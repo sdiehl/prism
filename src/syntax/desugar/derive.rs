@@ -16,7 +16,7 @@ use crate::names::{
 };
 use crate::syntax::ast::{
     Arm, BigInt, BinOp, Constraint, Ctor, CtorShape, DataDecl, Decl, Expr, Fip, InstanceDecl,
-    IntLit, Param, PathOp, PathStep, Pattern, Program, Suffix, Ty, S,
+    IntLit, Param, PathOp, PathStep, Pattern, Program, Suffix, Total, Ty, S,
 };
 use crate::types::{
     ARBITRARY_CLASS, EQ_CLASS, HASH_CLASS, IDENTIFIABLE, IDENTIFIABLE_BUNDLE, LENS, ORD_CLASS,
@@ -246,7 +246,12 @@ fn mdecl(name: &str, params: &[&str], body: S<Expr>, z: Span) -> Decl {
         constraints: Vec::new(),
         body,
         wheres: Vec::new(),
+        requires: Vec::new(),
+        ensures: Vec::new(),
+        decreases: None,
         konst: false,
+        test: false,
+        total: Total::No,
         fip: Fip::No,
         replayable: false,
         no_alloc: false,
@@ -679,7 +684,7 @@ fn is_stable(t: &Ty, set: &BTreeSet<String>) -> bool {
         Ty::Con(n, args) => set.contains(n) && args.iter().all(|x| is_stable(x, set)),
         // A usage row is rejected in desugar before deriving; a type carrying
         // one is never frozen-serializable. Unboxed products have no derived
-        // instances in V1, so they are not frozen-serializable either.
+        // instances, so they are not frozen-serializable either.
         Ty::App(..) | Ty::Fun(..) | Ty::Forall(..) | Ty::State(_) | Ty::RowLit(_)
         | Ty::Coeffect(..) | Ty::UnboxedTuple(_) | Ty::UnboxedRecord(_) => false,
     }

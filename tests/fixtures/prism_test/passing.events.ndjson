@@ -1,0 +1,6 @@
+{"event":"suite_started","schema":"prism-test-events-v1","selected":2}
+{"event":"test_started","id":"passing::double_of_three_is_six"}
+{"event":"test_passed","id":"passing::double_of_three_is_six"}
+{"event":"test_started","id":"passing::double_of_zero_is_zero"}
+{"event":"test_passed","id":"passing::double_of_zero_is_zero"}
+{"event":"suite_finished","passed":2,"failed":0,"skipped":0,"infrastructure_failed":0}

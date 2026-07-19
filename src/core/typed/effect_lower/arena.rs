@@ -43,24 +43,62 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::core::builtins::Builtin;
 use crate::error::TypedCoreEffectLoweringFailure;
-use crate::fresh::Fresh;
 use crate::names::{self, ALLOC_OP, ENTRY_POINT};
 use crate::sym::Sym;
 use crate::types::ty::{EffRow, Label};
 use crate::types::Type;
+use crate::util::fresh::Fresh;
 
 use super::super::specialize_support::Rewrite;
 use super::super::verify::{verify, VerifyEnv};
 use super::super::{
-    ArenaPrepared, CompSig, CoreFnSig, CoreType, TypedBinder, TypedComp, TypedCompKind, TypedCore,
-    TypedCoreFn, TypedValue, TypedValueKind,
+    ArenaPrepared, CompSig, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, TypedBinder,
+    TypedComp, TypedCompKind, TypedCore, TypedCoreFn, TypedValue, TypedValueKind,
 };
 use super::peel;
 use super::walk::{each_subcomp, each_value};
 
 /// The binder hint for a cell an allocator handed out.
 const ARENA_CELL: &str = "arena_cell";
+
+/// The binder hint for the region token `arena_enter` returns.
+const ARENA_TOK: &str = "arena_tok";
+
+/// The binder hint for a handler activation's result, promoted by `arena_exit`.
+const ARENA_OUT: &str = "arena_out";
+
+/// The type quantifier of the `arena_exit` verifier signature.
+const ARENA_EXIT_QUANTIFIER: &str = "arena_a@";
+
+/// Seed the verifier signatures of the region hook builtins this pass emits:
+/// `arena_enter : () -> Int` (the activation-depth token) and
+/// `arena_exit : forall a. (Int, a) -> a` (token and result threaded through,
+/// so the bracket is data-dependent and no flow-respecting simplification can
+/// separate or drop it). Neither is surface-callable, so overrides are their
+/// only signature source.
+pub(super) fn insert_builtin_sigs(env: &mut VerifyEnv) {
+    let int = CoreType::Source(Type::Int);
+    env.insert_builtin_override(
+        Builtin::ArenaEnter,
+        CoreFnSig::new(
+            Vec::new(),
+            Vec::new(),
+            CompSig::new(int.clone(), EffRow::Empty),
+        ),
+    );
+    let a = Sym::from(ARENA_EXIT_QUANTIFIER);
+    let var = CoreType::Source(Type::Var(a));
+    env.insert_builtin_override(
+        Builtin::ArenaExit,
+        CoreFnSig::new(
+            vec![CoreQuantifier::Type(a)],
+            vec![int, var.clone()],
+            CompSig::new(var, EffRow::Empty),
+        ),
+    );
+}
 
 /// Rewrite constructors built under a `with_arena` scope into `alloc` +
 /// `init_at`, re-establishing every witness the new operation invalidates.
@@ -97,7 +135,10 @@ pub(super) fn prepare(
     }
     let graph = direct_graph(&fns);
     let arena_reachable = closure(&roots, &graph);
-    let otherwise = closure(&std::iter::once(Sym::new(ENTRY_POINT)).collect(), &graph);
+    let otherwise = closure(
+        &std::iter::once(Sym::new(ENTRY_POINT)).collect(),
+        &otherwise_graph(&fns, &installers),
+    );
     let arena_only: BTreeSet<Sym> = arena_reachable.difference(&otherwise).copied().collect();
     if arena_only.is_empty() {
         return finish(fns, env);
@@ -114,6 +155,7 @@ pub(super) fn prepare(
         .map(|f| {
             let cx = Cx {
                 rewriting: arena_only.contains(&f.name()),
+                installer: installers.contains(&f.name()),
             };
             let body = widen.comp(f.body(), &cx);
             let sig = fn_sig_for(f.sig(), gains.contains(&f.name()), &alloc);
@@ -185,7 +227,11 @@ fn arena_roots(fns: &[TypedCoreFn], installers: &BTreeSet<Sym>) -> BTreeSet<Sym>
 }
 
 /// Map every var bound to a thunk literal to that thunk's body, so an installer
-/// call passing the variable can be resolved.
+/// call passing the variable can be resolved. Descends into thunk values too: a
+/// binding inside a loop body or closure (elaborated as a suspended
+/// computation) is as resolvable as one at the top of the function, and
+/// post-elaboration binder names are fresh, so one flat map per function cannot
+/// collide across scopes.
 fn thunk_bindings<'a>(c: &'a TypedComp, out: &mut BTreeMap<Sym, &'a TypedComp>) {
     if let TypedCompKind::Bind(m, x, _) = c.kind() {
         if let TypedCompKind::Return(v) = m.kind() {
@@ -194,9 +240,28 @@ fn thunk_bindings<'a>(c: &'a TypedComp, out: &mut BTreeMap<Sym, &'a TypedComp>) 
             }
         }
     }
+    each_value(c, &mut |v| thunk_bindings_value(v, out));
     each_subcomp(c, &mut |sc| thunk_bindings(sc, out));
 }
 
+fn thunk_bindings_value<'a>(v: &'a TypedValue, out: &mut BTreeMap<Sym, &'a TypedComp>) {
+    match &v.kind {
+        TypedValueKind::Thunk(c) => thunk_bindings(c, out),
+        TypedValueKind::Reinterpret(inner) | TypedValueKind::NewtypeRepr { value: inner, .. } => {
+            thunk_bindings_value(inner, out);
+        }
+        TypedValueKind::Ctor { fields, .. } | TypedValueKind::Tuple(fields) => {
+            for f in fields {
+                thunk_bindings_value(f, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Find installer calls anywhere in `c`, descending into thunk values: a
+/// `with_arena` call inside a loop body or closure installs its handler exactly
+/// as one written at the top of the function does.
 fn collect_roots<'a>(
     c: &'a TypedComp,
     installers: &BTreeSet<Sym>,
@@ -218,7 +283,28 @@ fn collect_roots<'a>(
             }
         }
     }
+    each_value(c, &mut |v| collect_roots_value(v, installers, thunks, out));
     each_subcomp(c, &mut |sc| collect_roots(sc, installers, thunks, out));
+}
+
+fn collect_roots_value<'a>(
+    v: &'a TypedValue,
+    installers: &BTreeSet<Sym>,
+    thunks: &BTreeMap<Sym, &'a TypedComp>,
+    out: &mut BTreeSet<Sym>,
+) {
+    match &v.kind {
+        TypedValueKind::Thunk(c) => collect_roots(c, installers, thunks, out),
+        TypedValueKind::Reinterpret(inner) | TypedValueKind::NewtypeRepr { value: inner, .. } => {
+            collect_roots_value(inner, installers, thunks, out);
+        }
+        TypedValueKind::Ctor { fields, .. } | TypedValueKind::Tuple(fields) => {
+            for f in fields {
+                collect_roots_value(f, installers, thunks, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Every direct call head anywhere in `c`, descending through thunks (unlike
@@ -266,6 +352,119 @@ fn direct_graph(fns: &[TypedCoreFn]) -> BTreeMap<Sym, BTreeSet<Sym>> {
         .collect()
 }
 
+/// The non-arena call graph, for the `otherwise_reachable` side of the
+/// subtraction: every named call head in a function's body, descending into
+/// thunk values (a loop body or closure runs in its creator's own context),
+/// EXCEPT the entry thunks passed to installers, which run under the installed
+/// handler and are precisely the arena side. Without the carve-out every arena
+/// entry would also count as otherwise-reachable and nothing could be reified;
+/// without the thunk descent a function called from an ordinary loop body would
+/// be invisible here and could be misclassified arena-only.
+fn otherwise_graph(
+    fns: &[TypedCoreFn],
+    installers: &BTreeSet<Sym>,
+) -> BTreeMap<Sym, BTreeSet<Sym>> {
+    fns.iter()
+        .map(|f| {
+            let mut thunks = BTreeMap::new();
+            thunk_bindings(f.body(), &mut thunks);
+            let mut skip = BTreeSet::new();
+            installer_entry_bodies(f.body(), installers, &thunks, &mut skip);
+            let mut callees = BTreeSet::new();
+            calls_outside_arenas(f.body(), &skip, &mut callees);
+            (f.name(), callees)
+        })
+        .collect()
+}
+
+/// The identity of one thunk body, for the installer-entry carve-out. The
+/// var-bound case resolves to the literal at its binding site, so the address
+/// identifies the same body either way it is reached.
+fn body_id(body: &TypedComp) -> usize {
+    std::ptr::from_ref::<TypedComp>(body) as usize
+}
+
+/// The body identities of every thunk passed to an installer call in `c`.
+fn installer_entry_bodies<'a>(
+    c: &'a TypedComp,
+    installers: &BTreeSet<Sym>,
+    thunks: &BTreeMap<Sym, &'a TypedComp>,
+    out: &mut BTreeSet<usize>,
+) {
+    if let TypedCompKind::Call { callee, args, .. } = c.kind() {
+        if installers.contains(callee) {
+            for a in args {
+                match &peel(a).kind {
+                    TypedValueKind::Thunk(body) => {
+                        out.insert(body_id(body));
+                    }
+                    TypedValueKind::Var { name, .. } => {
+                        if let Some(body) = thunks.get(name) {
+                            out.insert(body_id(body));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    each_value(c, &mut |v| {
+        installer_entry_value(v, installers, thunks, out);
+    });
+    each_subcomp(c, &mut |sc| {
+        installer_entry_bodies(sc, installers, thunks, out);
+    });
+}
+
+fn installer_entry_value<'a>(
+    v: &'a TypedValue,
+    installers: &BTreeSet<Sym>,
+    thunks: &BTreeMap<Sym, &'a TypedComp>,
+    out: &mut BTreeSet<usize>,
+) {
+    match &v.kind {
+        TypedValueKind::Thunk(c) => installer_entry_bodies(c, installers, thunks, out),
+        TypedValueKind::Reinterpret(inner) | TypedValueKind::NewtypeRepr { value: inner, .. } => {
+            installer_entry_value(inner, installers, thunks, out);
+        }
+        TypedValueKind::Ctor { fields, .. } | TypedValueKind::Tuple(fields) => {
+            for f in fields {
+                installer_entry_value(f, installers, thunks, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Every named call head in `c`, descending into thunk values except the
+/// carved-out installer entries.
+fn calls_outside_arenas(c: &TypedComp, skip: &BTreeSet<usize>, out: &mut BTreeSet<Sym>) {
+    if let TypedCompKind::Call { callee, .. } = c.kind() {
+        out.insert(*callee);
+    }
+    each_value(c, &mut |v| calls_outside_value(v, skip, out));
+    each_subcomp(c, &mut |sc| calls_outside_arenas(sc, skip, out));
+}
+
+fn calls_outside_value(v: &TypedValue, skip: &BTreeSet<usize>, out: &mut BTreeSet<Sym>) {
+    match &v.kind {
+        TypedValueKind::Thunk(c) => {
+            if !skip.contains(&body_id(c)) {
+                calls_outside_arenas(c, skip, out);
+            }
+        }
+        TypedValueKind::Reinterpret(inner) | TypedValueKind::NewtypeRepr { value: inner, .. } => {
+            calls_outside_value(inner, skip, out);
+        }
+        TypedValueKind::Ctor { fields, .. } | TypedValueKind::Tuple(fields) => {
+            for f in fields {
+                calls_outside_value(f, skip, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Transitive closure of `roots` over `graph`.
 fn closure(roots: &BTreeSet<Sym>, graph: &BTreeMap<Sym, BTreeSet<Sym>>) -> BTreeSet<Sym> {
     let mut visited: BTreeSet<Sym> = BTreeSet::new();
@@ -302,7 +501,7 @@ fn gains(
             (f.name(), own)
         })
         .collect();
-    crate::fixpoint::least_fixpoint(seed, |name, cur| {
+    crate::util::fixpoint::least_fixpoint(seed, |name, cur| {
         let mut s = BTreeSet::new();
         for callee in graph.get(name).into_iter().flatten() {
             if cur.get(callee).is_some_and(|c| !c.is_empty()) {
@@ -413,9 +612,11 @@ impl Alloc {
 }
 
 /// Whether this function's terms are rewritten. Rows widen everywhere; terms
-/// only inside `arena_only`.
+/// only inside `arena_only`; region brackets only around the alloc-handling
+/// `Handle` nodes of installer functions.
 struct Cx {
     rewriting: bool,
+    installer: bool,
 }
 
 struct Widen<'a> {
@@ -454,13 +655,96 @@ impl Rewrite for Widen<'_> {
         // function's operation, which this scope does not service.
         let inner = Cx {
             rewriting: cx.rewriting && !nested_alloc_handler(comp),
+            installer: cx.installer,
         };
         let out = self.descend_comp(comp, &inner);
-        self.retype(out)
+        let out = self.retype(out);
+        // Each alloc-handling `Handle` in an installer is one region activation:
+        // bracket it with the runtime enter/exit hooks.
+        if cx.installer && nested_alloc_handler(&out) {
+            return self.bracket_region(out);
+        }
+        out
     }
 }
 
 impl Widen<'_> {
+    /// Bracket one alloc-handling `Handle` with the runtime region hooks:
+    ///
+    /// ```text
+    ///   let tok = arena_enter() in
+    ///   let out = handle ... in
+    ///   arena_exit(tok, out)
+    /// ```
+    ///
+    /// One region per handler activation. The token makes the bracket
+    /// data-dependent (enter feeds exit, exit produces the activation's
+    /// result), so no flow-respecting simplification can drop or reorder it,
+    /// and the runtime traps on any unbalanced pairing. `arena_exit` promotes
+    /// whatever escapes the activation before the region is reclaimed, so it
+    /// must see the final result, which is why the bracket wraps the whole
+    /// `Handle` (return clause included) rather than editing its clauses.
+    ///
+    /// An exotic handler whose result is not a source type cannot carry the
+    /// exit instantiation; it is left unbracketed, which is sound because
+    /// `bump` without an open region delegates to the ordinary allocator.
+    fn bracket_region(&mut self, handle: TypedComp) -> TypedComp {
+        let CoreType::Source(result_src) = handle.sig().result() else {
+            return handle;
+        };
+        let result_src = result_src.clone();
+        let result = handle.sig().result().clone();
+        let effects = handle.sig().effects().clone();
+        let int = CoreType::Source(Type::Int);
+        let tok = TypedBinder::new(
+            Sym::from(names::lowered(ARENA_TOK, self.fresh.bump())),
+            int.clone(),
+        );
+        let out = TypedBinder::new(
+            Sym::from(names::lowered(ARENA_OUT, self.fresh.bump())),
+            result.clone(),
+        );
+        let enter = TypedComp::new(
+            CompSig::new(int.clone(), EffRow::Empty),
+            TypedCompKind::StrBuiltin {
+                op: Builtin::ArenaEnter,
+                instantiation: Vec::new(),
+                args: Vec::new(),
+            },
+        );
+        let exit = TypedComp::new(
+            CompSig::new(result.clone(), EffRow::Empty),
+            TypedCompKind::StrBuiltin {
+                op: Builtin::ArenaExit,
+                instantiation: vec![CoreInstantiation::Type(result_src)],
+                args: vec![
+                    TypedValue::new(
+                        int,
+                        TypedValueKind::Var {
+                            name: tok.name(),
+                            instantiation: Vec::new(),
+                        },
+                    ),
+                    TypedValue::new(
+                        result.clone(),
+                        TypedValueKind::Var {
+                            name: out.name(),
+                            instantiation: Vec::new(),
+                        },
+                    ),
+                ],
+            },
+        );
+        let after = TypedComp::new(
+            CompSig::new(result.clone(), effects.clone()),
+            TypedCompKind::Bind(Box::new(handle), out, Box::new(exit)),
+        );
+        TypedComp::new(
+            CompSig::new(result, effects),
+            TypedCompKind::Bind(Box::new(enter), tok, Box::new(after)),
+        )
+    }
+
     /// `return ctor` becomes `let cell = alloc(arity) in init_at(cell, ctor)`.
     /// The replacement's row is exactly the operation's: `alloc` performs it and
     /// the in-place write is pure.

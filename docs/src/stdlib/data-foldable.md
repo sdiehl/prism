@@ -4,7 +4,7 @@
 
 Generic operations over any `Foldable` container.
 
-Each function is a constrained free function, not a class default method: it is written once against the `Foldable(f)` class methods and works for every instance (`List`, `Option`, and any future container) without a per-type copy. The prelude opens this module, so these names are in scope unqualified everywhere and subsume the old `List`-only `sum`/`length`/etc.
+Each function is a constrained free function, not a class default method: it is written once against the `Foldable(f)` class methods and works for every instance (`List`, `Option`, and any future container) without a per-type copy. Base includes this module, so these names are in scope unqualified everywhere and subsume the old `List`-only `sum`/`length`/etc.
 
 The folds are strict, so the short-circuiting versions (`all`, `any`, `find`, `elem`) still visit every element; for a pure predicate the result is identical to a left-to-right search. Every aggregation rides `fold_l`, which instances implement tail recursively, so a large container folds in constant stack on the native backend; only `to_list` uses `fold_r`, to build in order. Arithmetic has no `Num` class, so `sum` and `product` are fixed to `Int`, matching the operators `+` and `*`.
 

@@ -110,10 +110,27 @@ impl BackendOpt {
     }
 }
 
+/// The explicit compilation mode.
+///
+/// Production removes test declarations before
+/// production interface/body reachability and backend lowering; Test checks
+/// them in their defining module and makes them available only to a synthetic
+/// harness. An input to the queries whose output actually differs, never a
+/// scattered `if test_mode` inside lowering.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BuildMode {
+    #[default]
+    Production,
+    Test,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Config {
     /// The Core-to-Core optimization level (the CLI `-O` flag; default `O1`).
     pub opt: OptLevel,
+    /// The explicit production/test compilation mode (default production;
+    /// only `prism test` selects [`BuildMode::Test`]).
+    pub mode: BuildMode,
     /// An explicit ordered pass list (the CLI `--passes` flag) that overrides
     /// `opt` when present. The two are mutually exclusive at the CLI.
     pub passes: Option<PassSpec>,
@@ -168,6 +185,8 @@ impl Config {
         }
         Self {
             opt: flags.opt_level,
+            // The mode is a CLI decision (`prism test`), never an env knob.
+            mode: BuildMode::Production,
             passes: None,
             backend_opt: flags.backend_opt,
             disabled,

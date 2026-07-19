@@ -6,7 +6,7 @@ A Leijen-style pretty printer. Build a layout-independent `Doc` from the combina
 
 Rendering is a pure function of the document and the width, so a document lays out identically on every backend and replays byte for byte. The strict renderer carries a `Flat`/`Brk` mode through a work list; its `fits` lookahead stops at the next forced break or as soon as the width is exceeded.
 
-Import explicitly (`import Data.Pretty`); these names are not in the prelude's unqualified scope. Widths count Unicode code points, matching `str_len`; they are not terminal display-cell measurements.
+Import explicitly (`import Data.Pretty`); these names are not in Base's unqualified scope. Widths count Unicode code points, matching `str_len`; they are not terminal display-cell measurements.
 
 ## Types
 

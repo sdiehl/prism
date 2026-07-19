@@ -69,13 +69,13 @@ use num_bigint::BigInt;
 // The byte substrate (varints, bounded blobs/strings, table numbering, the
 // hostile-input reader, and the node-table bounds) is shared with the `def` codec;
 // only the `kont` schema below is local.
-use crate::binary::{
+use crate::core::{CoreOp, CorePat};
+use crate::driver::WireKind;
+use crate::lineage::provenance::Observation;
+use crate::util::binary::{
     from_wire, put_indices, put_str, put_svarint, put_uvarint, to_wire, Reader, MAX_EXPANSION,
     MAX_NODES,
 };
-use crate::core::{CoreOp, CorePat};
-use crate::driver::WireKind;
-use crate::provenance::Observation;
 // The op-family tables are numbered once in the `def` codec; the `kont` wire draws
 // the same numbering so an operator means one thing on both wires.
 use crate::store::codec::{BUILTINS, CORE_OPS, FLOAT_OPS, NEG_LANES};
@@ -487,6 +487,11 @@ impl Encoder {
             Rv::TBuf(_) => {
                 return Err(SuspendError::NonSerializable("typed buffer".into()));
             }
+            // A live SIMD vector is a transient unboxed value, like a typed
+            // buffer: it does not cross a serialized continuation boundary.
+            Rv::Vec128(_) => {
+                return Err(SuspendError::NonSerializable("simd vector".into()));
+            }
             Rv::Ref(_) => {
                 return Err(SuspendError::NonSerializable(
                     "effect-lowered local reference".into(),
@@ -705,7 +710,9 @@ impl Encoder {
             | Node::RefNew(_)
             | Node::RefGet(_)
             | Node::RefSet(..)
-            | Node::Bump(_) => {
+            | Node::Bump(_)
+            | Node::ArenaEnter
+            | Node::ArenaExit(_) => {
                 return Err(SuspendError::NonSerializable(
                     "effect-lowered runtime computation".into(),
                 ));
@@ -1675,7 +1682,9 @@ mod tests {
                 Obs::Bool(false),
                 Obs::Out,
             ],
-            observations: vec![crate::provenance::Observation::Stdout(b"hi".to_vec())],
+            observations: vec![crate::lineage::provenance::Observation::Stdout(
+                b"hi".to_vec(),
+            )],
         }
     }
 

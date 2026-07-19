@@ -1,0 +1,19 @@
+-- A three-rung additive family whose every route is `auto`, locked in the
+-- committed sibling manifest `save.pr.stable-lock`. Re-deriving it on build must
+-- reproduce the recorded rung, edge, and route identities; a changed generated
+-- behavior is a lock-drift error.
+
+import Wire (..)
+
+stable Save {
+  V1 = { hero: String, depth: Int },
+  V2 = { ..V1, fog: Int = 30 },
+  V3 = { ..V2, mist: Int = 5 },
+  migrations {
+    V1 -> V2 = auto
+    V2 -> V3 = auto
+    V1 -> V3 = auto
+  }
+}
+
+fn main() = println("ok")

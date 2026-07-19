@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
-use prism::provenance::OP_FS_WRITE_FILE;
+use prism::lineage::provenance::OP_FS_WRITE_FILE;
 
 // A program that observes one file, one environment variable, and its argument
 // count, then prints all three. Every observed input becomes a graph node.
@@ -348,6 +348,55 @@ fn why_output_unknown_selector_lists_the_available_outputs() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("stdout"), "lists stdout: {err}");
     assert!(err.contains("input.json"), "lists the input file: {err}");
+}
+
+// The top-level `prism why-output`: explains an artifact purely from its sidecar,
+// without reading source. With no output selector it defaults to the sidecar's
+// primary output (stdout for a run), and it resolves the sidecar from the artifact
+// path. This is the Future VI verb over the existing lineage graph.
+#[test]
+fn why_output_top_level_defaults_to_the_primary_output() {
+    let tmp = TempDir::new("why-top");
+    record(&tmp.path, "{\"t\": 5}", "alice", &["a", "b"]);
+
+    let default = Command::new(prism_bin())
+        .current_dir(&tmp.path)
+        .arg("why-output")
+        .arg("run.plineage")
+        .output()
+        .expect("runs prism why-output");
+    assert!(
+        default.status.success(),
+        "why-output must succeed: {}",
+        String::from_utf8_lossy(&default.stderr)
+    );
+    let text = String::from_utf8_lossy(&default.stdout);
+    assert!(
+        text.contains("why stdout"),
+        "defaults to the primary output: {text}"
+    );
+    assert!(
+        text.contains("source root:"),
+        "names the source hash from the graph, not the source: {text}"
+    );
+    assert!(
+        text.contains("input-file: input.json"),
+        "names the observed input: {text}"
+    );
+
+    // Naming the output explicitly routes through the same verb identically.
+    let explicit = Command::new(prism_bin())
+        .current_dir(&tmp.path)
+        .arg("why-output")
+        .arg("run.plineage")
+        .arg("stdout")
+        .output()
+        .expect("runs prism why-output stdout");
+    assert!(explicit.status.success());
+    assert_eq!(
+        default.stdout, explicit.stdout,
+        "the defaulted selector matches the explicit stdout selector"
+    );
 }
 
 // The `.plineage` arm of `prism diff` acceptance: changing one input file names exactly that input as

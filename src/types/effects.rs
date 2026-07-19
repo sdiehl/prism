@@ -7,8 +7,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::iter;
 
-use crate::scc::tarjan_scc;
 use crate::syntax::ast::{Core, Decl, Expr, HandlerArm, Pattern, Program, S};
+use crate::util::scc::tarjan_scc;
 
 /// The strongly-connected components of `prog.fns`'s call graph, in dependency
 /// order (every component a callee belongs to precedes the components that call

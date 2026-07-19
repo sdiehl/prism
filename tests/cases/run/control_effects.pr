@@ -1,0 +1,38 @@
+import Control.State (..)
+
+import Control.Reader (..)
+
+import Control.Writer (..)
+
+import Control.Fresh (..)
+
+fn count_up() : Int ! {State(Int)} =
+  put(get() + 1)
+  put(get() + 1)
+  put(get() + 1)
+  get()
+
+fn greet() : String ! {Reader(String)} = concat("hello ", ask())
+
+fn logs() : Int ! {Writer(String)} =
+  tell("a")
+  tell("b")
+  tell("c")
+  0
+
+fn names() : List(String) ! {Fresh} =
+  let a = gensym("x")
+  let b = gensym("x")
+  let c = gensym("y")
+  [a, b, c]
+
+fn main() =
+  match run_state(0, count_up) of
+    (result, final) =>
+      println(show(result))
+      println(show(final))
+  println(show(eval_state(10, count_up)))
+  println(show(exec_state(10, count_up)))
+  println(run_reader("world", greet))
+  println(show(run_writer(logs)))
+  println(show(run_fresh(names)))

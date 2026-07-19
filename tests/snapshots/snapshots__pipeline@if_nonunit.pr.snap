@@ -80,7 +80,7 @@ Program {
 }
 
 == types ==
-[E1998] Type Error: in `main`: type mismatch: expected Int, got Unit
+[E1022] Type Error: in `main`: type mismatch: expected Int, got Unit
    ╭─[ <source>:3:7 ]
    │
  3 │     42

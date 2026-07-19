@@ -1,0 +1,62 @@
+-- A `stable` block records a type's whole shipped history inline. Each rung is a
+-- record layout, `V1` through the current `V3`, and a later rung extends its
+-- predecessor with `..Vn` plus new fields carrying defaults. The `migrations`
+-- table names every version pair the family promises to convert, and `auto`
+-- asks the compiler to derive that conversion from the two rung shapes. Only the
+-- adjacent steps are ever authored; a non-adjacent route like `V1 -> V3`
+-- composes the declared ladder.
+--
+-- The public interface is family-qualified. `PlayerManual.V1.upgrade` follows
+-- the composed V1-to-current route, filling the defaults every later rung added;
+-- `PlayerManual.V1.downgrade` follows it in reverse and returns the older sheet
+-- paired with a `Loss` naming exactly the fields V1 cannot carry. No generated
+-- function name is written by hand, and unpacking a result is a tuple `let`, not
+-- a match.
+--
+-- Expected output:
+--   first edition hero: Mira
+--   first edition level: 7
+--   dropped reaching V1: ["spell_slots", "inspiration", "signature_spell"]
+--   restored spell: Magic Missile
+--   restored slots: 2
+--   restored inspiration: 0
+
+import Wire (..)
+
+type Calling = Sorcerer | Wizard | Bard deriving (Eq, Show, Serialize, Stable)
+
+stable PlayerManual {
+  V1 = { hero: String, calling: Calling, level: Int } frozen "fc9d14271df9a149",
+  V2 = { ..V1, signature_spell: String = "Magic Missile" } frozen "ab2c3f1a8c78e60f",
+  V3 = { ..V2, spell_slots: Int = 2, inspiration: Int = 0 },
+  migrations {
+    V1 -> V2 = auto
+    V2 -> V3 = auto
+    V1 -> V3 = auto
+  }
+}
+
+fn body() =
+  let current =
+    PlayerManual {
+      hero = "Mira",
+      calling = Sorcerer,
+      level = 7,
+      signature_spell = "Magic Missile",
+      spell_slots = 5,
+      inspiration = 3
+    }
+  -- Downgrade to the first edition in one step: the composed V3 -> V1 route
+  -- unions the loss each rung drops.
+  let (first_edition, loss) = PlayerManual.V1.downgrade(current)
+  println(concat("first edition hero: ", first_edition.hero))
+  println(concat("first edition level: ", show(first_edition.level)))
+  println(concat("dropped reaching V1: ", show(loss_names(loss))))
+  -- Upgrade the first edition back to the current sheet: the composed V1 -> V3
+  -- route restores the declared default for every field V1 could not carry.
+  let restored = PlayerManual.V1.upgrade(first_edition)
+  println(concat("restored spell: ", restored.signature_spell))
+  println(concat("restored slots: ", show(restored.spell_slots)))
+  println(concat("restored inspiration: ", show(restored.inspiration)))
+
+fn main() = default(body, ())

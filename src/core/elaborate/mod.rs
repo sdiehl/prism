@@ -17,7 +17,6 @@ use crate::error::{
     Error, TypeError, TypedCoreConstructionFailure, TypedCoreErasureFailure,
     TypedCoreVerificationFailure, TypedCoreViolation,
 };
-use crate::fresh::Fresh;
 use crate::hir::{self, CheckedHir, NodeRes};
 use crate::kw;
 use crate::names::{
@@ -34,6 +33,7 @@ use crate::types::{
     infer_expr_env, Checked, CtorInfo, Dict, Env, Type, CONS, DIV_CLASS, EQ_CLASS, LIST, NIL,
     NUM_CLASS, ORD_CLASS, SHOW_CLASS,
 };
+use crate::util::fresh::Fresh;
 use crate::wired::Indexable;
 
 mod dict;
@@ -1850,6 +1850,27 @@ pub fn elaborate_expr(
     dicts: Option<&crate::types::DictTable>,
     consts: &BTreeMap<String, S<Expr<CorePhase>>>,
 ) -> Result<Comp, Error> {
+    elaborate_expr_defs(checked, e, arity, dicts, consts).map(|(comp, _)| comp)
+}
+
+/// Like [`elaborate_expr`], but also returns the definitions the elaborator
+/// synthesized on demand while lowering `e` (the structural `show` helpers).
+///
+/// The whole-program [`elaborate`] folds these into its `Core`, so a batch run
+/// finds them in its global environment. A caller that evaluates a bare
+/// expression against a pre-built environment (the REPL) must add them itself,
+/// or a call to one faults as an unknown function.
+///
+/// # Errors
+/// Fails if the expression references a name or dictionary the elaborator cannot
+/// resolve against `checked`.
+pub fn elaborate_expr_defs(
+    checked: &Checked,
+    e: &S<Expr<CorePhase>>,
+    arity: &BTreeMap<String, usize>,
+    dicts: Option<&crate::types::DictTable>,
+    consts: &BTreeMap<String, S<Expr<CorePhase>>>,
+) -> Result<(Comp, Vec<CoreFn>), Error> {
     let effect_ops: BTreeSet<String> = checked.eff_ops.keys().cloned().collect();
     let mut elab = Elab {
         fresh: Fresh::new(),
@@ -1867,5 +1888,6 @@ pub fn elaborate_expr(
         show_seen: BTreeSet::new(),
         strict: false,
     };
-    elab.elab(e, &Locals::new())
+    let comp = elab.elab(e, &Locals::new())?;
+    Ok((comp, elab.show_fns))
 }

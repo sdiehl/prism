@@ -36,8 +36,8 @@
 -- ## Naming and the import idiom
 --
 -- The combinators keep their natural names (`map`, `filter`, `take`, `zip`, ...),
--- which collide with the prelude's eager `List` surface. That is why this module is
--- opt-in and NOT opened by the prelude: the flat namespace has no shadowing, so the
+-- which collide with Base's eager `List` surface. That is why this module is
+-- opt-in and NOT in Base: the flat namespace has no shadowing, so the
 -- documented idiom is a qualified import at the use site:
 --
 -- ```text
@@ -46,7 +46,7 @@
 -- ```
 --
 -- A selective `import Sequence (unfold, iterate)` also works for names that do not
--- clash with the prelude.
+-- clash with Base.
 --
 -- ## Fusion and allocation
 --

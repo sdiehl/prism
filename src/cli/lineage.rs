@@ -782,6 +782,33 @@ pub fn lineage_cmd(file: &Path, json: bool) -> CmdResult {
     Ok(())
 }
 
+// `prism why-output ARTIFACT [OUTPUT]`: the top-level verb that explains a built
+// artifact (or a recorded run) purely from its lineage sidecar, without reading
+// source: exact source hashes, package roots, build steps, handler observations,
+// replay entries, and intermediate artifact hashes. It resolves the sidecar from
+// the artifact path, defaults the selector to the sidecar's primary output when
+// none is named, then reuses the same backward walk as `lineage why`.
+pub fn why_output_top_cmd(artifact: &Path, output: Option<&str>, json: bool) -> CmdResult {
+    let selector = if let Some(output) = output {
+        output.to_string()
+    } else {
+        let graph = crate::lineage::read_lineage(artifact)
+            .map_err(|e| (e, String::new(), artifact.display().to_string()))?;
+        if graph.variant == Variant::World {
+            return Err((
+                Error::ResolveLineage(
+                    "why-output: a world timeline is explained by a state hash; name one".into(),
+                ),
+                String::new(),
+                artifact.display().to_string(),
+            ));
+        }
+        crate::lineage::default_output_selector(&graph)
+            .map_err(|e| (e, String::new(), artifact.display().to_string()))?
+    };
+    why_output_cmd(artifact, &selector, json)
+}
+
 // `lineage why`: explain one output by walking the sidecar backward. Pure graph
 // work, so it explains an old run even after its source files have moved.
 pub fn why_output_cmd(sidecar: &Path, output: &str, json: bool) -> CmdResult {

@@ -1,0 +1,1 @@
+test fn returns_int() = 42

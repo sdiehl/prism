@@ -56,7 +56,7 @@ Program {
 }
 
 == types ==
-[E1998] Type Error: in `main`: type mismatch: expected String, got Int
+[E1022] Type Error: in `main`: type mismatch: expected String, got Int
    ╭─[ <source>:1:22 ]
    │
  1 │ fn main() = println((1 : String))

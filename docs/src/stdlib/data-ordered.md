@@ -8,7 +8,7 @@ An unbranded `Map(k, v)` is ordered by the ambient canonical `Ord(k)`. When a pr
 
 This is the explicit half of the ordered-container coherence story, closed statically. The implicit `using ordRev` path (calling the ambient `map_insert` under a non-canonical `Ord`) is guarded at runtime when an ordered map crosses a package boundary: `Wire`'s map reader faults when a map arrives ordered by a different `Ord(k)` than the reader canonicalizes. No claim is made here of automatic static closure of the implicit path.
 
-Opt-in: this module is not opened by the prelude, so ambient effect rows and the unbranded `Map` surface are untouched unless a program imports it.
+Opt-in: this module is not in Base, so ambient effect rows and the unbranded `Map` surface are untouched unless a program imports it.
 
 ## Types
 

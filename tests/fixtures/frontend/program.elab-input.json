@@ -1,0 +1,240 @@
+{
+  "schema": "prism-elab-input-v1",
+  "compiler": "0.13.0",
+  "input": {
+    "imports": [],
+    "types": [
+      {
+        "name": "Point",
+        "params": [],
+        "newtype": false,
+        "deriving": [],
+        "ctors": [
+          {
+            "name": "Point",
+            "tag": 0,
+            "fields": [
+              "x",
+              "y"
+            ],
+            "args": [
+              "Int",
+              "Int"
+            ]
+          }
+        ],
+        "span": {
+          "start": 361,
+          "end": 398
+        }
+      }
+    ],
+    "effects": [
+      {
+        "name": "Tick",
+        "params": [],
+        "ops": [
+          {
+            "name": "tick",
+            "grade": "many",
+            "params": [],
+            "ret": "Int"
+          }
+        ],
+        "span": {
+          "start": 400,
+          "end": 426
+        }
+      }
+    ],
+    "classes": [
+      {
+        "name": "Same",
+        "param": "a",
+        "supers": [],
+        "methods": [
+          {
+            "name": "same",
+            "ty": "(a, a) -> Bool"
+          }
+        ],
+        "span": {
+          "start": 428,
+          "end": 465
+        }
+      }
+    ],
+    "instances": [
+      {
+        "class": "Same",
+        "head": "Int",
+        "module": "",
+        "context": []
+      }
+    ],
+    "functions": [
+      {
+        "name": "getx",
+        "params": [
+          {
+            "name": "p",
+            "borrow": false
+          }
+        ],
+        "constraints": [],
+        "body": 1,
+        "span": {
+          "start": 522,
+          "end": 552
+        }
+      },
+      {
+        "name": "alike",
+        "params": [
+          {
+            "name": "x",
+            "borrow": false
+          },
+          {
+            "name": "y",
+            "borrow": false
+          }
+        ],
+        "constraints": [
+          "Same"
+        ],
+        "body": 3,
+        "span": {
+          "start": 554,
+          "end": 610
+        }
+      },
+      {
+        "name": "ticked",
+        "params": [],
+        "constraints": [],
+        "body": 7,
+        "span": {
+          "start": 612,
+          "end": 656
+        }
+      },
+      {
+        "name": "main",
+        "params": [],
+        "constraints": [],
+        "body": 12,
+        "span": {
+          "start": 658,
+          "end": 715
+        }
+      }
+    ]
+  },
+  "facts": {
+    "decls": [
+      {
+        "name": "getx",
+        "scheme": "(Point) -> Int",
+        "effects": []
+      },
+      {
+        "name": "alike",
+        "scheme": "forall a. (a, a) -> Bool",
+        "effects": []
+      },
+      {
+        "name": "ticked",
+        "scheme": "() -> Int ! {Tick}",
+        "effects": [
+          "Tick"
+        ]
+      },
+      {
+        "name": "main",
+        "scheme": "() -> Bool",
+        "effects": []
+      }
+    ],
+    "nodes": {
+      "1": {
+        "res": {
+          "kind": "field",
+          "ctor": "Point",
+          "index": 0,
+          "arity": 2
+        },
+        "ty": "Int"
+      },
+      "2": {
+        "ty": "Point"
+      },
+      "3": {
+        "ty": "Bool"
+      },
+      "4": {
+        "evidence": [
+          "Param(0)"
+        ],
+        "ty": "(a, a) -> Bool"
+      },
+      "5": {
+        "ty": "a"
+      },
+      "6": {
+        "ty": "a"
+      },
+      "7": {
+        "ty": "Int"
+      },
+      "8": {
+        "ty": "Int"
+      },
+      "9": {
+        "ty": "() -> Int"
+      },
+      "10": {
+        "ty": "Int"
+      },
+      "11": {
+        "ty": "() -> Int"
+      },
+      "12": {
+        "ty": "Bool"
+      },
+      "13": {
+        "evidence": [
+          "Global(sameInt, [])"
+        ],
+        "ty": "(Int, Int) -> Bool ! {?r26}"
+      },
+      "14": {
+        "ty": "Int"
+      },
+      "15": {
+        "ty": "(Point) -> Int"
+      },
+      "16": {
+        "ty": "Point"
+      },
+      "17": {
+        "ty": "Int"
+      },
+      "18": {
+        "ty": "Int"
+      },
+      "19": {
+        "ty": "Int"
+      },
+      "20": {
+        "ty": "Bool"
+      },
+      "21": {
+        "ty": "Int"
+      },
+      "22": {
+        "ty": "Int"
+      }
+    }
+  }
+}

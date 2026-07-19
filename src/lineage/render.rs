@@ -15,9 +15,16 @@ use super::explain::{Explanation, WorldExplanation};
 use super::graph::{self, LineageGraph, LineageRoot, NodeKind, Variant};
 
 // Abbreviate a content-hash id to the same width the human dumps use, so a
-// rendered timeline shows the leading nibbles the resident also shows.
+// rendered timeline shows the leading nibbles the resident also shows. Ids arrive
+// from deserialized, possibly hand-authored input, so this truncates on a char
+// boundary rather than a raw byte index: a genuine hex hash yields the same leading
+// nibbles, while a value whose byte-16 boundary would split a multibyte char
+// truncates without panicking.
 fn short_hash(hash: &str) -> &str {
-    &hash[..hash.len().min(HASH_PREFIX_HEX)]
+    match hash.char_indices().nth(HASH_PREFIX_HEX) {
+        Some((boundary, _)) => &hash[..boundary],
+        None => hash,
+    }
 }
 
 /// A friendly, non-authoritative rendering of the graph.
@@ -351,6 +358,24 @@ pub fn render_explanation(explanation: &Explanation) -> String {
             let _ = writeln!(out, "    {} = {}", row.key, row.value);
         }
     }
+    for artifact in &explanation.artifacts {
+        let _ = writeln!(
+            out,
+            "  artifact: {} {} {}:{} ({} bytes)",
+            artifact.kind, artifact.path, artifact.digest_scheme, artifact.digest, artifact.bytes
+        );
+    }
+    for write in &explanation.file_writes {
+        let _ = writeln!(
+            out,
+            "  file-write: {} [{}] {}:{} ({} bytes)",
+            write.path,
+            write.mode.tag(),
+            write.digest_scheme,
+            write.digest,
+            write.bytes
+        );
+    }
     out
 }
 
@@ -394,4 +419,32 @@ pub fn render_diff(diff: &DiffReport) -> String {
         let _ = writeln!(out, "  same     {}: {}", entry.key.label(), entry.digest.0);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::short_hash;
+    use crate::core::HASH_PREFIX_HEX;
+
+    #[test]
+    fn short_hash_truncates_ascii_to_the_prefix_width() {
+        let hash = "0123456789abcdef0123456789abcdef";
+        assert_eq!(short_hash(hash), &hash[..HASH_PREFIX_HEX]);
+    }
+
+    #[test]
+    fn short_hash_returns_a_short_id_whole() {
+        assert_eq!(short_hash("abc"), "abc");
+    }
+
+    #[test]
+    fn short_hash_does_not_panic_when_byte_boundary_splits_a_multibyte_char() {
+        // A multibyte char straddles the prefix width, so a raw byte slice at
+        // HASH_PREFIX_HEX would land mid-character. The abbreviation must truncate
+        // on a char boundary instead of panicking on untrusted input.
+        let hash = "0123456789abcde\u{00e9}tail";
+        let short = short_hash(hash);
+        assert!(hash.starts_with(short));
+        assert!(short.len() <= hash.len());
+    }
 }

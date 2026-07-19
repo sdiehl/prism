@@ -1,0 +1,11 @@
+-- A single-file program that also defines `main`. The harness must neutralize
+-- the user `main` (its output must never appear) and run the test in isolation.
+fn main() = println("user main must not run under prism test")
+
+fn helper(n : Int) : Int = n * 2
+
+test fn helper_doubles() =
+  if helper(21) == 42 then
+    ()
+  else
+    fail()

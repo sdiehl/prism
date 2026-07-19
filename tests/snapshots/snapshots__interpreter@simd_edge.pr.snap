@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/simd_edge.pr
+---
+1
+1
+1e-323
+1e-323
+-2
+-9223372036854775808
+=> ()

@@ -1197,6 +1197,19 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
             ctors: vec![],
         },
     );
+    // `F64x2`/`I64x2` are the baseline 128-bit SIMD vector types: opaque
+    // 0-parameter built-ins with no surface constructors, produced and consumed
+    // only through the `simd_*` builtins.
+    for name in [crate::types::F64X2, crate::types::I64X2] {
+        data.insert(
+            name.to_string(),
+            DataInfo {
+                params: vec![],
+                param_kinds: vec![],
+                ctors: vec![],
+            },
+        );
+    }
     for dd in &prog.types {
         let kinds = normalize_kinds(&dd.params, &dd.param_kinds);
         // The `Row`-kinded parameters of this declaration; a field row that

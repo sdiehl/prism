@@ -24,19 +24,26 @@
 //! this pass emits the ladder the codec composes, and
 //! `names::stable_decode_ladder` names its reserved entry point.
 
+use std::collections::BTreeSet;
+
 use marginalia::Span;
 
 use super::{call, evar, sp, spat};
-use crate::core::contract_digest;
+use crate::core::{contract_digest, Hashes};
 use crate::error::{ErrKind, TypeError};
 use crate::names;
 use crate::names::{
-    DECODE_METHOD, FAIL_OP, WIRE_DECODE_VALUE_WITH_DIGEST, WIRE_ENCODE_VALUE_WITH_DIGEST,
-    WIRE_IS_EMPTY, WIRE_OPEN_VALUE_ANY,
+    DECODE_METHOD, FAIL_OP, WIRE_COMPOSE_DOWNGRADE, WIRE_DECODE_VALUE_WITH_DIGEST,
+    WIRE_ENCODE_VALUE_WITH_DIGEST, WIRE_IS_EMPTY, WIRE_OPEN_VALUE_ANY,
 };
+use crate::stable_lock::{
+    edge_hash, route_hash, EdgeLock, FamilyLock, RouteLock, RungShape, MODE_AUTO, MODE_DEFAULT,
+    MODE_MANUAL,
+};
+use crate::sym::Sym;
 use crate::syntax::ast::{
-    Arm, BinOp, ConvDir, Converter, Ctor, DataDecl, Decl, Expr, Fip, Param, Pattern, Program, Rung,
-    StableDecl, SynonymDecl, Ty, S,
+    Arm, BinOp, ConvDir, Converter, Ctor, DataDecl, Decl, Expr, Fip, Migration, MigrationDir,
+    MigrationRoute, Param, Pattern, Program, Rung, StableDecl, SynonymDecl, Total, Ty, S,
 };
 use crate::types::{ARBITRARY_CLASS, EQ_CLASS, SERIALIZE_CLASS, SHOW_CLASS, STABLE_CLASS};
 
@@ -123,10 +130,13 @@ pub(super) fn expand_stable(prog: &mut Program) -> Result<(), TypeError> {
             ty: Ty::Con(sd.name.clone(), Vec::new()),
             span: sd.span,
         });
+        validate_migrations(sd, &rungs)?;
         let fns = ladder_fns(sd, &rungs, &loss)?;
+        let routes = family_route_fns(sd, &rungs, &loss, &libf);
         let frames = frame_fns(sd, &rungs, &bytes_ty, &libf);
         prog.types.extend(datas);
         prog.fns.extend(fns);
+        prog.fns.extend(routes);
         prog.fns.extend(frames);
     }
     Ok(())
@@ -334,7 +344,12 @@ fn mdecl(name: String, param: &str, param_ty: Ty, ret: Ty, body: S<Expr>, span: 
         constraints: Vec::new(),
         body,
         wheres: Vec::new(),
+        requires: Vec::new(),
+        ensures: Vec::new(),
+        decreases: None,
         konst: false,
+        test: false,
+        total: Total::No,
         fip: Fip::No,
         replayable: false,
         no_alloc: false,
@@ -357,7 +372,48 @@ fn loss(loss: &LossRef, names_dropped: &[String], z: Span) -> S<Expr> {
     call(evar(&loss.ctor, z), vec![sp(Expr::List(items), z)], z)
 }
 
-// The whole adjacent ladder for one stable block.
+// How one direction of an adjacent edge is implemented. A migration table row
+// selects `Auto` (derive) or `Given` (a hand-supplied function); an edge with no
+// governing row keeps the historical `Default` (derive when additive, else demand
+// an inline converter).
+enum EdgeImpl<'a> {
+    Default,
+    Auto,
+    Given(&'a S<Expr>),
+}
+
+// The upgrade and downgrade implementation an adjacent edge takes, read off its
+// migration row (if any). A `version(...)` row can leave one direction `auto`.
+fn edge_impls<'a>(sd: &'a StableDecl, from: &str, to: &str) -> (EdgeImpl<'a>, EdgeImpl<'a>) {
+    match edge_row(sd, from, to) {
+        None => (EdgeImpl::Default, EdgeImpl::Default),
+        Some(Migration {
+            route: MigrationRoute::Auto,
+            ..
+        }) => (EdgeImpl::Auto, EdgeImpl::Auto),
+        Some(Migration {
+            route: MigrationRoute::Version(v),
+            ..
+        }) => (dir_impl(&v.upgrade), dir_impl(&v.downgrade)),
+    }
+}
+
+const fn dir_impl(dir: &MigrationDir) -> EdgeImpl<'_> {
+    match dir {
+        MigrationDir::Auto => EdgeImpl::Auto,
+        MigrationDir::Expr(e) => EdgeImpl::Given(e),
+    }
+}
+
+// The migration row that governs the adjacent edge `from -> to`, if the table
+// declares one.
+fn edge_row<'a>(sd: &'a StableDecl, from: &str, to: &str) -> Option<&'a Migration> {
+    sd.migrations.iter().find(|m| m.from == from && m.to == to)
+}
+
+// The whole adjacent ladder for one stable block. Each edge's two directions come
+// from its migration row (derived or hand-supplied), falling back to the inline
+// converter form when the table is silent about it.
 fn ladder_fns(sd: &StableDecl, rungs: &[RungInfo], loss: &LossRef) -> Result<Vec<Decl>, TypeError> {
     let mut out = Vec::new();
     let total = rungs.len();
@@ -368,15 +424,120 @@ fn ladder_fns(sd: &StableDecl, rungs: &[RungInfo], loss: &LossRef) -> Result<Vec
         let hi_ty = Ty::Con(rung_type(sd, k + 1, total), Vec::new());
         let hi_ctor = rung_type(sd, k + 1, total);
         let lo_ctor = rung_type(sd, k, total);
-        if hi.mutated.is_empty() {
-            out.push(gen_upgrade(sd, lo, hi, &lo_ty, &hi_ty, &hi_ctor));
-            out.push(gen_downgrade(sd, lo, hi, &lo_ty, &hi_ty, &lo_ctor, loss));
-        } else {
-            out.push(mut_upgrade(sd, lo, hi, &lo_ty, &hi_ty, &hi_ctor)?);
-            out.push(mut_downgrade(sd, lo, hi, &lo_ty, &hi_ty, &lo_ctor, loss)?);
-        }
+        let (up, down) = edge_impls(sd, &lo.ver, &hi.ver);
+        out.push(match up {
+            EdgeImpl::Default | EdgeImpl::Auto if hi.mutated.is_empty() => {
+                gen_upgrade(sd, lo, hi, &lo_ty, &hi_ty, &hi_ctor)
+            }
+            EdgeImpl::Default => mut_upgrade(sd, lo, hi, &lo_ty, &hi_ty, &hi_ctor)?,
+            EdgeImpl::Auto => return Err(auto_undecidable(sd, lo, hi)),
+            EdgeImpl::Given(e) => wrap_upgrade(sd, e, lo, hi, &lo_ty, &hi_ty),
+        });
+        out.push(match down {
+            EdgeImpl::Default | EdgeImpl::Auto if hi.mutated.is_empty() => {
+                gen_downgrade(sd, lo, hi, &lo_ty, &hi_ty, &lo_ctor, loss)
+            }
+            EdgeImpl::Default => mut_downgrade(sd, lo, hi, &lo_ty, &hi_ty, &lo_ctor, loss)?,
+            EdgeImpl::Auto => return Err(auto_undecidable(sd, lo, hi)),
+            EdgeImpl::Given(e) => wrap_downgrade(sd, e, lo, hi, &lo_ty, &hi_ty, loss),
+        });
     }
     Ok(out)
+}
+
+// The parameter binder and body of the function a hand-supplied direction
+// elaborates to. A single-parameter lambda is inlined so its binder carries the
+// edge's rung type directly (the type checker then flows record fields through
+// it, and the rung type is one the resolver never had to name); any other
+// expression is applied to a fresh binder. Inline and named forms thus reach the
+// same ordinary function shape.
+fn edge_fn_body(e: &S<Expr>, param: &str) -> (String, S<Expr>) {
+    if let Expr::Lam(ps, body) = &e.node {
+        if let [only] = ps.as_slice() {
+            return (only.name.clone(), (**body).clone());
+        }
+    }
+    (
+        param.to_string(),
+        call(e.clone(), vec![evar(param, e.span)], e.span),
+    )
+}
+
+// Wrap a hand-supplied upgrade under the exact edge interface. The binder carries
+// `T.Vfrom` and the result is checked as `T.Vto` by the ordinary type checker; a
+// wrong endpoint, extra effect, or wrong result is reported against this
+// signature.
+fn wrap_upgrade(
+    sd: &StableDecl,
+    e: &S<Expr>,
+    lo: &RungInfo,
+    hi: &RungInfo,
+    lo_ty: &Ty,
+    hi_ty: &Ty,
+) -> Decl {
+    let z = e.span;
+    let (param, body) = edge_fn_body(e, &names::stable_param(&lo.ver));
+    mdecl(
+        names::stable_upgrade(&sd.name, &lo.ver, &hi.ver),
+        &param,
+        lo_ty.clone(),
+        hi_ty.clone(),
+        body,
+        z,
+    )
+}
+
+// Wrap a hand-supplied downgrade under the exact edge interface `T.Vto ->
+// (T.Vfrom, Wire.Loss)`. A downgrade that omits the loss, reverses the endpoints,
+// or adds an effect fails the ordinary check against this signature.
+fn wrap_downgrade(
+    sd: &StableDecl,
+    e: &S<Expr>,
+    lo: &RungInfo,
+    hi: &RungInfo,
+    lo_ty: &Ty,
+    hi_ty: &Ty,
+    lref: &LossRef,
+) -> Decl {
+    let z = e.span;
+    let (param, body) = edge_fn_body(e, &names::stable_param(&hi.ver));
+    mdecl(
+        names::stable_downgrade(&sd.name, &hi.ver, &lo.ver),
+        &param,
+        hi_ty.clone(),
+        Ty::Tuple(vec![lo_ty.clone(), lref.ty.clone()]),
+        body,
+        z,
+    )
+}
+
+// The dedicated error for an `auto` row the compiler cannot derive: a type change
+// (and, by extension, a rename, split, or merge, which surface as one). It names
+// the fields that need judgment and proposes the smallest valid repair, never a
+// guessed correspondence.
+fn auto_undecidable(sd: &StableDecl, lo: &RungInfo, hi: &RungInfo) -> TypeError {
+    let fields = hi
+        .mutated
+        .iter()
+        .map(|f| format!("`{f}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let repair = format!(
+        "supply the migration explicitly:\n    \
+         {from} -> {to} = version(upgrade = <fn>, downgrade = <fn>)\n  \
+         a rename, split, merge, or type change is never guessed",
+        from = lo.ver,
+        to = hi.ver,
+    );
+    ErrKind::StableAutoUndecidable {
+        block: sd.name.clone(),
+        from: lo.ver.clone(),
+        to: hi.ver.clone(),
+        problem: "change a field type".to_string(),
+        fields,
+        repair,
+    }
+    .at(hi.span)
 }
 
 // Generated total upgrade for a purely additive step: copy every inherited field,
@@ -729,4 +890,295 @@ fn lift_to_current(
         e = call(evar(&up, z), vec![e], z);
     }
     e
+}
+
+/// The predecessor rungs whose route to the current rung the migration table
+/// promises, so the family-qualified `T.Vk.upgrade`/`.downgrade` are offered for
+/// exactly these. An omitted route is not promised; a block with no table offers
+/// no family members. Shared with the resolver, which needs the same set to map a
+/// use site before desugar has expanded the block.
+pub(crate) fn routes_to_current(sd: &StableDecl) -> BTreeSet<String> {
+    let Some(cur) = sd.rungs.last() else {
+        return BTreeSet::new();
+    };
+    sd.migrations
+        .iter()
+        .filter(|m| m.to == cur.name && m.from != cur.name)
+        .map(|m| m.from.clone())
+        .filter(|from| sd.rungs.iter().any(|r| &r.name == from))
+        .collect()
+}
+
+// One adjacent edge's descriptive route mode, read off its migration row. Mode is
+// recorded for review only; it never enters the compared identity, so an `auto`
+// row and a handwritten converter that elaborate to the same Core stay equal.
+fn edge_mode(sd: &StableDecl, from: &str, to: &str) -> &'static str {
+    match edge_row(sd, from, to) {
+        None => MODE_DEFAULT,
+        Some(Migration {
+            route: MigrationRoute::Auto,
+            ..
+        }) => MODE_AUTO,
+        Some(Migration {
+            route: MigrationRoute::Version(_),
+            ..
+        }) => MODE_MANUAL,
+    }
+}
+
+// The downgrade loss paths a locked edge reports, for the drift diagnostic. An
+// additive edge drops its newly added fields; the labels already ride inside the
+// downgrade function's Core, so this is only their human-readable projection. A
+// non-additive edge's loss is whatever its hand-written converter reports and is
+// left to that converter's own hash.
+fn edge_loss(hi: &RungInfo) -> Vec<String> {
+    if hi.mutated.is_empty() {
+        hi.new.iter().map(|(n, _)| n.clone()).collect()
+    } else {
+        Vec::new()
+    }
+}
+
+// The canonical semantic hash of a generated converter, looked up by its
+// compiler-owned name in the per-definition Core hashes. Present by construction
+// once the family elaborates (the identity surface carries every top-level
+// definition), so an absent entry is an internal invariant violation reported
+// against the edge rather than a silent empty identity.
+fn component_hash(
+    sd: &StableDecl,
+    from: &str,
+    to: &str,
+    fn_name: &str,
+    defs: &Hashes,
+) -> Result<String, TypeError> {
+    defs.get(&Sym::new(fn_name))
+        .map(|d| d.as_str().to_string())
+        .ok_or_else(|| {
+            ErrKind::StableMigrationBadEdge {
+                block: sd.name.clone(),
+                from: from.to_string(),
+                to: to.to_string(),
+                reason: format!("generated converter `{fn_name}` was not elaborated"),
+            }
+            .at(sd.span)
+        })
+}
+
+/// The locked migration identity of one stable family, or `None` when the block
+/// declares no `migrations` table (an unlockable, therefore unchecked, family).
+///
+/// The rung shape digests are structural; each adjacent edge's component hashes
+/// are read from the per-definition Core hashes `defs`, so an `auto` edge and a
+/// handwritten converter that elaborate to the same Core receive the same
+/// identity. Longer routes commit their ordered adjacent edge identities without
+/// rehashing composed bodies. This is the one home for the family's rung, edge,
+/// and route logic; the driver only orchestrates parse, elaborate, hash, and
+/// compare around it. The returned span is the block's, for the drift diagnostic.
+///
+/// # Errors
+/// Fails on a malformed block (the same errors `resolve_rungs` reports) or an
+/// internal absence of a generated converter from `defs`.
+pub(crate) fn family_lock(
+    sd: &StableDecl,
+    defs: &Hashes,
+) -> Result<Option<(FamilyLock, Span)>, TypeError> {
+    if sd.migrations.is_empty() {
+        return Ok(None);
+    }
+    let rungs = resolve_rungs(sd)?;
+    let total = rungs.len();
+    let shapes: Vec<RungShape> = rungs
+        .iter()
+        .enumerate()
+        .map(|(idx, r)| RungShape {
+            ver: r.ver.clone(),
+            shape: rung_digest(&rung_data(sd, idx, r, &[])),
+        })
+        .collect();
+    let mut edges = Vec::new();
+    for k in 0..total.saturating_sub(1) {
+        let lo = &rungs[k];
+        let hi = &rungs[k + 1];
+        let up_name = names::stable_upgrade(&sd.name, &lo.ver, &hi.ver);
+        let down_name = names::stable_downgrade(&sd.name, &hi.ver, &lo.ver);
+        let upgrade = component_hash(sd, &lo.ver, &hi.ver, &up_name, defs)?;
+        let downgrade = component_hash(sd, &lo.ver, &hi.ver, &down_name, defs)?;
+        let edge = edge_hash(
+            &sd.name,
+            &shapes[k].shape,
+            &shapes[k + 1].shape,
+            &upgrade,
+            &downgrade,
+        );
+        edges.push(EdgeLock {
+            from: lo.ver.clone(),
+            to: hi.ver.clone(),
+            mode: edge_mode(sd, &lo.ver, &hi.ver).to_string(),
+            upgrade,
+            downgrade,
+            edge,
+            loss: edge_loss(hi),
+        });
+    }
+    let promised = routes_to_current(sd);
+    let mut routes = Vec::new();
+    for (k, r) in rungs.iter().enumerate() {
+        // A route is recorded only when it spans more than one edge; an adjacent
+        // promised predecessor's identity is already its edge above.
+        if k + 2 >= total || !promised.contains(&r.ver) {
+            continue;
+        }
+        let ordered: Vec<String> = edges[k..total - 1].iter().map(|e| e.edge.clone()).collect();
+        let route = route_hash(
+            &sd.name,
+            &shapes[k].shape,
+            &shapes[total - 1].shape,
+            &ordered,
+        );
+        routes.push(RouteLock {
+            from: r.ver.clone(),
+            to: rungs[total - 1].ver.clone(),
+            mode: edge_mode(sd, &r.ver, &rungs[total - 1].ver).to_string(),
+            edges: ordered,
+            route,
+        });
+    }
+    Ok(Some((
+        FamilyLock {
+            rungs: shapes,
+            edges,
+            routes,
+        },
+        sd.span,
+    )))
+}
+
+// The composed family routes for one block: for each predecessor rung the table
+// promises a current route for, an `upgrade` that composes the adjacent upgrades
+// and a `downgrade` that composes the adjacent downgrades, unioning their loss.
+// These are the bodies behind `T.Vk.upgrade`/`.downgrade`.
+fn family_route_fns(
+    sd: &StableDecl,
+    rungs: &[RungInfo],
+    loss: &LossRef,
+    libf: &impl Fn(&str) -> String,
+) -> Vec<Decl> {
+    let promised = routes_to_current(sd);
+    let total = rungs.len();
+    let cur_ty = Ty::Con(sd.name.clone(), Vec::new());
+    let mut out = Vec::new();
+    for (k, r) in rungs.iter().enumerate() {
+        if k + 1 == total || !promised.contains(&r.ver) {
+            continue;
+        }
+        let vk_ty = Ty::Con(rung_type(sd, k, total), Vec::new());
+        out.push(family_upgrade(sd, rungs, k, &vk_ty, &cur_ty));
+        out.push(family_downgrade(sd, rungs, k, &vk_ty, &cur_ty, loss, libf));
+    }
+    out
+}
+
+// The composed upgrade `T.Vk -> T` reachable as `T.Vk.upgrade`: the adjacent
+// upgrades from rung k up to the current type.
+fn family_upgrade(sd: &StableDecl, rungs: &[RungInfo], k: usize, vk_ty: &Ty, cur_ty: &Ty) -> Decl {
+    let z = rungs[k].span;
+    let x = names::stable_param(&rungs[k].ver);
+    let body = lift_to_current(sd, rungs, k, evar(&x, z), z);
+    mdecl(
+        names::stable_route_upgrade(&sd.name, &rungs[k].ver),
+        &x,
+        vk_ty.clone(),
+        cur_ty.clone(),
+        body,
+        z,
+    )
+}
+
+// The composed downgrade `T -> (T.Vk, Wire.Loss)` reachable as `T.Vk.downgrade`:
+// the adjacent downgrades from the current rung down to rung k, with their losses
+// unioned into one.
+fn family_downgrade(
+    sd: &StableDecl,
+    rungs: &[RungInfo],
+    k: usize,
+    vk_ty: &Ty,
+    cur_ty: &Ty,
+    lref: &LossRef,
+    libf: &impl Fn(&str) -> String,
+) -> Decl {
+    let z = rungs[k].span;
+    let cur = rungs.len() - 1;
+    let x = names::stable_param(&rungs[cur].ver);
+    let body = lower_to_rung(sd, rungs, k, evar(&x, z), libf, z);
+    mdecl(
+        names::stable_route_downgrade(&sd.name, &rungs[k].ver),
+        &x,
+        cur_ty.clone(),
+        Ty::Tuple(vec![vk_ty.clone(), lref.ty.clone()]),
+        body,
+        z,
+    )
+}
+
+// Fold the adjacent downgrades from the current rung down to rung k into one
+// downgrade applied to `val`. Each `compose_downgrade` step runs the higher
+// downgrade, then the lower one, unioning the two losses; a single step is the
+// adjacent downgrade applied directly.
+fn lower_to_rung(
+    sd: &StableDecl,
+    rungs: &[RungInfo],
+    k: usize,
+    val: S<Expr>,
+    libf: &impl Fn(&str) -> String,
+    z: Span,
+) -> S<Expr> {
+    let cur = rungs.len() - 1;
+    let step = |hi: usize| {
+        evar(
+            &names::stable_downgrade(&sd.name, &rungs[hi].ver, &rungs[hi - 1].ver),
+            z,
+        )
+    };
+    let mut chain = step(cur);
+    let mut hi = cur - 1;
+    while hi > k {
+        chain = call(
+            evar(&libf(WIRE_COMPOSE_DOWNGRADE), z),
+            vec![chain, step(hi)],
+            z,
+        );
+        hi -= 1;
+    }
+    call(chain, vec![val], z)
+}
+
+// Reject a migration row that names an unknown rung, runs backward, or overrides a
+// non-adjacent edge with a `version(...)` (a direct long route is a distinct edge,
+// not part of the adjacent ladder). Non-adjacent `auto` rows are allowed: they
+// promise the composed route without emitting a pairwise converter.
+fn validate_migrations(sd: &StableDecl, rungs: &[RungInfo]) -> Result<(), TypeError> {
+    let index = |ver: &str| rungs.iter().position(|r| r.ver == ver);
+    for m in &sd.migrations {
+        let bad = |reason: &str| {
+            ErrKind::StableMigrationBadEdge {
+                block: sd.name.clone(),
+                from: m.from.clone(),
+                to: m.to.clone(),
+                reason: reason.to_string(),
+            }
+            .at(m.span)
+        };
+        let (Some(from), Some(to)) = (index(&m.from), index(&m.to)) else {
+            return Err(bad("names a rung this block does not declare"));
+        };
+        if from >= to {
+            return Err(bad("must run from an older rung to a newer one"));
+        }
+        if matches!(m.route, MigrationRoute::Version(_)) && to != from + 1 {
+            return Err(bad(
+                "version(...) overrides an adjacent edge; a non-adjacent route is `auto`",
+            ));
+        }
+    }
+    Ok(())
 }

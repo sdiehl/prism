@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/stable_migrations.pr
+---
+v1 hero: Ada
+v1 dropped: ["mist", "fog"]
+restored fog: 30
+restored mist: 7
+=> ()

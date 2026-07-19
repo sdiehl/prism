@@ -222,6 +222,9 @@ pub const WIRE_IS_EMPTY: &str = "wire_is_empty";
 pub const WIRE_ENCODE_VALUE_WITH_DIGEST: &str = "wire_encode_value_with_digest";
 pub const WIRE_DECODE_VALUE_WITH_DIGEST: &str = "wire_decode_value_with_digest";
 pub const WIRE_OPEN_VALUE_ANY: &str = "wire_open_value_any";
+// The wire-library downgrade composer a `stable` block's composed family route
+// folds the adjacent downgrades through, unioning the loss each step reports.
+pub const WIRE_COMPOSE_DOWNGRADE: &str = "compose_downgrade";
 
 // The `stable`-block version ladder. A stable type
 // desugars to one frozen rung type per version and a set of plain adjacent
@@ -285,6 +288,66 @@ pub fn stable_wire_decode(ty: &str) -> String {
 pub fn stable_param(ver: &str) -> String {
     ver.to_lowercase()
 }
+
+/// The composed family route lifting rung `ver` up to the current rung.
+///
+/// Exposed in source as `T.Vk.upgrade`; the body composes the adjacent upgrades.
+/// The flat spelling is compiler-owned and never written in user source.
+#[must_use]
+pub fn stable_route_upgrade(ty: &str, ver: &str) -> String {
+    format!("upgrade_route_{ty}_{ver}")
+}
+
+/// The composed family route lowering the current rung to rung `ver`.
+///
+/// Exposed in source as `T.Vk.downgrade`, returning `(T.Vk, Loss)`; the body
+/// composes the adjacent downgrades and unions their losses. The flat spelling is
+/// compiler-owned and never written in user source.
+#[must_use]
+pub fn stable_route_downgrade(ty: &str, ver: &str) -> String {
+    format!("downgrade_route_{ty}_{ver}")
+}
+
+/// The public family-qualified member a user writes to reach a composed route.
+///
+/// `T.Vk.upgrade` / `T.Vk.downgrade`, where `member` is `kw::UPGRADE` or
+/// `kw::DOWNGRADE`. The resolver splits this surface path and maps it to the flat
+/// route above, so this and its inverse `split_family_member` are the one shared
+/// home for the scheme.
+#[must_use]
+pub fn stable_family_member(ty: &str, ver: &str, member: &str) -> String {
+    format!("{}.{member}", stable_rung(ty, ver))
+}
+
+/// Split a family-qualified member path (`T.Vk.upgrade`) into its segments.
+///
+/// Returns the family, rung, and member, or `None` when the path is not exactly
+/// three dotted segments. The inverse of [`stable_family_member`]; the caller
+/// still checks the family and rung against the declared `stable` blocks (the
+/// fact lives in the declaration, never in the name).
+#[must_use]
+pub fn split_family_member(path: &str) -> Option<(&str, &str, &str)> {
+    let (head, member) = path.rsplit_once('.')?;
+    let (family, ver) = head.rsplit_once('.')?;
+    if family.contains('.') {
+        return None;
+    }
+    Some((family, ver, member))
+}
+
+// The hash-scheme identifiers for the stable-migration lock manifest, one family
+// kept together as the single home both the manifest derivation and its checker
+// read. Each tag seals a content-addressed identity, so bumping a scheme cannot
+// silently reuse a hash computed under an older encoding (the same discipline
+// `core::hash::SCHEME` follows for behavior hashes). The edge identity binds a
+// family, the two adjacent rung shape digests, and the upgrade and downgrade
+// canonical semantic hashes; the route identity binds a family, its endpoint
+// shape digests, and the ordered adjacent edge identities it composes; the
+// manifest format tag versions the committed lock file itself.
+pub const STABLE_MIGRATION_EDGE_SCHEME: &str = "prism-stable-migration-edge-v1";
+pub const STABLE_MIGRATION_ROUTE_SCHEME: &str = "prism-stable-migration-route-v1";
+pub const STABLE_LOCK_MANIFEST_FORMAT: &str = "prism-stable-lock-manifest-v1";
+
 // The property-generator combinators a derived `Arbitrary` composes: the runner
 // (`gen_run`), the applicative pieces (`gen_const`/`gen_bind`), the sum picker
 // (`gen_choose`), and the depth control (`gen_resize`) from `Quickcheck`, plus
@@ -807,8 +870,9 @@ mod tests {
     use super::{
         is_synthesized, is_var_get, is_var_runner, is_var_set, module_of, named_effect, named_op,
         parse_named_op, parse_scoped_escape, parse_var_get, parse_var_runner, parse_var_set,
-        private, sort_prim_kind, throw_op, var_effect, var_get, var_runner, var_set, ScopedEscape,
-        ARBITRARY_METHOD, CAP_WRAPPERS, CONCAT_MAP_FN, DECODE_METHOD, DIV_MOD_METHOD,
+        private, sort_prim_kind, split_family_member, stable_family_member, stable_route_downgrade,
+        stable_route_upgrade, stable_rung, throw_op, var_effect, var_get, var_runner, var_set,
+        ScopedEscape, ARBITRARY_METHOD, CAP_WRAPPERS, CONCAT_MAP_FN, DECODE_METHOD, DIV_MOD_METHOD,
         DIV_QUOT_METHOD, EMIT_OP, ENCODE_METHOD, EQ_METHOD, FMAP_METHOD, FORCE_FN, FOREVER,
         GUARD_FN, HASH_METHOD, INCR_REPLAY_DRIVERS, INT_CMP, NUM_ADD_METHOD, NUM_FROMINT_METHOD,
         NUM_MUL_METHOD, NUM_NEG_METHOD, NUM_SUB_METHOD, ORD_METHOD, POW_METHOD, QC_ARB_GEN,
@@ -1098,6 +1162,30 @@ mod tests {
         }
         assert_eq!(module_of("Data.Map.insert"), "Data.Map");
         assert_eq!(module_of("bare"), "");
+    }
+
+    // The family-qualified member surface path (`T.Vk.upgrade`) round-trips
+    // through `split_family_member`, and its two directions produce distinct flat
+    // route names that cannot collide with the adjacent-edge spellings. A bare or
+    // two-segment name is not a family member.
+    #[test]
+    fn family_member_scheme_round_trips() {
+        for (ty, ver, member) in [
+            ("Save", "V1", "upgrade"),
+            ("PlayerManual", "V2", "downgrade"),
+        ] {
+            let path = stable_family_member(ty, ver, member);
+            assert_eq!(split_family_member(&path), Some((ty, ver, member)));
+        }
+        assert_eq!(split_family_member("Save"), None);
+        assert_eq!(split_family_member("Save.V1"), None);
+        assert_ne!(
+            stable_route_upgrade("Save", "V1"),
+            stable_route_downgrade("Save", "V1")
+        );
+        // The composed-route names stay clear of the adjacent-edge names, so one
+        // scheme never shadows the other in the generated function set.
+        assert!(!stable_route_upgrade("Save", "V1").contains(&stable_rung("Save", "V1")));
     }
 
     // `sort_prim_kind` maps each canonical primitive `Ord` instance to the tag

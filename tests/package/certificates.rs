@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use prism::core::HASH_SCHEME;
-use prism::provenance::{sha256_hex, EVENT_HASH_SCHEME};
+use prism::lineage::provenance::{sha256_hex, EVENT_HASH_SCHEME};
 use prism::store::cert::{
     check_lineage_cert, decode_lineage_cert, encode_lineage_cert, lineage_cert, replay_cert,
     CertRow, CertStatus, LineageCert, LineageClaim,

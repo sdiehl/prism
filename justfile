@@ -16,9 +16,12 @@ run FILE:
 check FILE:
     cargo run -- check "{{FILE}}"
 
-# Default test runner: nextest, then doctests (nextest skips them).
+# Default test runner: nextest, then doctests (nextest skips them). RUST_MIN_STACK
+# enlarges libtest's per-test thread stack so the deepest corpus program's Core
+# Lint recursion (core_lint_clean_on_corpus) does not overflow the 2 MB default on
+# platforms with small thread stacks; optimized release frames already fit.
 test:
-    PRISM_COMPILER_CACHE=0 cargo nextest run --all
+    RUST_MIN_STACK=33554432 PRISM_COMPILER_CACHE=0 cargo nextest run --all
     PRISM_COMPILER_CACHE=0 cargo test --doc
 
 parity:
@@ -209,10 +212,6 @@ examples:
 web: wasm
     cd web && pnpm install && pnpm dev
 
-# Serve the web app and open the REPL page in the browser.
-web-repl: wasm
-    cd web && pnpm install && pnpm gen-examples && pnpm exec vite --open /repl.html
-
 web-build:
     cd web && pnpm install && pnpm lint && pnpm typecheck && pnpm build
 
@@ -301,3 +300,26 @@ bless PATH=".":
 # Serve the determinism-scrubber page (opens /scrubber.html).
 scrub: wasm
     cd web && pnpm install && pnpm gen-examples && pnpm exec vite --open /scrubber.html
+
+# Single-platform dry-run of the cross-platform determinism identity manifest:
+# build the pinned corpus through one binary, emit the manifest twice, and assert
+# it is byte-identical across the two runs. The cross-platform matrix (the identity
+# workflow) emits the same manifest on Linux x86-64, Linux ARM64, and macOS ARM64
+# and fails on any divergence; this recipe is its local determinism smoke.
+identity:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --release --features native
+    export PRISM_BIN=target/release/prism
+    a="$(mktemp "${TMPDIR:-/tmp}/prism_identity_a.XXXXXX")"
+    b="$(mktemp "${TMPDIR:-/tmp}/prism_identity_b.XXXXXX")"
+    trap 'rm -f "$a" "$b"' EXIT
+    bash scripts/identity-manifest.sh --out "$a"
+    bash scripts/identity-manifest.sh --out "$b"
+    if diff -u "$a" "$b"; then
+        echo "identity: manifest is deterministic across two runs"
+    else
+        echo "identity: MANIFEST NONDETERMINISTIC across two runs" >&2
+        exit 1
+    fi
+    cat "$a"

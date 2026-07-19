@@ -4,12 +4,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::builtins::Builtin;
 use crate::core::cbpv::CoreOp;
-use crate::fresh::Fresh;
 use crate::names;
 use crate::names::ENTRY_POINT;
 use crate::sym::Sym;
 use crate::types::ty::EffRow;
 use crate::types::Type;
+use crate::util::fresh::Fresh;
 
 use super::super::specialize_support::{free_comp_vars, free_value_vars};
 use super::super::verify::{instantiate_fn, lowered_representation_conversion};
@@ -1855,7 +1855,7 @@ impl<'a> Monadic<'a> {
                 ),
             ),
             TypedCompKind::Case(scrutinee, arms) => {
-                let arms = arms
+                let arms: Vec<(TypedPattern, TypedComp)> = arms
                     .iter()
                     .map(|(pattern, body)| {
                         let binders = Self::pattern_binders(pattern);
@@ -1865,8 +1865,17 @@ impl<'a> Monadic<'a> {
                         ))
                     })
                     .collect::<Option<_>>()?;
+                // A case's row is the union of its arms, recomputed after
+                // lowering, not the pre-lowering row: an arm whose body forces
+                // a residual-effectful function widens past the stored row, and
+                // keeping the stale row fails the verifier's own union rule.
+                // The result type is unchanged, so this is row-only and erased
+                // Core is identical.
+                let effects = arms.iter().fold(EffRow::Empty, |effects, (_, body)| {
+                    union_effects(&effects, body.sig().effects())
+                });
                 TypedComp::new(
-                    comp.sig().clone(),
+                    CompSig::new(comp.sig().result().clone(), effects),
                     TypedCompKind::Case(scrutinee.clone(), arms),
                 )
             }

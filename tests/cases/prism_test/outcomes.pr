@@ -1,0 +1,23 @@
+test fn passes() =
+  if 1 + 1 == 2 then
+    ()
+  else
+    fail()
+
+test fn fails() = fail()
+
+test fn exits_nonzero() = exit(3)
+
+test fn exits_zero() = exit(0)
+
+test fn faults() =
+  let x = 1 / 0
+  ()
+
+test fn prints_then_fails() =
+  print("diagnostic context")
+  fail()
+
+test fn prints_and_passes() =
+  print("visible only with show-output")
+  ()

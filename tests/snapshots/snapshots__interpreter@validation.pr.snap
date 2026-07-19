@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/validation.pr
+---
+Data.Validation.Valid(7)
+Data.Validation.Invalid(["x must be positive", "y must be positive"])
+true
+0
+Data.Validation.Invalid(["a", "b"])
+Ok(9)
+=> ()

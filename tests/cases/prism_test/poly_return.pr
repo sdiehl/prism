@@ -1,0 +1,4 @@
+-- A test whose result type is polymorphic (`List(a)`) is monomorphism-violating
+-- and non-Unit; the checker rejects it at the declaration rather than letting a
+-- tier-dependent value run.
+test fn poly() = Nil

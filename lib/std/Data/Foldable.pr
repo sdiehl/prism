@@ -3,7 +3,7 @@
 -- Each function is a constrained free function, not a class default method: it
 -- is written once against the `Foldable(f)` class methods and works for every
 -- instance (`List`, `Option`, and any future container) without a per-type
--- copy. The prelude opens this module, so these names are in scope unqualified
+-- copy. Base includes this module, so these names are in scope unqualified
 -- everywhere and subsume the old `List`-only `sum`/`length`/etc.
 --
 -- The folds are strict, so the short-circuiting versions (`all`, `any`, `find`,

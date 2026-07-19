@@ -1,0 +1,11 @@
+-- Floating-point arithmetic: the drift-prone surface between ARM and x86 FPUs.
+-- The printed decimals are the shortest round-tripping form of the f64 bits, so
+-- a single divergent bit changes the observation trace. Exercises the owned libm
+-- (sqrt) and mixed constant/expression arithmetic.
+
+fn main() : Unit ! {IO} =
+  println(show_float(0.1 + 0.2))
+  println(show_float(1.0 / 3.0))
+  println(show_float(sqrt(2.0)))
+  println(show_float(pi * 2.0))
+  println(show_float(2.0 ^ 53.0))

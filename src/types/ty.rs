@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::coeffect::CoeffectRow;
 use crate::kw;
 use crate::sym::Sym;
+use crate::types::coeffect::CoeffectRow;
 
 pub type Effects = BTreeSet<Sym>;
 
@@ -58,6 +58,12 @@ pub const CONS: &str = "Cons";
 pub const NIL: &str = "Nil";
 pub const FLOAT_BUF: &str = "FloatBuf";
 pub const INT_BUF: &str = "IntBuf";
+// The baseline 128-bit SIMD vector types: two f64 lanes or two i64 lanes. Opaque
+// 0-parameter built-in types (no surface constructors), produced and consumed
+// only through the `simd_*` builtins. The interpreter holds the two words raw;
+// native stores them in a two-word cell.
+pub const F64X2: &str = "F64x2";
+pub const I64X2: &str = "I64x2";
 pub const EQ_CLASS: &str = "Eq";
 pub const ORD_CLASS: &str = "Ord";
 pub const SHOW_CLASS: &str = "Show";

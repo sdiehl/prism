@@ -47,6 +47,7 @@
     coeffect: "Coeffect: ",
     hole: "Inferred Type Hole: ",
     patternvar: "Pattern Variable: ",
+    logic: "Logic Expression: ",
   };
 
   function show(span) {

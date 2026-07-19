@@ -1,0 +1,240 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/adapter_missing_op.pr
+---
+== tokens ==
+VOpen Effect UIdent("KvV1") VOpen Ident("get_v1") LParen KwInt RParen Colon KwInt VSemi Ident("put_v1") LParen KwInt Comma KwInt RParen Colon KwUnit VClose VSemi Effect UIdent("KvV2") VOpen Ident("get_v2") LParen KwInt RParen Colon KwInt VSemi Ident("put_v2") LParen KwInt Comma KwInt RParen Colon KwUnit VClose VSemi Fn Ident("adapt_partial") LParen Ident("action") RParen Eq VOpen Handle Ident("action") LParen RParen With VOpen Ident("get_v1") LParen Ident("key") RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen Ident("get_v2") LParen Ident("key") RParen RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("client_v1") LParen RParen Colon KwInt Bang LBrace UIdent("KvV1") RBrace Eq VOpen Ident("put_v1") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 100, suffix: None }) RParen VSemi Ident("get_v1") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "KvV1",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "get_v1",
+                    params: [
+                        Int,
+                    ],
+                    ret: Int,
+                    grade: Many,
+                },
+                EffOp {
+                    name: "put_v1",
+                    params: [
+                        Int,
+                        Int,
+                    ],
+                    ret: Unit,
+                    grade: Many,
+                },
+            ],
+            span: 250..307,
+        },
+        EffectDecl {
+            name: "KvV2",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "get_v2",
+                    params: [
+                        Int,
+                    ],
+                    ret: Int,
+                    grade: Many,
+                },
+                EffOp {
+                    name: "put_v2",
+                    params: [
+                        Int,
+                        Int,
+                    ],
+                    ret: Unit,
+                    grade: Many,
+                },
+            ],
+            span: 309..366,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "adapt_partial",
+            params: [
+                Param {
+                    name: "action",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Handle(
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "action",
+                                ),
+                                span: 404..410,
+                            },
+                            [],
+                        ),
+                        span: 404..412,
+                    },
+                    [
+                        Op(
+                            "get_v1",
+                            [
+                                "key",
+                            ],
+                            "k",
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "k",
+                                        ),
+                                        span: 446..447,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Call(
+                                                Spanned {
+                                                    node: Var(
+                                                        "get_v2",
+                                                    ),
+                                                    span: 448..454,
+                                                },
+                                                [
+                                                    Spanned {
+                                                        node: Var(
+                                                            "key",
+                                                        ),
+                                                        span: 455..458,
+                                                    },
+                                                ],
+                                            ),
+                                            span: 448..459,
+                                        },
+                                    ],
+                                ),
+                                span: 446..460,
+                            },
+                        ),
+                        Return(
+                            "r",
+                            Spanned {
+                                node: Var(
+                                    "r",
+                                ),
+                                span: 477..478,
+                            },
+                        ),
+                    ],
+                    Exhaustive,
+                ),
+                span: 397..478,
+            },
+            wheres: [],
+            span: 368..478,
+        },
+        Decl {
+            name: "client_v1",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "KvV1",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "_",
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "put_v1",
+                                ),
+                                span: 514..520,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 1,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 521..522,
+                                },
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 100,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 524..527,
+                                },
+                            ],
+                        ),
+                        span: 514..528,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "get_v1",
+                                ),
+                                span: 531..537,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 1,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 538..539,
+                                },
+                            ],
+                        ),
+                        span: 531..540,
+                    },
+                ),
+                span: 514..540,
+            },
+            wheres: [],
+            span: 480..540,
+        },
+    ],
+}
+
+== types ==
+[E5011] Type Error: in `adapt_partial`: handler for effect `KvV1` is missing `put_v1`; a handler must implement every operation of the effect it handles
+    ╭─[ <source>:14:3 ]
+    │
+ 14 │ ╭─▶   handle action() with
+    ┆ ┆   
+ 16 │ ├─▶     return r => r
+    │ │                       
+    │ ╰─────────────────────── in `adapt_partial`: handler for effect `KvV1` is missing `put_v1`; a handler must implement every operation of the effect it handles
+────╯

@@ -11,8 +11,8 @@ use prism::eval::kont::{decode_kont, encode_kont};
 use prism::eval::{resume_kont_observed, run_observed_with_args, run_suspending, Checkpoint};
 use prism::resolve::default_roots;
 use prism::{
-    core_of, interpret_io_on, resume_on, suspend_line_cuts, suspend_on, with_prelude, Config,
-    SuspendResult,
+    core_of, interpret_io_on, resume_on, suspend_at_cut_on, suspend_line_cuts, suspend_on,
+    with_prelude, Config, CutTarget, SuspendAtCut, SuspendResult,
 };
 
 fn cfg() -> Config {
@@ -317,4 +317,141 @@ fn suspend_cut_report_agrees_with_the_ruler() {
     };
     assert_eq!(cut.observations, 0);
     assert!(cut.last.is_none());
+}
+
+// A named `--at-call` cut pauses at the k-th entry to a definition, names the
+// def stack, and reduces to a single equivalent `--at N`: the snapshot it writes
+// is byte-identical to that step budget's, so the ergonomic form is exactly as
+// reproducible as the opaque one.
+#[test]
+fn named_cut_at_call_reproduces_the_equivalent_step_budget() {
+    let full = with_prelude(COUNTER);
+    let target = CutTarget::Call {
+        def: "go".into(),
+        nth: 3,
+    };
+    let mut prefix: Vec<u8> = Vec::new();
+    let mut input = Cursor::new(Vec::new());
+    let SuspendAtCut::Suspended { bytes, report, .. } =
+        suspend_at_cut_on(&full, &roots(), &mut prefix, &mut input, &target, &cfg()).expect("cut")
+    else {
+        panic!("the 3rd entry to `go` is reached");
+    };
+    // The def stack names the paused definition last and its caller chain first.
+    assert_eq!(report.def_stack.last().map(String::as_str), Some("go"));
+    assert_eq!(report.def_stack.first().map(String::as_str), Some("main"));
+
+    let mut prefix2: Vec<u8> = Vec::new();
+    let mut input2 = Cursor::new(Vec::new());
+    let SuspendResult::Suspended {
+        bytes: at_bytes, ..
+    } = suspend_on(
+        &full,
+        &roots(),
+        &mut prefix2,
+        &mut input2,
+        report.equiv_at,
+        &cfg(),
+    )
+    .expect("--at equiv_at suspends")
+    else {
+        panic!("the equivalent step budget suspends");
+    };
+    assert_eq!(
+        bytes, at_bytes,
+        "the named cut reproduces the equivalent --at N byte for byte"
+    );
+    assert_eq!(prefix, prefix2, "and its prefix output matches too");
+}
+
+// A named `--at-op` cut pauses just before the k-th performance of a capability
+// op: its equivalent budget is exactly one step before the op fires on the ruler,
+// and the snapshot equals that `--at N`.
+#[test]
+fn named_cut_at_op_pauses_before_the_kth_op_and_reproduces_it() {
+    let full = with_prelude(COUNTER);
+    let mut rout: Vec<u8> = Vec::new();
+    let mut rin = Cursor::new(Vec::new());
+    let ruler =
+        prism::step_ruler_on(&full, &roots(), &mut rout, &mut rin, &cfg()).expect("ruled run");
+    let prints: Vec<usize> = ruler
+        .rows
+        .iter()
+        .filter(|r| r.op == "Console.print")
+        .map(|r| r.step)
+        .collect();
+    let fourth_print = prints[3];
+
+    let target = CutTarget::Op {
+        op: "Console.print".into(),
+        nth: 4,
+    };
+    let mut prefix: Vec<u8> = Vec::new();
+    let mut input = Cursor::new(Vec::new());
+    let SuspendAtCut::Suspended { bytes, report, .. } =
+        suspend_at_cut_on(&full, &roots(), &mut prefix, &mut input, &target, &cfg()).expect("cut")
+    else {
+        panic!("the 4th print is reached");
+    };
+    assert_eq!(
+        report.equiv_at,
+        fourth_print - 1,
+        "the op cut pauses one step before the op fires on the ruler"
+    );
+
+    let mut prefix2: Vec<u8> = Vec::new();
+    let mut input2 = Cursor::new(Vec::new());
+    let SuspendResult::Suspended {
+        bytes: at_bytes, ..
+    } = suspend_on(
+        &full,
+        &roots(),
+        &mut prefix2,
+        &mut input2,
+        report.equiv_at,
+        &cfg(),
+    )
+    .expect("--at equiv_at suspends")
+    else {
+        panic!("the equivalent step budget suspends");
+    };
+    assert_eq!(
+        bytes, at_bytes,
+        "the op cut reproduces the equivalent --at N byte for byte"
+    );
+}
+
+// A cut past the program's length is not an error: the machine simply runs to
+// completion, honestly reporting nothing was suspended.
+#[test]
+fn named_cut_beyond_the_program_runs_to_completion() {
+    let full = with_prelude(COUNTER);
+    let target = CutTarget::Call {
+        def: "go".into(),
+        nth: 100,
+    };
+    let mut out: Vec<u8> = Vec::new();
+    let mut input = Cursor::new(Vec::new());
+    let result = suspend_at_cut_on(&full, &roots(), &mut out, &mut input, &target, &cfg())
+        .expect("an unreached cut still runs");
+    assert!(matches!(result, SuspendAtCut::Done(_)));
+}
+
+// An `--at-op` naming an op outside the capability set is a named error, not a
+// silent miss.
+#[test]
+fn named_cut_rejects_an_unknown_op() {
+    let full = with_prelude(COUNTER);
+    let target = CutTarget::Op {
+        op: "Console.nonesuch".into(),
+        nth: 1,
+    };
+    let mut out: Vec<u8> = Vec::new();
+    let mut input = Cursor::new(Vec::new());
+    let err = suspend_at_cut_on(&full, &roots(), &mut out, &mut input, &target, &cfg())
+        .expect_err("an unknown op is rejected");
+    assert!(
+        err.to_string().contains("unknown capability op"),
+        "names the bad op: {err}"
+    );
 }

@@ -31,11 +31,11 @@ fn line_of(src: &str, byte: usize) -> usize {
 fn escape_is_rejected_at_the_offending_call() {
     let err = prism::check(REPRO).expect_err("skolem escape must be rejected");
     // A type error whose message is the rigid skolem `a` failing to absorb an
-    // outer type, not some unrelated failure. (`in_fn` rewraps the underlying
-    // `Mismatch` as an `Other` carrying the wrapped message, so match on kind
-    // and text rather than the pre-wrap variant.)
+    // outer type, not some unrelated failure. (`in_fn` routes the underlying
+    // mismatch onto the coded catalogue as a `Kind` carrying the wrapped
+    // message, so match on the catalogue variant and text, not the pre-wrap one.)
     assert!(
-        matches!(err, Error::Type(TypeError::TypeFailure { .. })),
+        matches!(err, Error::Type(TypeError::Kind(_))),
         "expected a type error, got: {err}"
     );
     let msg = err.to_string();

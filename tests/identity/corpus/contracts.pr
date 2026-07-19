@@ -1,0 +1,30 @@
+-- Function contracts (Lane V): a `logic fn` plus `requires`/`ensures` clauses.
+-- Pins the canonical SMT query bytes (`dump smt`) and proves the contract is
+-- fully erased before executable Core, so its Core hash and run trace match the
+-- contract-free shape on every platform.
+
+logic fn nonneg(x : Int) : Bool = x >= 0
+
+fn clamp(x : Int, lo : Int, hi : Int) : Int
+  requires lo <= hi
+  ensures |r| nonneg(r)
+  =
+    if x < lo then
+      lo
+    elif x > hi then
+      hi
+    else
+      x
+
+fn abs(x : Int) : Int
+  ensures |r| nonneg(r)
+  =
+    if x < 0 then
+      0 - x
+    else
+      x
+
+fn main() : Unit ! {IO} =
+  println(clamp(5, 0, 10))
+  println(clamp(42, 0, 10))
+  println(abs(0 - 7))

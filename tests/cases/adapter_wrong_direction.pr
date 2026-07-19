@@ -1,0 +1,27 @@
+-- An adapter runs an old client against a newer provider: it handles the source
+-- operations and re-performs the adjacent target ones. Wiring one backwards
+-- (handling the target, re-performing the source) leaves the client's source
+-- operations unhandled. There is no protocol-aware diagnostic; the mistake
+-- surfaces only when a bridge is annotated with the target protocol, as an
+-- ordinary undeclared-effect error naming the escaped source operation.
+effect KvV1
+  get_v1(Int) : Int
+  put_v1(Int, Int) : Unit
+
+effect KvV2
+  get_v2(Int) : Int
+  put_v2(Int, Int) : Unit
+
+fn adapt_backwards(action) =
+  handle action() with
+    get_v2(key) resume k => k(get_v1(key))
+    put_v2(key, value) resume k =>
+      put_v1(key, value)
+      k(())
+    return r => r
+
+fn client_v1() : Int ! {KvV1} =
+  put_v1(1, 100)
+  get_v1(1)
+
+fn bridged() : Int ! {KvV2} = adapt_backwards(client_v1)

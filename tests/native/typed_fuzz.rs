@@ -14,12 +14,14 @@ use std::path::Path;
 
 use prism::{default_roots, Config, EffectTier};
 
-use crate::support::fuzzgen::{generate, shrink, Program};
+use crate::support::fuzzgen::{generate, generate_arena, shrink, Program};
 use crate::support::{check_native_parity, require_cc, TempDir};
 
 const TIERS: &[EffectTier] = &[EffectTier::Auto, EffectTier::State, EffectTier::FreeMonad];
 const GENERATED_CASES: usize = 12;
 const SEED: u64 = 0x7479_7065_645f_667a;
+const ARENA_CASES: usize = 8;
+const ARENA_SEED: u64 = 0x6172_656e_615f_667a;
 
 fn forced(tier: EffectTier) -> Config {
     let mut config = Config::from_env();
@@ -54,6 +56,31 @@ fn generated_programs_agree_across_all_tiers() {
             let (minimal, failure) = shrink(program, failure, |p| divergence(p, &path));
             panic!(
                 "generated case {index} diverged after shrinking:\n{failure}\n\nminimal reproducer:\n{}",
+                minimal.render()
+            );
+        }
+    }
+}
+
+// The arena family: constructors built under `with_arena`, with the escaping,
+// contained, and shared-helper shapes varied by the generator. The parity
+// helper runs each build under `PRISM_CHECK_LEAKS`, so a region that failed to
+// reclaim, a promotion that dropped a cell, or an exclusion that broke
+// non-arena identity all surface here as a shrunk reproducer.
+#[test]
+fn generated_arena_programs_agree_across_all_tiers() {
+    require_cc();
+    let scratch = TempDir::new("typed-fuzz-arena", "cases");
+    let path = scratch.join("candidate.pr");
+    for (index, program) in generate_arena(ARENA_SEED, ARENA_CASES)
+        .into_iter()
+        .enumerate()
+    {
+        if let Some(failure) = divergence(&program, &path) {
+            let (minimal, failure) = shrink(program, failure, |p| divergence(p, &path));
+            panic!(
+                "generated arena case {index} diverged after shrinking:\n{failure}\n\nminimal \
+                 reproducer:\n{}",
                 minimal.render()
             );
         }

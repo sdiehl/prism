@@ -1,0 +1,57 @@
+{
+  "format": "prism-stable-lock-manifest-v1",
+  "families": {
+    "Save": {
+      "rungs": [
+        {
+          "ver": "V1",
+          "shape": "c6da77960d4168ba"
+        },
+        {
+          "ver": "V2",
+          "shape": "c62295614cac9ca3"
+        },
+        {
+          "ver": "V3",
+          "shape": "dd2d226b2cbe6345"
+        }
+      ],
+      "edges": [
+        {
+          "from": "V1",
+          "to": "V2",
+          "mode": "auto",
+          "upgrade": "9dcd77363a66b8f0d0c6be6fc6ddb4761e1654e1f9608cc9e2758b5301d0f2b5",
+          "downgrade": "41d7649b1a7374e287c6d4d34816353d79ada012814ce40f0df3fced6d8b1e71",
+          "edge": "0a3f7228469ac0a16e075c3de75f5b07c8270e97f74dab51371657b2c8e2275a",
+          "loss": [
+            "fog"
+          ]
+        },
+        {
+          "from": "V2",
+          "to": "V3",
+          "mode": "auto",
+          "upgrade": "a956e93983d85a04596535abdeadc7a170e4ca0afcb233b89d52ec4fd269b6d0",
+          "downgrade": "e25a083d0c8b6313b09c6cc9a48a33a2e48d4c1f8f0873830e1b342b9da7a048",
+          "edge": "3cc525782b42a7a7c9df0e8768ba0243711502ca7c0bc4a5c5cf51df1de35f67",
+          "loss": [
+            "mist"
+          ]
+        }
+      ],
+      "routes": [
+        {
+          "from": "V1",
+          "to": "V3",
+          "mode": "auto",
+          "edges": [
+            "0a3f7228469ac0a16e075c3de75f5b07c8270e97f74dab51371657b2c8e2275a",
+            "3cc525782b42a7a7c9df0e8768ba0243711502ca7c0bc4a5c5cf51df1de35f67"
+          ],
+          "route": "2cde82658e52eb24c75354999d3def923d705a33413fcc6394c427fa6a96f160"
+        }
+      ]
+    }
+  }
+}

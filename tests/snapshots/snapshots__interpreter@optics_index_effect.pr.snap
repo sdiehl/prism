@@ -1,0 +1,8 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/optics_index_effect.pr
+---
+Vec2 { x = 1, y = 4 }
+World { party = [Player { pos = Vec2 { x = 3, y = 4 }, hp = 100 }], turn = 1 }
+=> ()

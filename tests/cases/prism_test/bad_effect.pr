@@ -1,0 +1,6 @@
+test fn reads_console() =
+  let line = read_line()
+  if line == "" then
+    ()
+  else
+    fail()

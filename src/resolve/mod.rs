@@ -18,9 +18,10 @@ use marginalia::Span;
 
 use crate::error::{Error, TypeError};
 use crate::syntax::ast::{
-    Constraint, Decl, EffLabel, Expr, HandlerArm, ImportDecl, Pattern, Program, Qualifier, Row,
-    Sugar, SugarArm, Surface, Ty, S,
+    Constraint, Decl, EffLabel, Expr, HandlerArm, ImportDecl, MigrationDir, MigrationRoute,
+    Pattern, Program, Qualifier, Row, Sugar, SugarArm, Surface, Ty, S,
 };
+use crate::{kw, names};
 
 mod identity;
 mod lints;
@@ -497,6 +498,11 @@ struct Rw<'a> {
     quals: &'a BTreeMap<String, Vec<usize>>,
     mods: &'a [ModInfo],
     locals: Vec<String>,
+    // Each locally declared `stable` family mapped to the predecessor rungs whose
+    // route to the current rung the migration table promises. A family-qualified
+    // `T.Vk.upgrade`/`.downgrade` resolves only for a promised rung; an omitted
+    // route is not offered. Built once per module from its `stable` blocks.
+    family_routes: BTreeMap<String, BTreeSet<String>>,
     err: Option<TypeError>,
 }
 
@@ -515,11 +521,24 @@ impl<'a> Rw<'a> {
             quals,
             mods,
             locals: Vec::new(),
+            family_routes: BTreeMap::new(),
             err: None,
         }
     }
 
     fn program(mut self, p: &mut Program) -> Result<(), Error> {
+        // Record the promised family routes before rewriting any reference, so a
+        // `T.Vk.upgrade` use resolves against the declared migration table.
+        self.family_routes = p
+            .stable
+            .iter()
+            .map(|sd| {
+                (
+                    sd.name.clone(),
+                    crate::syntax::desugar::routes_to_current(sd),
+                )
+            })
+            .collect();
         for d in &mut p.types {
             d.name = self.canon(&d.name);
             for c in &mut d.ctors {
@@ -619,6 +638,17 @@ impl<'a> Rw<'a> {
                     self.expr(e);
                 }
                 self.locals.truncate(base);
+            }
+            // A `version(...)` override is an ordinary function (a named function
+            // or an inline lambda); resolve each supplied direction like any body.
+            for mig in &mut sd.migrations {
+                if let MigrationRoute::Version(v) = &mut mig.route {
+                    for dir in [&mut v.upgrade, &mut v.downgrade] {
+                        if let MigrationDir::Expr(e) = dir {
+                            self.expr(e);
+                        }
+                    }
+                }
             }
         }
         self.err.take().map_or(Ok(()), |e| Err(Error::Type(e)))
@@ -993,6 +1023,23 @@ impl<'a> Rw<'a> {
             .map_or_else(|| name.to_string(), |name| name.as_str().to_string())
     }
 
+    /// Map a family-qualified route path (`T.Vk.upgrade` / `T.Vk.downgrade`) to
+    /// the compiler-owned composed route function, or `None` when the path is not
+    /// a promised family member. Requires `T` to be a locally declared `stable`
+    /// family, `Vk` a rung whose route to the current rung the migration table
+    /// promises, and the final segment the `upgrade`/`downgrade` member.
+    fn stable_family_route(&self, name: &str) -> Option<String> {
+        let (family, ver, member) = names::split_family_member(name)?;
+        if !self.family_routes.get(family)?.contains(ver) {
+            return None;
+        }
+        match member {
+            kw::UPGRADE => Some(names::stable_route_upgrade(family, ver)),
+            kw::DOWNGRADE => Some(names::stable_route_downgrade(family, ver)),
+            _ => None,
+        }
+    }
+
     /// Resolve a referenced name: locals untouched; `Q.n` resolved through the
     /// qualifier table; the module's own names and any unqualified imports
     /// rewritten to canonical form; everything else (builtins, effect ops,
@@ -1000,6 +1047,13 @@ impl<'a> Rw<'a> {
     fn value(&mut self, name: &str, span: Span) -> String {
         if self.locals.iter().any(|l| l == name) {
             return name.to_string();
+        }
+        // A family-qualified `T.Vk.upgrade`/`.downgrade` reaches the generated
+        // composed route, but only for a rung the migration table promises. The
+        // family and rung come from the declared `stable` block, never sniffed
+        // from the name, so this cannot capture an ordinary module-qualified call.
+        if let Some(route) = self.stable_family_route(name) {
+            return route;
         }
         // Split on the LAST dot, so a multi-segment qualifier (`Geo.Util.one`)
         // resolves as (`Geo.Util`, `one`) and a single one (`Map.insert`) as

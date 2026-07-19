@@ -1,6 +1,6 @@
 -- | The opt-in serialization layer.
 --
--- Serialization is deliberately out of the always-on prelude: a program that
+-- Serialization is deliberately out of Base: a program that
 -- never persists a value imports none of this. Everything here is pure total
 -- functions over `Bytes`; writing those bytes to a file, a socket, or a replay
 -- log is a capability routed through the effect system, never performed here.

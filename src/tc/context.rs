@@ -5,6 +5,12 @@ use super::{Entry, Env, Tc, TcErr};
 use crate::sym::Sym;
 use crate::types::ty::{EffRow, Label, Type};
 
+// Shown when an effect-row unification references a row variable that has already
+// left the typing context (a row-scope escape). One canonical home, referenced by
+// both `solve_row` here and `unify_row` in `subsume`.
+pub(super) const ROW_ESCAPES_SCOPE: &str =
+    "effect row escapes its scope: a row variable used here was introduced in an inner scope that has already closed, so its effects can no longer be determined";
+
 /// A `Type` with every solved metavariable already resolved (see `Tc::zonk`).
 ///
 /// Scheme construction in `generalize_zonked` relies on this: it enumerates the
@@ -74,11 +80,18 @@ impl Tc<'_> {
     }
 
     pub(super) fn solve_row(&mut self, v: u32, r: EffRow) -> Result<(), TcErr> {
+        // Absence of the row existential is a row-scope escape, not an internal
+        // fault. Unlike the type context, the row context does not keep every
+        // solution strictly left-referencing, so a later truncation can strand a
+        // row variable that a unification still references. That is a real (if
+        // rare) typing failure of a user program, so surface it as a user
+        // diagnostic rather than a compiler ICE. `Keep` so this precise reason
+        // survives a caller's coarse expected/got rewrite.
         let i = self
             .ctx
             .iter()
             .position(|e| matches!(e, Entry::ExRow(w) | Entry::SolvedRow(w, _) if *w == v))
-            .ok_or_else(|| TcErr::Ice(format!("solve_row: ^{v} not in context")))?;
+            .ok_or_else(|| TcErr::Keep(ROW_ESCAPES_SCOPE.into()))?;
         if let Some(sk) = self.row_skolem_escaping(v, &r) {
             // A user program reaches this: a closure created outside a
             // row-polymorphic boundary whose effects can only be satisfied by
@@ -765,8 +778,8 @@ fn collect_row_names(t: &Type, out: &mut BTreeSet<String>) {
 #[cfg(test)]
 mod tests {
     use super::{collect_row_names, collect_type_names, free_type_vars_ordered};
-    use crate::coeffect::CoeffectRow;
     use crate::sym::Sym;
+    use crate::types::coeffect::CoeffectRow;
     use crate::types::ty::{EffRow, Type};
     use std::collections::BTreeSet;
 

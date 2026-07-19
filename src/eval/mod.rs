@@ -9,11 +9,11 @@ use num_bigint::BigInt;
 
 use crate::core::builtins::Builtin;
 use crate::core::{Comp, Core, CoreFn, CorePat};
-use crate::names::ENTRY_POINT;
-use crate::provenance::{
+use crate::lineage::provenance::{
     CapEvent, CapOp, EventValue, Observation, OP_CONSOLE_EPRINT, OP_CONSOLE_NEWLINE,
     OP_CONSOLE_PRINT, OP_CONSOLE_READ_INT, OP_CONSOLE_READ_LINE, OP_RANDOM_RAND,
 };
+use crate::names::ENTRY_POINT;
 use crate::sym::Sym;
 use crate::types::{CONS, FLOAT_BUF, NIL};
 
@@ -76,6 +76,13 @@ pub enum Rv {
     // payloads and subnormals; shared via `Rc`, copied on write, mirroring the
     // runtime's rc==1 in-place / shared-copy discipline.
     TBuf(Rc<Vec<u64>>),
+    // A baseline 128-bit SIMD vector: two raw 64-bit words (float lanes as their
+    // double bit patterns, integer lanes as two's-complement). Opaque: produced
+    // and consumed only by the `simd_*` builtins, never shown, compared,
+    // serialized, or hashed. Boxed so the two-word payload does not widen the
+    // `Rv` enum (which every evaluator frame carries), keeping the recursive
+    // render/drop stack depth of ordinary programs unchanged.
+    Vec128(Rc<[u64; 2]>),
     Resume(Rc<[Frame]>),
     // Verification-only runtime form for an effect-lowered local `var`. Ordinary
     // source interpretation never constructs it; only the explicit lowered-Core
@@ -173,6 +180,7 @@ impl Rv {
             Self::Array(_) => "Array",
             Self::Buf(_) => "Buf",
             Self::TBuf(_) => FLOAT_BUF,
+            Self::Vec128(_) => "Vec128",
             Self::Resume(_) => "Resume",
             Self::Ref(_) => "Ref",
         }
@@ -210,6 +218,9 @@ impl Rv {
             Self::Closure(..) | Self::Thunk(..) => FUNCTION_REPR.into(),
             Self::Resume(..) => CONTINUATION_REPR.into(),
             Self::Ref(_) => LOCAL_REF_REPR.into(),
+            // Opaque: a SIMD vector has no surface representation. It only ever
+            // reaches here through a diagnostic path, never ordinary output.
+            Self::Vec128(_) => "<simd>".into(),
             Self::Data(name, fs) => match self.list_elems() {
                 Some(es) => {
                     let es: Vec<_> = es.iter().map(|e| e.render(quote)).collect();
@@ -306,6 +317,12 @@ pub struct Machine<'a> {
     // provenance stream, and an unarmed run pays nothing (the preview is built
     // lazily). See `prism exec steps` and the suspend cut report.
     ruler: Option<Vec<StepMark>>,
+    // A named cut predicate (`--at-call` / `--at-op`): when armed, the machine
+    // watches the deterministic step stream for the named program point and, on
+    // reaching it, records the equivalent step budget plus the def stack and
+    // pauses there. Interpreter-only and armed only by the suspend/debug drivers,
+    // so tier/backend parity is untouched and the program cannot observe it.
+    cut: Option<CutState>,
 }
 
 /// One observation on the machine-step clock: the step at which it fired, its
@@ -315,6 +332,44 @@ pub struct StepMark {
     pub step: usize,
     pub op: &'static str,
     pub preview: String,
+}
+
+/// A named cut predicate for a suspend: pause at a program point named by a
+/// definition or a capability op, instead of by an opaque step count.
+///
+/// Both are pure functions of the deterministic step stream, so the pause they
+/// pick reduces to a single equivalent `--at N` and reproduces the identical
+/// snapshot. Diagnostic-only and interpreter-only: the program cannot observe
+/// which predicate armed the machine, only whether it ran.
+#[derive(Debug, Clone)]
+pub enum CutPredicate {
+    /// Pause on entering the `nth` (1-based) call to the global definition `def`.
+    Call { def: Sym, nth: usize },
+    /// Pause just before the `nth` (1-based) performance of the capability op
+    /// whose canonical label is `op` (`Console.print`, `FileSystem.read_file`, ...).
+    Op { op: &'static str, nth: usize },
+}
+
+/// What a fired [`CutPredicate`] recorded: the equivalent `--at N` budget that
+/// reproduces the pause, and the call-provenance stack at that point.
+#[derive(Debug, Clone)]
+pub struct CutOutcome {
+    /// The `--at N` budget that pauses at the identical machine state. The named
+    /// cut is exactly as reproducible as this step count.
+    pub equiv_at: usize,
+    /// The def stack at the cut, outermost caller first, the paused definition
+    /// last: `[main, ..., f]`.
+    pub def_stack: Vec<Sym>,
+}
+
+// The armed cut and its progress. `seen` counts matching events; the predicate
+// fires when it reaches its `nth`, recording an outcome once and never again.
+// Held only when a suspend/debug driver arms it, so an ordinary run pays nothing
+// and cannot observe it.
+struct CutState {
+    pred: CutPredicate,
+    seen: usize,
+    outcome: Option<CutOutcome>,
 }
 
 // The borrowed `dyn Write`/`dyn BufRead` handles are not `Debug`; show only the
@@ -413,6 +468,7 @@ impl<'a> Machine<'a> {
             step_budget: None,
             steps: 0,
             ruler: None,
+            cut: None,
         }
     }
 
@@ -445,6 +501,111 @@ impl<'a> Machine<'a> {
         }
     }
 
+    /// Arm a named cut predicate: the machine watches the step stream for the
+    /// named program point and records where it lands. Interpreter-only.
+    pub fn arm_cut(&mut self, pred: CutPredicate) {
+        self.cut = Some(CutState {
+            pred,
+            seen: 0,
+            outcome: None,
+        });
+    }
+
+    /// The outcome of an armed cut, if its predicate fired. `None` when nothing
+    /// was armed or the program ended before the k-th event.
+    pub fn take_cut_outcome(&mut self) -> Option<CutOutcome> {
+        self.cut.take().and_then(|cut| cut.outcome)
+    }
+
+    // The call-provenance stack at this instant: the caller chain the live
+    // `Restore` frames record, outermost first, then the definition currently
+    // executing. Read off the frame stack the machine already keeps, so it costs
+    // nothing per call and materializes only at a cut; tail calls (whose frames
+    // collapse) and resumed continuations (whose frames are back on the stack)
+    // are handled for free, because the frames are the ground truth.
+    fn def_stack(&self, stack: &[Frame]) -> Vec<Sym> {
+        let mut defs: Vec<Sym> = stack
+            .iter()
+            .filter_map(|frame| match frame {
+                Frame::Restore(name) => Some(*name),
+                _ => None,
+            })
+            .collect();
+        defs.push(self.fn_name);
+        defs
+    }
+
+    // Record entry to global definition `name`'s body for an armed `--at-call`
+    // cut. On the k-th matching entry it captures the def stack and the
+    // equivalent `--at N` budget (the current step count: pausing after this
+    // call transition lands on the same state `--at N` would), then arms that
+    // budget so the ordinary suspend path performs the pause identically.
+    fn note_call_entry(&mut self, name: Sym, stack: &[Frame]) {
+        // Only an unfired call cut for this definition acts; anything else returns
+        // on the match alone.
+        let Some(CutState {
+            pred: CutPredicate::Call { def, nth },
+            outcome: None,
+            ..
+        }) = &self.cut
+        else {
+            return;
+        };
+        if *def != name {
+            return;
+        }
+        let nth = *nth;
+        let cut = self.cut.as_mut().expect("cut is armed");
+        cut.seen += 1;
+        if cut.seen < nth {
+            return;
+        }
+        let equiv_at = self.steps;
+        let def_stack = self.def_stack(stack);
+        self.cut.as_mut().expect("cut is armed").outcome = Some(CutOutcome {
+            equiv_at,
+            def_stack,
+        });
+        self.step_budget = Some(equiv_at);
+    }
+
+    // Test an armed `--at-op` cut against the transition the machine is about to
+    // take. On the k-th performance of the named op it captures the def stack and
+    // the equivalent `--at N` budget (the current step count, before the op runs),
+    // and returns `true` so the loop pauses here, before the op's effect. Pausing
+    // at this same point via `--at N` yields the identical snapshot.
+    fn note_op_before(&mut self, state: &State, stack: &[Frame]) -> bool {
+        // Only an unfired op cut inspects transitions; a call cut or a spent cut
+        // pays only this match, never the label lookup.
+        let Some(CutState {
+            pred: CutPredicate::Op { op, nth },
+            outcome: None,
+            ..
+        }) = &self.cut
+        else {
+            return false;
+        };
+        let (target, nth) = (*op, *nth);
+        let State::Eval(node, _) = state else {
+            return false;
+        };
+        if op_label_of(node) != Some(target) {
+            return false;
+        }
+        let cut = self.cut.as_mut().expect("cut is armed");
+        cut.seen += 1;
+        if cut.seen < nth {
+            return false;
+        }
+        let equiv_at = self.steps;
+        let def_stack = self.def_stack(stack);
+        self.cut.as_mut().expect("cut is armed").outcome = Some(CutOutcome {
+            equiv_at,
+            def_stack,
+        });
+        true
+    }
+
     /// Governs this machine's capability I/O for record/replay/debug.
     ///
     /// Record and replay also arm the provenance event stream, so a recorded run
@@ -452,11 +613,11 @@ impl<'a> Machine<'a> {
     pub fn set_tape(&mut self, tape: Tape) {
         self.events = match tape {
             Tape::Live => None,
-            Tape::Record(_) | Tape::Replay { .. } => Some(Vec::new()),
+            Tape::Record(_) | Tape::Replay { .. } | Tape::Durable { .. } => Some(Vec::new()),
         };
         self.observations = match tape {
             Tape::Live => None,
-            Tape::Record(_) | Tape::Replay { .. } => Some(Vec::new()),
+            Tape::Record(_) | Tape::Replay { .. } | Tape::Durable { .. } => Some(Vec::new()),
         };
         self.tape = tape;
     }
@@ -497,14 +658,14 @@ impl<'a> Machine<'a> {
             _ => None,
         });
         if let (Some(path), Some(observations)) = (path, self.observations.as_mut()) {
-            if op == crate::provenance::OP_FS_REMOVE_FILE {
+            if op == crate::lineage::provenance::OP_FS_REMOVE_FILE {
                 observations.push(Observation::Capability(event));
             } else {
                 let committed = std::fs::read(path)
                     .map_err(|error| format!("observe committed file {path:?}: {error}"))?;
                 observations.push(Observation::FileCommit {
                     path: path.to_string(),
-                    digest: crate::provenance::sha256_hex(&committed),
+                    digest: crate::lineage::provenance::sha256_hex(&committed),
                 });
             }
         }
@@ -521,10 +682,48 @@ impl<'a> Machine<'a> {
         }
     }
 
-    // True when a replay budget is set and already reached, so the next
-    // observation must halt the run instead of being performed.
+    // True when a replay/durable budget is set and already reached, so the next
+    // observation must halt the run instead of being performed. Under `Durable`
+    // this is the deterministic mid-run crash: the run stops with exactly the
+    // observations committed so far durably on disk.
     const fn budget_hit(&self) -> bool {
-        matches!(&self.tape, Tape::Replay { budget: Some(b), .. } if self.observed >= *b)
+        match &self.tape {
+            Tape::Replay {
+                budget: Some(b), ..
+            }
+            | Tape::Durable {
+                budget: Some(b), ..
+            } => self.observed >= *b,
+            _ => false,
+        }
+    }
+
+    // Serve the next already-committed frame of a durable run, advancing the
+    // cursor, or `None` once the committed prefix is exhausted (the point the run
+    // goes live and starts appending). Returns the frame's zero-based index so a
+    // mismatch can name the failing event, exactly like `next_frame`.
+    fn durable_next_committed(&mut self) -> Option<(usize, Obs)> {
+        if let Tape::Durable { frames, cursor, .. } = &mut self.tape {
+            if *cursor < frames.len() {
+                let index = *cursor;
+                let frame = frames[index].clone();
+                *cursor += 1;
+                return Some((index, frame));
+            }
+        }
+        None
+    }
+
+    // Commit one observation to the durable log, the sole persistence point of a
+    // live durable step. The append flushes the frame and advances the log's
+    // committed extent atomically, so a crash after it recovers the frame and one
+    // before it does not.
+    fn durable_commit(&mut self, obs: &Obs) -> Result<(), String> {
+        if let Tape::Durable { log, .. } = &mut self.tape {
+            log.append(obs)
+                .map_err(|e| format!("durable log append failed: {e}"))?;
+        }
+        Ok(())
     }
 
     // Consume the next recorded frame under `Replay`, advancing the cursor. The
@@ -577,6 +776,25 @@ impl<'a> Machine<'a> {
             self.mark(op.label(), || v.show());
             return Ok(v);
         }
+        if matches!(self.tape, Tape::Durable { .. }) {
+            // Replay the committed prefix with no real read; once it is exhausted,
+            // perform the real read and commit it durably before serving it.
+            if let Some((index, frame)) = self.durable_next_committed() {
+                let v =
+                    rv_of_obs(kind, &frame).map_err(|e| e.explain(index, op.label(), &frame))?;
+                self.record_event(op, args, &v);
+                self.observed += 1;
+                self.mark(op.label(), || v.show());
+                return Ok(v);
+            }
+            let v = real(self)?;
+            let obs = obs_of_rv(kind, &v)?;
+            self.durable_commit(&obs)?;
+            self.record_event(op, args, &v);
+            self.observed += 1;
+            self.mark(op.label(), || v.show());
+            return Ok(v);
+        }
         // Record: perform for real, then log the observation.
         let v = real(self)?;
         let obs = obs_of_rv(kind, &v)?;
@@ -617,6 +835,34 @@ impl<'a> Machine<'a> {
                     obs_label(&frame)
                 ));
             }
+            emit(self)?;
+            let output = preview();
+            self.record_output(op, output.clone());
+            self.observed += 1;
+            self.mark(op.label(), || output);
+            return Ok(());
+        }
+        if matches!(self.tape, Tape::Durable { .. }) {
+            // A committed output already ran in the crashed process: replay it by
+            // dropping the boundary (no re-emit), so a resume never double-prints.
+            if let Some((index, frame)) = self.durable_next_committed() {
+                if frame != Obs::Out {
+                    return Err(format!(
+                        "replay: trace does not match program at event {index}: \
+                         expected an output, but the recorded frame is {}",
+                        obs_label(&frame)
+                    ));
+                }
+                let output = preview();
+                self.record_output(op, output.clone());
+                self.observed += 1;
+                self.mark(op.label(), || output);
+                return Ok(());
+            }
+            // Live: commit the boundary durably before emitting, so a crash after
+            // the commit drops the output on resume (at most once) rather than
+            // re-performing it (never twice).
+            self.durable_commit(&Obs::Out)?;
             emit(self)?;
             let output = preview();
             self.record_output(op, output.clone());
@@ -673,6 +919,13 @@ impl<'a> Machine<'a> {
                 if let State::Ret(v) = state {
                     return Ok(Outcome::Done(v));
                 }
+            }
+            // An `--at-op` cut pauses before the transition that would perform the
+            // named op, so the effect has not yet run and the snapshot matches the
+            // equivalent `--at N`. Checked before the budget so the two paths pause
+            // at the identical loop position.
+            if self.cut.is_some() && self.note_op_before(&state, &stack) {
+                return Ok(Outcome::Suspended { stack, state });
             }
             // A step budget pauses the machine with its state intact. Checked before
             // the transition so the resumed run re-performs exactly the step the
@@ -753,6 +1006,12 @@ impl<'a> Machine<'a> {
                     // collapsing keeps tail calls O(1) space.
                     if !matches!(stack.last(), Some(Frame::Restore(_))) {
                         stack.push(Frame::Restore(prev));
+                    }
+                    // An armed `--at-call` cut records this body entry (after the
+                    // Restore push, so the def stack reads correctly) and arms the
+                    // equivalent step budget when it is the k-th entry.
+                    if self.cut.is_some() {
+                        self.note_call_entry(*name, stack);
                     }
                     State::Eval(body, Rc::new(e2))
                 }
@@ -953,6 +1212,14 @@ impl<'a> Machine<'a> {
             Node::Bump(args) => match atoms(&env, args)?.as_slice() {
                 [Rv::Int(_)] => State::Ret(Rv::Unit),
                 _ => return Err("bump: wrong args in lowered verifier".into()),
+            },
+            // Region brackets: no regions in the verifier, so enter yields a
+            // placeholder token and exit is the identity on the activation's
+            // result, both unobservable (the native contract).
+            Node::ArenaEnter => State::Ret(Rv::Int(0)),
+            Node::ArenaExit(args) => match atoms(&env, args)?.as_slice() {
+                [Rv::Int(_), v] => State::Ret(v.clone()),
+                _ => return Err("arena_exit: wrong args in lowered verifier".into()),
             },
         })
     }
@@ -1341,8 +1608,11 @@ pub fn run_traced_with_args(
     }
     let events = m.events.take().unwrap_or_default();
     let observations = m.observations.take().unwrap_or_default();
+    // A durable run's authoritative trace is the on-disk log; the in-memory
+    // `frames` here is only the committed prefix it replayed, which the driver
+    // ignores in favor of reading the committed log back from disk.
     let frames = match m.tape {
-        Tape::Record(frames) | Tape::Replay { frames, .. } => frames,
+        Tape::Record(frames) | Tape::Replay { frames, .. } | Tape::Durable { frames, .. } => frames,
         Tape::Live => Vec::new(),
     };
     Ok(TracedRun {
@@ -1437,7 +1707,9 @@ fn run_observed_mode(
     };
     let frames = match m.tape {
         Tape::Record(frames) => frames,
-        Tape::Live | Tape::Replay { .. } => unreachable!("observed run records"),
+        Tape::Live | Tape::Replay { .. } | Tape::Durable { .. } => {
+            unreachable!("observed run records")
+        }
     };
     TracedRun {
         term: m.term,
@@ -1472,7 +1744,7 @@ fn snapshot(m: Machine<'_>, bundle: String, stack: Vec<Frame>, state: State) -> 
         State::Ret(v) => kont::KontState::Ret(v),
     };
     let trace = match m.tape {
-        Tape::Record(frames) | Tape::Replay { frames, .. } => frames,
+        Tape::Record(frames) | Tape::Replay { frames, .. } | Tape::Durable { frames, .. } => frames,
         Tape::Live => Vec::new(),
     };
     let observations = m.observations.unwrap_or_default();
@@ -1578,6 +1850,80 @@ fn run_suspending_inner(
             Ok((
                 Checkpoint::Suspended(snapshot(m, bundle, stack, state)),
                 marks,
+            ))
+        }
+    }
+}
+
+// The canonical capability-op label the machine will perform when it steps this
+// node, or `None` for a node that performs no observable capability op. The single
+// source of truth for what `--at-op` counts, aligned with the labels the step
+// ruler records at the observe sites. Pure: it only inspects the node, never runs
+// it, so a cut can recognize an op before its effect fires.
+fn op_label_of(node: &Node) -> Option<&'static str> {
+    let op = match node {
+        Node::Print(_) => OP_CONSOLE_PRINT,
+        Node::PrintNl => OP_CONSOLE_NEWLINE,
+        Node::ReadInt => OP_CONSOLE_READ_INT,
+        Node::ReadLine => OP_CONSOLE_READ_LINE,
+        Node::Rand => OP_RANDOM_RAND,
+        Node::StrBuiltin(Builtin::Eprint, _) => OP_CONSOLE_EPRINT,
+        Node::StrBuiltin(name, _) => match capability_obs(*name) {
+            Some((_, op)) => op,
+            None => write_obs(*name)?,
+        },
+        _ => return None,
+    };
+    Some(op.label())
+}
+
+/// Run `core` under a suspend armed with a named cut predicate.
+///
+/// Runs forward with the step ruler and the cut armed. On the predicate's k-th
+/// event the machine pauses at the point named, capturing the whole live
+/// continuation as a [`kont::Kont`] and reporting the equivalent `--at N` budget
+/// and the def stack. A program that ends before the k-th event runs to
+/// completion ([`Checkpoint::Done`]) with no outcome. The cut is a pure function
+/// of the deterministic step stream, so the snapshot equals `--at equiv_at`.
+///
+/// # Errors
+/// Fails when `main` is missing or evaluation faults before the cut.
+pub fn run_suspending_at_cut(
+    core: &Core,
+    bundle: String,
+    pred: CutPredicate,
+    out_sink: &mut dyn io::Write,
+    input: &mut dyn io::BufRead,
+) -> Result<(Checkpoint, Vec<StepMark>, Option<CutOutcome>), String> {
+    let g = globals(core);
+    let main = g.get(&Sym::new(ENTRY_POINT)).ok_or("no main function")?;
+    let root = lower(&main.body);
+    let mut m = Machine::new(&g, out_sink, input);
+    m.set_tape(Tape::Record(Vec::new()));
+    m.arm_ruler();
+    m.arm_cut(pred);
+    match m.run_loop(Vec::new(), State::Eval(root, Env::default()))? {
+        Outcome::Done(value) => {
+            let marks = m.take_ruler();
+            let outcome = m.take_cut_outcome();
+            Ok((
+                Checkpoint::Done(Run {
+                    value,
+                    out: m.out,
+                    term: m.term,
+                    exit: m.exit,
+                }),
+                marks,
+                outcome,
+            ))
+        }
+        Outcome::Suspended { stack, state } => {
+            let marks = m.take_ruler();
+            let outcome = m.take_cut_outcome();
+            Ok((
+                Checkpoint::Suspended(snapshot(m, bundle, stack, state)),
+                marks,
+                outcome,
             ))
         }
     }
@@ -1705,7 +2051,9 @@ pub fn resume_kont_observed(
     };
     let frames = match m.tape {
         Tape::Record(frames) => frames,
-        Tape::Live | Tape::Replay { .. } => unreachable!("observed resume records"),
+        Tape::Live | Tape::Replay { .. } | Tape::Durable { .. } => {
+            unreachable!("observed resume records")
+        }
     };
     let observations = m.observations.take().unwrap_or_default();
     let term = observations
@@ -1735,7 +2083,7 @@ mod tests {
     use num_bigint::BigInt;
 
     use crate::core::{Comp, Core, CoreFn, Value};
-    use crate::provenance::{EventValue, Observation, OP_PROCESS_SYSTEM};
+    use crate::lineage::provenance::{EventValue, Observation, OP_PROCESS_SYSTEM};
 
     use super::builtin::big_of_str;
     use super::{

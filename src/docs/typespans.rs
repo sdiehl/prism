@@ -9,7 +9,6 @@ use std::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
 
-use crate::coeffect::CoeffectFact;
 use crate::error::{Error, SourceMap};
 use crate::hir::CheckedHir;
 use crate::kw;
@@ -21,6 +20,7 @@ use crate::syntax::ast::{
     ClassDecl, Core, DataDecl, Decl, Expr, HandlerArm, Pattern, PatternDecl, Program, StableDecl,
     Sugar, SugarArm, Surface, S,
 };
+use crate::types::coeffect::CoeffectFact;
 use crate::types::ty::Kind;
 use crate::types::{Checked, CtorInfo, EffOpInfo, Type};
 
@@ -61,6 +61,7 @@ pub enum Level {
     Coeffect,
     Hole,
     PatternVar,
+    Logic,
 }
 
 impl Level {
@@ -84,6 +85,7 @@ impl Level {
             Self::Coeffect => "coeffect",
             Self::Hole => "hole",
             Self::PatternVar => "patternvar",
+            Self::Logic => "logic",
         }
     }
 }
@@ -246,6 +248,9 @@ struct StableDeclSpans {
     name_range: Option<ByteRange>,
     rungs: Vec<StableRungSpans>,
     type_refs: Vec<(ByteRange, String)>,
+    // The rung references in the `migrations` rows (`V1 -> V2 = ...`), each paired
+    // with the internal rung type it names, so the table hovers like the rungs do.
+    migration_refs: Vec<(ByteRange, String)>,
 }
 
 struct StableRungSpans {
@@ -634,6 +639,17 @@ fn collect_pattern_heads_expr(
     });
 }
 
+// The internal type name of a rung named `ver`: the bare stable name for the
+// current (last) rung, its dotted version tag otherwise. Shared by the rung
+// declarations and the migration rows that reference them.
+fn rung_canonical(decl: &StableDecl, ver: &str) -> String {
+    if decl.rungs.last().is_some_and(|last| last.name == ver) {
+        decl.name.clone()
+    } else {
+        names::stable_rung(&decl.name, ver)
+    }
+}
+
 fn collect_stable_decl_spans(
     decl: &StableDecl,
     tokens: &[(usize, Token, usize)],
@@ -648,7 +664,7 @@ fn collect_stable_decl_spans(
         .map(|(start, _, end)| (*start, *end));
     let mut rungs = Vec::new();
     let mut type_refs = Vec::new();
-    for (index, rung) in decl.rungs.iter().enumerate() {
+    for rung in &decl.rungs {
         let body = tokens
             .iter()
             .filter(|(start, _, end)| *start >= rung.span.start && *end <= rung.span.end)
@@ -696,11 +712,7 @@ fn collect_stable_decl_spans(
                 type_refs.push(((start, end), name));
             }
         }
-        let canonical = if index + 1 == decl.rungs.len() {
-            decl.name.clone()
-        } else {
-            names::stable_rung(&decl.name, &rung.name)
-        };
+        let canonical = rung_canonical(decl, &rung.name);
         rungs.push(StableRungSpans {
             canonical,
             name_range: rung_name,
@@ -712,11 +724,25 @@ fn collect_stable_decl_spans(
             fields,
         });
     }
+    let mut migration_refs = Vec::new();
+    for mig in &decl.migrations {
+        for ver in [mig.from.as_str(), mig.to.as_str()] {
+            if let Some(range) = tokens.iter().find_map(|(start, token, end)| {
+                (*start >= mig.span.start
+                    && *end <= mig.span.end
+                    && matches!(token, Token::UIdent(name) if name.as_str() == ver))
+                .then_some((*start, *end))
+            }) {
+                migration_refs.push((range, rung_canonical(decl, ver)));
+            }
+        }
+    }
     StableDeclSpans {
         name: decl.name.clone(),
         name_range,
         rungs,
         type_refs,
+        migration_refs,
     }
 }
 
@@ -1535,6 +1561,11 @@ fn resolve_stable_spans(
                 resolved.entry(*range).or_insert(entry);
             }
         }
+        for (range, canonical) in &decl.migration_refs {
+            if let Some(entry) = typelevel(canonical) {
+                resolved.entry(*range).or_insert(entry);
+            }
+        }
     }
 }
 
@@ -2218,6 +2249,20 @@ pub(crate) fn extract(
             format!("{} ! {}", hole.expected, hole.effects)
         };
         resolved.insert((hole.start, hole.end), (rendered, Level::Hole));
+    }
+
+    // Logical subexpressions in `logic fn` bodies and `requires`/`ensures` clauses
+    // are sort-checked separately and erased before Core, so they have no checked
+    // HIR entry. Their tooltips come from re-parsing the surface program and
+    // running the logical sort checker in recording mode; they live in source
+    // regions disjoint from the runtime body spans, so they never collide with a
+    // value span already resolved above.
+    if let Ok(parsed) = crate::parse::parse(src) {
+        for (start, end, sort) in crate::verify::check::Checker::logic_typespans(&parsed.program) {
+            resolved
+                .entry((start, end))
+                .or_insert_with(|| (sort.smtlib().to_string(), Level::Logic));
+        }
     }
 
     Ok(into_document(src, resolved))

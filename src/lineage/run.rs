@@ -11,7 +11,7 @@ use std::path::Path;
 
 use crate::driver::{ArtifactIdentity, BuildIdentity};
 use crate::error::Error;
-use crate::provenance::{
+use crate::lineage::provenance::{
     self, CapEvent, CapOp, EventValue, ObservationTrace, EVENT_HASH_SCHEME, OP_ENV_GETENV,
     OP_FS_APPEND_FILE, OP_FS_READ_FILE, OP_FS_READ_FILE_BYTES, OP_FS_REMOVE_FILE,
     OP_FS_WRITE_BYTES, OP_FS_WRITE_FILE,

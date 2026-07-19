@@ -13,6 +13,7 @@
 //! primitive over [`crate::eval::run_traced`], and the stepping REPL. The three
 //! CLI verbs (`record`, `replay`, `debug`) are thin wrappers in the driver.
 
+pub mod durable;
 pub mod trace;
 
 use std::io::{self, BufRead, Write};

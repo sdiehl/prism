@@ -75,6 +75,18 @@ extern void *mi_calloc(size_t, size_t);
 #define PRISM_ARITY_W 2
 #define PRISM_HDR_WORDS 3
 
+/* Arena-owned marker in the refcount word: a cell handed out by a `with_arena`
+ * region instead of malloc. The region is the cell's sole owner, so the cell is
+ * refcount-inert: prism_rc_inc, prism_rc_dec, the child-scan decrement, and
+ * prism_reuse_token all treat it as a no-op, and every `rc == 1` uniqueness
+ * fast path in the runtime correctly sees it as never-unique. The bit lives in
+ * the rc word rather than the tag word because generated code compares tag
+ * words directly for match dispatch; only the rc machinery reads rc words. Bit
+ * 62 keeps the value hugely positive, so the PRISM_RT_DEBUG `rc > 0` check and
+ * any stray arithmetic stay harmless, and it can never collide with a real
+ * count or the zero that terminates the free worklist. */
+#define PRISM_ARENA_OWNED (1L << 62)
+
 /* A string is a refcounted cell { rc, tag=PRISM_STR_TAG, byte_len, utf8... }:
  * the bytes live inline after the header and are NUL-terminated for printf
  * interop. The distinct tag tells prism_rc_dec to free the cell without
@@ -162,5 +174,10 @@ static inline long prism_ckd_grow(long cap, long floor_cap) {
 }
 
 _Static_assert(sizeof(void *) == 8 && sizeof(long) == 8, "prism runtime assumes LP64");
+/* The heap-word size constant must track the actual word type; the code
+ * generator cross-checks the same constant against `abi::WORD_BYTES` in
+ * emit.rs's `layout_matches_runtime`, so both halves of the ABI stay pinned. */
+_Static_assert(PRISM_WORD_BYTES == (long)sizeof(long),
+               "PRISM_WORD_BYTES must equal the heap word size");
 
 #endif /* PRISM_INTERNAL_H */

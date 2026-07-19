@@ -4,7 +4,7 @@
 
 The opt-in serialization layer.
 
-Serialization is deliberately out of the always-on prelude: a program that never persists a value imports none of this. Everything here is pure total functions over `Bytes`; writing those bytes to a file, a socket, or a replay log is a capability routed through the effect system, never performed here.
+Serialization is deliberately out of Base: a program that never persists a value imports none of this. Everything here is pure total functions over `Bytes`; writing those bytes to a file, a socket, or a replay log is a capability routed through the effect system, never performed here.
 
 The surface has three layers. The `Serialize` class and its instances are the codec: a value's compact positional body, derived structurally by `deriving (Serialize)` and bottoming out in the primitive instances below. The envelope (`wire_encode_stable`/`wire_decode_stable`, or the explicit-digest `*_with_digest` escape hatches) wraps a body in the frame `[scheme tag][kind][contract digest][body?]`, checked before the body so a stale layout is rejected up front. The version ladder (`compose_upgrade`/ `compose_downgrade`) spans frozen versions with O(n) adjacent converters.
 

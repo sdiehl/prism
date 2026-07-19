@@ -1,0 +1,2 @@
+{"event":"test_started","id":"M::structured"}
+{"event":"test_failed","id":"M::structured","kind":"fail","message":"values differ","expected":"4","actual":"5","diff":"- 4\n+ 5","context":["while checking addition","x = 2, y = 3"],"site":"M.pr:12:3"}

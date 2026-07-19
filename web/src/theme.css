@@ -1,5 +1,5 @@
-/* Shared look for the playground and the REPL: one palette, one header, one
-   toolbar-link style. Page-specific layout stays in styles.css / repl.css. */
+/* Shared look for the playground and the gallery pages: one palette, one header,
+   one toolbar-link style. Page-specific layout stays in styles.css. */
 :root {
   color-scheme: light;
   --bg: #fbfbf9;

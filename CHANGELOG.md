@@ -1,19 +1,32 @@
 # Changelog
 
+## 0.13.0
+
+- Contracts: added `logic fn`, `requires`, and `ensures`, discharged through an external SMT solver by `prism verify` as honest solver-oracle receipts.
+- Totality: added checked `total fn`, explicit `assume total fn`, and a `decreases` ranking clause, with honest pending results for unsupported proofs.
+- Durable replay: added `prism run --durable` for crash-safe logging and byte-identical resume, deterministic cut points (`--at-call`, `--at-op`), and `prism why-output`.
+- Cross-platform determinism: added an identity matrix comparing Core hashes, traces, float bits, and query bytes across Linux x86-64, Linux ARM64, and macOS ARM64.
+- Arenas: added `with_arena` and the `Alloc` effect for bump allocation with safe promotion of escaping values.
+- Testing: added `test fn` and `prism test` with deterministic discovery, filtering, isolated execution, captured output, and JSON reporting.
+- SIMD: added bit-stable two-lane `F64x2` and `I64x2` vectors across the interpreter and native backend.
+- Standard library: added a `Math` constants module, `Data.Graph`, `Data.UnionFind`, and the `State`/`Reader`/`Writer`/`Fresh` effect modules.
+- Stable data blocks: added a `migrations` table with `auto`/`version` routes, family-qualified `Vn.upgrade`/`downgrade` members, and a content-addressed lock manifest.
+- Soundness and hardening: fixed a totality-shadowing hole, made `prism verify` fail on unproven contracts, and hardened package signing, the transparency log, and git transport.
+- Documentation: documented the v0.13 surface with checked examples, ordered the standard-library reference, renamed the always-on module Base, and removed the bit-rotted in-browser REPL.
+- Semantics: added an unverified Typst sketch of the Core terms and types.
+
 ## 0.12.0
 
-- Typed Core: elaboration constructs witness-carrying CBPV Core through private builders, and an independent verifier checks scopes, types, polymorphic instantiations, effects, handlers, references, and reuse invariants. The whole back end now runs on this typed spine: every optimizer pass, effect-lowering strategy, reference-counting insertion, and in-place-reuse rewrite operates on typed Core and is re-verified after it runs, so a miscompiling pass is caught structurally before erasure rather than by output drift.
-- Semantic patches: `prism patch` judges a digest-pinned replacement against the module interface and returns a delta report at a proven evidence tier, over the CLI or a `patch serve` stdio protocol.
-- Differential fuzzing: a type-directed generator emits well-typed programs, partial handlers included, and diffs them across effect-lowering tiers against the interpreter trace, shrinking any divergence to a minimal reproducer.
-- Partial handlers: `handle e with partial { ... }` discharges some of an effect's operations and forwards the rest, carrying the residual row in the type; unmarked handlers stay exhaustive.
-- Typed holes: `?name` produces a structured expected-type/effect report with ranked in-scope candidates. Batch and code-generation paths remain strict; `prism run --defer-holes` and REPL `:set +h` can instead turn a reached hole into a deterministic, traceable fault.
-- REPL: imports and top-level declarations persist transactionally, repeated names replace prior entries, and context-aware completion, `:browse`, and `:info` use the rebuilt resolver scope without exposing private names.
-- Concurrency semantics: cancellation cleanups are cancellation-only and run exactly once, `try_await` joins the completed unwind before returning `Was_Cancelled`, cancelling an unstarted fiber never enters its body, and cancelling fiber 0 defers termination until runnable descendant cleanups drain. Unhandled fiber failure is honestly scheduler-global rather than scope-local: it cancels every other live fiber and descendant, drains runnable cleanups, and re-emerges from `run_async`/`run_lifo`; a failing cleanup aborts the run instead of producing `Was_Cancelled`.
-- Duplicate detection: `--warn-dupes` flags definitions that share a behavior hash and `--warn-stdlib-dupes` (on by default) names a standard-library function a definition reimplements; `strict` makes either a compile error.
-- Documentation: `prism dump typespans` emits stable inferred type, effect, and kind ranges, including class declarations and their method signatures, now baked into hoverable book examples. Doctests gained enclosing-module auto-imports and hidden setup lines, and the standard-library reference gained checked examples.
-- Optimizer equivalence: a release gate lowers every runnable corpus program at O0, O1, O2, and O2 with each optimization disabled and requires one identical canonical observation trace, pinning optimization as a pure cost choice that never changes what a program observes.
-- Effect lowering: verified typed Core is now the sole lowering authority; the erased-Core executable route and differential oracles were deleted after the cutover gates passed.
-- Internals: with the typed spine authoritative, the legacy effect-lowering and effect-observation machinery was retired; the untyped optimizer survives only as a shadow the typed result is diffed against for parity.
+- Typed Core: moved the back end onto witness-carrying Core with independent verification after every transformation.
+- Semantic patches: added digest-pinned patch judging through the CLI and a JSON-lines service protocol.
+- Differential fuzzing: added generation and shrinking of well-typed programs across effect-lowering tiers.
+- Partial handlers: added typed forwarding for operations omitted from explicitly partial handlers.
+- Typed holes: added structured type reports, ranked candidates, and opt-in deferred interpreter faults.
+- REPL: made imports and declarations persistent, transactional, replaceable, and available to contextual completion.
+- Concurrency: defined deterministic cancellation cleanup, joining, and scheduler-global failure behavior.
+- Duplicate detection: added warnings for equal behavior hashes and accidental standard-library reimplementations.
+- Documentation: added stable type spans, hoverable examples, stronger doctests, and checked standard-library examples.
+- Verification: made typed effect lowering authoritative and added optimizer-equivalence gates across configurations.
 
 ## 0.11.0
 

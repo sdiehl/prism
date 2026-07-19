@@ -25,6 +25,10 @@ HTML_ANCHOR_RE = re.compile(r'<a\s+id="([A-Za-z0-9_-]+)"')
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 INCLUDE_RE = re.compile(r"\{\{#include\s+([^}\s]+)\s*\}\}")
 EXTERNAL_RE = re.compile(r"^(https?|mailto|ftp)://|^mailto:")
+# Targets the site build (docs/scripts/build-site.sh) generates into the output
+# tree rather than committing under docs/src, so a link to them resolves on the
+# deployed site but never exists on disk here.
+GENERATED_TARGETS = {"semantics.pdf"}
 ANCHOR_TAG_RE_TEMPLATE = r"ANCHOR(?:_END)?:\s*{}\b"
 
 anchor_cache = {}
@@ -101,6 +105,8 @@ def check_link(src_file, lineno, target):
     if EXTERNAL_RE.match(target):
         return
     path_part, _, anchor_part = target.partition("#")
+    if path_part and Path(path_part).name in GENERATED_TARGETS:
+        return
 
     if path_part == "":
         target_path = src_file

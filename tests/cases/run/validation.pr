@@ -1,0 +1,29 @@
+import Data.Validation (..)
+
+-- Validate each field independently and accumulate every failure.
+fn check_pos(label : String, n : Int) : Validation(String, Int) =
+  if n > 0 then
+    Valid(n)
+  else
+    Invalid([concat(label, " must be positive")])
+
+-- Concrete signature so the conversions' error type is not left ambiguous.
+fn roundtrip(r : Result(Int, String)) : Result(Int, List(String)) =
+  result_of_validation(validation_of_result(r))
+
+fn main() =
+  println(
+      show(validate2(\(a, b) -> a + b, check_pos("x", 3), check_pos("y", 4))),
+    )
+  println(
+      show(validate2(\(a, b) -> a + b, check_pos("x", 0), check_pos("y", -1))),
+    )
+  println(show(is_valid(check_pos("z", 5))))
+  println(show(validation_or(0, check_pos("w", -2))))
+  println(show(sequence_validation([
+      Valid(1),
+      Invalid(["a"]),
+      Valid(3),
+      Invalid(["b"]),
+    ])))
+  println(show(roundtrip(Ok(9))))

@@ -4,7 +4,7 @@
 
 Persistent ordered map: an AVL-balanced binary search tree over keys.
 
-The `Map(k, v)` type and its `Tip`/`Bin` constructors are wired in; this module is the operation surface. The prelude opens it.
+The `Map(k, v)` type and its `Tip`/`Bin` constructors are wired in; this module is the operation surface. Base includes it.
 
 Reserved (a later release): a map's identity will carry the content hash of the canonical `Ord` instance it was built with, so a map that crosses an assembly boundary commits to the ordering it was ordered by. Two programs that canonicalize different `Ord(k)` cannot then silently exchange a `Map(k, v)` built under one and walked under the other. The classes whose instance choice affects a container's representation live in one place on the compiler side (`store::coherence::is_representation_affecting`, `Ord` and `Hash`); this note is the container-side half of that reservation, so the two cannot drift.
 

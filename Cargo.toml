@@ -1,6 +1,6 @@
 [package]
 name = "prism"
-version = "0.12.0"
+version = "0.13.0"
 authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
 categories = ["compilers"]
 default-run = "prism"
@@ -65,7 +65,7 @@ lalrpop = "0.23"
 blake3 = "1"
 # Lean bench harness (no plotting/rayon pull-in): just the measurement engine for
 # the compile-time baseline corpus in `benches/compile.rs`.
-criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 insta = { version = "1.41", features = ["glob"] }
 rstest = "0.26.1"
 

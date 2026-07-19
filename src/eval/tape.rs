@@ -6,7 +6,8 @@
 use std::rc::Rc;
 
 use crate::core::builtins::Builtin;
-use crate::provenance::{
+use crate::debug::durable::DurableLog;
+use crate::lineage::provenance::{
     CapOp, EventValue, OP_CLOCK_MONO_NOW, OP_CLOCK_WALL_NOW, OP_ENV_ARG, OP_ENV_ARGS_COUNT,
     OP_ENV_GETENV, OP_FS_APPEND_FILE, OP_FS_FILE_EXISTS, OP_FS_READ_FILE, OP_FS_READ_FILE_BYTES,
     OP_FS_REMOVE_FILE, OP_FS_WRITE_BYTES, OP_FS_WRITE_FILE, OP_PROCESS_SYSTEM,
@@ -36,11 +37,32 @@ pub enum Obs {
 /// trace and re-performs outputs live, so a deterministic program reproduces its
 /// original transcript byte for byte; an optional `budget` halts the run after
 /// that many observations, which is the mechanism behind replay-to-N stepping.
+///
+/// `Durable` is the crash-safe form: the same observation stream, but persisted
+/// to an on-disk [`DurableLog`] as it is produced, so a process killed mid-run
+/// resumes byte-identically. It is the production form of `Replay.pr`'s `durable`
+/// handler, moved onto the interpreter's observe sites and the atomic, index-
+/// committed log substrate. It is reached only through the explicit durable-run
+/// driver, never by an ordinary interpret/record/replay, so those paths and every
+/// program's observation trace are untouched.
 #[derive(Debug)]
 pub enum Tape {
     Live,
     Record(Vec<Obs>),
     Replay {
+        frames: Vec<Obs>,
+        cursor: usize,
+        budget: Option<usize>,
+    },
+    /// Replay the committed prefix (`frames`, up to `cursor`) with no real I/O,
+    /// then perform each further observation live and append it to `log`,
+    /// committing it durably before the run advances. `budget` halts the run
+    /// after that many observations: the deterministic mid-run crash used to
+    /// prove a resume continues byte-identically. A durable output is committed
+    /// before it is emitted, and a committed output is dropped (not re-emitted)
+    /// on resume, so an already-persisted output is never printed twice.
+    Durable {
+        log: DurableLog,
         frames: Vec<Obs>,
         cursor: usize,
         budget: Option<usize>,

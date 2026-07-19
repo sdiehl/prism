@@ -1,6 +1,6 @@
 -- | Operations over `Option`.
 --
--- The type is wired in; the prelude opens this module, so these are in
+-- The type is wired in; Base includes this module, so these are in
 -- unqualified scope everywhere.
 
 -- | True when the option holds a value.

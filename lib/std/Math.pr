@@ -1,0 +1,37 @@
+-- | Named mathematical constants, matching Rust's `f64::consts` surface.
+--
+-- Purely additive: the transcendental functions (`sin`, `cos`, `exp`, `ln`,
+-- `sqrt`, ...) stay owned builtins routing through the vendored libm, and
+-- `pi`/`e`/`tau` stay Base-global. This module only names the derived
+-- constants, as exact `Float` literals pinned bit-for-bit, so importing it never
+-- shadows a Base name. Opt-in: not in Base.
+
+-- | The square root of 2.
+pub let sqrt2 : Float = 1.4142135623730951
+
+-- | The reciprocal of the square root of 2 (`1 / sqrt2`).
+pub let sqrt1_2 : Float = 0.7071067811865476
+
+-- | The natural logarithm of 2.
+pub let ln2 : Float = 0.6931471805599453
+
+-- | The natural logarithm of 10.
+pub let ln10 : Float = 2.302585092994046
+
+-- | The base-2 logarithm of `e`.
+pub let log2e : Float = 1.4426950408889634
+
+-- | The base-10 logarithm of `e`.
+pub let log10e : Float = 0.4342944819032518
+
+-- | The golden ratio, `(1 + sqrt(5)) / 2`.
+pub let phi : Float = 1.618033988749895
+
+-- | Half of pi (`pi / 2`).
+pub let half_pi : Float = 1.5707963267948966
+
+-- | A quarter of pi (`pi / 4`).
+pub let quarter_pi : Float = 0.7853981633974483
+
+-- | The reciprocal of pi (`1 / pi`).
+pub let inv_pi : Float = 0.3183098861837907

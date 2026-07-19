@@ -228,11 +228,14 @@ fn run_local_pass(core: &Core, query: &SccPassQuery<'_>) -> Result<Core, Error> 
         .fns
         .iter()
         .map(|function| {
-            transformed
-                .remove(&function.name)
-                .expect("SCC-local pass preserves definitions")
+            transformed.remove(&function.name).ok_or_else(|| {
+                Error::InternalInvariant(format!(
+                    "SCC-local pass dropped definition `{}`",
+                    function.name.as_str()
+                ))
+            })
         })
-        .collect();
+        .collect::<Result<Vec<CoreFn>, Error>>()?;
     Ok(Core { fns })
 }
 

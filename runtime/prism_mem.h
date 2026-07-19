@@ -17,10 +17,24 @@ size_t prism_cell_bytes(long n_words);
 
 void *prism_alloc(long n_words);
 /* Arena bump: hand out a raw n-word cell for a constructor the arena-lowering
- * pass split into `alloc` + `init_at`. It delegates to `prism_alloc`, so an arena
- * constructor is byte-identical to an ordinary one. Returns the cell as a
- * `long`, the representation `init_at` fills. */
+ * pass split into `alloc` + `init_at`. Inside a `with_arena` activation the cell
+ * is carved from that activation's region and marked arena-owned
+ * (refcount-inert); with no active region it delegates to `prism_alloc`, so the
+ * cell is byte-identical to an ordinary one. Returns the cell as a `long`, the
+ * representation `init_at` fills. */
 long prism_bump(long n_words);
+/* Region brackets, emitted by the arena-lowering pass around each `with_arena`
+ * handler activation. `enter` opens a region and returns its activation depth,
+ * a token `exit` checks so the pair can never silently unbalance. `exit`
+ * promotes every arena-owned cell reachable from `v` into ordinary refcounted
+ * cells (a value may escape its region), releases the refcounted children the
+ * region's cells own, reclaims the whole region, and returns the promoted
+ * value (owned by the caller). Unlike every other builtin, `exit` CONSUMES `v`:
+ * the caller's release of an arena-owned `v` would read a header the reclaimed
+ * region no longer backs, so the release happens inside, and codegen emits no
+ * post-call dec for it. */
+long prism_arena_enter(void);
+long prism_arena_exit(long token, long v);
 /* Build a constructor cell { rc, tag, arity, fields... }; shared with the effect,
  * integer, and IO modules that assemble tagged cells (queues, boxed ints, Result
  * values). */

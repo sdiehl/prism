@@ -95,6 +95,9 @@ struct Cli {
     /// Emit one timing row per compiler phase to stderr
     #[arg(long, global = true)]
     time_compile: bool,
+    /// Print effect-lowering fusion-fallback warnings to stderr (off by default)
+    #[arg(long, global = true)]
+    verbose: bool,
     /// Disable the persistent compiler artifact cache
     #[arg(long, global = true)]
     no_compiler_cache: bool,
@@ -143,6 +146,9 @@ enum Cmd {
         /// Write a run-lineage sidecar (requires `--record`, which it explains)
         #[arg(long, value_name = "PATH", requires = "record")]
         lineage: Option<PathBuf>,
+        /// Persist observations to a crash-safe log at PATH and resume from it
+        #[arg(long, value_name = "PATH", conflicts_with = "record")]
+        durable: Option<PathBuf>,
         /// Defer typed holes to deterministic interpreter faults
         #[arg(long)]
         defer_holes: bool,
@@ -173,13 +179,28 @@ enum Cmd {
         /// A `.pr` file or project to type-check; omitted checks the enclosing project
         file: Option<PathBuf>,
     },
+    /// Discharge a file's function contracts through an external SMT solver
+    Verify {
+        /// A `.pr` file whose `requires`/`ensures` contracts to verify
+        file: PathBuf,
+        /// Solver executable (found on PATH, or an absolute path)
+        #[arg(long, value_name = "SOLVER", default_value = "z3")]
+        solver: String,
+        /// Discharge with several solvers (comma-separated); with
+        /// --require-agreement every one must report unsat
+        #[arg(long, value_name = "SOLVERS", value_delimiter = ',')]
+        solvers: Vec<String>,
+        /// Require every selected solver to agree on unsat; any split fails closed
+        #[arg(long)]
+        require_agreement: bool,
+    },
     /// Print one pipeline phase artifact
     ///
     /// PHASE is one of: tokens, ast, types, hir, interface, module-graph, core,
-    /// core-json, core-hash, native-kont-table, native-kont-state-map, shape,
-    /// dupes, namespace, stdlib-hash, fbip, lowered,
+    /// core-json, core-hash, tc-input, tc-facts, elab-input, native-kont-table,
+    /// native-kont-state-map, shape, dupes, namespace, stdlib-hash, fbip, lowered,
     /// tier, captures, usage-summary, usage-summary-md, usage-summary-json,
-    /// llvm, mlir.
+    /// llvm, mlir, verify, smt, totality.
     Dump { phase: String, file: PathBuf },
     /// Behavior or lineage diff by content hash
     ///
@@ -248,9 +269,45 @@ enum Cmd {
     /// Inspect and verify lineage sidecars
     #[command(subcommand)]
     Lineage(LineageCmd),
+    /// Explain an artifact from its lineage sidecar, without reading source
+    WhyOutput {
+        /// The built artifact or its `.plineage` sidecar
+        artifact: PathBuf,
+        /// The output to explain: a path or the literal `stdout`; defaults to the
+        /// sidecar's primary output
+        output: Option<String>,
+        /// Print the explanation as JSON instead of prose
+        #[arg(long)]
+        json: bool,
+    },
     /// Package manager and store-publishing verbs
     #[command(subcommand)]
     Pkg(PkgCmd),
+    /// Discover and run `test fn` declarations
+    Test {
+        /// A `.pr` file or project to test (defaults to the current project)
+        file: Option<PathBuf>,
+        /// Substring filter over logical test IDs
+        filter: Option<String>,
+        /// Match FILTER as a complete logical ID
+        #[arg(long)]
+        exact: bool,
+        /// Discover and print matching tests without running
+        #[arg(long)]
+        list: bool,
+        /// Compile the selected test targets without executing
+        #[arg(long)]
+        no_run: bool,
+        /// Output format: human or json
+        #[arg(long, value_name = "FMT", default_value = "human")]
+        format: String,
+        /// Show captured output for successful tests too
+        #[arg(long)]
+        show_output: bool,
+        /// Make an empty selection a command failure
+        #[arg(long)]
+        fail_if_no_tests: bool,
+    },
     /// Content-addressed store verbs
     #[command(subcommand)]
     Store(StoreCmd),
@@ -292,13 +349,20 @@ enum ExecCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Pause a running program at a step and snapshot it to a `kont` file
+    /// Pause a running program and snapshot it to a `kont` file
     Suspend {
         /// The program to run
         file: PathBuf,
         /// Pause after this many machine steps (0 snapshots before the first step)
-        #[arg(long, value_name = "STEP")]
-        at: usize,
+        #[arg(long, value_name = "STEP", conflicts_with_all = ["at_call", "at_op"])]
+        at: Option<usize>,
+        /// Pause on the k-th entry to a definition, e.g. `count` or `count:3`
+        #[arg(long = "at-call", value_name = "DEF[:K]")]
+        at_call: Option<String>,
+        /// Pause before the k-th performance of a capability op, e.g.
+        /// `Console.print` or `FileSystem.read_file:2`
+        #[arg(long = "at-op", value_name = "OP[:K]")]
+        at_op: Option<String>,
         /// Where to write the `kont` snapshot
         #[arg(short, long, value_name = "PATH")]
         out: PathBuf,
@@ -452,6 +516,15 @@ enum StoreCmd {
         #[arg(long)]
         accept: bool,
         /// The `.pr` file whose `stable` blocks to reseat
+        file: PathBuf,
+    },
+    /// Lock or verify stable-migration behavior
+    Lock {
+        /// Re-derive and write the committed lock manifest in place (required to
+        /// write; a bare `lock` verifies the family against its committed manifest)
+        #[arg(long)]
+        accept: bool,
+        /// The `.pr` file whose locked `stable` families to derive or verify
         file: PathBuf,
     },
 }
@@ -617,6 +690,9 @@ fn main() -> ExitCode {
     if cli.time_compile {
         cfg.flags.time_compile = true;
     }
+    if cli.verbose {
+        cfg.flags.verbose = true;
+    }
     if cli.no_compiler_cache {
         cfg.flags.compiler_cache = false;
     }
@@ -692,6 +768,7 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
             stdin,
             record,
             lineage,
+            durable,
             defer_holes,
             args,
         } => match (file, examples) {
@@ -726,6 +803,15 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
                         dir.display().to_string(),
                     ));
                 }
+                if durable.is_some() {
+                    return Err((
+                        Error::ResolveCommand(
+                            "`--durable` cannot be combined with `--examples`".into(),
+                        ),
+                        String::new(),
+                        dir.display().to_string(),
+                    ));
+                }
                 if !args.is_empty() {
                     return Err((
                         Error::ResolveCommand(
@@ -742,6 +828,7 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
                     &file,
                     record.as_deref(),
                     lineage.as_deref(),
+                    durable.as_deref(),
                     args,
                     cfg,
                     defer_holes,
@@ -754,6 +841,11 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
         },
         Cmd::Exec(exec) => dispatch_exec(exec, cfg),
         Cmd::Lineage(lineage) => dispatch_lineage(lineage, cfg),
+        Cmd::WhyOutput {
+            artifact,
+            output,
+            json,
+        } => cli::lineage::why_output_top_cmd(&artifact, output.as_deref(), json),
         Cmd::Pkg(pkg) => dispatch_pkg(pkg, cfg),
         Cmd::Store(store) => dispatch_store(store, cfg),
         Cmd::Patch(patch) => dispatch_patch(patch, cfg),
@@ -778,6 +870,34 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
         }
         Cmd::Clean { path } => cli::clean_cmd(&path),
         Cmd::Check { file } => cli::check_cmd(file.as_deref(), cfg),
+        Cmd::Test {
+            file,
+            filter,
+            exact,
+            list,
+            no_run,
+            format,
+            show_output,
+            fail_if_no_tests,
+        } => cli::test::test_cmd(
+            file.as_deref(),
+            &cli::test::TestOptions {
+                filter,
+                exact,
+                list,
+                no_run,
+                json: format == "json",
+                show_output,
+                fail_if_no_tests,
+            },
+            cfg,
+        ),
+        Cmd::Verify {
+            file,
+            solver,
+            solvers,
+            require_agreement,
+        } => cli::verify_cmd(&file, &solver, &solvers, require_agreement, cfg),
         Cmd::Dump { phase, file } => cli::dump_cmd(&phase, &file, cfg),
         Cmd::Diff { old, new, json } => {
             cli::lineage::diff_cmd(old.as_deref(), new.as_deref(), json, cfg)
@@ -818,7 +938,13 @@ fn dispatch_exec(exec: ExecCmd, cfg: &prism::Config) -> CmdResult {
         ExecCmd::Replay { file, trace } => cli::exec::replay(&file, &trace, cfg),
         ExecCmd::Debug { file, trace } => cli::exec::debug(&file, &trace, cfg),
         ExecCmd::Steps { file, json } => cli::exec::steps(&file, json, cfg),
-        ExecCmd::Suspend { file, at, out } => cli::exec::suspend(&file, at, &out, cfg),
+        ExecCmd::Suspend {
+            file,
+            at,
+            at_call,
+            at_op,
+            out,
+        } => cli::exec::suspend(&file, at, at_call.as_deref(), at_op.as_deref(), &out, cfg),
         ExecCmd::Resume { file, snapshot } => cli::exec::resume(&file, &snapshot, cfg),
     }
 }
@@ -891,6 +1017,7 @@ fn dispatch_store(store: StoreCmd, cfg: &prism::Config) -> CmdResult {
         StoreCmd::Attest { file } => cli::store::attest(&file, cfg),
         StoreCmd::Query { kind, name, file } => cli::store::query(&kind, &name, &file, cfg),
         StoreCmd::Wire { accept, file } => cli::store::wire(accept, &file),
+        StoreCmd::Lock { accept, file } => cli::store::lock(accept, &file, cfg),
     }
 }
 

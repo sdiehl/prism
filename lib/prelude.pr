@@ -1,4 +1,4 @@
--- | The always-on prelude: wired-in types, the type-class tower, core
+-- | Base, the always-on surface: wired-in types, the type-class tower, core
 -- combinators, and the effect/loop machinery.
 --
 -- The broad data-structure surface (lists, maybe/result, maps, sets, strings,
@@ -847,7 +847,7 @@ fn ssum(s) = sfold(s, 0, \(acc, x) -> acc + x)
 -- ```
 fn scollect(s) = reverse(sfold(s, Nil, \(acc, x) -> Cons(x, acc)))
 
--- | Map `f` over `xs` and concatenate the resulting lists. Kept in the prelude
+-- | Map `f` over `xs` and concatenate the resulting lists. Kept in Base
 -- (as well as `Data.List`) because optic-path desugaring synthesizes calls to it
 -- by bare name.
 --
@@ -1371,7 +1371,7 @@ instance ordFloat : Ord(Float)
 -- ordinary library code. Equality is componentwise; ordering is lexicographic
 -- with the leftmost component most significant, matching every mainstream
 -- language and the positional order the tuple `Serialize` codec uses. The logic
--- is inlined rather than delegated to top-level helpers so the prelude claims no
+-- is inlined rather than delegated to top-level helpers so Base claims no
 -- collidable names like `eq_pair` (a corpus program defines its own).
 instance eqPair : Eq((a, b)) given Eq(a), Eq(b)
   fn eq(p, q) =

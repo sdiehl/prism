@@ -23,11 +23,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::fresh::Fresh;
 use crate::names::{self, ENTRY_POINT, FRESH_EVIDENCE_ROW};
 use crate::sym::Sym;
 use crate::types::ty::{EffRow, Label};
 use crate::types::Type;
+use crate::util::fresh::Fresh;
 
 use super::super::specialize_support::{free_comp_vars, free_value_vars};
 use super::super::verify::{instantiate_fn, rename_bound_core, VerifyEnv};

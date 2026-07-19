@@ -11,7 +11,6 @@
 
 use std::collections::BTreeSet;
 
-use crate::coeffect::CoeffectFact;
 use crate::core::fbip::borrow_sigs;
 use crate::core::{
     check_fip, check_fip_linear, fip_annots, insert_rc, replayable_annots, reuse, Core,
@@ -19,6 +18,7 @@ use crate::core::{
 use crate::error::{Error, TypeError};
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Fip, Program};
+use crate::types::coeffect::CoeffectFact;
 use crate::types::Checked;
 
 #[cfg(feature = "native")]
@@ -33,7 +33,7 @@ use std::process::Command;
 #[cfg(feature = "native")]
 use crate::pkg::transport::{DiskTransport, Transport};
 #[cfg(feature = "native")]
-use crate::pkg::trust::{parse_index, verify_signature, Verdict};
+use crate::pkg::trust::{parse_index, private_temp_dir, verify_signature, Verdict};
 #[cfg(feature = "native")]
 use crate::resolve::Root;
 #[cfg(feature = "native")]
@@ -139,7 +139,11 @@ pub fn attest_on(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Erro
     let root = identity.root;
     let interp = interp_transcript(src, roots, cfg)?;
 
-    let tmp = std::env::temp_dir();
+    // Stage the compiled binaries in a freshly created private directory rather
+    // than at a predictable shared-temp path: a fixed `temp_dir()/name` an
+    // attacker can guess is a symlink-follow / name-prediction race on a binary
+    // about to be executed.
+    let tmp = private_temp_dir("attest")?;
     let stem = format!("prism_attest_{}", std::process::id());
     let llvm_bin = tmp.join(format!("{stem}_llvm"));
     build_on(src, roots, &llvm_bin, cfg)?;
@@ -148,6 +152,9 @@ pub fn attest_on(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Erro
 
     let (second_name, second_out, limitation) =
         attest_second(src, roots, cfg, &tmp, &stem, &interp)?;
+    // The staged binaries were removed as they ran, so this clears the now-empty
+    // private directory itself.
+    let _ = fs::remove_dir_all(&tmp);
 
     // The two backends must agree byte for byte; the interpreter oracle backstops
     // both, so a three-way agreement is what the green line asserts.
@@ -337,9 +344,9 @@ fn strip_sentence_prefix(msg: &str) -> &str {
 
 // Check every `replayable`-annotated function. The certificate is on the inferred
 // principal row: it must stay within the recordable capabilities (`Console`,
-// `FileSystem`, `Random`, `Env`, `Output`) plus the deterministic builtin effects
-// (`Exn`, `Fail`). `Output` is admitted because replay/durable suppress it during
-// the replayed prefix, so re-running it is sound. A row containing `IO` (un-logged
+// `FileSystem`, `Random`, `Env`, `Clock`, `Output`) plus the deterministic builtin
+// effects (`Exn`, `Fail`). `Output` is admitted because replay/durable suppress it
+// during the replayed prefix, so re-running it is sound. A row containing `IO` (un-logged
 // nondeterminism: the system clock, srand) or any user-defined effect cannot be
 // reproduced from a trace, so it is rejected with a caret at the function naming
 // the offending effect(s).

@@ -1,0 +1,26 @@
+-- | The `Fresh` effect: a deterministic monotonic name supply (gensym).
+--
+-- `fresh` yields the next integer from a counter the code never threads; the
+-- handler starts it at `0` (or an explicit `start`) and increments by one each
+-- call, so a run's names are a pure function of the order they are requested.
+-- `gensym(prefix)` builds a fresh string identifier. Opt-in: not in
+-- Base.
+
+-- | Draw the next integer from the monotonic counter.
+pub effect Fresh
+  fresh() : Int
+
+-- | Run `action` with a fresh-name counter starting at `0`, discharging `Fresh`.
+pub fn run_fresh(action : () -> a ! {Fresh | e}) : a = run_fresh_from(0, action)
+
+-- | Run `action` with the counter starting at `start`.
+pub fn run_fresh_from(start : Int, action : () -> a ! {Fresh | e}) : a =
+  let f =
+    handle action() with
+      fresh() resume k => \(n) -> k(n)(n + 1)
+      return r => \(_n) -> r
+  f(start)
+
+-- | A fresh string identifier: `prefix` followed by the next counter value.
+pub fn gensym(prefix : String) : String ! {Fresh} =
+  concat(prefix, show_int(fresh()))

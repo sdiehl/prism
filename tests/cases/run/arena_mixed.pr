@@ -1,0 +1,30 @@
+-- Adversarial region shapes: arena cells owning refcounted string children
+-- (released with the region at exit), escape of a structure mixing arena and
+-- ordinary cells, and two sequential `with_arena` activations reusing the
+-- region machinery. Everything observable is a pure function of the source;
+-- the leak balance and the sanitizer sweep are the gates that bite here.
+import Arena (..)
+
+type Tagged = Tagged(String, Int)
+
+fn label(n : Int, acc : List(Tagged)) : List(Tagged) =
+  if n == 0 then
+    acc
+  else
+    label(n - 1, Cons(Tagged(show_int(n * 100), n), acc))
+
+fn escape() : List(Tagged) = label(5, Nil)
+
+fn contained() : Int = weigh(label(7, Nil))
+
+fn weigh(xs : List(Tagged)) : Int =
+  match xs of
+    Nil => 0
+    Cons(t, rest) =>
+      match t of
+        Tagged(s, n) => str_len(s) + n + weigh(rest)
+
+fn main() : Unit ! {IO} =
+  let escaped = with_arena(escape)
+  let inside = with_arena(contained)
+  println(weigh(escaped) + inside)

@@ -18,7 +18,7 @@ use rustyline::history::DefaultHistory;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Context, Editor, Helper};
 
-use crate::core::{builtin_arities, elaborate, elaborate_expr, CoreFn};
+use crate::core::{builtin_arities, elaborate, elaborate_expr_defs, CoreFn};
 use crate::driver::PRELUDE;
 use crate::error::Error;
 use crate::eval::{globals, Machine};
@@ -478,13 +478,21 @@ impl Session {
         } else {
             infer_expr_dicts(&built.checked, &e)?
         };
-        let comp = elaborate_expr(
+        let (comp, synthesized) = elaborate_expr_defs(
             &built.checked,
             &e,
             &built.arity,
             Some(&dicts),
             &built.consts,
         )?;
+        // Elaboration synthesizes structural `show` helpers on demand. A
+        // whole-program compile folds them into its Core, so `built.globals`
+        // (the prelude session) lacks any this expression alone needed; add
+        // them here or a call to one faults as an unknown function.
+        let mut globals = built.globals.clone();
+        for f in synthesized {
+            globals.insert(f.name, f);
+        }
         // The REPL streams `print` to the terminal and reads from real stdin,
         // but `exit(n)` only ends the evaluation: the shell keeps running.
         let stdout = io::stdout();
@@ -492,7 +500,7 @@ impl Session {
         let mut out = stdout.lock();
         let mut input = stdin.lock();
         let v = {
-            let mut m = Machine::new(&built.globals, &mut out, &mut input);
+            let mut m = Machine::new(&globals, &mut out, &mut input);
             m.eval(&comp).map_err(Error::RuntimeEvaluation)?
         };
         drop(out);
@@ -1629,5 +1637,34 @@ mod tests {
             fault,
             crate::error::typed_hole_fault("todo", marginalia::Span::new(0, 5))
         );
+    }
+
+    // Elaborating a structural print/interpolation synthesizes a `_show_*`
+    // helper on demand. A whole-program compile folds those into its Core; the
+    // REPL evaluates one expression at a time against a pre-built environment,
+    // so it must register the freshly synthesized helpers, or the call to one
+    // faults at runtime as an unknown function (E7500). `println` and string
+    // interpolation share the synthesis path: the print forms prove it runs,
+    // the interpolated forms pin the exact rendered text.
+    #[test]
+    fn synthesized_show_helpers_reach_the_runtime_environment() {
+        let (session, built) = fresh();
+        for expr in ["println([1])", "println([1, 2, 3])", "println((1, [2]))"] {
+            let (val, ty, _) = session
+                .eval_chained(&built, expr)
+                .unwrap_or_else(|e| panic!("`{expr}` must evaluate without a fault, got: {e}"));
+            assert_eq!(val, "()", "`{expr}` returns unit");
+            assert_eq!(ty, "Unit", "`{expr}` has unit type");
+        }
+        for (expr, rendered) in [
+            ("\"{[1]}\"", "\"[1]\""),
+            ("\"{[1, 2, 3]}\"", "\"[1, 2, 3]\""),
+            ("\"{(1, [2])}\"", "\"(1, [2])\""),
+        ] {
+            let (val, ..) = session
+                .eval_chained(&built, expr)
+                .unwrap_or_else(|e| panic!("`{expr}` must evaluate without a fault, got: {e}"));
+            assert_eq!(val, rendered, "`{expr}` renders its structural value");
+        }
     }
 }

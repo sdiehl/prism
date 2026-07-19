@@ -44,7 +44,7 @@ fn latent_map(core: &Core) -> Latent {
         .iter()
         .map(|function| (function.name, &function.body))
         .collect();
-    crate::fixpoint::least_fixpoint(seed, |name, current| {
+    crate::util::fixpoint::least_fixpoint(seed, |name, current| {
         let mut operations = BTreeSet::new();
         latent(bodies[name], current, &mut operations);
         operations

@@ -1,0 +1,13 @@
+fn double(n : Int) : Int = n * 2
+
+test fn double_of_three_is_six() =
+  if double(3) == 6 then
+    ()
+  else
+    fail()
+
+test fn double_of_zero_is_zero() =
+  if double(0) == 0 then
+    ()
+  else
+    fail()

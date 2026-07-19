@@ -4,7 +4,7 @@
 
 String operations, byte-oriented and ASCII-accurate.
 
-Built over the primitive UTF-8 string operations. The prelude opens this module.
+Built over the primitive UTF-8 string operations. Base includes this module.
 
 ## Functions and Values
 

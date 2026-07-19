@@ -1,0 +1,331 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/adapter_wrong_direction.pr
+---
+== tokens ==
+VOpen Effect UIdent("KvV1") VOpen Ident("get_v1") LParen KwInt RParen Colon KwInt VSemi Ident("put_v1") LParen KwInt Comma KwInt RParen Colon KwUnit VClose VSemi Effect UIdent("KvV2") VOpen Ident("get_v2") LParen KwInt RParen Colon KwInt VSemi Ident("put_v2") LParen KwInt Comma KwInt RParen Colon KwUnit VClose VSemi Fn Ident("adapt_backwards") LParen Ident("action") RParen Eq VOpen Handle Ident("action") LParen RParen With VOpen Ident("get_v2") LParen Ident("key") RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen Ident("get_v1") LParen Ident("key") RParen RParen VSemi Ident("put_v2") LParen Ident("key") Comma Ident("value") RParen Ident("resume") Ident("k") FatArrow VOpen Ident("put_v1") LParen Ident("key") Comma Ident("value") RParen VSemi Ident("k") LParen LParen RParen RParen VClose VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("client_v1") LParen RParen Colon KwInt Bang LBrace UIdent("KvV1") RBrace Eq VOpen Ident("put_v1") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 100, suffix: None }) RParen VSemi Ident("get_v1") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose VSemi Fn Ident("bridged") LParen RParen Colon KwInt Bang LBrace UIdent("KvV2") RBrace Eq Ident("adapt_backwards") LParen Ident("client_v1") RParen VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "KvV1",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "get_v1",
+                    params: [
+                        Int,
+                    ],
+                    ret: Int,
+                    grade: Many,
+                },
+                EffOp {
+                    name: "put_v1",
+                    params: [
+                        Int,
+                        Int,
+                    ],
+                    ret: Unit,
+                    grade: Many,
+                },
+            ],
+            span: 461..518,
+        },
+        EffectDecl {
+            name: "KvV2",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "get_v2",
+                    params: [
+                        Int,
+                    ],
+                    ret: Int,
+                    grade: Many,
+                },
+                EffOp {
+                    name: "put_v2",
+                    params: [
+                        Int,
+                        Int,
+                    ],
+                    ret: Unit,
+                    grade: Many,
+                },
+            ],
+            span: 520..577,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "adapt_backwards",
+            params: [
+                Param {
+                    name: "action",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Handle(
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "action",
+                                ),
+                                span: 617..623,
+                            },
+                            [],
+                        ),
+                        span: 617..625,
+                    },
+                    [
+                        Op(
+                            "get_v2",
+                            [
+                                "key",
+                            ],
+                            "k",
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "k",
+                                        ),
+                                        span: 659..660,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Call(
+                                                Spanned {
+                                                    node: Var(
+                                                        "get_v1",
+                                                    ),
+                                                    span: 661..667,
+                                                },
+                                                [
+                                                    Spanned {
+                                                        node: Var(
+                                                            "key",
+                                                        ),
+                                                        span: 668..671,
+                                                    },
+                                                ],
+                                            ),
+                                            span: 661..672,
+                                        },
+                                    ],
+                                ),
+                                span: 659..673,
+                            },
+                        ),
+                        Op(
+                            "put_v2",
+                            [
+                                "key",
+                                "value",
+                            ],
+                            "k",
+                            Spanned {
+                                node: Let(
+                                    "_",
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "put_v1",
+                                                ),
+                                                span: 715..721,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Var(
+                                                        "key",
+                                                    ),
+                                                    span: 722..725,
+                                                },
+                                                Spanned {
+                                                    node: Var(
+                                                        "value",
+                                                    ),
+                                                    span: 727..732,
+                                                },
+                                            ],
+                                        ),
+                                        span: 715..733,
+                                    },
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "k",
+                                                ),
+                                                span: 740..741,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Unit,
+                                                    span: 742..744,
+                                                },
+                                            ],
+                                        ),
+                                        span: 740..745,
+                                    },
+                                ),
+                                span: 715..745,
+                            },
+                        ),
+                        Return(
+                            "r",
+                            Spanned {
+                                node: Var(
+                                    "r",
+                                ),
+                                span: 762..763,
+                            },
+                        ),
+                    ],
+                    Exhaustive,
+                ),
+                span: 610..763,
+            },
+            wheres: [],
+            span: 579..763,
+        },
+        Decl {
+            name: "client_v1",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "KvV1",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "_",
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "put_v1",
+                                ),
+                                span: 799..805,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 1,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 806..807,
+                                },
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 100,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 809..812,
+                                },
+                            ],
+                        ),
+                        span: 799..813,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "get_v1",
+                                ),
+                                span: 816..822,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 1,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 823..824,
+                                },
+                            ],
+                        ),
+                        span: 816..825,
+                    },
+                ),
+                span: 799..825,
+            },
+            wheres: [],
+            span: 765..825,
+        },
+        Decl {
+            name: "bridged",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "KvV2",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "adapt_backwards",
+                        ),
+                        span: 857..872,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "client_v1",
+                            ),
+                            span: 873..882,
+                        },
+                    ],
+                ),
+                span: 857..883,
+            },
+            wheres: [],
+            span: 827..883,
+        },
+    ],
+}
+
+== types ==
+[E5004] Type Error: in `bridged`: effect `KvV1` not declared in annotation
+    ╭─[ <source>:27:31 ]
+    │
+ 27 │ fn bridged() : Int ! {KvV2} = adapt_backwards(client_v1)
+    │                               ─────────────┬────────────  
+    │                                            ╰────────────── in `bridged`: effect `KvV1` not declared in annotation
+────╯

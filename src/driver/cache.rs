@@ -336,10 +336,22 @@ fn semantic_query_hasher(
             .as_bytes(),
         );
     }
-    field(&mut h, format!("{core:?}").as_bytes());
+    field(&mut h, &lowered_core_identity(core)?);
     field(&mut h, format!("{ctors:?}").as_bytes());
     field(&mut h, native_kont_table.as_bytes());
     Ok(h)
+}
+
+// A stable content encoding of the lowered term for the cache key, not its
+// `Debug` rendering. `Debug` is a presentation format with no stability
+// contract, so a derive or field-order change would silently move this key;
+// `Core` serializes deterministically (ordered vectors and maps, no unordered
+// collections), so equal terms always encode to equal bytes.
+#[cfg(feature = "native")]
+fn lowered_core_identity(core: &LoweredCore) -> Result<Vec<u8>, Error> {
+    serde_json::to_vec(&core.0).map_err(|error| {
+        Error::InternalInvariant(format!("serialize lowered core for cache key: {error}"))
+    })
 }
 
 #[cfg(feature = "native")]
@@ -364,6 +376,12 @@ fn linked_native_raw_key(
         &mut h,
         source_inputs_digest(src, roots, cfg.flags.query_threads)?.as_bytes(),
     );
+    // The build mode changes which declarations survive into the binary
+    // (production strips `test fn`; test retains them) without entering the LLVM
+    // artifact identity, so it must split this raw-source key: a test-mode build
+    // must never be served a prior production, tests-stripped binary of the same
+    // source, or the reverse. Mirrors the session front key's mode split.
+    field(&mut h, &[u8::from(cfg.mode == super::BuildMode::Test)]);
     field(&mut h, output_identity(out)?.as_os_str().as_encoded_bytes());
     Ok(h.finalize().to_hex().to_string())
 }

@@ -5,6 +5,7 @@ use std::process::Command;
 const INTENTIONAL_DOC_VARIANTS: &[&str] = &[
     "effectful_traverse.pr",
     "effects.pr",
+    "player_manual.pr",
     "stable.pr",
     "ufcs.pr",
 ];

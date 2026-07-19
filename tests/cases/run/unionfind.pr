@@ -1,0 +1,8 @@
+import Data.UnionFind (..)
+
+fn main() =
+  let uf = uf_union(uf_union(uf_union(uf_empty, 1, 2), 3, 4), 2, 3)
+  println(show(uf_equiv(uf, 1, 4)))
+  println(show(uf_equiv(uf, 1, 5)))
+  println(show(uf_find(uf, 4)))
+  println(show(uf_equiv(uf_union(uf, 5, 6), 5, 6)))

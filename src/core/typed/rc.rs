@@ -8,11 +8,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::fbip::Sigs;
-use crate::fresh::Fresh;
 use crate::names;
 use crate::sym::Sym;
 use crate::types::ty::EffRow;
 use crate::types::Type;
+use crate::util::fresh::Fresh;
 
 use super::specialize_support::free_comp_vars;
 use super::{

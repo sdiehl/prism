@@ -119,3 +119,14 @@
 .prism-type-tooltip-patternvar .prism-tooltip-label {
   color: #a8c3e0;
 }
+
+.prism-type-tooltip-logic {
+  border-color: #9d8ceb;
+  border-left-width: 4px;
+  background: #2c2745;
+  color: #e7e0f7;
+}
+
+.prism-type-tooltip-logic .prism-tooltip-label {
+  color: #c3b6f2;
+}

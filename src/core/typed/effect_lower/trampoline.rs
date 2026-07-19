@@ -3,10 +3,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::effect_abi::{BOUNCE_TAG, EBOUNCE, EOP, EPURE, ERESUME};
-use crate::fresh::Fresh;
 use crate::names;
 use crate::sym::Sym;
 use crate::types::ty::EffRow;
+use crate::util::fresh::Fresh;
 
 use super::super::{
     CompSig, CoreFnSig, CoreQuantifier, CoreType, LoweredType, TypedBinder, TypedComp,

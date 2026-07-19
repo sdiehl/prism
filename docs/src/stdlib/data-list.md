@@ -4,7 +4,7 @@
 
 Singly-linked list operations.
 
-The `List(a)` type and its `Nil`/`Cons` constructors are wired into the language (list literals, deriving); this module is the function surface over them. The prelude opens it, so these names are in scope unqualified everywhere; a project module reaches them with `import Data.List`. The container-generic queries (`length`, `sum`, `all`, `find`, and friends) live in `Data.Foldable` and work on any `Foldable`, this type included.
+The `List(a)` type and its `Nil`/`Cons` constructors are wired into the language (list literals, deriving); this module is the function surface over them. Base includes it, so these names are in scope unqualified everywhere; a project module reaches them with `import Data.List`. The container-generic queries (`length`, `sum`, `all`, `find`, and friends) live in `Data.Foldable` and work on any `Foldable`, this type included.
 
 ## Functions and Values
 
@@ -490,7 +490,7 @@ partition(\(x) -> x > 1, [1, 2, 3])
 
 ### `chunks_of`
 
-```prism,sig,h-d40608c9730e577f16268bf90bece94ad031bf1af4de64e977b6fb99d3faf220
+```prism,sig,h-95221285a3cf532d275079dd4829f1aab7def57126ad227c9d82272dcdc14f01
 chunks_of : forall a. (Int, List(a)) -> List(List(a))
 ```
 

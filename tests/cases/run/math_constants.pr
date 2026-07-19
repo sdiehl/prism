@@ -1,0 +1,13 @@
+import Math (sqrt2, sqrt1_2, ln2, ln10, log2e, log10e, phi, half_pi, quarter_pi, inv_pi)
+
+fn main() =
+  println(show(sqrt2))
+  println(show(sqrt1_2))
+  println(show(ln2))
+  println(show(ln10))
+  println(show(log2e))
+  println(show(log10e))
+  println(show(phi))
+  println(show(half_pi))
+  println(show(quarter_pi))
+  println(show(inv_pi))

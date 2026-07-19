@@ -136,7 +136,7 @@ Program {
 }
 
 == types ==
-[E1998] Type Error: in `bad`: type mismatch: expected a, got ?3
+[E1022] Type Error: in `bad`: type mismatch: expected a, got ?3
     ╭─[ <source>:10:17 ]
     │
  10 │   useid(\(y) -> x)

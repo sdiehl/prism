@@ -6,6 +6,8 @@ mod arena;
 mod base_surface;
 #[path = "compiler/expect.rs"]
 mod expect;
+#[path = "compiler/frontend_fixtures.rs"]
+mod frontend_fixtures;
 #[path = "compiler/hir_fixture.rs"]
 mod hir_fixture;
 #[path = "compiler/incr.rs"]

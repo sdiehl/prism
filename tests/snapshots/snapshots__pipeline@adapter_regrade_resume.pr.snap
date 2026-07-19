@@ -1,0 +1,322 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/adapter_regrade_resume.pr
+---
+== tokens ==
+VOpen Effect UIdent("KvV1") VOpen Ident("once") Ident("get_v1") LParen KwInt RParen Colon KwInt VSemi Ident("put_v1") LParen KwInt Comma KwInt RParen Colon KwUnit VClose VSemi Effect UIdent("KvV2") VOpen Ident("get_v2") LParen KwInt RParen Colon KwInt VSemi Ident("put_v2") LParen KwInt Comma KwInt RParen Colon KwUnit VClose VSemi Fn Ident("adapt_regrades") LParen Ident("action") RParen Eq VOpen Handle Ident("action") LParen RParen With VOpen Ident("get_v1") LParen Ident("key") RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen Ident("get_v2") LParen Ident("key") RParen RParen Plus Ident("k") LParen Int(IntLit { value: 0, suffix: None }) RParen VSemi Ident("put_v1") LParen Ident("key") Comma Ident("value") RParen Ident("resume") Ident("k") FatArrow VOpen Ident("put_v2") LParen Ident("key") Comma Ident("value") RParen VSemi Ident("k") LParen LParen RParen RParen VClose VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Fn Ident("client_v1") LParen RParen Colon KwInt Bang LBrace UIdent("KvV1") RBrace Eq VOpen Ident("put_v1") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 100, suffix: None }) RParen VSemi Ident("get_v1") LParen Int(IntLit { value: 1, suffix: None }) RParen VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "KvV1",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "get_v1",
+                    params: [
+                        Int,
+                    ],
+                    ret: Int,
+                    grade: Once,
+                },
+                EffOp {
+                    name: "put_v1",
+                    params: [
+                        Int,
+                        Int,
+                    ],
+                    ret: Unit,
+                    grade: Many,
+                },
+            ],
+            span: 245..307,
+        },
+        EffectDecl {
+            name: "KvV2",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "get_v2",
+                    params: [
+                        Int,
+                    ],
+                    ret: Int,
+                    grade: Many,
+                },
+                EffOp {
+                    name: "put_v2",
+                    params: [
+                        Int,
+                        Int,
+                    ],
+                    ret: Unit,
+                    grade: Many,
+                },
+            ],
+            span: 309..366,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "adapt_regrades",
+            params: [
+                Param {
+                    name: "action",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Handle(
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "action",
+                                ),
+                                span: 405..411,
+                            },
+                            [],
+                        ),
+                        span: 405..413,
+                    },
+                    [
+                        Op(
+                            "get_v1",
+                            [
+                                "key",
+                            ],
+                            "k",
+                            Spanned {
+                                node: Bin(
+                                    Add,
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "k",
+                                                ),
+                                                span: 447..448,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Call(
+                                                        Spanned {
+                                                            node: Var(
+                                                                "get_v2",
+                                                            ),
+                                                            span: 449..455,
+                                                        },
+                                                        [
+                                                            Spanned {
+                                                                node: Var(
+                                                                    "key",
+                                                                ),
+                                                                span: 456..459,
+                                                            },
+                                                        ],
+                                                    ),
+                                                    span: 449..460,
+                                                },
+                                            ],
+                                        ),
+                                        span: 447..461,
+                                    },
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "k",
+                                                ),
+                                                span: 464..465,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Int(
+                                                        IntLit {
+                                                            value: 0,
+                                                            suffix: None,
+                                                        },
+                                                    ),
+                                                    span: 466..467,
+                                                },
+                                            ],
+                                        ),
+                                        span: 464..468,
+                                    },
+                                ),
+                                span: 447..468,
+                            },
+                        ),
+                        Op(
+                            "put_v1",
+                            [
+                                "key",
+                                "value",
+                            ],
+                            "k",
+                            Spanned {
+                                node: Let(
+                                    "_",
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "put_v2",
+                                                ),
+                                                span: 510..516,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Var(
+                                                        "key",
+                                                    ),
+                                                    span: 517..520,
+                                                },
+                                                Spanned {
+                                                    node: Var(
+                                                        "value",
+                                                    ),
+                                                    span: 522..527,
+                                                },
+                                            ],
+                                        ),
+                                        span: 510..528,
+                                    },
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "k",
+                                                ),
+                                                span: 535..536,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Unit,
+                                                    span: 537..539,
+                                                },
+                                            ],
+                                        ),
+                                        span: 535..540,
+                                    },
+                                ),
+                                span: 510..540,
+                            },
+                        ),
+                        Return(
+                            "r",
+                            Spanned {
+                                node: Var(
+                                    "r",
+                                ),
+                                span: 557..558,
+                            },
+                        ),
+                    ],
+                    Exhaustive,
+                ),
+                span: 398..558,
+            },
+            wheres: [],
+            span: 368..558,
+        },
+        Decl {
+            name: "client_v1",
+            params: [],
+            ret: Some(
+                Int,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "KvV1",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "_",
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "put_v1",
+                                ),
+                                span: 594..600,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 1,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 601..602,
+                                },
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 100,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 604..607,
+                                },
+                            ],
+                        ),
+                        span: 594..608,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "get_v1",
+                                ),
+                                span: 611..617,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 1,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 618..619,
+                                },
+                            ],
+                        ),
+                        span: 611..620,
+                    },
+                ),
+                span: 594..620,
+            },
+            wheres: [],
+            span: 560..620,
+        },
+    ],
+}
+
+== types ==
+[E6028] Type Error: handler clause for `get_v1` exceeds its declared grade `once` (which resumes exactly once, in tail position): this clause may resume the continuation more than once
+    ╭─[ <source>:14:29 ]
+    │
+ 14 │     get_v1(key) resume k => k(get_v2(key)) + k(0)
+    │                             ──────────┬──────────  
+    │                                       ╰──────────── handler clause for `get_v1` exceeds its declared grade `once` (which resumes exactly once, in tail position): this clause may resume the continuation more than once
+────╯

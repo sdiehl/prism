@@ -1,0 +1,13 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/control_effects.pr
+---
+3
+3
+13
+13
+hello world
+["a", "b", "c"]
+["x0", "x1", "y2"]
+=> ()

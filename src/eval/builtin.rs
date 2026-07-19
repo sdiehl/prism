@@ -188,6 +188,63 @@ fn tbuf_copy(d: &[u64], ds: i64, s: &[u64], ss: i64, n: i64) -> Result<Rv, Strin
     Ok(Rv::TBuf(Rc::new(next)))
 }
 
+// The baseline 128-bit SIMD oracle: the interpreter defines every op's exact
+// semantics over the two-lane representation, and native (`runtime/prism_simd.c`)
+// must reproduce it bit for bit, including NaN payloads, signed zero, and
+// subnormals. A vector is two raw 64-bit words: float lanes are the doubles' bit
+// patterns, integer lanes the two's-complement values. `min`/`max` are a plain
+// lane-wise `a < b ? a : b` / `a > b ? a : b`, the one formula both sides emit,
+// so their NaN and signed-zero behavior agrees by construction rather than by
+// matching an intrinsic's platform-specific choice.
+fn simd_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
+    let vec = |w0: u64, w1: u64| Rv::Vec128(Rc::new([w0, w1]));
+    let flane = |bits: u64| f64::from_bits(bits);
+    let fbin = |a: &[u64; 2], c: &[u64; 2], op: fn(f64, f64) -> f64| {
+        vec(
+            op(flane(a[0]), flane(c[0])).to_bits(),
+            op(flane(a[1]), flane(c[1])).to_bits(),
+        )
+    };
+    let ibin =
+        |a: &[u64; 2], c: &[u64; 2], op: fn(u64, u64) -> u64| vec(op(a[0], c[0]), op(a[1], c[1]));
+    match (b, vals) {
+        (B::SimdFSplat, [Rv::Float(x)]) => Ok(vec(x.to_bits(), x.to_bits())),
+        (B::SimdISplat, [Rv::I64(x)]) => Ok(vec(x.cast_unsigned(), x.cast_unsigned())),
+        (B::SimdFAdd, [Rv::Vec128(a), Rv::Vec128(c)]) => Ok(fbin(a, c, |x, y| x + y)),
+        (B::SimdFSub, [Rv::Vec128(a), Rv::Vec128(c)]) => Ok(fbin(a, c, |x, y| x - y)),
+        (B::SimdFMul, [Rv::Vec128(a), Rv::Vec128(c)]) => Ok(fbin(a, c, |x, y| x * y)),
+        (B::SimdFMin, [Rv::Vec128(a), Rv::Vec128(c)]) => {
+            Ok(fbin(a, c, |x, y| if x < y { x } else { y }))
+        }
+        (B::SimdFMax, [Rv::Vec128(a), Rv::Vec128(c)]) => {
+            Ok(fbin(a, c, |x, y| if x > y { x } else { y }))
+        }
+        (B::SimdIAdd, [Rv::Vec128(a), Rv::Vec128(c)]) => Ok(ibin(a, c, u64::wrapping_add)),
+        (B::SimdISub, [Rv::Vec128(a), Rv::Vec128(c)]) => Ok(ibin(a, c, u64::wrapping_sub)),
+        (B::SimdIAnd, [Rv::Vec128(a), Rv::Vec128(c)]) => Ok(ibin(a, c, |x, y| x & y)),
+        (B::SimdIOr, [Rv::Vec128(a), Rv::Vec128(c)]) => Ok(ibin(a, c, |x, y| x | y)),
+        (B::SimdIXor, [Rv::Vec128(a), Rv::Vec128(c)]) => Ok(ibin(a, c, |x, y| x ^ y)),
+        (B::SimdFExtract, [Rv::Vec128(v), Rv::Int(i)]) => {
+            Ok(Rv::Float(f64::from_bits(simd_lane(v, *i)?)))
+        }
+        (B::SimdIExtract, [Rv::Vec128(v), Rv::Int(i)]) => {
+            Ok(Rv::I64(simd_lane(v, *i)?.cast_signed()))
+        }
+        _ => Err("simd op: wrong args".into()),
+    }
+}
+
+// A lane read: only 0 and 1 are valid on a two-lane vector, matching the native
+// bounds behavior. An out-of-range index is a deterministic fault, not UB.
+fn simd_lane(v: &[u64; 2], i: i64) -> Result<u64, String> {
+    match i {
+        0 => Ok(v[0]),
+        1 => Ok(v[1]),
+        _ => Err("simd lane index out of bounds".into()),
+    }
+}
+
+#[allow(clippy::too_many_lines)]
 pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv, String> {
     match (b, vals) {
         (B::Concat, [Rv::Str(a), Rv::Str(b)]) => Ok(Rv::Str(format!("{a}{b}"))),
@@ -457,6 +514,26 @@ pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv
             | B::IbufBlit,
             _,
         ) => tbuf_builtin(b, vals),
+        // Baseline 128-bit SIMD: the interpreter is the parity oracle, so every
+        // op is defined here by its exact scalar formula, and native must match
+        // it bit for bit. Routed to its own dispatcher below.
+        (
+            B::SimdFSplat
+            | B::SimdFExtract
+            | B::SimdFAdd
+            | B::SimdFSub
+            | B::SimdFMul
+            | B::SimdFMin
+            | B::SimdFMax
+            | B::SimdISplat
+            | B::SimdIExtract
+            | B::SimdIAdd
+            | B::SimdISub
+            | B::SimdIAnd
+            | B::SimdIOr
+            | B::SimdIXor,
+            _,
+        ) => simd_builtin(b, vals),
         (B::BufSlice, [Rv::Buf(v), Rv::Int(start), Rv::Int(len)]) => {
             let n = v.len();
             let s = usize::try_from(*start).unwrap_or(0).min(n);
@@ -525,6 +602,9 @@ pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv
         (B::Bump, _) => Err(
             "bump: the arena raw-cell allocator is native-only and has no interpreter form".into(),
         ),
+        (B::ArenaEnter | B::ArenaExit, _) => {
+            Err("arena region hooks are native-only and have no interpreter form".into())
+        }
         (op, _) => Err(format!("str builtin {}: wrong args", op.name())),
     }
 }

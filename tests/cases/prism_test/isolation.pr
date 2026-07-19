@@ -1,0 +1,21 @@
+-- Two tests each mutate a local `var` and print. A fresh world per test means
+-- neither the state nor the captured output of one leaks into the other.
+test fn counts_to_three() =
+  var n := 0
+  n := n + 1
+  n := n + 1
+  n := n + 1
+  print("first")
+  if n == 3 then
+    ()
+  else
+    fail()
+
+test fn counts_to_one() =
+  var n := 0
+  n := n + 1
+  print("second")
+  if n == 1 then
+    ()
+  else
+    fail()

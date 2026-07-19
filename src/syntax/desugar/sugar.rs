@@ -8,8 +8,8 @@ use crate::error::{ErrKind, TypeError};
 use crate::kw;
 use crate::names;
 use crate::syntax::ast::{
-    Arm, BinOp, Converter, Core, Expr, Marker, NodeId, Param, Pattern, PatternDecl, Rung, Spanned,
-    StableDecl, Sugar, Ty, S,
+    Arm, BinOp, Converter, Core, Expr, Marker, Migration, MigrationDir, NodeId, Param, Pattern,
+    PatternDecl, Rung, Spanned, StableDecl, Sugar, Total, Ty, S,
 };
 
 // The `view` clause keyword of a `pattern` decl (the only single-parameter
@@ -76,13 +76,27 @@ pub const MIGRATE_RET_ORDER: &str =
     "the effect row now follows the result type: write `: Result ! {Effects}` \
      instead of `: !{Effects} Result`";
 
-// One entry of a `stable` block body: a version rung or a hand-written converter.
-// The parser collects them interleaved (they share the comma-separated body);
-// `build_stable` partitions them and enforces the ordering invariant.
+// One entry of a `stable` block body: a version rung, a hand-written converter,
+// or the migration table. The parser collects them interleaved (they share the
+// comma-separated body); `build_stable` partitions them and enforces the
+// ordering invariant.
 #[derive(Debug)]
 pub enum StableItem {
     Rung(Rung),
     Conv(Converter),
+    Migrations(Vec<Migration>),
+}
+
+// Normalize a `version(...)` direction value: the contextual word `auto` (parsed
+// as a bare variable) asks the compiler to derive that direction, anything else
+// is a hand-supplied function. Done at parse time, before name resolution, so a
+// resolver never sees the `auto` marker as a value reference.
+#[must_use]
+pub fn mig_dir(e: S<Expr>) -> MigrationDir {
+    match &e.node {
+        Expr::Var(v) if v == kw::AUTO => MigrationDir::Auto,
+        _ => MigrationDir::Expr(e),
+    }
 }
 
 /// Assemble a `stable` block from its parsed entries.
@@ -100,21 +114,34 @@ pub fn build_stable(
 ) -> Result<StableDecl, (Span, String)> {
     let mut rungs = Vec::new();
     let mut converters = Vec::new();
+    let mut migrations = Vec::new();
+    let mut saw_body = false;
     for item in items {
         match item {
             StableItem::Rung(r) => {
-                if !converters.is_empty() {
+                if saw_body {
                     return Err((
                         r.span,
                         format!(
-                            "rung `{}` must come before the converters in `stable {name}`",
+                            "rung `{}` must come before the converters and migrations in \
+                             `stable {name}`",
                             r.name
                         ),
                     ));
                 }
                 rungs.push(r);
             }
-            StableItem::Conv(c) => converters.push(c),
+            StableItem::Conv(c) => {
+                saw_body = true;
+                converters.push(c);
+            }
+            StableItem::Migrations(rows) => {
+                saw_body = true;
+                if !migrations.is_empty() {
+                    return Err((span, format!("`stable {name}` has two migration tables")));
+                }
+                migrations = rows;
+            }
         }
     }
     if rungs.is_empty() {
@@ -124,6 +151,7 @@ pub fn build_stable(
         name,
         rungs,
         converters,
+        migrations,
         span,
     })
 }
@@ -157,6 +185,39 @@ pub fn lift_noalloc(ret: Option<Ty>) -> (Option<Ty>, bool) {
         Some(Ty::Coeffect(inner, row)) if row.is_noalloc_only() => (Some(*inner), true),
         other => (other, false),
     }
+}
+
+/// Classify the contextual leading declaration modifiers before a `fn`.
+///
+/// The canonical order is `test assume total`. Each stays an ordinary identifier
+/// everywhere else (the grammar only reaches here in the leading-modifier
+/// position), so a leading ident that is not one of them is a pointed
+/// "not a declaration modifier" diagnostic rather than a bare parse failure.
+///
+/// # Errors
+/// A message when the idents are not a valid ordered modifier prefix.
+pub fn decl_mods(words: &[&str]) -> Result<(bool, Total), String> {
+    let mut test = false;
+    let mut rest = words;
+    if let [first, tail @ ..] = rest {
+        if *first == kw::TEST {
+            test = true;
+            rest = tail;
+        }
+    }
+    let total = match rest {
+        [] => Total::No,
+        [t] if *t == kw::TOTAL => Total::Prove,
+        [a, t] if *a == kw::ASSUME && *t == kw::TOTAL => Total::Assume,
+        _ => {
+            return Err(format!(
+                "`{}` is not a declaration modifier; expected `test`, `total`, or \
+                 `assume total` before `fn`",
+                words.join(" ")
+            ));
+        }
+    };
+    Ok((test, total))
 }
 
 // UFCS dot call: `recv.f(args)` becomes `f(recv, args)`. The callee's `synth`

@@ -13,10 +13,10 @@ use crate::core::builtins::Builtin;
 use crate::core::fbip::{borrow_sigs, fip_annots, Fips};
 use crate::core::{hash_program, Comp, Core, DepGraph, Hashes, Value};
 use crate::error::Error;
+use crate::lineage::provenance::Observation;
 use crate::patch::{
     extract_term, replace_term, PatchArtifact, PatchArtifactError, PatchTarget, DIGEST_HEX_LEN,
 };
-use crate::provenance::Observation;
 use crate::resolve::Root;
 use crate::sym::Sym;
 use crate::types::{show_effects, Checked};
@@ -1360,7 +1360,7 @@ mod tests {
 
         let moving = artifact("pub fn inc(x : Bool) : Bool = x\n");
         let refusal = apply_semantic_patch(SOURCE, &full, &roots(), &moving).unwrap_err();
-        assert_eq!(refusal.code, "E1998");
+        assert_eq!(refusal.code, "E1022");
         assert_eq!(refusal.judgment, "elaborate");
     }
 }

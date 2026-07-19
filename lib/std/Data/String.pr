@@ -1,6 +1,6 @@
 -- | String operations, byte-oriented and ASCII-accurate.
 --
--- Built over the primitive UTF-8 string operations. The prelude opens this
+-- Built over the primitive UTF-8 string operations. Base includes this
 -- module.
 
 import Data.Char (is_space, to_upper_c, to_lower_c)

@@ -12,10 +12,6 @@
 #[cfg(feature = "mimalloc")]
 extern crate libmimalloc_sys as _;
 
-// The byte substrate shared by the two content-addressed wire codecs
-// (`store::codec` and `eval::kont`): varints, bounded blobs/strings, table
-// numbering, and the hostile-input discipline. The schemas stay in the codecs.
-pub(crate) mod binary;
 #[cfg(feature = "native")]
 // Public intentionally: external compiler hackers can implement `codegen::Isa`
 // and reuse Prism's semantic Core-to-instruction lowering for experimental
@@ -25,17 +21,14 @@ pub mod codegen;
 // package manager, and the interpreter, none of which exist in a wasm build.
 #[cfg(feature = "native")]
 pub mod cli;
-pub mod coeffect;
 pub mod core;
 pub mod debug;
 pub mod docs;
 pub mod driver;
 pub mod error;
 pub mod eval;
-pub mod fixpoint;
 pub mod flags;
 pub mod fmt;
-pub mod fresh;
 pub mod hir;
 pub mod kw;
 pub mod lex;
@@ -50,17 +43,22 @@ pub mod patch;
 pub mod pkg;
 #[cfg(feature = "native")]
 pub mod project;
-pub mod provenance;
 #[cfg(feature = "native")]
 pub mod repl;
 pub mod resolve;
-pub(crate) mod scc;
+pub mod stable_lock;
 pub mod stdlib;
 pub mod store;
 pub mod sym;
 pub mod syntax;
 pub(crate) mod tc;
+// `prism test` discovery and the harness runner. Native-only: it drives the CLI,
+// the project loader, and the interpreter, none of which exist in a wasm build.
+#[cfg(feature = "native")]
+pub mod testing;
 pub mod types;
+pub(crate) mod util;
+pub mod verify;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 pub mod wired;
@@ -81,25 +79,26 @@ pub use docs::{
 pub use driver::{
     apply_semantic_patch, check, check_at, check_modules_on, check_on, check_on_in,
     check_validated_on_in, check_with_seed, commit_to_store, core_ir, core_ir_full, core_of,
-    debug_on, diff_on, dump, dump_at, dump_on, effect_strategy_full, effect_strategy_on,
-    effect_warnings_full, example_program, fetch_semantic_patch, impact_semantic_patch, interpret,
-    interpret_at, interpret_deferred_holes, interpret_io_at, interpret_io_on,
-    interpret_io_on_with_args, interpret_io_on_with_args_deferred_holes, interpret_on,
-    module_graph, module_interface, namespace_identity, namespace_root, observe_run_on,
-    observe_run_on_deferred_holes, off_platform_builtins, public_surface, query_on, rc_balanced,
-    record_on, record_on_with_args, record_run_on, replay_on, replay_run_on, report, report_at,
-    report_on, resume_observed_on, resume_on, shape_digests_of, source_diff_on, source_modules,
-    stdlib_hash, step_ruler_on, store_def_inputs, suspend_line_cuts, suspend_on,
-    verify_semantic_patch_behavior, with_custom_prelude, with_prelude, BackendOpt, BehaviorCase,
-    BehaviorCaseResult, BehaviorCorpus, BehaviorDivergence, BehaviorReceipt, CheckedModule,
-    CompilerSession, Config, DeltaReport, EvidenceTier, FetchReport, ImpactReport, InterfaceDelta,
-    ModuleCheckReport, ModuleGraph, ModuleGraphNode, ModuleInterface, ModuleInterfaceEntry,
-    ModuleInvalidation, ModuleInvalidationCause, NamespaceIdentity, PatchRefusal, PatchRefusalBody,
+    debug_on, diff_on, dump, dump_at, dump_on, durable_run_on, effect_strategy_full,
+    effect_strategy_on, effect_warnings_full, example_program, fetch_semantic_patch,
+    impact_semantic_patch, interpret, interpret_at, interpret_deferred_holes, interpret_io_at,
+    interpret_io_on, interpret_io_on_with_args, interpret_io_on_with_args_deferred_holes,
+    interpret_on, module_graph, module_interface, namespace_identity, namespace_root,
+    observe_run_on, observe_run_on_deferred_holes, off_platform_builtins, public_surface, query_on,
+    rc_balanced, record_on, record_on_with_args, record_run_on, replay_on, replay_run_on, report,
+    report_at, report_on, resume_observed_on, resume_on, shape_digests_of, source_diff_on,
+    source_modules, stdlib_hash, step_ruler_on, store_def_inputs, suspend_at_cut_on,
+    suspend_line_cuts, suspend_on, verify_semantic_patch_behavior, with_custom_prelude,
+    with_prelude, BackendOpt, BehaviorCase, BehaviorCaseResult, BehaviorCorpus, BehaviorDivergence,
+    BehaviorReceipt, CheckedModule, CompilerSession, Config, CutReport, CutTarget, DeltaReport,
+    DurableRun, EvidenceTier, FetchReport, ImpactReport, InterfaceDelta, ModuleCheckReport,
+    ModuleGraph, ModuleGraphNode, ModuleInterface, ModuleInterfaceEntry, ModuleInvalidation,
+    ModuleInvalidationCause, NamespaceIdentity, PatchRefusal, PatchRefusalBody,
     PatchRefusalSubject, PublicDef, RecordedRun, RehydratedModuleInterface, Scheduler,
-    SessionStats, StagedPatch, StdlibHash, StepRuler, StepRulerRow, SuspendCut, SuspendResult,
-    TimingSink, MODULE_GRAPH_FORMAT, MODULE_INTERFACE_FORMAT, PATCH_BEHAVIOR_CORPUS_FORMAT,
-    PATCH_BEHAVIOR_FORMAT, PATCH_DELTA_FORMAT, PATCH_FETCH_FORMAT, PATCH_IMPACT_FORMAT,
-    PATCH_REFUSAL_FORMAT, PATCH_STAGE_FORMAT, STEP_RULER_FORMAT,
+    SessionStats, StagedPatch, StdlibHash, StepRuler, StepRulerRow, SuspendAtCut, SuspendCut,
+    SuspendResult, TimingSink, MODULE_GRAPH_FORMAT, MODULE_INTERFACE_FORMAT,
+    PATCH_BEHAVIOR_CORPUS_FORMAT, PATCH_BEHAVIOR_FORMAT, PATCH_DELTA_FORMAT, PATCH_FETCH_FORMAT,
+    PATCH_IMPACT_FORMAT, PATCH_REFUSAL_FORMAT, PATCH_STAGE_FORMAT, STEP_RULER_FORMAT,
 };
 #[cfg(feature = "native")]
 pub use driver::{
@@ -114,7 +113,7 @@ pub use error::{
 };
 pub use flags::{DynFlags, EffectTier, WarnDupes};
 pub use fmt::{format, format_check, format_wire_accept};
-pub use provenance::{Observation, ObservationTrace, OBSERVATION_TRACE_FORMAT};
+pub use lineage::provenance::{Observation, ObservationTrace, OBSERVATION_TRACE_FORMAT};
 pub use resolve::{
     default_roots, project_roots, project_roots_with_packages_and_std, project_roots_with_std, Root,
 };

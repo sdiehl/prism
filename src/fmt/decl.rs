@@ -8,12 +8,12 @@ use std::fmt::Write as _;
 
 use super::breaks::{block_trailing_call, forces_break};
 use super::{text_width, Fmt, Mode, INDENT, LINE_WIDTH};
-use crate::coeffect::CoeffectFact;
 use crate::kw;
 use crate::syntax::ast::{
     ClassDecl, Constraint, Ctor, DataDecl, Decl, EffLabel, EffectDecl, Expr, Fip, ImportDecl,
-    InstanceDecl, Kind, Param, PatternDecl, Row, Ty, S,
+    InstanceDecl, Kind, Param, PatternDecl, Row, Total, Ty, S,
 };
+use crate::types::coeffect::CoeffectFact;
 // The empty-effect-row switch lives with the type printer it also governs; the
 // source formatter reuses that one global rather than declaring a second.
 use crate::types::ty::SHOW_EMPTY_EFFECT_ROW;
@@ -309,10 +309,8 @@ pub(crate) fn fmt_ty(t: &Ty) -> String {
         }
         Ty::RowLit(Row::Empty) => "{}".into(),
         // Synthesized only by desugar and carries no span; the formatter only
-        // ever sees source types. Should this marker leak this far, emit an inert
-        // hole rather than fabricating identity text or aborting: a formatter
-        // must never crash on or invent identity from its input.
-        Ty::State(_) => "_".into(),
+        // ever sees source types, so this marker cannot reach the surface printer.
+        Ty::State(_) => unreachable!("Ty::State is desugar-only and never reaches the formatter"),
         // A type-level natural literal in a dimension position (`Vec(Int, 3)`).
         Ty::Nat(n) => n.to_string(),
     }
@@ -447,7 +445,7 @@ impl Fmt<'_> {
         // The allocation certificate `@ noalloc` is a postfix on the result type,
         // ahead of any declaration effect, so it re-parses at the annotation root
         // (`: T @ noalloc ! {E}`). It is folded into `ret_ann` here rather than
-        // appended after it, so `na` below stays empty in the result-first order.
+        // appended after the result annotation.
         let ty_ann = |t: &Ty| {
             if d.no_alloc {
                 format!("{} {} {}", ret_ty(t), kw::AT, CoeffectFact::Noalloc)
@@ -487,27 +485,50 @@ impl Fmt<'_> {
             Fip::Fbip => format!("{} {}", kw::FBIP, kw::FN),
             Fip::Fip => format!("{} {}", kw::FIP, kw::FN),
         };
-        let key = if d.replayable {
+        let rep_key = if d.replayable {
             format!("{} {fip_key}", kw::REPLAYABLE)
         } else {
             fip_key
         };
-        // The allocation certificate `@ noalloc` now prints inside `ret_ann`
-        // (ahead of the declaration effect), so nothing is appended after it.
-        let na = String::new();
+        // The totality claim leads the modifier chain: `assume total replayable
+        // fip fn`, matching the parse order.
+        let key = match d.total {
+            Total::No => rep_key,
+            Total::Prove => format!("{} {rep_key}", kw::TOTAL),
+            Total::Assume => format!("{} {} {rep_key}", kw::ASSUME, kw::TOTAL),
+        };
+        // A `test fn` leads the whole modifier chain (`test assume total ...`),
+        // mirroring the `decl_mods` parse order, so the declaration round-trips
+        // instead of silently dropping the `test` modifier when formatted.
+        let key = if d.test {
+            format!("{} {key}", kw::TEST)
+        } else {
+            key
+        };
+        // SMT contract clauses and the `decreases` measure take a dedicated layout:
+        // the signature, then each `requires`/`ensures`/`decreases` on its own
+        // indented line, then an indented `=` (an `=` back at column 0 would be
+        // sheared off by the offside rule). Handled apart so a clause-free `fn`
+        // still formats byte-identically.
+        if !d.requires.is_empty() || !d.ensures.is_empty() || d.decreases.is_some() {
+            let flat_head = format!("{key} {}({}){ret_ann}{wh}", d.name, params.join(", "));
+            let head = if text_width(&flat_head) > LINE_WIDTH && params.len() >= 2 {
+                let ps: Vec<String> = params.iter().map(|p| format!("{INDENT}{p}")).collect();
+                format!("{key} {}(\n{}\n){ret_ann}{wh}", d.name, ps.join(",\n"))
+            } else {
+                flat_head
+            };
+            return self.fmt_fn_contract(d, &head, mode);
+        }
         // A signature over budget with two or more parameters puts each on its own
         // line inside the parens (which suppress layout), the closing `)` and the
         // return annotation placed back at the declaration's column. The wrap is
         // decided from the flat signature length, so it is idempotent and a short
         // signature stays on one line.
-        let flat_sig = format!("{key} {}({}){ret_ann}{na}{wh} =", d.name, params.join(", "));
+        let flat_sig = format!("{key} {}({}){ret_ann}{wh} =", d.name, params.join(", "));
         let sig = if text_width(&flat_sig) > LINE_WIDTH && params.len() >= 2 {
             let ps: Vec<String> = params.iter().map(|p| format!("{INDENT}{p}")).collect();
-            format!(
-                "{key} {}(\n{}\n){ret_ann}{na}{wh} =",
-                d.name,
-                ps.join(",\n")
-            )
+            format!("{key} {}(\n{}\n){ret_ann}{wh} =", d.name, ps.join(",\n"))
         } else {
             flat_sig
         };
@@ -548,6 +569,78 @@ impl Fmt<'_> {
 
     // A trailing `where` block: `where` one level in, each binding two levels in,
     // so the body (rendered a level deeper still) stays offside-nested under it.
+    // Render a `fn` carrying `requires`/`ensures` clauses: the signature `head`
+    // (no trailing `=`), one clause per indented line, then the `= body`. Clause
+    // predicates format inline where they fit, else as an indented block, matching
+    // the `where` layout. The `=` sits at the clause indent, never column 0.
+    fn fmt_fn_contract(&self, d: &Decl, head: &str, mode: Mode) -> String {
+        let ind = INDENT;
+        let mut s = head.to_string();
+        let clause = |this: &Self, e: &S<Expr>| {
+            this.fmt_expr_inline(e, Mode::Layout)
+                .filter(|inl| text_width(&format!("{ind}{} {inl}", kw::REQUIRES)) <= LINE_WIDTH)
+        };
+        for r in &d.requires {
+            match clause(self, r) {
+                Some(inl) => write!(s, "\n{ind}{} {inl}", kw::REQUIRES).unwrap(),
+                None => write!(
+                    s,
+                    "\n{ind}{}\n{}",
+                    kw::REQUIRES,
+                    self.fmt_block(r, 2, r.span.start)
+                )
+                .unwrap(),
+            }
+        }
+        for (name, p) in &d.ensures {
+            let bind = format!("{} {}{name}{}", kw::ENSURES, kw::BAR, kw::BAR);
+            match clause(self, p) {
+                Some(inl) => write!(s, "\n{ind}{bind} {inl}").unwrap(),
+                None => write!(s, "\n{ind}{bind}\n{}", self.fmt_block(p, 2, p.span.start)).unwrap(),
+            }
+        }
+        // The ranking measure prints last, closest to the `=`, matching the parse
+        // order `requires`/`ensures`/`decreases`.
+        if let Some(m) = &d.decreases {
+            match clause(self, m) {
+                Some(inl) => write!(s, "\n{ind}{} {inl}", kw::DECREASES).unwrap(),
+                None => write!(
+                    s,
+                    "\n{ind}{}\n{}",
+                    kw::DECREASES,
+                    self.fmt_block(m, 2, m.span.start)
+                )
+                .unwrap(),
+            }
+        }
+        // The body, inline after `=` when it fits and carries no `where`/comments,
+        // otherwise an indented block under an `=` on its own line.
+        let bodied = self.has_comments(d.span.start, d.body.span.end);
+        let stay_inline = mode == Mode::Flat || !forces_break(&d.body);
+        if !bodied && stay_inline && d.wheres.is_empty() {
+            if let Some(body) = self.fmt_expr_inline(&d.body, mode) {
+                let line = format!("{ind}{} {body}", kw::EQ);
+                if text_width(&line) <= LINE_WIDTH {
+                    return format!("{s}\n{line}");
+                }
+            }
+        }
+        let wheres = self.fmt_wheres(&d.wheres);
+        match mode {
+            Mode::Layout => format!(
+                "{s}\n{ind}{}\n{}{wheres}",
+                kw::EQ,
+                self.fmt_block(&d.body, 2, d.span.start)
+            ),
+            Mode::Flat => format!(
+                "{s}\n{ind}{}\n{}{}{wheres}",
+                kw::EQ,
+                INDENT.repeat(2),
+                self.fmt_expr_break(&d.body, 2, Mode::Flat)
+            ),
+        }
+    }
+
     fn fmt_wheres(&self, wheres: &[(String, S<Expr>)]) -> String {
         if wheres.is_empty() {
             return String::new();

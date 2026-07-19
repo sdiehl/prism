@@ -1,5 +1,6 @@
 /* IO, environment, process, and the fault traps; main() lives here. */
 #include "prism_io.h"
+#include "prism_array.h"
 #include "prism_buffer.h"
 #include "prism_int.h"
 #include "prism_mem.h"
@@ -218,7 +219,11 @@ long prism_probe_enabled(long name) {
     return 0;
 }
 
-long prism_prim_read_file(long path) {
+/* Slurp a whole file into a fresh String cell verbatim, with no interpretation
+ * of its bytes. Faults loudly on any IO error and caps the size. Shared by
+ * read_file (which then enforces UTF-8) and read_bytes (which reinterprets the
+ * cell as a byte buffer), so neither path duplicates the open/size/cap/read. */
+static long prism_slurp_string(long path) {
     const char *name = prism_str_data(path);
     FILE *f = fopen(name, "rb");
     if (!f) prism_read_fatal("cannot open", name);
@@ -234,6 +239,19 @@ long prism_prim_read_file(long path) {
     p[PRISM_ARITY_W] = got;
     fclose(f);
     return (long)p;
+}
+
+long prism_prim_read_file(long path) {
+    long s = prism_slurp_string(path);
+    /* Prism's String is UTF-8 (a Rust `String`). The interpreter's read_file
+     * decodes with `fs::read_to_string`, which rejects non-UTF-8 input; native
+     * must reject it too, or the two tiers disagree on the same file. read_bytes
+     * is the byte-faithful path for arbitrary content. */
+    if (!prism_utf8_valid((const unsigned char *)prism_str_data(s), prism_str_len_bytes(s))) {
+        prism_rc_dec(s);
+        prism_read_fatal("stream did not contain valid UTF-8", prism_str_data(path));
+    }
+    return s;
 }
 
 /* Result(Unit, String): Ok(()) with the immediate Unit field, or Err(msg). */
@@ -262,12 +280,13 @@ long prism_write_file(long path, long contents) {
 }
 
 /* Read a file's raw bytes into a byte buffer with no UTF-8 interpretation. The
- * slurp reuses prism_prim_read_file (same open, cap, and error handling); its
- * String cell holds the bytes verbatim, and prism_buf_of_string copies them
- * byte-for-byte, so an embedded NUL or a non-UTF-8 byte survives intact. The
- * transient string is dropped once copied. */
+ * slurp reuses prism_slurp_string (same open, cap, and error handling) rather
+ * than read_file, so it skips the UTF-8 gate: its String cell holds the bytes
+ * verbatim, and prism_buf_of_string copies them byte-for-byte, so an embedded
+ * NUL or a non-UTF-8 byte survives intact. The transient string is dropped once
+ * copied. */
 long prism_prim_read_bytes(long path) {
-    long s = prism_prim_read_file(path);
+    long s = prism_slurp_string(path);
     long b = prism_buf_of_string(s);
     prism_rc_dec(s);
     return b;
@@ -330,7 +349,11 @@ int main(int argc, char **argv) {
     prism_argc = argc;
     prism_argv = argv;
     long r = prismfn_main();
-    int code = (int)(r & 1 ? r >> 1 : 0);
+    /* Only an explicit `exit(n)` sets the process code (it calls libc exit
+     * directly, before returning here); a value-returning main exits 0. The
+     * interpreter derives the exit code from `exit(n)` alone and ignores main's
+     * return word, so mirroring that keeps the two tiers' exit codes identical.
+     * A heap cell returned by main is still freed so the leak audit stays exact. */
     if (!(r & 1) && r) prism_rc_dec(r);
-    return code;
+    return 0;
 }

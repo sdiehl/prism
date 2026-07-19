@@ -28,10 +28,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::io::{self, Write as _};
+#[cfg(unix)]
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[cfg(unix)]
+use rustix::fs::{flock, FlockOperation};
 
 use crate::core::HASH_SCHEME;
 use crate::driver::Config;
@@ -61,8 +66,8 @@ const FIELD_SEP: char = '\t';
 fn line_digest(line: &str) -> String {
     format!(
         "{}:{}",
-        crate::provenance::EVENT_HASH_SCHEME,
-        crate::provenance::sha256_hex(line.as_bytes())
+        crate::lineage::provenance::EVENT_HASH_SCHEME,
+        crate::lineage::provenance::sha256_hex(line.as_bytes())
     )
 }
 
@@ -344,7 +349,7 @@ fn ssh_verify(body: &[u8], sig: &[u8], flags: &DynFlags) -> Verdict {
         ],
         body,
     );
-    let _ = fs::remove_file(&sig_file);
+    remove_temp(&sig_file);
     verdict_of(res, flags.sign_identity.clone())
 }
 
@@ -361,7 +366,7 @@ fn minisign_verify(body: &[u8], sig: &[u8], flags: &DynFlags) -> Verdict {
     let sig_file = match write_temp("minisig", sig) {
         Ok(p) => p,
         Err(e) => {
-            let _ = fs::remove_file(&data_file);
+            remove_temp(&data_file);
             return Verdict::Unavailable(format!("could not stage signature: {e}"));
         }
     };
@@ -378,8 +383,8 @@ fn minisign_verify(body: &[u8], sig: &[u8], flags: &DynFlags) -> Verdict {
         ],
         &[],
     );
-    let _ = fs::remove_file(&data_file);
-    let _ = fs::remove_file(&sig_file);
+    remove_temp(&data_file);
+    remove_temp(&sig_file);
     verdict_of(res, None)
 }
 
@@ -408,8 +413,9 @@ fn minisign_sign(body: &[u8], key: &Path) -> Result<Option<Vec<u8>>, TrustError>
         Ok(false) => Err(TrustError::Sign("minisign refused to sign".into())),
         Err(e) => Err(TrustError::Sign(format!("could not run minisign: {e}"))),
     };
-    let _ = fs::remove_file(&data_file);
-    let _ = fs::remove_file(&sig_path);
+    // `sig_path` is a sibling of `data_file` in the same private directory, so
+    // removing that directory cleans both.
+    remove_temp(&data_file);
     out
 }
 
@@ -471,20 +477,79 @@ fn run_status(tool: &str, args: &[&str], stdin: &[u8]) -> Result<bool, io::Error
     Ok(child.wait()?.success())
 }
 
-// A unique temp path for staging a blob a CLI tool must read from a file. The
-// `.tmp` marker and pid/counter keep concurrent signers from colliding.
-fn write_temp(tag: &str, bytes: &[u8]) -> io::Result<PathBuf> {
+// The shared prefix for Prism's private temp directories and the files staged in
+// them, so they are recognizable in a system temp dir.
+const TEMP_NAME_PREFIX: &str = "prism-pkg";
+
+// Mode bits for a freshly created private staging directory: owner-only rwx, so
+// no other user can plant a symlink into it or read a staged blob mid-operation.
+#[cfg(unix)]
+const PRIVATE_DIR_MODE: u32 = 0o700;
+
+/// Create a fresh, private (0700 on unix) directory under the system temp dir and
+/// return its path.
+///
+/// The name is unique per call (process id, a process-local counter, and the wall
+/// clock), and the directory is created with mkdir semantics that fail on a
+/// pre-existing path rather than following it, so a planted symlink or a squatted
+/// name cannot redirect what is written inside. Staging a blob or an executable in
+/// a directory made this way, instead of at a predictable shared-temp path, closes
+/// the symlink-follow and name-prediction races a fixed `temp_dir()/name` opens.
+///
+/// # Errors
+/// A filesystem error other than a name collision, which is retried.
+pub(crate) fn private_temp_dir(tag: &str) -> io::Result<PathBuf> {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
-    let path = std::env::temp_dir().join(format!(
-        "prism-pkg.{tag}.{}.{nanos}.{n}",
-        std::process::id()
-    ));
+    let base = std::env::temp_dir();
+    loop {
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let dir = base.join(format!(
+            "{TEMP_NAME_PREFIX}.{tag}.{}.{nanos}.{n}",
+            std::process::id()
+        ));
+        // Both branches use mkdir semantics that fail on a pre-existing path; the
+        // unix branch additionally clamps the mode to owner-only.
+        #[cfg(unix)]
+        let created = {
+            let mut builder = fs::DirBuilder::new();
+            builder.mode(PRIVATE_DIR_MODE);
+            builder.create(&dir)
+        };
+        #[cfg(not(unix))]
+        let created = fs::create_dir(&dir);
+        match created {
+            Ok(()) => return Ok(dir),
+            // A name collision is the one recoverable case: loop for a fresh name
+            // rather than reuse a directory that may not be ours.
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+// Stage a blob a CLI tool must read from a file, inside a freshly created private
+// directory. Returns the file path; `remove_temp` cleans up the whole directory.
+fn write_temp(tag: &str, bytes: &[u8]) -> io::Result<PathBuf> {
+    let path = private_temp_dir(tag)?.join(tag);
     fs::write(&path, bytes)?;
     Ok(path)
+}
+
+// Remove a file staged by `write_temp` along with the private directory that held
+// it, best-effort. A sibling produced beside the staged file (a detached
+// signature written next to it) shares that directory, so one removal cleans both.
+fn remove_temp(path: &Path) {
+    match path.parent() {
+        Some(dir) => {
+            let _ = fs::remove_dir_all(dir);
+        }
+        None => {
+            let _ = fs::remove_file(path);
+        }
+    }
 }
 
 /// The local append-only transparency log: every `origin/name/tag -> root`
@@ -543,6 +608,45 @@ pub struct Repoint {
     pub to_kind: String,
 }
 
+// The sibling file whose advisory lock serializes transparency-log appenders: the
+// log path with this extension.
+const LOG_LOCK_EXTENSION: &str = "lock";
+
+// The advisory lock held across a transparency-log append. `append` is a
+// read-modify-write, and an exclusive `flock` on a sibling lock file makes two
+// concurrent appenders serialize instead of racing to the same sequence off a
+// stale prev digest. The kernel drops the lock when the handle closes, including
+// on a crash, so a killed publisher never strands it. Non-unix targets (the wasm
+// build has no real filesystem) degrade to a no-op. Holding the open handle is
+// holding the lock; dropping it (closing the file) releases it.
+struct AppendLock {
+    _file: fs::File,
+}
+
+impl AppendLock {
+    fn acquire(log_path: &Path) -> io::Result<Self> {
+        let lock_path = log_path.with_extension(LOG_LOCK_EXTENSION);
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)?;
+        lock_exclusive(&file)?;
+        Ok(Self { _file: file })
+    }
+}
+
+// Take the exclusive advisory lock, blocking until no other handle holds it.
+#[cfg(unix)]
+fn lock_exclusive(file: &fs::File) -> io::Result<()> {
+    flock(file, FlockOperation::LockExclusive).map_err(io::Error::from)
+}
+
+#[cfg(not(unix))]
+fn lock_exclusive(_file: &fs::File) -> io::Result<()> {
+    Ok(())
+}
+
 impl Log {
     /// A log rooted at `path` (the file need not exist yet).
     #[must_use]
@@ -571,6 +675,15 @@ impl Log {
         kind: &str,
         root: &str,
     ) -> io::Result<u64> {
+        // The parent must exist before the sibling lock file can be created there.
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        // Serialize the whole read-modify-write. Without exclusion two concurrent
+        // publishers read the same tail, compute the same sequence off the same
+        // prev digest, and the second appended line breaks the chain so every
+        // later audit read fails. The lock releases when `_lock` drops at exit.
+        let _lock = AppendLock::acquire(&self.path)?;
         let text = self.read_text()?.unwrap_or_default();
         let existing = self.parse(&text)?;
         // The next sequence comes from the last entry's own number, never from a
@@ -578,9 +691,6 @@ impl Log {
         // the recorded maximum keeps the numbers a property of the entries
         // themselves (and `parse` has already rejected a non-dense log).
         let seq = existing.last().map_or(0, |e| e.seq + 1);
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
-        }
         let mut f = fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -1078,9 +1188,14 @@ fn verdict_label(verdict: &Verdict) -> String {
 }
 
 // A short hash prefix for human-facing lines, matching the store's display habit.
+// The root travels as untrusted deserialized text, so the prefix is taken by
+// character count rather than a raw byte slice: a multibyte codepoint straddling
+// the byte boundary would panic an index expression but only widens a char cut.
 fn short_hash(hash: &str) -> &str {
-    let n = crate::core::HASH_PREFIX_HEX.min(hash.len());
-    &hash[..n]
+    match hash.char_indices().nth(crate::core::HASH_PREFIX_HEX) {
+        Some((byte, _)) => &hash[..byte],
+        None => hash,
+    }
 }
 
 // The local transparency log lives beside the signed index, under the store's
@@ -1241,4 +1356,61 @@ pub fn audit_cmd(cfg: &Config, allow_unsigned: bool) -> Result<AuditReport, Erro
         allow_unsigned,
     )?;
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::thread;
+
+    #[test]
+    fn short_hash_multibyte_boundary_does_not_panic() {
+        // A root whose byte at the prefix length lands inside a multibyte
+        // codepoint panics a raw byte slice; the char-boundary cut must not.
+        // 15 ASCII chars, then 'e' with acute accent straddling byte 16.
+        let root = "0123456789abcde\u{e9}ffff";
+        let short = short_hash(root);
+        assert_eq!(short, "0123456789abcde\u{e9}");
+        assert_eq!(short.chars().count(), crate::core::HASH_PREFIX_HEX);
+    }
+
+    #[test]
+    fn short_hash_ascii_prefix_is_unchanged() {
+        assert_eq!(short_hash("0123456789abcdef0123"), "0123456789abcdef");
+        assert_eq!(short_hash("abc"), "abc");
+    }
+
+    #[test]
+    fn concurrent_appends_serialize_into_a_valid_chain() {
+        let dir = private_temp_dir("logtest").expect("temp dir");
+        let log = Arc::new(Log::at(dir.join("log")));
+        let n: u64 = 8;
+        let handles: Vec<_> = (0..n)
+            .map(|i| {
+                let log = Arc::clone(&log);
+                thread::spawn(move || {
+                    let name = format!("pkg{i}");
+                    log.append(
+                        "origin",
+                        &name,
+                        "v1",
+                        HASH_SCHEME,
+                        INDEX_KIND_SOURCE,
+                        "root",
+                    )
+                    .expect("append");
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().expect("thread");
+        }
+        // `entries` verifies the chain and the dense-from-zero numbering; a race
+        // would have broken a link or duplicated a sequence.
+        let entries = log.entries().expect("entries");
+        let seqs: Vec<u64> = entries.iter().map(|e| e.seq).collect();
+        assert_eq!(seqs, (0..n).collect::<Vec<_>>());
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

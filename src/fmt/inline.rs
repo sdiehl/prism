@@ -321,7 +321,13 @@ impl Fmt<'_> {
                     .iter()
                     .map(|(f, v)| Some(format!("{f} = {}", self.fmt_expr_inline(v, Mode::Flat)?)))
                     .collect();
-                parts.map(|p| format!("#{{ {} }}", p.join(", ")))
+                parts.map(|p| {
+                    if p.is_empty() {
+                        "#{}".to_string()
+                    } else {
+                        format!("#{{ {} }}", p.join(", "))
+                    }
+                })
             }
             Expr::Index(recv, key) => {
                 let recv_s = self.fmt_expr_inline(recv, mode)?;
@@ -345,7 +351,13 @@ impl Fmt<'_> {
                             .map(|e_s| format!("{f} = {e_s}"))
                     })
                     .collect();
-                fs.map(|fs| format!("{name} {{ {} }}", fs.join(", ")))
+                fs.map(|fs| {
+                    if fs.is_empty() {
+                        format!("{name} {{}}")
+                    } else {
+                        format!("{name} {{ {} }}", fs.join(", "))
+                    }
+                })
             }
             Expr::RecordUpdate(base, name, fields) => {
                 let base_s = self.fmt_expr_inline(base, Mode::Flat)?;

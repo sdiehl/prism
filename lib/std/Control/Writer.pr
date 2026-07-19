@@ -1,0 +1,21 @@
+-- | The canonical `Writer(w)` effect: accumulate output on the side.
+--
+-- `tell(m)` appends `m` to a log the producer never sees; `run_writer` returns
+-- the whole log as a list in emission order. The handler threads the growing log
+-- as a parameter (tail-resumptive, so it fuses), so nothing shared or mutable is
+-- involved. Opt-in: not in Base.
+
+import Data.List (reverse)
+
+-- | Append one item of type `w` to the accumulated log.
+pub effect Writer(w)
+  tell(w) : Unit
+
+-- | Run `action`, collecting every `tell` into a log, and return that log in
+-- emission order (the computation's own result value is discarded).
+pub fn run_writer(action : () -> a ! {Writer(w) | e}) : List(w) =
+  let f =
+    handle action() with
+      tell(m) resume k => \(log) -> k(())(Cons(m, log))
+      return r => \(log) -> reverse(log)
+  f(Nil)

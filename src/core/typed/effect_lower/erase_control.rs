@@ -22,11 +22,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::effect_abi::{DONE_TAG, MORE_TAG, SDONE, SMORE, STEP};
-use crate::fresh::Fresh;
 use crate::names::{self, FOREVER, REPEAT_WHILE};
 use crate::sym::Sym;
 use crate::types::ty::EffRow;
 use crate::types::Type;
+use crate::util::fresh::Fresh;
 
 use super::super::specialize_support::free_comp_vars;
 use super::super::verify::{instantiate_value_scheme, ConstructorSig, VerifyEnv};

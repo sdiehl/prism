@@ -31,7 +31,7 @@ fn cross_witness_mixing_is_rejected() {
     let err = prism::check(with_prelude(CROSS).as_str())
         .expect_err("mixing two ordering witnesses must be a type error");
     assert!(
-        matches!(err, Error::Type(TypeError::TypeFailure { .. })),
+        matches!(err, Error::Type(TypeError::Kind(_))),
         "expected a type error, got: {err}"
     );
     let msg = err.to_string();

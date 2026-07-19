@@ -1,0 +1,6 @@
+-- read_file on a non-UTF-8 file. Prism's String is UTF-8, so read_file must
+-- reject invalid bytes on both tiers: the interpreter faults (fs::read_to_string
+-- rejects it) and native faults too (an explicit UTF-8 gate). read_bytes is the
+-- byte-faithful path for arbitrary content. Off-platform (file IO), so verified
+-- by hand, not the empty-stdin corpus.
+fn main() = println(read_file("tests/cases/run/bad_utf8.bin"))

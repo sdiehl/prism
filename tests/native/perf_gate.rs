@@ -353,6 +353,78 @@ fn pull_sequence_module_allocation_baseline() {
 }
 
 // ---------------------------------------------------------------------------
+// Lane A region ratchets. A `with_arena` scope routes every eligible
+// constructor through the region's bump pointer, so the cells never touch
+// `prism_alloc` and the whole region is reclaimed at the handler's return.
+// Parity and the leak balance cannot see a silent fallback to per-cell malloc
+// (the delegating path is observationally identical); these counters can.
+
+const PERF_ARENA_REGION_FILL: &str = include_str!("../cases/perf/arena_region_fill.pr");
+const PERF_ARENA_REGION_LOOP: &str = include_str!("../cases/perf/arena_region_loop.pr");
+
+// The headline Lane A claim: growing the list built under one `with_arena`
+// activation must not grow the runtime allocation count at all. Every `Cons`
+// comes from the region; only the scalar sum escapes.
+#[test]
+fn arena_region_fill_allocates_zero_cells_per_element() {
+    require_cc();
+    let (small, big) = (500_i64, 5_000_i64);
+    let lo = stat_src_o2(
+        &perf_src_n(PERF_ARENA_REGION_FILL, small),
+        "arena_region_fill_lo",
+        "PRISM_ALLOC_STATS",
+        "cells allocated",
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let hi = stat_src_o2(
+        &perf_src_n(PERF_ARENA_REGION_FILL, big),
+        "arena_region_fill_hi",
+        "PRISM_ALLOC_STATS",
+        "cells allocated",
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let per = (hi - lo) / (big - small);
+    assert_eq!(
+        per, 0,
+        "arena fill allocates {per} cells/element through prism_alloc ({lo} at n={small}, {hi} \
+         at n={big}); constructors under `with_arena` regressed off the region path"
+    );
+}
+
+// Region activations in a loop: the 65 per-iteration constructor cells come
+// from the region, leaving exactly the two loop-invariant evidence closures of
+// the handler activation itself. Ratcheted so the region path cannot silently
+// regress to per-cell malloc (a fallback reads ~66 here); hoisting the
+// captureless evidence closures is the follow-up that takes this to zero, and
+// then this baseline ratchets down.
+#[test]
+fn arena_region_loop_allocates_only_activation_constants() {
+    require_cc();
+    let (small, big) = (50_i64, 500_i64);
+    let lo = stat_src_o2(
+        &perf_src_n(PERF_ARENA_REGION_LOOP, small),
+        "arena_region_loop_lo",
+        "PRISM_ALLOC_STATS",
+        "cells allocated",
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let hi = stat_src_o2(
+        &perf_src_n(PERF_ARENA_REGION_LOOP, big),
+        "arena_region_loop_hi",
+        "PRISM_ALLOC_STATS",
+        "cells allocated",
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let per = (hi - lo) / (big - small);
+    assert!(
+        per <= 2,
+        "arena activation loop allocates {per} cells/iteration through prism_alloc ({lo} at \
+         n={small}, {hi} at n={big}; baseline 2, the activation's evidence closures); the \
+         region path regressed"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Wire/Bytes allocation ratchets. The serialization codec threads one growable
 // buffer through a linear builder fold (`buf_push`/`buf_append`) instead of a
 // right-nested `wire_cat` (a fresh buffer per element), and decode advances a read

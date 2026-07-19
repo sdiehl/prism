@@ -38,6 +38,20 @@ pub fn print_step_ruler(ruler: &crate::StepRuler) {
     );
 }
 
+// A named cut's def-stack clause: the paused definition, the callers that reached
+// it (immediate caller first), and the equivalent step budget. `[main, count]`
+// renders `step N in count (from main)`; a lone `[main]` renders `step N in main`.
+pub fn cut_provenance(equiv_at: usize, def_stack: &[String]) -> String {
+    match def_stack.split_last() {
+        None => format!("step {equiv_at}"),
+        Some((current, [])) => format!("step {equiv_at} in {current}"),
+        Some((current, callers)) => {
+            let chain: Vec<&str> = callers.iter().rev().map(String::as_str).collect();
+            format!("step {equiv_at} in {current} (from {})", chain.join(", "))
+        }
+    }
+}
+
 // The suspend cut report's timeline clause: where the pause fell relative to
 // the observations the prefix performed.
 pub fn cut_position(cut: &crate::SuspendCut) -> String {
