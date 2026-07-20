@@ -31,6 +31,7 @@ mod facts;
 #[cfg(feature = "native")]
 mod graph;
 mod node_id;
+pub mod provenance;
 #[cfg(feature = "native")]
 mod render;
 #[cfg(feature = "native")]
@@ -53,8 +54,8 @@ pub use docs::{
 };
 #[cfg(feature = "native")]
 pub use explain::{
-    why_output, why_world_state, Explanation, SelectedOutput, WorldExplanation, WorldForkCrossed,
-    WorldRun,
+    default_output_selector, why_output, why_world_state, Explanation, SelectedOutput,
+    WorldExplanation, WorldForkCrossed, WorldRun,
 };
 pub use facts::{
     changed_inputs, describe_input_changes, outcome_of, record_fact, record_facts, FactChange,

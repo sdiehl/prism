@@ -1,0 +1,10 @@
+-- An integration test: it imports the package as a consumer and may use only
+-- the public API. Reaching `Parser.normalize` (private) would be a visibility
+-- error, checked separately.
+import Parser
+
+test fn public_api_is_reachable() =
+  if Parser.parse_ok("y") then
+    ()
+  else
+    fail()

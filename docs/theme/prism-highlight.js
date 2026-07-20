@@ -16,7 +16,7 @@
             "try catch transact alias class instance canonical pattern deriving where " +
             "given handle with handler mask ctl final fun val return let var " +
             "borrow in for while loop break continue do if then else elif match of " +
-            "each forall using",
+            "each forall using stable probe logic requires ensures total assume",
           literal: "true false",
           type: "Int Bool Unit Float Char String I64 U64",
         },

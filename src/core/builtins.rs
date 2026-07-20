@@ -551,6 +551,37 @@ builtins! {
     // is the raw cell pointer. Native-only (no interpreter allocation): it appears
     // only in effect-lowered Core, which the interpreter never runs.
     Bump "prim_arena_bump" "Bump" 105 IMM0 surface 1 Int "(Int) -> Arena.Cell";
+    // Region brackets around a `with_arena` handler activation, emitted only by
+    // the arena-lowering pass (never surface-callable: user code reaching them
+    // could unbalance the region stack). `arena_enter` opens a region and
+    // returns its activation depth; `arena_exit` threads that token plus the
+    // handler's result, so the pair is data-dependent and can never be
+    // separated or dropped by a simplification that respects data flow. Their
+    // verifier signatures are overrides seeded by the arena pass
+    // (`() -> Int` and `forall a. (Int, a) -> a`).
+    ArenaEnter "arena_enter" "ArenaEnter" 106 RETAG;
+    ArenaExit "arena_exit" "ArenaExit" 107 IMM0;
+    // Baseline 128-bit SIMD (the `src/core/simd.rs` registry, wired to execution).
+    // The hash tags are exactly the frozen `SimdOp::hash_tag`s, so content identity
+    // matches the pinned registry (`simd_builtin_tags_match_registry` guards it).
+    // The interpreter defines the bit-exact semantics; native lowers each to its
+    // `prism_simd_*` runtime symbol over a two-word vector cell. A `splat` unboxes
+    // its scalar (`F0`/`RAW`); `extract` untags its lane index (`IDX1`); the
+    // lane-wise binary ops thread two vector cells raw.
+    SimdFSplat "simd_fsplat" "SimdFSplat" 108 F0 surface 1 Str "(Float) -> F64x2";
+    SimdFExtract "simd_fextract" "SimdFExtract" 109 IDX1 surface 2 Str "(F64x2, Int) -> Float";
+    SimdFAdd "simd_fadd" "SimdFAdd" 110 RAW surface 2 Str "(F64x2, F64x2) -> F64x2";
+    SimdFSub "simd_fsub" "SimdFSub" 111 RAW surface 2 Str "(F64x2, F64x2) -> F64x2";
+    SimdFMul "simd_fmul" "SimdFMul" 112 RAW surface 2 Str "(F64x2, F64x2) -> F64x2";
+    SimdFMin "simd_fmin" "SimdFMin" 113 RAW surface 2 Str "(F64x2, F64x2) -> F64x2";
+    SimdFMax "simd_fmax" "SimdFMax" 114 RAW surface 2 Str "(F64x2, F64x2) -> F64x2";
+    SimdISplat "simd_isplat" "SimdISplat" 115 RAW surface 1 Str "(I64) -> I64x2";
+    SimdIExtract "simd_iextract" "SimdIExtract" 116 IDX1 surface 2 Str "(I64x2, Int) -> I64";
+    SimdIAdd "simd_iadd" "SimdIAdd" 117 RAW surface 2 Str "(I64x2, I64x2) -> I64x2";
+    SimdISub "simd_isub" "SimdISub" 118 RAW surface 2 Str "(I64x2, I64x2) -> I64x2";
+    SimdIAnd "simd_iand" "SimdIAnd" 119 RAW surface 2 Str "(I64x2, I64x2) -> I64x2";
+    SimdIOr "simd_ior" "SimdIOr" 120 RAW surface 2 Str "(I64x2, I64x2) -> I64x2";
+    SimdIXor "simd_ixor" "SimdIXor" 121 RAW surface 2 Str "(I64x2, I64x2) -> I64x2";
     ]
 }
 
@@ -802,9 +833,43 @@ mod tag_tests {
                 (Builtin::TaqConcat, "TaqConcat"),
                 (Builtin::TaqUncons, "TaqUncons"),
                 (Builtin::Bump, "Bump"),
+                (Builtin::ArenaEnter, "ArenaEnter"),
+                (Builtin::ArenaExit, "ArenaExit"),
+                (Builtin::SimdFSplat, "SimdFSplat"),
+                (Builtin::SimdFExtract, "SimdFExtract"),
+                (Builtin::SimdFAdd, "SimdFAdd"),
+                (Builtin::SimdFSub, "SimdFSub"),
+                (Builtin::SimdFMul, "SimdFMul"),
+                (Builtin::SimdFMin, "SimdFMin"),
+                (Builtin::SimdFMax, "SimdFMax"),
+                (Builtin::SimdISplat, "SimdISplat"),
+                (Builtin::SimdIExtract, "SimdIExtract"),
+                (Builtin::SimdIAdd, "SimdIAdd"),
+                (Builtin::SimdISub, "SimdISub"),
+                (Builtin::SimdIAnd, "SimdIAnd"),
+                (Builtin::SimdIOr, "SimdIOr"),
+                (Builtin::SimdIXor, "SimdIXor"),
             ],
             Builtin::hash_tag,
         );
+    }
+
+    // The wired SIMD builtins carry exactly the frozen `SimdOp::hash_tag`s, so
+    // executing the registry never moves a content hash relative to its pinned
+    // identity. Keyed by surface name, the one string both registries agree on.
+    #[test]
+    fn simd_builtin_tags_match_registry() {
+        use crate::core::simd::SimdOp;
+        for op in SimdOp::ALL {
+            let b = Builtin::from_name(op.name())
+                .unwrap_or_else(|| panic!("simd op `{}` has no wired builtin", op.name()));
+            assert_eq!(
+                b.hash_tag(),
+                op.hash_tag(),
+                "wired builtin for `{}` must reuse the frozen registry tag",
+                op.name()
+            );
+        }
     }
 
     // Wire indices are dense and unique from zero (also enforced at compile time by

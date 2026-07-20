@@ -226,9 +226,16 @@ pub struct DynFlags {
     /// re-elaboration (which builds its own [`from_env`](Self::from_env) config)
     /// stays silent. Program stdout is unaffected; rows go only to stderr.
     pub time_compile: bool,
-    /// `PRISM_QUIET` (default off): silence the compiler-internal fallback
-    /// warnings (fusion drift, free-monad fallback) on stderr.
+    /// `PRISM_QUIET` (default off): silence the rare compiler-internal
+    /// matcher-drift signal (an elaborated clause shape changed) on stderr.
     pub quiet: bool,
+    /// `PRISM_VERBOSE` / `--verbose` (default off): print the effect-lowering
+    /// fusion-fallback warning (a computation reaches `main` unhandled, or a
+    /// handler reifies its continuation, so operations reify instead of fusing)
+    /// to stderr. Off by default so an ordinary build or docs run stays quiet;
+    /// the same warning is always available as structured data through the
+    /// library API.
+    pub verbose: bool,
     /// `PRISM_MDBOOK_STRICT` (default off): make the mdbook preprocessor fail the
     /// build when a doc code block that should type-check does not, instead of
     /// only warning on stderr.
@@ -279,6 +286,11 @@ pub struct DynFlags {
     /// back to a user-wide cache directory, then `target/prism-store`; see
     /// [`crate::store::disk::resolve_store_path`].
     pub store_path: Option<PathBuf>,
+    /// `PRISM_SOLVER_TIMEOUT_MS` (default none): the per-obligation wall-clock
+    /// budget `prism verify` gives an external solver before it kills the process
+    /// and records an infrastructure timeout. Physical policy, never part of the
+    /// logical query; absent uses the adapter's built-in default.
+    pub solver_timeout_ms: Option<u64>,
     /// `PRISM_SIGN_MODE` (default `ssh`): which external tool signs and verifies
     /// the package-identity-to-root index. See [`SignMode`].
     pub sign_mode: SignMode,
@@ -325,6 +337,7 @@ impl Default for DynFlags {
             scc_backend: true,
             time_compile: false,
             quiet: false,
+            verbose: false,
             mdbook_strict: false,
             opt_level: OptLevel::default(),
             backend_opt: BackendOpt::default(),
@@ -336,6 +349,7 @@ impl Default for DynFlags {
             compiler_cache: true,
             store: false,
             store_path: None,
+            solver_timeout_ms: None,
             sign_mode: SignMode::default(),
             sign_key: None,
             sign_identity: None,
@@ -378,6 +392,7 @@ impl DynFlags {
             scc_backend: env_bool("PRISM_SCC_BACKEND", base.scc_backend),
             time_compile: env_bool("PRISM_TIME_COMPILE", base.time_compile),
             quiet: base.quiet || env_present("PRISM_QUIET"),
+            verbose: base.verbose || env_present("PRISM_VERBOSE"),
             mdbook_strict: base.mdbook_strict || env_present("PRISM_MDBOOK_STRICT"),
             opt_level: std::env::var("PRISM_OPT_LEVEL")
                 .ok()
@@ -397,6 +412,10 @@ impl DynFlags {
             store_path: std::env::var_os("PRISM_STORE_PATH")
                 .map(PathBuf::from)
                 .or_else(|| base.store_path.clone()),
+            solver_timeout_ms: std::env::var("PRISM_SOLVER_TIMEOUT_MS")
+                .ok()
+                .and_then(|s| s.trim().parse().ok())
+                .or(base.solver_timeout_ms),
             sign_mode: sign_mode_from_env(base.sign_mode),
             sign_key: std::env::var_os("PRISM_SIGN_KEY")
                 .map(PathBuf::from)
@@ -446,6 +465,7 @@ impl DynFlags {
             "scc-backend" => self.scc_backend = toml_bool(key, val)?,
             "time-compile" => self.time_compile = toml_bool(key, val)?,
             "quiet" => self.quiet = toml_bool(key, val)?,
+            "verbose" => self.verbose = toml_bool(key, val)?,
             "no-specialize" => self.no_specialize = toml_bool(key, val)?,
             "fuse" => self.fuse = toml_bool(key, val)?,
             "compiler-cache" => self.compiler_cache = toml_bool(key, val)?,
@@ -462,6 +482,7 @@ impl DynFlags {
             }
             "dump-core" => self.dump_core = Some(toml_string(key, val)?.into()),
             "store-path" => self.store_path = Some(PathBuf::from(toml_string(key, val)?)),
+            "solver-timeout-ms" => self.solver_timeout_ms = Some(toml_pos_int(key, val)? as u64),
             "sign-key" => self.sign_key = Some(PathBuf::from(toml_string(key, val)?)),
             "sign-identity" => self.sign_identity = Some(toml_string(key, val)?),
             "sign-allowed-signers" => {

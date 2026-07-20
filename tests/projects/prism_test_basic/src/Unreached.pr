@@ -1,0 +1,9 @@
+-- This module is never imported by `main`, so it is outside the binary entry
+-- closure. `prism test` must still discover and run its tests.
+pub fn answer() : Int = 42
+
+test fn unreached_module_is_tested() =
+  if answer() == 42 then
+    ()
+  else
+    fail()

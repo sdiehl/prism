@@ -14,10 +14,13 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+use crate::driver::stable_lock;
 use crate::error::Error;
 use crate::pkg::lock::Lock;
-use crate::store::disk::resolve_store_path;
+use crate::store::disk::{resolve_store_path, Store};
+use crate::verify::run::VerifyOptions;
 
 pub mod check_world;
 pub mod docs;
@@ -29,6 +32,7 @@ pub mod pkg;
 pub mod render;
 pub mod run;
 pub mod store;
+pub mod test;
 
 pub use run::ExampleStdin;
 
@@ -148,6 +152,12 @@ fn read_lock(project_root: &Path) -> Result<Lock, Error> {
 pub fn build_input(arg: &Path, out: Option<PathBuf>, mlir: bool, cfg: &crate::Config) -> CmdResult {
     let lineage_request = project_lineage_request(arg)?;
     let (full, roots, name, default_out) = resolve_input(arg, cfg)?;
+    // Enforce a committed stable-lock manifest beside a single source before
+    // building it, the same gate `prism check` applies. Absent manifest is a
+    // no-op, so an unlocked family builds unchanged.
+    if !is_project(arg) {
+        stable_lock::enforce(arg, &full, &roots).map_err(|e| (e, full.clone(), name.clone()))?;
+    }
     let out = out.unwrap_or(default_out);
     // Codegen writes intermediates (`.bc`, `.ll`) beside the binary, so the
     // output directory must exist first (the default `target/` may not yet).
@@ -281,11 +291,59 @@ pub fn check_cmd(file: Option<&Path>, cfg: &crate::Config) -> CmdResult {
         })?
     };
     let (full, roots, name, _) = resolve_input(&input, cfg)?;
+    // A committed stable-lock manifest beside a single source is enforced here, so
+    // a locked migration whose generated behavior drifted fails the check. Absent
+    // manifest is a no-op, so an unlocked family is not checked.
+    if !is_project(&input) {
+        stable_lock::enforce(&input, &full, &roots).map_err(|e| (e, full.clone(), name.clone()))?;
+    }
     // The public verdict validates (fip / replayable / effect reconciliation),
     // so `prism check` agrees with `prism build`. The type-only surface stays
     // available to `dump` / `report` / snapshots via `check_on_in`.
     crate::check_validated_on_in(&full, &roots, cfg).map_err(|e| (e, full, name))?;
     Ok(())
+}
+
+// `prism verify FILE [--solver z3] [--solvers z3,cvc5 --require-agreement]`:
+// discharge the file's function contracts through one or more external solvers,
+// print honest per-function receipts, and record content-addressed evidence
+// (receipts and dependency-closed certificates) in the store.
+pub fn verify_cmd(
+    file: &Path,
+    solver: &str,
+    solvers: &[String],
+    require_agreement: bool,
+    cfg: &crate::Config,
+) -> CmdResult {
+    let (full, roots, name, _) = resolve_input(file, cfg)?;
+    let parsed = crate::parse::parse(&full)
+        .map_err(|e| (Error::from(e), full.clone(), name.clone()))?
+        .program;
+    let program = crate::resolve::resolve_modules_in(parsed, &roots)
+        .map_err(|e| (e, full.clone(), name.clone()))?;
+    // An explicit `--solvers` list wins; otherwise the single `--solver`.
+    let solver_list = if solvers.is_empty() {
+        vec![solver.to_string()]
+    } else {
+        solvers.to_vec()
+    };
+    let opts = VerifyOptions {
+        solvers: solver_list,
+        require_agreement,
+        timeout: cfg.flags.solver_timeout_ms.map(Duration::from_millis),
+    };
+    // Evidence rides the same content-addressed store the compiler uses; it is a
+    // cache, so a store that cannot be opened just means no recorded evidence.
+    let store_root = resolve_store_path(cfg.flags.store_path.as_deref());
+    let store = Store::open_or_create(&store_root).ok();
+    let report = crate::verify::run::run_with(&program, &opts, store.as_ref())
+        .map_err(|e| (Error::from(e), full.clone(), name.clone()))?;
+    print!("{}", report.render());
+    if report.all_clear() {
+        Ok(())
+    } else {
+        Err((Error::CodegenVerification(report.summary()), full, name))
+    }
 }
 
 // `prism dump PHASE FILE`: print one pipeline-phase artifact.

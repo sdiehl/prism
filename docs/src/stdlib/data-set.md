@@ -4,7 +4,7 @@
 
 Ordered sets, reusing the balanced-tree map.
 
-Set algebra stays O(n log n) and preserves iteration order. The prelude opens this module.
+Set algebra stays O(n log n) and preserves iteration order. Base includes this module.
 
 Reserved (a later release): like `Map`, a set's identity will carry the content hash of the canonical `Ord` instance it was built with, so a set that crosses an assembly boundary commits to the ordering it was ordered by, and two programs that canonicalize different `Ord(k)` cannot silently exchange one. The representation-affecting classes (`Ord`, `Hash`) live in one place on the compiler side (`store::coherence::is_representation_affecting`); this is the container-side half of that reservation.
 

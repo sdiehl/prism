@@ -1,0 +1,28 @@
+-- Algebraic data types, pattern matching, and list processing. Pins the shape
+-- digests (`dump shape`) of a user datatype and the serialized-value form of a
+-- list result, the surface most exposed to filesystem/iteration ordering drift.
+
+type Tree = Leaf | Node(Tree, Int, Tree)
+
+fn insert(t : Tree, x : Int) : Tree =
+  match t of
+    Leaf => Node(Leaf, x, Leaf)
+    Node(l, v, r) =>
+      if x < v then
+        Node(insert(l, x), v, r)
+      elif x > v then
+        Node(l, v, insert(r, x))
+      else
+        t
+
+fn sum(t : Tree) : Int =
+  match t of
+    Leaf => 0
+    Node(l, v, r) => sum(l) + v + sum(r)
+
+fn build(xs : List(Int)) : Tree = foldl(\(acc, x) -> insert(acc, x), Leaf, xs)
+
+fn main() : Unit ! {IO} =
+  let t = build([5, 3, 8, 1, 4, 7, 9, 2, 6])
+  println(sum(t))
+  println(show(map(\(x) -> x * x, [1, 2, 3, 4, 5])))

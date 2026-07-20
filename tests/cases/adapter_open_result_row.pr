@@ -1,0 +1,21 @@
+-- The essential adapter type is polymorphic in the ambient tail `e`: it removes
+-- its source protocol, introduces its target protocol, and forwards the rest of
+-- the row untouched. That result row cannot be spelled as a declaration
+-- annotation: a declaration effect row must be closed, so an open tail in result
+-- position is rejected. Ambient preservation is available only implicitly, by
+-- leaving an adapter's result row to inference.
+effect KvV1
+  get_v1(Int) : Int
+  put_v1(Int, Int) : Unit
+
+effect KvV2
+  get_v2(Int) : Int
+  put_v2(Int, Int) : Unit
+
+fn adapt_v1_to_v2(action : () -> a ! {KvV1 | e}) : a ! {KvV2 | e} =
+  handle action() with
+    get_v1(key) resume k => k(get_v2(key))
+    put_v1(key, value) resume k =>
+      put_v2(key, value)
+      k(())
+    return r => r

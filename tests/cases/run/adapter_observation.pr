@@ -1,0 +1,49 @@
+import Replay (record, replay, serialize, deserialize)
+
+-- Where record and replay observe an adapter ladder. Record and replay handle
+-- the fixed capability vocabulary (console, file, random, environment), never a
+-- user protocol operation. An old client speaks the V1 protocol; an adapter
+-- re-performs it as V2; the provider serves V2. The client's V1 vocabulary and
+-- the provider's V2 vocabulary are both invisible to the recorder: it observes
+-- only the capability the provider performs, after adaptation.
+
+effect KvV1
+  get_v1(Int) : Int
+
+effect KvV2
+  get_v2(Int) : Int
+
+fn adapt_v1_to_v2(action) =
+  handle action() with
+    get_v1(key) resume k => k(get_v2(key))
+    return r => r
+
+-- A pure provider: no capability is performed anywhere in the ladder.
+fn serve_v2_pure(action) =
+  handle action() with
+    get_v2(key) resume k => k(key * 10)
+    return r => r
+
+-- A provider that serves V2 by drawing from the Random capability.
+fn serve_v2_live(action) =
+  handle action() with
+    get_v2(key) resume k => k(rng_rand())
+    return r => r
+
+fn client_v1() : Int ! {KvV1} = get_v1(5)
+
+fn main() =
+  -- Recording a pure ladder observes no operation at all: the trace is empty,
+  -- so neither the client's V1 vocabulary nor the provider's V2 vocabulary is
+  -- what the recorder sees.
+  let (a, ta) = record(\(_u) -> serve_v2_pure(\() -> adapt_v1_to_v2(client_v1)))
+  println(a)
+  println(str_len(serialize(ta)))
+  -- When the provider draws a capability, replay serves that post-adaptation
+  -- read from the trace. The traced value 42 flows through the provider's V2
+  -- operation, up through the adapter, to the client's V1 result.
+  let b = replay(
+      deserialize("I2:42"),
+      \(_u) -> serve_v2_live(\() -> adapt_v1_to_v2(client_v1)),
+    )
+  println(b)

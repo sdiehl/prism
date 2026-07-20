@@ -21,14 +21,14 @@ The step continuation is ordinary data, not an effect, so every combinator is a 
 
 ## Naming and the import idiom
 
-The combinators keep their natural names (`map`, `filter`, `take`, `zip`, ...), which collide with the prelude's eager `List` surface. That is why this module is opt-in and NOT opened by the prelude: the flat namespace has no shadowing, so the documented idiom is a qualified import at the use site:
+The combinators keep their natural names (`map`, `filter`, `take`, `zip`, ...), which collide with Base's eager `List` surface. That is why this module is opt-in and NOT in Base: the flat namespace has no shadowing, so the documented idiom is a qualified import at the use site:
 
 ```text
 import Sequence as Seq          -- qualified: Seq.map, Seq.filter, Seq.take
 Seq.to_list(Seq.filter(Seq.map(Seq.range(1, 100), \(x) -> x * x), even))
 ```
 
-A selective `import Sequence (unfold, iterate)` also works for names that do not clash with the prelude.
+A selective `import Sequence (unfold, iterate)` also works for names that do not clash with Base.
 
 ## Fusion and allocation
 

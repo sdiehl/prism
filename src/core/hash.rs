@@ -626,7 +626,7 @@ fn sccs(core: &Core, fnmap: &BTreeMap<Sym, &CoreFn>) -> Vec<Vec<Sym>> {
     // Merkle hashing needs, a cycle's dependencies hashed before it). hash.rs
     // canonicalizes the members within a component separately, so their order
     // here is not part of the hash contract.
-    crate::scc::tarjan_scc(&adj)
+    crate::util::scc::tarjan_scc(&adj)
         .into_iter()
         .map(|comp| comp.into_iter().map(|i| order[i]).collect())
         .collect()

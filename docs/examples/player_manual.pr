@@ -1,0 +1,34 @@
+import Wire (..)
+
+type Calling = Sorcerer | Wizard | Bard deriving (Eq, Show, Serialize, Stable)
+
+stable PlayerManual {
+  V1 = { hero: String, calling: Calling, level: Int } frozen "fc9d14271df9a149",
+  V2 = { ..V1, signature_spell: String = "Magic Missile" } frozen "ab2c3f1a8c78e60f",
+  V3 = { ..V2, spell_slots: Int = 2, inspiration: Int = 0 },
+  migrations {
+    V1 -> V2 = auto
+    V2 -> V3 = auto
+    V1 -> V3 = auto
+  }
+}
+
+fn body() =
+  let current =
+    PlayerManual {
+      hero = "Mira",
+      calling = Sorcerer,
+      level = 7,
+      signature_spell = "Magic Missile",
+      spell_slots = 5,
+      inspiration = 3
+    }
+  -- The composed V3 -> V1 route drops every field the older sheet cannot carry
+  -- and unions the loss each rung reports.
+  let (first_edition, loss) = PlayerManual.V1.downgrade(current)
+  println(concat("dropped reaching V1: ", show(loss_names(loss))))
+  -- The composed V1 -> V3 route restores the declared default for each of them.
+  let restored = PlayerManual.V1.upgrade(first_edition)
+  println(concat("restored slots: ", show(restored.spell_slots)))
+
+fn main() = default(body, ())

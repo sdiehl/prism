@@ -1,11 +1,11 @@
 use super::Token;
 use Token::{
     Alias, As, Borrow, Break, Canonical, Catch, CharLit, Class, Comment, Continue, Deriving, Do,
-    Each, Effect, Elif, Else, False, Fbip, Fip, Float, Fn, For, Forall, Given, Handle, Handler,
-    Ident, If, Import, In, Instance, Int, InterpEnd, InterpMid, InterpStart, KwBool, KwChar,
-    KwError, KwFloat, KwI64, KwInt, KwString, KwU64, KwUnit, Let, Loop, Mask, Match, Newtype, Of,
-    Opaque, Pattern, Probe, Pub, QualName, Replayable, Return, Stable, StringLit, Then, Throw,
-    Transact, True, Try, Type, UIdent, Using, Val, Var, Where, While, With,
+    Each, Effect, Elif, Else, Ensures, False, Fbip, Fip, Float, Fn, For, Forall, Given, Handle,
+    Handler, Ident, If, Import, In, Instance, Int, InterpEnd, InterpMid, InterpStart, KwBool,
+    KwChar, KwError, KwFloat, KwI64, KwInt, KwString, KwU64, KwUnit, Let, Logic, Loop, Mask, Match,
+    Newtype, Of, Opaque, Pattern, Probe, Pub, QualName, Replayable, Requires, Return, Stable,
+    StringLit, Then, Throw, Transact, True, Try, Type, UIdent, Using, Val, Var, Where, While, With,
 };
 
 /// Coarse highlight category for one lexed token, matched in `web/index.html`.
@@ -16,7 +16,8 @@ pub const fn tok_class(t: &Token) -> &'static str {
         | Catch | Transact | Alias | Class | Instance | Canonical | Pattern | Deriving | Where
         | Handle | With | Handler | Mask | Val | Return | Let | Var | Borrow | In | For | Do
         | If | Then | Else | Elif | Match | Of | Forall | Probe | Replayable | Stable | Given
-        | While | Loop | Break | Continue | Fip | Fbip | Each | Using => "kw",
+        | While | Loop | Break | Continue | Fip | Fbip | Each | Using | Logic | Requires
+        | Ensures => "kw",
         True | False => "lit",
         KwInt | KwBool | KwUnit | KwFloat | KwChar | KwString | KwI64 | KwU64 => "ty",
         UIdent(_) | QualName(_) => "ctor",

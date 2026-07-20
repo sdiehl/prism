@@ -145,7 +145,7 @@ Program {
 }
 
 == types ==
-[E1998] Type Error: in `main`: type mismatch: expected a, got Int
+[E1022] Type Error: in `main`: type mismatch: expected a, got Int
    ╭─[ <source>:7:38 ]
    │
  7 │ fn main() = println(pick(\(x) -> x + 1))

@@ -16,6 +16,13 @@ use serde::{Deserialize, Serialize};
 const CLOSURE_TAG_SCHEME: &[u8] = b"prism-closure-tag-v1";
 const CLOSURE_TAG_MASK: u64 = i64::MAX.cast_unsigned();
 
+// Value bits a tagged-immediate int may occupy. A small int `n` is stored as
+// `(n << 1) | 1` (the low bit is the immediate tag), leaving a sign bit plus this
+// many value bits, so `n` must lie in `[-(1 << N), (1 << N) - 1]`. Outside that,
+// the `<< 1` drops bit 62 while the interpreter's full-width `Rv::Int` keeps it,
+// forking the two tiers; such a literal must reach codegen boxed as I64/bignum.
+const TAGGED_INT_VALUE_BITS: u32 = i64::BITS - 2;
+
 use super::abi::{ctor_tag, idx64, BIG_TAG, HDR_BYTES, STR_TAG, TAG_OFF, WORD_BYTES};
 use super::dispatch::partial_app_body;
 use super::isa::{Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa};
@@ -305,7 +312,14 @@ impl<'a, I: Isa> Cg<'a, I> {
                 .get(x)
                 .cloned()
                 .ok_or_else(|| format!("codegen: unbound {x}")),
-            Value::Int(n) => Ok(self.isa.const_int(&mut self.b, n.wrapping_shl(1) | 1)),
+            Value::Int(n) => {
+                debug_assert!(
+                    (-(1i64 << TAGGED_INT_VALUE_BITS)..(1i64 << TAGGED_INT_VALUE_BITS)).contains(n),
+                    "codegen: Int literal {n} outside tagged-immediate range; the \
+                     elaborator must box a wider literal as I64/bignum before codegen"
+                );
+                Ok(self.isa.const_int(&mut self.b, n.wrapping_shl(1) | 1))
+            }
             Value::I64(n) => {
                 let c = self.isa.const_int(&mut self.b, *n);
                 Ok(self.box_i64(&c))
@@ -608,8 +622,17 @@ impl<'a, I: Isa> Cg<'a, I> {
                     AbiResult::Raw => t,
                     AbiResult::RetagImmediate => self.retag(&t),
                 };
-                for v in owned {
-                    self.rc_dec(&v);
+                // Every builtin borrows its arguments, so the caller releases
+                // them after the call, with one exception: `arena_exit` consumes
+                // its value argument. That value may be an arena-owned cell
+                // whose region the call itself reclaims, so even the no-op
+                // release (a header read to see the arena bit) would touch
+                // freed memory here; the runtime performs the caller's release
+                // inside the call, while the region is still alive.
+                if *b != Builtin::ArenaExit {
+                    for v in owned {
+                        self.rc_dec(&v);
+                    }
                 }
                 Ok(out)
             }
@@ -1685,6 +1708,7 @@ mod tests {
             super::HDR_BYTES
         );
         assert_eq!(c_def("PRISM_RC_W"), 0);
+        assert_eq!(c_def("PRISM_WORD_BYTES"), super::WORD_BYTES);
         assert_eq!(
             c_def("PRISM_ARITY_W") * super::WORD_BYTES + super::WORD_BYTES,
             super::HDR_BYTES

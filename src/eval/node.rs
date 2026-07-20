@@ -47,6 +47,8 @@ pub enum Node {
     RefGet(Atom),
     RefSet(Atom, Atom),
     Bump(Vec<Atom>),
+    ArenaEnter,
+    ArenaExit(Vec<Atom>),
 }
 
 #[derive(Debug)]
@@ -169,6 +171,14 @@ fn node(c: &Comp, runtime: bool) -> Node {
         Comp::Mask(ops, b) => Node::Mask(Rc::from(ops.as_slice()), lower_with_runtime(b, runtime)),
         Comp::StrBuiltin(Builtin::Bump, args) if runtime => {
             Node::Bump(args.iter().map(|value| atom_of(value, runtime)).collect())
+        }
+        // The region brackets the arena pass emits around a `with_arena`
+        // activation. The verifier has no regions (values are Rust data), so
+        // enter yields a placeholder token and exit passes the result through;
+        // both are unobservable, exactly the native contract.
+        Comp::StrBuiltin(Builtin::ArenaEnter, _) if runtime => Node::ArenaEnter,
+        Comp::StrBuiltin(Builtin::ArenaExit, args) if runtime => {
+            Node::ArenaExit(args.iter().map(|value| atom_of(value, runtime)).collect())
         }
         Comp::StrBuiltin(n, args) => Node::StrBuiltin(
             *n,

@@ -1,3 +1,4 @@
+pub(crate) mod coeffect;
 pub(crate) mod effects;
 pub(crate) mod repr;
 pub(crate) mod ty;
@@ -11,6 +12,6 @@ pub use crate::tc::{
 pub use repr::{is_or_null_element, repr_of_type, Repr};
 pub use ty::{
     show_effects, show_type_with_effects, Effects, Type, ARBITRARY_CLASS, CONS, DIV_CLASS,
-    EQ_CLASS, FLOAT_BUF, HASH_CLASS, IDENTIFIABLE, IDENTIFIABLE_BUNDLE, INT_BUF, LENS, LIST, NIL,
-    NUM_CLASS, ORD_CLASS, SERIALIZE_CLASS, SHOW_CLASS, STABLE_CLASS,
+    EQ_CLASS, F64X2, FLOAT_BUF, HASH_CLASS, I64X2, IDENTIFIABLE, IDENTIFIABLE_BUNDLE, INT_BUF,
+    LENS, LIST, NIL, NUM_CLASS, ORD_CLASS, SERIALIZE_CLASS, SHOW_CLASS, STABLE_CLASS,
 };

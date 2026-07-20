@@ -1,3 +1,4 @@
+pub mod block_index;
 pub mod builtins;
 pub mod captures;
 mod cbpv;
@@ -27,7 +28,7 @@ pub use cbpv::{
 pub(crate) use effect_analysis::latent_ops;
 pub(crate) use effect_check::residual_effects;
 pub use effects::{EffectStrategy, OpGrades, EFFECT_TIERS};
-pub use elaborate::{builtin_arities, elaborate, elaborate_expr, konst_fns};
+pub use elaborate::{builtin_arities, elaborate, elaborate_expr, elaborate_expr_defs, konst_fns};
 pub(crate) use elaborate::{elaborate_typed, typed_verification_error};
 pub use fbip::{
     balanced, check_fip, check_fip_linear, fip_annots, insert_rc, replayable_annots, reuse, Fips,

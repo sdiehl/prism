@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use crate::provenance::{self, TraceDigest, EVENT_HASH_SCHEME};
+use crate::lineage::provenance::{self, TraceDigest, EVENT_HASH_SCHEME};
 
 use super::diff::{diff, DiffReport};
 use super::explain::{why_output, why_world_state, Explanation, SelectedOutput};

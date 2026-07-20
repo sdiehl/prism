@@ -1,0 +1,10 @@
+prism-smt-query-v1
+logic QF_LIA
+digest 99952b093dcf82f24b5c7a2df0494d23edc0944d8e300b9550abb8c699c6ed05
+--
+(set-logic QF_LIA)
+(declare-const x0 Int)
+(assert (>= x0 0))
+(assert (< x0 10))
+(assert (not (< x0 20)))
+(check-sat)

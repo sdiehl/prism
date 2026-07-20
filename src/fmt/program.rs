@@ -91,6 +91,10 @@ impl Fmt<'_> {
                 pubd(&f.name, self.fmt_fn(f, Mode::Layout)),
             ));
         }
+        for f in &prog.logic_fns {
+            let line = format!("{} {}", kw::LOGIC, self.fmt_fn(f, Mode::Layout));
+            items.push((f.span.start, f.span.end, pubd(&f.name, line)));
+        }
         items.sort_by_key(|(start, _, _)| *start);
 
         let mut out = String::new();

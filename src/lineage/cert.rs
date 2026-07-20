@@ -9,7 +9,7 @@
 //! ([`sidecar_subject`]) so minting and checking cannot drift.
 
 use crate::error::Error;
-use crate::provenance::{sha256_hex, EVENT_HASH_SCHEME};
+use crate::lineage::provenance::{sha256_hex, EVENT_HASH_SCHEME};
 use crate::store::cert::{
     check_lineage_cert, encode_lineage_cert, lineage_cert, replay_cert, CertStatus,
 };

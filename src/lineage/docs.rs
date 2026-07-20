@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use crate::driver::{ArtifactIdentity, BuildIdentity};
 use crate::error::Error;
-use crate::provenance::{self, EVENT_HASH_SCHEME};
+use crate::lineage::provenance::{self, EVENT_HASH_SCHEME};
 use crate::resolve::Root;
 use crate::Config;
 

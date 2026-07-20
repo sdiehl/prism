@@ -1,0 +1,19 @@
+-- A private helper (`normalize` is not exported) exercised by an inline unit
+-- test, which reaches it because a unit test is checked inside its own module.
+fn normalize(n : Int) : Int = n + 1
+
+pub fn parse_ok(s : String) : Bool = true
+
+test fn normalize_is_private_but_visible_inline() =
+  if normalize(3) == 4 then
+    ()
+  else
+    fail()
+
+test fn parse_ok_holds() =
+  if parse_ok("x") then
+    ()
+  else
+    fail()
+
+test fn always_fails() = fail()

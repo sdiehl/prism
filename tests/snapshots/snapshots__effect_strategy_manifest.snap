@@ -3,6 +3,7 @@ source: tests/snapshots.rs
 expression: "lines.join(\"\\n\")"
 ---
 examples/arena.pr: evidence
+examples/arena_escape.pr: evidence
 examples/arena_shared.pr: evidence
 examples/async.pr: whole-program-free-monad
 examples/async_capability.pr: whole-program-free-monad
@@ -55,6 +56,7 @@ examples/os.pr: evidence
 examples/param_effects.pr: state-fusion
 examples/parse_dont_validate.pr: whole-program-free-monad
 examples/pipeline.pr: whole-program-free-monad
+examples/player_manual.pr: selective-free-monad
 examples/proptest.pr: whole-program-free-monad
 examples/protocol_ladder.pr: whole-program-free-monad
 examples/queens.pr: selective-free-monad
@@ -83,6 +85,8 @@ tests/cases/fail_unhandled.pr: selective-free-monad
 tests/cases/higher_eff.pr: whole-program-free-monad
 tests/cases/mask_tunnels_to_outer.pr: selective-free-monad
 tests/cases/multishot.pr: evidence
+tests/cases/run/adapter_observation.pr: whole-program-free-monad
+tests/cases/run/arena_mixed.pr: evidence
 tests/cases/run/cancel_await.pr: whole-program-free-monad
 tests/cases/run/cancel_completed.pr: whole-program-free-monad
 tests/cases/run/cancel_finalizer.pr: whole-program-free-monad
@@ -95,7 +99,9 @@ tests/cases/run/comp_guard_dispatch.pr: whole-program-free-monad
 tests/cases/run/comp_guards.pr: whole-program-free-monad
 tests/cases/run/comp_in_annotated_row.pr: whole-program-free-monad
 tests/cases/run/comp_map_once.pr: state-fusion
+tests/cases/run/control_effects.pr: whole-program-free-monad
 tests/cases/run/curry_effect.pr: evidence
+tests/cases/run/deep_effect_recursion.pr: state-fusion
 tests/cases/run/default_or.pr: selective-free-monad
 tests/cases/run/eff_closure_arg.pr: whole-program-free-monad
 tests/cases/run/eff_eta_thunk.pr: whole-program-free-monad
@@ -133,14 +139,17 @@ tests/cases/run/nursery_name_collision.pr: whole-program-free-monad
 tests/cases/run/open_nontail.pr: selective-free-monad
 tests/cases/run/opt_chain.pr: selective-free-monad
 tests/cases/run/optics_index.pr: selective-free-monad
+tests/cases/run/optics_index_effect.pr: selective-free-monad
 tests/cases/run/optics_read.pr: selective-free-monad
 tests/cases/run/ordered_wire_stopgap.pr: whole-program-free-monad
 tests/cases/run/param_eff.pr: evidence
 tests/cases/run/quickcheck_detect.pr: whole-program-free-monad
+tests/cases/run/read_bad_utf8.pr: evidence
 tests/cases/run/reified_under_world.pr: whole-program-free-monad
 tests/cases/run/replayable_ok.pr: evidence
 tests/cases/run/rollback.pr: selective-free-monad
 tests/cases/run/stable_ladder.pr: whole-program-free-monad
+tests/cases/run/stable_migrations.pr: selective-free-monad
 tests/cases/run/stream_take.pr: state-fusion
 tests/cases/run/streams_edge.pr: state-fusion
 tests/cases/run/sugar_if.pr: evidence

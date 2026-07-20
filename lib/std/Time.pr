@@ -225,7 +225,7 @@ pub fn instant_nanos(i : Instant) : Int =
     Instant(n) => n
 
 -- | The span from `earlier` to `later` (`later - earlier`). Named `elapsed`, not
--- `between`, to leave the prelude's numeric `between` range test unshadowed.
+-- `between`, to leave Base's numeric `between` range test unshadowed.
 --
 -- ```prism
 -- dur_nanos(elapsed(Instant(100), Instant(450)))

@@ -258,6 +258,12 @@ pub enum ErrKind {
         expected: String,
         found: String,
     },
+    /// The core subtype/unification mismatch: the checker expected one type and
+    /// found another. The catalogued home for what the legacy
+    /// [`TypeError::TypeMismatch`] carried, so the mismatch keeps a dedicated code
+    /// and its descent frames once it gains context (see [`TypeError::in_fn`]).
+    #[error("type mismatch: expected {expected}, got {found}")]
+    TypeMismatch { expected: String, found: String },
     #[error("unknown type `{name}`")]
     UnknownType { name: String },
     #[error("{report}")]
@@ -599,6 +605,40 @@ pub enum ErrKind {
         block: String,
         dir: String,
     },
+    #[error(
+        "cannot derive `stable {block}` migration {from} -> {to}\n  \
+         auto cannot {problem}: {fields}\n  \
+         {repair}"
+    )]
+    StableAutoUndecidable {
+        block: String,
+        from: String,
+        to: String,
+        problem: String,
+        fields: String,
+        repair: String,
+    },
+    #[error("migration `{from} -> {to}` in `stable {block}` {reason}")]
+    StableMigrationBadEdge {
+        block: String,
+        from: String,
+        to: String,
+        reason: String,
+    },
+    #[error(
+        "generated migration `{block}` {edge} changed\n  \
+         {changes}\n  \
+         derived loss paths: {loss}\n  \
+         the locked family cannot be rewritten implicitly. Inspect the migration diff,\n  \
+         then relock an unpublished family (`prism store lock --accept <file>`), or add a\n  \
+         new rung or route for a published family so its old behavior stays addressable."
+    )]
+    StableLockDrift {
+        block: String,
+        edge: String,
+        changes: String,
+        loss: String,
+    },
     #[error("handler clause for `{op}` exceeds its declared grade `{grade}` ({limit}): {did}")]
     HandlerGradeExceeded {
         op: String,
@@ -695,6 +735,26 @@ pub enum ErrKind {
         "`{name}` reimplements the standard library function `{stdlib}`; call `{stdlib}` instead"
     )]
     RedundantStdlibDef { name: String, stdlib: String },
+    // SMT contracts. A `logic fn` body or a `requires`/`ensures` clause
+    // is a total first-order proposition over `Bool`/`Int`; these report the
+    // smallest offending logical subexpression. Solver-free: raised during normal
+    // compilation, never gated on an installed solver.
+    #[error("unsupported in a logical context: {detail}; a contract is a total first-order proposition over Bool and Int")]
+    LogicUnsupported { detail: String },
+    #[error("`{name}` is not a parameter, the result binder, or a visible logical declaration")]
+    LogicUnresolved { name: String },
+    #[error("`{name}` is a runtime definition and cannot appear in a contract; only parameters and logical declarations are in logical scope")]
+    LogicNotLogical { name: String },
+    #[error("logical sort error: {detail}")]
+    LogicSort { detail: String },
+    #[error("logical declaration `{name}` takes {expected} argument(s), {got} given")]
+    LogicArity {
+        name: String,
+        expected: usize,
+        got: usize,
+    },
+    #[error("duplicate logical declaration `{name}`")]
+    LogicDuplicate { name: String },
 }
 
 impl ErrKind {
@@ -708,6 +768,7 @@ impl ErrKind {
             Self::NotIndexable { .. } => "E1099",
             Self::UnboundVar { .. } => code::SCOPE_UNBOUND,
             Self::PolyRecursionMismatch { .. } => "E1000",
+            Self::TypeMismatch { .. } => "E1022",
             Self::UnknownType { .. } => "E1001",
             Self::TypedHole { .. } => code::TYPED_HOLE.as_str(),
             Self::OrNullBadElement { .. } => "E1019",
@@ -813,6 +874,9 @@ impl ErrKind {
             Self::RungFieldNeedsDefault { .. } => "E6025",
             Self::FrozenShapeChanged { .. } => "E6026",
             Self::RungNeedsConverter { .. } => "E6027",
+            Self::StableAutoUndecidable { .. } => "E6065",
+            Self::StableMigrationBadEdge { .. } => "E6066",
+            Self::StableLockDrift { .. } => "E6067",
             Self::HandlerGradeExceeded { .. } => "E6028",
             Self::OpPolymorphicReturn { .. } => "E6029",
             Self::NeverClauseResumes { .. } => "E6030",
@@ -850,6 +914,13 @@ impl ErrKind {
             Self::MissingArgument { .. } => "E6058",
             Self::DuplicateBehavior { .. } => "E6063",
             Self::RedundantStdlibDef { .. } => "E6064",
+            // E8xxx: logical/contract checking.
+            Self::LogicUnsupported { .. } => "E8000",
+            Self::LogicUnresolved { .. } => "E8001",
+            Self::LogicNotLogical { .. } => "E8002",
+            Self::LogicSort { .. } => "E8003",
+            Self::LogicArity { .. } => "E8004",
+            Self::LogicDuplicate { .. } => "E8005",
         }
     }
 
@@ -949,7 +1020,19 @@ impl TypeError {
                     msg: format!("in `{fn_name}`: {self}"),
                 }
             }
-            Self::TypeMismatch { span, .. } | Self::TypeFailure { span, .. } => Self::TypeFailure {
+            // The core type mismatch migrates onto the catalogue as it gains
+            // context: routing it through `ErrKind::TypeMismatch` keeps its
+            // dedicated code and records the descent as a real frame, instead of
+            // flattening it back onto the `TypeFailure` (E1998) catch-all the way a
+            // plain string wrap would.
+            Self::TypeMismatch {
+                span,
+                expected,
+                found,
+            } => ErrKind::TypeMismatch { expected, found }
+                .at(span)
+                .in_fn(fn_name),
+            Self::TypeFailure { span, .. } => Self::TypeFailure {
                 span,
                 msg: format!("in `{fn_name}`: {self}"),
             },
@@ -961,7 +1044,9 @@ impl TypeError {
 mod tests {
     use std::collections::BTreeMap;
 
-    use super::ErrKind;
+    use marginalia::Span;
+
+    use super::{ErrKind, TypeError};
 
     /// Well below the catalogue's true size (over a hundred variants), so a table
     /// that has silently shrunk fails loudly instead of passing vacuously.
@@ -1008,6 +1093,7 @@ mod tests {
                 expected,
                 found
             },
+            TypeMismatch { expected, found },
             UnknownType { name },
             TypedHole { report },
             OrNullBadElement { found },
@@ -1162,6 +1248,26 @@ mod tests {
                 block,
                 dir
             },
+            StableAutoUndecidable {
+                block,
+                from,
+                to,
+                problem,
+                fields,
+                repair
+            },
+            StableMigrationBadEdge {
+                block,
+                from,
+                to,
+                reason
+            },
+            StableLockDrift {
+                block,
+                edge,
+                changes,
+                loss
+            },
             HandlerGradeExceeded {
                 op,
                 grade,
@@ -1208,6 +1314,16 @@ mod tests {
             MissingArgument { fn_name, param },
             DuplicateBehavior { names },
             RedundantStdlibDef { name, stdlib },
+            LogicUnsupported { detail },
+            LogicUnresolved { name },
+            LogicNotLogical { name },
+            LogicSort { detail },
+            LogicArity {
+                name,
+                expected,
+                got
+            },
+            LogicDuplicate { name },
         ];
 
         let mut seen: BTreeMap<&'static str, String> = BTreeMap::new();
@@ -1225,6 +1341,45 @@ mod tests {
             seen.len() > MIN_DISTINCT_CODES,
             "expected the full code table, found {}",
             seen.len()
+        );
+    }
+
+    // The core type mismatch has a dedicated catalogue code, distinct from the
+    // legacy catch-all codes, and it survives `in_fn`: gaining function context
+    // routes it onto the catalogue rather than flattening it back onto the
+    // `TypeFailure` (E1998) catch-all.
+    #[test]
+    fn core_type_mismatch_has_a_dedicated_code_through_in_fn() {
+        let dedicated = ErrKind::TypeMismatch {
+            expected: "String".into(),
+            found: "Int".into(),
+        }
+        .code();
+        assert_eq!(dedicated, "E1022");
+
+        // The dedicated code differs from both legacy mismatch/failure catch-alls,
+        // read off real values rather than hard-coded spellings.
+        let legacy_mismatch = TypeError::TypeMismatch {
+            span: Span::default(),
+            expected: "String".into(),
+            found: "Int".into(),
+        };
+        let legacy_failure = TypeError::TypeFailure {
+            span: Span::default(),
+            msg: String::new(),
+        };
+        assert_ne!(dedicated, legacy_mismatch.error_code().as_str());
+        assert_ne!(dedicated, legacy_failure.error_code().as_str());
+
+        // Gaining function context routes the mismatch onto the catalogue: a
+        // `Kind` carrying the dedicated code and a real descent frame, with the
+        // message preserved.
+        let contextual = legacy_mismatch.in_fn("main");
+        assert!(matches!(contextual, TypeError::Kind(_)));
+        assert_eq!(contextual.error_code().as_str(), dedicated);
+        assert_eq!(
+            format!("{contextual}"),
+            "in `main`: type mismatch: expected String, got Int"
         );
     }
 }

@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
-use crate::fresh::Fresh;
 use crate::names;
 use crate::sym::Sym;
+use crate::util::fresh::Fresh;
 
 use super::super::cbpv::{Comp, Core, CoreFn, CorePat, HandleOp, Value};
 use super::super::fv::{comp as freev, pat_vars};

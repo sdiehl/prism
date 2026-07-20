@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 
 use crate::error::Error;
 use crate::hir::NodeFacts;
+use crate::lineage::QueryFact;
 use crate::parse::parse;
 use crate::resolve::{load, resolve_loaded_module_units, Module, Root};
 use crate::store::disk::{resolve_store_path, Store, Written};
@@ -11,7 +12,7 @@ use crate::syntax::desugar::desugar_with_scope;
 use crate::types::{check_seeded, Checked, DeclInfo, TypecheckSeed};
 use serde::{Deserialize, Serialize};
 
-use super::decision::{DecisionTracker, ModuleQueryDecision};
+use super::decision::{persist_facts, DecisionTracker, ModuleQueryDecision};
 use super::downstream::cache_enabled;
 use super::identity::{
     compiler_binary_fingerprint, module_interface_from_checked, stdlib_typecheck_seed,
@@ -34,6 +35,24 @@ const CHECKED_BODY_FORMAT: &str = "prism-checked-body-v2";
 const STANDARD_FOUNDATION_SCHEMA: &[u8] = b"prism-standard-foundation-input-v1";
 const INJECTED_FOUNDATION_NAME: &str = "__query_injected_foundation";
 const INJECTED_FOUNDATION_SOURCE: &str = "fn __query_injected_foundation() : Unit = ()\n";
+
+/// Remove `test fn` declarations from a program under production mode; retain
+/// them under test mode. The single production-neutrality chokepoint shared by
+/// the single-file front (`front::prepare_resolved_front`) and the project module
+/// check (`check_modules_on`), so a test-only edit cannot move any production
+/// interface hash, Core hash, or backend artifact, and the two paths cannot drift.
+pub(super) fn strip_tests_for_mode(mode: super::BuildMode, program: &mut Program) {
+    if mode == super::BuildMode::Production {
+        program.fns.retain(|d| !d.test);
+    }
+}
+
+// A ready module's per-artifact table lookup as a structured error, not a
+// map-index panic. Readiness comes from the resolved key set, so a miss is a
+// broken pass invariant that must surface as a diagnostic rather than abort.
+fn missing_ready_artifact(module: &str, artifact: &str) -> Error {
+    Error::ResolveModule(format!("ready module `{module}` is missing its {artifact}"))
+}
 
 /// One independently checked source module and its public cutoff artifact.
 #[derive(Clone, Debug)]
@@ -83,14 +102,27 @@ pub fn check_modules_on(
     roots: &[Root],
     cfg: &Config,
 ) -> Result<ModuleCheckReport, Error> {
-    let root_entry = parse(src)?.program;
+    let mut root_entry = parse(src)?.program;
     let foundation = if src.starts_with(PRELUDE) {
         stdlib_typecheck_seed()?
     } else {
         injected_typecheck_seed()?
     };
     let foundation_identity = standard_foundation_identity(src);
-    let loaded = load(&root_entry, roots)?;
+    let mut loaded = load(&root_entry, roots)?;
+    // Production neutrality: a project check must be byte-identical whether or not
+    // any module carries `test fn` declarations, since a module's checked
+    // interface digest feeds its importers and the durable module cache. Tests are
+    // stripped from every loaded module and the root before their programs derive
+    // the interface exports, the checked bodies, and the query keys. Only
+    // `prism test` selects `BuildMode::Test`, which retains them so the harness can
+    // check and run the test supplements. The single-file front does the same at
+    // its own resolve boundary; both call [`strip_tests_for_mode`], so the two
+    // production views cannot drift.
+    strip_tests_for_mode(cfg.mode, &mut root_entry);
+    for module in &mut loaded {
+        strip_tests_for_mode(cfg.mode, &mut module.prog);
+    }
     let shipped = embedded_std_modules(&loaded);
     let entries = loaded
         .iter()
@@ -122,6 +154,10 @@ pub fn check_modules_on(
     let mut interfaces = BTreeMap::<String, ModuleInterface>::new();
     let mut checked_modules = BTreeMap::<String, CheckedModule>::new();
     let mut decisions = Vec::new();
+    // Facts are buffered here and committed once, only after the whole DAG is
+    // known acyclic. The import-cycle fallback returns before the commit, so no
+    // per-module fact the empty report disowns can reach the durable ledger.
+    let mut pending_facts: Vec<QueryFact> = Vec::new();
     while !pending.is_empty() {
         let ready = pending
             .iter()
@@ -145,9 +181,12 @@ pub fn check_modules_on(
         for name in ready {
             let dep_names = dependencies.get(&name).cloned().unwrap_or_default();
             let deps = dep_names.iter();
+            let source = sources
+                .get(&name)
+                .ok_or_else(|| missing_ready_artifact(&name, "source"))?;
             let decision = DecisionTracker::new(
                 &name,
-                &sources[&name],
+                source,
                 dep_names.iter(),
                 &interfaces,
                 &foundation_identity,
@@ -156,7 +195,7 @@ pub fn check_modules_on(
             )?;
             let key = module_query_key(
                 &name,
-                &sources[&name],
+                source,
                 deps.clone(),
                 &interfaces,
                 &foundation_identity,
@@ -164,7 +203,7 @@ pub fn check_modules_on(
             )?;
             let interface_key = checked_interface_key(
                 &name,
-                &sources[&name],
+                source,
                 deps.clone(),
                 &interfaces,
                 &foundation_identity,
@@ -172,7 +211,7 @@ pub fn check_modules_on(
             )?;
             let body_key = checked_body_key(
                 &name,
-                &sources[&name],
+                source,
                 deps.clone(),
                 &interfaces,
                 &foundation_identity,
@@ -184,7 +223,9 @@ pub fn check_modules_on(
                     module.reused = true;
                     session.record_hit();
                     pending.remove(&name);
-                    decisions.push(decision.finish(&module.interface.digest, true)?);
+                    let (module_decision, fact) = decision.finish(&module.interface.digest, true);
+                    decisions.push(module_decision);
+                    pending_facts.extend(fact);
                     interfaces.insert(name.clone(), module.interface.clone());
                     checked_modules.insert(name, module);
                     continue;
@@ -198,7 +239,9 @@ pub fn check_modules_on(
                         session.insert_module(key.clone(), module.clone());
                     }
                     pending.remove(&name);
-                    decisions.push(decision.finish(&module.interface.digest, true)?);
+                    let (module_decision, fact) = decision.finish(&module.interface.digest, true);
+                    decisions.push(module_decision);
+                    pending_facts.extend(fact);
                     interfaces.insert(name.clone(), module.interface.clone());
                     checked_modules.insert(name, module);
                     continue;
@@ -208,18 +251,28 @@ pub fn check_modules_on(
                         session.record_hit();
                     }
                     pending.remove(&name);
-                    decisions.push(decision.finish(&interface.digest, true)?);
+                    let (module_decision, fact) = decision.finish(&interface.digest, true);
+                    decisions.push(module_decision);
+                    pending_facts.extend(fact);
                     interfaces.insert(name, interface);
                     continue;
                 }
             }
+            let entry = entries
+                .get(&name)
+                .ok_or_else(|| missing_ready_artifact(&name, "entry program"))?
+                .clone();
+            let resolved_program = resolved
+                .get(&name)
+                .ok_or_else(|| missing_ready_artifact(&name, "resolved program"))?
+                .clone();
             jobs.push(ModuleJob {
                 key: cfg.session.as_ref().map(|_| key),
                 interface_key: durable_interface_key(cfg, interface_key),
                 body_key: durable_interface_key(cfg, body_key),
                 name: name.clone(),
-                entry: entries[&name].clone(),
-                resolved: resolved[&name].clone(),
+                entry,
+                resolved: resolved_program,
                 seed,
                 decision,
             });
@@ -241,7 +294,9 @@ pub fn check_modules_on(
                 }
             }
             pending.remove(&module.name);
-            decisions.push(job.decision.finish(&module.interface.digest, false)?);
+            let (module_decision, fact) = job.decision.finish(&module.interface.digest, false);
+            decisions.push(module_decision);
+            pending_facts.extend(fact);
             interfaces.insert(module.name.clone(), module.interface.clone());
             checked_modules.insert(module.name.clone(), module);
         }
@@ -329,8 +384,13 @@ pub fn check_modules_on(
         )?;
         (module.checked, false, module.interface.digest)
     };
-    decisions.push(root_decision.finish(&root_interface, root_reused)?);
+    let (root_module_decision, root_fact) = root_decision.finish(&root_interface, root_reused);
+    decisions.push(root_module_decision);
+    pending_facts.extend(root_fact);
     decisions.sort_by(|left, right| left.module.cmp(&right.module));
+    // The DAG is acyclic (the cycle fallback returns earlier), so committing the
+    // buffered facts now cannot leave the ledger describing a disowned result.
+    persist_facts(roots, cfg, pending_facts)?;
     Ok(ModuleCheckReport {
         root,
         root_reused,

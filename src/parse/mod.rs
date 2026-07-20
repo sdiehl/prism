@@ -68,6 +68,7 @@ pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
     let mut canonicals = Vec::new();
     let mut patterns = Vec::new();
     let mut fns = Vec::new();
+    let mut logic_fns = Vec::new();
     let mut stable = Vec::new();
     let mut imports = Vec::new();
     let mut exports = BTreeSet::new();
@@ -126,6 +127,7 @@ pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
             Item::Canonical(c) => canonicals.push(c),
             Item::Pattern(p) => patterns.push(p),
             Item::Fn(f) => fns.push(f),
+            Item::LogicFn(f) => logic_fns.push(f),
             Item::Stable(s) => stable.push(s),
             Item::Deprecated(..) => unreachable!("attached to the next decl above"),
         }
@@ -149,6 +151,7 @@ pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
             canonicals,
             patterns,
             fns,
+            logic_fns,
             imports,
             exports,
             opaques,
@@ -169,7 +172,7 @@ fn export_name(item: &Item) -> Option<&str> {
         Item::Synonym(s) => Some(&s.name),
         Item::Class(c) => Some(&c.name),
         Item::Pattern(p) => Some(&p.name),
-        Item::Fn(f) => Some(&f.name),
+        Item::Fn(f) | Item::LogicFn(f) => Some(&f.name),
         Item::Stable(s) => Some(&s.name),
         Item::Instance(_) | Item::Canonical(_) | Item::Import(_) | Item::Deprecated(..) => None,
     }

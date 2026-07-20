@@ -1,0 +1,5 @@
+test fn needs_argument(x : Int) =
+  if x == 1 then
+    ()
+  else
+    fail()

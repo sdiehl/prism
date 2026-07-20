@@ -1,0 +1,31 @@
+-- Algebraic effects and a deep handler: exercises the effect-lowering tier and
+-- the native continuation table. The observation trace and step ruler must be
+-- identical whether the tier lowers to evidence passing or the free monad, and
+-- the portable kont envelope must agree across platforms.
+
+effect State
+  get() : Int
+  put(Int) : Unit
+
+fn tick() : Int ! {State} =
+  let n = get()
+  put(n + 1)
+  n
+
+fn counter() : Int ! {State} =
+  tick()
+  tick()
+  tick()
+  get()
+
+fn run_counter(init) =
+  let f =
+    handle counter() with
+      get() resume k => \(s) -> k(s)(s)
+      put(s2) resume k => \(_s) -> k(())(s2)
+      return r => \(_s) -> r
+  f(init)
+
+fn main() : Unit ! {IO} =
+  println(run_counter(0))
+  println(run_counter(100))

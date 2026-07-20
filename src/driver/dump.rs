@@ -16,13 +16,13 @@ use crate::core::{
     captures, fip_annots, hash_program, insert_rc, pp_core_pretty, reuse, CoreFn, DepGraph, Digest,
     HASH_SCHEME,
 };
-use crate::error::Error;
+use crate::error::{Error, SourceMap};
 use crate::hir::{HandlerResidual, NodeRes};
 use crate::lex::lex;
 use crate::parse::parse;
 use crate::resolve::{default_roots, Root};
 use crate::sym::Sym;
-use crate::syntax::ast::{Core as CorePhase, Program};
+use crate::syntax::ast::{Core as CorePhase, Program, Span};
 use crate::types::{show_effects, Checked, Dict, Type};
 use serde::Serialize;
 
@@ -109,6 +109,76 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // its resolution, dictionary evidence, numeric lane, and zonked type, as
         // versioned deterministic JSON.
         "hir" => Ok(hir_fixture(&check_on(src, roots)?)),
+        // The resolved-program boundary a Prism-written front end starts from.
+        // The declaration interface the checker reads (datatypes and
+        // their constructor layouts, effects and operation grades, classes,
+        // instances, and functions with their parameter lists and body NodeId),
+        // as versioned deterministic JSON. Structural shape comes from the
+        // resolved surface program; declared types come from the checked tables
+        // (rendered with the same deterministic `Type::show` the HIR fixture uses).
+        // Companion to `tc-facts`; together they form `elab-input`.
+        "tc-input" => {
+            let (program, checked) = tooltip_checked_on(src, roots, cfg)?;
+            let doc = TcInput {
+                schema: TC_INPUT_SCHEMA,
+                compiler: COMPILER_VERSION,
+                body: tc_input_body(&program, &checked, src),
+            };
+            Ok(serde_json::to_string_pretty(&doc).unwrap_or_default())
+        }
+        // The checker's output facts as the versioned front-end seam.
+        // Per-declaration principal schemes and effect rows, and every per-node
+        // fact checking recorded (resolution, dictionary evidence, numeric lane,
+        // zonked type, handler residual). Shares the HIR fixture's node/decl
+        // rendering so the two can never disagree; the envelope is the stable
+        // front-end boundary a Prism typechecker is diffed against.
+        "tc-facts" => {
+            let (_program, checked) = tooltip_checked_on(src, roots, cfg)?;
+            let doc = TcFacts {
+                schema: TC_FACTS_SCHEMA,
+                compiler: COMPILER_VERSION,
+                body: tc_facts_body(&checked),
+            };
+            Ok(serde_json::to_string_pretty(&doc).unwrap_or_default())
+        }
+        // The elaborator's input boundary, composing the resolved
+        // declarations (`tc-input`) with the checker facts (`tc-facts`) a Prism
+        // elaborator consumes to emit Core. One envelope so a front end reads both
+        // halves from a single deterministic export.
+        "elab-input" => {
+            let (program, checked) = tooltip_checked_on(src, roots, cfg)?;
+            let doc = ElabInput {
+                schema: ELAB_INPUT_SCHEMA,
+                compiler: COMPILER_VERSION,
+                input: tc_input_body(&program, &checked, src),
+                facts: tc_facts_body(&checked),
+            };
+            Ok(serde_json::to_string_pretty(&doc).unwrap_or_default())
+        }
+        // The module's verification interface (logical declarations and
+        // contract summaries with digests). Runs the solver-free logical checker
+        // on the resolved surface program; a malformed contract is a source error.
+        "verify" => {
+            let program = crate::resolve::resolve_modules_in(parse(src)?.program, roots)?;
+            Ok(crate::verify::check_program(&program)?.render())
+        }
+        // The verification conditions, one canonical SMT query per
+        // postcondition, then the termination ranking obligations of every
+        // `total fn` with a `decreases` measure, under distinct banners so the two
+        // certificate families stay separate. Solver-free.
+        "smt" => {
+            let program = crate::resolve::resolve_modules_in(parse(src)?.program, roots)?;
+            Ok(
+                crate::verify::vc::render(&program)?
+                    + &crate::verify::ranking::render_smt(&program),
+            )
+        }
+        // Per-function totality status (checked-trivial, checked-structural,
+        // trusted assumption, or pending with a precise reason). Solver-free.
+        "totality" => {
+            let program = crate::resolve::resolve_modules_in(parse(src)?.program, roots)?;
+            Ok(crate::verify::totality::render(&program))
+        }
         "core" => {
             let (_, _, core) = frontend(src, roots, cfg)?;
             Ok(pp_core_pretty(&strip_prelude(core.0, &prelude_fn_names()?)))
@@ -617,6 +687,19 @@ fn usage_summary_json(rows: &[UsageRow], tier: &str) -> String {
 // parsing; bump it on any incompatible shape change.
 const HIR_FIXTURE_SCHEMA: &str = "prism-hir-fixture-v2";
 
+// The versioned schema tags heading the three front-end fixture seams. Each is
+// self-describing and versioned so a committed export tells a
+// reader (and a Prism-written front end) which layout it is parsing; bump on any
+// incompatible shape change. Kept together because they are one family.
+const TC_INPUT_SCHEMA: &str = "prism-tc-input-v1";
+const TC_FACTS_SCHEMA: &str = "prism-tc-facts-v1";
+const ELAB_INPUT_SCHEMA: &str = "prism-elab-input-v1";
+
+// The producing compiler version, stamped into every versioned export envelope so
+// a persisted fixture records which compiler emitted it. One home for the crate
+// version so the three seams (and any future one) never re-type the `env!`.
+const COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 // The versioned checked-HIR fixture document: the schema tag, the checked
 // declarations in source order, and every node the checker recorded a fact for,
 // keyed by decimal NodeId. Serialized through derived structs and BTreeMaps so
@@ -690,16 +773,42 @@ struct HirStep {
 // Render a checked program's HIR fixture. Declarations come out in source order;
 // nodes come out in ascending NodeId order (the BTreeMap key is the decimal id).
 fn hir_fixture(checked: &Checked) -> String {
-    let decls = checked
+    let fixture = HirFixture {
+        schema: HIR_FIXTURE_SCHEMA,
+        decls: hir_decls(checked),
+        nodes: hir_nodes(checked),
+    };
+    serde_json::to_string_pretty(&fixture).unwrap_or_default()
+}
+
+// The checked declarations in source order, each carrying its principal scheme and
+// canonicalized effect row. Shared by the HIR fixture and the `tc-facts` seam so
+// the two renderings can never diverge.
+fn hir_decls(checked: &Checked) -> Vec<HirDecl> {
+    checked
         .decls
         .iter()
         .map(|d| HirDecl {
             name: d.name.clone(),
             scheme: d.ty.show(),
-            effects: d.effects.iter().map(|s| s.as_str().to_string()).collect(),
+            // Canonicalize by name: the principal row iterates in intern order,
+            // which is not stable across processes, so an unsorted list makes the
+            // fixture non-deterministic. The residual lists below are already
+            // ordered at their source.
+            effects: {
+                let mut effects: Vec<String> =
+                    d.effects.iter().map(|s| s.as_str().to_string()).collect();
+                effects.sort_unstable();
+                effects
+            },
         })
-        .collect();
-    let nodes = checked
+        .collect()
+}
+
+// Every per-node checker fact keyed by decimal NodeId (ascending, the BTreeMap
+// key). Shared by the HIR fixture and the `tc-facts` seam.
+fn hir_nodes(checked: &Checked) -> BTreeMap<u32, HirNode> {
+    checked
         .facts
         .iter()
         .map(|(id, refs)| {
@@ -714,13 +823,7 @@ fn hir_fixture(checked: &Checked) -> String {
                 },
             )
         })
-        .collect();
-    let fixture = HirFixture {
-        schema: HIR_FIXTURE_SCHEMA,
-        decls,
-        nodes,
-    };
-    serde_json::to_string_pretty(&fixture).unwrap_or_default()
+        .collect()
 }
 
 fn render_handler_residual(residual: &HandlerResidual) -> HirHandlerResidual {
@@ -791,5 +894,400 @@ fn borrow_mask(sig: Option<&Vec<bool>>) -> String {
     match sig {
         Some(bs) if !bs.is_empty() => bs.iter().map(|&b| if b { 'b' } else { '-' }).collect(),
         _ => "-".to_string(),
+    }
+}
+
+// The front-end fixture seams (`tc-input`, `tc-facts`, `elab-input`).
+//
+// Each is a semantic, versioned, deterministic projection of the resolved-program
+// boundary a Prism-written checker or elaborator would start from, mirroring the
+// machinery of `core-json`/`core-hash`: serialized through derived structs and
+// `BTreeMap`s so two runs (and two checkout roots) are byte-identical, and headed
+// by a versioned schema tag and the producing compiler version.
+//
+// `tc-input` is the resolved declaration interface the checker reads. `tc-facts`
+// is what the checker inferred. `elab-input` composes both, the input a Prism
+// elaborator consumes. Spans are emitted relative to the user source (the byte
+// offset of the built-in prelude is subtracted) so they are stable whether or not
+// the prelude was prepended and independent of the prelude's length.
+
+// A source span, as byte offsets into the user's own source.
+#[derive(Serialize)]
+struct TcSpan {
+    start: usize,
+    end: usize,
+}
+
+// One resolved import the user source opens: the dotted module path, the selective
+// names bound (empty for a whole-module or glob import), and whether it is a glob.
+#[derive(Serialize)]
+struct TcImport {
+    path: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    names: Vec<String>,
+    glob: bool,
+}
+
+// One data constructor: its name, layout tag, field labels (empty when positional),
+// and the rendered field types in declaration order.
+#[derive(Serialize)]
+struct TcCtor {
+    name: String,
+    tag: usize,
+    fields: Vec<String>,
+    args: Vec<String>,
+}
+
+// A resolved datatype declaration: name, type parameters, whether it is a newtype,
+// its sorted deriving list, its constructors, and its source span.
+#[derive(Serialize)]
+struct TcData {
+    name: String,
+    params: Vec<String>,
+    newtype: bool,
+    deriving: Vec<String>,
+    ctors: Vec<TcCtor>,
+    span: TcSpan,
+}
+
+// One effect operation: name, resumption grade, rendered parameter types, and
+// rendered return type.
+#[derive(Serialize)]
+struct TcOp {
+    name: String,
+    grade: &'static str,
+    params: Vec<String>,
+    ret: String,
+}
+
+// A resolved effect declaration: name, effect parameters, operations, and span.
+#[derive(Serialize)]
+struct TcEffect {
+    name: String,
+    params: Vec<String>,
+    ops: Vec<TcOp>,
+    span: TcSpan,
+}
+
+// One class method: its name and rendered signature.
+#[derive(Serialize)]
+struct TcMethod {
+    name: String,
+    ty: String,
+}
+
+// A resolved class declaration: name, the class parameter, sorted superclass
+// names, methods sorted by name, and span.
+#[derive(Serialize)]
+struct TcClass {
+    name: String,
+    param: String,
+    supers: Vec<String>,
+    methods: Vec<TcMethod>,
+    span: TcSpan,
+}
+
+// One instance-context constraint: the class and its rendered head type.
+#[derive(Serialize)]
+struct TcConstraint {
+    class: String,
+    ty: String,
+}
+
+// A resolved instance declaration: the class, its rendered head type, the defining
+// module (empty for a root-program instance), and its sorted context constraints.
+#[derive(Serialize)]
+struct TcInstance {
+    class: String,
+    head: String,
+    module: String,
+    context: Vec<TcConstraint>,
+}
+
+// One function parameter: its name and whether it is borrowed.
+#[derive(Serialize)]
+struct TcParam {
+    name: String,
+    borrow: bool,
+}
+
+// A resolved function declaration: name, parameters, sorted constraint class names,
+// the NodeId of its body (the key that ties it to the `tc-facts` node table), and
+// its source span.
+#[derive(Serialize)]
+struct TcFunction {
+    name: String,
+    params: Vec<TcParam>,
+    constraints: Vec<String>,
+    body: u32,
+    span: TcSpan,
+}
+
+// The resolved-program declaration interface, without the versioned envelope so it
+// can be embedded verbatim inside `elab-input` as well as headed on its own.
+#[derive(Serialize)]
+struct TcInputBody {
+    imports: Vec<TcImport>,
+    types: Vec<TcData>,
+    effects: Vec<TcEffect>,
+    classes: Vec<TcClass>,
+    instances: Vec<TcInstance>,
+    functions: Vec<TcFunction>,
+}
+
+// The `tc-input` export: the versioned schema tag and compiler version, then the
+// declaration interface.
+#[derive(Serialize)]
+struct TcInput {
+    schema: &'static str,
+    compiler: &'static str,
+    #[serde(flatten)]
+    body: TcInputBody,
+}
+
+// The checker's output facts, without the versioned envelope so it can be embedded
+// inside `elab-input`. Reuses the HIR fixture's declaration and node shapes.
+#[derive(Serialize)]
+struct TcFactsBody {
+    decls: Vec<HirDecl>,
+    nodes: BTreeMap<u32, HirNode>,
+}
+
+// The `tc-facts` export: the versioned schema tag and compiler version, then the
+// checker facts.
+#[derive(Serialize)]
+struct TcFacts {
+    schema: &'static str,
+    compiler: &'static str,
+    #[serde(flatten)]
+    body: TcFactsBody,
+}
+
+// The `elab-input` export: the versioned envelope, then the resolved declarations
+// and the checker facts a Prism elaborator consumes together.
+#[derive(Serialize)]
+struct ElabInput {
+    schema: &'static str,
+    compiler: &'static str,
+    input: TcInputBody,
+    facts: TcFactsBody,
+}
+
+// The compiler-injected control effects (`fail`, loop `break`/`continue`,
+// function `return`) desugar adds to the resolved program. They are not user
+// declarations, so the resolved-program seam excludes them, exactly as the module
+// interface does (`src/driver/modules.rs`); the names are the canonical constants
+// in `names.rs`, never re-spelled here.
+fn is_control_effect(name: &str) -> bool {
+    name == crate::names::FAIL_EFFECT
+        || name == crate::names::BREAK_EFFECT
+        || name == crate::names::CONTINUE_EFFECT
+        || name == crate::names::RETURN_EFFECT
+}
+
+// A span rendered relative to the user's own source, so it is stable whether or
+// not the built-in prelude was prepended (the CLI prepends it; `prism::dump` does
+// not) and independent of the prelude's length.
+const fn rel_span(span: Span, user_start: usize) -> TcSpan {
+    TcSpan {
+        start: span.start.saturating_sub(user_start),
+        end: span.end.saturating_sub(user_start),
+    }
+}
+
+// The user source's own imports, parsed from the source below the built-in prelude
+// so a prepended prelude's own imports never leak in. Best-effort: an unparseable
+// fragment yields no imports rather than an error, since the whole program already
+// parsed to reach this dump.
+fn user_imports(src: &str) -> Vec<TcImport> {
+    let user = SourceMap::new(src).user();
+    let Ok(parsed) = parse(user) else {
+        return Vec::new();
+    };
+    let mut imports: Vec<TcImport> = parsed
+        .program
+        .imports
+        .iter()
+        .map(|import| {
+            let mut names = import.names.clone().unwrap_or_default();
+            names.sort_unstable();
+            TcImport {
+                path: import.path.join("."),
+                names,
+                glob: import.glob,
+            }
+        })
+        .collect();
+    imports.sort_by(|a, b| a.path.cmp(&b.path));
+    imports
+}
+
+// Build the resolved declaration interface. Structural shape (names, parameters,
+// constructor field labels, operation grades, deriving, node ids, spans) comes
+// from the resolved surface `program`; declared types (constructor field types,
+// operation signatures, class-method and instance head types) come from the
+// checked tables, rendered with the same deterministic `Type::show` the HIR
+// fixture uses. Iteration follows the program's source order, so nothing depends
+// on a `Sym`-keyed map's intern order; the checked tables are only ever indexed by
+// name.
+fn tc_input_body(program: &Program<CorePhase>, checked: &Checked, src: &str) -> TcInputBody {
+    let user_start = SourceMap::new(src).prelude_len();
+
+    let types = program
+        .types
+        .iter()
+        .map(|data| {
+            let ctors = data
+                .ctors
+                .iter()
+                .map(|ctor| {
+                    let info = checked.ctors.get(&ctor.name);
+                    TcCtor {
+                        name: ctor.name.clone(),
+                        tag: info.map_or(0, |i| i.tag),
+                        fields: ctor.fields.as_ref().map_or_else(Vec::new, |fs| {
+                            fs.iter().map(|(name, _)| name.clone()).collect()
+                        }),
+                        args: info
+                            .map_or_else(Vec::new, |i| i.args.iter().map(Type::show).collect()),
+                    }
+                })
+                .collect();
+            let mut deriving: Vec<String> =
+                data.deriving.iter().map(|(name, _)| name.clone()).collect();
+            deriving.sort_unstable();
+            TcData {
+                name: data.name.clone(),
+                params: data.params.clone(),
+                newtype: data.newtype,
+                deriving,
+                ctors,
+                span: rel_span(data.span, user_start),
+            }
+        })
+        .collect();
+
+    let effects = program
+        .effects
+        .iter()
+        .filter(|effect| !is_control_effect(&effect.name))
+        .map(|effect| {
+            let ops = effect
+                .ops
+                .iter()
+                .map(|op| {
+                    let info = checked.eff_ops.get(&op.name);
+                    TcOp {
+                        name: op.name.clone(),
+                        grade: op.grade.word(),
+                        params: info
+                            .map_or_else(Vec::new, |i| i.params.iter().map(Type::show).collect()),
+                        ret: info.map_or_else(String::new, |i| i.ret.show()),
+                    }
+                })
+                .collect();
+            TcEffect {
+                name: effect.name.clone(),
+                params: effect.params.clone(),
+                ops,
+                span: rel_span(effect.span, user_start),
+            }
+        })
+        .collect();
+
+    let classes = program
+        .classes
+        .iter()
+        .map(|class| {
+            let mut methods: Vec<TcMethod> = checked
+                .classes
+                .get(&Sym::new(&class.name))
+                .map_or_else(Vec::new, |info| {
+                    info.methods
+                        .iter()
+                        .map(|(name, ty)| TcMethod {
+                            name: name.as_str().to_string(),
+                            ty: ty.show(),
+                        })
+                        .collect()
+                });
+            methods.sort_by(|a, b| a.name.cmp(&b.name));
+            let mut supers = class.supers.clone();
+            supers.sort_unstable();
+            TcClass {
+                name: class.name.clone(),
+                param: class.param.clone(),
+                supers,
+                methods,
+                span: rel_span(class.span, user_start),
+            }
+        })
+        .collect();
+
+    let instances = program
+        .instances
+        .iter()
+        .filter_map(|inst| {
+            let info = checked.instances.get(&Sym::new(&inst.name))?;
+            let mut context: Vec<TcConstraint> = info
+                .context
+                .iter()
+                .map(|(class, ty)| TcConstraint {
+                    class: class.as_str().to_string(),
+                    ty: ty.show(),
+                })
+                .collect();
+            context.sort_by(|a, b| (&a.class, &a.ty).cmp(&(&b.class, &b.ty)));
+            Some(TcInstance {
+                class: info.class.as_str().to_string(),
+                head: info.head.show(),
+                module: info.module.clone(),
+                context,
+            })
+        })
+        .collect();
+
+    let functions = program
+        .fns
+        .iter()
+        .filter(|decl| !crate::names::is_synthesized(&decl.name))
+        .map(|decl| {
+            let params = decl
+                .params
+                .iter()
+                .map(|p| TcParam {
+                    name: p.name.clone(),
+                    borrow: p.borrow,
+                })
+                .collect();
+            let mut constraints: Vec<String> =
+                decl.constraints.iter().map(|c| c.class.clone()).collect();
+            constraints.sort_unstable();
+            TcFunction {
+                name: decl.name.clone(),
+                params,
+                constraints,
+                body: decl.body.id.0,
+                span: rel_span(decl.span, user_start),
+            }
+        })
+        .collect();
+
+    TcInputBody {
+        imports: user_imports(src),
+        types,
+        effects,
+        classes,
+        instances,
+        functions,
+    }
+}
+
+// Build the checker facts: the shared HIR declaration and node renderings under
+// the front-end seam envelope.
+fn tc_facts_body(checked: &Checked) -> TcFactsBody {
+    TcFactsBody {
+        decls: hir_decls(checked),
+        nodes: hir_nodes(checked),
     }
 }

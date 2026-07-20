@@ -1,0 +1,6 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/read_bad_utf8.pr
+---
+ERROR: runtime: read_file: stream did not contain valid UTF-8: tests/cases/run/bad_utf8.bin

@@ -1,0 +1,10 @@
+-- A main that returns a non-unit Int. The return word is not the process exit
+-- code: only an explicit exit(n) sets that, so both tiers print the value and
+-- exit 0. Pins the interpreter/native agreement on main's return word.
+fn compute() =
+  let r = 6 * 7
+  r
+
+fn main() =
+  println(compute())
+  compute()

@@ -89,15 +89,22 @@ field     ->  varid ":" type
 deriving  ->  "deriving" "(" conid , ... ")"
 
 constdecl ->  "let" varid [ ":" type ] "=" expr
-fundecl   ->  [ "replayable" ] [ "fip" | "fbip" ] "fn" varid "(" [ param , ... ] ")"
-                [ retann ] [ given ] "=" expr [ wheres ]
+fundecl   ->  [ "logic" ] [ "test" ] [ [ "assume" ] "total" ] [ "replayable" ] [ "fip" | "fbip" ]
+                "fn" varid "(" [ param , ... ] ")"
+                [ retann ] [ given ] { requires } { ensures } "=" expr [ wheres ]
                 -- a usage row spelling exactly "@ noalloc" at the root of the
-                -- return annotation is the declaration's allocation certificate
+                -- return annotation is the declaration's allocation certificate;
+                -- "logic fn" is a proof-level (SMT) declaration, never a runtime fn;
+                -- "test" (Lane K) and "total"/"assume" (Lane T) are contextual
+                -- declaration modifiers, not reserved words, so all three stay
+                -- usable as ordinary identifiers everywhere else
 param     ->  [ "borrow" ] varid [ ":" type ] [ ":=" expr ]
 retann    ->  ":" type [ decleff ]              -- result first, e.g. `: Int ! {State}`
 decleff   ->  "!" "{" [ label , ... ] "}"       -- the declaration's effect row (closed)
            |  "!"                                -- an explicit empty effect row
 given     ->  "given" constraint , ...
+requires  ->  "requires" expr                    -- an SMT precondition clause
+ensures   ->  "ensures" "|" varid "|" expr       -- an SMT postcondition over the result binder
 constraint -> conid "(" type ")"
 wheres    ->  "where" "{" { varid "=" expr } "}"
 (* ANCHOR_END: program *)

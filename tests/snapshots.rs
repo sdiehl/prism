@@ -466,22 +466,33 @@ fn local_monadification_partition() {
     );
 }
 
-// The free-monad fallback warning is default-on, proportionate, and free of
-// false positives. A fully fused program is silent; a program with one escaping
-// effectful closure warns exactly once, naming the entangled functions and the
-// cause, never the unrelated fused pipeline beside it. Spawned via the CLI so the
-// compile-time stderr is observable.
+// The free-monad fallback warning is off by default, opt-in via `--verbose`, then
+// proportionate and free of false positives. A fully fused program is silent; a
+// program with one escaping effectful closure warns exactly once, naming the
+// entangled functions and the cause, never the unrelated fused pipeline beside it.
+// Spawned via the CLI so the compile-time stderr is observable.
 #[test]
-fn free_monad_warning_default_on_and_proportionate() {
+fn free_monad_warning_is_opt_in_and_proportionate() {
     let root = env!("CARGO_MANIFEST_DIR");
     let stderr = |case: &str| {
         let out = Command::new(env!("CARGO_BIN_EXE_prism"))
             .arg("run")
+            .arg("--verbose")
             .arg(format!("{root}/{case}"))
             .output()
             .unwrap();
         String::from_utf8_lossy(&out.stderr).into_owned()
     };
+    // Off by default: the escaping program stays silent without `--verbose`.
+    let quiet = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("run")
+        .arg(format!("{root}/tests/cases/run/local_mono_combined.pr"))
+        .output()
+        .unwrap();
+    assert!(
+        !String::from_utf8_lossy(&quiet.stderr).contains("fell off the fused path"),
+        "the fusion warning must be silent without --verbose"
+    );
     // Zero false positives: a fully fused stream program says nothing.
     let fused = stderr("examples/stream_fold.pr");
     assert!(
@@ -593,9 +604,14 @@ fn interp_output(path: &Path) -> String {
 
 #[test]
 fn interpreter() {
-    insta::glob!("cases/run/*.pr", |path| insta::assert_snapshot!(
-        interp_output(path)
-    ));
+    // A whole-corpus in-process gate, so run it on the compiler stack: debug
+    // builds can exceed libtest's smaller worker stack on the deepest corpus
+    // programs (stream fusion) even though the production 8 MiB binary runs them.
+    on_compiler_stack("interpreter", || {
+        insta::glob!("cases/run/*.pr", |path| insta::assert_snapshot!(
+            interp_output(path)
+        ));
+    });
 }
 
 // Terminal-printer coverage. `print` dispatches by type into three native

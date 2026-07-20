@@ -1,7 +1,7 @@
 -- | Persistent ordered map: an AVL-balanced binary search tree over keys.
 --
 -- The `Map(k, v)` type and its `Tip`/`Bin` constructors are wired in; this
--- module is the operation surface. The prelude opens it.
+-- module is the operation surface. Base includes it.
 --
 -- Reserved (a later release): a map's identity will carry the content hash of the
 -- canonical `Ord` instance it was built with, so a map that crosses an assembly

@@ -1,0 +1,19 @@
+-- Totality claims (Lane T): trivial-acyclic and direct-structural `total fn`
+-- forms. Pins the totality problem bytes (`dump totality`) and proves the claim
+-- is erased before executable Core, so the run trace is identical on every
+-- platform.
+
+type Nat = Z | S(Nat)
+
+total fn double(x : Int) : Int = x + x
+
+total fn quad(x : Int) : Int = double(double(x))
+
+total fn depth(n : Nat) : Int =
+  match n of
+    Z => 0
+    S(m) => 1 + depth(m)
+
+fn main() : Unit ! {IO} =
+  println(quad(9))
+  println(depth(S(S(S(Z)))))

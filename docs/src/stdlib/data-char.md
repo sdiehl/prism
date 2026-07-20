@@ -4,7 +4,7 @@
 
 ASCII character classification.
 
-Operates on the byte/codepoint returned by `byte_at`/`char_at`. The prelude opens this module.
+Operates on the byte/codepoint returned by `byte_at`/`char_at`. Base includes this module.
 
 ## Functions and Values
 

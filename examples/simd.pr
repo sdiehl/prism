@@ -1,0 +1,25 @@
+-- Baseline 128-bit SIMD: two lanes per vector, one instruction per lane pair.
+-- The scalar interpreter defines the semantics and the native backend must match
+-- it bit for bit, so the output is a pure function of the source on every tier.
+-- Vectors are opaque: they are built with `splat`, combined lane-wise, and read
+-- back one lane at a time; there is no `show`, equality, or ordering on them.
+
+fn dot2(a : F64x2, b : F64x2) : Float =
+  let p = simd_fmul(a, b)
+  simd_fextract(p, 0) + simd_fextract(p, 1)
+
+fn main() : Unit ! {IO} =
+  -- A two-lane float vector from a pair of scalars, via splat + replace-by-add.
+  let xs = simd_fadd(simd_fsplat(3.0), simd_fsplat(0.5))
+  let ys = simd_fsplat(2.0)
+  println(show_float(dot2(xs, ys)))
+  -- Lane-wise min and max, read back per lane.
+  let lo = simd_fmin(xs, ys)
+  let hi = simd_fmax(xs, ys)
+  println(show_float(simd_fextract(lo, 0)))
+  println(show_float(simd_fextract(hi, 1)))
+  -- Integer lanes: bitwise and wrapping arithmetic.
+  let m = simd_iand(simd_isplat(12), simd_isplat(10))
+  let s = simd_iadd(simd_isplat(100), simd_isplat(23))
+  println(simd_iextract(m, 0))
+  println(simd_iextract(s, 1))

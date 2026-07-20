@@ -1,0 +1,97 @@
+-- | `Validation`, the error-accumulating sibling of `Result`.
+--
+-- Where `Result` short-circuits on the first `Err`, `Validation` collects every
+-- error, so checking several independent fields reports all their failures at
+-- once instead of only the first. Combine independent validations with
+-- `validate2` or `validation_ap`; both concatenate the error lists of whatever
+-- failed. Opt-in: not in Base.
+
+import Data.List (append, foldr)
+
+-- | A validated `a`, or the list of accumulated errors `e`.
+pub type Validation(e, a) = Valid(a) | Invalid(List(e)) deriving (Eq, Show)
+
+-- | True when the value validated.
+pub fn is_valid(v) =
+  match v of
+    Valid(_x) => true
+    Invalid(_es) => false
+
+-- | True when there were errors.
+pub fn is_invalid(v) = not(is_valid(v))
+
+-- | Apply `f` to a `Valid` value, leaving accumulated errors untouched.
+pub fn map_valid(f, v) =
+  match v of
+    Valid(x) => Valid(f(x))
+    Invalid(es) => Invalid(es)
+
+-- | Applicative apply: when both sides validate, apply the function; otherwise
+-- keep every error from both sides, in order. This is the accumulation.
+pub fn validation_ap(vf, va) =
+  match vf of
+    Valid(f) =>
+      match va of
+        Valid(x) => Valid(f(x))
+        Invalid(es) => Invalid(es)
+    Invalid(es1) =>
+      match va of
+        Valid(_x) => Invalid(es1)
+        Invalid(es2) => Invalid(append(es1, es2))
+
+-- | Combine two validations with the two-argument `f`, accumulating the errors
+-- of whichever failed.
+--
+-- ```prism
+-- validate2(\(a, b) -> a + b, Valid(1), Invalid(["oops"]))
+-- ```
+-- ```output
+-- Data.Validation.Invalid([oops])
+-- ```
+pub fn validate2(f, va, vb) =
+  match va of
+    Valid(a) =>
+      match vb of
+        Valid(b) => Valid(f(a, b))
+        Invalid(es) => Invalid(es)
+    Invalid(es1) =>
+      match vb of
+        Valid(_b) => Invalid(es1)
+        Invalid(es2) => Invalid(append(es1, es2))
+
+-- | The `Valid` value, or `d` when there were errors.
+pub fn validation_or(d, v) =
+  match v of
+    Valid(x) => x
+    Invalid(_es) => d
+
+-- | Turn a `Result` into a single-error `Validation`.
+pub fn validation_of_result(r) =
+  match r of
+    Ok(x) => Valid(x)
+    Err(e) => Invalid([e])
+
+-- | Turn a `Validation` back into a `Result`, keeping the whole error list on
+-- the `Err` side.
+pub fn result_of_validation(v) =
+  match v of
+    Valid(x) => Ok(x)
+    Invalid(es) => Err(es)
+
+-- Fold step for `sequence_validation`: cons a `Valid` head onto a `Valid` tail,
+-- otherwise accumulate whatever errors either side carries. A top-level helper
+-- (not an inline lambda) so the nested match parses.
+fn cons_validation(v, acc) =
+  match v of
+    Valid(x) =>
+      match acc of
+        Valid(xs) => Valid(Cons(x, xs))
+        Invalid(es) => Invalid(es)
+    Invalid(es1) =>
+      match acc of
+        Valid(_xs) => Invalid(es1)
+        Invalid(es2) => Invalid(append(es1, es2))
+
+-- | Collapse a list of validations into a validation of the list, accumulating
+-- every error across all of them.
+pub fn sequence_validation(vs) = foldr(cons_validation, Valid(Nil), vs)

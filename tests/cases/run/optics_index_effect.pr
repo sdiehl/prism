@@ -1,0 +1,23 @@
+-- A record `~`-modify followed by an optic index update, both under IO. The
+-- `party[0]` step reads a failable list index, whose out-of-range fallback
+-- installs a handler that reifies its continuation, pushing the whole `main`
+-- onto the free-monad tier. On that tier the earlier `x ~ f` modify lowers its
+-- match arm to force the modify function at the ambient row, so the arm carries
+-- `IO`; the enclosing match must carry the same row rather than the pre-lowering
+-- empty row, or the typed-Core verifier rejects the program. Native must match
+-- the interpreter byte-for-byte.
+type Vec2 = Vec2 { x: Int, y: Int }
+
+type Player = Player { pos: Vec2, hp: Int }
+
+type World = World { party: List(Player), turn: Int }
+
+fn main() =
+  let v = Vec2 { x = 3, y = 4 }
+  let world =
+    World {
+      party = Cons(Player { pos = v, hp = 5 }, Nil),
+      turn = 1
+    }
+  println({ v | x ~ \(n) -> n - 2 })
+  println({ world | party[0].hp = 100 })

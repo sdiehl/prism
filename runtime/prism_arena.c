@@ -1,8 +1,9 @@
 /* prism_arena.c: a region (arena) allocator.
  *
- * Standalone and self-contained: the linked runtime does not include this file.
- * Runtime tests build it directly so the allocator can be tested and reasoned
- * about independently of `prism_rt.c` and codegen.
+ * Self-contained: this file knows nothing about Prism cells, reference counts,
+ * or handlers, and can still be built and tested standalone (see the self-test
+ * below). The linked runtime includes it as the substrate under the
+ * `with_arena` region policy in prism_mem.c (prism_arena.h is the seam).
  *
  * The design is the textbook region allocator (Hanson, "C Interfaces and
  * Implementations", ch. 6; Tofte/Talpin regions): a singly linked list of
@@ -19,18 +20,16 @@
  * Build the self-test:  cc -DPRISM_ARENA_TEST -O2 runtime/prism_arena.c -o /tmp/at && /tmp/at
  */
 
-#ifndef _POSIX_C_SOURCE
-// clang-format off: a feature-test macro must be one line, and the NOLINT must
-// stay on it to suppress the reserved-identifier lint.
-#define _POSIX_C_SOURCE 200809L /* NOLINT(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp): the standard feature-test macro */
-// clang-format on
-#endif
+/* The internal header first: its optional mimalloc shim must precede any
+ * allocation call so the region's blocks follow the same malloc/free routing as
+ * every other runtime allocation. It compiles standalone, so the self-test
+ * build is unaffected. */
+#include "prism_internal.h"
 
 #include <stdalign.h>
-#include <stddef.h>
 #include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
+
+#include "prism_arena.h"
 
 /* Default block size when the caller passes 0: large enough that most scopes
  * never allocate a second block, small enough not to waste a page on a tiny
@@ -49,12 +48,12 @@ typedef struct PrismBlock {
     max_align_t data[]; /* flexible array member */
 } PrismBlock;
 
-typedef struct PrismArena {
+struct PrismArena {
     PrismBlock *head; /* first block, start of the reuse chain */
     PrismBlock *cur;  /* block currently being bumped */
     size_t block_size;
     size_t used; /* bytes handed out since the last reset (stats) */
-} PrismArena;
+};
 
 /* Round address `n` up to a multiple of the power-of-two `align`. Aligning the
  * absolute address (not the block-relative offset) is what lets an arena serve

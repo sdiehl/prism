@@ -63,9 +63,9 @@ use std::collections::{BTreeMap, HashMap};
 // hostile-input reader) is shared with the `kont` codec; only the `def` schema
 // below is local. `put_str`/`put_uvarint`/`Reader` are re-exported so `store::cert`
 // serializes its own small envelopes through the same discipline.
-use crate::binary::{from_wire, put_indices, put_svarint, to_wire, MAX_EXPANSION, MAX_NODES};
-pub(crate) use crate::binary::{put_str, put_uvarint, Reader};
 use crate::core::builtins::{Builtin, FloatOp};
+use crate::util::binary::{from_wire, put_indices, put_svarint, to_wire, MAX_EXPANSION, MAX_NODES};
+pub(crate) use crate::util::binary::{put_str, put_uvarint, Reader};
 // Builtins and float ops are numbered by their per-row wire index, defined once
 // in `crate::core::builtins`. Re-exported here so the kont codec
 // (`crate::eval::kont`) numbers the same operators from the codec's table set.

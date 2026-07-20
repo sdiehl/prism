@@ -159,6 +159,17 @@ impl Tc<'_> {
                 ds.push(self.resolve(class, &t, w.span, explicit.as_deref(), &[])?);
             }
             match self.dicts.get(&w.id) {
+                // Kept a genuine internal invariant, not converted to a user
+                // diagnostic. A dispatch site's identity (`w.id`, a `NodeId`) is
+                // unique per syntactic site, and every obligation on it is resolved
+                // in this single pass over already-unified types, so a well-typed
+                // source resolves each site to exactly one dictionary vector (the
+                // idempotent `Some(_)` arm below). Two *different* vectors under one
+                // id could only arise from an internal id-assignment or
+                // constraint-threading inconsistency, and would leave elaboration a
+                // nondeterministic choice of dictionary. That directly breaks the
+                // determinism contract, so it must fail loudly as an ICE rather than
+                // silently pick one; it is unreachable from any user program.
                 Some(prev) if *prev != ds => {
                     return Err(TypeError::InternalInvariant {
                         msg: format!("conflicting dict records at {:?}", w.span),

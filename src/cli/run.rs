@@ -34,6 +34,7 @@ pub fn run_file_cmd(
     file: &Path,
     record: Option<&Path>,
     lineage: Option<&Path>,
+    durable: Option<&Path>,
     args: Vec<String>,
     cfg: &crate::Config,
     defer_holes: bool,
@@ -53,6 +54,39 @@ pub fn run_file_cmd(
             name,
         ));
     }
+    if durable.is_some() && record.is_some() {
+        return Err((
+            Error::ResolveCommand("`--durable` cannot be combined with `--record`".into()),
+            full,
+            name,
+        ));
+    }
+    // `--durable PATH` persists each observation to a crash-safe log and resumes a
+    // prior crashed run from it: the committed prefix is replayed with no real IO,
+    // then new observations stream live and are appended. Re-running the same
+    // command after a crash continues byte-identically.
+    if let Some(durable_path) = durable {
+        let run = crate::durable_run_on(
+            &full,
+            &roots,
+            &mut out,
+            &mut input,
+            cfg,
+            args,
+            durable_path,
+            None,
+        )
+        .map_err(|e| (e, full.clone(), name.clone()))?;
+        drop(out);
+        drop(input);
+        eprintln!(
+            "durable run: {} observations committed to {} ({} replayed from the prior run)",
+            run.committed,
+            durable_path.display(),
+            run.replayed
+        );
+        return Ok(run.exit);
+    }
     // `--lineage` (which clap already gated on `--record`) records the run, writes
     // its trace, and writes the sidecar that explains that trace.
     if let (Some(record_path), Some(lineage_path)) = (record, lineage) {
@@ -60,7 +94,7 @@ pub fn run_file_cmd(
             .map_err(|e| (e, full.clone(), name.clone()))?;
         drop(out);
         drop(input);
-        fs::write(record_path, &recorded.trace).map_err(|e| {
+        crate::debug::durable::write_atomic(record_path, &recorded.trace).map_err(|e| {
             (
                 Error::Io(e),
                 full.clone(),
@@ -102,7 +136,8 @@ pub fn run_file_cmd(
                 .map_err(|e| (e, full.clone(), name.clone()))?;
         drop(out);
         drop(input);
-        fs::write(path, &trace).map_err(|e| (Error::Io(e), full, path.display().to_string()))?;
+        crate::debug::durable::write_atomic(path, &trace)
+            .map_err(|e| (Error::Io(e), full, path.display().to_string()))?;
         eprintln!("recorded {n_obs} observations to {}", path.display());
         return Ok(exit);
     }

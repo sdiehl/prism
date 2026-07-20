@@ -1,0 +1,24 @@
+-- A resolved program exercising the whole front-end fixture surface: a record
+-- datatype and field access, an effect and its operation, a class and instance
+-- with dictionary evidence, a constrained function, and a plain function.
+-- Deliberately prelude-independent (local class/effect, builtin types only) so
+-- the seam dumps stay small and user-scoped.
+
+type Point = Point { x: Int, y: Int }
+
+effect Tick
+  tick() : Int
+
+class Same(a)
+  same : (a, a) -> Bool
+
+instance sameInt : Same(Int)
+  fn same(a, b) = a == b
+
+fn getx(p : Point) : Int = p.x
+
+fn alike(x : a, y : a) : Bool given Same(a) = same(x, y)
+
+fn ticked() : Int ! {Tick} = tick() + tick()
+
+fn main() : Bool = alike(getx(Point { x = 1, y = 2 }), 1)

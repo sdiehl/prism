@@ -7,9 +7,9 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        exclude: ^(tests/snapshots/|.*\.gray$)
+        exclude: ^(tests/snapshots/|tests/fixtures/|.*\.gray$)
       - id: end-of-file-fixer
-        exclude: ^(LICENSE$|tests/snapshots/|.*\.gray$)
+        exclude: ^(LICENSE$|tests/snapshots/|tests/fixtures/|.*\.gray$)
       - id: check-toml
       - id: check-yaml
       - id: check-merge-conflict

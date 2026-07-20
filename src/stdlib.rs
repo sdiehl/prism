@@ -45,4 +45,24 @@ pub const STDLIB: &[(&str, &str)] = &[
     ("Sequence", include_str!("../lib/std/Sequence.pr")),
     ("Cli", include_str!("../lib/std/Cli.pr")),
     ("Arena", include_str!("../lib/std/Arena.pr")),
+    ("Math", include_str!("../lib/std/Math.pr")),
+    ("Data.Graph", include_str!("../lib/std/Data/Graph.pr")),
+    ("Control.State", include_str!("../lib/std/Control/State.pr")),
+    (
+        "Control.Reader",
+        include_str!("../lib/std/Control/Reader.pr"),
+    ),
+    (
+        "Control.Writer",
+        include_str!("../lib/std/Control/Writer.pr"),
+    ),
+    ("Control.Fresh", include_str!("../lib/std/Control/Fresh.pr")),
+    (
+        "Data.Validation",
+        include_str!("../lib/std/Data/Validation.pr"),
+    ),
+    (
+        "Data.UnionFind",
+        include_str!("../lib/std/Data/UnionFind.pr"),
+    ),
 ];

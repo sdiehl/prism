@@ -21,12 +21,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::OpGrades;
-use crate::fixpoint::least_fixpoint;
-use crate::fresh::Fresh;
 use crate::names;
 use crate::sym::Sym;
 use crate::syntax::ast::Grade;
 use crate::types::ty::EffRow;
+use crate::util::fixpoint::least_fixpoint;
+use crate::util::fresh::Fresh;
 
 use super::super::inline::calls_in;
 use super::super::specialize_support::Rewrite;

@@ -1,5 +1,7 @@
 /* Memory core: allocation, tagged immediates, Perceus reference counting, FBIP
- * reuse, local mutable refs, and the runtime instrumentation counters. */
+ * reuse, local mutable refs, the `with_arena` region policy, and the runtime
+ * instrumentation counters. */
+#include "prism_arena.h"
 #include "prism_mem.h"
 
 /* Live-cell balance, the box-1 acceptance oracle: every prism_alloc bumps it,
@@ -67,13 +69,201 @@ long prism_ctor(long tag, long n, const long *fields) {
     return (long)p;
 }
 
+/* ---- The `with_arena` region policy -------------------------------------
+ *
+ * One region per `with_arena` handler activation. The arena-lowering pass
+ * emits `prism_arena_enter` before the handler and `prism_arena_exit` around
+ * its result; the handler's `alloc` clause discharges into `prism_bump`, which
+ * carves cells from the innermost open region. Activations bracket strictly
+ * (the body of `with_arena` has the closed row `{Alloc}`, so no foreign effect
+ * can unwind past the return clause, and `alloc` is graded `once`), so a plain
+ * stack of regions is sound; the depth token makes any compiler bug that
+ * unbalances the bracket a trap instead of a corruption.
+ *
+ * Arena cells carry PRISM_ARENA_OWNED in their rc word: dup/drop and the
+ * child-scan are no-ops on them and the region is their sole owner. Their
+ * refcounted children are owned as usual and released once, at exit, by
+ * walking the region's cell registry (an intrusive chain threaded through a
+ * link word bumped in front of every cell). Values may escape the region
+ * through the handler's result; exit deep-promotes any arena-owned cell
+ * reachable from the result into ordinary refcounted cells before the region
+ * is destroyed, so escape costs a copy, never soundness. */
+
+typedef struct PrismRegion {
+    PrismArena *arena;
+    long *cells; /* registry: head link word, each followed by its cell */
+    struct PrismRegion *next;
+    long depth; /* 1-based activation depth, the enter/exit pairing token */
+} PrismRegion;
+
+static PrismRegion *prism_region_top = NULL;
+
 /* Arena bump. The arena-lowering pass rewrites a constructor built under a
- * `with_arena` scope into `alloc(n)` + `init_at`, and the handler discharges the
- * `alloc` into this call. This runtime delegates to `prism_alloc`, so an arena
- * constructor is byte-identical to a plain one. `runtime/prism_arena.c` contains
- * the standalone region allocator exercised by the runtime tests. */
+ * `with_arena` scope into `alloc(n)` + `init_at`, and the handler discharges
+ * the `alloc` into this call. Inside an activation the cell comes from the
+ * region: no malloc, no live-cell accounting (the region owns it wholesale),
+ * fields zeroed so a cell a handler never resumes into stays walkable. With no
+ * open region (an `Alloc` handler outside `with_arena`, or a build without the
+ * lowering) it delegates to `prism_alloc` and the cell is ordinary. */
 long prism_bump(long n_words) {
-    return (long)prism_alloc(n_words);
+    PrismRegion *r = prism_region_top;
+    if (!r) return (long)prism_alloc(n_words);
+    /* link word + { rc, tag, arity, fields } */
+    size_t bytes = prism_ckd_words_bytes(
+        prism_ckd_ladd(1 + PRISM_HDR_WORDS, n_words));
+    long *w = prism_arena_alloc(r->arena, bytes);
+    if (!w) abort();
+    w[0] = (long)r->cells;
+    r->cells = w;
+    long *p = w + 1;
+    p[PRISM_RC_W] = PRISM_ARENA_OWNED;
+    p[PRISM_TAG_W] = 0;
+    p[PRISM_ARITY_W] = n_words;
+    for (long i = 0; i < n_words; i++) p[PRISM_HDR_WORDS + i] = 0;
+    return (long)p;
+}
+
+long prism_arena_enter(void) {
+    PrismRegion *r = malloc(sizeof *r);
+    if (!r) abort();
+    r->arena = prism_arena_create(0);
+    if (!r->arena) abort();
+    r->cells = NULL;
+    r->next = prism_region_top;
+    r->depth = prism_region_top ? prism_region_top->depth + 1 : 1;
+    prism_region_top = r;
+    return r->depth;
+}
+
+/* Whether the collector and the promotion walk may read a cell's payload words
+ * as child values. Strings, bignums, and buffers hold inline bytes/limbs/words
+ * behind the arity slot, not children; everything else (constructors, tuples,
+ * closures, boxes, arrays) stores ordinary tagged values. */
+static int prism_cell_has_children(const long *p) {
+    long tag = p[PRISM_TAG_W];
+    return tag != PRISM_STR_TAG && tag != PRISM_BIG_TAG && tag != PRISM_BUF_TAG &&
+           tag != PRISM_TBUF_TAG;
+}
+
+/* A fresh refcounted copy of an arena cell's header (fields filled by the
+ * promotion walk). Only constructor/tuple cells are ever arena-allocated, so
+ * arity is always a genuine field count here. */
+static long *prism_promote_shell(const long *p) {
+    long *q = prism_alloc(p[PRISM_ARITY_W]);
+    q[PRISM_TAG_W] = p[PRISM_TAG_W];
+    return q;
+}
+
+/* One step of the iterative promotion walk: fields [i..arity) of `src` remain
+ * to visit. `dst` is the refcounted copy being filled when `src` is an arena
+ * cell, or NULL when `src` is an ordinary cell whose arena-valued fields are
+ * rewritten in place. */
+typedef struct {
+    long *src;
+    long *dst;
+    long i;
+} PrismPromoteFrame;
+
+/* Deep-promote every arena-owned cell reachable from `v` into ordinary
+ * refcounted cells. `v` is borrowed; the result is an owned reference (the
+ * original when nothing was arena-owned at the root). Iterative with an
+ * explicit worklist, like prism_rc_dec, so escaping structures of any depth
+ * promote in bounded C stack. Values are acyclic (data is immutable and refs
+ * cannot capture themselves), so the walk terminates; shared arena cells are
+ * duplicated per path, which preserves the value and is unobservable. */
+static long prism_promote(long v) {
+    if ((v & 1) || !v) return v;
+    long *root = (long *)v;
+    PrismPromoteFrame *stack = NULL;
+    size_t sp = 0, cap = 0;
+    long out;
+    if (root[PRISM_RC_W] & PRISM_ARENA_OWNED) {
+        long *q = prism_promote_shell(root);
+        out = (long)q;
+        stack = malloc(sizeof *stack);
+        if (!stack) abort();
+        cap = 1;
+        stack[sp++] = (PrismPromoteFrame){root, q, 0};
+    } else {
+        prism_rc_inc(v); /* borrowed in, owned result out */
+        out = v;
+        if (prism_cell_has_children(root)) {
+            stack = malloc(sizeof *stack);
+            if (!stack) abort();
+            cap = 1;
+            stack[sp++] = (PrismPromoteFrame){root, NULL, 0};
+        }
+    }
+    while (sp) {
+        PrismPromoteFrame *f = &stack[sp - 1];
+        if (f->i >= f->src[PRISM_ARITY_W]) {
+            sp--;
+            continue;
+        }
+        long idx = f->i;
+        f->i++;
+        long c = f->src[PRISM_HDR_WORDS + idx];
+        if ((c & 1) || !c) {
+            if (f->dst) f->dst[PRISM_HDR_WORDS + idx] = c;
+            continue;
+        }
+        long *cp = (long *)c;
+        PrismPromoteFrame next;
+        if (cp[PRISM_RC_W] & PRISM_ARENA_OWNED) {
+            long *q = prism_promote_shell(cp);
+            (f->dst ? f->dst : f->src)[PRISM_HDR_WORDS + idx] = (long)q;
+            next = (PrismPromoteFrame){cp, q, 0};
+        } else {
+            if (f->dst) {
+                prism_rc_inc(c); /* the copy takes its own reference */
+                f->dst[PRISM_HDR_WORDS + idx] = c;
+            }
+            if (!prism_cell_has_children(cp)) continue;
+            next = (PrismPromoteFrame){cp, NULL, 0};
+        }
+        if (sp == cap) { /* grow; `f` is dead past this point */
+            size_t ncap = cap * 2;
+            PrismPromoteFrame *ns = realloc(stack, ncap * sizeof *ns);
+            if (!ns) abort();
+            stack = ns;
+            cap = ncap;
+        }
+        stack[sp++] = next;
+    }
+    free(stack);
+    return out;
+}
+
+long prism_arena_exit(long token, long v) {
+    PrismRegion *r = prism_region_top;
+    if (!r || r->depth != token) {
+        fprintf(stderr, "fatal: unbalanced arena exit (token %ld, depth %ld)\n", token,
+                r ? r->depth : 0);
+        abort();
+    }
+    long out = prism_promote(v);
+    /* Release the refcounted children the region's cells own. Arena-owned
+     * children die with the region itself; the promotion above already took
+     * fresh references for everything the escaping value keeps. */
+    for (long *lw = r->cells; lw; lw = (long *)*lw) {
+        long *cell = lw + 1;
+        long n = cell[PRISM_ARITY_W];
+        for (long i = 0; i < n; i++) {
+            long c = cell[PRISM_HDR_WORDS + i];
+            if ((c & 1) || !c) continue;
+            if (((long *)c)[PRISM_RC_W] & PRISM_ARENA_OWNED) continue;
+            prism_rc_dec(c);
+        }
+    }
+    /* Consume the caller's reference to `v` (this builtin's one deviation from
+     * the borrowed-argument convention, mirrored in codegen): when `v` is an
+     * arena cell, even the no-op release reads its header for the arena bit, so
+     * it must happen here, before the region backing that header is freed. */
+    prism_rc_dec(v);
+    prism_region_top = r->next;
+    prism_arena_destroy(r->arena);
+    free(r);
+    return out;
 }
 
 /* A box is an arity-0 cell whose single payload word holds one opaque i64: the
@@ -134,7 +324,10 @@ long prism_unbox(long p) {
  * short-circuits the traversal. */
 void prism_rc_inc(long v) {
     if ((v & 1) || !v) return;
-    ((long *)v)[PRISM_RC_W]++;
+    long *p = (long *)v;
+    /* An arena-owned cell's sole owner is its region: inert. */
+    if (p[PRISM_RC_W] & PRISM_ARENA_OWNED) return;
+    p[PRISM_RC_W]++;
 }
 
 /* Freeing is iterative via an intrusive worklist: a dead cell's rc word (now 0,
@@ -144,6 +337,8 @@ void prism_rc_inc(long v) {
 void prism_rc_dec(long v) {
     if ((v & 1) || !v) return;
     long *p = (long *)v;
+    /* Arena-owned: the region reclaims it wholesale, never this collector. */
+    if (p[PRISM_RC_W] & PRISM_ARENA_OWNED) return;
     if (--p[PRISM_RC_W] != 0) return;
     while (p) {
         long *next = (long *)p[PRISM_RC_W];
@@ -155,6 +350,11 @@ void prism_rc_dec(long v) {
                 long c = p[PRISM_HDR_WORDS + i];
                 if ((c & 1) || !c) continue;
                 long *cp = (long *)c;
+                /* An arena-owned child is the region's, not this cell's, so the
+                 * cascade must neither decrement nor free it. Only live children
+                 * are inspected here, so the rc word read is always a genuine
+                 * count (never a worklist link). */
+                if (cp[PRISM_RC_W] & PRISM_ARENA_OWNED) continue;
                 if (--cp[PRISM_RC_W] == 0) {
                     cp[PRISM_RC_W] = (long)next;
                     next = cp;
@@ -263,6 +463,10 @@ void prism_drive_step(void) {
 long prism_reuse_token(long v) {
     if ((v & 1) || !v) return 0;
     long *p = (long *)v;
+    /* An arena-owned cell is never uniquely owned by the dropping frame (the
+     * region owns it), so it can never become a reuse shell; its rc word must
+     * also stay untouched. Constructing over it falls back to fresh allocation. */
+    if (p[PRISM_RC_W] & PRISM_ARENA_OWNED) return 0;
     if (p[PRISM_TAG_W] == PRISM_STR_TAG || p[PRISM_TAG_W] == PRISM_BIG_TAG ||
         p[PRISM_TAG_W] == PRISM_BUF_TAG || p[PRISM_TAG_W] == PRISM_TBUF_TAG)
         return 0;

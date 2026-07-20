@@ -576,7 +576,7 @@ pub(super) fn thread_program(
     plan: &FoldPlan,
     analysis: &StateAnalysis<'_>,
     drift: &DriftLog,
-    fresh: &mut crate::fresh::Fresh,
+    fresh: &mut crate::util::fresh::Fresh,
 ) -> Option<Vec<TypedCoreFn>> {
     let StateAnalysis {
         ids,
@@ -1035,7 +1035,7 @@ pub(super) struct Threader<'a> {
     /// decline, leaving the counter advanced for whatever runs next. An engine
     /// with a private counter would rename the fallback's tree, including where
     /// a name is minted before an arm that can still decline.
-    pub(super) fresh: &'a mut crate::fresh::Fresh,
+    pub(super) fresh: &'a mut crate::util::fresh::Fresh,
 }
 
 /// Constant context for the `stake` lowering: the downstream evidence, the
@@ -3625,7 +3625,7 @@ mod tests {
             ret: BTreeMap::new(),
             param: BTreeMap::new(),
         };
-        let mut fresh = crate::fresh::Fresh::new();
+        let mut fresh = crate::util::fresh::Fresh::new();
         let mut threader = Threader {
             plan: &plan,
             ids: &ids,
@@ -4056,7 +4056,7 @@ mod tests {
             signatures: BTreeMap::new(),
             step: None,
             row: EffRow::Empty,
-            fresh: &mut crate::fresh::Fresh::new(),
+            fresh: &mut crate::util::fresh::Fresh::new(),
         };
         let read = TypedComp::new(
             CompSig::new(int.clone(), EffRow::Empty),
@@ -4228,7 +4228,7 @@ mod tests {
             signatures: BTreeMap::new(),
             step: None,
             row: EffRow::Empty,
-            fresh: &mut crate::fresh::Fresh::new(),
+            fresh: &mut crate::util::fresh::Fresh::new(),
         };
         let n = TypedBinder::new(Sym::new("n"), int.clone());
         let body = TypedComp::new(

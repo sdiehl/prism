@@ -1,8 +1,8 @@
 use marginalia::Span;
-use crate::syntax::ast::{Item, Vis, Fip, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, S, Spanned, NodeId, EffectDecl, EffOp, EffLabel, Grade, HandlerArm, HandlerMode, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier, StableDecl, Rung, RungField, Converter, ConvDir, CoeffectRow};
-use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, lift_noalloc, grade_word_msg, dot_op_removed, IfTail, FLIP_CLASS, FLIP_INSTANCE, FLIP_EFFECT, DECLINE_DIM_ARITH, GRADE_MANY_CLAUSE, MIGRATE_RESUME, MIGRATE_RET_ORDER};
+use crate::syntax::ast::{Item, Vis, Fip, Total, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, S, Spanned, NodeId, EffectDecl, EffOp, EffLabel, Grade, HandlerArm, HandlerMode, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier, StableDecl, Rung, RungField, Converter, ConvDir, Migration, MigrationRoute, VersionRoute, MigrationDir, CoeffectRow};
+use crate::syntax::desugar::{dot_call, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, lift_noalloc, decl_mods, grade_word_msg, dot_op_removed, mig_dir, IfTail, FLIP_CLASS, FLIP_INSTANCE, FLIP_EFFECT, DECLINE_DIM_ARITH, GRADE_MANY_CLAUSE, MIGRATE_RESUME, MIGRATE_RET_ORDER};
 use crate::lex::Token;
-use crate::kw::{self, DEPRECATED, VIEW, MAKE};
+use crate::kw::{self, DEPRECATED, VIEW, MAKE, DECREASES};
 
 grammar;
 
@@ -19,6 +19,9 @@ extern {
         "fip"    => Token::Fip,
         "fbip"   => Token::Fbip,
         "replayable" => Token::Replayable,
+        "logic"    => Token::Logic,
+        "requires" => Token::Requires,
+        "ensures"  => Token::Ensures,
         "pub"    => Token::Pub,
         "import" => Token::Import,
         "as"     => Token::As,
@@ -192,6 +195,7 @@ Item: Item = {
     <s:StableD> => Item::Stable(s),
     <c:ConstD> => Item::Fn(c),
     <f:Fn> => Item::Fn(f),
+    <f:LogicFn> => Item::LogicFn(f),
     <d:DeprecatedD> => d,
 };
 
@@ -261,6 +265,56 @@ StableD: StableDecl = {
 StableItem: crate::syntax::desugar::StableItem = {
     <r:Rung> => crate::syntax::desugar::StableItem::Rung(r),
     <c:Converter> => crate::syntax::desugar::StableItem::Conv(c),
+    <m:Migrations> => crate::syntax::desugar::StableItem::Migrations(m),
+};
+
+// `migrations { V1 -> V2 = auto  V2 -> V3 = version(upgrade = e, downgrade = auto) }`.
+// `migrations` is contextual (an ident, not a reserved word); rows are newline
+// separated, needing no comma because each opens with a rung `uid`.
+Migrations: Vec<Migration> = {
+    <l:@L> <kw:"ident"> "{" <rows:MigrationRow*> "}" <r:@R> =>? if kw == kw::MIGRATIONS {
+        Ok(rows)
+    } else {
+        Err(lalrpop_util::ParseError::User {
+            error: (Span::new(l, r), format!("expected `migrations`, found `{kw}`")),
+        })
+    },
+};
+
+MigrationRow: Migration = {
+    <l:@L> <from:"uid"> "->" <to:"uid"> "=" <route:Route> <r:@R> =>
+        Migration { from, to, route, span: Span::new(l, r) },
+};
+
+// A route is the derived form `auto` or the explicit `version(...)`. Both open
+// with a contextual ident; the following `(` selects `version`.
+Route: MigrationRoute = {
+    <l:@L> <kw:"ident"> <r:@R> =>? if kw == kw::AUTO {
+        Ok(MigrationRoute::Auto)
+    } else {
+        Err(lalrpop_util::ParseError::User {
+            error: (Span::new(l, r), format!("expected `auto` or `version(...)`, found `{kw}`")),
+        })
+    },
+    <l:@L> <kw:"ident"> "(" <up:VersionArg> "," <down:VersionArg> ","? ")" <r:@R> =>? if kw == kw::VERSION {
+        if up.0 == kw::UPGRADE && down.0 == kw::DOWNGRADE {
+            Ok(MigrationRoute::Version(Box::new(VersionRoute { upgrade: up.1, downgrade: down.1 })))
+        } else {
+            Err(lalrpop_util::ParseError::User {
+                error: (Span::new(l, r), "`version(...)` takes `upgrade = ..., downgrade = ...`".to_string()),
+            })
+        }
+    } else {
+        Err(lalrpop_util::ParseError::User {
+            error: (Span::new(l, r), format!("expected `auto` or `version(...)`, found `{kw}`")),
+        })
+    },
+};
+
+// `upgrade = <e>` / `downgrade = <e>`: the field name is checked in `Route`, the
+// value is any expression, normalized so a bare `auto` becomes the derived form.
+VersionArg: (String, MigrationDir) = {
+    <name:"ident"> "=" <e:Expr> => (name, mig_dir(e)),
 };
 
 // `V2 = { ..V1, tif: TimeInForce = GoodTillCancel } frozen "<digest>"`.
@@ -576,13 +630,55 @@ EffOpParam: Ty = {
 };
 
 Fn: Decl = {
-    <l:@L> <rep:"replayable"?> <fip:FipKw> "fn" <name:"ident"> "(" <params:Comma<Param>> ")" <ann:RetAnn> <wh:GivenClause?> "=" <body:ExprOrBlock> <wb:WhereBlock?> <r:@R> => {
+    <l:@L> <mods:DeclMods> <rep:"replayable"?> <fip:FipKw> "fn" <name:"ident"> "(" <params:Comma<Param>> ")" <ann:RetAnn> <wh:GivenClause?> <reqs:Requires*> <ens:Ensures*> <dec:Decreases?> "=" <body:ExprOrBlock> <wb:WhereBlock?> <r:@R> => {
         // A `@ noalloc` row at the root of the return annotation is the
         // declaration's allocation certificate, not part of the type.
         let (ret, no_alloc) = lift_noalloc(ann.1);
-        Decl { name, params, eff: ann.0, ret, constraints: wh.unwrap_or_default(), body, wheres: wb.unwrap_or_default(), konst: false, fip, replayable: rep.is_some(), no_alloc, span: Span::new(l, r) }
+        Decl { name, params, eff: ann.0, ret, constraints: wh.unwrap_or_default(), body, wheres: wb.unwrap_or_default(), requires: reqs, ensures: ens, decreases: dec, konst: false, test: mods.0, total: mods.1, fip, replayable: rep.is_some(), no_alloc, span: Span::new(l, r) }
     },
 };
+
+// The contextual leading declaration modifiers (Lanes K and T): `test`,
+// `total`/`assume total`, in that canonical order, before a `fn`'s reserved
+// modifiers. All three stay ordinary identifiers everywhere else; the run of
+// leading idents is classified by `decl_mods`, and a leading ident that is not
+// one of them is a pointed "not a declaration modifier" error rather than a bare
+// parse failure. The idents are distinguishable from the reserved modifiers
+// (`replayable`/`fip`/`fbip`) and `fn` that follow, so the run is unambiguous.
+DeclMods: (bool, Total) = {
+    <l:@L> <a:"ident"> <b:"ident"> <c:"ident"> <r:@R> =>? decl_mods(&[&a, &b, &c]).map_err(|msg| lalrpop_util::ParseError::User { error: (Span::new(l, r), msg) }),
+    <l:@L> <a:"ident"> <b:"ident"> <r:@R> =>? decl_mods(&[&a, &b]).map_err(|msg| lalrpop_util::ParseError::User { error: (Span::new(l, r), msg) }),
+    <l:@L> <a:"ident"> <r:@R> =>? decl_mods(&[&a]).map_err(|msg| lalrpop_util::ParseError::User { error: (Span::new(l, r), msg) }),
+    () => (false, Total::No),
+};
+
+// SMT contract clauses on a `fn`. A `requires` is a precondition
+// expression; an `ensures` binds a result name over its postcondition. Reserved
+// keywords delimit the clauses (a contextual spelling would fuse with the
+// clause's own expression via juxtaposition application). Their expressions are
+// left unresolved and unchecked in this phase and dropped before `Core`.
+Requires: S<Expr> = { "requires" <e:Expr> => e };
+Ensures: (String, S<Expr>) = { "ensures" "|" <name:"ident"> "|" <e:Expr> => (name, e) };
+
+// The ranking-measure clause on a `total fn`: `decreases <measure>`.
+// Contextual `decreases` (an ident, validated in the action) so the word stays an
+// ordinary identifier; it is the last clause before `=`, so a single measure
+// cannot fuse with a following clause the way a contextual `requires`/`ensures`
+// would. The measure is left unresolved and unchecked here and consumed only by
+// the termination checker; it never reaches `Core`.
+Decreases: S<Expr> = {
+    <l:@L> <kw:"ident"> <e:Expr> <r:@R> =>? if kw == DECREASES {
+        Ok(e)
+    } else {
+        Err(lalrpop_util::ParseError::User {
+            error: (Span::new(l, r), format!("expected `{DECREASES}` or `=`, found `{kw}`")),
+        })
+    },
+};
+
+// A `logic fn` proof-level declaration. It reuses the whole `Fn` body shape but
+// is a distinct item, never a runtime function.
+LogicFn: Decl = { "logic" <f:Fn> => f };
 
 // An optional `fip`/`fbip` keyword before `fn` requests the FP^2 in-place check.
 FipKw: Fip = {
@@ -596,7 +692,7 @@ FipKw: Fip = {
 // value rather than push a call frame.
 ConstD: Decl = {
     <l:@L> "let" <name:"ident"> <ann:(":" <Type>)?> "=" <body:ExprOrBlock> <r:@R> =>
-        Decl { name, params: vec![], eff: None, ret: ann, constraints: vec![], body, wheres: vec![], konst: true, fip: Fip::No, replayable: false, no_alloc: false, span: Span::new(l, r) },
+        Decl { name, params: vec![], eff: None, ret: ann, constraints: vec![], body, wheres: vec![], requires: vec![], ensures: vec![], decreases: None, konst: true, test: false, total: Total::No, fip: Fip::No, replayable: false, no_alloc: false, span: Span::new(l, r) },
 };
 
 // Haskell-style trailing definitions: `body where { x = e; y = e }`. Bindings

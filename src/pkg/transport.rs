@@ -313,11 +313,21 @@ impl GitTransport {
         if clone_dir.join(".git").is_dir() {
             git(&["pull", "--ff-only"], Some(&clone_dir))?;
         } else {
+            check_remote_scheme(remote)?;
             if let Some(parent) = clone_dir.parent() {
                 fs::create_dir_all(parent)?;
             }
+            // The `--` terminates options so a `-`-leading remote is read as a
+            // positional, never a flag; the scheme allow-list above independently
+            // rejects it and the remote-helper `ext::`/`file:` families.
             git(
-                &["clone", "--quiet", remote, &clone_dir.to_string_lossy()],
+                &[
+                    "clone",
+                    "--quiet",
+                    "--",
+                    remote,
+                    &clone_dir.to_string_lossy(),
+                ],
                 None,
             )?;
         }
@@ -389,6 +399,46 @@ impl Transport for GitTransport {
 
     fn publish_index(&self, artifact: &SignedArtifact) -> Result<(), TransportError> {
         self.local.publish_index(artifact)
+    }
+}
+
+// The URL schemes a network package remote may carry. A remote that names a
+// scheme must name one of these; git's remote-helper families that run code
+// (`ext::` executes an arbitrary command) and disk-reading schemes (`file:`) name
+// a scheme outside this set and are refused before the URL reaches `git clone`.
+const ALLOWED_REMOTE_SCHEMES: &[&str] = &["https", "http", "git", "ssh"];
+
+// Reject a remote that could be read as a `git` option, or that names a scheme
+// outside the allow-list, before it is ever passed to `git clone`. A scheme-less
+// remote is a local filesystem path (git's local-clone form) and is permitted; it
+// clones a directory and executes nothing.
+fn check_remote_scheme(remote: &str) -> Result<(), TransportError> {
+    // A remote that could be parsed as an option is refused outright; the `--`
+    // guard at the clone site is the second line of defense.
+    if remote.starts_with('-') {
+        return Err(TransportError::Remote(format!(
+            "refusing remote `{remote}`: a remote must not begin with `-`"
+        )));
+    }
+    if remote.is_empty() {
+        return Err(TransportError::Remote("refusing empty remote".to_string()));
+    }
+    // A scheme, when present, is the token before the first `:`, so `ext::sh -c
+    // ...` yields `ext`, `file:///x` yields `file`, and a scp-style `host:path`
+    // yields `host`, all outside the allow-list. A remote with no `:` at all is a
+    // bare local path and is allowed through unchanged.
+    match remote.split_once(':') {
+        None => Ok(()),
+        Some((scheme, _)) => {
+            let scheme = scheme.to_ascii_lowercase();
+            if ALLOWED_REMOTE_SCHEMES.contains(&scheme.as_str()) {
+                Ok(())
+            } else {
+                Err(TransportError::Remote(format!(
+                    "refusing remote `{remote}`: scheme `{scheme}` is not one of {ALLOWED_REMOTE_SCHEMES:?}"
+                )))
+            }
+        }
     }
 }
 
@@ -539,4 +589,30 @@ pub fn verify_all(src: &Store, baseline: &BTreeSet<String>) -> Result<usize, Tra
         .filter(|h| !baseline.contains(h))
         .collect();
     verify_closure(src, &roots, baseline)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_scheme_allow_list_rejects_malicious_urls() {
+        // Arbitrary command execution, option injection, local-file read, and
+        // scp-style / unschemed remotes are all refused before `git clone`.
+        assert!(check_remote_scheme("ext::sh -c 'touch /tmp/pwned'").is_err());
+        assert!(check_remote_scheme("--upload-pack=/bin/sh").is_err());
+        assert!(check_remote_scheme("file:///etc/passwd").is_err());
+        assert!(check_remote_scheme("git@github.com:sdiehl/prism.git").is_err());
+        assert!(check_remote_scheme("").is_err());
+    }
+
+    #[test]
+    fn remote_scheme_allow_list_accepts_known_schemes() {
+        assert!(check_remote_scheme("https://github.com/sdiehl/prism.git").is_ok());
+        assert!(check_remote_scheme("http://example.com/repo.git").is_ok());
+        assert!(check_remote_scheme("git://example.com/repo.git").is_ok());
+        assert!(check_remote_scheme("ssh://git@example.com/repo.git").is_ok());
+        // A scheme-less local path is git's local-clone form and is permitted.
+        assert!(check_remote_scheme("/var/tmp/store/remote.git").is_ok());
+    }
 }

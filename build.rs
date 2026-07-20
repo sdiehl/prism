@@ -14,6 +14,7 @@ use std::process::Command;
 // #include. Keep prism_internal.h first (the shared foundation).
 const RUNTIME_HEADERS: &[&str] = &[
     "prism_internal.h",
+    "prism_arena.h",
     "prism_mem.h",
     "prism_string.h",
     "prism_int.h",
@@ -24,11 +25,13 @@ const RUNTIME_HEADERS: &[&str] = &[
     "prism_array.h",
     "prism_buffer.h",
     "prism_tbuf.h",
+    "prism_simd.h",
     "prism_sort.h",
     "prism_kont.h",
     "prism_io.h",
 ];
 const RUNTIME_SOURCES: &[&str] = &[
+    "prism_arena.c",
     "prism_mem.c",
     "prism_string.c",
     "prism_int.c",
@@ -39,6 +42,7 @@ const RUNTIME_SOURCES: &[&str] = &[
     "prism_array.c",
     "prism_buffer.c",
     "prism_tbuf.c",
+    "prism_simd.c",
     "prism_kont.c",
     "prism_io.c",
 ];

@@ -4,9 +4,9 @@ use std::fmt;
 pub use marginalia::Span;
 pub use num_bigint::BigInt;
 
-use crate::coeffect::CoeffectFact;
-pub use crate::coeffect::CoeffectRow;
 use crate::kw;
+use crate::types::coeffect::CoeffectFact;
+pub use crate::types::coeffect::CoeffectRow;
 pub use crate::types::ty::Kind;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -119,6 +119,11 @@ pub struct Program<P: Phase = Surface> {
     pub canonicals: Vec<CanonicalDecl>,
     pub patterns: Vec<PatternDecl<P>>,
     pub fns: Vec<Decl<P>>,
+    // `logic fn` proof-level declarations. Surface-only proof data,
+    // apart from `fns`: no runtime phase reads them, so they are empty in a
+    // `Program<Core>` (dropped when desugar lowers). An AST dump of a
+    // contract-free program is byte-identical, since this is omitted when empty.
+    pub logic_fns: Vec<Decl<P>>,
     // Module imports, resolved away by the name-resolution pass.
     pub imports: Vec<ImportDecl>,
     // Top-level names marked `pub`. Visibility lives here, off the decls, so an
@@ -141,6 +146,19 @@ pub enum Vis {
     Priv,
     Pub,
     Opaque,
+}
+
+// A totality claim on a `fn`. `Prove` (`total fn`) asks Prism to prove
+// or locate evidence that the function returns in finitely many steps for every
+// well-typed argument; `Assume` (`assume total fn`) is an explicit source trust
+// root, accepted without proof but recorded as trusted in every dependent
+// certificate. Contextual, so `total`/`assume` stay usable as identifiers. Like
+// every verification claim, it is erased before executable Core.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Total {
+    No,
+    Prove,
+    Assume,
 }
 
 // The FP^2 in-place discipline a `fn` is annotated with. `Fbip` proves the body
@@ -197,6 +215,9 @@ impl<P: Phase + fmt::Debug> fmt::Debug for Program<P> {
             d.field("patterns", &self.patterns);
         }
         d.field("fns", &self.fns);
+        if !self.logic_fns.is_empty() {
+            d.field("logic_fns", &self.logic_fns);
+        }
         if !self.exports.is_empty() {
             d.field("exports", &self.exports);
         }
@@ -241,6 +262,10 @@ pub enum Item {
     Canonical(CanonicalDecl),
     Pattern(PatternDecl),
     Fn(Decl),
+    // A `logic fn` proof-level declaration. Shares the `fn` grammar but
+    // is a distinct item: it is never a runtime function, so it lands in
+    // `Program::logic_fns`, apart from `fns`, and no runtime phase reads it.
+    LogicFn(Decl),
     Stable(StableDecl),
     // A `deprecated "suggestion"` annotation line. It is a standalone item (a
     // layout statement of its own) that the parse-time demultiplexer attaches to
@@ -415,7 +440,52 @@ pub struct StableDecl {
     pub name: String,
     pub rungs: Vec<Rung>,
     pub converters: Vec<Converter>,
+    // The optional `migrations { From -> To = <route> }` table: an explicit
+    // allowlist of the routes the family promises. An adjacent row governs how
+    // that edge's `upgrade`/`downgrade` is built (derived or a hand-supplied
+    // function); a non-adjacent row to the current rung promises the composed
+    // family route reachable as `T.From.upgrade`/`T.From.downgrade`. An omitted
+    // route is not promised. Empty when the block uses only the inline
+    // converter form.
+    pub migrations: Vec<Migration>,
     pub span: Span,
+}
+
+// One row of a `migrations` table: the promised route from rung `from` to rung
+// `to` and how it is implemented.
+#[derive(Clone, Debug)]
+pub struct Migration {
+    pub from: String,
+    pub to: String,
+    pub route: MigrationRoute,
+    pub span: Span,
+}
+
+// How a migration row is implemented. `Auto` asks the compiler to derive the
+// mechanical parts of the edge (or, for a non-adjacent row, compose the declared
+// adjacent ladder). `Version` supplies one or both directions explicitly, each
+// still allowed to be `Auto`; its two expression payloads are boxed so the common
+// `Auto` route stays a cheap tag.
+#[derive(Clone, Debug)]
+pub enum MigrationRoute {
+    Auto,
+    Version(Box<VersionRoute>),
+}
+
+// The two directions a `version(...)` route names, each derived or hand-supplied.
+#[derive(Clone, Debug)]
+pub struct VersionRoute {
+    pub upgrade: MigrationDir,
+    pub downgrade: MigrationDir,
+}
+
+// One direction of a `version(...)` route: either derived (`auto`) or a
+// hand-supplied ordinary function (a named function or an inline lambda),
+// checked against the exact edge interface.
+#[derive(Clone, Debug)]
+pub enum MigrationDir {
+    Auto,
+    Expr(SExpr),
 }
 
 // One version of a stable type. `base` is the predecessor rung it extends
@@ -579,10 +649,31 @@ pub struct Decl<P: Phase = Surface> {
     // Trailing `where` bindings (non-recursive, let*-style): desugared into
     // nested `let`s around `body`, kept here so the formatter can restore them.
     pub wheres: Vec<(String, S<Expr<P>>)>,
+    // SMT contract clauses. `requires` are preconditions; each `ensures`
+    // binds a result name over its postcondition (`ensures |r| p`). Surface-only
+    // proof data: they carry no runtime meaning, are never resolved or checked in
+    // this phase, and are dropped when `core_decl` lowers to `Core`, so a
+    // contract-only edit leaves executable Core byte-identical. Held here for the
+    // formatter to restore, exactly like `wheres`.
+    pub requires: Vec<S<Expr<P>>>,
+    pub ensures: Vec<(String, S<Expr<P>>)>,
+    // The `decreases <measure>` ranking clause on a `total fn`. One
+    // logical measure expression over the parameters, used only to generate the
+    // termination ranking obligations; like `requires`/`ensures` it is surface-only
+    // proof data, carries no runtime meaning, and is dropped at the `Core`
+    // boundary, so a measure-only edit leaves executable Core byte-identical.
+    pub decreases: Option<S<Expr<P>>>,
     // A top-level `let NAME = EXPR` constant: zero params, its type is the
     // body's value type, and every reference inlines the body instead of
     // pushing a call frame. Set only by the const decl form.
     pub konst: bool,
+    // The `test fn` membership flag: the declaration is a test, checked
+    // in its defining module under test mode and excluded from every production
+    // view. Erased; never an elaboration input or content-hash row.
+    pub test: bool,
+    // The totality claim (`total`/`assume total` before `fn`), a
+    // verification fact. `No` for a plain `fn`. Erased before executable Core.
+    pub total: Total,
     // The FP^2 in-place annotation (`fip`/`fbip` keyword before `fn`), checked
     // over the reuse-lowered core. `No` for a plain `fn`.
     pub fip: Fip,
@@ -610,8 +701,23 @@ impl<P: Phase + fmt::Debug> fmt::Debug for Decl<P> {
             .field("constraints", &self.constraints)
             .field("body", &self.body)
             .field("wheres", &self.wheres);
+        if !self.requires.is_empty() {
+            d.field("requires", &self.requires);
+        }
+        if !self.ensures.is_empty() {
+            d.field("ensures", &self.ensures);
+        }
+        if let Some(m) = &self.decreases {
+            d.field("decreases", m);
+        }
         if self.konst {
             d.field("konst", &self.konst);
+        }
+        if self.test {
+            d.field("test", &self.test);
+        }
+        if self.total != Total::No {
+            d.field("total", &self.total);
         }
         if self.fip != Fip::No {
             d.field("fip", &self.fip);

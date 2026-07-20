@@ -83,6 +83,10 @@ pub const TYPED_CORE_EFFECT_LOWERING: ErrorCode = ErrorCode::new(ErrorPhase::Int
 pub const TYPED_CORE_CONSTRUCTION: ErrorCode = ErrorCode::new(ErrorPhase::Internal, "E9996");
 /// The independent typed-Core checker rejected a constructed witness.
 pub const TYPED_CORE_VERIFICATION: ErrorCode = ErrorCode::new(ErrorPhase::Internal, "E9997");
+/// Internal Logic IR built for verification was not well-sorted. The internal IR
+/// has no surface syntax, so this only fires on a compiler bug that built a
+/// malformed obligation.
+pub const SMT_LOGIC_WELLFORMED: ErrorCode = ErrorCode::new(ErrorPhase::Internal, "E9990");
 pub(crate) const INTERNAL_TYPE: &str = "E9998";
 pub(crate) const INTERNAL: &str = "E9999";
 
@@ -136,6 +140,7 @@ mod tests {
             TYPED_CORE_ENVIRONMENT.as_str(),
             TYPED_CORE_CONSTRUCTION.as_str(),
             TYPED_CORE_VERIFICATION.as_str(),
+            SMT_LOGIC_WELLFORMED.as_str(),
             INTERNAL_TYPE,
             INTERNAL,
         ];

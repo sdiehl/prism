@@ -177,8 +177,9 @@ fn render_all(
 // Standard library (the first consumer): the embedded prelude and modules.
 // ---------------------------------------------------------------------------
 
-const STDLIB_BLURB: &str = "Prism's standard library is ordinary Prism source, not compiler built-ins. \
-A small always-on prelude supplies the core types, the type-class tower, and the common data modules \
+const STDLIB_BLURB: &str =
+    "Prism's standard library is ordinary Prism source, not compiler built-ins. \
+A small always-on Base supplies the core types, the type-class tower, and the common data modules \
 in unqualified scope; everything else is opt-in via explicit import. The pages below are generated \
 from the module sources, with signatures taken from the typechecker.";
 
@@ -220,14 +221,15 @@ pub fn project_expect_files(modules: &[ModuleSource], base: &Path) -> Vec<Expect
 fn stdlib_specs() -> Vec<ModSpec> {
     let mut v = vec![ModSpec {
         dotted: doctest::PRELUDE_DOTTED.into(),
-        title: "The Prelude".into(),
-        slug: "prelude".into(),
+        title: "Base".into(),
+        slug: "base".into(),
         src: PRELUDE.to_string(),
         source_path: "lib/prelude.pr".into(),
         is_prelude: true,
     }];
+    let mut rest = Vec::new();
     for (name, src) in STDLIB {
-        v.push(ModSpec {
+        rest.push(ModSpec {
             dotted: (*name).into(),
             title: (*name).into(),
             slug: slug_of(name),
@@ -236,6 +238,13 @@ fn stdlib_specs() -> Vec<ModSpec> {
             is_prelude: false,
         });
     }
+    // Prefixed modules grouped and lexicographic first (`Control.*`, then
+    // `Data.*`), then the bare modules lexicographic, so the reference reads in a
+    // predictable order rather than the embed-registration order.
+    rest.sort_by(|a, b| {
+        (!a.dotted.contains('.'), &a.dotted).cmp(&(!b.dotted.contains('.'), &b.dotted))
+    });
+    v.extend(rest);
     v
 }
 

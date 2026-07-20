@@ -6,8 +6,8 @@
 -- renderer carries a `Flat`/`Brk` mode through a work list; its `fits`
 -- lookahead stops at the next forced break or as soon as the width is exceeded.
 --
--- Import explicitly (`import Data.Pretty`); these names are not in the
--- prelude's unqualified scope. Widths count Unicode code points, matching
+-- Import explicitly (`import Data.Pretty`); these names are not in
+-- Base's unqualified scope. Widths count Unicode code points, matching
 -- `str_len`; they are not terminal display-cell measurements.
 
 -- | A layout document. Its representation is hidden so indentation and break

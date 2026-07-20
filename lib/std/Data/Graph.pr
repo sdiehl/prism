@@ -1,0 +1,336 @@
+-- | Directed graphs over an ordered node type, with the deterministic
+-- algorithms the compiler relies on internally, mirrored into Prism.
+--
+-- A graph is an adjacency `Map(k, List(k))` from a node to its successor list
+-- (the same "a set is a `Map(k, Unit)`" idiom `Data.Set` uses, so no new wired
+-- type is needed). Every traversal visits nodes and successors in ascending
+-- `Ord(k)` order, so output is a pure function of the edge set, never of
+-- insertion order or hashing. The strongly-connected-components pass is Tarjan's,
+-- returning components callee-first (each component after the ones it points to)
+-- with each component's members in ascending order, matching the compiler's own
+-- SCC. Opt-in: not in Base.
+
+import Data.Map (map_empty, map_lookup, map_insert, map_keys, map_member)
+
+import Data.Set (set_empty, set_insert, set_member, set_delete, set_to_list, set_union, set_from_list)
+
+import Data.List (append, reverse, foldl)
+
+-- | The empty graph.
+pub let graph_empty : Map(k, List(k)) = map_empty
+
+-- | The successors of `u` in ascending order (empty if `u` has no out-edges).
+pub fn graph_successors(g : Map(k, List(k)), u : k) : List(k) given Ord(k) =
+  match map_lookup(u, g) of
+    None => Nil
+    Some(vs) => vs
+
+-- | Add `u` as a node with no new edges (a no-op if already present).
+pub fn graph_add_node(g : Map(k, List(k)), u : k) : Map(k, List(k)) given Ord(k) =
+  if map_member(u, g) then
+    g
+  else
+    map_insert(u, Nil, g)
+
+-- | Add the directed edge `u -> v`, keeping each successor list sorted and
+-- duplicate-free so iteration stays deterministic.
+pub fn graph_add_edge(
+  g : Map(k, List(k)),
+  u : k,
+  v : k
+) : Map(k, List(k)) given Ord(k) =
+  map_insert(u, insert_sorted_uniq(v, graph_successors(g, u)), g)
+
+-- Insert `x` into the ascending, duplicate-free list `xs`.
+fn insert_sorted_uniq(x : k, xs : List(k)) : List(k) given Ord(k) =
+  match xs of
+    Nil => Cons(x, Nil)
+    Cons(y, rest) =>
+      let c = cmp(x, y)
+      if c < 0 then
+        Cons(x, xs)
+      elif c == 0 then
+        xs
+      else
+        Cons(y, insert_sorted_uniq(x, rest))
+
+-- | Build a graph from a list of directed `(from, to)` edges.
+pub fn graph_from_edges(es : List((k, k))) : Map(k, List(k)) given Ord(k) =
+  foldl(
+      \(acc, e) -> match e of { (u, v) => graph_add_edge(acc, u, v) },
+      graph_empty,
+      es,
+    )
+
+-- | Every node, in ascending order: the sources plus everything pointed at, so a
+-- sink that only ever appears as a successor still shows up.
+pub fn graph_nodes(g : Map(k, List(k))) : List(k) given Ord(k) =
+  let sources = set_from_list(map_keys(g))
+  let all = foldl(
+      \(acc, u) -> set_union(acc, set_from_list(graph_successors(g, u))),
+      sources,
+      map_keys(g),
+    )
+  set_to_list(all)
+
+-- | The reverse graph: every edge `u -> v` becomes `v -> u`. Nodes are
+-- preserved, so an isolated node survives.
+pub fn graph_reverse(g : Map(k, List(k))) : Map(k, List(k)) given Ord(k) =
+  let seeded =
+    foldl(\(acc, u) -> graph_add_node(acc, u), graph_empty, graph_nodes(g))
+  foldl(
+      \(acc, u) -> foldl(\(a, v) -> graph_add_edge(a, v, u), acc, graph_successors(g, u)),
+      seeded,
+      graph_nodes(g),
+    )
+
+-- | Depth-first preorder from `start`: `start`, then its successors' subtrees,
+-- successors taken in ascending order. Each node appears once.
+pub fn graph_dfs(g : Map(k, List(k)), start : k) : List(k) given Ord(k) =
+  match dfs_go(g, Cons(start, Nil), set_empty, Nil) of
+    (_seen, acc) => reverse(acc)
+
+fn dfs_go(
+  g : Map(k, List(k)),
+  stack : List(k),
+  seen : Map(k, Unit),
+  acc : List(k)
+) : (Map(k, Unit), List(k)) given Ord(k) =
+  match stack of
+    Nil => (seen, acc)
+    Cons(u, rest) =>
+      if set_member(u, seen) then
+        dfs_go(g, rest, seen, acc)
+      else
+        dfs_go(
+            g,
+            append(graph_successors(g, u), rest),
+            set_insert(u, seen),
+            Cons(u, acc),
+          )
+
+-- | Breadth-first order from `start`, successors taken in ascending order. Each
+-- node appears once.
+pub fn graph_bfs(g : Map(k, List(k)), start : k) : List(k) given Ord(k) =
+  reverse(bfs_go(g, Cons(start, Nil), set_insert(start, set_empty), Nil))
+
+fn bfs_go(
+  g : Map(k, List(k)),
+  queue : List(k),
+  seen : Map(k, Unit),
+  acc : List(k)
+) : List(k) given Ord(k) =
+  match queue of
+    Nil => acc
+    Cons(u, rest) =>
+      match push_unseen(graph_successors(g, u), seen, Nil) of
+        (fresh, seen2) =>
+          bfs_go(g, append(rest, reverse(fresh)), seen2, Cons(u, acc))
+
+-- Mark and collect the not-yet-seen successors (reversed; caller re-reverses).
+fn push_unseen(
+  vs : List(k),
+  seen : Map(k, Unit),
+  acc : List(k)
+) : (List(k), Map(k, Unit)) given Ord(k) =
+  match vs of
+    Nil => (acc, seen)
+    Cons(v, rest) =>
+      if set_member(v, seen) then
+        push_unseen(rest, seen, acc)
+      else
+        push_unseen(rest, set_insert(v, seen), Cons(v, acc))
+
+-- | The nodes reachable from `start` (including `start`), in ascending order.
+pub fn graph_reachable(g : Map(k, List(k)), start : k) : List(k) given Ord(k) =
+  set_to_list(set_from_list(graph_dfs(g, start)))
+
+-- | The transitive closure: an edge `u -> v` for every `v` reachable from `u`
+-- via at least one step (so `u -> u` only when `u` lies on a cycle).
+pub fn graph_transitive_closure(g : Map(k, List(k))) : Map(k, List(k)) given Ord(k) =
+  foldl(
+      \(acc, u) -> foldl(\(a, v) -> graph_add_edge(a, u, v), acc, reachable_from_succ(g, u)),
+      graph_empty,
+      graph_nodes(g),
+    )
+
+fn reachable_from_succ(g : Map(k, List(k)), u : k) : List(k) given Ord(k) =
+  set_to_list(
+      foldl(
+          \(acc, v) -> set_union(acc, set_from_list(graph_reachable(g, v))),
+          set_empty,
+          graph_successors(g, u),
+        ),
+    )
+
+-- | Topological order: a node before every node it points to. Deterministic via
+-- a depth-first postorder over nodes in ascending order, reversed. A graph with
+-- a cycle still yields a total order, but not a valid topo sort (a cycle admits
+-- none); pair it with `graph_scc` when cycles are possible.
+pub fn graph_topo_sort(g : Map(k, List(k))) : List(k) given Ord(k) =
+  match (foldl(\(st, u) -> topo_visit(g, u, st), (set_empty, Nil), graph_nodes(g))) of
+    (_seen, order) => order
+
+fn topo_visit(
+  g : Map(k, List(k)),
+  u : k,
+  st : (Map(k, Unit), List(k))
+) : (Map(k, Unit), List(k)) given Ord(k) =
+  match st of
+    (seen, order) =>
+      if set_member(u, seen) then
+        st
+      else
+        match (foldl(
+              \(s, v) -> topo_visit(g, v, s),
+              (set_insert(u, seen), order),
+              graph_successors(g, u),
+            )) of
+          (seen2, order2) => (seen2, Cons(u, order2))
+
+-- | Tarjan's strongly-connected components, returned callee-first: a component
+-- comes after every component reachable from it, and each component's members
+-- are in ascending order. A node with no self-loop is its own singleton
+-- component. This mirrors the compiler's own SCC ordering exactly.
+pub fn graph_scc(g : Map(k, List(k))) : List(List(k)) given Ord(k) =
+  match (foldl(\(st, u) -> scc_start(g, u, st), scc_init(), graph_nodes(g))) of
+    (_meta, _on, _cstk, _next, sccs, _work) => reverse(sccs)
+
+-- Tarjan's state, threaded as a tuple to stay brand-polymorphic: a per-node
+-- `(index, lowlink)` map, the on-stack set, the component stack, the next index
+-- to hand out, the finished components (in reverse of the output order), and the
+-- explicit DFS work stack of `(node, unprocessed-successors)` frames. Iterative,
+-- like the compiler's own `scc.rs`, so a deep chain never overflows the stack.
+fn scc_init() : (Map(k, (Int, Int)), Map(k, Unit), List(k), Int, List(List(k)), List((k, List(k)))) =
+  (map_empty, set_empty, Nil, 0, Nil, Nil)
+
+-- Begin (or skip) a DFS tree rooted at `u`, then drive it to completion.
+fn scc_start(
+  g : Map(k, List(k)),
+  u : k,
+  st : (Map(k, (Int, Int)), Map(k, Unit), List(k), Int, List(List(k)), List((k, List(k))))
+) : (Map(k, (Int, Int)), Map(k, Unit), List(k), Int, List(List(k)), List((k, List(k)))) given Ord(k) =
+  match st of
+    (meta, on, cstk, next, sccs, _work) =>
+      if map_member(u, meta) then
+        st
+      else
+        scc_drive(g, (
+            map_insert(u, (next, next), meta),
+            set_insert(u, on),
+            Cons(u, cstk),
+            next + 1,
+            sccs,
+            Cons((u, graph_successors(g, u)), Nil),
+          ))
+
+-- The iterative DFS: process the top frame's next successor, or finish the node
+-- when its successors are exhausted. Tail-recursive over the work stack.
+fn scc_drive(
+  g : Map(k, List(k)),
+  st : (Map(k, (Int, Int)), Map(k, Unit), List(k), Int, List(List(k)), List((k, List(k))))
+) : (Map(k, (Int, Int)), Map(k, Unit), List(k), Int, List(List(k)), List((k, List(k)))) given Ord(k) =
+  match st of
+    (meta, on, cstk, next, sccs, work) =>
+      match work of
+        Nil => st
+        Cons(frame, rest) =>
+          match frame of
+            (v, succs) =>
+              match succs of
+                Cons(w, more) =>
+                  let work2 = Cons((v, more), rest)
+                  match map_lookup(w, meta) of
+                    None =>
+                      scc_drive(g, (
+                          map_insert(w, (next, next), meta),
+                          set_insert(w, on),
+                          Cons(w, cstk),
+                          next + 1,
+                          sccs,
+                          Cons((w, graph_successors(g, w)), work2),
+                        ))
+                    Some(mw) =>
+                      match mw of
+                        (iw, _lw) =>
+                          if set_member(w, on) then
+                            scc_drive(g, (
+                                relax_low(meta, v, iw),
+                                on,
+                                cstk,
+                                next,
+                                sccs,
+                                work2,
+                              ))
+                          else
+                            scc_drive(g, (meta, on, cstk, next, sccs, work2))
+                Nil =>
+                  -- `v` is done: pop its component if it is a root, then push its
+                  -- lowlink up to the parent frame. Inlined (not a mutually
+                  -- recursive helper) so `scc_drive` only ever self-recurses,
+                  -- which the dictionary elaborator handles cleanly.
+                  let lv = low_of(meta, v)
+                  match rooted(v, meta, on, cstk, sccs) of
+                    (on2, cstk2, sccs2) =>
+                      match rest of
+                        Nil =>
+                          scc_drive(g, (meta, on2, cstk2, next, sccs2, rest))
+                        Cons(pf, _) =>
+                          match pf of
+                            (p, _ps) =>
+                              scc_drive(g, (
+                                  relax_low(meta, p, lv),
+                                  on2,
+                                  cstk2,
+                                  next,
+                                  sccs2,
+                                  rest,
+                                ))
+
+-- If `low[v] == index[v]`, pop the component down to `v`, sort it ascending, and
+-- record it; otherwise leave the stacks untouched.
+fn rooted(
+  v : k,
+  meta : Map(k, (Int, Int)),
+  on : Map(k, Unit),
+  cstk : List(k),
+  sccs : List(List(k))
+) : (Map(k, Unit), List(k), List(List(k))) given Ord(k) =
+  match map_lookup(v, meta) of
+    Some((iv, lv)) =>
+      if lv == iv then
+        match pop_component(v, cstk, on, Nil) of
+          (comp, cstk2, on2) => (on2, cstk2, Cons(sort(comp), sccs))
+      else
+        (on, cstk, sccs)
+    None => (on, cstk, sccs)
+
+fn pop_component(
+  v : k,
+  stack : List(k),
+  onstack : Map(k, Unit),
+  acc : List(k)
+) : (List(k), List(k), Map(k, Unit)) given Ord(k) =
+  match stack of
+    Nil => (acc, Nil, onstack)
+    Cons(u, rest) =>
+      let on2 = set_delete(u, onstack)
+      if cmp(u, v) == 0 then
+        (Cons(u, acc), rest, on2)
+      else
+        pop_component(v, rest, on2, Cons(u, acc))
+
+fn low_of(meta : Map(k, (Int, Int)), v : k) : Int given Ord(k) =
+  match map_lookup(v, meta) of
+    Some((_iv, lv)) => lv
+    None => 0
+
+-- Set `low[v]` to the smaller of its current value and `n`, keeping `index[v]`.
+fn relax_low(
+  meta : Map(k, (Int, Int)),
+  v : k,
+  n : Int
+) : Map(k, (Int, Int)) given Ord(k) =
+  match map_lookup(v, meta) of
+    Some((iv, lv)) => map_insert(v, (iv, min(lv, n)), meta)
+    None => meta

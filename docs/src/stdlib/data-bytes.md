@@ -16,7 +16,7 @@ Hex and base64 are written in pure Prism over the buffer builders rather than as
 
 ## Filesystem bytes
 
-`read_bytes` and `write_bytes` are the raw-byte counterparts of the prelude's text `read_file`/`write_file`, reading and writing a file's exact bytes with no UTF-8 interpretation. They stay inside the determinism contract: `read_bytes` is a `FileSystem` capability of its own (`fs_read_bytes`), so its input is captured in the replay trace exactly like a text read; `write_bytes` is an off-platform output that is not part of the trace, exactly as text writes already are. Bytes are never routed through `String` (which is proof-carrying UTF-8 and would replace an ill-formed byte with U+FFFD), so an embedded NUL or a lone `0xFF` survives a round trip verbatim.
+`read_bytes` and `write_bytes` are the raw-byte counterparts of Base's text `read_file`/`write_file`, reading and writing a file's exact bytes with no UTF-8 interpretation. They stay inside the determinism contract: `read_bytes` is a `FileSystem` capability of its own (`fs_read_bytes`), so its input is captured in the replay trace exactly like a text read; `write_bytes` is an off-platform output that is not part of the trace, exactly as text writes already are. Bytes are never routed through `String` (which is proof-carrying UTF-8 and would replace an ill-formed byte with U+FFFD), so an embedded NUL or a lone `0xFF` survives a round trip verbatim.
 
 ## Functions and Values
 
@@ -250,7 +250,7 @@ Some(2)
 read_bytes : (String) -> Wire.Bytes ! {FileSystem}
 ```
 
-Read the file at `path` as raw bytes. Carries the `FileSystem` capability (the `fs_read_bytes` op the default world handler discharges, via the prelude's `read_file_bytes` wrapper) and is replay-recorded like `read_file`, so a recorded run reproduces the same bytes.
+Read the file at `path` as raw bytes. Carries the `FileSystem` capability (the `fs_read_bytes` op the default world handler discharges, via Base's `read_file_bytes` wrapper) and is replay-recorded like `read_file`, so a recorded run reproduces the same bytes.
 
 ```prism,no_run,mod=Data.Bytes
 bytes_length(read_bytes("data.bin"))

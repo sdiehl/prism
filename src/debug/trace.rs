@@ -27,19 +27,30 @@ const TAG_BOOL: char = 'B';
 const TAG_OUT: char = 'O';
 const DELIM: char = ':';
 
-// The tag and payload of one observation, the raw form of a frame.
-fn field(tag: char, payload: &str) -> String {
+// The tag character and payload string of one observation.
+fn tag_payload(o: &Obs) -> (char, String) {
+    match o {
+        Obs::Int(n) => (TAG_INT, n.to_string()),
+        Obs::Str(s) => (TAG_STR, s.clone()),
+        Obs::Bool(b) => (TAG_BOOL, if *b { "1" } else { "0" }.to_string()),
+        Obs::Out => (TAG_OUT, String::new()),
+    }
+}
+
+/// The two write halves of one frame: its self-delimiting header (tag, payload
+/// char length, delimiter) and the payload itself. A durable writer can persist
+/// the halves in separate steps and still land bytes that [`decode`] reads back,
+/// keeping frame framing the sole authority of this module even when a
+/// crash-safe log wants to fail between a frame's header and its body.
+pub(crate) fn frame_halves(o: &Obs) -> (String, String) {
+    let (tag, payload) = tag_payload(o);
     // Character count, not byte count: `Replay.pr` measures payloads in chars.
-    format!("{tag}{}{DELIM}{payload}", payload.chars().count())
+    (format!("{tag}{}{DELIM}", payload.chars().count()), payload)
 }
 
 fn encode_one(o: &Obs) -> String {
-    match o {
-        Obs::Int(n) => field(TAG_INT, &n.to_string()),
-        Obs::Str(s) => field(TAG_STR, s),
-        Obs::Bool(b) => field(TAG_BOOL, if *b { "1" } else { "0" }),
-        Obs::Out => field(TAG_OUT, ""),
-    }
+    let (header, payload) = frame_halves(o);
+    format!("{header}{payload}")
 }
 
 /// Encode a trace to its self-delimiting `.replay` string form.
@@ -49,6 +60,11 @@ pub fn encode(frames: &[Obs]) -> String {
 }
 
 /// Decode a `.replay` string back into its observation frames.
+///
+/// This is the strict reader: any malformed or trailing garbage is a hard error,
+/// the pointed diagnostic a corrupt trace deserves. Torn-tail recovery of a log
+/// killed mid-append is the durable log's job (it truncates to the committed
+/// extent named by its sidecar index before decoding), not the codec's.
 ///
 /// # Errors
 /// Fails on a malformed frame: a truncated header, a missing delimiter, a

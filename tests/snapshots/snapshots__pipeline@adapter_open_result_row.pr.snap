@@ -1,0 +1,16 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/adapter_open_result_row.pr
+---
+== tokens ==
+VOpen Effect UIdent("KvV1") VOpen Ident("get_v1") LParen KwInt RParen Colon KwInt VSemi Ident("put_v1") LParen KwInt Comma KwInt RParen Colon KwUnit VClose VSemi Effect UIdent("KvV2") VOpen Ident("get_v2") LParen KwInt RParen Colon KwInt VSemi Ident("put_v2") LParen KwInt Comma KwInt RParen Colon KwUnit VClose VSemi Fn Ident("adapt_v1_to_v2") LParen Ident("action") Colon LParen RParen Arrow Ident("a") Bang LBrace UIdent("KvV1") Bar Ident("e") RBrace RParen Colon Ident("a") Bang LBrace UIdent("KvV2") Bar Ident("e") RBrace Eq VOpen Handle Ident("action") LParen RParen With VOpen Ident("get_v1") LParen Ident("key") RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen Ident("get_v2") LParen Ident("key") RParen RParen VSemi Ident("put_v1") LParen Ident("key") Comma Ident("value") RParen Ident("resume") Ident("k") FatArrow VOpen Ident("put_v2") LParen Ident("key") Comma Ident("value") RParen VSemi Ident("k") LParen LParen RParen RParen VClose VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VClose
+
+== parse ==
+[E7100] Parse Error: a declaration effect row must be closed; write `: T ! {A, B}`
+    ╭─[ <source>:15:52 ]
+    │
+ 15 │ fn adapt_v1_to_v2(action : () -> a ! {KvV1 | e}) : a ! {KvV2 | e} =
+    │                                                    ───────┬──────  
+    │                                                           ╰──────── here
+────╯

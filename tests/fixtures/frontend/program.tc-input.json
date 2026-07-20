@@ -1,0 +1,132 @@
+{
+  "schema": "prism-tc-input-v1",
+  "compiler": "0.13.0",
+  "imports": [],
+  "types": [
+    {
+      "name": "Point",
+      "params": [],
+      "newtype": false,
+      "deriving": [],
+      "ctors": [
+        {
+          "name": "Point",
+          "tag": 0,
+          "fields": [
+            "x",
+            "y"
+          ],
+          "args": [
+            "Int",
+            "Int"
+          ]
+        }
+      ],
+      "span": {
+        "start": 361,
+        "end": 398
+      }
+    }
+  ],
+  "effects": [
+    {
+      "name": "Tick",
+      "params": [],
+      "ops": [
+        {
+          "name": "tick",
+          "grade": "many",
+          "params": [],
+          "ret": "Int"
+        }
+      ],
+      "span": {
+        "start": 400,
+        "end": 426
+      }
+    }
+  ],
+  "classes": [
+    {
+      "name": "Same",
+      "param": "a",
+      "supers": [],
+      "methods": [
+        {
+          "name": "same",
+          "ty": "(a, a) -> Bool"
+        }
+      ],
+      "span": {
+        "start": 428,
+        "end": 465
+      }
+    }
+  ],
+  "instances": [
+    {
+      "class": "Same",
+      "head": "Int",
+      "module": "",
+      "context": []
+    }
+  ],
+  "functions": [
+    {
+      "name": "getx",
+      "params": [
+        {
+          "name": "p",
+          "borrow": false
+        }
+      ],
+      "constraints": [],
+      "body": 1,
+      "span": {
+        "start": 522,
+        "end": 552
+      }
+    },
+    {
+      "name": "alike",
+      "params": [
+        {
+          "name": "x",
+          "borrow": false
+        },
+        {
+          "name": "y",
+          "borrow": false
+        }
+      ],
+      "constraints": [
+        "Same"
+      ],
+      "body": 3,
+      "span": {
+        "start": 554,
+        "end": 610
+      }
+    },
+    {
+      "name": "ticked",
+      "params": [],
+      "constraints": [],
+      "body": 7,
+      "span": {
+        "start": 612,
+        "end": 656
+      }
+    },
+    {
+      "name": "main",
+      "params": [],
+      "constraints": [],
+      "body": 12,
+      "span": {
+        "start": 658,
+        "end": 715
+      }
+    }
+  ]
+}

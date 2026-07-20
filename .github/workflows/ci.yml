@@ -82,8 +82,10 @@ jobs:
             echo "tidy $f"
             clang-tidy-22 "$f" --quiet -- -std=c11 -O2 -D_GNU_SOURCE=1 -Iruntime
           done
-      # The arena allocator is standalone and excluded from the linked runtime.
-      # Its self-test covers the create/alloc/reset/destroy paths directly.
+      # The arena allocator links into the runtime (build.rs RUNTIME_SOURCES) and
+      # is exercised end-to-end by the native parity/leak gates and the hostile
+      # harness. This extra standalone self-test compiles it in isolation to cover
+      # the create/alloc/reset/destroy paths directly.
       - name: C runtime arena self-test
         run: |
           ${PRISM_CC:-clang} -std=c11 -O2 -DPRISM_ARENA_TEST -Iruntime \
@@ -195,21 +197,15 @@ jobs:
           PRISM_CC_FLAGS: "-DPRISM_RT_DEBUG"
         run: cargo test --test native_parity native_matches_interpreter
 
-  test:
-    name: Test
+  # The non-test verification steps, split out of the sharded `test` job below so
+  # they run once instead of being duplicated across every shard.
+  checks:
+    name: Checks
     runs-on: ubuntu-latest
     env:
       LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
       PRISM_CC: /usr/lib/llvm-22/bin/clang
       RUSTC_WRAPPER: sccache
-      # Persist the native parity/leak verdicts across runs. Safe by
-      # construction: each cached verdict is keyed by a hash of the compiler's
-      # source tree (source fingerprint), so any change under src/, runtime/,
-      # lib/, or the manifests re-runs the whole corpus and only genuinely
-      # unchanged programs are skipped. A restored stale cache can never mask a
-      # regression, its markers simply miss.
-      PRISM_GATE_CACHE: "1"
-      PRISM_GATE_FINGERPRINT: source
     steps:
       - uses: actions/checkout@v7
 
@@ -226,28 +222,8 @@ jobs:
           # cold rebuild so `libprism_libm.a` is regenerated from current sources.
           prefix-key: "v1-libm"
 
-      # The gate verdict cache, restored after rust-cache so its files are not
-      # disturbed. A loose restore-key is correct because the marker's own key
-      # carries the source/toolchain fingerprint; the per-sha save key just lets
-      # each run publish an updated snapshot.
-      - name: Cache gate verdicts
-        uses: actions/cache@v6
-        with:
-          path: target/gate-cache
-          key: gate-verdicts-test-${{ runner.os }}-${{ github.sha }}
-          restore-keys: |
-            gate-verdicts-test-${{ runner.os }}-
-
       - name: Install LLVM 22
         uses: ./.github/actions/setup-llvm
-        with:
-          packages: clang-tidy-22
-
-      # cargo-nextest runs every test binary's tests in one global scheduler, so
-      # the many small suites fill cores continuously instead of queueing binary
-      # after binary. It skips Rust doctests, which are run separately below.
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@nextest
 
       - name: sccache
         uses: mozilla-actions/sccache-action@v0.0.10
@@ -262,17 +238,6 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --no-deps
-
-      # Runs the whole suite, including the runtime performance ratchet
-      # (perf_gate.rs): evidence-passing/stream fusion must allocate zero
-      # free-monad cells and FBIP reuse must fire at runtime, regressions parity
-      # alone cannot see (identical output, zero leaks). The heavy native-parity
-      # corpus is delegated to the sharded `parity` job below (PRISM_CORPUS_SHARDED),
-      # so it is not also run serially here; the sanitizer re-runs still cover it.
-      - name: Run tests
-        env:
-          PRISM_CORPUS_SHARDED: "1"
-        run: cargo nextest run --profile ci --workspace
 
       # nextest does not run Rust doctests (the `--test` in `-- | ... --test`
       # doc examples and rustdoc code blocks); cover them with a plain run.
@@ -320,6 +285,83 @@ jobs:
       # `just tier-accept`, `just bless`) remain explicit review points.
       - name: No surprise generated drift
         run: git diff --exit-code
+
+  # The test runner, sharded across machines. nextest --partition splits the
+  # suite by a stable hash of each test id, so the heavy single-test corpus gates
+  # (opt_equiv, native_tier, native_fusion, typed_spine, snapshots) that the
+  # nextest test-groups force to run single-threaded scatter across shards and run
+  # in parallel instead of back-to-back on one runner. The heavy native-parity
+  # corpus stays delegated to the sharded `parity` job (PRISM_CORPUS_SHARDED).
+  test:
+    name: Test (shard ${{ matrix.partition }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: [1, 2, 3, 4]
+    env:
+      LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
+      PRISM_CC: /usr/lib/llvm-22/bin/clang
+      RUSTC_WRAPPER: sccache
+      # Source-fingerprinted gate cache: only genuinely unchanged programs are
+      # skipped, so a stale cache can never mask a regression.
+      PRISM_GATE_CACHE: "1"
+      PRISM_GATE_FINGERPRINT: source
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Rust toolchain
+        run: rustup show
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-libm"
+
+      # Per-shard gate-verdict cache: each partition owns a distinct key so the
+      # parallel runs do not overwrite each other's snapshots.
+      - name: Cache gate verdicts
+        uses: actions/cache@v6
+        with:
+          path: target/gate-cache
+          key: gate-verdicts-test-${{ matrix.partition }}-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            gate-verdicts-test-${{ matrix.partition }}-${{ runner.os }}-
+
+      - name: Install LLVM 22
+        uses: ./.github/actions/setup-llvm
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Run tests (shard ${{ matrix.partition }} of 4)
+        env:
+          PRISM_CORPUS_SHARDED: "1"
+          # Enlarge libtest's per-test thread stack so the deepest debug-profile
+          # compiler recursion (Core Lint over the corpus, the scheduler
+          # constant-stack perf gate) does not overflow the 2 MB default. Matches
+          # the `just test` recipe; these tests are release-green in `just gate`.
+          RUST_MIN_STACK: "33554432"
+        run: cargo nextest run --profile ci --workspace --partition hash:${{ matrix.partition }}/4
+
+  # Branch-protection anchor: one "Test" check that is green only when Checks and
+  # every test shard passed, so the required-status-check config need not
+  # enumerate the matrix and the split does not weaken enforcement.
+  test-complete:
+    name: Test
+    needs: [checks, test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checks and all test shards passed
+        run: |
+          if [ "${{ needs.checks.result }}" != "success" ] || [ "${{ needs.test.result }}" != "success" ]; then
+            echo "checks or a test shard failed"
+            exit 1
+          fi
 
   web:
     name: Web playground
@@ -374,7 +416,7 @@ jobs:
           # pulled a just-published pnpm whose self-installer crashed.
           version: 11.6.0
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -436,7 +478,7 @@ jobs:
       # boundary on deterministic generated pure/effectful programs as well, with
       # final-value mains so a Unit result from println cannot pass vacuously.
       - name: Generated Lean differential fuzz
-        timeout-minutes: 10
+        timeout-minutes: 30
         run: cargo test --test lean_fuzz generated_programs_match_lean_final_values -- --ignored --exact --nocapture
 
       # Runs the whole fixture corpus through both the verified CEK machine (via

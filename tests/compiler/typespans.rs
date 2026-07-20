@@ -214,3 +214,54 @@ fn stable_ladder_surface_and_unused_pattern_binder_are_pointable() {
         "Wire.Bytes"
     );
 }
+
+#[test]
+fn stable_migration_rung_references_are_pointable() {
+    let source =
+        fs::read_to_string(repo("docs/examples/player_manual.pr")).expect("read player manual");
+    let spans = extract(&source);
+
+    // A predecessor rung named in a migration row hovers as its dotted rung type.
+    let row = source.find("V1 -> V2").expect("migration row");
+    assert_eq!(
+        span_at(&spans, row, "V1", "typelevel").rendered,
+        "PlayerManual.V1 : Type"
+    );
+    // The current rung named as a route target hovers as the bare type name.
+    let to_current = source.find("V2 -> V3").expect("route to current");
+    let target = to_current + "V2 -> ".len();
+    assert_eq!(
+        span_at(&spans, target, "V3", "typelevel").rendered,
+        "PlayerManual : Type"
+    );
+}
+
+#[test]
+fn logic_expression_spans_are_a_distinct_level() {
+    // Contract and `logic fn` subexpressions are sort-checked separately and
+    // erased before Core, so they carry the dedicated `logic` level. `extract`
+    // validates the whole document through `from_json`, so this also proves the
+    // logic spans nest cleanly with the body spans and never cross them.
+    let source = "\
+logic fn nonneg(x : Int) : Bool = x >= 0
+
+fn f(x : Int) : Int
+  requires x >= 0
+  ensures |r| nonneg(r)
+  = x + 1
+";
+    let spans = extract(source);
+    assert!(
+        spans.spans.iter().any(|s| s.level.tag() == "logic"),
+        "a contract program has logic-level spans"
+    );
+    // The `logic fn` body `x >= 0` is a Bool logical expression.
+    let body = source.find("x >= 0").expect("logic fn body");
+    assert_eq!(span_at(&spans, body, "x >= 0", "logic").rendered, "Bool");
+    // The `requires` clause is Bool; its `x` operand is an Int logical value.
+    let clause = source.find("requires x >= 0").expect("requires clause") + "requires ".len();
+    assert_eq!(span_at(&spans, clause, "x >= 0", "logic").rendered, "Bool");
+    // The runtime body keeps its ordinary value spans, unaffected.
+    let rt = source.find("= x + 1").expect("body") + "= ".len();
+    assert_eq!(span_at(&spans, rt, "x + 1", "").rendered, "Int");
+}

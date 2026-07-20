@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 #[cfg(feature = "native")]
 use crate::error::Error;
@@ -18,6 +18,29 @@ use super::modules::CheckedModule;
 use super::Config;
 
 const QUERY_KEY_INPUT: &str = "query-key";
+
+// Lock a session memo, recovering (rather than propagating) a poisoned lock.
+// A poison means a worker panicked mid-update: the session is a pure cache, so
+// the recovered map costs at most some reuse, never a wrong compilation result.
+// The recovery is surfaced once so a panicked worker is not silently swallowed;
+// choosing to warn rather than fail keeps the documented contract that killing or
+// dropping a session only loses reuse.
+fn lock_recovering<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
+    lock.lock().unwrap_or_else(|poisoned| {
+        warn_poisoned_once();
+        poisoned.into_inner()
+    })
+}
+
+fn warn_poisoned_once() {
+    static WARNED: AtomicBool = AtomicBool::new(false);
+    if !WARNED.swap(true, Ordering::Relaxed) {
+        eprintln!(
+            "prism: recovered a poisoned compiler-session cache lock after a worker \
+             panic; reuse may be reduced for the rest of this run"
+        );
+    }
+}
 
 #[derive(Debug, Default)]
 struct Inner {
@@ -123,10 +146,7 @@ impl CompilerSession {
     /// Decisions recorded by optimizer and backend query boundaries.
     #[must_use]
     pub fn decisions(&self) -> Vec<QueryDecision> {
-        self.0
-            .decisions
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        lock_recovering(&self.0.decisions)
             .values()
             .cloned()
             .collect()
@@ -134,21 +154,9 @@ impl CompilerSession {
 
     /// Drop every in-memory artifact while retaining the counters.
     pub fn clear(&self) {
-        self.0
-            .fronts
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clear();
-        self.0
-            .modules
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clear();
-        self.0
-            .decisions
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clear();
+        lock_recovering(&self.0.fronts).clear();
+        lock_recovering(&self.0.modules).clear();
+        lock_recovering(&self.0.decisions).clear();
         self.0.facts.clear();
     }
 
@@ -178,46 +186,25 @@ impl CompilerSession {
 
     pub(super) fn record_decision(&self, decision: QueryDecision) {
         self.0.facts.record(decision.fact());
-        self.0
-            .decisions
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        lock_recovering(&self.0.decisions)
             .insert((decision.kind, decision.identity.clone()), decision);
     }
 
     pub(super) fn lookup(&self, key: &str) -> Option<Front> {
-        self.0
-            .fronts
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(key)
-            .cloned()
+        lock_recovering(&self.0.fronts).get(key).cloned()
     }
 
     pub(super) fn lookup_module(&self, key: &str) -> Option<CheckedModule> {
-        self.0
-            .modules
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(key)
-            .cloned()
+        lock_recovering(&self.0.modules).get(key).cloned()
     }
 
     pub(super) fn insert_module(&self, key: String, module: CheckedModule) {
-        self.0
-            .modules
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(key, module);
+        lock_recovering(&self.0.modules).insert(key, module);
     }
 
     pub(super) fn insert_aliases(&self, keys: impl IntoIterator<Item = String>, front: &Front) {
         {
-            let mut fronts = self
-                .0
-                .fronts
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut fronts = lock_recovering(&self.0.fronts);
             for key in keys {
                 fronts.insert(key, front.clone());
             }

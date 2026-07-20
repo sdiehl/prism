@@ -4,9 +4,9 @@
 
 Arena: allocation as an algebraic effect.
 
-On the dynamic axis, allocation is an ordinary effect a handler interprets. `with_arena(body)` installs a handler that routes each eligible allocation through the arena entry point. The linked runtime delegates that entry point to ordinary reference-counted allocation, so this configuration provides the semantic boundary but not bulk reclamation. A program that installs no `Alloc` handler allocates exactly as before.
+On the dynamic axis, allocation is an ordinary effect a handler interprets. `with_arena(body)` installs a handler that services each eligible allocation out of a region owned by that activation: cells are carved from a bump pointer, are inert to reference counting while the region lives, and the whole region is reclaimed in one step when the handler returns. A value that escapes through the result is deep-promoted into ordinary reference-counted cells at the boundary, so escape costs a copy, never soundness. A program that installs no `Alloc` handler allocates exactly as before.
 
-The `alloc` operation is compiler-internal: the arena-lowering pass rewrites a constructor built under a `with_arena` scope into a performed `alloc` (a raw cell) plus an in-place initialization, so `body` never spells `alloc` itself. This handler discharges each `alloc(n)` into `prim_arena_bump(n)`, which in this configuration delegates to the ordinary allocator. An arena constructor is therefore byte-identical to a plain one; only the allocator entry point differs, which the determinism contract requires to be unobservable. `alloc` is `once`: a bump region assumes single-shot use, so it resumes at most once across the boundary.
+The `alloc` operation is compiler-internal: the arena-lowering pass rewrites a constructor built under a `with_arena` scope into a performed `alloc` (a raw cell) plus an in-place initialization, so `body` never spells `alloc` itself. This handler discharges each `alloc(n)` into `prim_arena_bump(n)`, the region bump entry point. An arena constructor is observably identical to a plain one; only where its words come from differs, which the determinism contract requires to be unobservable. `alloc` is `once`: a bump region assumes single-shot use, so it resumes at most once across the boundary.
 
 ## Types
 
@@ -37,4 +37,4 @@ The allocation effect. `alloc(n)` requests a raw `n`-word cell; a handler decide
 with_arena : forall a. (() -> a ! {Arena.Alloc}) -> a
 ```
 
-Run `body`, routing each eligible allocation through the `Alloc` handler. `bump` delegates to ordinary allocation in the linked runtime, so cells keep their ordinary reference-counted lifetime. A `body` that allocates nothing runs unchanged, and code that never calls `with_arena` allocates exactly as before.
+Run `body`, servicing each eligible allocation out of this activation's region and reclaiming the whole region when the handler returns. Anything the result keeps is promoted to ordinary reference-counted cells at the boundary. A `body` that allocates nothing runs unchanged, and code that never calls `with_arena` allocates exactly as before.

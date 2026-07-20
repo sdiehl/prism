@@ -318,7 +318,7 @@ instant_nanos(Instant(500))
 elapsed : (Time.Instant, Time.Instant) -> Time.Duration
 ```
 
-The span from `earlier` to `later` (`later - earlier`). Named `elapsed`, not `between`, to leave the prelude's numeric `between` range test unshadowed.
+The span from `earlier` to `later` (`later - earlier`). Named `elapsed`, not `between`, to leave Base's numeric `between` range test unshadowed.
 
 ```prism,mod=Time
 dur_nanos(elapsed(Instant(100), Instant(450)))

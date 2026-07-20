@@ -17,7 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, fs, thread};
 
 use prism::error::Error;
-use prism::eval::{Run, Rv};
+use prism::eval::Run;
 
 /// Type-directed generator of small well-typed programs for the differential
 /// determinism gate; shared so every fuzz harness diffs the same fragment.
@@ -145,37 +145,14 @@ pub fn interpreted(full: &str) -> String {
     prism::interpret(full).unwrap().term
 }
 
-/// The bit width of the runtime's signed tagged immediate: a value is stored as
-/// `(n << 1) | 1`, so magnitudes below `2^62` are immediates and anything wider
-/// is a heap bignum.
-const TAGGED_IMMEDIATE_BITS: u32 = 62;
-
-/// A signed value that native's `main` shim returns as a tagged immediate (an odd
-/// word it shifts back into an exit code), as opposed to a heap bignum, which it
-/// treats as non-immediate and exits 0 for.
-fn fits_tagged_immediate(n: i64) -> bool {
-    let lo = -(1i64 << TAGGED_IMMEDIATE_BITS);
-    let hi = (1i64 << TAGGED_IMMEDIATE_BITS) - 1;
-    (lo..=hi).contains(&n)
-}
-
-/// The process exit code the interpreter's result implies, derived exactly as the
-/// native `main` shim derives it from `prismfn_main`'s return word so the two are
-/// directly comparable. An explicit `exit(n)` wins; otherwise a tagged-immediate
-/// integer or boolean return becomes the code and every other value (Unit, a heap
-/// cell, a bignum too wide to tag) exits 0. The OS reports only the low 8 bits, so
-/// the result is masked to a `u8`, matching what a native process reports back.
-// The truncations are the point: native narrows the immediate to `int` at exit
-// and the kernel then reports only the low byte, so mirroring both is what makes
-// the two exit codes comparable.
+/// The process exit code the interpreter's result implies, matching native's
+/// `main` shim: only an explicit `exit(n)` sets a nonzero code, and a
+/// value-returning `main` exits 0 regardless of the value. The OS reports only
+/// the low 8 bits, so the result is masked to a `u8`, matching what a native
+/// process reports back.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn canonical_exit(run: &Run) -> u8 {
-    let code = run.exit.unwrap_or_else(|| match run.value {
-        Rv::Int(n) | Rv::I64(n) if fits_tagged_immediate(n) => n as i32,
-        Rv::Bool(b) => i32::from(b),
-        _ => 0,
-    });
-    code as u8
+    run.exit.unwrap_or(0) as u8
 }
 
 /// The corpus directories, relative to the crate root.
@@ -189,6 +166,10 @@ const CORPUS_DIRS: [&str; 2] = ["examples", "tests/cases/run"];
 /// again is flagged here as a stale entry. Labels are `dir/name.pr`.
 pub const CORPUS_SKIPS: &[(&str, &str)] = &[
     ("examples/capabilities.pr", "off-platform: getenv"),
+    (
+        "tests/cases/run/read_bad_utf8.pr",
+        "off-platform: read_file on a non-UTF-8 file",
+    ),
     ("examples/durable.pr", "off-platform: file IO + eprint"),
     (
         "examples/incr_trace.pr",

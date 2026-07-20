@@ -1,0 +1,41 @@
+-- | The canonical `State(s)` effect: a threaded piece of mutable-looking state,
+-- interpreted by parameter passing.
+--
+-- `get` reads the current state, `put` overwrites it; a computation performs
+-- them without ever naming a state value in its own signature. `run_state`
+-- discharges the effect, threading `init` through and handing back the result
+-- paired with the final state. Because the handler is the only interpreter, the
+-- same ops can be re-read (bounded, logged) without touching the producer.
+-- Opt-in: not in Base.
+
+-- | Read (`get`) and overwrite (`put`) a threaded state of type `s`.
+pub effect State(s)
+  get() : s
+  put(s) : Unit
+
+-- | Run `action`, threading `init` as the initial state; returns `(result,
+-- final_state)`. The handler makes the block a state transformer `s -> (a, s)`
+-- and applies it to `init`.
+pub fn run_state(init : s, action : () -> a ! {State(s) | e}) : (a, s) =
+  let f =
+    handle action() with
+      get() resume k => \(s) -> k(s)(s)
+      put(s2) resume k => \(_s) -> k(())(s2)
+      return r => \(s) -> (r, s)
+  f(init)
+
+-- | Run `action` for its result only, discarding the final state.
+pub fn eval_state(init : s, action : () -> a ! {State(s) | e}) : a =
+  match run_state(init, action) of
+    (a, _s) => a
+
+-- | Run `action` for its final state only, discarding the result.
+pub fn exec_state(init : s, action : () -> a ! {State(s) | e}) : s =
+  match run_state(init, action) of
+    (_a, s) => s
+
+-- | Apply `f` to the current state, storing the result.
+pub fn modify(f : (s) -> s) : Unit ! {State(s)} = put(f(get()))
+
+-- | Read a projection `f` of the current state.
+pub fn gets(f : (s) -> a) : a ! {State(s)} = f(get())

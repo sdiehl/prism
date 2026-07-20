@@ -48,6 +48,7 @@ mod report;
 mod scheduler;
 mod semantic_patch;
 mod session;
+pub mod stable_lock;
 mod timing;
 mod verify;
 pub use artifact::{ArtifactField, ArtifactIdentity, ArtifactRow};
@@ -63,7 +64,7 @@ pub use build::{
 pub use build::{build_mlir, build_mlir_at, build_mlir_on};
 #[cfg(feature = "native")]
 pub use cache::NativeCacheStatus;
-pub use config::{BackendOpt, Config, Scheduler};
+pub use config::{BackendOpt, BuildMode, Config, Scheduler};
 pub use decision::ModuleQueryDecision;
 pub use diff::{
     diff_on, source_diff_on, DiffChangedDef, DiffNamedDef, SourceDiff, SOURCE_DIFF_FORMAT,
@@ -72,12 +73,13 @@ pub use diff::{
 pub(crate) use diff::{diff_on_roots, render_source_diff, source_diff_on_roots};
 pub use dump::{dump, dump_at, dump_on};
 pub use execution::{
-    debug_on, interpret, interpret_at, interpret_deferred_holes, interpret_io_at, interpret_io_on,
-    interpret_io_on_with_args, interpret_io_on_with_args_deferred_holes, interpret_on,
-    observe_lowered_run_on, observe_run_on, observe_run_on_deferred_holes, record_on,
+    debug_on, durable_run_on, interpret, interpret_at, interpret_deferred_holes, interpret_io_at,
+    interpret_io_on, interpret_io_on_with_args, interpret_io_on_with_args_deferred_holes,
+    interpret_on, observe_lowered_run_on, observe_run_on, observe_run_on_deferred_holes, record_on,
     record_on_with_args, record_run_on, replay_on, replay_run_on, resume_observed_on, resume_on,
-    step_ruler_on, suspend_line_cuts, suspend_on, RecordedRun, StepRuler, StepRulerRow, SuspendCut,
-    SuspendResult, STEP_RULER_FORMAT,
+    step_ruler_on, suspend_at_cut_on, suspend_line_cuts, suspend_on, CutReport, CutTarget,
+    DurableRun, RecordedRun, StepRuler, StepRulerRow, SuspendAtCut, SuspendCut, SuspendResult,
+    STEP_RULER_FORMAT,
 };
 use front::{run_front, Front, FrontOpts};
 pub(crate) use identity::stdlib_driver_src;
@@ -445,8 +447,9 @@ fn emit_warning(src: &str, w: &crate::tc::Warning) {
 }
 
 // The full compile path (scheduler retarget, validators, pre-lowering optimizer),
-// as the legacy tuple its many consumers destructure.
-fn frontend(
+// as the legacy tuple its many consumers destructure. `pub(crate)` so the test
+// lane's discovery can key targets by the same checked-program surface; additive.
+pub(crate) fn frontend(
     src: &str,
     roots: &[Root],
     cfg: &Config,
@@ -621,7 +624,7 @@ fn prepared_core_with_opts(
         &checked.op_grades(),
         cfg,
     )?;
-    emit_lower_warning(src, lowered.warning.as_deref(), cfg.flags.quiet);
+    emit_lower_warning(src, lowered.warning.as_deref(), cfg.flags.verbose);
     finish_lowered(lowered, &sigs)?;
     Ok(core)
 }
@@ -931,7 +934,7 @@ fn lowered_front(
         &checked.op_grades(),
         cfg,
     )?;
-    emit_lower_warning(src, lowered.warning.as_deref(), cfg.flags.quiet);
+    emit_lower_warning(src, lowered.warning.as_deref(), cfg.flags.verbose);
     Ok((checked, sigs, lowered))
 }
 
@@ -976,7 +979,7 @@ fn lowered_core_with_identity(
         &checked.op_grades(),
         cfg,
     )?;
-    emit_lower_warning(src, lowered.warning.as_deref(), cfg.flags.quiet);
+    emit_lower_warning(src, lowered.warning.as_deref(), cfg.flags.verbose);
     let ctors = lowered.ctors.clone();
     let core = finish_lowered(lowered, &sigs)?;
     Ok((checked, core, ctors, hashes))
@@ -986,10 +989,11 @@ fn lowered_core_with_identity(
 // the same one `emit_warnings` uses for checker diagnostics. The diagnostic
 // comes from the Core phase, which carries no source spans, so it renders as a
 // plain `warning: ...` line (an empty span makes `render_warning` skip the caret).
-// `quiet` (from DynFlags) silences it, matching the documented PRISM_QUIET
-// contract that covers both the fallback and matcher-drift warnings.
-fn emit_lower_warning(src: &str, warning: Option<&str>, quiet: bool) {
-    if quiet {
+// `verbose` (from DynFlags, off by default) gates it: the fusion fallback is a
+// performance hint, not a correctness signal, so an ordinary build or docs run
+// stays quiet and `--verbose` (or `PRISM_VERBOSE`) opts in.
+fn emit_lower_warning(src: &str, warning: Option<&str>, verbose: bool) {
+    if !verbose {
         return;
     }
     if let Some(msg) = warning {
@@ -1758,5 +1762,48 @@ mod envelope_tests {
             },
         });
         assert_eq!(EnvelopeHeader::parse(&doc), None);
+    }
+}
+
+#[cfg(test)]
+mod content_hash_canonicity_tests {
+    use super::{check_on_in, Config};
+    use crate::resolve::default_roots;
+    use std::path::Path;
+
+    // The elaboration content hash folds each declaration's `Type::show()`
+    // rendering (`hash_meta`), so a stable content address rests on alpha-
+    // equivalent definitions rendering byte-identically. Generalization assigns
+    // canonical variable names in structural order, so two programs that differ
+    // only in the spelling of a type variable must yield the same rendered
+    // scheme; if this ever regressed, equal definitions would receive different
+    // addresses and content addressing would no longer be a pure function of
+    // meaning. This pins the invariant the hash silently depends on.
+    #[test]
+    fn alpha_equivalent_signatures_render_canonically() {
+        let roots = default_roots(Path::new("."));
+        let mut cfg = Config::default();
+        cfg.flags.quiet = true;
+        let show_id = |src: &str| {
+            check_on_in(src, &roots, &cfg)
+                .expect("program checks")
+                .decls
+                .iter()
+                .find(|d| d.name == "id")
+                .map(|d| d.ty.show())
+        };
+        let left = show_id("fn id(x : a) : a = x\n").expect("id present");
+        let right = show_id("fn id(x : zebra) : zebra = x\n").expect("id present");
+        assert_eq!(
+            left, right,
+            "alpha-equivalent signatures must render identically"
+        );
+        // Generalization canonicalizes the source-chosen name away, proving the
+        // rendering is a function of structure, not of the written variable.
+        assert!(
+            left.starts_with("forall a."),
+            "generalization renames to the canonical `a`, got {left}"
+        );
+        assert!(!right.contains("zebra"), "canonical rename dropped `zebra`");
     }
 }

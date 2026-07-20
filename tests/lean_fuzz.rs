@@ -21,10 +21,21 @@ use prism::eval::Rv;
 use crate::support::fuzzgen::{generate, shrink, Program, ProgramFamily};
 use crate::support::TempDir;
 
-const GENERATED_CASES: usize = 12;
+// The generated-program corpus size. Overridable via PRISM_LEAN_FUZZ_CASES so CI
+// sweeps a large deterministic corpus while a quick local run can ask for fewer;
+// the seed is fixed, so a given count always generates the same programs.
+const DEFAULT_GENERATED_CASES: usize = 256;
 const SEED: u64 = 0x6c65_616e_5f66_757a;
 const SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(30);
-const _: () = assert!(GENERATED_CASES > 0);
+const _: () = assert!(DEFAULT_GENERATED_CASES > 0);
+
+fn generated_cases() -> usize {
+    std::env::var("PRISM_LEAN_FUZZ_CASES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(DEFAULT_GENERATED_CASES)
+}
 
 enum Comparison {
     Match,
@@ -320,7 +331,8 @@ fn compare(program: &Program, source_path: &Path) -> Comparison {
 #[test]
 #[ignore = "requires a built Lean oracle; run `just lean-fuzz`"]
 fn generated_programs_match_lean_final_values() {
-    let programs = generate(SEED, GENERATED_CASES);
+    let cases = generated_cases();
+    let programs = generate(SEED, cases);
     let pure = programs
         .iter()
         .filter(|program| program.family() == ProgramFamily::Pure)
@@ -376,7 +388,10 @@ fn generated_programs_match_lean_final_values() {
         }
     }
     assert_eq!(
-        ran, GENERATED_CASES,
+        ran, cases,
         "Lean fuzz did not execute its complete deterministic corpus"
+    );
+    println!(
+        "Lean fuzz: {ran} generated programs matched the verified CEK model (seed {SEED:#018x})"
     );
 }

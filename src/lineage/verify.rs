@@ -16,7 +16,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::error::Error;
-use crate::provenance::TraceDigest;
+use crate::lineage::provenance::TraceDigest;
 
 use std::collections::BTreeSet;
 

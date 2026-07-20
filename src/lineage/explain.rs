@@ -7,6 +7,8 @@
 //! the graph, so it explains an output even after its source files have moved on
 //! disk, and a `--json` projection cannot drift from the human rendering.
 
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
@@ -69,6 +71,12 @@ pub struct Explanation {
     pub input_files: Vec<InputFilePayload>,
     pub trace: Option<TracePayload>,
     pub compiler: Option<CompilerPayload>,
+    /// The artifacts this request produced, with their intermediate digests: the
+    /// built binary for a build, or the docs pages for a docs run.
+    pub artifacts: Vec<LineageArtifact>,
+    /// The files the run committed (handler write observations), each with the
+    /// content digest it wrote.
+    pub file_writes: Vec<FileWritePayload>,
 }
 
 /// Explain why `selector` exists: walk backward from the named output to the
@@ -108,6 +116,8 @@ pub fn why_output(graph: &LineageGraph, selector: &str) -> Result<Explanation, E
         input_files: Vec::new(),
         trace: None,
         compiler: None,
+        artifacts: Vec::new(),
+        file_writes: Vec::new(),
     };
     for input in graph.inputs_of(&request_node.id) {
         match &input.kind {
@@ -125,13 +135,17 @@ pub fn why_output(graph: &LineageGraph, selector: &str) -> Result<Explanation, E
     {
         explanation.compiler = Some(c.clone());
     }
-    explanation.trace = graph
-        .outputs_of(&request_node.id)
-        .into_iter()
-        .find_map(|node| match &node.kind {
-            NodeKind::Trace(t) => Some(t.clone()),
-            _ => None,
-        });
+    // The request's produced side: the trace (a run's replay entries), the
+    // artifacts it emitted (intermediate hashes), and the files it committed
+    // (handler write observations). Gathered in one pass over the outputs.
+    for node in graph.outputs_of(&request_node.id) {
+        match &node.kind {
+            NodeKind::Trace(t) => explanation.trace = Some(t.clone()),
+            NodeKind::Artifact(a) => explanation.artifacts.push(a.clone()),
+            NodeKind::FileWrite(w) => explanation.file_writes.push(w.clone()),
+            _ => {}
+        }
+    }
 
     // Deterministic, legible ordering within each input group.
     explanation
@@ -139,7 +153,23 @@ pub fn why_output(graph: &LineageGraph, selector: &str) -> Result<Explanation, E
         .sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.root.cmp(&b.root)));
     explanation.env_reads.sort_by(|a, b| a.name.cmp(&b.name));
     explanation.input_files.sort_by(|a, b| a.path.cmp(&b.path));
+    explanation.artifacts.sort_by(|a, b| a.path.cmp(&b.path));
+    explanation.file_writes.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(explanation)
+}
+
+/// The primary output to explain when a `why-output` caller names none.
+///
+/// `stdout` for a run, otherwise the first artifact, file-write, or input path in
+/// canonical order. This lets `prism why-output ARTIFACT` explain a built artifact
+/// with no selector, reading only the sidecar.
+///
+/// # Errors
+/// Fails when the graph names no selectable output.
+pub fn default_output_selector(graph: &LineageGraph) -> Result<String, Error> {
+    available_outputs(graph).into_iter().next().ok_or_else(|| {
+        Error::ResolveLineage("why-output: the sidecar names no output to explain".into())
+    })
 }
 
 /// One compressed stretch of history: consecutive ticks under one law on a branch.
@@ -198,14 +228,22 @@ pub fn why_world_state(graph: &LineageGraph, selector: &str) -> Result<WorldExpl
     };
 
     // Walk the single-predecessor chain from the selected state to the seed,
-    // recording each step's (tick, branch, law) and any fork it diverged from.
+    // recording each step's (tick, branch, law) and any fork it diverged from. A
+    // genuine chain is acyclic (each state's predecessor is strictly earlier), but
+    // a loaded file is untrusted, so a `visited` set bounds the walk to the distinct
+    // states on the chain: a predecessor edge that loops back stops the walk rather
+    // than looping forever and growing `steps` without bound.
     let mut steps: Vec<(WorldStatePayload, String, String)> = Vec::new();
     let mut forks: Vec<WorldForkCrossed> = Vec::new();
+    let mut visited: BTreeSet<&str> = BTreeSet::new();
     let mut cursor = Some(start);
     while let Some(node) = cursor {
         let NodeKind::WorldState(state) = &node.kind else {
             break;
         };
+        if !visited.insert(node.id.0.as_str()) {
+            break;
+        }
         let law = graph.law_of(&node.id).ok_or_else(|| {
             Error::ResolveLineage(format!(
                 "lineage why: world state `{}` has no law edge",
@@ -317,4 +355,64 @@ fn available_outputs(graph: &LineageGraph) -> Vec<String> {
     paths.dedup();
     out.extend(paths);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::why_world_state;
+    use crate::lineage::graph::{
+        self, Edge, EdgeKind, Node, NodeId, NodeKind, Variant, WorldLawPayload, WorldStatePayload,
+    };
+
+    // A two-state timeline whose predecessor edges form a cycle: state A's
+    // predecessor is B and B's predecessor is A. A genuine export never does this,
+    // but a loaded file is untrusted, so the backward walk must terminate on the
+    // distinct states it has seen rather than loop forever.
+    #[test]
+    fn why_world_state_terminates_on_a_cyclic_predecessor_chain() {
+        let law_hash = "c07a9b3d1e2f4a5b";
+        let law_id = NodeId(law_hash.to_string());
+        let a = NodeId("aa".repeat(32));
+        let b = NodeId("bb".repeat(32));
+        let state = |id: &NodeId, tick: u32| Node {
+            id: id.clone(),
+            kind: NodeKind::WorldState(WorldStatePayload {
+                tick,
+                branch: 0,
+                dims: "6x6".to_string(),
+            }),
+        };
+        let edge = |from: &NodeId, to: &NodeId, kind: EdgeKind| Edge {
+            from: from.clone(),
+            to: to.clone(),
+            kind,
+        };
+        let nodes = vec![
+            Node {
+                id: law_id.clone(),
+                kind: NodeKind::WorldLaw(WorldLawPayload {
+                    rule: "B3/S23".to_string(),
+                    law_hash: law_hash.to_string(),
+                }),
+            },
+            state(&a, 0),
+            state(&b, 1),
+        ];
+        let edges = vec![
+            edge(&a, &law_id, EdgeKind::IdentifiedBy),
+            edge(&b, &law_id, EdgeKind::IdentifiedBy),
+            edge(&a, &b, EdgeKind::Input),
+            edge(&b, &a, EdgeKind::Input),
+        ];
+        let graph = graph::finalize(Variant::World, nodes, edges);
+
+        // Without a visited set this call never returns; the fix bounds the walk to
+        // the two distinct states, so the result is finite.
+        let explanation = why_world_state(&graph, &a.0).unwrap();
+        assert_eq!(explanation.state_id, a.0);
+        assert!(
+            explanation.runs.len() <= 2,
+            "a two-state cycle must not grow the walk unboundedly"
+        );
+    }
 }

@@ -2,7 +2,7 @@
 --
 -- The `List(a)` type and its `Nil`/`Cons` constructors are wired into the
 -- language (list literals, deriving); this module is the function surface over
--- them. The prelude opens it, so these names are in scope unqualified
+-- them. Base includes it, so these names are in scope unqualified
 -- everywhere; a project module reaches them with `import Data.List`. The
 -- container-generic queries (`length`, `sum`, `all`, `find`, and friends) live
 -- in `Data.Foldable` and work on any `Foldable`, this type included.
@@ -411,7 +411,9 @@ pub fn partition(p, xs) = (filter(p, xs), filter(\(x) -> not(p(x)), xs))
 -- [[1, 2], [3, 4], [5]]
 -- ```
 pub fn chunks_of(n, xs) =
-  if is_nil(xs) then
+  if n <= 0 then
+    Nil
+  elif is_nil(xs) then
     Nil
   else
     Cons(take(n, xs), chunks_of(n, drop(n, xs)))

@@ -1,0 +1,3 @@
+-- A parse error: an unterminated parameter list. Every seam must refuse it
+-- rather than emit a partial fixture.
+fn oops(

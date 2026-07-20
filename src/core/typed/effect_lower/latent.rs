@@ -27,7 +27,7 @@ pub(super) type Latent = BTreeMap<Sym, BTreeSet<MaskOp>>;
 pub(super) fn latent_map(fns: &[TypedCoreFn]) -> Latent {
     let seed: Latent = fns.iter().map(|f| (f.name(), BTreeSet::new())).collect();
     let bodies: BTreeMap<Sym, &TypedComp> = fns.iter().map(|f| (f.name(), f.body())).collect();
-    crate::fixpoint::least_fixpoint(seed, |name, cur| {
+    crate::util::fixpoint::least_fixpoint(seed, |name, cur| {
         let mut s = BTreeSet::new();
         latent(bodies[name], cur, &mut s);
         s

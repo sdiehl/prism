@@ -1,0 +1,26 @@
+-- Integer recursion and arithmetic: a plain observation trace with no floats,
+-- effects, or contracts. Pins Core hashes, the step ruler, and replay output for
+-- the simplest runnable shape.
+
+fn fact(n : Int) : Int =
+  if n <= 1 then
+    1
+  else
+    n * fact(n - 1)
+
+fn fib(n : Int) : Int =
+  if n < 2 then
+    n
+  else
+    fib(n - 1) + fib(n - 2)
+
+fn gcd(a : Int, b : Int) : Int =
+  if b == 0 then
+    a
+  else
+    gcd(b, a % b)
+
+fn main() : Unit ! {IO} =
+  println(fact(10))
+  println(fib(15))
+  println(gcd(1071, 462))

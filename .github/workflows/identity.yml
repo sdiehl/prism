@@ -1,0 +1,149 @@
+name: Identity
+
+# The cross-platform determinism gate. Build the pinned corpus
+# (tests/identity/corpus) through one prism binary on each supported host, emit
+# the identity manifest (Core hashes, namespace roots, shape digests, the portable
+# native-kont envelope, run/step/replay observation traces, serialized traces, and
+# the SMT and totality query bytes), and fail if any two hosts disagree by a single
+# byte. This is what makes every determinism and every SMT/totality query-byte
+# claim honest across machines rather than across backends on one runner.
+#
+# Runs on a push to main or a release branch (vX.Y.Z), and on demand. The three
+# legs each build the LLVM-linked compiler, so this is heavier than the PR gate
+# in ci.yml; promote it to pull_request once the ARM64/macOS legs are proven
+# stable if the cost is acceptable.
+on:
+  push:
+    branches:
+      - main
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: identity-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  manifest:
+    name: Manifest (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm  # GitHub public ARM64 runner
+            target: aarch64-unknown-linux-gnu
+          - os: macos-14  # Apple Silicon runner
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v7
+
+      # Toolchain version + components come from rust-toolchain.toml, so every leg
+      # builds with the same pinned rustc.
+      - name: Setup Rust toolchain
+        run: rustup show
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Match the other workflows so the vendored-libm rebuild rule is shared.
+          prefix-key: "v1-libm"
+
+      # LLVM 22 from the apt.llvm.org snapshot, the same source ci.yml and
+      # release.yml build against, on both the x86-64 and ARM64 Linux legs.
+      - name: Install LLVM 22 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -qq
+          sudo apt-get install -y llvm-22-dev libpolly-22-dev clang-22
+          echo "LLVM_SYS_221_PREFIX=/usr/lib/llvm-22" >> "$GITHUB_ENV"
+          echo "PRISM_CC=/usr/lib/llvm-22/bin/clang" >> "$GITHUB_ENV"
+
+      # macOS: llvm@22 pins the major inkwell links against and provides clang.
+      - name: Install LLVM 22 (macOS)
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_REQUIRE_TAP_TRUST: "1"
+        run: |
+          brew install llvm@22
+          prefix="$(brew --prefix llvm@22)"
+          echo "LLVM_SYS_221_PREFIX=$prefix" >> "$GITHUB_ENV"
+          echo "PRISM_CC=$prefix/bin/clang" >> "$GITHUB_ENV"
+
+      - name: Build prism (native)
+        run: cargo build --release --features native
+
+      # Emit this host's manifest, and prove it is deterministic across two runs on
+      # this host before it is compared across hosts. The generator is a pure
+      # function of the source and the pinned empty-stdin trace, so a within-host
+      # diff catches per-platform nondeterminism, and the cross-host compare job
+      # then catches genuine cross-platform breaks.
+      - name: Emit identity manifest (deterministic across two runs)
+        run: |
+          set -euo pipefail
+          export PRISM_BIN=target/release/prism
+          bash scripts/identity-manifest.sh --out "identity-${{ matrix.target }}.txt"
+          bash scripts/identity-manifest.sh --out /tmp/identity-recheck.txt
+          if ! diff -u "identity-${{ matrix.target }}.txt" /tmp/identity-recheck.txt; then
+            echo "::error::identity manifest is nondeterministic on ${{ matrix.target }} across two runs"
+            exit 1
+          fi
+          echo "manifest deterministic across two runs on ${{ matrix.target }}"
+
+      - name: Upload identity manifest
+        uses: actions/upload-artifact@v7
+        with:
+          name: identity-${{ matrix.target }}
+          path: identity-${{ matrix.target }}.txt
+          if-no-files-found: error
+
+  compare:
+    name: Cross-platform identity compare
+    needs: manifest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download every platform's manifest
+        uses: actions/download-artifact@v8
+        with:
+          path: manifests
+          merge-multiple: true
+
+      # The gate: every leg's manifest must be byte-identical. A divergence names
+      # the two hosts and prints the diff so the drift-prone surface is visible.
+      - name: Diff manifests across all targets
+        run: |
+          set -euo pipefail
+          cd manifests
+          shopt -s nullglob
+          files=(identity-*.txt)
+          echo "manifests found: ${files[*]:-none}"
+          if [ "${#files[@]}" -lt 3 ]; then
+            echo "::error::expected 3 platform manifests, found ${#files[@]}; a build leg failed to upload"
+            exit 1
+          fi
+          ref="${files[0]}"
+          status=0
+          for f in "${files[@]:1}"; do
+            if diff -u "$ref" "$f"; then
+              echo "match: $f == $ref"
+            else
+              echo "::error::cross-platform determinism divergence between $ref and $f (see diff above)"
+              status=1
+            fi
+          done
+          if [ "$status" -eq 0 ]; then
+            echo "all ${#files[@]} platform manifests are byte-identical"
+          fi
+          exit "$status"

@@ -16,15 +16,15 @@ use crate::error::Error;
 use crate::eval::{run, Rv};
 use crate::lex::lex;
 use crate::parse::{parse, ParseResult};
-use crate::resolve::{default_roots, resolve_modules_in, Root};
-use crate::syntax::desugar::desugar;
-use crate::types::{check as typecheck, Checked};
+use crate::resolve::{default_roots, Root};
+use crate::types::Checked;
 
 #[cfg(feature = "native")]
 use crate::codegen::emit_llvm_with_native_kont_table;
 #[cfg(feature = "native")]
 use crate::core::{fip_annots, hash_program};
 
+use super::front::{run_front, FrontOpts};
 #[cfg(feature = "native")]
 use super::identity::{native_kont_table_of, NativeKontIdentityRows};
 use super::query::section;
@@ -80,25 +80,16 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
     };
     section(&mut out, "ast", &format!("{program:#?}"));
 
-    let program = match resolve_modules_in(program, roots) {
-        Ok(p) => p,
+    // Route resolve, test stripping, the logical-contract check, desugar, and
+    // typecheck through the one canonical front runner rather than a parallel
+    // hand-rolled prefix, so this rendered pipeline cannot drift from a real
+    // check. Elaboration and the fip / replayable validators continue below,
+    // keeping their own per-phase sections (a checked program whose elaboration
+    // later fails still shows its `types` section before the `core (cbpv)` error).
+    let (program, checked) = match run_front(src, roots, cfg, FrontOpts::REPORT) {
+        Ok(front) => front.into_program_checked(),
         Err(e) => {
-            section(&mut out, "resolve", &render(e));
-            return out;
-        }
-    };
-
-    let program = match desugar(program) {
-        Ok(p) => p,
-        Err(e) => {
-            section(&mut out, "types", &render(e.into()));
-            return out;
-        }
-    };
-    let checked = match typecheck(&program) {
-        Ok(c) => c,
-        Err(e) => {
-            section(&mut out, "types", &render(e.into()));
+            section(&mut out, "types", &render(e));
             return out;
         }
     };

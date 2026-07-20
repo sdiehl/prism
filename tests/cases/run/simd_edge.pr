@@ -1,0 +1,25 @@
+-- SIMD parity under the IEEE edge cases the plan calls out: NaN, signed zero,
+-- and subnormals. The interpreter is the oracle; native must reproduce every
+-- lane bit for bit. `min`/`max` are a plain lane-wise `a < b ? a : b`, so a NaN
+-- operand returns the other lane on both sides, and signed zero orders the way
+-- the comparison does, identically on each backend.
+
+fn nan() : Float = 0.0 / 0.0
+
+fn main() : Unit ! {IO} =
+  -- A NaN in lane 0 of the left operand: min/max return the right operand there.
+  let bad = simd_fsplat(nan())
+  let ok = simd_fsplat(1.0)
+  println(show_float(simd_fextract(simd_fmin(bad, ok), 0)))
+  println(show_float(simd_fextract(simd_fmax(bad, ok), 0)))
+  -- Subnormals: the smallest positive doubles, summed and multiplied lane-wise.
+  let tiny = simd_fsplat(5.0e-324)
+  let two = simd_fsplat(2.0)
+  println(show_float(simd_fextract(simd_fadd(tiny, tiny), 0)))
+  println(show_float(simd_fextract(simd_fmul(tiny, two), 0)))
+  -- Negation through a lane: (0 - x) then splat, exercising the sign bit.
+  let negd = simd_fsplat(0.0 - 3.5)
+  println(show_float(simd_fextract(simd_fadd(negd, simd_fsplat(1.5)), 0)))
+  -- Integer wrap at the 64-bit boundary is exact on both backends.
+  let big = simd_isplat(9223372036854775807)
+  println(simd_iextract(simd_iadd(big, simd_isplat(1)), 0))

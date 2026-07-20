@@ -10,14 +10,16 @@
 use std::io::Cursor;
 use std::path::Path;
 
+use crate::debug::durable::{committed_frames, DurableLog};
 use crate::debug::trace;
 use crate::error::Error;
 use crate::eval::{
-    run, run_observed_lowered_with_args, run_observed_with_args, run_ruler, run_traced,
-    run_traced_with_args, Run, StepMark, Tape,
+    run, run_observed_lowered_with_args, run_observed_with_args, run_ruler, run_suspending_at_cut,
+    run_traced, run_traced_with_args, CutPredicate, Run, StepMark, Tape,
 };
-use crate::provenance::{CapEvent, ObservationTrace};
+use crate::lineage::provenance::{cap_op_label, cap_op_labels, CapEvent, ObservationTrace};
 use crate::resolve::{default_roots, Root};
+use crate::sym::Sym;
 use serde::Serialize;
 
 use super::{
@@ -448,6 +450,84 @@ pub fn replay_on(
     Ok(run.exit)
 }
 
+/// The outcome of a durable run: how far it got and how much of its trace is now
+/// committed on disk, so a caller can tell a completed run from a mid-run crash and
+/// find the durable trace to resume from.
+#[derive(Debug)]
+pub struct DurableRun {
+    /// `Some(code)` when the program called `exit(code)` before finishing.
+    pub exit: Option<i32>,
+    /// True when a test budget stopped the run mid-flight (the deterministic
+    /// crash), false when the program ran to completion.
+    pub halted: bool,
+    /// Total observations performed this run: the committed prefix replayed plus
+    /// any new live observations appended.
+    pub observed: usize,
+    /// How many committed observations this run replayed before going live, i.e.
+    /// the length of the prefix a previous crashed run left on disk.
+    pub replayed: usize,
+    /// The number of observation frames durably committed on disk after the run.
+    pub committed: usize,
+    /// The complete ordered observable behavior of this run.
+    pub canonical_trace: ObservationTrace,
+}
+
+/// Run `src` against a crash-safe durable log at `log_path`, resuming a prior
+/// crashed run byte-identically.
+///
+/// The log's already-committed observations are replayed with no real IO (a
+/// resumed output is dropped, never re-emitted), then every further observation is
+/// performed live and appended to the log, committing it durably before the run
+/// advances. So a process killed mid-run resumes from exactly the observations
+/// that reached disk and continues, producing the same observation trace as an
+/// uninterrupted run.
+///
+/// `budget` is the deterministic mid-run crash used by tests: the run halts after
+/// that many observations, leaving exactly that committed prefix on disk. `None`
+/// runs to completion, the ordinary path.
+///
+/// Persistence is an ordinary handler over the capability effects, invisible to a
+/// program except through cost: the durable run's observation trace equals the
+/// interpreter's on every tier and backend.
+///
+/// # Errors
+/// Fails on any front-end error, an evaluation fault, a corrupt committed log, or
+/// a durable-log filesystem error.
+#[allow(clippy::too_many_arguments)]
+pub fn durable_run_on(
+    src: &str,
+    roots: &[Root],
+    out_sink: &mut dyn std::io::Write,
+    input: &mut dyn std::io::BufRead,
+    cfg: &Config,
+    args: Vec<String>,
+    log_path: &Path,
+    budget: Option<usize>,
+) -> Result<DurableRun, Error> {
+    let core = prepared_core(src, roots, cfg)?;
+    let (log, committed_prefix) = DurableLog::open(log_path).map_err(Error::Io)?;
+    let replayed = committed_prefix.len();
+    let tape = Tape::Durable {
+        log,
+        frames: committed_prefix,
+        cursor: 0,
+        budget,
+    };
+    let run = run_traced_with_args(&core, out_sink, input, tape, args)
+        .map_err(Error::RuntimeEvaluation)?;
+    // The authoritative trace is the on-disk log, not the in-memory frames the run
+    // returns, so read the committed extent back from disk after the run.
+    let committed = committed_frames(log_path).map_err(Error::Io)?.len();
+    Ok(DurableRun {
+        exit: run.exit,
+        halted: run.halted,
+        observed: run.observed,
+        replayed,
+        committed,
+        canonical_trace: ObservationTrace::new(run.observations),
+    })
+}
+
 /// Drive the terminal reverse-step debugger over `src` and a recorded trace:
 /// read stepping commands from `cmds`, write the debugger UI to `ui`.
 ///
@@ -597,6 +677,126 @@ pub fn suspend_on(
                 last: marks.into_iter().next_back().map(ruler_row),
             };
             Ok(SuspendResult::Suspended { bytes, cut })
+        }
+    }
+}
+
+/// A named suspend target from the CLI: pause at the k-th call to a definition,
+/// or just before the k-th performance of a capability op.
+#[derive(Debug, Clone)]
+pub enum CutTarget {
+    /// `--at-call DEF[:K]`: the k-th entry to global definition `def`.
+    Call { def: String, nth: usize },
+    /// `--at-op OP[:K]`: the k-th performance of the op labelled `op`.
+    Op { op: String, nth: usize },
+}
+
+impl CutTarget {
+    /// A human phrase naming the target, for the "never reached" report.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Call { def, nth } => format!("entry #{nth} to `{def}`"),
+            Self::Op { op, nth } => format!("performance #{nth} of `{op}`"),
+        }
+    }
+}
+
+/// The provenance a named cut reported: the equivalent `--at N` budget that
+/// reproduces the pause byte-for-byte, and the def stack at that point (the
+/// outermost caller first, the paused definition last).
+#[derive(Debug, Serialize)]
+pub struct CutReport {
+    /// The `--at N` budget that reproduces this exact snapshot.
+    pub equiv_at: usize,
+    /// The call-provenance stack, outermost first: `[main, ..., f]`.
+    pub def_stack: Vec<String>,
+}
+
+/// The outcome of a named-cut suspend.
+#[derive(Debug)]
+pub enum SuspendAtCut {
+    /// The program finished before the k-th event; nothing was snapshotted.
+    Done(Option<i32>),
+    /// Paused at the named point: the `kont` envelope, the observation-timeline
+    /// position, and the def-stack provenance with its equivalent `--at N`.
+    Suspended {
+        /// The serialized `kont` envelope.
+        bytes: Vec<u8>,
+        /// Where the cut fell on the observation timeline.
+        cut: SuspendCut,
+        /// The def stack and equivalent step budget at the cut.
+        report: CutReport,
+    },
+}
+
+/// Run `src`, pausing at a named cut point (`--at-call` / `--at-op`).
+///
+/// The named point is a pure function of the deterministic step stream, so it
+/// reduces to a single equivalent `--at N` (reported in the [`CutReport`]) and the
+/// snapshot is byte-identical to that `--at N`. Everything else matches
+/// [`suspend_on`]; the whole path is interpreter-only, so tier and backend parity
+/// are untouched.
+///
+/// # Errors
+/// Fails on any front-end error, an unknown op label, an evaluation fault before
+/// the cut, or a value that cannot cross the suspend boundary.
+pub fn suspend_at_cut_on(
+    src: &str,
+    roots: &[Root],
+    out_sink: &mut dyn std::io::Write,
+    input: &mut dyn std::io::BufRead,
+    target: &CutTarget,
+    cfg: &Config,
+) -> Result<SuspendAtCut, Error> {
+    let pred = cut_predicate(target)?;
+    let bundle = execution_bundle(src, roots, cfg)?;
+    let core = prepared_core(src, roots, cfg)?;
+    let (checkpoint, marks, outcome) = run_suspending_at_cut(&core, bundle, pred, out_sink, input)
+        .map_err(Error::RuntimeEvaluation)?;
+    match checkpoint {
+        crate::eval::Checkpoint::Done(run) => Ok(SuspendAtCut::Done(run.exit)),
+        crate::eval::Checkpoint::Suspended(kont) => {
+            let outcome = outcome.ok_or_else(|| {
+                Error::RuntimeEvaluation(
+                    "internal: named cut suspended without recording its provenance".into(),
+                )
+            })?;
+            let bytes = crate::eval::kont::encode_kont(&kont)
+                .map_err(|e| Error::RuntimeEvaluation(e.to_string()))?;
+            let cut = SuspendCut {
+                observations: marks.len(),
+                last: marks.into_iter().next_back().map(ruler_row),
+            };
+            let report = CutReport {
+                equiv_at: outcome.equiv_at,
+                def_stack: outcome.def_stack.iter().map(Sym::to_string).collect(),
+            };
+            Ok(SuspendAtCut::Suspended { bytes, cut, report })
+        }
+    }
+}
+
+// Build the interpreter cut predicate from a CLI target, resolving an op label to
+// the exact `&'static str` the step machinery counts (an unknown label is a named
+// error listing the valid ops).
+fn cut_predicate(target: &CutTarget) -> Result<CutPredicate, Error> {
+    match target {
+        CutTarget::Call { def, nth } => Ok(CutPredicate::Call {
+            def: Sym::new(def),
+            nth: *nth,
+        }),
+        CutTarget::Op { op, nth } => {
+            let label = cap_op_label(op).ok_or_else(|| {
+                Error::RuntimeEvaluation(format!(
+                    "unknown capability op `{op}`; expected one of: {}",
+                    cap_op_labels().join(", ")
+                ))
+            })?;
+            Ok(CutPredicate::Op {
+                op: label,
+                nth: *nth,
+            })
         }
     }
 }

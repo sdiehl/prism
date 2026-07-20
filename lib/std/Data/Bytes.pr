@@ -30,7 +30,7 @@
 --
 -- ## Filesystem bytes
 --
--- `read_bytes` and `write_bytes` are the raw-byte counterparts of the prelude's
+-- `read_bytes` and `write_bytes` are the raw-byte counterparts of Base's
 -- text `read_file`/`write_file`, reading and writing a file's exact bytes with no
 -- UTF-8 interpretation. They stay inside the determinism contract: `read_bytes`
 -- is a `FileSystem` capability of its own (`fs_read_bytes`), so its input is
@@ -424,7 +424,7 @@ fn base64_decode_go(acc : Buf, s : String, i : Int, n : Int) : Option(Bytes) =
             )
 
 -- | Read the file at `path` as raw bytes. Carries the `FileSystem` capability
--- (the `fs_read_bytes` op the default world handler discharges, via the prelude's
+-- (the `fs_read_bytes` op the default world handler discharges, via Base's
 -- `read_file_bytes` wrapper) and is replay-recorded like `read_file`, so a
 -- recorded run reproduces the same bytes.
 --

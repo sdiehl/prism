@@ -1,0 +1,108 @@
+{
+  "schema": "prism-tc-facts-v1",
+  "compiler": "0.13.0",
+  "decls": [
+    {
+      "name": "getx",
+      "scheme": "(Point) -> Int",
+      "effects": []
+    },
+    {
+      "name": "alike",
+      "scheme": "forall a. (a, a) -> Bool",
+      "effects": []
+    },
+    {
+      "name": "ticked",
+      "scheme": "() -> Int ! {Tick}",
+      "effects": [
+        "Tick"
+      ]
+    },
+    {
+      "name": "main",
+      "scheme": "() -> Bool",
+      "effects": []
+    }
+  ],
+  "nodes": {
+    "1": {
+      "res": {
+        "kind": "field",
+        "ctor": "Point",
+        "index": 0,
+        "arity": 2
+      },
+      "ty": "Int"
+    },
+    "2": {
+      "ty": "Point"
+    },
+    "3": {
+      "ty": "Bool"
+    },
+    "4": {
+      "evidence": [
+        "Param(0)"
+      ],
+      "ty": "(a, a) -> Bool"
+    },
+    "5": {
+      "ty": "a"
+    },
+    "6": {
+      "ty": "a"
+    },
+    "7": {
+      "ty": "Int"
+    },
+    "8": {
+      "ty": "Int"
+    },
+    "9": {
+      "ty": "() -> Int"
+    },
+    "10": {
+      "ty": "Int"
+    },
+    "11": {
+      "ty": "() -> Int"
+    },
+    "12": {
+      "ty": "Bool"
+    },
+    "13": {
+      "evidence": [
+        "Global(sameInt, [])"
+      ],
+      "ty": "(Int, Int) -> Bool ! {?r26}"
+    },
+    "14": {
+      "ty": "Int"
+    },
+    "15": {
+      "ty": "(Point) -> Int"
+    },
+    "16": {
+      "ty": "Point"
+    },
+    "17": {
+      "ty": "Int"
+    },
+    "18": {
+      "ty": "Int"
+    },
+    "19": {
+      "ty": "Int"
+    },
+    "20": {
+      "ty": "Bool"
+    },
+    "21": {
+      "ty": "Int"
+    },
+    "22": {
+      "ty": "Int"
+    }
+  }
+}

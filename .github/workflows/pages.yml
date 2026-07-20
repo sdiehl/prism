@@ -56,13 +56,18 @@ jobs:
       - name: Install mdbook + mdbook-tabs
         run: cargo install mdbook mdbook-tabs
 
+      - uses: typst-community/setup-typst@v5
+        with:
+          typst-version: 0.14.2
+          cache-dependency-path: models/semantics/semantics.typ
+
       - uses: pnpm/action-setup@v6
         with:
           # Pinned to web/package.json's packageManager: a floating "11" once
           # pulled a just-published pnpm whose self-installer crashed.
           version: 11.6.0
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm

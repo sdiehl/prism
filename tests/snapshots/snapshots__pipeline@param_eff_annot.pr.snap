@@ -94,7 +94,7 @@ Program {
 }
 
 == types ==
-[E1998] Type Error: in `bad`: type mismatch: expected String, got Int
+[E1022] Type Error: in `bad`: type mismatch: expected String, got Int
    ╭─[ <source>:4:41 ]
    │
  4 │ fn bad() : Unit ! {Emit(String)} = emit(1)

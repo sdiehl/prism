@@ -169,6 +169,22 @@ impl FrontOpts {
         allow_holes: false,
         typed_tooltips: true,
     };
+    // The rendered-pipeline inspection surface (`report`): quiet type-check stop,
+    // no scheduler retarget and no optimizer, so the report shows the plain
+    // pre-optimizer term. It routes through the one runner purely to share
+    // `strip_tests_for_mode` and the logical-contract check, so the dump cannot
+    // drift from a real check on test-fn visibility or contract validity. The
+    // report re-elaborates and runs its own fip / replayable validators after this
+    // stop, keeping their per-phase rendering.
+    pub(super) const REPORT: Self = Self {
+        stop: FrontStop::Checked,
+        diagnostics: false,
+        scheduler_retarget: false,
+        validate: false,
+        pre_opt: false,
+        allow_holes: false,
+        typed_tooltips: false,
+    };
 }
 
 // The staged frontend results, held as one value so every entry point reads the
@@ -380,6 +396,12 @@ fn front_key_for(schema: &[u8], input: &str, cfg: &Config, opts: FrontOpts) -> S
             // knobs (own clones, stdlib reimplementations) split it.
             cfg.flags.warn_dupes as u8,
             cfg.flags.warn_stdlib_dupes as u8,
+            // The build mode changes which declarations the front retains
+            // (production strips `test fn`; test keeps them) without entering the
+            // artifact fingerprint, so it must split the session cache: a shared
+            // session must never serve a test-mode consumer a production front
+            // (tests stripped) of the same source, or the reverse.
+            u8::from(cfg.mode == crate::driver::BuildMode::Test),
         ],
     );
     h.finalize().to_hex().to_string()
@@ -435,14 +457,28 @@ fn prepare_resolved_front(
     src: &str,
     cfg: &Config,
     opts: FrontOpts,
-    program: Program,
+    mut program: Program,
 ) -> Result<PreparedFront, Error> {
     let timer = cfg.timing.as_ref();
+    // Production neutrality: `test fn` declarations are removed here, before any
+    // linting, desugar, typecheck, elaboration, hashing, or backend reachability,
+    // so a production compile is byte-identical whether or not tests are present.
+    // Only `prism test` selects `BuildMode::Test`, which retains them for the test
+    // supplements the harness checks. This is the single chokepoint every
+    // production identity path (`elaborated`, `namespace_root`, the `core-hash`
+    // dump, the store commit) flows through; it shares the strip with the project
+    // module check via `strip_tests_for_mode`.
+    super::modules::strip_tests_for_mode(cfg.mode, &mut program);
     let lints = if opts.diagnostics {
         lint_surface(src, &program)
     } else {
         Vec::new()
     };
+    // The logical checker validates every `logic fn` and contract clause
+    // against the resolved surface program, before desugar erases them. A
+    // malformed contract is a source error; a valid one leaves the runtime path
+    // untouched. Solver-free.
+    crate::verify::check_program(&program)?;
     let mut program = timing::timed_res(
         timer,
         Phase::Desugar,

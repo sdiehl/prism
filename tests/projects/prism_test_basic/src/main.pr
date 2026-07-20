@@ -1,0 +1,3 @@
+import Parser
+
+fn main() = println(Parser.parse_ok("input"))

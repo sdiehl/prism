@@ -1,0 +1,35 @@
+-- The `migrations` table names every route the family promises, and the
+-- family-qualified API reaches them without a flat generated name. `V1 -> V2`
+-- and the composed `V1 -> V3` are derived; `V2 -> V3` overrides only its upgrade
+-- so a fresh V3 sheet fills `mist` with 7 instead of the declared default. A
+-- composed downgrade unions the loss each rung reports; the composed upgrade
+-- restores the overridden default.
+
+import Wire (..)
+
+stable Save {
+  V1 = { hero: String, depth: Int },
+  V2 = { ..V1, fog: Int = 30 },
+  V3 = { ..V2, mist: Int = 5 },
+  migrations {
+    V1 -> V2 = auto
+    V2 -> V3 = version(upgrade = \(s) -> Save { hero = s.hero, depth = s.depth, fog = s.fog, mist = 7 }, downgrade = auto)
+    V1 -> V3 = auto
+  }
+}
+
+fn body() =
+  let current = Save { hero = "Ada", depth = 12, fog = 30, mist = 99 }
+  -- `Save.V1.downgrade` follows the declared V3 -> V1 route itself, unioning the
+  -- fields each step drops.
+  match Save.V1.downgrade(current) of
+    (old, loss) =>
+      println(concat("v1 hero: ", old.hero))
+      println(concat("v1 dropped: ", show(loss_names(loss))))
+      -- `Save.V1.upgrade` composes the ladder back to the current rung; the V2 ->
+      -- V3 override sets mist to 7.
+      let restored = Save.V1.upgrade(old)
+      println(concat("restored fog: ", show(restored.fog)))
+      println(concat("restored mist: ", show(restored.mist)))
+
+fn main() = default(body, ())

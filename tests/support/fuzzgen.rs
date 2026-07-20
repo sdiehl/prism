@@ -8,11 +8,16 @@
 //! clean signal: a compile failure is a generator bug, and any observation-trace
 //! divergence across tiers, backends, or optimizer levels is a compiler bug.
 //!
-//! Two program families are produced. The pure family exercises the typed core
-//! (arithmetic, comparison, `if`, `let`). The effectful family wraps a generated
-//! body in either a full handler or a `partial` handler forwarding its residual
-//! row to an outer handler, so the residual-handler lowering is diffed the same
-//! way. Arena handlers are a deliberate extension point once `with_arena` lands.
+//! Three program families are produced. The pure family exercises the typed
+//! core (arithmetic, comparison, `if`, `let`). The effectful family wraps a
+//! generated body in either a full handler or a `partial` handler forwarding
+//! its residual row to an outer handler, so the residual-handler lowering is
+//! diffed the same way. The arena family ([`generate_arena`], its own seed
+//! stream so the Lean-oracle corpus is undisturbed) builds constructors under
+//! `with_arena`, varying whether the structure escapes the region, whether a
+//! shared helper pins the exclusion path, and how much is built, so region
+//! reification, escape promotion, and the shared-function exclusion are diffed
+//! across every tier with the same shrink loop.
 
 use std::fmt::Write as _;
 
@@ -305,11 +310,13 @@ pub enum ProgramFamily {
     Pure,
     FullHandler,
     PartialHandler,
+    Arena,
 }
 
 enum Repr {
     Pure(Expr),
     Eff(EffProgram),
+    Arena(ArenaProgram),
 }
 
 impl Program {
@@ -320,6 +327,7 @@ impl Program {
             Repr::Pure(_) => ProgramFamily::Pure,
             Repr::Eff(eff) if eff.partial => ProgramFamily::PartialHandler,
             Repr::Eff(_) => ProgramFamily::FullHandler,
+            Repr::Arena(_) => ProgramFamily::Arena,
         }
     }
 
@@ -330,6 +338,7 @@ impl Program {
         match &self.0 {
             Repr::Pure(expr) => format!("fn main() = println({})\n", expr.render()),
             Repr::Eff(eff) => eff.render(),
+            Repr::Arena(arena) => arena.render("println(run())"),
         }
     }
 
@@ -342,6 +351,7 @@ impl Program {
         match &self.0 {
             Repr::Pure(expr) => format!("fn main() = {}\n", expr.render()),
             Repr::Eff(eff) => eff.render_oracle(),
+            Repr::Arena(arena) => arena.render("run()"),
         }
     }
 
@@ -354,6 +364,124 @@ impl Program {
                 .map(|e| Self(Repr::Pure(e)))
                 .collect(),
             Repr::Eff(eff) => eff.reductions().map(|e| Self(Repr::Eff(e))).collect(),
+            Repr::Arena(arena) => arena
+                .reductions()
+                .into_iter()
+                .map(|a| Self(Repr::Arena(a)))
+                .collect(),
+        }
+    }
+}
+
+/// A generated `with_arena` program: a list of constructors built under the
+/// handler, observed through an unrolled two-level probe (the fragment stays
+/// recursion-free). `escape` decides whether the built structure leaves the
+/// region (exercising exit promotion) or only a scalar does; `shared` adds a
+/// pair helper called both under the arena and outside it, pinning the
+/// shared-function exclusion.
+struct ArenaProgram {
+    elems: Vec<i64>, // at least one; each is one arena-built `Cons` cell
+    escape: bool,
+    shared: bool,
+    delta: i64, // combined with the run result in `main`
+}
+
+impl ArenaProgram {
+    fn render(&self, main: &str) -> String {
+        let mut src = String::from("import Arena (..)\n\n");
+        if self.shared {
+            src.push_str("type Pair = Pair(Int, Int)\n\n");
+            src.push_str("fn mk(a : Int, b : Int) : Pair = Pair(a, b)\n\n");
+            src.push_str(
+                "fn pair_sum(p : Pair) : Int =\n  match p of\n    Pair(x, y) => (x + y)\n\n",
+            );
+        }
+        let mut list = String::from("Nil");
+        for e in self.elems.iter().rev() {
+            list = format!("Cons({e}, {list})");
+        }
+        let _ = writeln!(src, "fn build() : List(Int) = {list}\n");
+        src.push_str(
+            "fn peek(xs : List(Int)) : Int =\n  match xs of\n    Nil => 0\n    Cons(h, t) =>\n      match t of\n        Nil => h\n        Cons(h2, rest) => (h + h2)\n\n",
+        );
+        // `grow` is the entry thunk handed to `with_arena`; the reachability
+        // pass resolves it and reifies what only it can reach.
+        match (self.escape, self.shared) {
+            (true, false) => {
+                src.push_str("fn grow() : List(Int) = build()\n\n");
+                src.push_str("fn run() : Int = peek(with_arena(grow))\n\n");
+            }
+            (true, true) => {
+                src.push_str("fn grow() : List(Int) = Cons(pair_sum(mk(3, 4)), build())\n\n");
+                src.push_str("fn run() : Int = (peek(with_arena(grow)) + pair_sum(mk(1, 2)))\n\n");
+            }
+            (false, false) => {
+                src.push_str("fn grow() : Int = peek(build())\n\n");
+                src.push_str("fn run() : Int = with_arena(grow)\n\n");
+            }
+            (false, true) => {
+                src.push_str("fn grow() : Int = (peek(build()) + pair_sum(mk(3, 4)))\n\n");
+                src.push_str("fn run() : Int = (with_arena(grow) + pair_sum(mk(1, 2)))\n\n");
+            }
+        }
+        let delta = self.delta;
+        let main = main.replace("run()", &format!("(run() + {delta})"));
+        let _ = writeln!(src, "fn main() = {main}");
+        src
+    }
+
+    fn reductions(&self) -> Vec<Self> {
+        let mut out = Vec::new();
+        // Drop an element, keeping at least one so a `Cons` is still built.
+        if self.elems.len() > 1 {
+            for i in 0..self.elems.len() {
+                let mut elems = self.elems.clone();
+                elems.remove(i);
+                out.push(Self {
+                    elems,
+                    ..self.clone_self()
+                });
+            }
+        }
+        // Zero an element.
+        for i in 0..self.elems.len() {
+            if self.elems[i] != 0 {
+                let mut elems = self.elems.clone();
+                elems[i] = 0;
+                out.push(Self {
+                    elems,
+                    ..self.clone_self()
+                });
+            }
+        }
+        // The contained form is the smaller program (no promotion at exit).
+        if self.escape {
+            out.push(Self {
+                escape: false,
+                ..self.clone_self()
+            });
+        }
+        if self.shared {
+            out.push(Self {
+                shared: false,
+                ..self.clone_self()
+            });
+        }
+        if self.delta != 0 {
+            out.push(Self {
+                delta: 0,
+                ..self.clone_self()
+            });
+        }
+        out
+    }
+
+    fn clone_self(&self) -> Self {
+        Self {
+            elems: self.elems.clone(),
+            escape: self.escape,
+            shared: self.shared,
+            delta: self.delta,
         }
     }
 }
@@ -615,6 +743,27 @@ pub fn generate(seed: u64, count: usize) -> Vec<Program> {
                 Program(Repr::Eff(gen_effectful(&mut rng)))
             }
         })
+        .collect()
+}
+
+fn gen_arena(rng: &mut Rng) -> ArenaProgram {
+    let n = rng.index(4) + 1;
+    ArenaProgram {
+        elems: (0..n).map(|_| rng.literal()).collect(),
+        escape: rng.one_in(2),
+        shared: rng.one_in(2),
+        delta: rng.literal(),
+    }
+}
+
+/// Generate `count` arena-family programs from `seed`, deterministic in the
+/// seed. A separate stream from [`generate`] so the Lean-oracle corpus (whose
+/// model has no allocator) keeps its exact distribution.
+#[must_use]
+pub fn generate_arena(seed: u64, count: usize) -> Vec<Program> {
+    let mut rng = Rng::seeded(seed);
+    (0..count)
+        .map(|_| Program(Repr::Arena(gen_arena(&mut rng))))
         .collect()
 }
 

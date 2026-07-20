@@ -15,7 +15,7 @@ use std::io;
 use std::path::Path;
 
 use crate::error::Error;
-use crate::provenance::{self, EVENT_HASH_SCHEME};
+use crate::lineage::provenance::{self, EVENT_HASH_SCHEME};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 

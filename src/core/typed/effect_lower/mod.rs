@@ -143,16 +143,20 @@ fn prepare(
     // Scope-directed arena lowering, before the tier branch so every tier reifies
     // the same allocations (the choice of allocator is tier-invariant): a
     // constructor built under a `with_arena` scope becomes `alloc` + `init_at`,
-    // which the installed handler discharges into a `bump`. A no-op when no
+    // which the installed handler discharges into a `bump`, and each installer's
+    // handler activation is bracketed with the runtime region hooks. The hook
+    // builtins' verifier signatures are seeded here so every later phase
+    // verifies the bracketed tree under the same environment. A no-op when no
     // `with_arena` is present, so the non-arena corpus stays byte-identical.
-    let fns = arena::prepare(fns, env)?.fns;
+    let mut env = env.clone();
+    arena::insert_builtin_sigs(&mut env);
+    let fns = arena::prepare(fns, &env)?.fns;
 
     // Erase escape-checked local `var` state to mutable cells before strategy
     // selection, so a var-only program has no residual effects and classifies
     // pure. The free-monad tier cap deliberately selects the general path.
     // Loop-control erasure follows before classification so recognized control
     // handlers do not leave raw effect nodes.
-    let mut env = env.clone();
     let (fns, used_step) = if flags.effect_tier == EffectTier::FreeMonad {
         (fns, false)
     } else {
@@ -222,7 +226,7 @@ pub(crate) fn threaded_state_typed(
     if !state::threads(&plan, &prepared.fns, &analysis) {
         return Ok(None);
     }
-    let mut fresh = crate::fresh::Fresh::new();
+    let mut fresh = crate::util::fresh::Fresh::new();
     Ok(state::thread_program(
         &prepared.fns,
         &plan,
@@ -257,7 +261,7 @@ fn cascade(
     let thunk_flow = flow::analyze(&fns, &latent);
     let state_analysis = state::StateAnalysis::new(&ops, &latent, &thunk_flow, env);
     let drift = DriftLog::new(flags.quiet);
-    let mut fresh = crate::fresh::Fresh::new();
+    let mut fresh = crate::util::fresh::Fresh::new();
     if flags.effect_tier == EffectTier::Auto {
         if let Some(threaded) =
             evidence::try_lower_ev(&fns, &latent, &thunk_flow, &ops, env, &drift, &mut fresh)
@@ -463,7 +467,7 @@ fn try_local_partial(
     ctors: &BTreeMap<String, CtorInfo>,
     analysis: &LoweringAnalysis<'_>,
     drift: &DriftLog,
-    fresh: &mut crate::fresh::Fresh,
+    fresh: &mut crate::util::fresh::Fresh,
 ) -> Result<Option<Decision>, TypedCoreEffectLoweringFailure> {
     let Some((region, entries)) = analysis::local_region(fns, analysis.latent, analysis.flow)
     else {
@@ -534,7 +538,7 @@ fn assemble_local_partial(
     ctors: &BTreeMap<String, CtorInfo>,
     analysis: &LoweringAnalysis<'_>,
     split: &LocalSplit<'_>,
-    fresh: &mut crate::fresh::Fresh,
+    fresh: &mut crate::util::fresh::Fresh,
 ) -> Result<Option<LocalPartialArtifacts>, TypedCoreEffectLoweringFailure> {
     let rows = residual::plan(fns, analysis.ops, env)
         .map_err(|msg| TypedCoreEffectLoweringFailure::Internal { msg })?;
@@ -576,7 +580,7 @@ fn monadic_fallback(
     ctors: &BTreeMap<String, CtorInfo>,
     flags: &DynFlags,
     analysis: &LoweringAnalysis<'_>,
-    fresh: &mut crate::fresh::Fresh,
+    fresh: &mut crate::util::fresh::Fresh,
 ) -> Result<Decision, TypedCoreEffectLoweringFailure> {
     let plan = analysis::plan(fns, analysis.latent, analysis.flow);
     let mut warning_members = diagnostics::genuine_effects(analysis.latent);
@@ -903,8 +907,8 @@ pub(super) fn union_effects(left: &EffRow, right: &EffRow) -> EffRow {
 mod tests {
     use crate::core::CoreOp;
     use crate::flags::EffectTier;
-    use crate::fresh::Fresh;
     use crate::types::ty::Label;
+    use crate::util::fresh::Fresh;
 
     use super::super::verify::OperationSig;
     use super::super::{CompSig, CoreFnSig, CoreQuantifier, CoreType, TypedBinder, TypedPattern};
@@ -1522,7 +1526,10 @@ mod tests {
     #[test]
     fn arena_preparation_rewrites_constructors_and_verifies() {
         let src = "import Arena (..)\n\nfn build(n : Int, acc : List(Int)) : List(Int) =\n  if n == 0 then\n    acc\n  else\n    build(n - 1, Cons(n, acc))\n\nfn total(xs : List(Int)) : Int =\n  match xs of\n    Nil => 0\n    Cons(h, t) => h + total(t)\n\nfn scratch() : Int = total(build(3, Nil))\n\nfn main() : Int = with_arena(scratch)\n";
-        let (typed, env, _, _) = typed_from_program(src);
+        let (typed, mut env, _, _) = typed_from_program(src);
+        // The production seam (`prepare` in this module) seeds the region-hook
+        // signatures before invoking the pass; a direct invocation must too.
+        arena::insert_builtin_sigs(&mut env);
         let before = typed.clone().erase();
         let prepared = arena::prepare(typed.functions().to_vec(), &env).expect("preparation");
         assert_eq!(verify(&prepared, &env), Ok(()));

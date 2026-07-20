@@ -1,9 +1,10 @@
 use std::collections::BTreeSet;
 
+use super::context::ROW_ESCAPES_SCOPE;
 use super::{Entry, Tc, TcErr};
-use crate::coeffect::{CoeffectFact, CoeffectRow};
 use crate::names::{self, ScopedEscape};
 use crate::sym::Sym;
+use crate::types::coeffect::{CoeffectFact, CoeffectRow};
 use crate::types::ty::{EffRow, Label, Type};
 
 // Multiplicity as a level: `@ once` is 1 (restrictive), the default `@ many` is
@@ -402,14 +403,17 @@ impl Tc<'_> {
             // survives later truncation at a marker. Mirrors `inst`'s `Exist` arm.
             (EffRow::Exist(x), EffRow::Exist(y)) => {
                 // Unlike the type context, the row context does not keep every
-                // solution strictly left-referencing, so absence here is not
-                // provably dead: keep it a defensive ICE rather than a panic.
+                // solution strictly left-referencing, so absence here is not an
+                // internal fault: a later truncation can strand a row variable a
+                // unification still references. Surface it as a row-scope-escape
+                // user diagnostic rather than a compiler ICE. `Keep` so the precise
+                // reason survives a caller's coarse expected/got rewrite.
                 let xi = self
                     .index_ex_row(*x)
-                    .ok_or_else(|| TcErr::Ice(format!("unify_row: ^{x} not in context")))?;
+                    .ok_or_else(|| TcErr::Keep(ROW_ESCAPES_SCOPE.into()))?;
                 let yi = self
                     .index_ex_row(*y)
-                    .ok_or_else(|| TcErr::Ice(format!("unify_row: ^{y} not in context")))?;
+                    .ok_or_else(|| TcErr::Keep(ROW_ESCAPES_SCOPE.into()))?;
                 if xi > yi {
                     self.solve_row(*x, EffRow::Exist(*y))
                 } else {
@@ -681,6 +685,11 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+    use crate::error::TypeError;
+    use crate::parse::parse;
+    use crate::resolve::resolve;
+    use crate::syntax::ast::{Core, Program};
+    use crate::syntax::desugar::desugar;
     use crate::tc::{PathRes, Tc};
 
     // A bare Tc with empty environments, enough to drive row rewriting.
@@ -800,5 +809,51 @@ mod tests {
         let from_back = unwrap(t.rewrite_row(&head("Emit", "IO"), &io));
         assert_eq!(from_front, EffRow::singleton("Emit"));
         assert_eq!(from_front, from_back);
+    }
+
+    // The type layer's only multiplicity rule is delegation, via `check_mult`: a
+    // `@ once` value (level 1) may not fill a `@ many` slot (level 0). It never
+    // counts how many times a value is used, so it is not, and cannot be, the
+    // authority for direct reuse. `mult_level` reads the row purely as a level.
+    #[test]
+    fn multiplicity_check_in_types_guards_delegation_not_reuse() {
+        // The one rejected pairing: a once-value handed to a many-context.
+        assert!(check_mult(1, 0).is_err());
+        // Every other pairing fits; none of these count uses.
+        assert!(check_mult(0, 0).is_ok());
+        assert!(check_mult(0, 1).is_ok());
+        assert!(check_mult(1, 1).is_ok());
+
+        let once = CoeffectRow::new(&["once"]).unwrap();
+        let many = CoeffectRow::new(&["many"]).unwrap();
+        assert_eq!(mult_level(&once), 1);
+        assert_eq!(mult_level(&many), 0);
+    }
+
+    fn desugared(src: &str) -> Result<Program<Core>, TypeError> {
+        let surface = parse(src).expect("parse once fixture").program;
+        let resolved = resolve(surface).expect("resolve once fixture");
+        desugar(resolved)
+    }
+
+    // Direct reuse of a `@ once` closure parameter is caught by the linear-use
+    // pass, and that pass is the sole authority: it runs in desugaring, before the
+    // type checker, so the program is rejected with the linear-use code (E6059)
+    // rather than any type error. The type checker's call rule deliberately strips
+    // the multiplicity and never counts uses, so removing this pass would leave the
+    // contract unenforced. A single direct use is left untouched.
+    #[test]
+    fn linear_use_pass_is_the_sole_authority_for_once_reuse() {
+        let reuse = "fn f(g : ((Int) -> Int) @ once) : Int = g(1) + g(2)\n";
+        assert_eq!(
+            desugared(reuse).expect_err("reuse must be rejected").code(),
+            Some("E6059"),
+        );
+
+        let single = "fn f(g : ((Int) -> Int) @ once, x : Int) : Int = g(x)\n";
+        assert!(
+            desugared(single).is_ok(),
+            "a single direct use of a `@ once` closure must pass the linear-use pass"
+        );
     }
 }

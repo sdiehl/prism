@@ -1,0 +1,26 @@
+-- Deep recursion through an effect handler. `descend` is tail-recursive and
+-- performs a State get/put each step, so the two tiers lower it differently:
+-- state fusion turns it into a while loop, while evidence passing emits direct
+-- self-calls that rely on native tail-call optimization. At this depth (far past
+-- a naive stack limit) both must run in constant stack and agree, or the tiers
+-- fork on termination. Pins that cross-tier parity.
+effect State
+  get() : Int
+  put(Int) : Unit
+
+fn descend(n : Int) : Int ! {State} =
+  if n == 0 then
+    get()
+  else
+    put(get() + 1)
+    descend(n - 1)
+
+fn run(init, n) =
+  let f =
+    handle descend(n) with
+      get() resume k => \(s) -> k(s)(s)
+      put(s2) resume k => \(_s) -> k(())(s2)
+      return r => \(_s) -> r
+  f(init)
+
+fn main() = println(run(0, 100000))

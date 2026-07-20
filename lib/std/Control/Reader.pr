@@ -1,0 +1,24 @@
+-- | The canonical `Reader(r)` effect: a read-only ambient environment.
+--
+-- `ask` pulls a value from a context the code never threads through its own
+-- signature; `run_reader` supplies it, so one function runs against any
+-- environment. `local` runs a sub-computation under a transformed environment.
+-- Opt-in: not in Base.
+
+-- | Read the ambient environment of type `r`.
+pub effect Reader(r)
+  ask() : r
+
+-- | Run `action` with `env` as the ambient environment, discharging `Reader(r)`.
+pub fn run_reader(env : r, action : () -> a ! {Reader(r) | e}) : a =
+  handle action() with
+    ask() resume k => k(env)
+    return x => x
+
+-- | Read a projection `f` of the environment.
+pub fn asks(f : (r) -> a) : a ! {Reader(r)} = f(ask())
+
+-- | Run `action` under the environment transformed by `f`. The transformed
+-- environment is scoped to `action`; the outer environment is unchanged.
+pub fn local(f : (r) -> r, action : () -> a ! {Reader(r) | e}) : a =
+  run_reader(f(ask()), action)

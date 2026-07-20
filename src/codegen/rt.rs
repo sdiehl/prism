@@ -27,6 +27,8 @@ use super::native_kont;
 include!(concat!(env!("OUT_DIR"), "/runtime_manifest.rs"));
 
 const PRISM_INTERNAL_H: &str = "prism_internal.h";
+const PRISM_ARENA_H: &str = "prism_arena.h";
+const PRISM_ARENA_C: &str = "prism_arena.c";
 const PRISM_MEM_H: &str = "prism_mem.h";
 const PRISM_MEM_C: &str = "prism_mem.c";
 const PRISM_STRING_H: &str = "prism_string.h";
@@ -46,6 +48,8 @@ const PRISM_BUFFER_H: &str = "prism_buffer.h";
 const PRISM_BUFFER_C: &str = "prism_buffer.c";
 const PRISM_TBUF_H: &str = "prism_tbuf.h";
 const PRISM_TBUF_C: &str = "prism_tbuf.c";
+const PRISM_SIMD_H: &str = "prism_simd.h";
+const PRISM_SIMD_C: &str = "prism_simd.c";
 const PRISM_SORT_H: &str = "prism_sort.h";
 const PRISM_SORT_C: &str = "prism_sort.c";
 const PRISM_KONT_H: &str = "prism_kont.h";
@@ -64,6 +68,7 @@ const BASE_RUNTIME_MODULES: &[RuntimeModule] = &[
     RuntimeModule::Array,
     RuntimeModule::Buffer,
     RuntimeModule::TypedBuffer,
+    RuntimeModule::Simd,
     RuntimeModule::Io,
 ];
 const NATIVE_RUNTIME_MODULES: &[RuntimeModule] = &[
@@ -77,6 +82,7 @@ const NATIVE_RUNTIME_MODULES: &[RuntimeModule] = &[
     RuntimeModule::Array,
     RuntimeModule::Buffer,
     RuntimeModule::TypedBuffer,
+    RuntimeModule::Simd,
     RuntimeModule::NativeKont,
     RuntimeModule::Io,
 ];
@@ -103,6 +109,7 @@ enum RuntimeModule {
     Array,
     Buffer,
     TypedBuffer,
+    Simd,
     NativeKont,
     Io,
 }
@@ -119,7 +126,15 @@ impl RuntimeProfile {
 impl RuntimeModule {
     const fn files(self) -> &'static [&'static str] {
         match self {
-            Self::Memory => &[PRISM_INTERNAL_H, PRISM_MEM_H, PRISM_MEM_C],
+            // The region substrate rides with the memory core: prism_mem.c owns
+            // the `with_arena` region policy over the prism_arena.h seam.
+            Self::Memory => &[
+                PRISM_INTERNAL_H,
+                PRISM_ARENA_H,
+                PRISM_ARENA_C,
+                PRISM_MEM_H,
+                PRISM_MEM_C,
+            ],
             Self::String => &[PRISM_STRING_H, PRISM_STRING_C],
             Self::Integer => &[PRISM_INT_H, PRISM_INT_C],
             Self::Float => &[PRISM_FLOAT_H, PRISM_FLOAT_C],
@@ -129,6 +144,7 @@ impl RuntimeModule {
             Self::Array => &[PRISM_ARRAY_H, PRISM_ARRAY_C],
             Self::Buffer => &[PRISM_BUFFER_H, PRISM_BUFFER_C],
             Self::TypedBuffer => &[PRISM_TBUF_H, PRISM_TBUF_C],
+            Self::Simd => &[PRISM_SIMD_H, PRISM_SIMD_C],
             Self::NativeKont => &[PRISM_KONT_H, PRISM_KONT_C],
             Self::Io => &[PRISM_IO_H, PRISM_IO_C],
         }
@@ -336,7 +352,8 @@ mod tests {
     #[cfg(feature = "native")]
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use super::super::{MAIN_SYMBOL, SYM_NAMESPACE, SYM_RUNTIME};
+    use super::super::mangle::{SYM_NAMESPACE, SYM_RUNTIME};
+    use super::super::MAIN_SYMBOL;
     use super::{native_kont, ALL};
 
     const KONT_RUNTIME_FILES: &[&str] = &["prism_kont.h", "prism_kont.c"];
@@ -531,6 +548,69 @@ mod tests {
         assert!(
             run.status.success(),
             "native kont runtime lookup harness exited with {:?}\nstdout:\n{}\nstderr:\n{}",
+            run.status,
+            String::from_utf8_lossy(&run.stdout),
+            String::from_utf8_lossy(&run.stderr)
+        );
+    }
+
+    // Hostile-input harness for the arena region policy: refcount traffic
+    // against arena-owned cells, escape promotion over shared/DAG/deep shapes,
+    // cross-region references, child release at destruction, and the
+    // unbalanced-bracket trap, driven directly against the materialized
+    // runtime (see tests/fixtures/arena_hostile.c). Honors PRISM_CC_FLAGS so a
+    // sanitizer environment sweeps it too.
+    #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+    #[test]
+    fn arena_region_hostile_harness() {
+        const ARENA_HARNESS: &str = include_str!("../../tests/fixtures/arena_hostile.c");
+        let cc = std::env::var("PRISM_CC").unwrap_or_else(|_| env!("PRISM_BUILD_CC").into());
+        if !Command::new(&cc)
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+        {
+            eprintln!("skipping arena hostile harness: C compiler `{cc}` not found");
+            return;
+        }
+        let stem = format!(
+            "prism_arena_hostile_{}_{}",
+            std::process::id(),
+            KONT_TEST_SEQ.fetch_add(1, Ordering::Relaxed)
+        );
+        let dir = std::env::temp_dir().join(&stem);
+        std::fs::create_dir_all(&dir).unwrap();
+        // The host-oracle profile: the harness drives the memory core directly
+        // and needs no native kont tables (which only generated programs
+        // define).
+        let rt_sources = super::write_runtime_for(&dir, super::RuntimeProfile::HostOracle).unwrap();
+        let libm_archive = super::write_libm_archive(&dir).unwrap();
+        let src = dir.join(format!("{stem}.c"));
+        let bin = dir.join(&stem);
+        std::fs::write(&src, ARENA_HARNESS).unwrap();
+        let mut cmd = Command::new(&cc);
+        cmd.args(["-O1", "-w"]);
+        if let Ok(flags) = std::env::var("PRISM_CC_FLAGS") {
+            cmd.args(flags.split_whitespace());
+        }
+        let comp = cmd
+            .arg(&src)
+            .args(&rt_sources)
+            .arg(&libm_archive)
+            .arg("-o")
+            .arg(&bin)
+            .output()
+            .unwrap();
+        assert!(
+            comp.status.success(),
+            "arena hostile harness failed to compile:\n{}",
+            String::from_utf8_lossy(&comp.stderr)
+        );
+        let run = Command::new(&bin).output().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            run.status.success(),
+            "arena hostile harness exited with {:?}\nstdout:\n{}\nstderr:\n{}",
             run.status,
             String::from_utf8_lossy(&run.stdout),
             String::from_utf8_lossy(&run.stderr)

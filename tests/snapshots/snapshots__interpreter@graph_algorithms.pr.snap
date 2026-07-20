@@ -1,0 +1,14 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/graph_algorithms.pr
+---
+[1, 2, 3, 4, 5, 6]
+[[4, 5], [1, 2, 3], [6]]
+[6, 1, 2, 3, 4, 5]
+[1, 2, 3, 4, 5]
+[1, 2, 3, 4, 5]
+[1, 4]
+[4, 5, 6]
+[3, 5, 6]
+=> ()

@@ -4,7 +4,7 @@
 
 Operations over `Result`.
 
-The type is wired in; the prelude opens this module, so these are in unqualified scope everywhere.
+The type is wired in; Base includes this module, so these are in unqualified scope everywhere.
 
 ## Functions and Values
 

@@ -1,6 +1,16 @@
 use logos::Lexer;
 use logos::Logos;
 
+// Decode one single-character string/char escape to its char. The supported set
+// is exactly what the formatter's re-escaper can reproduce, so every accepted
+// escape round-trips: each decoded value maps back to one escape spelling.
+//
+// Numeric and unicode escapes (`\0`, `\xNN`, `\u{...}`) are deliberately absent.
+// Each is many-to-one on the decoded value (`\x41`, `\u{41}`, and a bare `A` all
+// decode to `A`), so the decoded string keeps no record of which spelling the
+// writer used and the formatter would reprint the bare character rather than the
+// escape, breaking idempotence. An unknown escape therefore returns None and the
+// caller raises a clean lex error instead of silently decoding it.
 pub(super) const fn unescape(c: char) -> Option<char> {
     Some(match c {
         'n' => '\n',
@@ -280,6 +290,12 @@ pub enum Token {
     Fbip,
     #[token("replayable")]
     Replayable,
+    #[token("logic")]
+    Logic,
+    #[token("requires")]
+    Requires,
+    #[token("ensures")]
+    Ensures,
     #[token("pub")]
     Pub,
     #[token("import")]
@@ -577,6 +593,9 @@ impl Token {
             Self::Fip => kw::FIP,
             Self::Fbip => kw::FBIP,
             Self::Replayable => kw::REPLAYABLE,
+            Self::Logic => kw::LOGIC,
+            Self::Requires => kw::REQUIRES,
+            Self::Ensures => kw::ENSURES,
             Self::Pub => kw::PUB,
             Self::Import => kw::IMPORT,
             Self::As => kw::AS,
@@ -853,6 +872,9 @@ mod tests {
             (Token::Fip, kw::FIP),
             (Token::Fbip, kw::FBIP),
             (Token::Replayable, kw::REPLAYABLE),
+            (Token::Logic, kw::LOGIC),
+            (Token::Requires, kw::REQUIRES),
+            (Token::Ensures, kw::ENSURES),
             (Token::Pub, kw::PUB),
             (Token::Import, kw::IMPORT),
             (Token::As, kw::AS),

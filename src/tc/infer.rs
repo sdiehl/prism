@@ -32,6 +32,22 @@ impl Tc<'_> {
         self.operation_uses.insert(effect, operation);
     }
 
+    // Debug-only invariant for the operation-uses swap discipline. Every delimited
+    // scope opens with a `mem::take` (installing a fresh accumulator), lets its
+    // body accumulate, drains that accumulation with a second `mem::take`, then
+    // reinstalls the saved outer scope. Asserting the accumulator is drained
+    // immediately before each restore pins the balance: the outer scope is always
+    // reinstalled into an empty slot, so a restore can never silently drop the
+    // effect uses gathered inside (an under-approximated row). A future reorder
+    // that accumulated between the drain and the restore, or an orphaned take,
+    // would trip this. Compiled out of release builds.
+    fn assert_uses_drained(&self) {
+        debug_assert!(
+            self.operation_uses == OperationUses::default(),
+            "operation-uses accumulator must be drained before restoring the outer scope"
+        );
+    }
+
     // A public effect row carries labels, not operation subsets. Treat each
     // concrete label as every operation declared by that effect, and preserve
     // any open tail as an explicit precision barrier.
@@ -150,6 +166,7 @@ impl Tc<'_> {
                     |tc| tc.check(&env2, body, ret),
                 );
                 let latent_uses = std::mem::take(&mut self.operation_uses);
+                self.assert_uses_drained();
                 self.operation_uses = outer_uses;
                 if propagate_latent_uses {
                     self.operation_uses.merge(latent_uses);
@@ -499,6 +516,7 @@ impl Tc<'_> {
                     |tc| tc.check(&env2, body, &Type::Exist(ret)),
                 );
                 let _latent_uses = std::mem::take(&mut self.operation_uses);
+                self.assert_uses_drained();
                 self.operation_uses = outer_uses;
                 checked?;
                 Ok(self.apply(&Type::fun_eff(doms, EffRow::Exist(row), Type::Exist(ret))))
@@ -885,6 +903,7 @@ impl Tc<'_> {
                 msg: format!("handler node {} produced duplicate residual facts", id.0),
             });
         }
+        self.assert_uses_drained();
         self.operation_uses = outer_uses;
         self.operation_uses.merge(residual);
         Ok(self.apply(&Type::Exist(ret_ex)))
@@ -1088,9 +1107,15 @@ impl Tc<'_> {
                 let b2 = b.subst_row_var(*n, &EffRow::Exist(r));
                 self.app_synth_with_uses(env, &b2, args, span, precise)
             }
-            // Applying a usage-annotated closure applies its inner function; the
-            // multiplicity contract (`@ once`: at most one use) is enforced by the
-            // linear-use pass, not by the call rule.
+            // Applying a usage-annotated closure strips the multiplicity and
+            // applies its inner function. The call rule intentionally defers the
+            // `@ once` contract ("at most one use") to the linear-use pass: this
+            // rule sees a single application in isolation and structurally cannot
+            // count how many times a binding is used across the whole body, which
+            // is the property the contract constrains. The type layer guards only
+            // the delegation direction (a `@ once` value handed to a `@ many`
+            // slot), via the contravariant `check_mult` in `subtype`; direct reuse
+            // is left entirely to the linear-use pass, its sole authority.
             Type::Coeffect(inner, _) => self.app_synth_with_uses(env, inner, args, span, precise),
             Type::Exist(a) => {
                 let ret = self.fresh_id();
@@ -1345,6 +1370,7 @@ impl Tc<'_> {
         let outer_uses = std::mem::take(&mut self.operation_uses);
         let body_ty = self.synth(env, body);
         let mut body_uses = std::mem::take(&mut self.operation_uses);
+        self.assert_uses_drained();
         self.operation_uses = outer_uses;
         let t = body_ty?;
         let args = (0..self.eff_arity(eff_sym))
@@ -1418,6 +1444,7 @@ impl Tc<'_> {
         let frame = self.handler_stack.pop().expect("handler frame");
         self.cur_row = saved_row;
         let mut body_uses = std::mem::take(&mut self.operation_uses);
+        self.assert_uses_drained();
         self.operation_uses = handler_uses;
         let body_ty = self.apply(&body_ty?);
         let handled_operations = self.handled_operations(arms);

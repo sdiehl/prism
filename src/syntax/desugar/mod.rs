@@ -11,13 +11,13 @@ use marginalia::Span;
 
 use super::ast::{
     BigInt, Constraint, Core, Decl, EffOp, EffectDecl, Expr, Fip, Grade, InstanceDecl, IntLit,
-    NodeId, Param, Pattern, Phase, Program, Row, Spanned, Suffix, Ty, S,
+    NodeId, Param, Pattern, Phase, Program, Row, Spanned, Suffix, Total, Ty, S,
 };
-use crate::coeffect::CoeffectFact;
 use crate::error::{ErrKind, TypeError};
-use crate::fresh::Fresh;
 use crate::kw;
 use crate::names;
+use crate::types::coeffect::CoeffectFact;
+use crate::util::fresh::Fresh;
 
 mod aliases;
 mod derive;
@@ -32,14 +32,14 @@ use derive::derive_instances;
 use effects::{rw, wrap_return, Binding, Vars};
 use ids::assign_ids;
 use stable::expand_stable;
-pub(crate) use stable::stable_rung_digests;
+pub(crate) use stable::{family_lock, routes_to_current, stable_rung_digests};
 use synonyms::expand_synonyms;
 
 pub use sugar::{
-    assign_stmt, build_stable, compound_assign, compound_stmt, dot_call, dot_op_removed,
-    grade_word_msg, interp_lit, let_pat, let_stmt, lift_noalloc, open_if, pattern_decl, seq_stmt,
-    try_mark, with_rest, with_stmt, IfTail, StableItem, DECLINE_DIM_ARITH, FLIP_CLASS, FLIP_EFFECT,
-    FLIP_INSTANCE, GRADE_MANY_CLAUSE, MIGRATE_RESUME, MIGRATE_RET_ORDER,
+    assign_stmt, build_stable, compound_assign, compound_stmt, decl_mods, dot_call, dot_op_removed,
+    grade_word_msg, interp_lit, let_pat, let_stmt, lift_noalloc, mig_dir, open_if, pattern_decl,
+    seq_stmt, try_mark, with_rest, with_stmt, IfTail, StableItem, DECLINE_DIM_ARITH, FLIP_CLASS,
+    FLIP_EFFECT, FLIP_INSTANCE, GRADE_MANY_CLAUSE, MIGRATE_RESUME, MIGRATE_RET_ORDER,
 };
 
 // Per-op record: owning effect name, that effect's type parameters, signature.
@@ -332,7 +332,12 @@ fn lift_lam(
         constraints: Vec::new(),
         body: *body,
         wheres: Vec::new(),
+        requires: Vec::new(),
+        ensures: Vec::new(),
+        decreases: None,
         konst: false,
+        test: false,
+        total: Total::No,
         fip: Fip::No,
         replayable: false,
         no_alloc: false,
@@ -1046,6 +1051,8 @@ pub fn desugar_with_scope(
         canonicals: prog.canonicals,
         patterns: Vec::new(),
         fns,
+        // Surface-only proof declarations: never lowered, dropped at `Core`.
+        logic_fns: Vec::new(),
         imports: prog.imports,
         exports: prog.exports,
         opaques: prog.opaques,
@@ -1160,7 +1167,19 @@ fn core_decl(d: Decl, cx: &mut Cx) -> Result<Decl<Core>, TypeError> {
         constraints: d.constraints,
         body,
         wheres: Vec::new(),
+        // Contracts and the `decreases` measure are surface-only proof data: they
+        // carry no runtime meaning and are dropped here at the `Core` boundary, so
+        // an edit touching only a `requires`/`ensures`/`decreases` clause leaves
+        // executable Core byte-identical.
+        requires: Vec::new(),
+        ensures: Vec::new(),
+        decreases: None,
         konst: d.konst,
+        // Test membership survives to Core: the test lane's discovery reads it
+        // off the checked program. Neutral because production mode strips test
+        // declarations before desugar, and `test` never enters the Core hash.
+        test: d.test,
+        total: Total::No,
         fip: d.fip,
         replayable: d.replayable,
         no_alloc: d.no_alloc,
