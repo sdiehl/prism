@@ -12,7 +12,7 @@ use crate::error::Error;
 use crate::flags::DynFlags;
 
 /// The manifest filename a project is keyed by.
-const MANIFEST: &str = "prism.toml";
+pub(crate) const MANIFEST: &str = "prism.toml";
 
 /// Separator between the hash scheme and the hex digest in a bare hash-pin
 /// dependency (`<scheme>:<hex>`). The scheme itself is never re-spelled here; it
