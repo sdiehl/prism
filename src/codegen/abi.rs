@@ -10,6 +10,16 @@ pub(super) const WORD_BYTES: i64 = 8;
 pub(super) const STR_TAG: i64 = 0x5354_5200;
 pub(super) const BIG_TAG: i64 = 0x4249_4700;
 
+/// The native word for the wired nullable's `Null`: the machine zero word.
+/// `This(v)` is its element word unchanged, so the type allocates no cell on
+/// the native tiers; the element contract (`types::is_or_null_element`) proves
+/// no admitted element can ever be this word.
+pub(super) const NULL_WORD: i64 = 0;
+
+// Null-word dispatch derives the case tag as `zext(word != 0)`; that identity
+// is only correct while the wired tags are exactly `Null = 0` / `This = 1`.
+const _: () = assert!(kw::OR_NULL_TAG == 0 && kw::OR_THIS_TAG == 1);
+
 const _: () = assert!(
     size_of::<usize>() == 8 && size_of::<u64>() == 8,
     "prism tagging scheme assumes LP64"

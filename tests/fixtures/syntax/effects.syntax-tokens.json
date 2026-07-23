@@ -1,0 +1,6272 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.14.0",
+  "source": {
+    "digest": "1a75ebd0c18a7e9c7e73bfe2a4459147b401efd68545e115ad927342c0ca5f44",
+    "text": "-- Effects and control: graded ops, handlers, masks, loops, state, errors.\neffect Ask\n  ask() : Int\n\neffect Log\n  never fail(String) : Int\n  once emit(Int) : Unit\n\nerror Boom(String)\n\nfn handled() : Int =\n  handle ask() + ask() with\n    ask() resume k => k(21)\n    return r => r\n\nfn sugar_arms() : Int =\n  handle emit(ask()) with\n    once ask() => 7\n    never fail(msg) => 0\n    val base = 5\n    once emit(v) => ()\n    return r => base()\n\nfn named() : Int =\n  with f <- handler\n    ask() resume k => k(1)\n    return r => r\n  f.ask()\n\nfn tunneled() : Int =\n  handle mask<Ask>(ask()) with\n    ask() resume k => k(2)\n    return r => r\n\nfn thrower(n : Int) : Int =\n  if n < 0 then\n    throw Boom(\"negative\")\n  else\n    n\n\nfn catcher() : Int = try thrower(-1) catch { Boom(msg) => 0 }\n\nfn looping() : Int =\n  var acc := 0\n  var i := 0\n  while i < 10 do\n    i += 1\n    if i % 2 == 0 then\n      continue\n    if i > 7 then\n      break\n    acc := acc + i\n  for v in [1, 2, 3],\n      if v > 1,\n      let w = v * 2 do\n    acc += w\n  loop\n    break\n  acc\n\nfn early(n : Int) : Int =\n  if n == 0 then\n    return 99\n  n + 1\n\nfn atomic() : Int =\n  var balance := 100\n  let r =\n    transact\n      balance -= 40\n      guard(balance >= 80)\n      1\n    else\n      0\n  probe \"trace\" do println(\"attempted\")\n  balance\n\nfn grid_write() : List(List(Int)) =\n  var grid := [[0, 1], [2, 3]]\n  grid[0][1] := 9\n  grid\n"
+  },
+  "raw": [
+    {
+      "kind": "effect",
+      "span": [
+        75,
+        81
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        82,
+        85
+      ],
+      "value": "Ask"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        88,
+        91
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        91,
+        92
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        92,
+        93
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        94,
+        95
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        96,
+        99
+      ]
+    },
+    {
+      "kind": "effect",
+      "span": [
+        101,
+        107
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        108,
+        111
+      ],
+      "value": "Log"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        114,
+        119
+      ],
+      "value": "never"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        120,
+        124
+      ],
+      "value": "fail"
+    },
+    {
+      "kind": "(",
+      "span": [
+        124,
+        125
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        125,
+        131
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        131,
+        132
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        133,
+        134
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        135,
+        138
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        141,
+        145
+      ],
+      "value": "once"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        146,
+        150
+      ],
+      "value": "emit"
+    },
+    {
+      "kind": "(",
+      "span": [
+        150,
+        151
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        151,
+        154
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        154,
+        155
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        156,
+        157
+      ]
+    },
+    {
+      "kind": "Unit",
+      "span": [
+        158,
+        162
+      ]
+    },
+    {
+      "kind": "error",
+      "span": [
+        164,
+        169
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        170,
+        174
+      ],
+      "value": "Boom"
+    },
+    {
+      "kind": "(",
+      "span": [
+        174,
+        175
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        175,
+        181
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        181,
+        182
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        184,
+        186
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        187,
+        194
+      ],
+      "value": "handled"
+    },
+    {
+      "kind": "(",
+      "span": [
+        194,
+        195
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        195,
+        196
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        197,
+        198
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        199,
+        202
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        203,
+        204
+      ]
+    },
+    {
+      "kind": "handle",
+      "span": [
+        207,
+        213
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        214,
+        217
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        217,
+        218
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        218,
+        219
+      ]
+    },
+    {
+      "kind": "+",
+      "span": [
+        220,
+        221
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        222,
+        225
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        225,
+        226
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        226,
+        227
+      ]
+    },
+    {
+      "kind": "with",
+      "span": [
+        228,
+        232
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        237,
+        240
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        240,
+        241
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        241,
+        242
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        243,
+        249
+      ],
+      "value": "resume"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        250,
+        251
+      ],
+      "value": "k"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        252,
+        254
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        255,
+        256
+      ],
+      "value": "k"
+    },
+    {
+      "kind": "(",
+      "span": [
+        256,
+        257
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        257,
+        259
+      ],
+      "value": "21"
+    },
+    {
+      "kind": ")",
+      "span": [
+        259,
+        260
+      ]
+    },
+    {
+      "kind": "return",
+      "span": [
+        265,
+        271
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        272,
+        273
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        274,
+        276
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        277,
+        278
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        280,
+        282
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        283,
+        293
+      ],
+      "value": "sugar_arms"
+    },
+    {
+      "kind": "(",
+      "span": [
+        293,
+        294
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        294,
+        295
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        296,
+        297
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        298,
+        301
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        302,
+        303
+      ]
+    },
+    {
+      "kind": "handle",
+      "span": [
+        306,
+        312
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        313,
+        317
+      ],
+      "value": "emit"
+    },
+    {
+      "kind": "(",
+      "span": [
+        317,
+        318
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        318,
+        321
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        321,
+        322
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        322,
+        323
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        323,
+        324
+      ]
+    },
+    {
+      "kind": "with",
+      "span": [
+        325,
+        329
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        334,
+        338
+      ],
+      "value": "once"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        339,
+        342
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        342,
+        343
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        343,
+        344
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        345,
+        347
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        348,
+        349
+      ],
+      "value": "7"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        354,
+        359
+      ],
+      "value": "never"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        360,
+        364
+      ],
+      "value": "fail"
+    },
+    {
+      "kind": "(",
+      "span": [
+        364,
+        365
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        365,
+        368
+      ],
+      "value": "msg"
+    },
+    {
+      "kind": ")",
+      "span": [
+        368,
+        369
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        370,
+        372
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        373,
+        374
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "val",
+      "span": [
+        379,
+        382
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        383,
+        387
+      ],
+      "value": "base"
+    },
+    {
+      "kind": "=",
+      "span": [
+        388,
+        389
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        390,
+        391
+      ],
+      "value": "5"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        396,
+        400
+      ],
+      "value": "once"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        401,
+        405
+      ],
+      "value": "emit"
+    },
+    {
+      "kind": "(",
+      "span": [
+        405,
+        406
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        406,
+        407
+      ],
+      "value": "v"
+    },
+    {
+      "kind": ")",
+      "span": [
+        407,
+        408
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        409,
+        411
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        412,
+        413
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        413,
+        414
+      ]
+    },
+    {
+      "kind": "return",
+      "span": [
+        419,
+        425
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        426,
+        427
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        428,
+        430
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        431,
+        435
+      ],
+      "value": "base"
+    },
+    {
+      "kind": "(",
+      "span": [
+        435,
+        436
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        436,
+        437
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        439,
+        441
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        442,
+        447
+      ],
+      "value": "named"
+    },
+    {
+      "kind": "(",
+      "span": [
+        447,
+        448
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        448,
+        449
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        450,
+        451
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        452,
+        455
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        456,
+        457
+      ]
+    },
+    {
+      "kind": "with",
+      "span": [
+        460,
+        464
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        465,
+        466
+      ],
+      "value": "f"
+    },
+    {
+      "kind": "<-",
+      "span": [
+        467,
+        469
+      ]
+    },
+    {
+      "kind": "handler",
+      "span": [
+        470,
+        477
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        482,
+        485
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        485,
+        486
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        486,
+        487
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        488,
+        494
+      ],
+      "value": "resume"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        495,
+        496
+      ],
+      "value": "k"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        497,
+        499
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        500,
+        501
+      ],
+      "value": "k"
+    },
+    {
+      "kind": "(",
+      "span": [
+        501,
+        502
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        502,
+        503
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        503,
+        504
+      ]
+    },
+    {
+      "kind": "return",
+      "span": [
+        509,
+        515
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        516,
+        517
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        518,
+        520
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        521,
+        522
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        525,
+        526
+      ],
+      "value": "f"
+    },
+    {
+      "kind": ".",
+      "span": [
+        526,
+        527
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        527,
+        530
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        530,
+        531
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        531,
+        532
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        534,
+        536
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        537,
+        545
+      ],
+      "value": "tunneled"
+    },
+    {
+      "kind": "(",
+      "span": [
+        545,
+        546
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        546,
+        547
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        548,
+        549
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        550,
+        553
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        554,
+        555
+      ]
+    },
+    {
+      "kind": "handle",
+      "span": [
+        558,
+        564
+      ]
+    },
+    {
+      "kind": "mask",
+      "span": [
+        565,
+        569
+      ]
+    },
+    {
+      "kind": "<",
+      "span": [
+        569,
+        570
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        570,
+        573
+      ],
+      "value": "Ask"
+    },
+    {
+      "kind": ">",
+      "span": [
+        573,
+        574
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        574,
+        575
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        575,
+        578
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        578,
+        579
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        579,
+        580
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        580,
+        581
+      ]
+    },
+    {
+      "kind": "with",
+      "span": [
+        582,
+        586
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        591,
+        594
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        594,
+        595
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        595,
+        596
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        597,
+        603
+      ],
+      "value": "resume"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        604,
+        605
+      ],
+      "value": "k"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        606,
+        608
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        609,
+        610
+      ],
+      "value": "k"
+    },
+    {
+      "kind": "(",
+      "span": [
+        610,
+        611
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        611,
+        612
+      ],
+      "value": "2"
+    },
+    {
+      "kind": ")",
+      "span": [
+        612,
+        613
+      ]
+    },
+    {
+      "kind": "return",
+      "span": [
+        618,
+        624
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        625,
+        626
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        627,
+        629
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        630,
+        631
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        633,
+        635
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        636,
+        643
+      ],
+      "value": "thrower"
+    },
+    {
+      "kind": "(",
+      "span": [
+        643,
+        644
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        644,
+        645
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ":",
+      "span": [
+        646,
+        647
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        648,
+        651
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        651,
+        652
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        653,
+        654
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        655,
+        658
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        659,
+        660
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        663,
+        665
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        666,
+        667
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "<",
+      "span": [
+        668,
+        669
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        670,
+        671
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "then",
+      "span": [
+        672,
+        676
+      ]
+    },
+    {
+      "kind": "throw",
+      "span": [
+        681,
+        686
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        687,
+        691
+      ],
+      "value": "Boom"
+    },
+    {
+      "kind": "(",
+      "span": [
+        691,
+        692
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        692,
+        702
+      ],
+      "value": "negative"
+    },
+    {
+      "kind": ")",
+      "span": [
+        702,
+        703
+      ]
+    },
+    {
+      "kind": "else",
+      "span": [
+        706,
+        710
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        715,
+        716
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        718,
+        720
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        721,
+        728
+      ],
+      "value": "catcher"
+    },
+    {
+      "kind": "(",
+      "span": [
+        728,
+        729
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        729,
+        730
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        731,
+        732
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        733,
+        736
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        737,
+        738
+      ]
+    },
+    {
+      "kind": "try",
+      "span": [
+        739,
+        742
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        743,
+        750
+      ],
+      "value": "thrower"
+    },
+    {
+      "kind": "(",
+      "span": [
+        750,
+        751
+      ]
+    },
+    {
+      "kind": "-",
+      "span": [
+        751,
+        752
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        752,
+        753
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        753,
+        754
+      ]
+    },
+    {
+      "kind": "catch",
+      "span": [
+        755,
+        760
+      ]
+    },
+    {
+      "kind": "{",
+      "span": [
+        761,
+        762
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        763,
+        767
+      ],
+      "value": "Boom"
+    },
+    {
+      "kind": "(",
+      "span": [
+        767,
+        768
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        768,
+        771
+      ],
+      "value": "msg"
+    },
+    {
+      "kind": ")",
+      "span": [
+        771,
+        772
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        773,
+        775
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        776,
+        777
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "}",
+      "span": [
+        778,
+        779
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        781,
+        783
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        784,
+        791
+      ],
+      "value": "looping"
+    },
+    {
+      "kind": "(",
+      "span": [
+        791,
+        792
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        792,
+        793
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        794,
+        795
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        796,
+        799
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        800,
+        801
+      ]
+    },
+    {
+      "kind": "var",
+      "span": [
+        804,
+        807
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        808,
+        811
+      ],
+      "value": "acc"
+    },
+    {
+      "kind": ":=",
+      "span": [
+        812,
+        814
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        815,
+        816
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "var",
+      "span": [
+        819,
+        822
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        823,
+        824
+      ],
+      "value": "i"
+    },
+    {
+      "kind": ":=",
+      "span": [
+        825,
+        827
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        828,
+        829
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "while",
+      "span": [
+        832,
+        837
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        838,
+        839
+      ],
+      "value": "i"
+    },
+    {
+      "kind": "<",
+      "span": [
+        840,
+        841
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        842,
+        844
+      ],
+      "value": "10"
+    },
+    {
+      "kind": "do",
+      "span": [
+        845,
+        847
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        852,
+        853
+      ],
+      "value": "i"
+    },
+    {
+      "kind": "+=",
+      "span": [
+        854,
+        856
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        857,
+        858
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "if",
+      "span": [
+        863,
+        865
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        866,
+        867
+      ],
+      "value": "i"
+    },
+    {
+      "kind": "%",
+      "span": [
+        868,
+        869
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        870,
+        871
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "==",
+      "span": [
+        872,
+        874
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        875,
+        876
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "then",
+      "span": [
+        877,
+        881
+      ]
+    },
+    {
+      "kind": "continue",
+      "span": [
+        888,
+        896
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        901,
+        903
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        904,
+        905
+      ],
+      "value": "i"
+    },
+    {
+      "kind": ">",
+      "span": [
+        906,
+        907
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        908,
+        909
+      ],
+      "value": "7"
+    },
+    {
+      "kind": "then",
+      "span": [
+        910,
+        914
+      ]
+    },
+    {
+      "kind": "break",
+      "span": [
+        921,
+        926
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        931,
+        934
+      ],
+      "value": "acc"
+    },
+    {
+      "kind": ":=",
+      "span": [
+        935,
+        937
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        938,
+        941
+      ],
+      "value": "acc"
+    },
+    {
+      "kind": "+",
+      "span": [
+        942,
+        943
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        944,
+        945
+      ],
+      "value": "i"
+    },
+    {
+      "kind": "for",
+      "span": [
+        948,
+        951
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        952,
+        953
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "in",
+      "span": [
+        954,
+        956
+      ]
+    },
+    {
+      "kind": "[",
+      "span": [
+        957,
+        958
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        958,
+        959
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ",",
+      "span": [
+        959,
+        960
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        961,
+        962
+      ],
+      "value": "2"
+    },
+    {
+      "kind": ",",
+      "span": [
+        962,
+        963
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        964,
+        965
+      ],
+      "value": "3"
+    },
+    {
+      "kind": "]",
+      "span": [
+        965,
+        966
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        966,
+        967
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        974,
+        976
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        977,
+        978
+      ],
+      "value": "v"
+    },
+    {
+      "kind": ">",
+      "span": [
+        979,
+        980
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        981,
+        982
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ",",
+      "span": [
+        982,
+        983
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        990,
+        993
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        994,
+        995
+      ],
+      "value": "w"
+    },
+    {
+      "kind": "=",
+      "span": [
+        996,
+        997
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        998,
+        999
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "*",
+      "span": [
+        1000,
+        1001
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1002,
+        1003
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "do",
+      "span": [
+        1004,
+        1006
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1011,
+        1014
+      ],
+      "value": "acc"
+    },
+    {
+      "kind": "+=",
+      "span": [
+        1015,
+        1017
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1018,
+        1019
+      ],
+      "value": "w"
+    },
+    {
+      "kind": "loop",
+      "span": [
+        1022,
+        1026
+      ]
+    },
+    {
+      "kind": "break",
+      "span": [
+        1031,
+        1036
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1039,
+        1042
+      ],
+      "value": "acc"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1044,
+        1046
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1047,
+        1052
+      ],
+      "value": "early"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1052,
+        1053
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1053,
+        1054
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1055,
+        1056
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1057,
+        1060
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1060,
+        1061
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1062,
+        1063
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1064,
+        1067
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1068,
+        1069
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        1072,
+        1074
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1075,
+        1076
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "==",
+      "span": [
+        1077,
+        1079
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1080,
+        1081
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "then",
+      "span": [
+        1082,
+        1086
+      ]
+    },
+    {
+      "kind": "return",
+      "span": [
+        1091,
+        1097
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1098,
+        1100
+      ],
+      "value": "99"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1103,
+        1104
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "+",
+      "span": [
+        1105,
+        1106
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1107,
+        1108
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1110,
+        1112
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1113,
+        1119
+      ],
+      "value": "atomic"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1119,
+        1120
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1120,
+        1121
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1122,
+        1123
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1124,
+        1127
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1128,
+        1129
+      ]
+    },
+    {
+      "kind": "var",
+      "span": [
+        1132,
+        1135
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1136,
+        1143
+      ],
+      "value": "balance"
+    },
+    {
+      "kind": ":=",
+      "span": [
+        1144,
+        1146
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1147,
+        1150
+      ],
+      "value": "100"
+    },
+    {
+      "kind": "let",
+      "span": [
+        1153,
+        1156
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1157,
+        1158
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1159,
+        1160
+      ]
+    },
+    {
+      "kind": "transact",
+      "span": [
+        1165,
+        1173
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1180,
+        1187
+      ],
+      "value": "balance"
+    },
+    {
+      "kind": "-=",
+      "span": [
+        1188,
+        1190
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1191,
+        1193
+      ],
+      "value": "40"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1200,
+        1205
+      ],
+      "value": "guard"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1205,
+        1206
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1206,
+        1213
+      ],
+      "value": "balance"
+    },
+    {
+      "kind": ">=",
+      "span": [
+        1214,
+        1216
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1217,
+        1219
+      ],
+      "value": "80"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1219,
+        1220
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1227,
+        1228
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "else",
+      "span": [
+        1233,
+        1237
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1244,
+        1245
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "probe",
+      "span": [
+        1248,
+        1253
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        1254,
+        1261
+      ],
+      "value": "trace"
+    },
+    {
+      "kind": "do",
+      "span": [
+        1262,
+        1264
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1265,
+        1272
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1272,
+        1273
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        1273,
+        1284
+      ],
+      "value": "attempted"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1284,
+        1285
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1288,
+        1295
+      ],
+      "value": "balance"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1297,
+        1299
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1300,
+        1310
+      ],
+      "value": "grid_write"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1310,
+        1311
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1311,
+        1312
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1313,
+        1314
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1315,
+        1319
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1319,
+        1320
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1320,
+        1324
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1324,
+        1325
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1325,
+        1328
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1328,
+        1329
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1329,
+        1330
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1331,
+        1332
+      ]
+    },
+    {
+      "kind": "var",
+      "span": [
+        1335,
+        1338
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1339,
+        1343
+      ],
+      "value": "grid"
+    },
+    {
+      "kind": ":=",
+      "span": [
+        1344,
+        1346
+      ]
+    },
+    {
+      "kind": "[",
+      "span": [
+        1347,
+        1348
+      ]
+    },
+    {
+      "kind": "[",
+      "span": [
+        1348,
+        1349
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1349,
+        1350
+      ],
+      "value": "0"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1350,
+        1351
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1352,
+        1353
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "]",
+      "span": [
+        1353,
+        1354
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        1354,
+        1355
+      ]
+    },
+    {
+      "kind": "[",
+      "span": [
+        1356,
+        1357
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1357,
+        1358
+      ],
+      "value": "2"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1358,
+        1359
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1360,
+        1361
+      ],
+      "value": "3"
+    },
+    {
+      "kind": "]",
+      "span": [
+        1361,
+        1362
+      ]
+    },
+    {
+      "kind": "]",
+      "span": [
+        1362,
+        1363
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1366,
+        1370
+      ],
+      "value": "grid"
+    },
+    {
+      "kind": "[",
+      "span": [
+        1370,
+        1371
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1371,
+        1372
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "]",
+      "span": [
+        1372,
+        1373
+      ]
+    },
+    {
+      "kind": "[",
+      "span": [
+        1373,
+        1374
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1374,
+        1375
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "]",
+      "span": [
+        1375,
+        1376
+      ]
+    },
+    {
+      "kind": ":=",
+      "span": [
+        1377,
+        1379
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1380,
+        1381
+      ],
+      "value": "9"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1384,
+        1388
+      ],
+      "value": "grid"
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        75,
+        75
+      ]
+    },
+    {
+      "kind": "effect",
+      "span": [
+        75,
+        81
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        82,
+        85
+      ],
+      "value": "Ask"
+    },
+    {
+      "kind": "v{",
+      "span": [
+        88,
+        88
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        88,
+        91
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        91,
+        92
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        92,
+        93
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        94,
+        95
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        96,
+        99
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        99,
+        99
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        99,
+        99
+      ]
+    },
+    {
+      "kind": "effect",
+      "span": [
+        101,
+        107
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        108,
+        111
+      ],
+      "value": "Log"
+    },
+    {
+      "kind": "v{",
+      "span": [
+        114,
+        114
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        114,
+        119
+      ],
+      "value": "never"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        120,
+        124
+      ],
+      "value": "fail"
+    },
+    {
+      "kind": "(",
+      "span": [
+        124,
+        125
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        125,
+        131
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        131,
+        132
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        133,
+        134
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        135,
+        138
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        138,
+        138
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        141,
+        145
+      ],
+      "value": "once"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        146,
+        150
+      ],
+      "value": "emit"
+    },
+    {
+      "kind": "(",
+      "span": [
+        150,
+        151
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        151,
+        154
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        154,
+        155
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        156,
+        157
+      ]
+    },
+    {
+      "kind": "Unit",
+      "span": [
+        158,
+        162
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        162,
+        162
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        162,
+        162
+      ]
+    },
+    {
+      "kind": "error",
+      "span": [
+        164,
+        169
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        170,
+        174
+      ],
+      "value": "Boom"
+    },
+    {
+      "kind": "(",
+      "span": [
+        174,
+        175
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        175,
+        181
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        181,
+        182
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        182,
+        182
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        184,
+        186
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        187,
+        194
+      ],
+      "value": "handled"
+    },
+    {
+      "kind": "(",
+      "span": [
+        194,
+        195
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        195,
+        196
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        197,
+        198
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        199,
+        202
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        203,
+        204
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        207,
+        207
+      ]
+    },
+    {
+      "kind": "handle",
+      "span": [
+        207,
+        213
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        214,
+        217
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        217,
+        218
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        218,
+        219
+      ]
+    },
+    {
+      "kind": "+",
+      "span": [
+        220,
+        221
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        222,
+        225
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        225,
+        226
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        226,
+        227
+      ]
+    },
+    {
+      "kind": "with",
+      "span": [
+        228,
+        232
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        237,
+        237
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        237,
+        240
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        240,
+        241
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        241,
+        242
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        243,
+        249
+      ],
+      "value": "resume"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        250,
+        251
+      ],
+      "value": "k"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        252,
+        254
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        255,
+        256
+      ],
+      "value": "k"
+    },
+    {
+      "kind": "(",
+      "span": [
+        256,
+        257
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        257,
+        259
+      ],
+      "value": "21"
+    },
+    {
+      "kind": ")",
+      "span": [
+        259,
+        260
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        260,
+        260
+      ]
+    },
+    {
+      "kind": "return",
+      "span": [
+        265,
+        271
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        272,
+        273
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        274,
+        276
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        277,
+        278
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        278,
+        278
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        278,
+        278
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        278,
+        278
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        280,
+        282
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        283,
+        293
+      ],
+      "value": "sugar_arms"
+    },
+    {
+      "kind": "(",
+      "span": [
+        293,
+        294
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        294,
+        295
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        296,
+        297
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        298,
+        301
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        302,
+        303
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        306,
+        306
+      ]
+    },
+    {
+      "kind": "handle",
+      "span": [
+        306,
+        312
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        313,
+        317
+      ],
+      "value": "emit"
+    },
+    {
+      "kind": "(",
+      "span": [
+        317,
+        318
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        318,
+        321
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        321,
+        322
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        322,
+        323
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        323,
+        324
+      ]
+    },
+    {
+      "kind": "with",
+      "span": [
+        325,
+        329
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        334,
+        334
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        334,
+        338
+      ],
+      "value": "once"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        339,
+        342
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        342,
+        343
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        343,
+        344
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        345,
+        347
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        348,
+        349
+      ],
+      "value": "7"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        349,
+        349
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        354,
+        359
+      ],
+      "value": "never"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        360,
+        364
+      ],
+      "value": "fail"
+    },
+    {
+      "kind": "(",
+      "span": [
+        364,
+        365
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        365,
+        368
+      ],
+      "value": "msg"
+    },
+    {
+      "kind": ")",
+      "span": [
+        368,
+        369
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        370,
+        372
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        373,
+        374
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        374,
+        374
+      ]
+    },
+    {
+      "kind": "val",
+      "span": [
+        379,
+        382
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        383,
+        387
+      ],
+      "value": "base"
+    },
+    {
+      "kind": "=",
+      "span": [
+        388,
+        389
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        390,
+        391
+      ],
+      "value": "5"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        391,
+        391
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        396,
+        400
+      ],
+      "value": "once"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        401,
+        405
+      ],
+      "value": "emit"
+    },
+    {
+      "kind": "(",
+      "span": [
+        405,
+        406
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        406,
+        407
+      ],
+      "value": "v"
+    },
+    {
+      "kind": ")",
+      "span": [
+        407,
+        408
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        409,
+        411
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        412,
+        413
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        413,
+        414
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        414,
+        414
+      ]
+    },
+    {
+      "kind": "return",
+      "span": [
+        419,
+        425
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        426,
+        427
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        428,
+        430
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        431,
+        435
+      ],
+      "value": "base"
+    },
+    {
+      "kind": "(",
+      "span": [
+        435,
+        436
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        436,
+        437
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        437,
+        437
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        437,
+        437
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        437,
+        437
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        439,
+        441
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        442,
+        447
+      ],
+      "value": "named"
+    },
+    {
+      "kind": "(",
+      "span": [
+        447,
+        448
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        448,
+        449
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        450,
+        451
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        452,
+        455
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        456,
+        457
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        460,
+        460
+      ]
+    },
+    {
+      "kind": "with",
+      "span": [
+        460,
+        464
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        465,
+        466
+      ],
+      "value": "f"
+    },
+    {
+      "kind": "<-",
+      "span": [
+        467,
+        469
+      ]
+    },
+    {
+      "kind": "handler",
+      "span": [
+        470,
+        477
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        482,
+        482
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        482,
+        485
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        485,
+        486
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        486,
+        487
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        488,
+        494
+      ],
+      "value": "resume"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        495,
+        496
+      ],
+      "value": "k"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        497,
+        499
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        500,
+        501
+      ],
+      "value": "k"
+    },
+    {
+      "kind": "(",
+      "span": [
+        501,
+        502
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        502,
+        503
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        503,
+        504
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        504,
+        504
+      ]
+    },
+    {
+      "kind": "return",
+      "span": [
+        509,
+        515
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        516,
+        517
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        518,
+        520
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        521,
+        522
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        522,
+        522
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        522,
+        522
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        525,
+        526
+      ],
+      "value": "f"
+    },
+    {
+      "kind": ".",
+      "span": [
+        526,
+        527
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        527,
+        530
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        530,
+        531
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        531,
+        532
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        532,
+        532
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        532,
+        532
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        534,
+        536
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        537,
+        545
+      ],
+      "value": "tunneled"
+    },
+    {
+      "kind": "(",
+      "span": [
+        545,
+        546
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        546,
+        547
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        548,
+        549
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        550,
+        553
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        554,
+        555
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        558,
+        558
+      ]
+    },
+    {
+      "kind": "handle",
+      "span": [
+        558,
+        564
+      ]
+    },
+    {
+      "kind": "mask",
+      "span": [
+        565,
+        569
+      ]
+    },
+    {
+      "kind": "<",
+      "span": [
+        569,
+        570
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        570,
+        573
+      ],
+      "value": "Ask"
+    },
+    {
+      "kind": ">",
+      "span": [
+        573,
+        574
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        574,
+        575
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        575,
+        578
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        578,
+        579
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        579,
+        580
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        580,
+        581
+      ]
+    },
+    {
+      "kind": "with",
+      "span": [
+        582,
+        586
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        591,
+        591
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        591,
+        594
+      ],
+      "value": "ask"
+    },
+    {
+      "kind": "(",
+      "span": [
+        594,
+        595
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        595,
+        596
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        597,
+        603
+      ],
+      "value": "resume"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        604,
+        605
+      ],
+      "value": "k"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        606,
+        608
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        609,
+        610
+      ],
+      "value": "k"
+    },
+    {
+      "kind": "(",
+      "span": [
+        610,
+        611
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        611,
+        612
+      ],
+      "value": "2"
+    },
+    {
+      "kind": ")",
+      "span": [
+        612,
+        613
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        613,
+        613
+      ]
+    },
+    {
+      "kind": "return",
+      "span": [
+        618,
+        624
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        625,
+        626
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        627,
+        629
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        630,
+        631
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        631,
+        631
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        631,
+        631
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        631,
+        631
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        633,
+        635
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        636,
+        643
+      ],
+      "value": "thrower"
+    },
+    {
+      "kind": "(",
+      "span": [
+        643,
+        644
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        644,
+        645
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ":",
+      "span": [
+        646,
+        647
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        648,
+        651
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        651,
+        652
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        653,
+        654
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        655,
+        658
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        659,
+        660
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        663,
+        663
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        663,
+        665
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        666,
+        667
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "<",
+      "span": [
+        668,
+        669
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        670,
+        671
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "then",
+      "span": [
+        672,
+        676
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        681,
+        681
+      ]
+    },
+    {
+      "kind": "throw",
+      "span": [
+        681,
+        686
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        687,
+        691
+      ],
+      "value": "Boom"
+    },
+    {
+      "kind": "(",
+      "span": [
+        691,
+        692
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        692,
+        702
+      ],
+      "value": "negative"
+    },
+    {
+      "kind": ")",
+      "span": [
+        702,
+        703
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        703,
+        703
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        703,
+        703
+      ]
+    },
+    {
+      "kind": "else",
+      "span": [
+        706,
+        710
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        715,
+        715
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        715,
+        716
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        716,
+        716
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        716,
+        716
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        716,
+        716
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        718,
+        720
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        721,
+        728
+      ],
+      "value": "catcher"
+    },
+    {
+      "kind": "(",
+      "span": [
+        728,
+        729
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        729,
+        730
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        731,
+        732
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        733,
+        736
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        737,
+        738
+      ]
+    },
+    {
+      "kind": "try",
+      "span": [
+        739,
+        742
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        743,
+        750
+      ],
+      "value": "thrower"
+    },
+    {
+      "kind": "(",
+      "span": [
+        750,
+        751
+      ]
+    },
+    {
+      "kind": "-",
+      "span": [
+        751,
+        752
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        752,
+        753
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        753,
+        754
+      ]
+    },
+    {
+      "kind": "catch",
+      "span": [
+        755,
+        760
+      ]
+    },
+    {
+      "kind": "{",
+      "span": [
+        761,
+        762
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        763,
+        767
+      ],
+      "value": "Boom"
+    },
+    {
+      "kind": "(",
+      "span": [
+        767,
+        768
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        768,
+        771
+      ],
+      "value": "msg"
+    },
+    {
+      "kind": ")",
+      "span": [
+        771,
+        772
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        773,
+        775
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        776,
+        777
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "}",
+      "span": [
+        778,
+        779
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        779,
+        779
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        781,
+        783
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        784,
+        791
+      ],
+      "value": "looping"
+    },
+    {
+      "kind": "(",
+      "span": [
+        791,
+        792
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        792,
+        793
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        794,
+        795
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        796,
+        799
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        800,
+        801
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        804,
+        804
+      ]
+    },
+    {
+      "kind": "var",
+      "span": [
+        804,
+        807
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        808,
+        811
+      ],
+      "value": "acc"
+    },
+    {
+      "kind": ":=",
+      "span": [
+        812,
+        814
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        815,
+        816
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        816,
+        816
+      ]
+    },
+    {
+      "kind": "var",
+      "span": [
+        819,
+        822
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        823,
+        824
+      ],
+      "value": "i"
+    },
+    {
+      "kind": ":=",
+      "span": [
+        825,
+        827
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        828,
+        829
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        829,
+        829
+      ]
+    },
+    {
+      "kind": "while",
+      "span": [
+        832,
+        837
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        838,
+        839
+      ],
+      "value": "i"
+    },
+    {
+      "kind": "<",
+      "span": [
+        840,
+        841
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        842,
+        844
+      ],
+      "value": "10"
+    },
+    {
+      "kind": "do",
+      "span": [
+        845,
+        847
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        852,
+        852
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        852,
+        853
+      ],
+      "value": "i"
+    },
+    {
+      "kind": "+=",
+      "span": [
+        854,
+        856
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        857,
+        858
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        858,
+        858
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        863,
+        865
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        866,
+        867
+      ],
+      "value": "i"
+    },
+    {
+      "kind": "%",
+      "span": [
+        868,
+        869
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        870,
+        871
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "==",
+      "span": [
+        872,
+        874
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        875,
+        876
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "then",
+      "span": [
+        877,
+        881
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        888,
+        888
+      ]
+    },
+    {
+      "kind": "continue",
+      "span": [
+        888,
+        896
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        896,
+        896
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        896,
+        896
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        901,
+        903
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        904,
+        905
+      ],
+      "value": "i"
+    },
+    {
+      "kind": ">",
+      "span": [
+        906,
+        907
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        908,
+        909
+      ],
+      "value": "7"
+    },
+    {
+      "kind": "then",
+      "span": [
+        910,
+        914
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        921,
+        921
+      ]
+    },
+    {
+      "kind": "break",
+      "span": [
+        921,
+        926
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        926,
+        926
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        926,
+        926
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        931,
+        934
+      ],
+      "value": "acc"
+    },
+    {
+      "kind": ":=",
+      "span": [
+        935,
+        937
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        938,
+        941
+      ],
+      "value": "acc"
+    },
+    {
+      "kind": "+",
+      "span": [
+        942,
+        943
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        944,
+        945
+      ],
+      "value": "i"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        945,
+        945
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        945,
+        945
+      ]
+    },
+    {
+      "kind": "for",
+      "span": [
+        948,
+        951
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        952,
+        953
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "in",
+      "span": [
+        954,
+        956
+      ]
+    },
+    {
+      "kind": "[",
+      "span": [
+        957,
+        958
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        958,
+        959
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ",",
+      "span": [
+        959,
+        960
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        961,
+        962
+      ],
+      "value": "2"
+    },
+    {
+      "kind": ",",
+      "span": [
+        962,
+        963
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        964,
+        965
+      ],
+      "value": "3"
+    },
+    {
+      "kind": "]",
+      "span": [
+        965,
+        966
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        966,
+        967
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        974,
+        976
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        977,
+        978
+      ],
+      "value": "v"
+    },
+    {
+      "kind": ">",
+      "span": [
+        979,
+        980
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        981,
+        982
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ",",
+      "span": [
+        982,
+        983
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        990,
+        993
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        994,
+        995
+      ],
+      "value": "w"
+    },
+    {
+      "kind": "=",
+      "span": [
+        996,
+        997
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        998,
+        999
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "*",
+      "span": [
+        1000,
+        1001
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1002,
+        1003
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "do",
+      "span": [
+        1004,
+        1006
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1011,
+        1011
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1011,
+        1014
+      ],
+      "value": "acc"
+    },
+    {
+      "kind": "+=",
+      "span": [
+        1015,
+        1017
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1018,
+        1019
+      ],
+      "value": "w"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1019,
+        1019
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1019,
+        1019
+      ]
+    },
+    {
+      "kind": "loop",
+      "span": [
+        1022,
+        1026
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1031,
+        1031
+      ]
+    },
+    {
+      "kind": "break",
+      "span": [
+        1031,
+        1036
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1036,
+        1036
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1036,
+        1036
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1039,
+        1042
+      ],
+      "value": "acc"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1042,
+        1042
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1042,
+        1042
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1044,
+        1046
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1047,
+        1052
+      ],
+      "value": "early"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1052,
+        1053
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1053,
+        1054
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1055,
+        1056
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1057,
+        1060
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1060,
+        1061
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1062,
+        1063
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1064,
+        1067
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1068,
+        1069
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1072,
+        1072
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        1072,
+        1074
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1075,
+        1076
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "==",
+      "span": [
+        1077,
+        1079
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1080,
+        1081
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "then",
+      "span": [
+        1082,
+        1086
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1091,
+        1091
+      ]
+    },
+    {
+      "kind": "return",
+      "span": [
+        1091,
+        1097
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1098,
+        1100
+      ],
+      "value": "99"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1100,
+        1100
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1100,
+        1100
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1103,
+        1104
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "+",
+      "span": [
+        1105,
+        1106
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1107,
+        1108
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1108,
+        1108
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1108,
+        1108
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1110,
+        1112
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1113,
+        1119
+      ],
+      "value": "atomic"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1119,
+        1120
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1120,
+        1121
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1122,
+        1123
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1124,
+        1127
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1128,
+        1129
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1132,
+        1132
+      ]
+    },
+    {
+      "kind": "var",
+      "span": [
+        1132,
+        1135
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1136,
+        1143
+      ],
+      "value": "balance"
+    },
+    {
+      "kind": ":=",
+      "span": [
+        1144,
+        1146
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1147,
+        1150
+      ],
+      "value": "100"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1150,
+        1150
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        1153,
+        1156
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1157,
+        1158
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1159,
+        1160
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1165,
+        1165
+      ]
+    },
+    {
+      "kind": "transact",
+      "span": [
+        1165,
+        1173
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1180,
+        1180
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1180,
+        1187
+      ],
+      "value": "balance"
+    },
+    {
+      "kind": "-=",
+      "span": [
+        1188,
+        1190
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1191,
+        1193
+      ],
+      "value": "40"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1193,
+        1193
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1200,
+        1205
+      ],
+      "value": "guard"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1205,
+        1206
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1206,
+        1213
+      ],
+      "value": "balance"
+    },
+    {
+      "kind": ">=",
+      "span": [
+        1214,
+        1216
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1217,
+        1219
+      ],
+      "value": "80"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1219,
+        1220
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1220,
+        1220
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1227,
+        1228
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1228,
+        1228
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1228,
+        1228
+      ]
+    },
+    {
+      "kind": "else",
+      "span": [
+        1233,
+        1237
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1244,
+        1244
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1244,
+        1245
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1245,
+        1245
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1245,
+        1245
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1245,
+        1245
+      ]
+    },
+    {
+      "kind": "probe",
+      "span": [
+        1248,
+        1253
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        1254,
+        1261
+      ],
+      "value": "trace"
+    },
+    {
+      "kind": "do",
+      "span": [
+        1262,
+        1264
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1265,
+        1272
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1272,
+        1273
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        1273,
+        1284
+      ],
+      "value": "attempted"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1284,
+        1285
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1285,
+        1285
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1288,
+        1295
+      ],
+      "value": "balance"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1295,
+        1295
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1295,
+        1295
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1297,
+        1299
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1300,
+        1310
+      ],
+      "value": "grid_write"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1310,
+        1311
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1311,
+        1312
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1313,
+        1314
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1315,
+        1319
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1319,
+        1320
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1320,
+        1324
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1324,
+        1325
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1325,
+        1328
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1328,
+        1329
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1329,
+        1330
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1331,
+        1332
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1335,
+        1335
+      ]
+    },
+    {
+      "kind": "var",
+      "span": [
+        1335,
+        1338
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1339,
+        1343
+      ],
+      "value": "grid"
+    },
+    {
+      "kind": ":=",
+      "span": [
+        1344,
+        1346
+      ]
+    },
+    {
+      "kind": "[",
+      "span": [
+        1347,
+        1348
+      ]
+    },
+    {
+      "kind": "[",
+      "span": [
+        1348,
+        1349
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1349,
+        1350
+      ],
+      "value": "0"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1350,
+        1351
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1352,
+        1353
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "]",
+      "span": [
+        1353,
+        1354
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        1354,
+        1355
+      ]
+    },
+    {
+      "kind": "[",
+      "span": [
+        1356,
+        1357
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1357,
+        1358
+      ],
+      "value": "2"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1358,
+        1359
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1360,
+        1361
+      ],
+      "value": "3"
+    },
+    {
+      "kind": "]",
+      "span": [
+        1361,
+        1362
+      ]
+    },
+    {
+      "kind": "]",
+      "span": [
+        1362,
+        1363
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1363,
+        1363
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1366,
+        1370
+      ],
+      "value": "grid"
+    },
+    {
+      "kind": "[",
+      "span": [
+        1370,
+        1371
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1371,
+        1372
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "]",
+      "span": [
+        1372,
+        1373
+      ]
+    },
+    {
+      "kind": "[",
+      "span": [
+        1373,
+        1374
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1374,
+        1375
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "]",
+      "span": [
+        1375,
+        1376
+      ]
+    },
+    {
+      "kind": ":=",
+      "span": [
+        1377,
+        1379
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1380,
+        1381
+      ],
+      "value": "9"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1381,
+        1381
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1384,
+        1388
+      ],
+      "value": "grid"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1388,
+        1388
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1388,
+        1388
+      ]
+    }
+  ],
+  "trivia": [
+    {
+      "kind": "comment",
+      "span": [
+        0,
+        74
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        99,
+        101
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        162,
+        164
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        182,
+        184
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        278,
+        280
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        437,
+        439
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        532,
+        534
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        631,
+        633
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        716,
+        718
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        779,
+        781
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        1042,
+        1044
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        1108,
+        1110
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        1295,
+        1297
+      ]
+    }
+  ]
+}

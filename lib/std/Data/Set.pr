@@ -3,13 +3,11 @@
 -- Set algebra stays O(n log n) and preserves iteration order. Base includes
 -- this module.
 --
--- Reserved (a later release): like `Map`, a set's identity will carry the content
--- hash of the canonical `Ord` instance it was built with, so a set that crosses an
--- assembly boundary commits to the ordering it was ordered by, and two programs
--- that canonicalize different `Ord(k)` cannot silently exchange one. The
--- representation-affecting classes (`Ord`, `Hash`) live in one place on the
--- compiler side (`store::coherence::is_representation_affecting`); this is the
--- container-side half of that reservation.
+-- Like `Map`, a set's representation depends on the canonical `Ord` instance
+-- used to build it. The compiler classifies `Ord` and `Hash` as
+-- representation-affecting in `store::coherence::is_representation_affecting`.
+-- Set identity does not currently encode that instance, so programs exchanging a
+-- set across an assembly boundary must agree on its canonical ordering.
 
 import Data.Map (map_empty, map_insert, map_member, map_delete, map_size, map_keys)
 

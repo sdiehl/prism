@@ -1,0 +1,219 @@
+-- A web application snapshot with optic paths through ordinary collections and
+-- two recursive functors. `TaskTree.each` visits every task in a hierarchy;
+-- `Thread.each` visits every comment in a discussion. A single path can cross
+-- both, filter at either level, descend through records, and finish at a prism.
+
+type EmailPrefs = EmailPrefs { mentions: Bool, digest: Bool }
+
+type Preferences = Preferences { email: EmailPrefs, theme: String }
+
+type Profile = Profile { reputation: Int, preferences: Preferences }
+
+type User = User { name: String, profile: Profile }
+
+type Comment = Comment { id: Int, author: User, body: String, deleted: Bool }
+
+-- A recursively nested reply tree. Its Functor instance makes `each` mean
+-- every comment at every depth, not merely the immediate replies.
+type Thread(a) = Thread { item: a, replies: List(Thread(a)) }
+
+fn thread_map(f : (a) -> b ! {| e}, thread : Thread(a)) : Thread(b) ! { | e} =
+  Thread {
+    item = f(thread.item),
+    replies = map(\(reply) -> thread_map(f, reply), thread.replies)
+  }
+
+instance functorThread : Functor(Thread)
+  fn fmap(f, thread) = thread_map(f, thread)
+
+type TaskState = Planned | Doing { progress: Int } | Finished
+
+type Task = Task {
+  id: Int,
+  state: TaskState,
+  watchers: List(User),
+  discussion: Thread(Comment)
+}
+
+-- A second recursive functor, containing tasks whose discussions are recursive
+-- functors themselves. `tasks.each.discussion.each` composes the traversals.
+type TaskTree(a) = TaskNode { item: a, children: List(TaskTree(a)) }
+
+fn task_tree_map(
+  f : (a) -> b ! {| e},
+  tree : TaskTree(a)
+) : TaskTree(b) ! { | e} =
+  TaskNode {
+    item = f(tree.item),
+    children = map(\(child) -> task_tree_map(f, child), tree.children)
+  }
+
+instance functorTaskTree : Functor(TaskTree)
+  fn fmap(f, tree) = task_tree_map(f, tree)
+
+type Project = Project {
+  slug: String,
+  archived: Bool,
+  labels: List(String),
+  tasks: TaskTree(Task)
+}
+
+type Workspace = Workspace { name: String, projects: List(Project) }
+
+type Session = Session { viewer: User }
+
+type App = App { session: Option(Session), workspaces: List(Workspace) }
+
+fn active_project(project : Project) : Bool = not(project.archived)
+
+fn open_task(task : Task) : Bool =
+  match task.state of
+    Finished => false
+    _ => true
+
+fn deleted_comment(comment : Comment) : Bool = comment.deleted
+
+fn visible_comment(comment : Comment) : Bool = not(comment.deleted)
+
+fn advance(progress : Int) : Int = min(100, progress + 10)
+
+-- Several immutable application policies. The deepest path is:
+-- App -> [Workspace] -> [Project] -> TaskTree -> Task -> Thread -> Comment
+--     -> User -> Profile -> Preferences -> EmailPrefs.
+fn ship_sprint(app : App) : App =
+  let quiet_session =
+    { app | session.each.viewer.profile.preferences.email.digest = false }
+  let progressed = { quiet_session | workspaces.each.projects.(each where active_project).tasks.(each where open_task).state.?Doing.progress ~ advance }
+  let quiet_watchers = { progressed | workspaces.each.projects.(each where active_project).tasks.(each where open_task).watchers.each.profile.preferences.email.digest = false }
+  let rewarded = { quiet_watchers | workspaces.each.projects.(each where active_project).tasks.(each where open_task).discussion.(each where visible_comment).author.profile.reputation ~ \(score) -> score + 1 }
+  let redacted = { rewarded | workspaces.each.projects.(each where active_project).tasks.each.discussion.(each where deleted_comment).body = "[deleted]" }
+  { redacted
+  | workspaces.each.projects.(each where active_project).tasks.each.discussion.each.author.profile.preferences.email.mentions = false
+  }
+
+-- Small folds used only to inspect the recursive values after the optic update.
+fn fold_thread(step : (b, a) -> b, seed : b, thread : Thread(a)) : b =
+  let here = step(seed, thread.item)
+  foldl(\(acc, reply) -> fold_thread(step, acc, reply), here, thread.replies)
+
+fn fold_tasks(step : (b, a) -> b, seed : b, tree : TaskTree(a)) : b =
+  let here = step(seed, tree.item)
+  foldl(\(acc, child) -> fold_tasks(step, acc, child), here, tree.children)
+
+fn tasks_of(project : Project) : List(Task) =
+  reverse(fold_tasks(\(tasks, task) -> Cons(task, tasks), Nil, project.tasks))
+
+fn active_tasks(app : App) : List(Task) =
+  concat_map(
+      \(workspace) -> concat_map(\(project) -> if active_project(project) then tasks_of(project) else Nil, workspace.projects),
+      app.workspaces,
+    )
+
+fn comments_of(task : Task) : List(Comment) =
+  reverse(
+      fold_thread(
+          \(comments, comment) -> Cons(comment, comments),
+          Nil,
+          task.discussion,
+        ),
+    )
+
+fn active_comments(app : App) : List(Comment) =
+  concat_map(comments_of, active_tasks(app))
+
+fn progress_of(task : Task) : Int =
+  match task.state of
+    Doing { progress = progress } => progress
+    _ => 0
+
+fn email_prefs() : EmailPrefs = EmailPrefs { mentions = true, digest = true }
+
+fn user(name : String, reputation : Int) : User =
+  User {
+    name = name,
+    profile = Profile {
+      reputation = reputation,
+      preferences = Preferences { email = email_prefs(), theme = "dark" }
+    }
+  }
+
+fn comment(id : Int, author : User, body : String, deleted : Bool) : Comment =
+  Comment { id = id, author = author, body = body, deleted = deleted }
+
+fn thread() : Thread(Comment) =
+  Thread {
+    item = comment(1, user("Ada", 10), "ship it", false),
+    replies = [
+        Thread {
+          item = comment(2, user("Grace", 20), "needs a benchmark", false),
+          replies = [
+              Thread {
+                item = comment(3, user("Bot", 0), "stale payload", true),
+                replies = Nil
+              },
+            ]
+        },
+      ]
+  }
+
+fn task(id : Int, state : TaskState) : Task =
+  Task {
+    id = id,
+    state = state,
+    watchers = [user("Reviewer", 5)],
+    discussion = thread()
+  }
+
+fn task_tree() : TaskTree(Task) =
+  TaskNode {
+    item = task(1, Doing { progress = 40 }),
+    children = [
+        TaskNode {
+          item = task(2, Planned),
+          children = [TaskNode { item = task(3, Finished), children = Nil }]
+        },
+      ]
+  }
+
+fn sample() : App =
+  App {
+    session = Some(Session { viewer = user("Maintainer", 100) }),
+    workspaces = [
+        Workspace {
+          name = "compiler",
+          projects = [
+              Project {
+                slug = "v14",
+                archived = false,
+                labels = ["compiler", "release"],
+                tasks = task_tree()
+              },
+              Project {
+                slug = "v13",
+                archived = true,
+                labels = ["archive"],
+                tasks = task_tree()
+              },
+            ]
+        },
+      ]
+  }
+
+fn main() : Unit ! {IO} =
+  let shipped = ship_sprint(sample())
+  let comments = active_comments(shipped)
+  let tasks = active_tasks(shipped)
+  -- Read paths are folds' front ends when the traversed layers are ordinary
+  -- collections: archived-project labels are excluded before `length` runs.
+  let active_labels =
+    shipped.[workspaces.each.projects.(each where active_project).labels.each]
+  println(length(active_labels))
+  println(map(\(task) -> progress_of(task), tasks))
+  println(map(\(comment) -> comment.body, comments))
+  println(map(\(comment) -> comment.author.profile.reputation, comments))
+  println(
+      map(
+          \(comment) -> comment.author.profile.preferences.email.mentions,
+          comments,
+        ),
+    )

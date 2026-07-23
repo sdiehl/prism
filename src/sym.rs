@@ -4,10 +4,11 @@
 // back to the name. Ordering is by intern id (first-seen order), so callers that
 // need name order must sort on `as_str` (see effect-op id assignment).
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -17,21 +18,91 @@ pub struct Sym {
     name: &'static str,
 }
 
+// The symbol arena: the `name <-> id` table a compilation interns into.
+//
+// Interning reaches an owned arena through a thread-local handle rather than a
+// hard-wired table. The handle is an
+// `Arc<SymbolArena>` (a shared pointer, NOT a per-thread owned table): the query
+// engine parallelises WITHIN one compilation (`QueryScheduler` spawns workers),
+// so a `Sym` crosses worker threads and every worker must see the SAME arena. It
+// currently defaults to one process-global arena. Interning takes the arena's
+// internal lock; resolution stays lock-free via the embedded `&'static str` on
+// `Sym`, so `Display` never locks. Moving ownership to a compilation would also
+// require propagating the same arena to every query worker and replacing the
+// leaked spelling stored in `Sym`.
 #[derive(Debug)]
-struct Interner {
+struct SymbolArena {
+    table: Mutex<ArenaTable>,
+}
+
+#[derive(Debug)]
+struct ArenaTable {
     ids: HashMap<&'static str, u32>,
     names: Vec<&'static str>,
 }
 
-static INTERNER: OnceLock<Mutex<Interner>> = OnceLock::new();
+impl SymbolArena {
+    fn new() -> Self {
+        Self {
+            table: Mutex::new(ArenaTable {
+                ids: HashMap::new(),
+                names: Vec::new(),
+            }),
+        }
+    }
 
-fn interner() -> &'static Mutex<Interner> {
-    INTERNER.get_or_init(|| {
-        Mutex::new(Interner {
-            ids: HashMap::new(),
-            names: Vec::new(),
-        })
-    })
+    // Intern a spelling, leaking it to `&'static str` on first sight.
+    fn intern(&self, s: &str) -> (u32, &'static str) {
+        let mut t = self.table.lock().expect("sym arena poisoned");
+        if let Some(&id) = t.ids.get(s) {
+            let name = t.names[id as usize];
+            drop(t);
+            return (id, name);
+        }
+        let leaked: &'static str = Box::leak(s.to_owned().into_boxed_str());
+        let id = u32::try_from(t.names.len()).expect("more than u32::MAX interned symbols");
+        t.names.push(leaked);
+        t.ids.insert(leaked, id);
+        drop(t);
+        (id, leaked)
+    }
+
+    // Mint a fresh anonymous id displayed as `%n`, recorded in the reverse map
+    // too (`%` cannot appear in a source spelling, so it never shadows one).
+    fn fresh(&self) -> (u32, &'static str) {
+        let mut t = self.table.lock().expect("sym arena poisoned");
+        let id = u32::try_from(t.names.len()).expect("more than u32::MAX interned symbols");
+        let leaked: &'static str = Box::leak(format!("%{id}").into_boxed_str());
+        t.names.push(leaked);
+        t.ids.insert(leaked, id);
+        drop(t);
+        (id, leaked)
+    }
+
+    // Record `name` under a fresh id WITHOUT touching the reverse map, so this
+    // identity never becomes the canonical resolution of its spelling.
+    fn record(&self, name: &'static str) -> u32 {
+        let mut t = self.table.lock().expect("sym arena poisoned");
+        let id = u32::try_from(t.names.len()).expect("more than u32::MAX interned symbols");
+        t.names.push(name);
+        drop(t);
+        id
+    }
+}
+
+// The process-global arena shared across compilations.
+static GLOBAL_ARENA: OnceLock<Arc<SymbolArena>> = OnceLock::new();
+
+fn global_arena() -> Arc<SymbolArena> {
+    GLOBAL_ARENA
+        .get_or_init(|| Arc::new(SymbolArena::new()))
+        .clone()
+}
+
+thread_local! {
+    // The arena `Sym::new`/`fresh` intern into on this thread. Defaults to the
+    // shared global arena, so a freshly spawned query worker shares it too.
+    static CURRENT_ARENA: RefCell<Arc<SymbolArena>> = RefCell::new(global_arena());
 }
 
 impl Serialize for Sym {
@@ -56,25 +127,11 @@ impl Sym {
     /// Intern a string, returning its `Sym`.
     ///
     /// # Panics
-    /// Panics if the interner mutex is poisoned or more than `u32::MAX`
-    /// distinct symbols are interned.
+    /// Panics if the arena lock is poisoned or more than `u32::MAX` distinct
+    /// symbols are interned.
     #[must_use]
     pub fn new(s: &str) -> Self {
-        let (id, name) = {
-            let mut it = interner().lock().expect("sym interner poisoned");
-            let interned = if let Some(&id) = it.ids.get(s) {
-                (id, it.names[id as usize])
-            } else {
-                let leaked: &'static str = Box::leak(s.to_owned().into_boxed_str());
-                let id =
-                    u32::try_from(it.names.len()).expect("more than u32::MAX interned symbols");
-                it.names.push(leaked);
-                it.ids.insert(leaked, id);
-                (id, leaked)
-            };
-            drop(it);
-            interned
-        };
+        let (id, name) = CURRENT_ARENA.with(|a| a.borrow().intern(s));
         Self { id, name }
     }
 
@@ -86,19 +143,11 @@ impl Sym {
     /// counter, so do not embed it in snapshot-visible output.
     ///
     /// # Panics
-    /// Panics if the interner mutex is poisoned or more than `u32::MAX` symbols
-    /// are allocated.
+    /// Panics if the arena lock is poisoned or more than `u32::MAX` symbols are
+    /// allocated.
     #[must_use]
     pub fn fresh() -> Self {
-        let (id, name) = {
-            let mut it = interner().lock().expect("sym interner poisoned");
-            let id = u32::try_from(it.names.len()).expect("more than u32::MAX interned symbols");
-            let leaked: &'static str = Box::leak(format!("%{id}").into_boxed_str());
-            it.names.push(leaked);
-            it.ids.insert(leaked, id);
-            drop(it);
-            (id, leaked)
-        };
+        let (id, name) = CURRENT_ARENA.with(|a| a.borrow().fresh());
         Self { id, name }
     }
 
@@ -116,17 +165,11 @@ impl Sym {
     /// `%n`), so a skolem in a diagnostic is snapshot-stable.
     ///
     /// # Panics
-    /// Panics if the interner mutex is poisoned or more than `u32::MAX` symbols
-    /// are allocated.
+    /// Panics if the arena lock is poisoned or more than `u32::MAX` symbols are
+    /// allocated.
     #[must_use]
     pub fn fresh_named(display: Self) -> Self {
-        let id = {
-            let mut it = interner().lock().expect("sym interner poisoned");
-            let id = u32::try_from(it.names.len()).expect("more than u32::MAX interned symbols");
-            it.names.push(display.name);
-            drop(it);
-            id
-        };
+        let id = CURRENT_ARENA.with(|a| a.borrow().record(display.name));
         Self {
             id,
             name: display.name,

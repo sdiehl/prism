@@ -1,0 +1,14 @@
+-- | Code-oriented Spectra combinators.
+
+import Layout (Pict, Inline, CodeBlock, InlineCode)
+
+-- | A fenced source block. The language name is passed to Typst's raw-text
+-- renderer, which can apply syntax highlighting when it knows the language.
+pub fn code_block(language : String, source : String) : Pict =
+  CodeBlock(language, source)
+
+-- | A Prism source block.
+pub fn prism_code(source : String) : Pict = code_block("prism", source)
+
+-- | Inline monospace source.
+pub fn inline_code(source : String) : Inline = InlineCode(source)

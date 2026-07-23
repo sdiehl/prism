@@ -17,6 +17,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use prism::core::Digest;
 use prism::core::HASH_SCHEME;
 use prism::flags::SignMode;
 use prism::pkg::lock::{Lock, LockEntry};
@@ -25,7 +26,7 @@ use prism::pkg::std_source::encode_source_bundle;
 use prism::pkg::transport::{DiskTransport, Transport};
 use prism::pkg::trust::{serialize_index, IndexRow, SignedArtifact, INDEX_KIND_SOURCE};
 use prism::pkg::{package_source_roots, std_pin_status, stdlib_root, StdPin};
-use prism::project::{hash_pin, DepSource, Dependency};
+use prism::project::{hash_pin, load_project, DepSource, Dependency};
 use prism::resolve::{SourceBundleArtifactKind, SourceBundleKind, SourceBundleOrigin};
 use prism::store::coherence::is_representation_affecting;
 use prism::store::disk::Store;
@@ -55,6 +56,49 @@ const USAGE_SUMMARY_GOLDEN: &str = "usage-summary.md";
 
 struct TempDir {
     path: PathBuf,
+}
+
+#[test]
+fn spectra_path_dependencies_include_the_typst_package_transitively() {
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let spectra = load_project(&workspace.join("packages/spectra")).expect("loads Spectra");
+    let example =
+        load_project(&workspace.join("examples/spectra-deck")).expect("loads Spectra example");
+    let spectra_src = workspace
+        .join("packages/spectra/src")
+        .canonicalize()
+        .expect("Spectra source path");
+    let typst_src = workspace
+        .join("packages/typst/src")
+        .canonicalize()
+        .expect("Typst source path");
+    let canonical = |paths: &[PathBuf]| {
+        paths
+            .iter()
+            .map(|path| path.canonicalize().expect("dependency source path"))
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(canonical(&spectra.dep_src_dirs), vec![typst_src.clone()]);
+    assert_eq!(
+        canonical(&example.dep_src_dirs),
+        vec![spectra_src, typst_src]
+    );
+}
+
+#[test]
+fn spectra_facade_checks_with_its_transitive_typst_dependency() {
+    let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let output = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("check")
+        .arg(workspace.join("examples/spectra-deck"))
+        .output()
+        .expect("checks Spectra example");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 impl TempDir {
@@ -522,7 +566,7 @@ fn run_uses_hash_pinned_package_source_bundle() {
     lock.set(LockEntry {
         name: STORE_PKG_NAME.to_string(),
         scheme: HASH_SCHEME.to_string(),
-        hash: root.clone(),
+        hash: Digest::from(root.clone()),
         source: DepSource::Hash(root),
     });
     fs::write(project.join("prism.lock"), lock.render().unwrap()).unwrap();
@@ -553,7 +597,7 @@ fn package_source_roots_carry_bundle_identity() {
     lock.set(LockEntry {
         name: STORE_PKG_NAME.to_string(),
         scheme: HASH_SCHEME.to_string(),
-        hash: root.clone(),
+        hash: Digest::from(root.clone()),
         source: dependencies[0].source.clone(),
     });
 
@@ -585,7 +629,7 @@ fn git_package_source_roots_carry_origin_identity() {
     lock.set(LockEntry {
         name: STORE_PKG_NAME.to_string(),
         scheme: HASH_SCHEME.to_string(),
-        hash: root.clone(),
+        hash: Digest::from(root.clone()),
         source: dependencies[0].source.clone(),
     });
     let transport = DiskTransport::open(tmp.root()).unwrap();
@@ -595,7 +639,7 @@ fn git_package_source_roots_carry_origin_identity() {
         tag: STORE_PKG_TAG.to_string(),
         scheme: HASH_SCHEME.to_string(),
         kind: INDEX_KIND_SOURCE.to_string(),
-        root: root.clone(),
+        root: Digest::from(root.clone()),
     }]);
     transport
         .publish_index(&SignedArtifact { body, sig: None })
@@ -636,7 +680,7 @@ fn git_package_requires_an_authenticated_index_pointer() {
     lock.set(LockEntry {
         name: STORE_PKG_NAME.to_string(),
         scheme: HASH_SCHEME.to_string(),
-        hash: root.clone(),
+        hash: Digest::from(root.clone()),
         source,
     });
     fs::write(project.join("prism.lock"), lock.render().unwrap()).unwrap();
@@ -657,7 +701,7 @@ fn git_package_requires_an_authenticated_index_pointer() {
         tag: STORE_PKG_TAG.to_string(),
         scheme: HASH_SCHEME.to_string(),
         kind: INDEX_KIND_SOURCE.to_string(),
-        root: root.clone(),
+        root: Digest::from(root.clone()),
     }]);
     transport
         .publish_index(&SignedArtifact {
@@ -686,7 +730,7 @@ fn git_package_requires_an_authenticated_index_pointer() {
         tag: STORE_PKG_TAG.to_string(),
         scheme: HASH_SCHEME.to_string(),
         kind: INDEX_KIND_SOURCE.to_string(),
-        root,
+        root: Digest::from(root),
     }]);
     transport
         .publish_index(&SignedArtifact { body, sig: None })
@@ -719,7 +763,7 @@ fn package_resolution_rejects_foreign_lock_scheme() {
     lock.set(LockEntry {
         name: STORE_PKG_NAME.to_string(),
         scheme: "future-scheme".to_string(),
-        hash: root,
+        hash: Digest::from(root),
         source: dependencies[0].source.clone(),
     });
 
@@ -778,7 +822,7 @@ fn signed_index_resolution_rejects_foreign_scheme() {
         tag: STORE_PKG_TAG.to_string(),
         scheme: "future-scheme".to_string(),
         kind: INDEX_KIND_SOURCE.to_string(),
-        root: "00".repeat(32),
+        root: Digest::from("00".repeat(32)),
     }]);
     transport
         .publish_index(&SignedArtifact { body, sig: None })
@@ -1015,7 +1059,7 @@ fn check_world_reports_dependency_root_conflicts() {
         lock.set(LockEntry {
             name: STORE_PKG_NAME.to_string(),
             scheme: HASH_SCHEME.to_string(),
-            hash: root.clone(),
+            hash: Digest::from(root.clone()),
             source: DepSource::Hash(root),
         });
         fs::write(project.join("prism.lock"), lock.render().unwrap()).unwrap();

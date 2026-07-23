@@ -8,9 +8,10 @@ use std::rc::Rc;
 use crate::core::builtins::Builtin;
 use crate::debug::durable::DurableLog;
 use crate::lineage::provenance::{
-    CapOp, EventValue, OP_CLOCK_MONO_NOW, OP_CLOCK_WALL_NOW, OP_ENV_ARG, OP_ENV_ARGS_COUNT,
-    OP_ENV_GETENV, OP_FS_APPEND_FILE, OP_FS_FILE_EXISTS, OP_FS_READ_FILE, OP_FS_READ_FILE_BYTES,
-    OP_FS_REMOVE_FILE, OP_FS_WRITE_BYTES, OP_FS_WRITE_FILE, OP_PROCESS_SYSTEM,
+    CapOp, EventValue, OP_CLOCK_MONO_NOW, OP_CLOCK_WALL_NOW, OP_ENTROPY_READ, OP_ENV_ARG,
+    OP_ENV_ARGS_COUNT, OP_ENV_GETENV, OP_FS_APPEND_FILE, OP_FS_FILE_EXISTS, OP_FS_READ_FILE,
+    OP_FS_READ_FILE_BYTES, OP_FS_REMOVE_FILE, OP_FS_WRITE_BYTES, OP_FS_WRITE_FILE,
+    OP_PROCESS_SYSTEM,
 };
 
 use super::Rv;
@@ -190,6 +191,7 @@ pub(super) const fn capability_obs(b: Builtin) -> Option<(ObsKind, CapOp)> {
         Builtin::ArgsCount => Some((ObsKind::Int, OP_ENV_ARGS_COUNT)),
         Builtin::WallNow => Some((ObsKind::Int, OP_CLOCK_WALL_NOW)),
         Builtin::MonoNow => Some((ObsKind::Int, OP_CLOCK_MONO_NOW)),
+        Builtin::Entropy => Some((ObsKind::Int, OP_ENTROPY_READ)),
         Builtin::System => Some((ObsKind::Int, OP_PROCESS_SYSTEM)),
         _ => None,
     }

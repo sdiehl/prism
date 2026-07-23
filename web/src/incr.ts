@@ -7,19 +7,14 @@
 // twice per change (once before, once after) and lights up exactly what the engine
 // recomputed: recomputed cells, cut-off cells (re-run to the same value, cascade
 // stopped), and cells served from cache.
-import init, { tokens } from "../pkg/prism.js";
+//
+// `incr_run` is a statically imported named export, so a rename or drift on the
+// wasm side is a `pnpm typecheck` failure against the generated `pkg` types rather
+// than a silent dead page.
+import init, { incr_run, tokens } from "../pkg/prism.js";
 import { highlight, initFaces } from "./showcase.js";
 import "./showcase.css";
 import "./incr.css";
-
-// The wasm namespace reached through a plain-object alias so the one export this
-// page adds (`incr_run`) is looked up dynamically. That keeps the page building
-// against a pkg compiled before the export shipped; every deployed bundle carries
-// the real export and never falls back to the mock below.
-import * as wasm from "../pkg/prism.js";
-
-const wasmNs: Record<string, unknown> = wasm;
-const wasmIncrRun = wasmNs.incr_run as ((payload: string) => string) | undefined;
 
 type Kind = "input" | "memo";
 type State = "changed" | "unchanged" | "recomputed" | "cutoff" | "cached";
@@ -133,46 +128,10 @@ const val = (inp: Inputs, name: string): number => {
   }
 };
 
-// The development fallback: reproduce the engine's fire rule purely from values.
-// A derivation fires exactly when a direct dependency's value differs before and
-// after the change; a memo that fires but whose own value is unchanged is a
-// cutoff, and its dependents (seeing an unchanged dep hash) never fire. This is
-// the same classification the wasm derives from the real interpreter trace; every
-// deployed bundle uses that instead.
-function mockIncr(prev: Inputs | null, next: Inputs): NodeState[] {
-  const cold = prev === null;
-  const base = prev ?? next;
-  const fired = new Set<string>();
-  const changed = (name: string): boolean => val(base, name) !== val(next, name);
-  for (const c of GRAPH) {
-    if (c.kind !== "memo") continue;
-    if (cold || c.deps.some(changed)) fired.add(c.name);
-  }
-  return GRAPH.map((c) => {
-    const value = val(next, c.name);
-    let state: State;
-    if (c.kind === "input") {
-      state = !cold && changed(c.name) ? "changed" : "unchanged";
-    } else if (cold) {
-      state = "recomputed";
-    } else if (fired.has(c.name)) {
-      state = changed(c.name) ? "recomputed" : "cutoff";
-    } else {
-      state = "cached";
-    }
-    return { name: c.name, value, state };
-  });
-}
-
 // Ask the compiler to run the graph before and after the change and classify each
-// cell, or fall back to the mock if the bundle predates the export. `prev` is null
-// on the cold first render (every derivation is recomputed).
+// cell. `prev` is null on the cold first render (every derivation is recomputed).
 function incrRun(prev: Inputs | null, next: Inputs): NodeState[] {
-  if (!wasmIncrRun) {
-    console.warn("incr: wasm incr_run missing, using dev fallback classification");
-    return mockIncr(prev, next);
-  }
-  const raw = wasmIncrRun(JSON.stringify({ prev, next }));
+  const raw = incr_run(JSON.stringify({ prev, next }));
   const parsed = JSON.parse(raw) as { nodes?: NodeState[]; error?: string };
   if (parsed.error) throw new Error(parsed.error);
   return parsed.nodes ?? [];

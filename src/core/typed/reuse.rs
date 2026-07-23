@@ -5,6 +5,7 @@
 //! The rewrite mirrors [`super::super::fbip::reuse`] exactly while retaining the
 //! freed value type, the rebuilt value type, and a linear token between them.
 
+use crate::kw;
 use crate::names::reuse_token;
 use crate::sym::Sym;
 use crate::types::Type;
@@ -97,6 +98,11 @@ fn reuse_arm(scrutinee: &TypedValue, pattern: &TypedPattern, body: &TypedComp) -
     // still need their source tuple witness because unboxed products share the
     // tuple-pattern shape.
     let capacity = match (pattern, &scrutinee.ty) {
+        // The wired nullable frees no cell when matched (its native form is
+        // the null word or the element itself), so it can never seed a token.
+        (TypedPattern::Ctor { name, .. }, _) if kw::is_or_null_ctor(name.as_str()) => {
+            return body.clone()
+        }
         (TypedPattern::Ctor { fields, .. }, _)
         | (TypedPattern::Tuple(fields), CoreType::Source(Type::Tuple(_))) => fields.len(),
         _ => return body.clone(),
@@ -236,7 +242,8 @@ fn consume_alloc(comp: &TypedComp, token: &TypedBinder, capacity: usize) -> Opti
             ))
         }
         TypedCompKind::Return(value)
-            if ctor_arity(value).is_some_and(|arity| arity <= capacity) =>
+            if ctor_arity(value).is_some_and(|arity| arity <= capacity)
+                && !is_or_null_alloc(value) =>
         {
             Some(TypedComp::new(
                 comp.sig.clone(),
@@ -294,6 +301,11 @@ fn pattern_binds(pattern: &TypedPattern, name: Sym) -> bool {
             fields.iter().flatten().any(|binder| binder.name == name)
         }
     }
+}
+
+// The wired nullable allocates no cell, so it can never spend a reuse credit.
+fn is_or_null_alloc(value: &TypedValue) -> bool {
+    matches!(&value.kind, TypedValueKind::Ctor { name, .. } if kw::is_or_null_ctor(name.as_str()))
 }
 
 const fn ctor_arity(value: &TypedValue) -> Option<usize> {

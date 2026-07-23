@@ -6,6 +6,8 @@ mod fmt_contracts;
 mod fmt_control;
 #[path = "formatter/fmt_deriving.rs"]
 mod fmt_deriving;
+#[path = "formatter/fmt_modifiers.rs"]
+mod fmt_modifiers;
 #[path = "formatter/fmt_parens.rs"]
 mod fmt_parens;
 #[path = "formatter/fmt_records_optics.rs"]

@@ -341,6 +341,7 @@ fn mdecl(name: String, param: &str, param_ty: Ty, ret: Ty, body: S<Expr>, span: 
         }],
         ret: Some(ret),
         eff: None,
+        eff_tail: None,
         constraints: Vec::new(),
         body,
         wheres: Vec::new(),

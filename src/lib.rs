@@ -1,3 +1,34 @@
+//! The Prism compiler as a library.
+//!
+//! # Supported surface
+//!
+//! Most of the compiler is exposed so that tools can build ON it, not just call
+//! it. The load-bearing guarantee is that **merged Core is the semantic
+//! authority**, so the surface is organized around consuming and producing Core:
+//!
+//! - [`core`] — the call-by-push-value Core IR and its content-addressed
+//!   identity. A custom front end lowers to it; a custom back end reads it.
+//! - [`codegen`] — the [`codegen::Isa`] trait and [`codegen::emit_with_isa`]:
+//!   implement `Isa` to reuse Prism's semantic Core-to-instruction lowering for
+//!   an out-of-tree backend.
+//! - The front-end phases a custom front end can reuse to reach Core:
+//!   [`lex`], [`parse`], [`resolve`], [`syntax`] (desugaring), [`hir`],
+//!   [`types`], the versioned syntax exports (`dump syntax-tokens` /
+//!   `surface-syntax`), and the resolved/checked inspection dumps
+//!   (`dump tc-input` / `tc-facts` / `elab-input`).
+//! - [`driver`] — the compile entry points (`check`, `dump`, `build`,
+//!   `interpret`, the durable-run and patch surfaces), most re-exported at the
+//!   crate root below.
+//! - [`eval`] — the interpreter, the differential oracle every backend matches.
+//! - Supporting durable and diagnostic types: [`error`], [`flags`], [`sym`],
+//!   [`names`], [`resolve::Root`], [`store`], [`lineage`], [`stdlib`].
+//!
+//! Modules kept private (`pub(crate)`) are implementation detail with no
+//! stability commitment: keyword tables (`kw`), the formatter internals
+//! (surfaced only as [`fn@format`]), the wired-in stdlib symbol table (`wired`),
+//! the verification passes (`verify`, driven through the CLI), and the doc
+//! generator (`docs`, surfaced only through its re-exports).
+
 #![allow(clippy::many_single_char_names)]
 #![allow(clippy::multiple_crate_versions)]
 // `redundant_pub_crate` (nursery) and the rustc `unreachable_pub` lint pull in
@@ -23,14 +54,19 @@ pub mod codegen;
 pub mod cli;
 pub mod core;
 pub mod debug;
-pub mod docs;
+// Internal: the doc generator is driven by the CLI and the mdbook preprocessor;
+// its intended surface is the crate-root re-exports below, not the module.
+pub(crate) mod docs;
 pub mod driver;
 pub mod error;
 pub mod eval;
 pub mod flags;
-pub mod fmt;
+// Internal: the intended surface is the crate-root re-exports (`format`,
+// `format_check`, `format_wire_accept`), not the module's helpers.
+pub(crate) mod fmt;
 pub mod hir;
-pub mod kw;
+// Internal: keyword tables are a lexer/parser detail, never a library commitment.
+pub(crate) mod kw;
 pub mod lex;
 pub mod lineage;
 pub mod names;
@@ -58,10 +94,13 @@ pub(crate) mod tc;
 pub mod testing;
 pub mod types;
 pub(crate) mod util;
-pub mod verify;
+// Internal: `prism verify` is driven through the CLI; the module exposes no
+// public items, so it is not a library surface.
+pub(crate) mod verify;
 #[cfg(feature = "wasm")]
 pub mod wasm;
-pub mod wired;
+// Internal: the compiler's wired-in stdlib symbol table, not a library surface.
+pub(crate) mod wired;
 
 /// Inclusive byte bounds of the printable ASCII range.
 ///

@@ -52,6 +52,14 @@ modify : forall a. ((a) -> a) -> Unit ! {Control.State.State(a)}
 
 Apply `f` to the current state, storing the result.
 
+### `state`
+
+```prism,sig,h-82234b5357db3a3edc763c689bbbcb2f459b53efd29549cfc930713f6e50aad6
+state : forall a b. ((a) -> (b, a)) -> b ! {Control.State.State(a)}
+```
+
+Run one combined read-and-write step: `f` maps the current state to a result and the next state, the result is returned and the state stored.
+
 ### `gets`
 
 ```prism,sig,h-10dfe13223b3661f972e09682476ed06057093ad16215fea3d6a43d8898931e1

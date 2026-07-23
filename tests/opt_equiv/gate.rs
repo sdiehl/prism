@@ -15,7 +15,7 @@
 //! Optimization and disabled-pass labels remain part of artifact identity. The
 //! verification evaluator makes no allocator, RC-count, or reuse-cost claim.
 //!
-//! This is a standalone release gate rather than part of the default test sweep:
+//! This is a standalone gate rather than part of the default test sweep:
 //!
 //! ```text
 //! just opt-equiv
@@ -45,10 +45,7 @@ struct Variant {
 
 impl Variant {
     fn level(label: &'static str, level: OptLevel) -> Self {
-        let mut config = Config {
-            opt: level,
-            ..Config::default()
-        };
+        let mut config = Config::default().with_opt(level);
         config.flags.compiler_cache = false;
         config.flags.quiet = true;
         Self { label, config }

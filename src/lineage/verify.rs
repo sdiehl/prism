@@ -109,8 +109,8 @@ pub struct WorldVerifyReport {
 /// Every edge endpoint exists, every state has exactly one law edge, every law and
 /// fork id self-certifies (a law id is its hash; a fork id is the mint of its
 /// payload and endpoints), and every fork's parent and divergent states resolve.
-/// This checks the graph is well-formed, not that re-evolving the wasm reproduces
-/// the hashes (re-derivation is left to a future phase).
+/// This checks the graph is well-formed; it does not re-evolve the wasm to
+/// reproduce the hashes.
 ///
 /// # Errors
 /// Fails if an edge names a missing node, a state has zero or several law edges,

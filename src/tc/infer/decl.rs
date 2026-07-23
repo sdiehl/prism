@@ -27,6 +27,25 @@ struct DeclSeed {
     self_ty: Type,
 }
 
+// The scheme a sibling or self reference sees during SCC body inference: the
+// generalized `annotation_scheme` with its outermost latent effect row bound to
+// this member's shared row existential `mu`. Effect inference is monomorphic
+// within a recursion group, so a sibling call must propagate the callee's
+// inferred effects through `mu` exactly as an unannotated member's monomorphic
+// self-type does. Without it, a member whose only effects come from a sibling
+// call is inferred pure and its declared row is lost between checking and typed
+// Core, producing a false "never performed" warning followed by E9996. Type
+// recursion stays polymorphic: the quantified type variables refresh per
+// instantiation; only the effect row is shared across the group.
+fn with_latent_row(scheme: Type, mu: u32) -> Type {
+    match scheme {
+        Type::Forall(v, b) => Type::Forall(v, Box::new(with_latent_row(*b, mu))),
+        Type::RowForall(v, b) => Type::RowForall(v, Box::new(with_latent_row(*b, mu))),
+        Type::Fun(ps, _, r) => Type::Fun(ps, EffRow::Exist(mu), r),
+        other => other,
+    }
+}
+
 impl Tc<'_> {
     // Scope the ambient self-reference state (name, type, constraints) so a
     // recursive call cannot leak one declaration's state into the next.
@@ -242,7 +261,7 @@ impl Tc<'_> {
             // fully annotated function exposes its generalized annotation scheme
             // (a sibling call checks against it, supporting polymorphic recursion).
             let visible = super::super::env::annotation_scheme(d, self.data)
-                .unwrap_or_else(|| seed.self_ty.clone());
+                .map_or_else(|| seed.self_ty.clone(), |s| with_latent_row(s, seed.mu));
             env.insert(Sym::from(&d.name), visible);
             seeds.push(seed);
         }
@@ -448,7 +467,7 @@ impl Tc<'_> {
         }
         let self_entry = if d.constraints.is_empty() {
             super::super::env::annotation_scheme(d, self.data)
-                .unwrap_or_else(|| seed.self_ty.clone())
+                .map_or_else(|| seed.self_ty.clone(), |s| with_latent_row(s, seed.mu))
         } else {
             seed.self_ty.clone()
         };

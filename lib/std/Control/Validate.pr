@@ -1,0 +1,67 @@
+-- | Validation as an algebraic effect.
+--
+-- `Validate(e)` is the computation-oriented companion to
+-- `Data.Validation.Validation(e, a)`. A fatal `refute(error)` abandons the
+-- current validation branch. A non-fatal `dispute(error)` records an error but
+-- lets that branch continue. `run_validate` reports all recorded errors in
+-- encounter order, and `tolerate` turns fatal errors in a nested branch into a
+-- recoverable `None` so validation can continue elsewhere.
+--
+-- Unlike Haskell's `ValidateT`, Prism does not give ordinary effectful
+-- sequencing a separate accumulating `Applicative` interpretation. Independent
+-- branches are run explicitly and wrapped in `tolerate` when validation should
+-- continue after a refutation; pure, already-computed validations can instead
+-- be combined with `Data.Validation.validate2`.
+-- Opt-in: not in Base.
+
+import Data.List (reverse)
+
+import Data.Validation (..)
+
+-- | Errors raised while validating values of type `e`.
+pub effect Validate(e)
+  never refute(e) : a
+  dispute(e) : Unit
+
+-- Keep a branch's result as well as its errors. `None` distinguishes a fatal
+-- refutation from a completed branch that merely raised disputes.
+fn capture_validate(action : () -> a ! {Validate(e) | r}) : (Option(a), List(e)) =
+  let f =
+    handle action() with
+      never refute(err) => \(errs) -> (None, reverse(Cons(err, errs)))
+      dispute(err) resume k => \(errs) -> k(())(Cons(err, errs))
+      return value => \(errs) -> (Some(value), reverse(errs))
+  f(Nil)
+
+-- | Run a validation computation. Any fatal or non-fatal errors make the
+-- result `Invalid`; only a completed computation with no errors is `Valid`.
+pub fn run_validate(action : () -> a ! {Validate(e) | r}) : Validation(e, a) =
+  match capture_validate(action) of
+    (Some(value), Nil) => Valid(value)
+    (Some(_value), errs) => Invalid(errs)
+    (None, errs) => Invalid(errs)
+
+-- | Run a validation computation and return its errors, or `Nil` on success.
+pub fn exec_validate(action : () -> a ! {Validate(e) | r}) : List(e) =
+  match run_validate(action) of
+    Valid(_value) => Nil
+    Invalid(errs) => errs
+
+-- | Raise each error as a non-fatal dispute, in list order.
+pub fn disputes(errs : List(e)) : Unit ! {Validate(e)} =
+  match errs of
+    Nil => ()
+    Cons(err, rest) =>
+      dispute(err)
+      disputes(rest)
+
+-- | Make fatal errors in `action` recoverable. A refuted branch becomes
+-- `None`; a branch that completes returns `Some(value)`, even if it raised
+-- disputes. All captured errors are re-raised as disputes in the outer
+-- validation, so the final run still fails unless another handler consumes
+-- them.
+pub fn tolerate(action : () -> a ! {Validate(e) | r}) : Option(a) ! {Validate(e) | r} =
+  match capture_validate(action) of
+    (value, errs) =>
+      disputes(errs)
+      value

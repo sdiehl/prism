@@ -1,7 +1,7 @@
-// Lane V surface (V1/S1, increment 1): `logic fn` declarations and
-// `requires`/`ensures` contract clauses parse and format, and are surface-only
-// proof data erased before executable Core. The load-bearing invariant is that a
-// contract-only edit cannot move any runtime artifact.
+// `logic fn` declarations and `requires`/`ensures` contract clauses parse and
+// format as surface-only proof data erased before executable Core. The
+// load-bearing invariant is that a contract-only edit cannot move any runtime
+// artifact.
 
 // The same two functions, once with a `logic fn` and contract clauses, once
 // bare. Their executable Core must be byte-identical.
@@ -62,7 +62,7 @@ fn clause_keywords_are_reserved() {
     );
 }
 
-// -- S1 logical checker: diagnostics --------------------------------------------
+// -- Logical checker diagnostics ------------------------------------------------
 
 /// The stable diagnostic code for a program the logical checker rejects.
 fn err_code(src: &str) -> String {
@@ -116,7 +116,7 @@ fn clamp(x: Int, lo: Int, hi: Int): Int
     assert!(prism::check(src).is_ok());
 }
 
-// -- S1 verification interface + the dual determinism invariant ------------------
+// -- Verification interface and the dual determinism invariant -----------------
 
 fn verify_digest(src: &str) -> String {
     let interface = prism::dump("verify", src).expect("verify dump");
@@ -171,7 +171,7 @@ fn interface_is_deterministic() {
     );
 }
 
-// -- S2 VC generation: `dump smt` ------------------------------------------------
+// -- Verification-condition generation: `dump smt` -----------------------------
 
 #[test]
 fn dump_smt_emits_deterministic_obligations() {

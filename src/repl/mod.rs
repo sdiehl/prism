@@ -687,20 +687,28 @@ enum Cat {
     Plain,
 }
 
+// Exhaustive by construction: a new `Token` variant must be classified here,
+// so the REPL keyword set cannot silently drift from the lexer's `tok_class`.
+// The token drift test pins both against the JS and nvim highlighters.
 const fn category(t: &Token) -> Cat {
     match t {
         K::Fn
+        | K::Pub
         | K::Import
         | K::As
         | K::Type
+        | K::Newtype
+        | K::Opaque
         | K::Effect
         | K::KwError
         | K::Throw
         | K::Try
         | K::Catch
+        | K::Transact
         | K::Alias
         | K::Class
         | K::Instance
+        | K::Canonical
         | K::Pattern
         | K::Deriving
         | K::Where
@@ -712,6 +720,7 @@ const fn category(t: &Token) -> Cat {
         | K::Return
         | K::Let
         | K::Var
+        | K::Borrow
         | K::In
         | K::For
         | K::Do
@@ -721,19 +730,99 @@ const fn category(t: &Token) -> Cat {
         | K::Elif
         | K::Match
         | K::Of
-        | K::Forall => Cat::Keyword,
+        | K::Forall
+        | K::Probe
+        | K::Replayable
+        | K::Stable
+        | K::Given
+        | K::While
+        | K::Loop
+        | K::Break
+        | K::Continue
+        | K::Fip
+        | K::Fbip
+        | K::Each
+        | K::Using
+        | K::Logic
+        | K::Requires
+        | K::Ensures => Cat::Keyword,
         K::KwInt
         | K::KwBool
         | K::KwUnit
         | K::KwFloat
+        | K::KwChar
         | K::KwString
         | K::KwI64
         | K::KwU64
         | K::UIdent(_)
         | K::QualName(_) => Cat::Type,
         K::Int(_) | K::Float(_) | K::True | K::False => Cat::Num,
-        K::StringLit(_) | K::InterpStart(_) | K::InterpMid(_) | K::InterpEnd(_) => Cat::Str,
-        _ => Cat::Plain,
+        K::CharLit(_) | K::StringLit(_) | K::InterpStart(_) | K::InterpMid(_) | K::InterpEnd(_) => {
+            Cat::Str
+        }
+        // Operators, delimiters, comments, identifiers, and layout-virtual tokens
+        // carry no color; enumerated (not `_`) so a new token forces a decision.
+        K::Arrow
+        | K::LArrow
+        | K::FatArrow
+        | K::EqDot
+        | K::NeDot
+        | K::LeDot
+        | K::GeDot
+        | K::LtDot
+        | K::GtDot
+        | K::EqEq
+        | K::Ne
+        | K::Le
+        | K::Ge
+        | K::Lt
+        | K::Gt
+        | K::Eq
+        | K::AmpAmp
+        | K::PipePipe
+        | K::PipeRight
+        | K::CompRight
+        | K::CompLeft
+        | K::Bar
+        | K::Lambda
+        | K::PlusDot
+        | K::MinusDot
+        | K::PlusEq
+        | K::MinusEq
+        | K::StarEq
+        | K::PercentEq
+        | K::Plus
+        | K::Minus
+        | K::StarDot
+        | K::Star
+        | K::SlashDot
+        | K::Slash
+        | K::Percent
+        | K::Caret
+        | K::Tilde
+        | K::LParen
+        | K::RParen
+        | K::LBrace
+        | K::RBrace
+        | K::LBracket
+        | K::RBracket
+        | K::Comma
+        | K::ColonEq
+        | K::Colon
+        | K::Bang
+        | K::At
+        | K::Hash
+        | K::DotDot
+        | K::Dot
+        | K::QuestionQuestion
+        | K::QuestionDot
+        | K::Question
+        | K::Comment(_)
+        | K::Ident(_)
+        | K::VOpen
+        | K::VClose
+        | K::VSemi
+        | K::VHead => Cat::Plain,
     }
 }
 

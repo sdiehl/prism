@@ -1,0 +1,45 @@
+-- Discriminating coverage for the wired nullable: a present zero (`This(0)`
+-- must never be confused with `Null`), boxed and datatype elements, default
+-- arms, and a match-then-construct under reuse pressure. The interpreter and
+-- every native tier must agree on all of it.
+
+type Shade = Red | Green(Int)
+
+fn pick(n : Int) : OrNull(Int) =
+  match n < 0 of
+    true => Null
+    false => This(n)
+
+fn shade(hit : Bool) : OrNull(Shade) =
+  match hit of
+    true => This(Green(7))
+    false => Null
+
+fn zero_or(o : OrNull(Int), d : Int) : Int =
+  match o of
+    This(x) => x
+    Null => d
+
+fn label(o : OrNull(Shade)) : String =
+  match o of
+    This(s) =>
+      match s of
+        Red => "red"
+        Green(n) => "green {n}"
+    _ => "none"
+
+-- Consume a cons cell and produce `This` in the same arm: the freed shell must
+-- never be spent on the cell-free nullable.
+fn heads(xs : List(Int)) : OrNull(Int) =
+  match xs of
+    Cons(x, _) => This(x)
+    Nil => Null
+
+fn main() =
+  println(show(zero_or(pick(0), 99)))
+  println(show(zero_or(pick(0 - 1), 99)))
+  println(show(zero_or(pick(41), 99)))
+  println(label(shade(true)))
+  println(label(shade(false)))
+  println(show(zero_or(heads([5, 6]), 0)))
+  println(show(zero_or(heads([]), 0)))

@@ -165,6 +165,36 @@ fn runtime_entry(name: &str) -> io::Result<(&'static str, bool)> {
         })
 }
 
+// The C-toolchain seam. `PRISM_CC` / `PRISM_CC_FLAGS` select the compiler and
+// extra flags Prism shells out to for linking (and for the differential native
+// oracle); unset falls back to the compiler this build was configured with.
+// Every link site resolves the toolchain through these three helpers so the
+// fallback and the env-var spelling live in exactly one place. The env-knob audit
+// (`tests/env_knobs.rs`) pins that: `PRISM_CC*` is read nowhere else.
+
+/// The C compiler to invoke: `$PRISM_CC`, else the build-configured default
+/// (`env!("PRISM_BUILD_CC")`).
+#[must_use]
+pub fn cc() -> String {
+    std::env::var("PRISM_CC").unwrap_or_else(|_| env!("PRISM_BUILD_CC").to_string())
+}
+
+/// Whether `PRISM_CC` explicitly overrides the build-configured compiler.
+///
+/// Mirrors [`cc`]'s notion of "set" (valid-UTF-8 present), so the recorded
+/// cc-version source and the compiler actually invoked never disagree.
+#[must_use]
+pub fn cc_overridden() -> bool {
+    std::env::var("PRISM_CC").is_ok()
+}
+
+/// Extra flags for the C compiler from `$PRISM_CC_FLAGS` (empty when unset, which
+/// `split_whitespace` turns into no arguments).
+#[must_use]
+pub fn cc_flags() -> String {
+    std::env::var("PRISM_CC_FLAGS").unwrap_or_default()
+}
+
 /// Write the native-backend runtime profile into `dir` for the C compiler.
 ///
 /// Returns the absolute paths of the `.c` translation units to hand to the
@@ -502,7 +532,7 @@ mod tests {
 
     #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
     fn run_kont_lookup_harness(extra_cflags: &[&str]) {
-        let cc = std::env::var("PRISM_CC").unwrap_or_else(|_| env!("PRISM_BUILD_CC").into());
+        let cc = super::cc();
         if !Command::new(&cc)
             .arg("--version")
             .output()
@@ -564,7 +594,7 @@ mod tests {
     #[test]
     fn arena_region_hostile_harness() {
         const ARENA_HARNESS: &str = include_str!("../../tests/fixtures/arena_hostile.c");
-        let cc = std::env::var("PRISM_CC").unwrap_or_else(|_| env!("PRISM_BUILD_CC").into());
+        let cc = super::cc();
         if !Command::new(&cc)
             .arg("--version")
             .output()
@@ -590,9 +620,7 @@ mod tests {
         std::fs::write(&src, ARENA_HARNESS).unwrap();
         let mut cmd = Command::new(&cc);
         cmd.args(["-O1", "-w"]);
-        if let Ok(flags) = std::env::var("PRISM_CC_FLAGS") {
-            cmd.args(flags.split_whitespace());
-        }
+        cmd.args(super::cc_flags().split_whitespace());
         let comp = cmd
             .arg(&src)
             .args(&rt_sources)

@@ -46,7 +46,7 @@ fn score_pipeline(lo, hi, scale, xs) : Result(Int, Int) =
     |> and_then_result(safe_div(10000))
 
 -- IO lives here and nowhere above
-fn report(v) : Unit ! {IO} =
+fn report(v : Result(Int, Int)) : Unit ! {IO} =
   match v of
     Ok(x) => println(x)
     Err(_) => println(0 - 999)

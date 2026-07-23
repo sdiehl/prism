@@ -1,0 +1,25 @@
+-- Declaration families: imports, datatypes, aliases, constants, visibility.
+import Data.List (map, filter)
+
+import Json as J
+
+import Data.Map (..)
+
+pub type Color = Red | Green | Blue deriving (Eq, Show)
+
+opaque type Token = MkToken(Int)
+
+newtype Meters = Meters(Float) deriving (Eq)
+
+type Point = Point { x: Int, y: Int }
+
+alias Pair(a) = (a, a)
+
+error NotFound(String)
+
+let limit = 512
+
+deprecated "use limit"
+let old_limit = 256
+
+pub fn origin() : Point = Point { x = 0, y = 0 }

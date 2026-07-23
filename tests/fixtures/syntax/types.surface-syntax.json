@@ -1,0 +1,572 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.14.0",
+  "source": {
+    "digest": "2544973d2dc5f86eed0354cfb43ba57782333229b70adef424b180a08f35198c",
+    "text": "-- Type syntax: rows, kinds, dimensions, unboxed shapes, open effect tails.\neffect Tick\n  tick() : Int\n\ntype Cmd(a, e : Row) = Cmd(() -> a ! {e})\n\ntype Grid(n) = Grid(Vec(Int, n))\n\nfn poly(x : a, f : f(a)) : a = x\n\nfn generic(xs : List(Int), p : (Int, Float)) : Option(Int) = head(xs)\n\nfn effectful() : Int ! {Tick} = tick()\n\nfn forwarding(act : () -> Int ! {e}) : Int ! {Tick | e} = act()\n\nfn boxed_unboxed(t : #(Int, Float), r : #{ w : Int, h : Int }) : Int =\n  let s = #{ w = r.#w, h = r.#h }\n  let u = #(1, 2.5)\n  s.#w + s.#h\n\nfn annotated() : Int =\n  let f = (\\(v) -> v : forall a. (a) -> a)\n  f((3 : Int))\n"
+  },
+  "items": [
+    {
+      "kind": "effect",
+      "name": "Tick",
+      "ops": [
+        {
+          "name": "tick",
+          "ret": {
+            "kind": "int"
+          }
+        }
+      ],
+      "span": [
+        76,
+        102
+      ]
+    },
+    {
+      "ctors": [
+        {
+          "args": [
+            {
+              "effects": {
+                "labels": [
+                  {
+                    "name": "e"
+                  }
+                ]
+              },
+              "kind": "fun",
+              "ret": {
+                "kind": "var",
+                "name": "a"
+              }
+            }
+          ],
+          "name": "Cmd"
+        }
+      ],
+      "kind": "data",
+      "name": "Cmd",
+      "param_kinds": [
+        "type",
+        "row"
+      ],
+      "params": [
+        "a",
+        "e"
+      ],
+      "span": [
+        104,
+        145
+      ]
+    },
+    {
+      "ctors": [
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "kind": "int"
+                },
+                {
+                  "kind": "var",
+                  "name": "n"
+                }
+              ],
+              "kind": "con",
+              "name": "Vec"
+            }
+          ],
+          "name": "Grid"
+        }
+      ],
+      "kind": "data",
+      "name": "Grid",
+      "param_kinds": [
+        "type"
+      ],
+      "params": [
+        "n"
+      ],
+      "span": [
+        147,
+        179
+      ]
+    },
+    {
+      "body": {
+        "kind": "var",
+        "name": "x",
+        "span": [
+          212,
+          213
+        ]
+      },
+      "kind": "fn",
+      "name": "poly",
+      "params": [
+        {
+          "name": "x",
+          "ty": {
+            "kind": "var",
+            "name": "a"
+          }
+        },
+        {
+          "name": "f",
+          "ty": {
+            "args": [
+              {
+                "kind": "var",
+                "name": "a"
+              }
+            ],
+            "head": "f",
+            "kind": "app"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "var",
+        "name": "a"
+      },
+      "span": [
+        181,
+        213
+      ]
+    },
+    {
+      "body": {
+        "args": [
+          {
+            "kind": "var",
+            "name": "xs",
+            "span": [
+              281,
+              283
+            ]
+          }
+        ],
+        "head": {
+          "kind": "var",
+          "name": "head",
+          "span": [
+            276,
+            280
+          ]
+        },
+        "kind": "call",
+        "span": [
+          276,
+          284
+        ]
+      },
+      "kind": "fn",
+      "name": "generic",
+      "params": [
+        {
+          "name": "xs",
+          "ty": {
+            "args": [
+              {
+                "kind": "int"
+              }
+            ],
+            "kind": "con",
+            "name": "List"
+          }
+        },
+        {
+          "name": "p",
+          "ty": {
+            "items": [
+              {
+                "kind": "int"
+              },
+              {
+                "kind": "float"
+              }
+            ],
+            "kind": "tuple"
+          }
+        }
+      ],
+      "ret": {
+        "args": [
+          {
+            "kind": "int"
+          }
+        ],
+        "kind": "con",
+        "name": "Option"
+      },
+      "span": [
+        215,
+        284
+      ]
+    },
+    {
+      "body": {
+        "head": {
+          "kind": "var",
+          "name": "tick",
+          "span": [
+            318,
+            322
+          ]
+        },
+        "kind": "call",
+        "span": [
+          318,
+          324
+        ]
+      },
+      "effects": {
+        "labels": [
+          {
+            "name": "Tick"
+          }
+        ]
+      },
+      "kind": "fn",
+      "name": "effectful",
+      "ret": {
+        "kind": "int"
+      },
+      "span": [
+        286,
+        324
+      ]
+    },
+    {
+      "body": {
+        "head": {
+          "kind": "var",
+          "name": "act",
+          "span": [
+            384,
+            387
+          ]
+        },
+        "kind": "call",
+        "span": [
+          384,
+          389
+        ]
+      },
+      "effects": {
+        "labels": [
+          {
+            "name": "Tick"
+          }
+        ],
+        "tail": "e"
+      },
+      "kind": "fn",
+      "name": "forwarding",
+      "params": [
+        {
+          "name": "act",
+          "ty": {
+            "effects": {
+              "labels": [
+                {
+                  "name": "e"
+                }
+              ]
+            },
+            "kind": "fun",
+            "ret": {
+              "kind": "int"
+            }
+          }
+        }
+      ],
+      "ret": {
+        "kind": "int"
+      },
+      "span": [
+        326,
+        389
+      ]
+    },
+    {
+      "body": {
+        "body": {
+          "body": {
+            "kind": "bin",
+            "lhs": {
+              "expr": {
+                "kind": "var",
+                "name": "s",
+                "span": [
+                  518,
+                  519
+                ]
+              },
+              "kind": "unboxed-field",
+              "name": "w",
+              "span": [
+                518,
+                522
+              ]
+            },
+            "op": "+",
+            "rhs": {
+              "expr": {
+                "kind": "var",
+                "name": "s",
+                "span": [
+                  525,
+                  526
+                ]
+              },
+              "kind": "unboxed-field",
+              "name": "h",
+              "span": [
+                525,
+                529
+              ]
+            },
+            "span": [
+              518,
+              529
+            ]
+          },
+          "kind": "let",
+          "name": "u",
+          "span": [
+            498,
+            529
+          ],
+          "value": {
+            "items": [
+              {
+                "kind": "int",
+                "span": [
+                  508,
+                  509
+                ],
+                "value": "1"
+              },
+              {
+                "kind": "float",
+                "span": [
+                  511,
+                  514
+                ],
+                "value": "2.5"
+              }
+            ],
+            "kind": "unboxed-tuple",
+            "span": [
+              506,
+              515
+            ]
+          }
+        },
+        "kind": "let",
+        "name": "s",
+        "span": [
+          464,
+          529
+        ],
+        "value": {
+          "fields": [
+            {
+              "name": "w",
+              "value": {
+                "expr": {
+                  "kind": "var",
+                  "name": "r",
+                  "span": [
+                    479,
+                    480
+                  ]
+                },
+                "kind": "unboxed-field",
+                "name": "w",
+                "span": [
+                  479,
+                  483
+                ]
+              }
+            },
+            {
+              "name": "h",
+              "value": {
+                "expr": {
+                  "kind": "var",
+                  "name": "r",
+                  "span": [
+                    489,
+                    490
+                  ]
+                },
+                "kind": "unboxed-field",
+                "name": "h",
+                "span": [
+                  489,
+                  493
+                ]
+              }
+            }
+          ],
+          "kind": "unboxed-record",
+          "span": [
+            472,
+            495
+          ]
+        }
+      },
+      "kind": "fn",
+      "name": "boxed_unboxed",
+      "params": [
+        {
+          "name": "t",
+          "ty": {
+            "items": [
+              {
+                "kind": "int"
+              },
+              {
+                "kind": "float"
+              }
+            ],
+            "kind": "unboxed-tuple"
+          }
+        },
+        {
+          "name": "r",
+          "ty": {
+            "fields": [
+              {
+                "name": "w",
+                "ty": {
+                  "kind": "int"
+                }
+              },
+              {
+                "name": "h",
+                "ty": {
+                  "kind": "int"
+                }
+              }
+            ],
+            "kind": "unboxed-record"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "int"
+      },
+      "span": [
+        391,
+        529
+      ]
+    },
+    {
+      "body": {
+        "body": {
+          "args": [
+            {
+              "expr": {
+                "kind": "int",
+                "span": [
+                  602,
+                  603
+                ],
+                "value": "3"
+              },
+              "kind": "ann",
+              "span": [
+                601,
+                610
+              ],
+              "ty": {
+                "kind": "int"
+              }
+            }
+          ],
+          "head": {
+            "kind": "var",
+            "name": "f",
+            "span": [
+              599,
+              600
+            ]
+          },
+          "kind": "call",
+          "span": [
+            599,
+            611
+          ]
+        },
+        "kind": "let",
+        "name": "f",
+        "span": [
+          556,
+          611
+        ],
+        "value": {
+          "expr": {
+            "body": {
+              "kind": "var",
+              "name": "v",
+              "span": [
+                573,
+                574
+              ]
+            },
+            "kind": "lam",
+            "params": [
+              {
+                "name": "v"
+              }
+            ],
+            "span": [
+              565,
+              574
+            ]
+          },
+          "kind": "ann",
+          "span": [
+            564,
+            596
+          ],
+          "ty": {
+            "kind": "forall",
+            "ty": {
+              "effects": {
+                "labels": []
+              },
+              "kind": "fun",
+              "params": [
+                {
+                  "kind": "var",
+                  "name": "a"
+                }
+              ],
+              "ret": {
+                "kind": "var",
+                "name": "a"
+              }
+            },
+            "vars": [
+              "a"
+            ]
+          }
+        }
+      },
+      "kind": "fn",
+      "name": "annotated",
+      "ret": {
+        "kind": "int"
+      },
+      "span": [
+        531,
+        611
+      ]
+    }
+  ]
+}

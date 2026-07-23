@@ -1,6 +1,6 @@
 # Typechecker Model Scaffold
 
-This directory is only a scaffold for a future Prism typechecker proof. It does not prove anything today.
+This directory is only an unfinished Prism typechecker-proof scaffold. It does not prove anything today.
 
 The files sketch what the mechanization COULD look like. But it's a bloody hard problem to do.
 

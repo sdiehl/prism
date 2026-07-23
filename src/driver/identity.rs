@@ -108,7 +108,9 @@ fn namespace_entries(
     // compiled Core; elaborate them as zero-param CoreFns so each contributes its
     // own behavior hash, exactly as the standard-library root does.
     let mut core = core.clone();
-    core.0.fns.extend(crate::core::konst_fns(program, checked)?);
+    core.core_mut()
+        .fns
+        .extend(crate::core::konst_fns(program, checked)?);
     let defs = hash_program(
         &core,
         &hash_meta(checked, &borrow_sigs(program), &fip_annots(program)),
@@ -308,7 +310,7 @@ pub(crate) const EMBEDDED_STDLIB_KIND: &str = "embedded-stdlib";
 pub(crate) struct BuildRoot {
     pub artifact_kind: String,
     pub scheme: String,
-    pub root: String,
+    pub root: Digest,
     pub package: Option<PackageOrigin>,
 }
 
@@ -361,7 +363,7 @@ pub(crate) fn walk_roots(roots: &[Root]) -> Result<(Option<BuildRoot>, Vec<Build
                             stdlib = Some(BuildRoot {
                                 artifact_kind: identity.artifact_kind.to_string(),
                                 scheme: identity.scheme.clone(),
-                                root: identity.root.clone(),
+                                root: Digest::from(identity.root.clone()),
                                 package: None,
                             });
                         }
@@ -369,7 +371,7 @@ pub(crate) fn walk_roots(roots: &[Root]) -> Result<(Option<BuildRoot>, Vec<Build
                             packages.push(BuildRoot {
                                 artifact_kind: identity.artifact_kind.to_string(),
                                 scheme: identity.scheme.clone(),
-                                root: identity.root.clone(),
+                                root: Digest::from(identity.root.clone()),
                                 package: Some(PackageOrigin {
                                     name: name.clone(),
                                     origin: origin.as_str().to_string(),
@@ -385,7 +387,7 @@ pub(crate) fn walk_roots(roots: &[Root]) -> Result<(Option<BuildRoot>, Vec<Build
         stdlib = Some(BuildRoot {
             artifact_kind: EMBEDDED_STDLIB_KIND.to_string(),
             scheme: HASH_SCHEME.to_string(),
-            root: stdlib_hash()?.root.into_string(),
+            root: stdlib_hash()?.root,
             package: None,
         });
     }
@@ -483,7 +485,7 @@ pub(crate) fn stdlib_driver_src() -> String {
 pub struct PublicDef {
     pub name: String,
     pub scheme: &'static str,
-    pub hash: String,
+    pub hash: Digest,
 }
 
 /// Version tag for serialized checked module interfaces.
@@ -505,7 +507,7 @@ pub struct ModuleInterfaceEntry {
     /// Canonical generalized signature or structural contract.
     pub signature: String,
     /// Digest of this row alone.
-    pub digest: String,
+    pub digest: Digest,
 }
 
 /// Checked public facts an importer may consume without reading dependency
@@ -518,7 +520,7 @@ pub struct ModuleInterface {
     /// Name-sorted checked interface rows.
     pub entries: Vec<ModuleInterfaceEntry>,
     /// Digest over the complete ordered interface.
-    pub digest: String,
+    pub digest: Digest,
 }
 
 impl ModuleInterface {
@@ -589,7 +591,7 @@ impl ModuleInterface {
             }
         }
         let digest = interface_digest(&self.entries);
-        if digest != self.digest {
+        if digest != self.digest.as_str() {
             return Err(format!(
                 "module interface digest mismatch: stored {}, derived {digest}",
                 self.digest
@@ -603,7 +605,12 @@ fn interface_digest(entries: &[ModuleInterfaceEntry]) -> String {
     let mut h = blake3::Hasher::new();
     h.update(MODULE_INTERFACE_FORMAT.as_bytes());
     for entry in entries {
-        for field in [&entry.kind, &entry.name, &entry.signature, &entry.digest] {
+        for field in [
+            entry.kind.as_str(),
+            entry.name.as_str(),
+            entry.signature.as_str(),
+            entry.digest.as_str(),
+        ] {
             h.update(&(field.len() as u64).to_le_bytes());
             h.update(field.as_bytes());
         }
@@ -632,7 +639,7 @@ pub fn public_surface(
     let (program, checked, mut core) = elaborated(full_src, roots)?;
     // Top-level constants inline at use sites, so lift them to zero-param CoreFns
     // for their own behavior hash, exactly as the stdlib fingerprint does.
-    core.0
+    core.core_mut()
         .fns
         .extend(crate::core::konst_fns(&program, &checked)?);
     let defs = hash_program(
@@ -658,7 +665,7 @@ pub fn public_surface(
         .map(|(name, hash)| PublicDef {
             name,
             scheme: HASH_SCHEME,
-            hash: hash.into_string(),
+            hash,
         })
         .collect())
 }
@@ -783,7 +790,7 @@ pub(crate) fn module_interface_from_checked(
     Ok(ModuleInterface {
         format: MODULE_INTERFACE_FORMAT.to_string(),
         entries,
-        digest,
+        digest: Digest::from(digest),
     })
 }
 
@@ -802,7 +809,7 @@ pub(super) fn interface_entry(
         kind: kind.to_string(),
         name: name.to_string(),
         signature,
-        digest: h.finalize().to_hex().to_string(),
+        digest: Digest::from(h.finalize().to_hex().to_string()),
     }
 }
 
@@ -875,7 +882,7 @@ fn stdlib_hash_uncached() -> Result<StdlibHash, Error> {
     // Top-level constants (`let`) are inlined at use sites, so they are not in the
     // compiled Core. Elaborate them as zero-param CoreFns so each gets its own
     // behavior hash (addressable and displayable), then hash the whole set.
-    core.0
+    core.core_mut()
         .fns
         .extend(crate::core::konst_fns(&program, &checked)?);
     let defs = hash_program(

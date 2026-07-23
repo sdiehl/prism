@@ -493,8 +493,8 @@ pub enum MigrationDir {
 // a genuinely new field carries a `default` the generated `upgrade` uses, while a
 // field reusing a base name with a changed type is a type mutation (no default,
 // requiring a hand-written converter). `frozen` is the committed shape-digest
-// golden, seeded once a rung ships; a recomputed digest that no longer matches it
-// is the frozen-format compile error.
+// golden; a recomputed digest that no longer matches it is the frozen-format
+// compile error.
 #[derive(Clone, Debug)]
 pub struct Rung {
     pub name: String,
@@ -644,6 +644,13 @@ pub struct Decl<P: Phase = Surface> {
     pub params: Vec<Param<P>>,
     pub ret: Option<Ty>,
     pub eff: Option<Vec<EffLabel>>,
+    // The open tail of a declared effect row: `Some("e")` for `: T ! {A | e}`,
+    // `None` for a closed row `: T ! {A}` or an elided one. An effect-forwarding
+    // runner may name the row it forwards explicitly rather than eliding the `!`;
+    // the tail must be a signature row variable (bound in a parameter), and the
+    // row stays inferred (principal), so the annotation documents and checks the
+    // labels without closing the row.
+    pub eff_tail: Option<String>,
     pub constraints: Vec<Constraint>,
     pub body: S<Expr<P>>,
     // Trailing `where` bindings (non-recursive, let*-style): desugared into
@@ -701,6 +708,11 @@ impl<P: Phase + fmt::Debug> fmt::Debug for Decl<P> {
             .field("constraints", &self.constraints)
             .field("body", &self.body)
             .field("wheres", &self.wheres);
+        // Shown only when set, so a closed/elided-row decl dumps identically to
+        // the pre-feature form and an open declared row stands out.
+        if let Some(tail) = &self.eff_tail {
+            d.field("eff_tail", tail);
+        }
         if !self.requires.is_empty() {
             d.field("requires", &self.requires);
         }

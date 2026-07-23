@@ -8,9 +8,9 @@ Prism's determinism contract is byte-for-byte reproducibility across backends an
 
 - native codegen emits calls to the `prism_m_*` wrappers in `../prism_libm.c`;
 - the interpreter FFIs the same `prism_m_*` symbols (the compiler binary links this runtime), so interpreter and native are bit-identical by construction, not merely by test;
-- the wasm interpreter (no C toolchain in that build) falls back to the `libm` crate, which differs from this vendored copy by about 1 ULP on a few functions; that is a documented, ungated, browser-only boundary this release (there is no native backend in the browser to diverge from).
+- the wasm interpreter (no C toolchain in that build) falls back to the `libm` crate, which differs from this vendored copy by about 1 ULP on a few functions; that is a documented, ungated, browser-only boundary (there is no native backend in the browser to diverge from).
 
-The contract is determinism, not correct rounding: correctly-rounded transcendentals are an explicit non-goal deferred to a later release.
+The contract is determinism, not correct rounding; correctly-rounded transcendentals are an explicit non-goal.
 
 ## Local patches
 

@@ -37,5 +37,13 @@ pub fn exec_state(init : s, action : () -> a ! {State(s) | e}) : s =
 -- | Apply `f` to the current state, storing the result.
 pub fn modify(f : (s) -> s) : Unit ! {State(s)} = put(f(get()))
 
+-- | Run one combined read-and-write step: `f` maps the current state to a
+-- result and the next state, the result is returned and the state stored.
+pub fn state(f : (s) -> (a, s)) : a ! {State(s)} =
+  match f(get()) of
+    (a, s2) =>
+      put(s2)
+      a
+
 -- | Read a projection `f` of the current state.
 pub fn gets(f : (s) -> a) : a ! {State(s)} = f(get())

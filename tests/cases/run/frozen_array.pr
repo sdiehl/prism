@@ -1,0 +1,24 @@
+-- `Frozen(a)` is the read-only array surface: construction fixes the contents,
+-- freezing and thawing are O(1) under value semantics, and later writes to a
+-- thawed copy can never reach the frozen view.
+
+import Data.Frozen (..)
+
+fn main() =
+  let fz = fz_of_list([10, 20, 30])
+  println(show(fz_len(fz)))
+  println(show(fz_get(fz, 0)))
+  println(show(fz_get(fz, 2)))
+  println(show(fz_foldl(\(acc, x) -> acc + x, 0, fz)))
+  println(show(fz_to_list(fz_map(\(x) -> x + 1, fz))))
+  -- The frozen view survives writes to a thawed copy untouched.
+  let arr = fz_thaw(fz)
+  let arr2 = array_set(arr, 1, 99)
+  println(show(at_array(arr2, 1)))
+  println(show(fz_get(fz, 1)))
+  -- Freezing an array is likewise a snapshot.
+  let src = array_of_list([1, 2])
+  let fz2 = fz_freeze(src)
+  let src2 = array_push(src, 3)
+  println(show(array_len(src2)))
+  println(show(fz_len(fz2)))

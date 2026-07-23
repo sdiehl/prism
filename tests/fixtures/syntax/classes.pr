@@ -1,0 +1,24 @@
+-- Classes, instances, canonical designations, constrained functions.
+class Same(a)
+  same : (a, a) -> Bool
+
+class Bigger(a) given Same(a)
+  bigger : (a, a) -> Bool
+
+instance sameInt : Same(Int)
+  fn same(x, y) = x == y
+
+instance samePair : Same((a, b)) given Same(a), Same(b)
+  fn same(p, q) =
+    match (p, q) of
+      ((a1, b1), (a2, b2)) => same(a1, a2) && same(b1, b2)
+
+canonical Same(Int) = sameInt
+
+fn alike(x : a, y : a) : Bool given Same(a) = same(x, y)
+
+fn where_helper(n : Int) : Int =
+    double + offset
+  where
+    double = n * 2
+    offset = 10

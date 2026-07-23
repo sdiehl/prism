@@ -1,19 +1,19 @@
 fn main() =
   handle
-    return 10 to t@737
-    return 20 to t@735
-    return 30 to t@733
-    return Nil to t@734
-    return Cons(t@733, t@734) to t@736
+    return 10 to t@739
+    return 20 to t@737
+    return 30 to t@735
+    return Nil to t@736
     return Cons(t@735, t@736) to t@738
-    return Cons(t@737, t@738) to t@739
-    return 5 to t@740
-    at_list(t@739, t@740)
+    return Cons(t@737, t@738) to t@740
+    return Cons(t@739, t@740) to t@741
+    return 5 to t@742
+    at_list(t@741, t@742)
   with
     fail(k@) =>
       return 99
     return r@ =>
       return r@
-  to t@741
-  print t@741 to t@742
+  to t@743
+  print t@743 to t@744
   print_nl

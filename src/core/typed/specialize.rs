@@ -1180,9 +1180,7 @@ fn occurs_row(name: Sym, row: &EffRow) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::opt::{run_spec_stage, CorePass, PassStage};
     use crate::error::{Error, TYPED_CORE_SPECIALIZATION};
-    use crate::flags::DynFlags;
 
     use super::super::verify::ConstructorSig;
     use super::super::{verify, CompSig, Elaborated, VerifyEnv};
@@ -1753,7 +1751,7 @@ mod tests {
         )
     }
 
-    fn assert_differential(
+    fn run_and_verify(
         functions: Vec<TypedCoreFn>,
         env: &VerifyEnv,
     ) -> (TypedCore<Elaborated>, u64) {
@@ -1761,27 +1759,15 @@ mod tests {
         if let Err(violations) = verify(&input, env) {
             panic!("input fixture is invalid: {violations:#?}");
         }
-        let legacy_input = input.clone().erase();
-        let (expected, legacy_stats) = run_spec_stage(
-            &legacy_input,
-            &BTreeSet::new(),
-            &[CorePass::Specialize],
-            PassStage::PreLowering,
-            &[],
-            &DynFlags::default(),
-        );
-        let expected_ticks = legacy_stats.total();
         let (actual, stats) = specialize(input).expect("typed specialization");
         if let Err(violations) = verify(&actual, env) {
             panic!("specialized typed Core is invalid: {violations:#?}");
         }
-        assert_eq!(actual.clone().erase(), expected);
-        assert_eq!(stats.ticks(), expected_ticks);
-        (actual, expected_ticks)
+        (actual, stats.ticks())
     }
 
     #[test]
-    fn monomorphic_builder_matches_legacy_projection_ticks_and_clone_order() {
+    fn monomorphic_builder_projection_ticks_and_clone_order() {
         let mut env = VerifyEnv::new();
         install_dictionary_constructor(&mut env, "_DIdentity");
         let functions = vec![
@@ -1801,7 +1787,7 @@ mod tests {
                 }],
             ),
         ];
-        let (actual, ticks) = assert_differential(functions, &env);
+        let (actual, ticks) = run_and_verify(functions, &env);
         assert_eq!(ticks, 2, "one clone plus one reduced projection");
         assert_eq!(
             actual
@@ -1853,7 +1839,7 @@ mod tests {
                 EffRow::Empty,
             ),
         ];
-        let (actual, ticks) = assert_differential(functions, &env);
+        let (actual, ticks) = run_and_verify(functions, &env);
         assert_eq!(ticks, 2, "one clone plus one polymorphic projection");
         let clone = actual.functions().last().expect("specialized clone");
         assert_eq!(clone.body.sig.result(), &source(Type::Bool));
@@ -1890,7 +1876,7 @@ mod tests {
                 io.clone(),
             ),
         ];
-        let (actual, ticks) = assert_differential(functions, &env);
+        let (actual, ticks) = run_and_verify(functions, &env);
         assert_eq!(ticks, 2, "one clone plus one row-polymorphic projection");
         let clone = actual.functions().last().expect("specialized clone");
         assert_eq!(clone.body.sig.effects(), &io);
@@ -1928,7 +1914,7 @@ mod tests {
                 }],
             ),
         ];
-        let (actual, _) = assert_differential(functions, &env);
+        let (actual, _) = run_and_verify(functions, &env);
         let clone = actual.functions().last().expect("specialized clone");
         assert_eq!(
             clone.sig.quantifiers(),
@@ -1946,7 +1932,7 @@ mod tests {
             residual_row_function("keepResidualRow", "_DResidualRow", "residual_e"),
             residual_row_main("residualRowInt", "_DResidualRow", "keepResidualRow", io),
         ];
-        let (actual, ticks) = assert_differential(functions, &env);
+        let (actual, ticks) = run_and_verify(functions, &env);
         assert_eq!(ticks, 1);
         let clone = actual.functions().last().expect("specialized clone");
         assert_eq!(
@@ -1994,7 +1980,7 @@ mod tests {
                 ],
             ),
         ];
-        let (actual, ticks) = assert_differential(functions, &env);
+        let (actual, ticks) = run_and_verify(functions, &env);
         assert_eq!(ticks, 2, "one clone and one clone-local projection");
         assert_eq!(
             actual
@@ -2060,7 +2046,7 @@ mod tests {
                 }],
             ),
         ];
-        let (actual, _) = assert_differential(functions, &env);
+        let (actual, _) = run_and_verify(functions, &env);
         assert_eq!(
             actual.functions().last().unwrap().sig.quantifiers().len(),
             1
@@ -2095,7 +2081,7 @@ mod tests {
                 }],
             ),
         ];
-        let (actual, ticks) = assert_differential(functions, &env);
+        let (actual, ticks) = run_and_verify(functions, &env);
         assert_eq!(ticks, 1);
         let clone = actual.functions().last().expect("specialized clone");
         let TypedCompKind::Call { callee, .. } = &clone.body.kind else {

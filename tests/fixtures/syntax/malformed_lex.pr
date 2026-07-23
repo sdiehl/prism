@@ -1,0 +1,2 @@
+-- An unterminated string literal: the lexer refuses this file.
+fn main() = println("oops

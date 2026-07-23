@@ -1,7 +1,7 @@
 //! Dependency-light generic primitives shared across the compiler: the byte
 //! substrate for the wire codecs, deterministic strongly-connected-component and
-//! least-fixpoint solvers, and the compiler's own fresh-id supply. Kept
-//! import-light so it stays a natural leaf at the eventual crate split.
+//! least-fixpoint solvers, and the compiler's own fresh-id supply. The module stays
+//! import-light and independent of compiler-specific representations.
 
 // The byte substrate shared by the two content-addressed wire codecs
 // (`store::codec` and `eval::kont`): varints, bounded blobs/strings, table

@@ -1,0 +1,2698 @@
+-- | Codecs for the versioned syntax artifacts. Decoding turns the compiler's
+-- `prism-syntax-tokens-v1` export into the typed vocabulary of `Syntax.Source`
+-- and `Syntax.Token`, refusing wrong schema tags, malformed shapes, and
+-- inverted spans with one structured error. Encoding is the exact inverse: a
+-- decoded artifact re-encodes to the identical bytes the compiler emitted,
+-- checked byte for byte by the syntax round-trip gate.
+--
+-- The printer here matches the compiler's export format precisely: two-space
+-- indent, one element per line, a space after each key's colon, `[]` and `{}`
+-- for empty collections, insertion-order object keys, and the shared escape
+-- discipline (named escapes plus lowercase `\u00xx` for other control
+-- characters). Field order is part of the schema: envelope keys are in
+-- declaration order, node objects are alphabetical, and optional fields are
+-- omitted rather than null.
+
+import Data.List (..)
+
+import Data.Maybe (..)
+
+import Data.Result (..)
+
+import Data.String (..)
+
+import Json (Json, JNull, JBool, JInt, JFloat, JStr, JArr, JObj, decode, json_error_message)
+
+import Syntax.Source (..)
+
+import Syntax.Token (..)
+
+import Syntax.Ast (..)
+
+-- | The schema tag of the token-stream artifact.
+pub fn tokens_schema() : String = "prism-syntax-tokens-v1"
+
+-- | A structured decode refusal: the path of the offending value inside the
+-- document and the reason it was rejected.
+pub type CodecError = CodecError { path: String, reason: String }
+
+-- | Render a codec error as one line.
+pub fn codec_error_message(e : CodecError) : String = "{e.path}: {e.reason}"
+
+-- | A decoded `prism-syntax-tokens-v1` document: the envelope identity, the
+-- embedded source, the raw and post-layout token streams, and the trivia
+-- events, all in stream order.
+pub type TokensDoc = TokensDoc {
+  schema: String,
+  compiler: String,
+  source: SourceFile,
+  raw: List(Token),
+  parse: List(Token),
+  trivia: List(Trivia)
+}
+
+-- Assoc lookup over a JSON object's parse-order fields.
+fn jget(fields : List((String, Json)), key : String) : Option(Json) =
+  match fields of
+    Nil => None
+    Cons((k, v), rest) =>
+      if k == key then
+        Some(v)
+      else
+        jget(rest, key)
+
+fn need(
+  fields : List((String, Json)),
+  key : String,
+  path : String
+) : Result(Json, CodecError) =
+  match jget(fields, key) of
+    Some(v) => Ok(v)
+    None => Err(CodecError { path = path, reason = "missing field `{key}`" })
+
+fn as_obj(j : Json, path : String) : Result(List((String, Json)), CodecError) =
+  match j of
+    JObj(fields) => Ok(fields)
+    _ => Err(CodecError { path = path, reason = "expected an object" })
+
+fn as_arr(j : Json, path : String) : Result(List(Json), CodecError) =
+  match j of
+    JArr(items) => Ok(items)
+    _ => Err(CodecError { path = path, reason = "expected an array" })
+
+fn as_str(j : Json, path : String) : Result(String, CodecError) =
+  match j of
+    JStr(s) => Ok(s)
+    _ => Err(CodecError { path = path, reason = "expected a string" })
+
+fn as_int(j : Json, path : String) : Result(Int, CodecError) =
+  match j of
+    JInt(n) => Ok(n)
+    _ => Err(CodecError { path = path, reason = "expected an integer" })
+
+fn str_field(
+  fields : List((String, Json)),
+  key : String,
+  path : String
+) : Result(String, CodecError) =
+  match need(fields, key, path) of
+    Err(e) => Err(e)
+    Ok(v) => as_str(v, "{path}.{key}")
+
+-- A `[lo, hi]` span array, checked well formed.
+fn span_of_json(j : Json, path : String) : Result(Span, CodecError) =
+  match j of
+    JArr(Cons(jlo, Cons(jhi, Nil))) =>
+      match as_int(jlo, "{path}[0]") of
+        Err(e) => Err(e)
+        Ok(lo) =>
+          match as_int(jhi, "{path}[1]") of
+            Err(e) => Err(e)
+            Ok(hi) =>
+              let s = Span { lo = lo, hi = hi }
+              if span_valid(s) then
+                Ok(s)
+              else
+                Err(
+                    CodecError {
+                      path = path,
+                      reason = "inverted or negative span"
+                    },
+                  )
+    _ =>
+      Err(
+          CodecError {
+            path = path,
+            reason = "expected a two-element span array"
+          },
+        )
+
+fn token_of_json(j : Json, path : String) : Result(Token, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "kind", path) of
+        Err(e) => Err(e)
+        Ok(kname) =>
+          match need(fields, "span", path) of
+            Err(e) => Err(e)
+            Ok(jspan) =>
+              match span_of_json(jspan, "{path}.span") of
+                Err(e) => Err(e)
+                Ok(span) =>
+                  match jget(fields, "value") of
+                    None =>
+                      Ok(
+                          Token {
+                            kind = kind_of_name(kname),
+                            span = span,
+                            value = None
+                          },
+                        )
+                    Some(jv) =>
+                      match as_str(jv, "{path}.value") of
+                        Err(e) => Err(e)
+                        Ok(v) =>
+                          Ok(
+                              Token {
+                                kind = kind_of_name(kname),
+                                span = span,
+                                value = Some(v)
+                              },
+                            )
+
+fn trivia_of_json(j : Json, path : String) : Result(Trivia, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "kind", path) of
+        Err(e) => Err(e)
+        Ok(kname) =>
+          match need(fields, "span", path) of
+            Err(e) => Err(e)
+            Ok(jspan) =>
+              match span_of_json(jspan, "{path}.span") of
+                Err(e) => Err(e)
+                Ok(span) =>
+                  if kname == "comment" then
+                    Ok(TComment(span))
+                  elif kname == "block-comment" then
+                    Ok(TBlockComment(span))
+                  elif kname == "blank" then
+                    Ok(TBlank(span))
+                  else
+                    Err(
+                        CodecError {
+                          path = "{path}.kind",
+                          reason = "unknown trivia kind `{kname}`"
+                        },
+                      )
+
+fn decode_each(
+  items : List(Json),
+  path : String,
+  i : Int,
+  f : (Json, String) -> Result(a, CodecError)
+) : Result(List(a), CodecError) =
+  match items of
+    Nil => Ok([])
+    Cons(x, rest) =>
+      match f(x, "{path}[{i}]") of
+        Err(e) => Err(e)
+        Ok(v) =>
+          match decode_each(rest, path, i + 1, f) of
+            Err(e) => Err(e)
+            Ok(vs) => Ok(Cons(v, vs))
+
+fn source_of_json(j : Json, path : String) : Result(SourceFile, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "digest", path) of
+        Err(e) => Err(e)
+        Ok(digest) =>
+          match str_field(fields, "text", path) of
+            Err(e) => Err(e)
+            Ok(text) => Ok(SourceFile { digest = digest, text = text })
+
+-- | Decode a `prism-syntax-tokens-v1` document from its exact bytes. A wrong
+-- or missing schema tag, malformed JSON, missing field, or invalid span is a
+-- structured `CodecError`, never a partial document.
+pub fn decode_tokens(text : String) : Result(TokensDoc, CodecError) =
+  match decode(text) of
+    Err(e) => Err(CodecError { path = "$", reason = json_error_message(e) })
+    Ok(j) =>
+      match as_obj(j, "$") of
+        Err(e) => Err(e)
+        Ok(fields) =>
+          match str_field(fields, "schema", "$") of
+            Err(e) => Err(e)
+            Ok(schema) =>
+              if not(schema == tokens_schema()) then
+                Err(
+                    CodecError {
+                      path = "$.schema",
+                      reason = "unsupported schema `{schema}`"
+                    },
+                  )
+              else
+                match str_field(fields, "compiler", "$") of
+                  Err(e) => Err(e)
+                  Ok(compiler) =>
+                    match need(fields, "source", "$") of
+                      Err(e) => Err(e)
+                      Ok(jsrc) =>
+                        match source_of_json(jsrc, "$.source") of
+                          Err(e) => Err(e)
+                          Ok(source) =>
+                            match token_stream(fields, "raw") of
+                              Err(e) => Err(e)
+                              Ok(raw) =>
+                                match token_stream(fields, "parse") of
+                                  Err(e) => Err(e)
+                                  Ok(parse) =>
+                                    match need(fields, "trivia", "$") of
+                                      Err(e) => Err(e)
+                                      Ok(jt) =>
+                                        match as_arr(jt, "$.trivia") of
+                                          Err(e) => Err(e)
+                                          Ok(titems) =>
+                                            match (decode_each(
+                                                  titems,
+                                                  "$.trivia",
+                                                  0,
+                                                  trivia_of_json,
+                                                )) of
+                                              Err(e) => Err(e)
+                                              Ok(trivia) =>
+                                                Ok(
+                                                    TokensDoc {
+                                                      schema = schema,
+                                                      compiler = compiler,
+                                                      source = source,
+                                                      raw = raw,
+                                                      parse = parse,
+                                                      trivia = trivia
+                                                    },
+                                                  )
+
+fn token_stream(
+  fields : List((String, Json)),
+  key : String
+) : Result(List(Token), CodecError) =
+  match need(fields, key, "$") of
+    Err(e) => Err(e)
+    Ok(v) =>
+      match as_arr(v, "$.{key}") of
+        Err(e) => Err(e)
+        Ok(items) => decode_each(items, "$.{key}", 0, token_of_json)
+
+-- The artifact escape discipline, shared with the compiler's JSON emitter:
+-- named escapes, then lowercase `\u00xx` for the remaining control characters,
+-- raw UTF-8 for everything else.
+fn esc_char(c : Int) : String =
+  if c == 34 then
+    "\\\""
+  elif c == 92 then
+    "\\\\"
+  elif c == 8 then
+    "\\b"
+  elif c == 12 then
+    "\\f"
+  elif c == 10 then
+    "\\n"
+  elif c == 13 then
+    "\\r"
+  elif c == 9 then
+    "\\t"
+  elif c < 32 then
+    "\\u00{hex2(c)}"
+  else
+    str_of_char(chr(c))
+
+fn hex_digit(n : Int) : String =
+  str_of_char(chr(if n < 10 then 48 + n else 97 + n - 10))
+
+fn hex2(c : Int) : String = "{hex_digit(c / 16)}{hex_digit(c % 16)}"
+
+-- Escape by copying maximal clean runs whole, so a mostly-clean string costs
+-- one slice per escape rather than one allocation per character.
+fn needs_escape(c : Int) : Bool = c == 34 || c == 92 || c < 32
+
+fn jesc(s : String) : String = str_join("", jesc_go(s, 0, 0, []))
+
+fn jesc_go(s : String, run : Int, i : Int, acc : List(String)) : List(String) =
+  if i >= str_len(s) then
+    reverse(if run < i then Cons(substring(s, run, i - run), acc) else acc)
+  elif needs_escape(char_at(s, i)) then
+    let acc2 =
+      if run < i then
+        Cons(substring(s, run, i - run), acc)
+      else
+        acc
+    jesc_go(s, i + 1, i + 1, Cons(esc_char(char_at(s, i)), acc2))
+  else
+    jesc_go(s, run, i + 1, acc)
+
+fn spaces(n : Int) : String =
+  if n <= 0 then
+    ""
+  else
+    concat("  ", spaces(n - 2))
+
+-- The exact export layout: two-space indent, one element per line, a space
+-- after each colon, empty collections inline, insertion-order keys.
+fn render(j : Json, ind : Int) : String =
+  match j of
+    JNull => "null"
+    JBool(b) =>
+      if b then
+        "true"
+      else
+        "false"
+    JInt(n) => show_int(n)
+    JFloat(x) => show_float(x)
+    JStr(s) => "\"{jesc(s)}\""
+    JArr(items) =>
+      match items of
+        Nil => "[]"
+        _ =>
+          let inner = str_join(
+              ",\n",
+              map(\(x) -> "{spaces(ind + 2)}{render(x, ind + 2)}", items),
+            )
+          "[\n{inner}\n{spaces(ind)}]"
+    JObj(fields) =>
+      match fields of
+        Nil => "\{\}"
+        _ =>
+          let inner =
+            str_join(",\n", map(\(kv) -> render_field(kv, ind + 2), fields))
+          "\{\n{inner}\n{spaces(ind)}\}"
+
+fn render_field(kv : (String, Json), ind : Int) : String =
+  match kv of
+    (k, v) => "{spaces(ind)}\"{jesc(k)}\": {render(v, ind)}"
+
+fn span_json(s : Span) : Json = JArr([JInt(s.lo), JInt(s.hi)])
+
+fn token_json(t : Token) : Json =
+  let base = [("kind", JStr(kind_name(t.kind))), ("span", span_json(t.span))]
+  match t.value of
+    None => JObj(base)
+    Some(v) => JObj(append(base, [("value", JStr(v))]))
+
+fn trivia_json(t : Trivia) : Json =
+  JObj([("kind", JStr(trivia_name(t))), ("span", span_json(trivia_span(t)))])
+
+-- | Encode a token document back to the exact artifact bytes the compiler
+-- emits: `encode_tokens` after `decode_tokens` is byte-identity on every
+-- well-formed export.
+pub fn encode_tokens(d : TokensDoc) : String =
+  render(
+      JObj([
+          ("schema", JStr(d.schema)),
+          ("compiler", JStr(d.compiler)),
+          (
+              "source",
+              JObj([
+                  ("digest", JStr(d.source.digest)),
+                  ("text", JStr(d.source.text)),
+                ]),
+            ),
+          ("raw", JArr(map(token_json, d.raw))),
+          ("parse", JArr(map(token_json, d.parse))),
+          ("trivia", JArr(map(trivia_json, d.trivia))),
+        ]),
+      0,
+    )
+
+-- | The schema tag of the surface-syntax artifact.
+pub fn surface_schema() : String = "prism-surface-syntax-v1"
+
+-- | A decoded `prism-surface-syntax-v1` document: the envelope identity, the
+-- embedded source, and the ordered item list of the parsed file.
+pub type SurfaceDoc = SurfaceDoc {
+  schema: String,
+  compiler: String,
+  source: SourceFile,
+  items: List(Item)
+}
+
+-- -------------------------------------------------------------------------
+-- Encode helpers
+-- -------------------------------------------------------------------------
+
+-- The `kind` tag fragment every node starts with.
+fn kf(k : String) : (String, Json) = ("kind", JStr(k))
+
+-- An always-present array field.
+fn arrf(key : String, xs : List(Json)) : (String, Json) = (key, JArr(xs))
+
+-- A list field omitted when empty (mirrors the exporter's `put_list`).
+fn omit_list(key : String, xs : List(Json)) : List((String, Json)) =
+  match xs of
+    Nil => []
+    _ => [(key, JArr(xs))]
+
+-- A string-array field omitted when empty (mirrors `put_strs`).
+fn omit_strs(key : String, xs : List(String)) : List((String, Json)) =
+  match xs of
+    Nil => []
+    _ => [(key, JArr(map(JStr, xs)))]
+
+-- A boolean flag field omitted when false (mirrors `put_flag`).
+fn flag_field(key : String, b : Bool) : List((String, Json)) =
+  if b then
+    [(key, JBool(true))]
+  else
+    []
+
+-- An optional string field.
+fn opt_str_field(key : String, o : Option(String)) : List((String, Json)) =
+  match o of
+    None => []
+    Some(s) => [(key, JStr(s))]
+
+-- An optional field carrying an encoded value, omitted when absent.
+fn opt_field(
+  key : String,
+  o : Option(a),
+  f : (a) -> Json
+) : List((String, Json)) =
+  match o of
+    None => []
+    Some(x) => [(key, f(x))]
+
+fn vis_frag(v : Option(String)) : List((String, Json)) = opt_str_field("vis", v)
+
+fn dep_frag(v : Option(String)) : List((String, Json)) =
+  opt_str_field("deprecated", v)
+
+fn field_key(kv : (String, Json)) : String =
+  match kv of
+    (k, _v) => k
+
+-- Insert one field into a key-sorted list.
+fn ins_field(
+  kv : (String, Json),
+  acc : List((String, Json))
+) : List((String, Json)) =
+  match acc of
+    Nil => [kv]
+    Cons(h, t) =>
+      if field_key(kv) < field_key(h) then
+        Cons(kv, acc)
+      else
+        Cons(h, ins_field(kv, t))
+
+-- Order a node object's fields by key: the exporter emits node objects with
+-- alphabetical (byte-lexicographic) keys, so encoding sorts before rendering.
+fn sort_fields(fs : List((String, Json))) : List((String, Json)) =
+  foldr(ins_field, [], fs)
+
+-- A node object with no span: sort the fields and wrap.
+fn node_obj(fs : List((String, Json))) : Json = JObj(sort_fields(fs))
+
+-- The spanned wrapper an expression or pattern object carries: its own fields
+-- plus `span`, plus `synth` when the parser set the sugar bit, all sorted.
+fn sp_obj(fs : List((String, Json)), s : Span, synth : Bool) : Json =
+  let withspan = append(fs, [("span", span_json(s))])
+  let all =
+    if synth then
+      append(withspan, [("synth", JBool(true))])
+    else
+      withspan
+  JObj(sort_fields(all))
+
+-- -------------------------------------------------------------------------
+-- Encoders
+-- -------------------------------------------------------------------------
+
+fn enc_kind(k : Kind) : Json =
+  match k of
+    KType => JStr("type")
+    KRow => JStr("row")
+    KNat => JStr("nat")
+    KFun(a, b) => node_obj([("from", enc_kind(a)), ("to", enc_kind(b))])
+
+fn enc_efflabel(l : EffLabel) : Json =
+  node_obj(flatten([
+      [("name", JStr(l.name))],
+      omit_list("args", map(enc_ty, l.args)),
+    ]))
+
+fn enc_row(r : Row) : Json =
+  node_obj(flatten([
+      [arrf("labels", map(enc_efflabel, r.labels))],
+      opt_str_field("tail", r.tail),
+    ]))
+
+fn enc_cfield(c : CField) : Json =
+  node_obj([("name", JStr(c.name)), ("ty", enc_ty(c.ty))])
+
+fn enc_ty(t : Ty) : Json =
+  match t of
+    TyInt => node_obj([kf("int")])
+    TyI64 => node_obj([kf("i64")])
+    TyU64 => node_obj([kf("u64")])
+    TyBool => node_obj([kf("bool")])
+    TyUnit => node_obj([kf("unit")])
+    TyFloat => node_obj([kf("float")])
+    TyChar => node_obj([kf("char")])
+    TyStr => node_obj([kf("str")])
+    TyVar(n) => node_obj([kf("var"), ("name", JStr(n))])
+    TyApp(h, args) =>
+      node_obj(flatten([
+          [kf("app"), ("head", JStr(h))],
+          omit_list("args", map(enc_ty, args)),
+        ]))
+    TyState(n) => node_obj([kf("state"), ("cell", JInt(n))])
+    TyForall(vars, b) =>
+      node_obj([kf("forall"), arrf("vars", map(JStr, vars)), ("ty", enc_ty(b))])
+    TyFun(ps, row, ret) =>
+      node_obj(flatten([
+          [kf("fun")],
+          omit_list("params", map(enc_ty, ps)),
+          [("effects", enc_row(row)), ("ret", enc_ty(ret))],
+        ]))
+    TyCon(n, args) =>
+      node_obj(flatten([
+          [kf("con"), ("name", JStr(n))],
+          omit_list("args", map(enc_ty, args)),
+        ]))
+    TyTuple(items) => node_obj([kf("tuple"), arrf("items", map(enc_ty, items))])
+    TyUnboxedTuple(items) =>
+      node_obj([kf("unboxed-tuple"), arrf("items", map(enc_ty, items))])
+    TyUnboxedRecord(fs) =>
+      node_obj([kf("unboxed-record"), arrf("fields", map(enc_cfield, fs))])
+    TyRowLit(row) => node_obj([kf("row"), ("row", enc_row(row))])
+    TyNat(n) => node_obj([kf("nat"), ("value", JInt(n))])
+    TyUsage(b, facts) =>
+      node_obj([
+          kf("usage"),
+          ("ty", enc_ty(b)),
+          arrf("facts", map(JStr, facts)),
+        ])
+
+fn enc_named(n : NamedExpr) : Json =
+  node_obj([("name", JStr(n.name)), ("value", enc_expr(n.value))])
+
+fn enc_ensure(e : Ensure) : Json =
+  node_obj([("binder", JStr(e.binder)), ("expr", enc_expr(e.expr))])
+
+fn enc_param(p : Param) : Json =
+  node_obj(flatten([
+      [("name", JStr(p.name))],
+      opt_field("ty", p.ty, enc_ty),
+      flag_field("borrow", p.is_borrow),
+      opt_field("default", p.dflt, enc_expr),
+    ]))
+
+fn enc_constraint(c : Constraint) : Json =
+  node_obj([
+      ("class", JStr(c.cls)),
+      ("span", span_json(c.span)),
+      ("ty", enc_ty(c.ty)),
+    ])
+
+fn suffix_frag(s : Suffix) : List((String, Json)) =
+  match s of
+    SufNone => []
+    SufI64 => [("suffix", JStr("i64"))]
+    SufU64 => [("suffix", JStr("u64"))]
+
+fn enc_expr(e : Sp(Expr)) : Json =
+  sp_obj(enc_expr_node(e.node), e.span, e.synth)
+
+fn enc_expr_node(e : Expr) : List((String, Json)) =
+  match e of
+    EInt(v, suf) => append([kf("int"), ("value", JStr(v))], suffix_frag(suf))
+    EFloat(v) => [kf("float"), ("value", JStr(v))]
+    EChar(v) => [kf("char"), ("value", JStr(v))]
+    EBool(b) => [kf("bool"), ("value", JBool(b))]
+    EUnit => [kf("unit")]
+    EStr(v) => [kf("str"), ("value", JStr(v))]
+    EVar(n) => [kf("var"), ("name", JStr(n))]
+    EHole(n) => [kf("hole"), ("name", JStr(n))]
+    EBin(op, l, r) =>
+      [kf("bin"), ("op", JStr(op)), ("lhs", enc_expr(l)), ("rhs", enc_expr(r))]
+    ENeg(a) => [kf("neg"), ("expr", enc_expr(a))]
+    EIf(c, t, f) =>
+      [
+          kf("if"),
+          ("cond", enc_expr(c)),
+          ("then", enc_expr(t)),
+          ("else", enc_expr(f)),
+        ]
+    ELet(n, v, b) =>
+      [
+          kf("let"),
+          ("name", JStr(n)),
+          ("value", enc_expr(v)),
+          ("body", enc_expr(b)),
+        ]
+    ELam(ps, b) =>
+      flatten([
+          [kf("lam")],
+          omit_list("params", map(enc_param, ps)),
+          [("body", enc_expr(b))],
+        ])
+    ECall(h, args) =>
+      flatten([
+          [kf("call"), ("head", enc_expr(h))],
+          omit_list("args", map(enc_expr, args)),
+        ])
+    EPipe(l, r) => [kf("pipe"), ("lhs", enc_expr(l)), ("rhs", enc_expr(r))]
+    EMatch(s, arms) =>
+      [
+          kf("match"),
+          ("scrutinee", enc_expr(s)),
+          arrf("arms", map(enc_arm, arms)),
+        ]
+    EList(items) => [kf("list"), arrf("items", map(enc_expr, items))]
+    ETuple(items) => [kf("tuple"), arrf("items", map(enc_expr, items))]
+    EField(b, n) => [kf("field"), ("expr", enc_expr(b)), ("name", JStr(n))]
+    EUnboxedTuple(items) =>
+      [kf("unboxed-tuple"), arrf("items", map(enc_expr, items))]
+    EUnboxedRecord(fs) =>
+      [kf("unboxed-record"), arrf("fields", map(enc_named, fs))]
+    EUnboxedField(b, n) =>
+      [kf("unboxed-field"), ("expr", enc_expr(b)), ("name", JStr(n))]
+    ERecord(n, fs) =>
+      [kf("record"), ("name", JStr(n)), arrf("fields", map(enc_named, fs))]
+    ERecordUpdate(b, n, fs) =>
+      [
+          kf("record-update"),
+          ("base", enc_expr(b)),
+          ("name", JStr(n)),
+          arrf("fields", map(enc_named, fs)),
+        ]
+    EPathUpdate(b, us) =>
+      [
+          kf("path-update"),
+          ("base", enc_expr(b)),
+          arrf("updates", map(enc_pupdate, us)),
+        ]
+    EHandle(b, arms, partial) =>
+      flatten([
+          [kf("handle"), ("body", enc_expr(b))],
+          omit_list("arms", map(enc_harm, arms)),
+          flag_field("partial", partial),
+        ])
+    EMask(eff, b) => [kf("mask"), ("effect", JStr(eff)), ("body", enc_expr(b))]
+    EInst(b, args) =>
+      [kf("inst"), ("expr", enc_expr(b)), arrf("args", map(JStr, args))]
+    EIndex(b, i) => [kf("index"), ("expr", enc_expr(b)), ("index", enc_expr(i))]
+    EIndexSet(b, i, v) =>
+      [
+          kf("index-set"),
+          ("expr", enc_expr(b)),
+          ("index", enc_expr(i)),
+          ("value", enc_expr(v)),
+        ]
+    EAnn(b, t) => [kf("ann"), ("expr", enc_expr(b)), ("ty", enc_ty(t))]
+    EMarker(m) => [kf("marker"), ("marker", JStr(m))]
+    ENamedHandle(n, b, arms) =>
+      flatten([
+          [kf("named-handle"), ("name", JStr(n)), ("body", enc_expr(b))],
+          omit_list("arms", map(enc_harm, arms)),
+        ])
+    EVarDecl(n, v, b) =>
+      [
+          kf("var-decl"),
+          ("name", JStr(n)),
+          ("value", enc_expr(v)),
+          ("body", enc_expr(b)),
+        ]
+    EAssign(n, v) => [kf("assign"), ("name", JStr(n)), ("value", enc_expr(v))]
+    EIndexAssign(b, i, v) =>
+      [
+          kf("index-assign"),
+          ("expr", enc_expr(b)),
+          ("index", enc_expr(i)),
+          ("value", enc_expr(v)),
+        ]
+    EThrow(n, args) =>
+      flatten([
+          [kf("throw"), ("name", JStr(n))],
+          omit_list("args", map(enc_expr, args)),
+        ])
+    ETryCatch(b, arms) =>
+      [
+          kf("try-catch"),
+          ("body", enc_expr(b)),
+          arrf("arms", map(enc_catch, arms)),
+        ]
+    EFor(bnd, seq, quals, b) =>
+      flatten([
+          [kf("for"), ("binder", JStr(bnd)), ("seq", enc_expr(seq))],
+          omit_list("quals", map(enc_qual, quals)),
+          [("body", enc_expr(b))],
+        ])
+    EWhile(c, b) => [kf("while"), ("cond", enc_expr(c)), ("body", enc_expr(b))]
+    ELoop(b) => [kf("loop"), ("body", enc_expr(b))]
+    EBreak => [kf("break")]
+    EContinue => [kf("continue")]
+    EReturn(v) => [kf("return"), ("value", enc_expr(v))]
+    EComp(h, bnd, seq, quals) =>
+      flatten([
+          [
+              kf("comprehension"),
+              ("head", enc_expr(h)),
+              ("binder", JStr(bnd)),
+              ("seq", enc_expr(seq)),
+            ],
+          omit_list("quals", map(enc_qual, quals)),
+        ])
+    EDefault(b, f) =>
+      [kf("default"), ("expr", enc_expr(b)), ("fallback", enc_expr(f))]
+    ETransact(b, f) =>
+      [kf("transact"), ("body", enc_expr(b)), ("fallback", enc_expr(f))]
+    EProbe(n, b) => [kf("probe"), ("name", JStr(n)), ("body", enc_expr(b))]
+    EOptChain(b, n) =>
+      [kf("opt-chain"), ("expr", enc_expr(b)), ("name", JStr(n))]
+    ERange(prefix, e) =>
+      [kf("range"), arrf("prefix", map(enc_expr, prefix)), ("end", enc_expr(e))]
+    ECompose(dir, l, r) =>
+      [
+          kf("compose"),
+          ("dir", JStr(dir)),
+          ("lhs", enc_expr(l)),
+          ("rhs", enc_expr(r)),
+        ]
+    EReadPath(b, steps) =>
+      [
+          kf("read-path"),
+          ("base", enc_expr(b)),
+          arrf("path", map(enc_pstep, steps)),
+        ]
+
+fn enc_arm(a : Arm) : Json = sp_expr_arm(a)
+
+fn sp_expr_arm(a : Arm) : Json =
+  node_obj(flatten([
+      [("pat", enc_pat(a.pat))],
+      opt_field("guard", a.guard, enc_expr),
+      [("body", enc_expr(a.body))],
+    ]))
+
+fn enc_harm(a : HandlerArm) : Json =
+  match a of
+    HReturn(b, body) =>
+      node_obj([kf("return"), ("binder", JStr(b)), ("body", enc_expr(body))])
+    HOp(op, ps, rk, body) =>
+      node_obj([
+          kf("op"),
+          ("op", JStr(op)),
+          arrf("params", map(JStr, ps)),
+          ("resume", JStr(rk)),
+          ("body", enc_expr(body)),
+        ])
+    HOnce(op, ps, body) =>
+      node_obj([
+          kf("once"),
+          ("op", JStr(op)),
+          arrf("params", map(JStr, ps)),
+          ("body", enc_expr(body)),
+        ])
+    HVal(n, body) =>
+      node_obj([kf("val"), ("name", JStr(n)), ("body", enc_expr(body))])
+    HNever(op, ps, body) =>
+      node_obj([
+          kf("never"),
+          ("op", JStr(op)),
+          arrf("params", map(JStr, ps)),
+          ("body", enc_expr(body)),
+        ])
+
+fn enc_catch(a : CatchArm) : Json =
+  node_obj(flatten([
+      [("name", JStr(a.name))],
+      omit_strs("binders", a.binders),
+      [("body", enc_expr(a.body)), ("span", span_json(a.span))],
+    ]))
+
+fn enc_qual(q : Qual) : Json =
+  match q of
+    QGuard(e) => node_obj([kf("guard"), ("expr", enc_expr(e))])
+    QBind(n, e) =>
+      node_obj([kf("bind"), ("name", JStr(n)), ("value", enc_expr(e))])
+
+fn enc_pstep(s : PathStep) : Json =
+  match s of
+    PSField(n) => node_obj([kf("field"), ("name", JStr(n))])
+    PSEach => node_obj([kf("each")])
+    PSCase(n) => node_obj([kf("case"), ("name", JStr(n))])
+    PSIndex(e) => node_obj([kf("index"), ("expr", enc_expr(e))])
+    PSWhere(e) => node_obj([kf("where"), ("expr", enc_expr(e))])
+
+fn enc_pop(o : PathOp) : Json =
+  match o of
+    POSet(e) => node_obj([kf("set"), ("expr", enc_expr(e))])
+    POModify(e) => node_obj([kf("modify"), ("expr", enc_expr(e))])
+
+fn enc_pupdate(u : PathUpdate) : Json =
+  node_obj([arrf("path", map(enc_pstep, u.path)), ("op", enc_pop(u.op))])
+
+fn enc_pat(p : Sp(Pat)) : Json = sp_obj(enc_pat_node(p.node), p.span, p.synth)
+
+fn enc_pfield(f : PatField) : Json =
+  node_obj([("name", JStr(f.name)), ("pat", enc_pat(f.pat))])
+
+fn enc_pat_node(p : Pat) : List((String, Json)) =
+  match p of
+    PWild => [kf("wild")]
+    PVar(n) => [kf("var"), ("name", JStr(n))]
+    PInt(v, suf) => append([kf("int"), ("value", JStr(v))], suffix_frag(suf))
+    PFloat(v) => [kf("float"), ("value", JStr(v))]
+    PChar(v) => [kf("char"), ("value", JStr(v))]
+    PBool(b) => [kf("bool"), ("value", JBool(b))]
+    PCtor(n, args) =>
+      flatten([
+          [kf("ctor"), ("name", JStr(n))],
+          omit_list("args", map(enc_pat, args)),
+        ])
+    PTuple(items) => [kf("tuple"), arrf("items", map(enc_pat, items))]
+    PRecord(n, fs, rest) =>
+      flatten([
+          [kf("record"), ("name", JStr(n))],
+          omit_list("fields", map(enc_pfield, fs)),
+          flag_field("rest", rest),
+        ])
+
+fn enc_ctor(c : Ctor) : Json =
+  match c.shape of
+    CPositional(args) =>
+      node_obj(flatten([
+          [("name", JStr(c.name))],
+          omit_list("args", map(enc_ty, args)),
+        ]))
+    CRecord(fs) =>
+      node_obj([("name", JStr(c.name)), arrf("fields", map(enc_cfield, fs))])
+
+fn enc_deriving(d : Deriving) : Json =
+  node_obj([("name", JStr(d.name)), ("span", span_json(d.span))])
+
+fn enc_method(m : Method) : Json =
+  node_obj([("name", JStr(m.name)), ("ty", enc_ty(m.ty))])
+
+fn enc_effop(o : EffOp) : Json =
+  node_obj(flatten([
+      [("name", JStr(o.name))],
+      omit_list("params", map(enc_ty, o.params)),
+      [("ret", enc_ty(o.ret))],
+      opt_str_field("grade", o.grade),
+    ]))
+
+fn enc_rungfield(f : RungField) : Json =
+  node_obj(flatten([
+      [("name", JStr(f.name)), ("ty", enc_ty(f.ty))],
+      opt_field("default", f.dflt, enc_expr),
+    ]))
+
+fn enc_rung(r : Rung) : Json =
+  node_obj(flatten([
+      [("name", JStr(r.name))],
+      opt_str_field("base", r.base),
+      omit_list("fields", map(enc_rungfield, r.fields)),
+      opt_str_field("frozen", r.frozen),
+      [("span", span_json(r.span))],
+    ]))
+
+fn enc_converter(c : Converter) : Json =
+  node_obj(flatten([
+      [
+          ("dir", JStr(c.dir)),
+          ("from", JStr(c.from)),
+          ("to", JStr(c.to)),
+          ("base", enc_expr(c.base)),
+        ],
+      omit_list("overrides", map(enc_named, c.overrides)),
+      omit_strs("drop_loss", c.drop_loss),
+      [("span", span_json(c.span))],
+    ]))
+
+fn enc_mdir(d : MigrationDir) : Json =
+  match d of
+    DAuto => JStr("auto")
+    DExpr(e) => enc_expr(e)
+
+fn enc_mroute(r : MigrationRoute) : Json =
+  match r of
+    MAuto => JStr("auto")
+    MVersion(up, down) =>
+      node_obj([("upgrade", enc_mdir(up)), ("downgrade", enc_mdir(down))])
+
+fn enc_migration(m : Migration) : Json =
+  node_obj([
+      ("from", JStr(m.from)),
+      ("route", enc_mroute(m.route)),
+      ("span", span_json(m.span)),
+      ("to", JStr(m.to)),
+    ])
+
+-- The declaration fields shared by top-level fns/consts/logic-fns and by
+-- instance methods; the caller adds visibility and deprecation.
+fn enc_decl(d : Decl, kind : String) : List((String, Json)) =
+  flatten([
+      [kf(kind), ("name", JStr(d.name))],
+      omit_list("params", map(enc_param, d.params)),
+      opt_field("ret", d.ret, enc_ty),
+      opt_field("effects", d.eff, enc_row),
+      omit_list("constraints", map(enc_constraint, d.constraints)),
+      [("body", enc_expr(d.body))],
+      omit_list("wheres", map(enc_named, d.wheres)),
+      omit_list("requires", map(enc_expr, d.reqs)),
+      omit_list("ensures", map(enc_ensure, d.enss)),
+      opt_field("decreases", d.measure, enc_expr),
+      flag_field("test", d.is_test),
+      opt_str_field("total", d.totality),
+      opt_str_field("fip", d.fip_word),
+      flag_field("replayable", d.is_replayable),
+      flag_field("no_alloc", d.is_no_alloc),
+      [("span", span_json(d.span))],
+    ])
+
+fn enc_method_decl(d : Decl) : Json = node_obj(enc_decl(d, "fn"))
+
+fn enc_item(it : Item) : Json =
+  match it of
+    IImport {
+      path = path,
+      mod_alias = ma,
+      names = names,
+      glob = glob,
+      reexport = reexport,
+      span = span,
+    } =>
+      node_obj(flatten([
+          [kf("import")],
+          opt_str_field("alias", ma),
+          opt_field("names", names, \(ns) -> JArr(map(JStr, ns))),
+          [arrf("path", map(JStr, path))],
+          flag_field("glob", glob),
+          flag_field("reexport", reexport),
+          [("span", span_json(span))],
+        ]))
+    IData {
+      nt = nt,
+      name = name,
+      params = params,
+      param_kinds = pks,
+      ctors = ctors,
+      derivs = derivs,
+      span = span,
+      vis = vis,
+      dep = dep,
+    } =>
+      node_obj(flatten([
+          [kf(if nt then "newtype" else "data"), ("name", JStr(name))],
+          omit_strs("params", params),
+          omit_list("param_kinds", map(enc_kind, pks)),
+          omit_list("ctors", map(enc_ctor, ctors)),
+          omit_list("deriving", map(enc_deriving, derivs)),
+          [("span", span_json(span))],
+          vis_frag(vis),
+          dep_frag(dep),
+        ]))
+    IEffect {
+      name = name,
+      params = params,
+      ops = ops,
+      span = span,
+      vis = vis,
+      dep = dep,
+    } =>
+      node_obj(flatten([
+          [kf("effect"), ("name", JStr(name))],
+          omit_strs("params", params),
+          omit_list("ops", map(enc_effop, ops)),
+          [("span", span_json(span))],
+          vis_frag(vis),
+          dep_frag(dep),
+        ]))
+    IError { name = name, params = params, span = span, vis = vis, dep = dep } =>
+      node_obj(flatten([
+          [kf("error"), ("name", JStr(name))],
+          omit_list("params", map(enc_ty, params)),
+          [("span", span_json(span))],
+          vis_frag(vis),
+          dep_frag(dep),
+        ]))
+    IEffAlias {
+      name = name,
+      labels = labels,
+      span = span,
+      vis = vis,
+      dep = dep,
+    } =>
+      node_obj(flatten([
+          [kf("effect-alias"), ("name", JStr(name))],
+          omit_list("labels", map(enc_efflabel, labels)),
+          [("span", span_json(span))],
+          vis_frag(vis),
+          dep_frag(dep),
+        ]))
+    ISynonym {
+      name = name,
+      params = params,
+      ty = ty,
+      span = span,
+      vis = vis,
+      dep = dep,
+    } =>
+      node_obj(flatten([
+          [kf("type-synonym"), ("name", JStr(name))],
+          omit_strs("params", params),
+          [("ty", enc_ty(ty)), ("span", span_json(span))],
+          vis_frag(vis),
+          dep_frag(dep),
+        ]))
+    IClass {
+      name = name,
+      param = param,
+      supers = supers,
+      methods = methods,
+      span = span,
+      vis = vis,
+      dep = dep,
+    } =>
+      node_obj(flatten([
+          [kf("class"), ("name", JStr(name)), ("param", JStr(param))],
+          omit_strs("supers", supers),
+          omit_list("methods", map(enc_method, methods)),
+          [("span", span_json(span))],
+          vis_frag(vis),
+          dep_frag(dep),
+        ]))
+    IInstance {
+      name = name,
+      cls = cls,
+      head = head,
+      context = context,
+      methods = methods,
+      span = span,
+    } =>
+      node_obj(flatten([
+          [
+              kf("instance"),
+              ("name", JStr(name)),
+              ("class", JStr(cls)),
+              ("head", enc_ty(head)),
+            ],
+          omit_list("context", map(enc_constraint, context)),
+          omit_list("methods", map(enc_method_decl, methods)),
+          [("span", span_json(span))],
+        ]))
+    ICanonical { cls = cls, head = head, name = name, span = span } =>
+      node_obj([
+          kf("canonical"),
+          ("class", JStr(cls)),
+          ("head", enc_ty(head)),
+          ("name", JStr(name)),
+          ("span", span_json(span)),
+        ])
+    IPattern {
+      name = name,
+      params = params,
+      forty = forty,
+      viewfn = viewfn,
+      makefn = makefn,
+      span = span,
+      vis = vis,
+      dep = dep,
+    } =>
+      node_obj(flatten([
+          [kf("pattern"), ("name", JStr(name))],
+          omit_strs("params", params),
+          [("for", JStr(forty)), ("view", enc_expr(viewfn))],
+          opt_field("make", makefn, enc_expr),
+          [("span", span_json(span))],
+          vis_frag(vis),
+          dep_frag(dep),
+        ]))
+    IStable {
+      name = name,
+      rungs = rungs,
+      converters = converters,
+      migrations = migrations,
+      span = span,
+      vis = vis,
+      dep = dep,
+    } =>
+      node_obj(flatten([
+          [kf("stable"), ("name", JStr(name))],
+          omit_list("rungs", map(enc_rung, rungs)),
+          omit_list("converters", map(enc_converter, converters)),
+          omit_list("migrations", map(enc_migration, migrations)),
+          [("span", span_json(span))],
+          vis_frag(vis),
+          dep_frag(dep),
+        ]))
+    IDecl { decl = decl, declkind = declkind, vis = vis, dep = dep } =>
+      node_obj(flatten([
+          enc_decl(decl, declkind),
+          vis_frag(vis),
+          dep_frag(dep),
+        ]))
+
+-- | Encode a surface document back to the exact artifact bytes the compiler
+-- emits: `encode_surface` after `decode_surface` is byte-identity on every
+-- well-formed export.
+pub fn encode_surface(d : SurfaceDoc) : String =
+  render(
+      JObj([
+          ("schema", JStr(d.schema)),
+          ("compiler", JStr(d.compiler)),
+          (
+              "source",
+              JObj([
+                  ("digest", JStr(d.source.digest)),
+                  ("text", JStr(d.source.text)),
+                ]),
+            ),
+          ("items", JArr(map(enc_item, d.items))),
+        ]),
+      0,
+    )
+
+-- -------------------------------------------------------------------------
+-- Decode helpers
+-- -------------------------------------------------------------------------
+
+fn as_bool(j : Json, path : String) : Result(Bool, CodecError) =
+  match j of
+    JBool(b) => Ok(b)
+    _ => Err(CodecError { path = path, reason = "expected a boolean" })
+
+fn as_strs(j : Json, path : String) : Result(List(String), CodecError) =
+  match as_arr(j, path) of
+    Err(e) => Err(e)
+    Ok(items) => decode_each(items, path, 0, as_str)
+
+-- Required field, then decode with `f`.
+fn req(
+  fields : List((String, Json)),
+  key : String,
+  path : String,
+  f : (Json, String) -> Result(a, CodecError)
+) : Result(a, CodecError) =
+  match need(fields, key, path) of
+    Err(e) => Err(e)
+    Ok(v) => f(v, "{path}.{key}")
+
+-- Optional field: `None` when absent, else decoded with `f`.
+fn opt(
+  fields : List((String, Json)),
+  key : String,
+  path : String,
+  f : (Json, String) -> Result(a, CodecError)
+) : Result(Option(a), CodecError) =
+  match jget(fields, key) of
+    None => Ok(None)
+    Some(v) =>
+      match f(v, "{path}.{key}") of
+        Err(e) => Err(e)
+        Ok(x) => Ok(Some(x))
+
+-- List field: absent decodes to the empty list (mirrors the exporter omitting
+-- empty collections).
+fn listf(
+  fields : List((String, Json)),
+  key : String,
+  path : String,
+  f : (Json, String) -> Result(a, CodecError)
+) : Result(List(a), CodecError) =
+  match jget(fields, key) of
+    None => Ok([])
+    Some(v) =>
+      match as_arr(v, "{path}.{key}") of
+        Err(e) => Err(e)
+        Ok(items) => decode_each(items, "{path}.{key}", 0, f)
+
+-- Boolean flag field: absent or false is false.
+fn flagf(fields : List((String, Json)), key : String) : Bool =
+  match jget(fields, key) of
+    Some(JBool(b)) => b
+    _ => false
+
+-- String-list field: absent decodes to the empty list.
+fn strsf(
+  fields : List((String, Json)),
+  key : String,
+  path : String
+) : Result(List(String), CodecError) =
+  match jget(fields, key) of
+    None => Ok([])
+    Some(v) => as_strs(v, "{path}.{key}")
+
+-- -------------------------------------------------------------------------
+-- Decoders
+-- -------------------------------------------------------------------------
+
+fn dec_kind(j : Json, path : String) : Result(Kind, CodecError) =
+  match j of
+    JStr(s) =>
+      if s == "type" then
+        Ok(KType)
+      elif s == "row" then
+        Ok(KRow)
+      elif s == "nat" then
+        Ok(KNat)
+      else
+        Err(CodecError { path = path, reason = "unknown kind `{s}`" })
+    JObj(fields) =>
+      match req(fields, "from", path, dec_kind) of
+        Err(e) => Err(e)
+        Ok(a) =>
+          map_result(\(b) -> KFun(a, b), req(fields, "to", path, dec_kind))
+    _ => Err(CodecError { path = path, reason = "expected a kind" })
+
+fn dec_efflabel(j : Json, path : String) : Result(EffLabel, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "name", path) of
+        Err(e) => Err(e)
+        Ok(n) =>
+          map_result(
+              \(args) -> EffLabel { name = n, args = args },
+              listf(fields, "args", path, dec_ty),
+            )
+
+fn dec_row(j : Json, path : String) : Result(Row, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match listf(fields, "labels", path, dec_efflabel) of
+        Err(e) => Err(e)
+        Ok(labels) =>
+          match opt(fields, "tail", path, as_str) of
+            Err(e) => Err(e)
+            Ok(tail) => Ok(Row { labels = labels, tail = tail })
+
+fn dec_cfield(j : Json, path : String) : Result(CField, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "name", path) of
+        Err(e) => Err(e)
+        Ok(n) =>
+          map_result(
+              \(t) -> CField { name = n, ty = t },
+              req(fields, "ty", path, dec_ty),
+            )
+
+fn dec_ty(j : Json, path : String) : Result(Ty, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "kind", path) of
+        Err(e) => Err(e)
+        Ok(kind) => dec_ty_kind(kind, fields, path)
+
+fn dec_ty_kind(
+  kind : String,
+  fields : List((String, Json)),
+  path : String
+) : Result(Ty, CodecError) =
+  if kind == "int" then
+    Ok(TyInt)
+  elif kind == "i64" then
+    Ok(TyI64)
+  elif kind == "u64" then
+    Ok(TyU64)
+  elif kind == "bool" then
+    Ok(TyBool)
+  elif kind == "unit" then
+    Ok(TyUnit)
+  elif kind == "float" then
+    Ok(TyFloat)
+  elif kind == "char" then
+    Ok(TyChar)
+  elif kind == "str" then
+    Ok(TyStr)
+  elif kind == "var" then
+    map_result(TyVar, str_field(fields, "name", path))
+  elif kind == "app" then
+    match str_field(fields, "head", path) of
+      Err(e) => Err(e)
+      Ok(h) =>
+        map_result(
+            \(args) -> TyApp(h, args),
+            listf(fields, "args", path, dec_ty),
+          )
+  else
+    dec_ty_kind2(kind, fields, path)
+
+fn dec_ty_kind2(
+  kind : String,
+  fields : List((String, Json)),
+  path : String
+) : Result(Ty, CodecError) =
+  if kind == "state" then
+    map_result(TyState, req(fields, "cell", path, as_int))
+  elif kind == "forall" then
+    match strsf(fields, "vars", path) of
+      Err(e) => Err(e)
+      Ok(vars) =>
+        map_result(\(b) -> TyForall(vars, b), req(fields, "ty", path, dec_ty))
+  elif kind == "fun" then
+    match listf(fields, "params", path, dec_ty) of
+      Err(e) => Err(e)
+      Ok(ps) =>
+        match req(fields, "effects", path, dec_row) of
+          Err(e) => Err(e)
+          Ok(row) =>
+            map_result(
+                \(ret) -> TyFun(ps, row, ret),
+                req(fields, "ret", path, dec_ty),
+              )
+  elif kind == "con" then
+    match str_field(fields, "name", path) of
+      Err(e) => Err(e)
+      Ok(n) =>
+        map_result(
+            \(args) -> TyCon(n, args),
+            listf(fields, "args", path, dec_ty),
+          )
+  elif kind == "tuple" then
+    map_result(TyTuple, listf(fields, "items", path, dec_ty))
+  elif kind == "unboxed-tuple" then
+    map_result(TyUnboxedTuple, listf(fields, "items", path, dec_ty))
+  elif kind == "unboxed-record" then
+    map_result(TyUnboxedRecord, listf(fields, "fields", path, dec_cfield))
+  elif kind == "row" then
+    map_result(TyRowLit, req(fields, "row", path, dec_row))
+  elif kind == "nat" then
+    map_result(TyNat, req(fields, "value", path, as_int))
+  elif kind == "usage" then
+    match req(fields, "ty", path, dec_ty) of
+      Err(e) => Err(e)
+      Ok(b) =>
+        map_result(\(facts) -> TyUsage(b, facts), strsf(fields, "facts", path))
+  else
+    Err(
+        CodecError {
+          path = "{path}.kind",
+          reason = "unknown type kind `{kind}`"
+        },
+      )
+
+fn dec_named(j : Json, path : String) : Result(NamedExpr, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "name", path) of
+        Err(e) => Err(e)
+        Ok(n) =>
+          map_result(
+              \(v) -> NamedExpr { name = n, value = v },
+              req(fields, "value", path, dec_expr),
+            )
+
+fn dec_ensure(j : Json, path : String) : Result(Ensure, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "binder", path) of
+        Err(e) => Err(e)
+        Ok(b) =>
+          map_result(
+              \(e) -> Ensure { binder = b, expr = e },
+              req(fields, "expr", path, dec_expr),
+            )
+
+fn dec_suffix(fields : List((String, Json))) : Suffix =
+  match jget(fields, "suffix") of
+    Some(JStr(s)) =>
+      if s == "i64" then
+        SufI64
+      elif s == "u64" then
+        SufU64
+      else
+        SufNone
+    _ => SufNone
+
+fn dec_param(j : Json, path : String) : Result(Param, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "name", path) of
+        Err(e) => Err(e)
+        Ok(n) =>
+          match opt(fields, "ty", path, dec_ty) of
+            Err(e) => Err(e)
+            Ok(ty) =>
+              match opt(fields, "default", path, dec_expr) of
+                Err(e) => Err(e)
+                Ok(dflt) =>
+                  Ok(
+                      Param {
+                        name = n,
+                        ty = ty,
+                        is_borrow = flagf(fields, "borrow"),
+                        dflt = dflt
+                      },
+                    )
+
+fn dec_constraint(j : Json, path : String) : Result(Constraint, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "class", path) of
+        Err(e) => Err(e)
+        Ok(c) =>
+          match req(fields, "ty", path, dec_ty) of
+            Err(e) => Err(e)
+            Ok(t) =>
+              map_result(
+                  \(s) -> Constraint { cls = c, ty = t, span = s },
+                  req(fields, "span", path, span_of_json),
+                )
+
+fn dec_expr(j : Json, path : String) : Result(Sp(Expr), CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "kind", path) of
+        Err(e) => Err(e)
+        Ok(kind) =>
+          match req(fields, "span", path, span_of_json) of
+            Err(e) => Err(e)
+            Ok(span) =>
+              match dec_expr_node(kind, fields, path) of
+                Err(e) => Err(e)
+                Ok(node) =>
+                  Ok(
+                      Sp {
+                        node = node,
+                        span = span,
+                        synth = flagf(fields, "synth")
+                      },
+                    )
+
+-- One expression field.
+fn e1(
+  fields : List((String, Json)),
+  path : String,
+  key : String,
+  mk : (Sp(Expr)) -> Expr
+) : Result(Expr, CodecError) =
+  map_result(mk, req(fields, key, path, dec_expr))
+
+-- Two expression fields.
+fn e2(
+  fields : List((String, Json)),
+  path : String,
+  k1 : String,
+  k2 : String,
+  mk : (Sp(Expr), Sp(Expr)) -> Expr
+) : Result(Expr, CodecError) =
+  match req(fields, k1, path, dec_expr) of
+    Err(e) => Err(e)
+    Ok(a) => map_result(\(b) -> mk(a, b), req(fields, k2, path, dec_expr))
+
+-- Three expression fields.
+fn e3(
+  fields : List((String, Json)),
+  path : String,
+  k1 : String,
+  k2 : String,
+  k3 : String,
+  mk : (Sp(Expr), Sp(Expr), Sp(Expr)) -> Expr
+) : Result(Expr, CodecError) =
+  match req(fields, k1, path, dec_expr) of
+    Err(e) => Err(e)
+    Ok(a) =>
+      match req(fields, k2, path, dec_expr) of
+        Err(e) => Err(e)
+        Ok(b) =>
+          map_result(\(c) -> mk(a, b, c), req(fields, k3, path, dec_expr))
+
+-- A string field then an expression field.
+fn se(
+  fields : List((String, Json)),
+  path : String,
+  ks : String,
+  ke : String,
+  mk : (String, Sp(Expr)) -> Expr
+) : Result(Expr, CodecError) =
+  match str_field(fields, ks, path) of
+    Err(e) => Err(e)
+    Ok(s) => map_result(\(x) -> mk(s, x), req(fields, ke, path, dec_expr))
+
+-- An expression field then a string field.
+fn es(
+  fields : List((String, Json)),
+  path : String,
+  ke : String,
+  ks : String,
+  mk : (Sp(Expr), String) -> Expr
+) : Result(Expr, CodecError) =
+  match req(fields, ke, path, dec_expr) of
+    Err(e) => Err(e)
+    Ok(x) => map_result(\(s) -> mk(x, s), str_field(fields, ks, path))
+
+-- A string field then two expression fields.
+fn s2e(
+  fields : List((String, Json)),
+  path : String,
+  ks : String,
+  k1 : String,
+  k2 : String,
+  mk : (String, Sp(Expr), Sp(Expr)) -> Expr
+) : Result(Expr, CodecError) =
+  match str_field(fields, ks, path) of
+    Err(e) => Err(e)
+    Ok(s) =>
+      match req(fields, k1, path, dec_expr) of
+        Err(e) => Err(e)
+        Ok(a) =>
+          map_result(\(b) -> mk(s, a, b), req(fields, k2, path, dec_expr))
+
+fn dec_expr_node(
+  kind : String,
+  fields : List((String, Json)),
+  path : String
+) : Result(Expr, CodecError) =
+  if kind == "int" then
+    map_result(
+        \(v) -> EInt(v, dec_suffix(fields)),
+        str_field(fields, "value", path),
+      )
+  elif kind == "float" then
+    map_result(EFloat, str_field(fields, "value", path))
+  elif kind == "char" then
+    map_result(EChar, str_field(fields, "value", path))
+  elif kind == "bool" then
+    map_result(EBool, req(fields, "value", path, as_bool))
+  elif kind == "unit" then
+    Ok(EUnit)
+  elif kind == "str" then
+    map_result(EStr, str_field(fields, "value", path))
+  elif kind == "var" then
+    map_result(EVar, str_field(fields, "name", path))
+  elif kind == "hole" then
+    map_result(EHole, str_field(fields, "name", path))
+  elif kind == "bin" then
+    match str_field(fields, "op", path) of
+      Err(e) => Err(e)
+      Ok(op) => e2(fields, path, "lhs", "rhs", \(l, r) -> EBin(op, l, r))
+  elif kind == "neg" then
+    e1(fields, path, "expr", ENeg)
+  else
+    dec_expr_node2(kind, fields, path)
+
+fn dec_expr_node2(
+  kind : String,
+  fields : List((String, Json)),
+  path : String
+) : Result(Expr, CodecError) =
+  if kind == "if" then
+    e3(fields, path, "cond", "then", "else", EIf)
+  elif kind == "let" then
+    s2e(fields, path, "name", "value", "body", ELet)
+  elif kind == "lam" then
+    match listf(fields, "params", path, dec_param) of
+      Err(e) => Err(e)
+      Ok(ps) =>
+        map_result(\(b) -> ELam(ps, b), req(fields, "body", path, dec_expr))
+  elif kind == "call" then
+    match req(fields, "head", path, dec_expr) of
+      Err(e) => Err(e)
+      Ok(h) =>
+        map_result(
+            \(args) -> ECall(h, args),
+            listf(fields, "args", path, dec_expr),
+          )
+  elif kind == "pipe" then
+    e2(fields, path, "lhs", "rhs", EPipe)
+  elif kind == "match" then
+    match req(fields, "scrutinee", path, dec_expr) of
+      Err(e) => Err(e)
+      Ok(s) =>
+        map_result(
+            \(arms) -> EMatch(s, arms),
+            listf(fields, "arms", path, dec_arm),
+          )
+  elif kind == "list" then
+    map_result(EList, listf(fields, "items", path, dec_expr))
+  elif kind == "tuple" then
+    map_result(ETuple, listf(fields, "items", path, dec_expr))
+  elif kind == "field" then
+    es(fields, path, "expr", "name", EField)
+  elif kind == "unboxed-tuple" then
+    map_result(EUnboxedTuple, listf(fields, "items", path, dec_expr))
+  else
+    dec_expr_node3(kind, fields, path)
+
+fn dec_expr_node3(
+  kind : String,
+  fields : List((String, Json)),
+  path : String
+) : Result(Expr, CodecError) =
+  if kind == "unboxed-record" then
+    map_result(EUnboxedRecord, listf(fields, "fields", path, dec_named))
+  elif kind == "unboxed-field" then
+    es(fields, path, "expr", "name", EUnboxedField)
+  elif kind == "record" then
+    match str_field(fields, "name", path) of
+      Err(e) => Err(e)
+      Ok(n) =>
+        map_result(
+            \(fs) -> ERecord(n, fs),
+            listf(fields, "fields", path, dec_named),
+          )
+  elif kind == "record-update" then
+    match req(fields, "base", path, dec_expr) of
+      Err(e) => Err(e)
+      Ok(b) =>
+        match str_field(fields, "name", path) of
+          Err(e) => Err(e)
+          Ok(n) =>
+            map_result(
+                \(fs) -> ERecordUpdate(b, n, fs),
+                listf(fields, "fields", path, dec_named),
+              )
+  elif kind == "path-update" then
+    match req(fields, "base", path, dec_expr) of
+      Err(e) => Err(e)
+      Ok(b) =>
+        map_result(
+            \(us) -> EPathUpdate(b, us),
+            listf(fields, "updates", path, dec_pupdate),
+          )
+  elif kind == "handle" then
+    match req(fields, "body", path, dec_expr) of
+      Err(e) => Err(e)
+      Ok(b) =>
+        map_result(
+            \(arms) -> EHandle(b, arms, flagf(fields, "partial")),
+            listf(fields, "arms", path, dec_harm),
+          )
+  elif kind == "mask" then
+    se(fields, path, "effect", "body", EMask)
+  elif kind == "inst" then
+    match req(fields, "expr", path, dec_expr) of
+      Err(e) => Err(e)
+      Ok(b) =>
+        map_result(\(args) -> EInst(b, args), strsf(fields, "args", path))
+  elif kind == "index" then
+    e2(fields, path, "expr", "index", EIndex)
+  elif kind == "index-set" then
+    e3(fields, path, "expr", "index", "value", EIndexSet)
+  else
+    dec_expr_node4(kind, fields, path)
+
+fn dec_expr_node4(
+  kind : String,
+  fields : List((String, Json)),
+  path : String
+) : Result(Expr, CodecError) =
+  if kind == "ann" then
+    match req(fields, "expr", path, dec_expr) of
+      Err(e) => Err(e)
+      Ok(b) => map_result(\(t) -> EAnn(b, t), req(fields, "ty", path, dec_ty))
+  elif kind == "marker" then
+    map_result(EMarker, str_field(fields, "marker", path))
+  elif kind == "named-handle" then
+    match str_field(fields, "name", path) of
+      Err(e) => Err(e)
+      Ok(n) =>
+        match req(fields, "body", path, dec_expr) of
+          Err(e) => Err(e)
+          Ok(b) =>
+            map_result(
+                \(arms) -> ENamedHandle(n, b, arms),
+                listf(fields, "arms", path, dec_harm),
+              )
+  elif kind == "var-decl" then
+    s2e(fields, path, "name", "value", "body", EVarDecl)
+  elif kind == "assign" then
+    se(fields, path, "name", "value", EAssign)
+  elif kind == "index-assign" then
+    e3(fields, path, "expr", "index", "value", EIndexAssign)
+  elif kind == "throw" then
+    match str_field(fields, "name", path) of
+      Err(e) => Err(e)
+      Ok(n) =>
+        map_result(
+            \(args) -> EThrow(n, args),
+            listf(fields, "args", path, dec_expr),
+          )
+  elif kind == "try-catch" then
+    match req(fields, "body", path, dec_expr) of
+      Err(e) => Err(e)
+      Ok(b) =>
+        map_result(
+            \(arms) -> ETryCatch(b, arms),
+            listf(fields, "arms", path, dec_catch),
+          )
+  elif kind == "for" then
+    match str_field(fields, "binder", path) of
+      Err(e) => Err(e)
+      Ok(bnd) =>
+        match req(fields, "seq", path, dec_expr) of
+          Err(e) => Err(e)
+          Ok(seq) =>
+            match listf(fields, "quals", path, dec_qual) of
+              Err(e) => Err(e)
+              Ok(quals) =>
+                map_result(
+                    \(b) -> EFor(bnd, seq, quals, b),
+                    req(fields, "body", path, dec_expr),
+                  )
+  elif kind == "while" then
+    e2(fields, path, "cond", "body", EWhile)
+  else
+    dec_expr_node5(kind, fields, path)
+
+fn dec_expr_node5(
+  kind : String,
+  fields : List((String, Json)),
+  path : String
+) : Result(Expr, CodecError) =
+  if kind == "loop" then
+    e1(fields, path, "body", ELoop)
+  elif kind == "break" then
+    Ok(EBreak)
+  elif kind == "continue" then
+    Ok(EContinue)
+  elif kind == "return" then
+    e1(fields, path, "value", EReturn)
+  elif kind == "comprehension" then
+    match req(fields, "head", path, dec_expr) of
+      Err(e) => Err(e)
+      Ok(h) =>
+        match str_field(fields, "binder", path) of
+          Err(e) => Err(e)
+          Ok(bnd) =>
+            match req(fields, "seq", path, dec_expr) of
+              Err(e) => Err(e)
+              Ok(seq) =>
+                map_result(
+                    \(quals) -> EComp(h, bnd, seq, quals),
+                    listf(fields, "quals", path, dec_qual),
+                  )
+  elif kind == "default" then
+    e2(fields, path, "expr", "fallback", EDefault)
+  elif kind == "transact" then
+    e2(fields, path, "body", "fallback", ETransact)
+  elif kind == "probe" then
+    se(fields, path, "name", "body", EProbe)
+  elif kind == "opt-chain" then
+    es(fields, path, "expr", "name", EOptChain)
+  elif kind == "range" then
+    match listf(fields, "prefix", path, dec_expr) of
+      Err(e) => Err(e)
+      Ok(prefix) =>
+        map_result(
+            \(e) -> ERange(prefix, e),
+            req(fields, "end", path, dec_expr),
+          )
+  else
+    dec_expr_node6(kind, fields, path)
+
+fn dec_expr_node6(
+  kind : String,
+  fields : List((String, Json)),
+  path : String
+) : Result(Expr, CodecError) =
+  if kind == "compose" then
+    match str_field(fields, "dir", path) of
+      Err(e) => Err(e)
+      Ok(dir) => e2(fields, path, "lhs", "rhs", \(l, r) -> ECompose(dir, l, r))
+  elif kind == "read-path" then
+    match req(fields, "base", path, dec_expr) of
+      Err(e) => Err(e)
+      Ok(b) =>
+        map_result(
+            \(steps) -> EReadPath(b, steps),
+            listf(fields, "path", path, dec_pstep),
+          )
+  else
+    Err(
+        CodecError {
+          path = "{path}.kind",
+          reason = "unknown expression kind `{kind}`"
+        },
+      )
+
+fn dec_arm(j : Json, path : String) : Result(Arm, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match req(fields, "pat", path, dec_pat) of
+        Err(e) => Err(e)
+        Ok(pat) =>
+          match opt(fields, "guard", path, dec_expr) of
+            Err(e) => Err(e)
+            Ok(guard) =>
+              map_result(
+                  \(body) -> Arm { pat = pat, guard = guard, body = body },
+                  req(fields, "body", path, dec_expr),
+                )
+
+fn dec_harm(j : Json, path : String) : Result(HandlerArm, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "kind", path) of
+        Err(e) => Err(e)
+        Ok(kind) =>
+          if kind == "return" then
+            match str_field(fields, "binder", path) of
+              Err(e) => Err(e)
+              Ok(b) =>
+                map_result(
+                    \(body) -> HReturn(b, body),
+                    req(fields, "body", path, dec_expr),
+                  )
+          elif kind == "op" then
+            match str_field(fields, "op", path) of
+              Err(e) => Err(e)
+              Ok(op) =>
+                match strsf(fields, "params", path) of
+                  Err(e) => Err(e)
+                  Ok(ps) =>
+                    match str_field(fields, "resume", path) of
+                      Err(e) => Err(e)
+                      Ok(rk) =>
+                        map_result(
+                            \(body) -> HOp(op, ps, rk, body),
+                            req(fields, "body", path, dec_expr),
+                          )
+          elif kind == "once" then
+            match str_field(fields, "op", path) of
+              Err(e) => Err(e)
+              Ok(op) =>
+                match strsf(fields, "params", path) of
+                  Err(e) => Err(e)
+                  Ok(ps) =>
+                    map_result(
+                        \(body) -> HOnce(op, ps, body),
+                        req(fields, "body", path, dec_expr),
+                      )
+          elif kind == "val" then
+            match str_field(fields, "name", path) of
+              Err(e) => Err(e)
+              Ok(n) =>
+                map_result(
+                    \(body) -> HVal(n, body),
+                    req(fields, "body", path, dec_expr),
+                  )
+          elif kind == "never" then
+            match str_field(fields, "op", path) of
+              Err(e) => Err(e)
+              Ok(op) =>
+                match strsf(fields, "params", path) of
+                  Err(e) => Err(e)
+                  Ok(ps) =>
+                    map_result(
+                        \(body) -> HNever(op, ps, body),
+                        req(fields, "body", path, dec_expr),
+                      )
+          else
+            Err(
+                CodecError {
+                  path = "{path}.kind",
+                  reason = "unknown handler arm kind `{kind}`"
+                },
+              )
+
+fn dec_catch(j : Json, path : String) : Result(CatchArm, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "name", path) of
+        Err(e) => Err(e)
+        Ok(n) =>
+          match strsf(fields, "binders", path) of
+            Err(e) => Err(e)
+            Ok(bs) =>
+              match req(fields, "body", path, dec_expr) of
+                Err(e) => Err(e)
+                Ok(body) =>
+                  map_result(
+                      \(s) -> CatchArm { name = n, binders = bs, body = body, span = s },
+                      req(fields, "span", path, span_of_json),
+                    )
+
+fn dec_qual(j : Json, path : String) : Result(Qual, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "kind", path) of
+        Err(e) => Err(e)
+        Ok(kind) =>
+          if kind == "guard" then
+            map_result(QGuard, req(fields, "expr", path, dec_expr))
+          elif kind == "bind" then
+            match str_field(fields, "name", path) of
+              Err(e) => Err(e)
+              Ok(n) =>
+                map_result(
+                    \(v) -> QBind(n, v),
+                    req(fields, "value", path, dec_expr),
+                  )
+          else
+            Err(
+                CodecError {
+                  path = "{path}.kind",
+                  reason = "unknown qualifier kind `{kind}`"
+                },
+              )
+
+fn dec_pstep(j : Json, path : String) : Result(PathStep, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "kind", path) of
+        Err(e) => Err(e)
+        Ok(kind) =>
+          if kind == "field" then
+            map_result(PSField, str_field(fields, "name", path))
+          elif kind == "each" then
+            Ok(PSEach)
+          elif kind == "case" then
+            map_result(PSCase, str_field(fields, "name", path))
+          elif kind == "index" then
+            map_result(PSIndex, req(fields, "expr", path, dec_expr))
+          elif kind == "where" then
+            map_result(PSWhere, req(fields, "expr", path, dec_expr))
+          else
+            Err(
+                CodecError {
+                  path = "{path}.kind",
+                  reason = "unknown path step kind `{kind}`"
+                },
+              )
+
+fn dec_pop(j : Json, path : String) : Result(PathOp, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "kind", path) of
+        Err(e) => Err(e)
+        Ok(kind) =>
+          if kind == "set" then
+            map_result(POSet, req(fields, "expr", path, dec_expr))
+          elif kind == "modify" then
+            map_result(POModify, req(fields, "expr", path, dec_expr))
+          else
+            Err(
+                CodecError {
+                  path = "{path}.kind",
+                  reason = "unknown path op kind `{kind}`"
+                },
+              )
+
+fn dec_pupdate(j : Json, path : String) : Result(PathUpdate, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match listf(fields, "path", path, dec_pstep) of
+        Err(e) => Err(e)
+        Ok(steps) =>
+          map_result(
+              \(op) -> PathUpdate { path = steps, op = op },
+              req(fields, "op", path, dec_pop),
+            )
+
+fn dec_pat(j : Json, path : String) : Result(Sp(Pat), CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "kind", path) of
+        Err(e) => Err(e)
+        Ok(kind) =>
+          match req(fields, "span", path, span_of_json) of
+            Err(e) => Err(e)
+            Ok(span) =>
+              match dec_pat_node(kind, fields, path) of
+                Err(e) => Err(e)
+                Ok(node) =>
+                  Ok(
+                      Sp {
+                        node = node,
+                        span = span,
+                        synth = flagf(fields, "synth")
+                      },
+                    )
+
+fn dec_pfield(j : Json, path : String) : Result(PatField, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "name", path) of
+        Err(e) => Err(e)
+        Ok(n) =>
+          map_result(
+              \(p) -> PatField { name = n, pat = p },
+              req(fields, "pat", path, dec_pat),
+            )
+
+fn dec_pat_node(
+  kind : String,
+  fields : List((String, Json)),
+  path : String
+) : Result(Pat, CodecError) =
+  if kind == "wild" then
+    Ok(PWild)
+  elif kind == "var" then
+    map_result(PVar, str_field(fields, "name", path))
+  elif kind == "int" then
+    map_result(
+        \(v) -> PInt(v, dec_suffix(fields)),
+        str_field(fields, "value", path),
+      )
+  elif kind == "float" then
+    map_result(PFloat, str_field(fields, "value", path))
+  elif kind == "char" then
+    map_result(PChar, str_field(fields, "value", path))
+  else
+    dec_pat_node2(kind, fields, path)
+
+fn dec_pat_node2(
+  kind : String,
+  fields : List((String, Json)),
+  path : String
+) : Result(Pat, CodecError) =
+  if kind == "bool" then
+    map_result(PBool, req(fields, "value", path, as_bool))
+  elif kind == "ctor" then
+    match str_field(fields, "name", path) of
+      Err(e) => Err(e)
+      Ok(n) =>
+        map_result(
+            \(args) -> PCtor(n, args),
+            listf(fields, "args", path, dec_pat),
+          )
+  elif kind == "tuple" then
+    map_result(PTuple, listf(fields, "items", path, dec_pat))
+  elif kind == "record" then
+    match str_field(fields, "name", path) of
+      Err(e) => Err(e)
+      Ok(n) =>
+        map_result(
+            \(fs) -> PRecord(n, fs, flagf(fields, "rest")),
+            listf(fields, "fields", path, dec_pfield),
+          )
+  else
+    Err(
+        CodecError {
+          path = "{path}.kind",
+          reason = "unknown pattern kind `{kind}`"
+        },
+      )
+
+fn dec_ctor(j : Json, path : String) : Result(Ctor, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "name", path) of
+        Err(e) => Err(e)
+        Ok(n) =>
+          match jget(fields, "fields") of
+            Some(_v) =>
+              map_result(
+                  \(fs) -> Ctor { name = n, shape = CRecord(fs) },
+                  listf(fields, "fields", path, dec_cfield),
+                )
+            None =>
+              map_result(
+                  \(args) -> Ctor { name = n, shape = CPositional(args) },
+                  listf(fields, "args", path, dec_ty),
+                )
+
+fn dec_deriving(j : Json, path : String) : Result(Deriving, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "name", path) of
+        Err(e) => Err(e)
+        Ok(n) =>
+          map_result(
+              \(s) -> Deriving { name = n, span = s },
+              req(fields, "span", path, span_of_json),
+            )
+
+fn dec_method(j : Json, path : String) : Result(Method, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "name", path) of
+        Err(e) => Err(e)
+        Ok(n) =>
+          map_result(
+              \(t) -> Method { name = n, ty = t },
+              req(fields, "ty", path, dec_ty),
+            )
+
+fn dec_effop(j : Json, path : String) : Result(EffOp, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "name", path) of
+        Err(e) => Err(e)
+        Ok(n) =>
+          match listf(fields, "params", path, dec_ty) of
+            Err(e) => Err(e)
+            Ok(ps) =>
+              match req(fields, "ret", path, dec_ty) of
+                Err(e) => Err(e)
+                Ok(ret) =>
+                  map_result(
+                      \(g) -> EffOp { name = n, params = ps, ret = ret, grade = g },
+                      opt(fields, "grade", path, as_str),
+                    )
+
+fn dec_rungfield(j : Json, path : String) : Result(RungField, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "name", path) of
+        Err(e) => Err(e)
+        Ok(n) =>
+          match req(fields, "ty", path, dec_ty) of
+            Err(e) => Err(e)
+            Ok(t) =>
+              map_result(
+                  \(d) -> RungField { name = n, ty = t, dflt = d },
+                  opt(fields, "default", path, dec_expr),
+                )
+
+fn dec_rung(j : Json, path : String) : Result(Rung, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "name", path) of
+        Err(e) => Err(e)
+        Ok(n) =>
+          match opt(fields, "base", path, as_str) of
+            Err(e) => Err(e)
+            Ok(base) =>
+              match listf(fields, "fields", path, dec_rungfield) of
+                Err(e) => Err(e)
+                Ok(rfs) =>
+                  match opt(fields, "frozen", path, as_str) of
+                    Err(e) => Err(e)
+                    Ok(frozen) =>
+                      map_result(
+                          \(s) -> Rung { name = n, base = base, fields = rfs, frozen = frozen, span = s },
+                          req(fields, "span", path, span_of_json),
+                        )
+
+fn dec_converter(j : Json, path : String) : Result(Converter, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "dir", path) of
+        Err(e) => Err(e)
+        Ok(dir) =>
+          match str_field(fields, "from", path) of
+            Err(e) => Err(e)
+            Ok(from) =>
+              match str_field(fields, "to", path) of
+                Err(e) => Err(e)
+                Ok(to) =>
+                  match req(fields, "base", path, dec_expr) of
+                    Err(e) => Err(e)
+                    Ok(base) =>
+                      match (listf(fields, "overrides", path, dec_named)) of
+                        Err(e) => Err(e)
+                        Ok(ovs) =>
+                          match strsf(fields, "drop_loss", path) of
+                            Err(e) => Err(e)
+                            Ok(drops) =>
+                              map_result(
+                                  \(s) -> Converter { dir = dir, from = from, to = to, base = base, overrides = ovs, drop_loss = drops, span = s },
+                                  req(fields, "span", path, span_of_json),
+                                )
+
+fn dec_mdir(j : Json, path : String) : Result(MigrationDir, CodecError) =
+  match j of
+    JStr(s) =>
+      if s == "auto" then
+        Ok(DAuto)
+      else
+        Err(
+            CodecError {
+              path = path,
+              reason = "unknown migration direction `{s}`"
+            },
+          )
+    _ => map_result(DExpr, dec_expr(j, path))
+
+fn dec_mroute(j : Json, path : String) : Result(MigrationRoute, CodecError) =
+  match j of
+    JStr(s) =>
+      if s == "auto" then
+        Ok(MAuto)
+      else
+        Err(
+            CodecError {
+              path = path,
+              reason = "unknown migration route `{s}`"
+            },
+          )
+    JObj(fields) =>
+      match req(fields, "upgrade", path, dec_mdir) of
+        Err(e) => Err(e)
+        Ok(up) =>
+          map_result(
+              \(down) -> MVersion(up, down),
+              req(fields, "downgrade", path, dec_mdir),
+            )
+    _ => Err(CodecError { path = path, reason = "expected a migration route" })
+
+fn dec_migration(j : Json, path : String) : Result(Migration, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "from", path) of
+        Err(e) => Err(e)
+        Ok(from) =>
+          match str_field(fields, "to", path) of
+            Err(e) => Err(e)
+            Ok(to) =>
+              match req(fields, "route", path, dec_mroute) of
+                Err(e) => Err(e)
+                Ok(route) =>
+                  map_result(
+                      \(s) -> Migration { from = from, to = to, route = route, span = s },
+                      req(fields, "span", path, span_of_json),
+                    )
+
+fn dec_decl_fields(
+  fields : List((String, Json)),
+  path : String
+) : Result(Decl, CodecError) =
+  match str_field(fields, "name", path) of
+    Err(e) => Err(e)
+    Ok(name) =>
+      match listf(fields, "params", path, dec_param) of
+        Err(e) => Err(e)
+        Ok(params) =>
+          match opt(fields, "ret", path, dec_ty) of
+            Err(e) => Err(e)
+            Ok(ret) =>
+              match opt(fields, "effects", path, dec_row) of
+                Err(e) => Err(e)
+                Ok(eff) =>
+                  match (listf(fields, "constraints", path, dec_constraint)) of
+                    Err(e) => Err(e)
+                    Ok(cons) =>
+                      match req(fields, "body", path, dec_expr) of
+                        Err(e) => Err(e)
+                        Ok(body) =>
+                          match (listf(fields, "wheres", path, dec_named)) of
+                            Err(e) => Err(e)
+                            Ok(wheres) =>
+                              match (listf(fields, "requires", path, dec_expr)) of
+                                Err(e) => Err(e)
+                                Ok(reqs) =>
+                                  match (listf(fields, "ensures", path, dec_ensure)) of
+                                    Err(e) => Err(e)
+                                    Ok(enss) =>
+                                      match (opt(fields, "decreases", path, dec_expr)) of
+                                        Err(e) => Err(e)
+                                        Ok(measure) =>
+                                          match (opt(fields, "total", path, as_str)) of
+                                            Err(e) => Err(e)
+                                            Ok(totality) =>
+                                              match (opt(fields, "fip", path, as_str)) of
+                                                Err(e) => Err(e)
+                                                Ok(fipw) =>
+                                                  map_result(
+                                                      \(sp) -> Decl { name = name, params = params, ret = ret, eff = eff, constraints = cons, body = body, wheres = wheres, reqs = reqs, enss = enss, measure = measure, is_test = flagf(fields, "test"), totality = totality, fip_word = fipw, is_replayable = flagf(fields, "replayable"), is_no_alloc = flagf(fields, "no_alloc"), span = sp },
+                                                      req(
+                                                          fields,
+                                                          "span",
+                                                          path,
+                                                          span_of_json,
+                                                        ),
+                                                    )
+
+fn dec_decl(j : Json, path : String) : Result(Decl, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) => dec_decl_fields(fields, path)
+
+fn dec_item(j : Json, path : String) : Result(Item, CodecError) =
+  match as_obj(j, path) of
+    Err(e) => Err(e)
+    Ok(fields) =>
+      match str_field(fields, "kind", path) of
+        Err(e) => Err(e)
+        Ok(kind) => dec_item_kind(kind, fields, path)
+
+fn dec_item_kind(
+  kind : String,
+  fields : List((String, Json)),
+  path : String
+) : Result(Item, CodecError) =
+  if kind == "import" then
+    dec_import(fields, path)
+  elif kind == "data" || kind == "newtype" then
+    dec_data(kind, fields, path)
+  elif kind == "effect" then
+    dec_effect(fields, path)
+  elif kind == "error" then
+    dec_error(fields, path)
+  elif kind == "effect-alias" then
+    dec_effalias(fields, path)
+  elif kind == "type-synonym" then
+    dec_synonym(fields, path)
+  else
+    dec_item_kind2(kind, fields, path)
+
+fn dec_item_kind2(
+  kind : String,
+  fields : List((String, Json)),
+  path : String
+) : Result(Item, CodecError) =
+  if kind == "class" then
+    dec_class(fields, path)
+  elif kind == "instance" then
+    dec_instance(fields, path)
+  elif kind == "canonical" then
+    dec_canonical(fields, path)
+  elif kind == "pattern" then
+    dec_pattern(fields, path)
+  elif kind == "stable" then
+    dec_stable(fields, path)
+  elif kind == "fn" || kind == "const" || kind == "logic-fn" then
+    dec_fndecl(kind, fields, path)
+  else
+    Err(
+        CodecError {
+          path = "{path}.kind",
+          reason = "unknown item kind `{kind}`"
+        },
+      )
+
+fn dec_import(
+  fields : List((String, Json)),
+  path : String
+) : Result(Item, CodecError) =
+  match req(fields, "path", path, as_strs) of
+    Err(e) => Err(e)
+    Ok(p) =>
+      match opt(fields, "alias", path, as_str) of
+        Err(e) => Err(e)
+        Ok(ma) =>
+          match opt(fields, "names", path, as_strs) of
+            Err(e) => Err(e)
+            Ok(names) =>
+              map_result(
+                  \(s) -> IImport { path = p, mod_alias = ma, names = names, glob = flagf(fields, "glob"), reexport = flagf(fields, "reexport"), span = s },
+                  req(fields, "span", path, span_of_json),
+                )
+
+fn dec_data(
+  kind : String,
+  fields : List((String, Json)),
+  path : String
+) : Result(Item, CodecError) =
+  match str_field(fields, "name", path) of
+    Err(e) => Err(e)
+    Ok(name) =>
+      match strsf(fields, "params", path) of
+        Err(e) => Err(e)
+        Ok(params) =>
+          match listf(fields, "param_kinds", path, dec_kind) of
+            Err(e) => Err(e)
+            Ok(pks) =>
+              match listf(fields, "ctors", path, dec_ctor) of
+                Err(e) => Err(e)
+                Ok(ctors) =>
+                  match listf(fields, "deriving", path, dec_deriving) of
+                    Err(e) => Err(e)
+                    Ok(derivs) =>
+                      match opt(fields, "vis", path, as_str) of
+                        Err(e) => Err(e)
+                        Ok(vis) =>
+                          match (opt(fields, "deprecated", path, as_str)) of
+                            Err(e) => Err(e)
+                            Ok(dep) =>
+                              map_result(
+                                  \(s) -> IData { nt = kind == "newtype", name = name, params = params, param_kinds = pks, ctors = ctors, derivs = derivs, span = s, vis = vis, dep = dep },
+                                  req(fields, "span", path, span_of_json),
+                                )
+
+fn dec_effect(
+  fields : List((String, Json)),
+  path : String
+) : Result(Item, CodecError) =
+  match str_field(fields, "name", path) of
+    Err(e) => Err(e)
+    Ok(name) =>
+      match strsf(fields, "params", path) of
+        Err(e) => Err(e)
+        Ok(params) =>
+          match listf(fields, "ops", path, dec_effop) of
+            Err(e) => Err(e)
+            Ok(ops) =>
+              match opt(fields, "vis", path, as_str) of
+                Err(e) => Err(e)
+                Ok(vis) =>
+                  match opt(fields, "deprecated", path, as_str) of
+                    Err(e) => Err(e)
+                    Ok(dep) =>
+                      map_result(
+                          \(s) -> IEffect { name = name, params = params, ops = ops, span = s, vis = vis, dep = dep },
+                          req(fields, "span", path, span_of_json),
+                        )
+
+fn dec_error(
+  fields : List((String, Json)),
+  path : String
+) : Result(Item, CodecError) =
+  match str_field(fields, "name", path) of
+    Err(e) => Err(e)
+    Ok(name) =>
+      match listf(fields, "params", path, dec_ty) of
+        Err(e) => Err(e)
+        Ok(params) =>
+          match opt(fields, "vis", path, as_str) of
+            Err(e) => Err(e)
+            Ok(vis) =>
+              match opt(fields, "deprecated", path, as_str) of
+                Err(e) => Err(e)
+                Ok(dep) =>
+                  map_result(
+                      \(s) -> IError { name = name, params = params, span = s, vis = vis, dep = dep },
+                      req(fields, "span", path, span_of_json),
+                    )
+
+fn dec_effalias(
+  fields : List((String, Json)),
+  path : String
+) : Result(Item, CodecError) =
+  match str_field(fields, "name", path) of
+    Err(e) => Err(e)
+    Ok(name) =>
+      match listf(fields, "labels", path, dec_efflabel) of
+        Err(e) => Err(e)
+        Ok(labels) =>
+          match opt(fields, "vis", path, as_str) of
+            Err(e) => Err(e)
+            Ok(vis) =>
+              match opt(fields, "deprecated", path, as_str) of
+                Err(e) => Err(e)
+                Ok(dep) =>
+                  map_result(
+                      \(s) -> IEffAlias { name = name, labels = labels, span = s, vis = vis, dep = dep },
+                      req(fields, "span", path, span_of_json),
+                    )
+
+fn dec_synonym(
+  fields : List((String, Json)),
+  path : String
+) : Result(Item, CodecError) =
+  match str_field(fields, "name", path) of
+    Err(e) => Err(e)
+    Ok(name) =>
+      match strsf(fields, "params", path) of
+        Err(e) => Err(e)
+        Ok(params) =>
+          match req(fields, "ty", path, dec_ty) of
+            Err(e) => Err(e)
+            Ok(ty) =>
+              match opt(fields, "vis", path, as_str) of
+                Err(e) => Err(e)
+                Ok(vis) =>
+                  match opt(fields, "deprecated", path, as_str) of
+                    Err(e) => Err(e)
+                    Ok(dep) =>
+                      map_result(
+                          \(s) -> ISynonym { name = name, params = params, ty = ty, span = s, vis = vis, dep = dep },
+                          req(fields, "span", path, span_of_json),
+                        )
+
+fn dec_class(
+  fields : List((String, Json)),
+  path : String
+) : Result(Item, CodecError) =
+  match str_field(fields, "name", path) of
+    Err(e) => Err(e)
+    Ok(name) =>
+      match str_field(fields, "param", path) of
+        Err(e) => Err(e)
+        Ok(param) =>
+          match strsf(fields, "supers", path) of
+            Err(e) => Err(e)
+            Ok(supers) =>
+              match listf(fields, "methods", path, dec_method) of
+                Err(e) => Err(e)
+                Ok(methods) =>
+                  match opt(fields, "vis", path, as_str) of
+                    Err(e) => Err(e)
+                    Ok(vis) =>
+                      match opt(fields, "deprecated", path, as_str) of
+                        Err(e) => Err(e)
+                        Ok(dep) =>
+                          map_result(
+                              \(s) -> IClass { name = name, param = param, supers = supers, methods = methods, span = s, vis = vis, dep = dep },
+                              req(fields, "span", path, span_of_json),
+                            )
+
+fn dec_instance(
+  fields : List((String, Json)),
+  path : String
+) : Result(Item, CodecError) =
+  match str_field(fields, "name", path) of
+    Err(e) => Err(e)
+    Ok(name) =>
+      match str_field(fields, "class", path) of
+        Err(e) => Err(e)
+        Ok(cls) =>
+          match req(fields, "head", path, dec_ty) of
+            Err(e) => Err(e)
+            Ok(head) =>
+              match listf(fields, "context", path, dec_constraint) of
+                Err(e) => Err(e)
+                Ok(ctx) =>
+                  match listf(fields, "methods", path, dec_decl) of
+                    Err(e) => Err(e)
+                    Ok(methods) =>
+                      map_result(
+                          \(s) -> IInstance { name = name, cls = cls, head = head, context = ctx, methods = methods, span = s },
+                          req(fields, "span", path, span_of_json),
+                        )
+
+fn dec_canonical(
+  fields : List((String, Json)),
+  path : String
+) : Result(Item, CodecError) =
+  match str_field(fields, "class", path) of
+    Err(e) => Err(e)
+    Ok(cls) =>
+      match req(fields, "head", path, dec_ty) of
+        Err(e) => Err(e)
+        Ok(head) =>
+          match str_field(fields, "name", path) of
+            Err(e) => Err(e)
+            Ok(name) =>
+              map_result(
+                  \(s) -> ICanonical { cls = cls, head = head, name = name, span = s },
+                  req(fields, "span", path, span_of_json),
+                )
+
+fn dec_pattern(
+  fields : List((String, Json)),
+  path : String
+) : Result(Item, CodecError) =
+  match str_field(fields, "name", path) of
+    Err(e) => Err(e)
+    Ok(name) =>
+      match strsf(fields, "params", path) of
+        Err(e) => Err(e)
+        Ok(params) =>
+          match str_field(fields, "for", path) of
+            Err(e) => Err(e)
+            Ok(forty) =>
+              match req(fields, "view", path, dec_expr) of
+                Err(e) => Err(e)
+                Ok(viewfn) =>
+                  match opt(fields, "make", path, dec_expr) of
+                    Err(e) => Err(e)
+                    Ok(makefn) =>
+                      match opt(fields, "vis", path, as_str) of
+                        Err(e) => Err(e)
+                        Ok(vis) =>
+                          match (opt(fields, "deprecated", path, as_str)) of
+                            Err(e) => Err(e)
+                            Ok(dep) =>
+                              map_result(
+                                  \(s) -> IPattern { name = name, params = params, forty = forty, viewfn = viewfn, makefn = makefn, span = s, vis = vis, dep = dep },
+                                  req(fields, "span", path, span_of_json),
+                                )
+
+fn dec_stable(
+  fields : List((String, Json)),
+  path : String
+) : Result(Item, CodecError) =
+  match str_field(fields, "name", path) of
+    Err(e) => Err(e)
+    Ok(name) =>
+      match listf(fields, "rungs", path, dec_rung) of
+        Err(e) => Err(e)
+        Ok(rungs) =>
+          match listf(fields, "converters", path, dec_converter) of
+            Err(e) => Err(e)
+            Ok(converters) =>
+              match listf(fields, "migrations", path, dec_migration) of
+                Err(e) => Err(e)
+                Ok(migrations) =>
+                  match opt(fields, "vis", path, as_str) of
+                    Err(e) => Err(e)
+                    Ok(vis) =>
+                      match opt(fields, "deprecated", path, as_str) of
+                        Err(e) => Err(e)
+                        Ok(dep) =>
+                          map_result(
+                              \(s) -> IStable { name = name, rungs = rungs, converters = converters, migrations = migrations, span = s, vis = vis, dep = dep },
+                              req(fields, "span", path, span_of_json),
+                            )
+
+fn dec_fndecl(
+  kind : String,
+  fields : List((String, Json)),
+  path : String
+) : Result(Item, CodecError) =
+  match dec_decl_fields(fields, path) of
+    Err(e) => Err(e)
+    Ok(decl) =>
+      match opt(fields, "vis", path, as_str) of
+        Err(e) => Err(e)
+        Ok(vis) =>
+          match opt(fields, "deprecated", path, as_str) of
+            Err(e) => Err(e)
+            Ok(dep) =>
+              Ok(IDecl { decl = decl, declkind = kind, vis = vis, dep = dep })
+
+-- | Decode a `prism-surface-syntax-v1` document from its exact bytes. A wrong
+-- or missing schema tag, malformed JSON, missing field, or invalid span is a
+-- structured `CodecError`, never a partial document.
+pub fn decode_surface(text : String) : Result(SurfaceDoc, CodecError) =
+  match decode(text) of
+    Err(e) => Err(CodecError { path = "$", reason = json_error_message(e) })
+    Ok(j) =>
+      match as_obj(j, "$") of
+        Err(e) => Err(e)
+        Ok(fields) =>
+          match str_field(fields, "schema", "$") of
+            Err(e) => Err(e)
+            Ok(schema) =>
+              if not(schema == surface_schema()) then
+                Err(
+                    CodecError {
+                      path = "$.schema",
+                      reason = "unsupported schema `{schema}`"
+                    },
+                  )
+              else
+                match str_field(fields, "compiler", "$") of
+                  Err(e) => Err(e)
+                  Ok(compiler) =>
+                    match req(fields, "source", "$", source_of_json) of
+                      Err(e) => Err(e)
+                      Ok(source) =>
+                        match req(fields, "items", "$", as_arr) of
+                          Err(e) => Err(e)
+                          Ok(items) =>
+                            match (decode_each(items, "$.items", 0, dec_item)) of
+                              Err(e) => Err(e)
+                              Ok(decoded) =>
+                                Ok(
+                                    SurfaceDoc {
+                                      schema = schema,
+                                      compiler = compiler,
+                                      source = source,
+                                      items = decoded
+                                    },
+                                  )

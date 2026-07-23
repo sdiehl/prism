@@ -1010,11 +1010,11 @@ fn restore(env: &mut TypeEnv, name: Sym, previous: Option<CoreType>) {
     }
 }
 
-// A W6a rewrite in a non-signalling Bind head may change its result witness
-// (most notably a nested loop body thunk from Unit to Int). W6b must carry
-// that witness through both the binder and every Var occurrence refreshed
-// from TypeEnv; retaining the original binder would make the continuation
-// internally inconsistent even though it does not itself signal control.
+// Rewriting a non-signalling Bind head may change its result witness, most
+// notably when a nested loop body thunk changes from Unit to Int. Carry that
+// witness through both the binder and every Var occurrence refreshed from
+// TypeEnv; retaining the original binder would make the continuation internally
+// inconsistent even though it does not itself signal control.
 fn retype_bind_binder(head: &TypedComp, binder: &TypedBinder) -> TypedBinder {
     if head.sig().result() == binder.ty() {
         binder.clone()

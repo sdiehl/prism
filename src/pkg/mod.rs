@@ -195,7 +195,7 @@ pub fn package_source_roots(
             DepSource::Path(_) => {}
             DepSource::Hash(hex) => {
                 let entry = locked_dependency(lock, dep)?;
-                if entry.hash != *hex {
+                if entry.hash.as_str() != hex {
                     return Err(Error::ResolvePackage(format!(
                         "dependency `{}` is pinned to {} in prism.lock but {} in prism.toml",
                         dep.name, entry.hash, hex

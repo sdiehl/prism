@@ -11,7 +11,7 @@
 # do not, so those rows always name the functions to keep. The `llvm` phase is
 # dumped at `-O0` so a small illustrative function survives (the backend
 # optimizer would otherwise inline and constant-fold it away), and only the named
-# `define @prism_<fn>` blocks are kept, dropping the module header and the
+# `define @prismfn_<fn>` blocks are kept, dropping the module header and the
 # content-addressed kont tables (which embed the stdlib root hash and would churn
 # on every stdlib edit). Output is normalized to no trailing blank lines and a
 # single final newline so the committed files stay byte-stable and idempotent.
@@ -40,12 +40,12 @@ extract() {
   '
 }
 
-# Print the `define @prism_NAME(...) { .. }` blocks for the requested names, in
+# Print the `define @prismfn_NAME(...) { .. }` blocks for the requested names, in
 # module order, each preceded by its `; Function Attrs:` comment. Names are the
-# Prism function names; the emitted symbol is `@prism_<name>`.
+# Prism function names; the emitted symbol is `@prismfn_<name>`.
 extract_llvm() {
   awk -v names="$1" '
-    BEGIN { n = split(names, a, ","); for (i = 1; i <= n; i++) want["@prism_" a[i]] = 1 }
+    BEGIN { n = split(names, a, ","); for (i = 1; i <= n; i++) want["@prismfn_" a[i]] = 1 }
     inblk { print; if ($0 ~ /^}/) inblk = 0; next }
     /^; Function Attrs:/ { pend = $0; next }
     /^define / {

@@ -1,14 +1,13 @@
-//! The registry-only SIMD operation set: names, identity, and shape.
+//! The SIMD operation registry: names, identity, and shape.
 //!
 //! Each row is the single home for a vector op's stable enum variant, surface
-//! name, content-hash tag, append-only wire index, arity, and lane type. The
-//! elaborator, backends, and interpreter do not recognize these operations, so
-//! programs cannot execute them. Tests freeze the hash tags and require the wire
-//! indices to be dense and unique.
+//! name, content-hash tag, append-only wire index, arity, and lane type; the
+//! wired builtins mirror these rows for execution. Tests freeze the hash tags
+//! and require the wire indices to be dense and unique.
 //!
-//! The op set is the SSE2-compatible 128-bit baseline only: two f64 lanes or two
-//! i64 lanes per vector (`Repr::Vec128`, two words). It excludes wider vectors,
-//! runtime CPU dispatch, and float32 lanes.
+//! The op set is the SSE2-compatible 128-bit vector (`Repr::Vec128`, two
+//! words) in four lane interpretations: two f64/i64 lanes or four f32/i32
+//! lanes. It excludes wider vectors and runtime CPU dispatch.
 
 /// The 128-bit lane interpretation of a vector operand.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,13 +16,29 @@ pub enum Lane {
     F64x2,
     /// Two 64-bit integers.
     I64x2,
+    /// Four IEEE-754 singles.
+    F32x4,
+    /// Four 32-bit integers.
+    I32x4,
 }
 
 impl Lane {
-    /// The lane count; the element width is always 64 bits in the baseline.
+    /// The lane count: two 64-bit or four 32-bit elements per 128-bit vector.
     #[must_use]
     pub const fn count(self) -> usize {
-        2
+        match self {
+            Self::F64x2 | Self::I64x2 => 2,
+            Self::F32x4 | Self::I32x4 => 4,
+        }
+    }
+
+    /// The element width in bits; `count * width` is always 128.
+    #[must_use]
+    pub const fn width_bits(self) -> usize {
+        match self {
+            Self::F64x2 | Self::I64x2 => 64,
+            Self::F32x4 | Self::I32x4 => 32,
+        }
     }
 }
 
@@ -101,6 +116,20 @@ simd_ops! {
     IAnd "simd_iand" "SimdIAnd" 11 2 I64x2;
     IOr "simd_ior" "SimdIOr" 12 2 I64x2;
     IXor "simd_ixor" "SimdIXor" 13 2 I64x2;
+    F32Splat "simd_fsplat4" "SimdF32Splat" 14 1 F32x4;
+    F32Extract "simd_fextract4" "SimdF32Extract" 15 2 F32x4;
+    F32Add "simd_fadd4" "SimdF32Add" 16 2 F32x4;
+    F32Sub "simd_fsub4" "SimdF32Sub" 17 2 F32x4;
+    F32Mul "simd_fmul4" "SimdF32Mul" 18 2 F32x4;
+    F32Min "simd_fmin4" "SimdF32Min" 19 2 F32x4;
+    F32Max "simd_fmax4" "SimdF32Max" 20 2 F32x4;
+    I32Splat "simd_isplat4" "SimdI32Splat" 21 1 I32x4;
+    I32Extract "simd_iextract4" "SimdI32Extract" 22 2 I32x4;
+    I32Add "simd_iadd4" "SimdI32Add" 23 2 I32x4;
+    I32Sub "simd_isub4" "SimdI32Sub" 24 2 I32x4;
+    I32And "simd_iand4" "SimdI32And" 25 2 I32x4;
+    I32Or "simd_ior4" "SimdI32Or" 26 2 I32x4;
+    I32Xor "simd_ixor4" "SimdI32Xor" 27 2 I32x4;
 }
 
 // Ops in wire order: the compile-time guard that the wire space is dense and
@@ -145,6 +174,20 @@ mod tests {
             (SimdOp::IAnd, "SimdIAnd"),
             (SimdOp::IOr, "SimdIOr"),
             (SimdOp::IXor, "SimdIXor"),
+            (SimdOp::F32Splat, "SimdF32Splat"),
+            (SimdOp::F32Extract, "SimdF32Extract"),
+            (SimdOp::F32Add, "SimdF32Add"),
+            (SimdOp::F32Sub, "SimdF32Sub"),
+            (SimdOp::F32Mul, "SimdF32Mul"),
+            (SimdOp::F32Min, "SimdF32Min"),
+            (SimdOp::F32Max, "SimdF32Max"),
+            (SimdOp::I32Splat, "SimdI32Splat"),
+            (SimdOp::I32Extract, "SimdI32Extract"),
+            (SimdOp::I32Add, "SimdI32Add"),
+            (SimdOp::I32Sub, "SimdI32Sub"),
+            (SimdOp::I32And, "SimdI32And"),
+            (SimdOp::I32Or, "SimdI32Or"),
+            (SimdOp::I32Xor, "SimdI32Xor"),
         ];
         assert_eq!(frozen.len(), SimdOp::ALL.len());
         for (op, tag) in frozen {
@@ -160,10 +203,13 @@ mod tests {
         }
     }
 
+    // Lane geometry is the invariant every consumer packs and unpacks by:
+    // count times width is one 128-bit vector for every lane interpretation.
     #[test]
-    fn baseline_lanes_are_two_wide() {
+    fn lanes_fill_the_vector() {
         for op in SimdOp::ALL {
-            assert_eq!(op.lane().count(), 2);
+            let lane = op.lane();
+            assert_eq!(lane.count() * lane.width_bits(), 128);
         }
     }
 }

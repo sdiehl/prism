@@ -455,14 +455,36 @@ impl Tc<'_> {
             applied.free_exist_row(&mut env_row_exs);
             super::env::collect_type_vars(&applied, &mut env_tvars);
         }
+        // Rigid variables that stay FREE in this scheme (the enclosing
+        // signature's variables, bound by the environment): a fresh binder must
+        // never reuse one of their spellings, or the binder would capture the
+        // free variable (`forall a` closing over an unrelated free `a` collapses
+        // two distinct signature variables into one). Empty for every top-level
+        // declaration, so the historical id-order naming below is byte-identical
+        // wherever it was already correct.
+        let mut rigid_seen = Vec::new();
+        free_type_vars_ordered(t, &mut rigid_seen);
+        let captured: BTreeSet<&str> = rigid_seen
+            .iter()
+            .filter(|v| env_tvars.contains(*v))
+            .map(|v| v.as_str())
+            .collect();
+        let mut next_name = 0usize;
+        let mut fresh_name = || loop {
+            let name = var_name(next_name);
+            next_name += 1;
+            if !captured.contains(name.as_str()) {
+                break name;
+            }
+        };
         // Generalized existentials keep their historical id-order naming, so an
         // all-existential scheme (every inferred function) prints byte-identically
         // to before rigid signature variables existed.
         let gen: Vec<u32> = exs.into_iter().filter(|e| !env_exs.contains(e)).collect();
         let mut names = Vec::new();
         let mut mapping = Vec::new();
-        for (i, e) in gen.iter().enumerate() {
-            let name = var_name(i);
+        for e in &gen {
+            let name = fresh_name();
             mapping.push((*e, name.clone()));
             names.push(name);
         }
@@ -472,11 +494,13 @@ impl Tc<'_> {
         // after the existentials, in first-appearance order. A fully-annotated
         // polymorphic function has no existentials, so its variables are named
         // `a, b, ...` left to right, exactly as the all-existential path named them.
-        let mut rigid_seen = Vec::new();
-        free_type_vars_ordered(t, &mut rigid_seen);
         let mut rigids = Vec::new();
-        for v in rigid_seen.into_iter().filter(|v| !env_tvars.contains(v)) {
-            let name = var_name(names.len());
+        for v in rigid_seen
+            .iter()
+            .copied()
+            .filter(|v| !env_tvars.contains(v))
+        {
+            let name = fresh_name();
             rigids.push((v, name.clone()));
             names.push(name);
         }

@@ -1,0 +1,233 @@
+-- | Spectra: typed Prism presentations lowered to deterministic Typst.
+
+import Layout as L
+
+import Theme as Themes
+
+import Code as SourceCode
+
+import Backend as TypstBackend
+
+import Backend (TypstDocument)
+
+import Layout (Align, Left, Center, Right, Inline, Plain, Emphasis, Strong, InlineCode, Link, Colored, TextStyle, Pict, Empty, Text, CodeBlock, Image, Rectangle, Row, Column, Overlay, Inset, Fit, Fragment, RawTypst)
+
+import Theme (Theme)
+
+import Data.List (map, reverse, foldl, append)
+
+import Data.Foldable (length)
+
+import Data.String (str_join)
+
+import Json (Json, JObj, JArr, JStr, JInt, encode)
+
+pub type Metadata = Metadata {
+  title: String,
+  author: String,
+  subject: String
+} deriving (Eq, Show)
+
+pub type Slide = Slide {
+  title: Option(String),
+  body: Pict,
+  notes: List(String)
+} deriving (Eq, Show)
+
+pub type Deck = Deck {
+  metadata: Metadata,
+  theme: Theme,
+  slides: List(Slide)
+} deriving (Eq, Show)
+
+-- The facade owns forwarding definitions for authoring values. This keeps
+-- package consumers independent of internal module names during native linking;
+-- users who need raw constructors can import Layout explicitly.
+pub fn text(s : String) : Pict = L.text(s)
+
+pub fn rich_text(xs : List(Inline)) : Pict = L.rich_text(xs)
+
+pub fn para(xs : List(Inline)) : Pict = L.para(xs)
+
+pub fn plain(s : String) : Inline = Plain(s)
+
+pub fn emphasis(xs : List(Inline)) : Inline = Emphasis(xs)
+
+pub fn strong(xs : List(Inline)) : Inline = Strong(xs)
+
+pub fn link(url : String, xs : List(Inline)) : Inline = Link(url, xs)
+
+pub fn colored(name : String, xs : List(Inline)) : Inline = Colored(name, xs)
+
+pub fn item_text(xs : List(Inline)) : Pict = L.item_text(xs)
+
+pub fn item(s : String) : Pict = L.item(s)
+
+pub fn row(gap : Int, children : List(Pict)) : Pict = L.row(gap, children)
+
+pub fn column(gap : Int, children : List(Pict)) : Pict = L.column(gap, children)
+
+pub fn centered(gap : Int, children : List(Pict)) : Pict = L.centered(gap, children)
+
+pub fn overlay(children : List(Pict)) : Pict = L.overlay(children)
+
+pub fn inset(all : Int, child : Pict) : Pict = L.inset(all, child)
+
+pub fn raw_typst(source : String) : Pict = L.raw_typst(source)
+
+pub fn code_block(language : String, source : String) : Pict =
+  SourceCode.code_block(language, source)
+
+pub fn prism_code(source : String) : Pict = SourceCode.prism_code(source)
+
+pub fn inline_code(source : String) : Inline = SourceCode.inline_code(source)
+
+pub let prism_theme : Theme = Themes.prism_theme
+
+pub let paper_theme : Theme = Themes.paper_theme
+
+pub let prism_dark_theme : Theme = Themes.prism_dark_theme
+
+pub fn max_stage(p : Pict) : Int = TypstBackend.max_stage(p)
+
+pub fn pict_assets(p : Pict) : List(String) = TypstBackend.pict_assets(p)
+
+pub fn render_pict(p : Pict, stage : Int, theme : Theme) : String =
+  TypstBackend.render_pict(p, stage, theme)
+
+pub fn render_slide_page(
+  title : Option(String),
+  body : Pict,
+  stage : Int,
+  theme : Theme
+) : String =
+  TypstBackend.render_slide_page(title, body, stage, theme)
+
+pub fn typst_prelude(theme : Theme) : String = TypstBackend.typst_prelude(theme)
+
+pub fn metadata(title : String, author : String) : Metadata =
+  Metadata { title = title, author = author, subject = "" }
+
+pub fn make_deck(meta : Metadata, theme : Theme, slides : List(Slide)) : Deck =
+  Deck { metadata = meta, theme = theme, slides = slides }
+
+pub fn title_slide(title : String, subtitle : String) : Slide =
+  Slide {
+    title = None,
+    body = centered(18, [
+        Text(TextStyle { size = 46, color = "accent", align = Center }, [
+            Plain(title),
+          ]),
+        Text(TextStyle { size = 24, color = "muted", align = Center }, [
+            Plain(subtitle),
+          ]),
+      ]),
+    notes = Nil
+  }
+
+pub fn titled_slide(title : String, body : Pict) : Slide =
+  Slide { title = Some(title), body = body, notes = Nil }
+
+-- Builder operations are ordinary typed effects. A reveal increments the
+-- logical stage attached to subsequent picts.
+pub effect SlideBuilder
+  place(Pict) : Unit
+  reveal(Unit) : Unit
+
+pub fn pict(p : Pict) : Unit ! {SlideBuilder} = place(p)
+
+pub fn reveal_next() : Unit ! {SlideBuilder} = reveal(())
+
+fn collect_slide(body : () -> Unit ! {SlideBuilder}) : List(Pict) =
+  let f =
+    handle body() with
+      place(p) resume k =>
+        \(stage, acc) -> k(())(stage, Cons(Fragment(stage, p), acc))
+      reveal(_) resume k => \(stage, acc) -> k(())(stage + 1, acc)
+      return _ => \(_stage, acc) -> reverse(acc)
+  f(0, Nil)
+
+pub effect DeckBuilder
+  add_slide(Slide) : Unit
+
+-- | Emit a built slide into the surrounding deck builder.
+pub fn slide(
+  title : String,
+  body : () -> Unit ! {SlideBuilder}
+) : Unit ! {DeckBuilder} =
+  add_slide(titled_slide(title, Column(14, Left, collect_slide(body))))
+
+-- | Emit a cover slide into the surrounding deck builder.
+pub fn cover(title : String, subtitle : String) : Unit ! {DeckBuilder} =
+  add_slide(title_slide(title, subtitle))
+
+-- | Run the effectful authoring surface into the same pure `Deck` used by the
+-- data-first API.
+pub fn deck(
+  meta : Metadata,
+  theme : Theme,
+  body : () -> Unit ! {DeckBuilder}
+) : Deck =
+  let f =
+    handle body() with
+      add_slide(s) resume k => \(acc) -> k(())(Cons(s, acc))
+      return _ =>
+        \(acc) -> Deck { metadata = meta, theme = theme, slides = reverse(acc) }
+  f(Nil)
+
+fn pages_for_slide(slide : Slide) : Int = 1 + max_stage(slide.body)
+
+fn page_count(slides : List(Slide)) : Int =
+  foldl(\(n, slide) -> n + pages_for_slide(slide), 0, slides)
+
+fn stages_for(slide : Slide, stage : Int, theme : Theme) : List(String) =
+  let page = render_slide_page(slide.title, slide.body, stage, theme)
+  if stage >= max_stage(slide.body) then
+    [page]
+  else
+    Cons(page, stages_for(slide, stage + 1, theme))
+
+fn render_slides(slides : List(Slide), theme : Theme) : List(String) =
+  match slides of
+    Nil => Nil
+    Cons(slide, rest) =>
+      append(stages_for(slide, 0, theme), render_slides(rest, theme))
+
+fn deck_assets(slides : List(Slide)) : List(String) =
+  match slides of
+    Nil => Nil
+    Cons(slide, rest) => append(pict_assets(slide.body), deck_assets(rest))
+
+-- | Pure, deterministic Typst lowering. Logical slides with reveals expand to
+-- one physical PDF page per stage.
+pub fn render_typst(d : Deck) : TypstDocument =
+  let pages = render_slides(d.slides, d.theme)
+  TypstDocument {
+    format = "spectra-typst-document-v1",
+    source = concat(
+        typst_prelude(d.theme),
+        concat(str_join("\n#pagebreak()\n", pages), "\n"),
+      ),
+    logical_slides = length(d.slides),
+    physical_pages = page_count(d.slides),
+    assets = deck_assets(d.slides)
+  }
+
+-- | The exact one-line envelope consumed by the `spectra` host frontend.
+pub fn envelope(d : Deck) : String =
+  let doc = render_typst(d)
+  encode(JObj([
+      ("format", JStr("spectra-envelope-v1")),
+      ("document_format", JStr(doc.format)),
+      ("source", JStr(doc.source)),
+      ("logical_slides", JInt(doc.logical_slides)),
+      ("physical_pages", JInt(doc.physical_pages)),
+      ("theme", JStr(d.theme.name)),
+      ("title", JStr(d.metadata.title)),
+      ("author", JStr(d.metadata.author)),
+      ("assets", JArr(map(\(asset) -> JStr(asset), doc.assets))),
+    ]))
+
+-- | Emit exactly one framed envelope. The host rejects any extra output, so a
+-- stray debug print can never be interpreted as Typst source.
+pub fn emit_deck(d : Deck) : Unit = println(concat("SPECTRA/1 ", envelope(d)))

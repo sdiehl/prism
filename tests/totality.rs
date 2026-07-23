@@ -1,4 +1,4 @@
-// Lane T (totality): `total fn` / `assume total fn` are contextual claims,
+// `total fn` / `assume total fn` are contextual claims,
 // checked for the trivial-acyclic and direct-structural fragments, erased before
 // executable Core. `total`/`assume` stay ordinary identifiers.
 
@@ -91,7 +91,7 @@ assume total fn ext(x : Int) : Int = x
     );
 }
 
-// -- T2: `decreases` ranking measure -------------------------------------------
+// -- `decreases` ranking measure -----------------------------------------------
 
 const RANKED: &str = "\
 total fn count(n: Int): Int

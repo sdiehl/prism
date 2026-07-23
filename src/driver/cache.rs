@@ -58,6 +58,15 @@ const RUNTIME_OBJECT_SCHEMA: &str = "prism-runtime-object-query-v1";
 #[cfg(feature = "native")]
 const IDENTITY_LINKED_RAW: &str = "linked-native-raw";
 #[cfg(feature = "native")]
+const CHECKED_VERDICT_QUERY: &str = "checked-verdict";
+#[cfg(feature = "native")]
+const CHECKED_VERDICT_SCHEMA: &str = "prism-checked-verdict-query-v1";
+// The stored output for a warm check hit: the verdict IS the artifact, so the
+// payload is one constant object (only warning-free passes are ever written);
+// the query row references it by its content hash like every other query.
+#[cfg(feature = "native")]
+const CHECKED_VERDICT_OK_PAYLOAD: &[u8] = b"checked-verdict-ok";
+#[cfg(feature = "native")]
 const IDENTITY_LINKED_SEMANTIC: &str = "linked-native-semantic";
 #[cfg(feature = "native")]
 const IDENTITY_WHOLE_BITCODE: &str = "whole-program-bitcode";
@@ -327,7 +336,7 @@ fn semantic_query_hasher(
         field(
             &mut h,
             pass_fingerprint(
-                cfg.opt,
+                cfg.opt(),
                 cfg.passes.as_ref(),
                 stage,
                 &cfg.disabled,
@@ -349,9 +358,102 @@ fn semantic_query_hasher(
 // collections), so equal terms always encode to equal bytes.
 #[cfg(feature = "native")]
 fn lowered_core_identity(core: &LoweredCore) -> Result<Vec<u8>, Error> {
-    serde_json::to_vec(&core.0).map_err(|error| {
+    serde_json::to_vec(&**core).map_err(|error| {
         Error::InternalInvariant(format!("serialize lowered core for cache key: {error}"))
     })
+}
+
+/// The durable warm no-op cutoff for `prism check`: a raw-source-digest keyed
+/// verdict, the check-side analogue of `linked-native.raw`.
+///
+/// A hit means this exact source tree, under this exact compiler,
+/// configuration, build mode, and stable-lock manifest, already passed a full
+/// validated check WITHOUT WARNINGS, so the warm run can return the identical
+/// (empty) success output with no parse or resolve. Only warning-free passes
+/// are recorded, mirroring the module-body cache's discipline: a run that
+/// prints diagnostics always re-runs, so cold and warm output are identical by
+/// construction, and a failing check is never cached at all.
+#[cfg(feature = "native")]
+pub(crate) struct CheckVerdictCache {
+    store: Store,
+    key: String,
+}
+
+#[cfg(feature = "native")]
+impl CheckVerdictCache {
+    /// `None` when the compiler cache is off (or the store is the opt-in
+    /// definition store), matching every other durable query's gate.
+    ///
+    /// # Errors
+    /// Fails only on a store-open failure.
+    pub(crate) fn for_check(
+        src: &str,
+        roots: &[Root],
+        lock_manifest: Option<&[u8]>,
+        cfg: &Config,
+    ) -> Result<Option<Self>, Error> {
+        if !cfg.flags.compiler_cache || cfg.flags.store {
+            return Ok(None);
+        }
+        let store = Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?;
+        let mut h = blake3::Hasher::new();
+        field(&mut h, CHECKED_VERDICT_SCHEMA.as_bytes());
+        field(&mut h, compiler_binary_fingerprint()?.as_bytes());
+        field(
+            &mut h,
+            cfg.artifact_identity_for("frontend")
+                .fingerprint()
+                .as_bytes(),
+        );
+        field(
+            &mut h,
+            source_inputs_digest(src, roots, cfg.flags.query_threads)?.as_bytes(),
+        );
+        // The build mode splits the key exactly as it splits the raw build key:
+        // test mode checks `test fn` bodies production mode never sees.
+        field(&mut h, &[u8::from(cfg.mode == super::BuildMode::Test)]);
+        // The stable-lock manifest gates single-file checks (a locked migration
+        // whose generated behavior drifted must fail), so its exact bytes join
+        // the key; its absence is a distinct state, not an empty manifest.
+        match lock_manifest {
+            Some(bytes) => field(&mut h, bytes),
+            None => field(&mut h, b"no-lock-manifest"),
+        }
+        Ok(Some(Self {
+            store,
+            key: h.finalize().to_hex().to_string(),
+        }))
+    }
+
+    fn ok_hash() -> String {
+        blake3::hash(CHECKED_VERDICT_OK_PAYLOAD)
+            .to_hex()
+            .to_string()
+    }
+
+    /// Whether this exact check already passed warning-free.
+    ///
+    /// # Errors
+    /// Fails on a store read failure.
+    pub(crate) fn hit(&self) -> Result<bool, Error> {
+        Ok(self
+            .store
+            .get_query(CHECKED_VERDICT_QUERY, &self.key)?
+            .as_deref()
+            == Some(Self::ok_hash().as_str()))
+    }
+
+    /// Record a warning-free validated pass.
+    ///
+    /// # Errors
+    /// Fails on a store write failure.
+    pub(crate) fn record(&self) -> Result<(), Error> {
+        let hash = Self::ok_hash();
+        self.store.put(&hash, CHECKED_VERDICT_OK_PAYLOAD)?;
+        self.store
+            .put_query(CHECKED_VERDICT_QUERY, &self.key, &hash)?;
+        Ok(())
+    }
 }
 
 #[cfg(feature = "native")]

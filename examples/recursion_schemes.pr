@@ -1,0 +1,91 @@
+-- The basic recursion-scheme ladder over one explicit base functor and its
+-- fixed point. Each combinator owns the recursion; its algebra or coalgebra is
+-- a non-recursive description of one layer.
+
+type ListF(a, r) = NilF | ConsF(a, r)
+
+type MuList(a) = Roll(ListF(a, MuList(a)))
+
+fn map_layer(f : (r) -> s, layer : ListF(a, r)) : ListF(a, s) =
+  match layer of
+    NilF => NilF
+    ConsF(x, rest) => ConsF(x, f(rest))
+
+-- Catamorphism: consume a fixed point one layer at a time.
+fn cata(algebra : (ListF(a, b)) -> b, value : MuList(a)) : b =
+  match value of
+    Roll(layer) => algebra(map_layer(\(child) -> cata(algebra, child), layer))
+
+-- Anamorphism: build a fixed point from a one-layer coalgebra.
+fn ana(coalgebra : (seed) -> ListF(a, seed), seed : seed) : MuList(a) =
+  Roll(map_layer(\(next) -> ana(coalgebra, next), coalgebra(seed)))
+
+-- Hylomorphism: unfold and fold without allocating the intermediate MuList.
+fn hylo(
+  algebra : (ListF(a, b)) -> b,
+  coalgebra : (seed) -> ListF(a, seed),
+  seed : seed
+) : b =
+  algebra(map_layer(\(next) -> hylo(algebra, coalgebra, next), coalgebra(seed)))
+
+-- Paramorphism: each recursive position carries both the untouched child and
+-- the answer computed from it. This supports structural sharing.
+fn para(algebra : (ListF(a, (MuList(a), b))) -> b, value : MuList(a)) : b =
+  match value of
+    Roll(layer) =>
+      algebra(map_layer(\(child) -> (child, para(algebra, child)), layer))
+
+fn collect_algebra(layer : ListF(a, List(a))) : List(a) =
+  match layer of
+    NilF => Nil
+    ConsF(x, rest) => Cons(x, rest)
+
+fn to_list(value : MuList(a)) : List(a) = cata(collect_algebra, value)
+
+fn sum_algebra(layer : ListF(Int, Int)) : Int =
+  match layer of
+    NilF => 0
+    ConsF(x, total) => x + total
+
+fn product_algebra(layer : ListF(Int, Int)) : Int =
+  match layer of
+    NilF => 1
+    ConsF(x, product) => x * product
+
+fn range_layer(bounds : (Int, Int)) : ListF(Int, (Int, Int)) =
+  if fst(bounds) >= snd(bounds) then
+    NilF
+  else
+    ConsF(fst(bounds), (fst(bounds) + 1, snd(bounds)))
+
+fn countdown_layer(n : Int) : ListF(Int, Int) =
+  if n <= 0 then
+    NilF
+  else
+    ConsF(n, n - 1)
+
+fn remove_algebra(
+  target : Int,
+  layer : ListF(Int, (MuList(Int), MuList(Int)))
+) : MuList(Int) =
+  match layer of
+    NilF => Roll(NilF)
+    ConsF(x, pair) =>
+      if x == target then
+        fst(pair)
+      else
+        Roll(ConsF(x, snd(pair)))
+
+fn remove_first(target : Int, value : MuList(Int)) : MuList(Int) =
+  para(\(layer) -> remove_algebra(target, layer), value)
+
+fn main() : Unit ! {IO} =
+  -- ana: [1, 2, 3, 4, 5]
+  let values = ana(range_layer, (1, 6))
+  println(to_list(values))
+  -- cata: consume that fixed point.
+  println(cata(sum_algebra, values))
+  -- hylo: 6 * 5 * ... * 1, with no intermediate recursive value.
+  println(hylo(product_algebra, countdown_layer, 6))
+  -- para: remove 3 and return its original tail without rebuilding that tail.
+  println(to_list(remove_first(3, values)))

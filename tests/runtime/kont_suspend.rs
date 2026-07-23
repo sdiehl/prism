@@ -162,7 +162,7 @@ fn resume_against_a_different_program_is_refused_by_hash() {
 fn resume_under_a_different_scheduler_is_refused() {
     let full = with_prelude(COUNTER);
     let mut cooperative = cfg();
-    cooperative.scheduler = prism::Scheduler::Cooperative;
+    cooperative.flags.scheduler = prism::Scheduler::Cooperative;
 
     let mut prefix: Vec<u8> = Vec::new();
     let mut input = Cursor::new(Vec::new());
@@ -173,7 +173,7 @@ fn resume_under_a_different_scheduler_is_refused() {
     };
 
     let mut lifo = cfg();
-    lifo.scheduler = prism::Scheduler::Lifo;
+    lifo.flags.scheduler = prism::Scheduler::Lifo;
     let mut out: Vec<u8> = Vec::new();
     let mut input2 = Cursor::new(Vec::new());
     let err = resume_on(&full, &roots(), &bytes, &mut out, &mut input2, &lifo)

@@ -59,6 +59,7 @@ examples/fip_list.pr	pure
 examples/fip_tree.pr	pure
 examples/fip_zipper.pr	pure
 examples/fold.pr	pure
+examples/fold_zoo.pr	pure
 examples/grade_isolation.pr	selective-free-monad
 examples/guards.pr	pure
 examples/handlers_funval.pr	evidence
@@ -89,6 +90,7 @@ examples/mutual.pr	pure
 examples/named_args.pr	pure
 examples/named_handlers.pr	selective-free-monad
 examples/newtype_order.pr	pure
+examples/optic_zoo.pr	pure
 examples/optics.pr	pure
 examples/optionals.pr	selective-free-monad
 examples/ordered_witness.pr	pure
@@ -108,6 +110,8 @@ examples/queens.pr	selective-free-monad
 examples/rbtree.pr	pure
 examples/record_replay.pr	whole-program-free-monad
 examples/records_demo.pr	pure
+examples/recursion_schemes.pr	pure
+examples/recursion_zoo.pr	pure
 examples/regex.pr	pure
 examples/regex_deriv.pr	pure
 examples/replay_concurrent.pr	whole-program-free-monad
@@ -126,6 +130,7 @@ examples/stream_fold.pr	state-fusion
 examples/stream_fuse.pr	evidence
 examples/streams.pr	state-fusion
 examples/superclass.pr	pure
+examples/systemf.pr	whole-program-free-monad
 examples/tagless.pr	pure
 examples/teleport.pr	pure
 examples/tensor_ops.pr	selective-free-monad
@@ -143,6 +148,7 @@ examples/where_blocks.pr	pure
 examples/wordcount.pr	pure
 examples/world.pr	pure
 examples/zipper.pr	pure
+examples/zygo.pr	pure
 tests/cases/run/accum.pr	pure
 tests/cases/run/adapter_observation.pr	whole-program-free-monad
 tests/cases/run/annot.pr	pure
@@ -175,7 +181,9 @@ tests/cases/run/comp_guard_dispatch.pr	whole-program-free-monad
 tests/cases/run/comp_guards.pr	whole-program-free-monad
 tests/cases/run/comp_in_annotated_row.pr	whole-program-free-monad
 tests/cases/run/comp_map_once.pr	state-fusion
+tests/cases/run/constrained_mutual.pr	evidence
 tests/cases/run/control_effects.pr	whole-program-free-monad
+tests/cases/run/control_validate.pr	whole-program-free-monad
 tests/cases/run/curry.pr	pure
 tests/cases/run/curry_effect.pr	evidence
 tests/cases/run/deep_effect_recursion.pr	state-fusion
@@ -192,6 +200,7 @@ tests/cases/run/eff_fn_list.pr	whole-program-free-monad
 tests/cases/run/eff_fuse.pr	evidence
 tests/cases/run/eff_pending_arg.pr	evidence
 tests/cases/run/eff_poly_fn_arg.pr	whole-program-free-monad
+tests/cases/run/eff_row_forward.pr	evidence
 tests/cases/run/eff_two_handlers.pr	evidence
 tests/cases/run/effects_demo.pr	pure
 tests/cases/run/effop_tax.pr	evidence
@@ -213,6 +222,7 @@ tests/cases/run/fold_chains.pr	state-fusion
 tests/cases/run/for_blocks.pr	evidence
 tests/cases/run/for_break.pr	whole-program-free-monad
 tests/cases/run/forward.pr	selective-free-monad
+tests/cases/run/frozen_array.pr	selective-free-monad
 tests/cases/run/generic_fold.pr	pure
 tests/cases/run/grade_ops.pr	selective-free-monad
 tests/cases/run/graph_algorithms.pr	pure
@@ -243,6 +253,7 @@ tests/cases/run/loop_control.pr	pure
 tests/cases/run/looptest.pr	pure
 tests/cases/run/main_heap_result.pr	pure
 tests/cases/run/main_returns_int.pr	pure
+tests/cases/run/map_newtype.pr	pure
 tests/cases/run/mask.pr	whole-program-free-monad
 tests/cases/run/math_constants.pr	pure
 tests/cases/run/mergesort.pr	pure
@@ -260,6 +271,7 @@ tests/cases/run/nursery_name_collision.pr	whole-program-free-monad
 tests/cases/run/once.pr	pure
 tests/cases/run/open_nontail.pr	selective-free-monad
 tests/cases/run/opt_chain.pr	selective-free-monad
+tests/cases/run/optic_prism_modify.pr	pure
 tests/cases/run/optics_each.pr	pure
 tests/cases/run/optics_index.pr	selective-free-monad
 tests/cases/run/optics_index_effect.pr	selective-free-monad
@@ -269,6 +281,7 @@ tests/cases/run/optics_read.pr	selective-free-monad
 tests/cases/run/optics_where.pr	pure
 tests/cases/run/option_chain.pr	pure
 tests/cases/run/or_null.pr	pure
+tests/cases/run/or_null_layout.pr	pure
 tests/cases/run/ord_dispatch.pr	pure
 tests/cases/run/ordered_wire_stopgap.pr	whole-program-free-monad
 tests/cases/run/param_eff.pr	evidence
@@ -284,12 +297,14 @@ tests/cases/run/reified_under_world.pr	whole-program-free-monad
 tests/cases/run/repeat_block.pr	pure
 tests/cases/run/replayable_ok.pr	evidence
 tests/cases/run/rollback.pr	selective-free-monad
+tests/cases/run/scc_effect_row.pr	evidence
 tests/cases/run/scientific.pr	pure
 tests/cases/run/sequence_pull.pr	pure
 tests/cases/run/set_ops.pr	pure
 tests/cases/run/shadow_prelude.pr	pure
 tests/cases/run/show.pr	pure
 tests/cases/run/show_mangle_clash.pr	pure
+tests/cases/run/simd4_edge.pr	pure
 tests/cases/run/simd_edge.pr	pure
 tests/cases/run/sort_demo.pr	pure
 tests/cases/run/stable_ladder.pr	whole-program-free-monad

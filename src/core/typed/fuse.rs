@@ -2061,11 +2061,7 @@ fn join_is_closed(body: &TypedComp, jparams: &[Sym]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
-    use crate::core::opt::{run_spec_stage, CorePass, PassStage};
     use crate::core::CoreOp;
-    use crate::flags::DynFlags;
     use crate::types::Type;
 
     use super::super::verify::{verify, ConstructorSig, VerifyEnv};
@@ -2405,10 +2401,10 @@ mod tests {
         env
     }
 
-    // Verify the fixture, run the legacy pass on its erasure and the typed pass
-    // on the witnesses, verify the output, and demand byte-identical erased
-    // trees and identical tick counts.
-    fn assert_differential(
+    // Verify the fixture, run the typed pass on the witnesses, verify the
+    // output, and return the fused tree with the pass's own tick count for the
+    // caller's structural assertions.
+    fn run_and_verify(
         functions: Vec<TypedCoreFn>,
         env: &VerifyEnv,
     ) -> (TypedCore<Elaborated>, u64) {
@@ -2416,23 +2412,11 @@ mod tests {
         if let Err(violations) = verify(&input, env) {
             panic!("input fixture is invalid: {violations:#?}");
         }
-        let legacy_input = input.clone().erase();
-        let (expected, legacy_stats) = run_spec_stage(
-            &legacy_input,
-            &BTreeSet::new(),
-            &[CorePass::Fuse],
-            PassStage::PreLowering,
-            &[],
-            &DynFlags::default(),
-        );
-        let expected_ticks = legacy_stats.total();
         let (actual, stats) = fuse(input);
         if let Err(violations) = verify(&actual, env) {
             panic!("fused typed Core is invalid: {violations:#?}");
         }
-        assert_eq!(actual.clone().erase(), expected);
-        assert_eq!(stats.ticks(), expected_ticks);
-        (actual, expected_ticks)
+        (actual, stats.ticks())
     }
 
     // `total(count(3, 10), 0)`: the producer-fold seed fuses into one join
@@ -2451,7 +2435,7 @@ mod tests {
             CoreFnSig::new(Vec::new(), Vec::new(), pure_sig(int())),
             0,
         );
-        let (actual, ticks) = assert_differential(vec![count_fn(), total_fn(), main], &step_env());
+        let (actual, ticks) = run_and_verify(vec![count_fn(), total_fn(), main], &step_env());
         assert_eq!(ticks, 1);
         let join = Sym::new(&names::fused_join(0));
         assert!(actual.functions().iter().any(|f| f.name() == join));
@@ -2500,7 +2484,7 @@ mod tests {
             0,
         );
         let (actual, ticks) =
-            assert_differential(vec![count_fn(), map_fn(), total_fn(), main], &step_env());
+            run_and_verify(vec![count_fn(), map_fn(), total_fn(), main], &step_env());
         assert_eq!(ticks, 1);
         let join = Sym::new(&names::fused_join(0));
         assert!(actual.functions().iter().any(|f| f.name() == join));
@@ -2517,7 +2501,7 @@ mod tests {
             CoreFnSig::new(Vec::new(), vec![seq_ty()], pure_sig(int())),
             0,
         );
-        let (_, ticks) = assert_differential(vec![total_fn(), opaque], &step_env());
+        let (_, ticks) = run_and_verify(vec![total_fn(), opaque], &step_env());
         assert_eq!(ticks, 0);
     }
 
@@ -2572,7 +2556,7 @@ mod tests {
             CoreFnSig::new(Vec::new(), Vec::new(), pure_sig(int())),
             0,
         );
-        let (_, ticks) = assert_differential(vec![count_fn(), crashy, main], &step_env());
+        let (_, ticks) = run_and_verify(vec![count_fn(), crashy, main], &step_env());
         assert_eq!(ticks, 0);
     }
 

@@ -23,6 +23,12 @@ use super::{
 use crate::core::builtins::Builtin;
 use crate::core::{CheckedHandler, Comp, Core, CoreOp, CorePat, IoOp, NegLane, Value};
 
+// Red zone / segment size for the builder's recursion: the entry point takes one
+// grown segment, and `Builder::comp` grows further segments inside the recursion
+// so depth is bounded by memory, not by any single stack.
+const BUILDER_MIN_STACK: usize = 4 * 1024 * 1024;
+const BUILDER_GROW_STACK: usize = 8 * 1024 * 1024;
+
 /// Translate a checked source function scheme to its Core calling convention.
 pub(in crate::core) fn core_fn_sig(
     scheme: &Type,
@@ -1613,8 +1619,18 @@ impl<'a> Builder<'a> {
         Ok(value)
     }
 
-    #[allow(clippy::too_many_lines)]
     fn comp(&mut self, comp: Comp, expected: Option<&CompSig>) -> Result<TypedComp, String> {
+        // The builder recurses per Core node, so a long `Bind` chain (a compiled
+        // statement block) is deep recursion. The entry-point guard in
+        // `build_typed` buys one segment; growing here, inside the recursion,
+        // chains segments so depth is bounded by memory, not by one stack.
+        stacker::maybe_grow(BUILDER_MIN_STACK, BUILDER_GROW_STACK, || {
+            self.comp_inner(comp, expected)
+        })
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn comp_inner(&mut self, comp: Comp, expected: Option<&CompSig>) -> Result<TypedComp, String> {
         match comp {
             Comp::Return(value) => {
                 let value = self.value(value, expected.map(CompSig::result))?;
@@ -2696,8 +2712,16 @@ impl Solver {
         TypedValue::new(self.final_core(&value.ty), kind)
     }
 
-    #[allow(clippy::too_many_lines)]
     fn zonk_comp(&self, comp: TypedComp) -> TypedComp {
+        // Zonking recurses per typed node; grow segments inside the recursion,
+        // same discipline as `Builder::comp`.
+        stacker::maybe_grow(BUILDER_MIN_STACK, BUILDER_GROW_STACK, || {
+            self.zonk_comp_inner(comp)
+        })
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn zonk_comp_inner(&self, comp: TypedComp) -> TypedComp {
         let kind = match comp.kind {
             TypedCompKind::Return(value) => TypedCompKind::Return(self.zonk_value(value)),
             TypedCompKind::Bind(first, binder, rest) => TypedCompKind::Bind(
@@ -2883,9 +2907,7 @@ pub(in crate::core) fn build_typed(
     signatures: &BTreeMap<Sym, CoreFnSig>,
     verify_env: &VerifyEnv,
 ) -> Result<TypedCore<Elaborated>, Error> {
-    const MIN_REMAINING_STACK: usize = 4 * 1024 * 1024;
-    const BUILDER_STACK: usize = 8 * 1024 * 1024;
-    stacker::maybe_grow(MIN_REMAINING_STACK, BUILDER_STACK, || {
+    stacker::maybe_grow(BUILDER_MIN_STACK, BUILDER_GROW_STACK, || {
         build_typed_on_grown_stack(core, signatures, verify_env)
     })
 }

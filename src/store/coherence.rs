@@ -70,7 +70,7 @@ impl From<io::Error> for CoherenceError {
 // content-addressed identity, and where to caret a conflict.
 struct Binding {
     key: CanonicalKey,
-    instance_hash: String,
+    instance_hash: Digest,
     span: Span,
 }
 
@@ -97,7 +97,7 @@ pub fn commit_canonical<P: Phase>(
     let bindings = canonical_bindings(instances, canonicals, hashes);
     let rows: Vec<_> = bindings
         .iter()
-        .map(|b| (b.key.clone(), b.instance_hash.clone()))
+        .map(|b| (b.key.clone(), b.instance_hash.to_string()))
         .collect();
     if let Err(conflict) = store.merge_canonicals(&rows)? {
         let Some(b) = bindings.get(conflict.incoming_index) else {
@@ -156,7 +156,7 @@ fn canonical_bindings<P: Phase>(
                 class: key.0.clone(),
                 head: key.1.clone(),
             },
-            instance_hash: instance_digest(&chosen.class, &chosen.head, &methods).into_string(),
+            instance_hash: instance_digest(&chosen.class, &chosen.head, &methods),
             // Caret the `canonical` declaration when one designates this key (that
             // is where the author re-designates); otherwise the instance itself.
             span: decl.map_or(chosen.span, |d| d.span),

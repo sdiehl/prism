@@ -1,8 +1,7 @@
 //! Versioned source ranges carrying canonical inferred type-and-effect text.
 //!
 //! `prism dump typespans` is the canonical producer. Documentation tooltips use
-//! the same payload, and a future editable/wasm producer can return it without
-//! inventing a second browser-facing schema.
+//! the same producer-independent browser payload.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -24,7 +23,7 @@ use crate::types::coeffect::CoeffectFact;
 use crate::types::ty::Kind;
 use crate::types::{Checked, CtorInfo, EffOpInfo, Type};
 
-/// Schema tag for the shared native/docs/future-wasm type-span payload.
+/// Schema tag for the shared type-span payload.
 pub const TYPESPANS_FORMAT: &str = "prism-typespans-v1";
 
 // The wired-in scalar type names (all of kind `Type`). They are `Type`

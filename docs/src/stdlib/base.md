@@ -280,6 +280,15 @@ effect Random
 
 Random-number capability (`rand`).
 
+### `Entropy`
+
+```prism,def,h-65841cb0e1c2e56a4b3a53ae8667f92216599f8385cb3d1a7a9e2b9570d4e5f3
+effect Entropy
+  entropy_word() : Int
+```
+
+Real, non-replayable entropy capability (`entropy`). Distinct from the seeded, replayable `Random`: use `Entropy` for key material, never `Random`.
+
 ### `Env`
 
 ```prism,def,h-8b41de0e984c772f3cb5d3a3fafb81a0bc48564b4deb094322dce4503b7bbb93
@@ -1377,6 +1386,14 @@ rand : () -> Int ! {Random}
 
 A random integer.
 
+### `entropy`
+
+```prism,sig,h-9fe92dca36b85952f6a0b4c0176a2972b27b0cc501fff4b2a28620b16f720081
+entropy : () -> Int ! {Entropy}
+```
+
+A fresh integer of real OS entropy. Non-reproducible, unlike the seeded `rand`; a `replayable` function may not use it.
+
 ### `getenv`
 
 ```prism,sig,h-52e8d4f2747a3f4fb620d18a2df9a5cc9383c69253d6db551189da1bd95234e9
@@ -1403,8 +1420,8 @@ The `i`th command-line argument.
 
 ### `run_io`
 
-```prism,sig,h-ee1d35d810f5955da6c19a1a275a83a3baa51898883645c671b9fcc5e1e103e0
-run_io : forall e0 a. ((Unit) -> a ! {Console, Env, FileSystem, IO, Output, Random, e0}) -> a ! {IO, e0}
+```prism,sig,h-751479c67d79c885afabd83602d95be6147fe116b1ea052e20d1fafa70658c5d
+run_io : forall e0 a. ((Unit) -> a ! {Console, Entropy, Env, FileSystem, IO, Output, Random, e0}) -> a ! {IO, e0}
 ```
 
 The default world handler the entry point is wrapped in. Each capability effect is discharged by a tail-resumptive handler that resumes with the matching `prim_*` builtin, so the chain fuses to direct calls (no effect-op allocation), leaving only `{IO | e}`.

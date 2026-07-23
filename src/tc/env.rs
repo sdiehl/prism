@@ -12,7 +12,7 @@ use crate::names;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core, Decl, Program};
 use crate::syntax::TypeSigParser;
-use crate::types::ty::{EffRow, Kind, Label, Type, FLOAT_BUF, INT_BUF};
+use crate::types::ty::{EffRow, Kind, Label, Type, CANONICAL, FLOAT_BUF, INT_BUF};
 
 // Effects the compiler knows without an `effect` declaration: the IO/Exn
 // builtins, the indexing/`??` `Fail`, and the internal loop/return control
@@ -521,14 +521,17 @@ pub(super) fn convert_data(t: &ast::Ty) -> Type {
 }
 
 // Saturate an under-applied constructor spine: `Map(k, v)` names the arity-3
-// `Map(k, v, ord)`, filling each omitted trailing parameter with a fresh
-// variable of its declared kind. This is the exported-scheme twin of the fill in
-// `convert_annot` (which mints existentials for the body check); the fresh names
-// here are quantified into the scheme by the caller's `collect_*_vars`. Only a
-// partial application fills: a bare `Map` head is a higher-kinded operand and is
-// left untouched, and a fully applied spine is unchanged.
-fn saturate_cons(t: Type, data: &BTreeMap<String, super::DataInfo>) -> Type {
-    let go = |x: Type| saturate_cons(x, data);
+// `Map(k, v, ord)`, filling each omitted trailing parameter of its declared
+// kind. `fill` supplies each omitted `Type`-kinded parameter (the phantom
+// brand); a `Row`-kinded one always takes a fresh row variable. Only a partial
+// application fills: a bare `Map` head is a higher-kinded operand and is left
+// untouched, and a fully applied spine is unchanged.
+fn saturate_fill(
+    t: Type,
+    data: &BTreeMap<String, super::DataInfo>,
+    fill: &dyn Fn() -> Type,
+) -> Type {
+    let go = |x: Type| saturate_fill(x, data, fill);
     match t {
         Type::Con(n, args) => {
             let mut conv: Vec<Type> = args.into_iter().map(go).collect();
@@ -537,7 +540,7 @@ fn saturate_cons(t: Type, data: &BTreeMap<String, super::DataInfo>) -> Type {
                     for k in info.param_kinds.iter().skip(conv.len()) {
                         conv.push(match k {
                             Kind::Row => Type::Row(EffRow::Var(Sym::fresh())),
-                            _ => Type::Var(Sym::fresh()),
+                            _ => fill(),
                         });
                     }
                 }
@@ -547,7 +550,7 @@ fn saturate_cons(t: Type, data: &BTreeMap<String, super::DataInfo>) -> Type {
         Type::Fun(ps, row, r) => Type::Fun(
             ps.into_iter().map(go).collect(),
             row,
-            Box::new(saturate_cons(*r, data)),
+            Box::new(saturate_fill(*r, data, fill)),
         ),
         Type::Tuple(xs) => Type::Tuple(xs.into_iter().map(go).collect()),
         Type::UnboxedTuple(xs) => Type::UnboxedTuple(xs.into_iter().map(go).collect()),
@@ -555,14 +558,31 @@ fn saturate_cons(t: Type, data: &BTreeMap<String, super::DataInfo>) -> Type {
             Type::UnboxedRecord(fs.into_iter().map(|(n, t)| (n, go(t))).collect())
         }
         Type::App(h, a) => Type::App(
-            Box::new(saturate_cons(*h, data)),
-            Box::new(saturate_cons(*a, data)),
+            Box::new(saturate_fill(*h, data, fill)),
+            Box::new(saturate_fill(*a, data, fill)),
         ),
         Type::OrNull(a) => Type::OrNull(Box::new(go(*a))),
-        Type::Forall(v, b) => Type::Forall(v, Box::new(saturate_cons(*b, data))),
-        Type::RowForall(v, b) => Type::RowForall(v, Box::new(saturate_cons(*b, data))),
+        Type::Forall(v, b) => Type::Forall(v, Box::new(saturate_fill(*b, data, fill))),
+        Type::RowForall(v, b) => Type::RowForall(v, Box::new(saturate_fill(*b, data, fill))),
         other => other,
     }
+}
+
+// The exported-scheme twin of the fill in `convert_annot` (which mints
+// existentials for the body check): each omitted brand is a fresh variable,
+// quantified into the scheme by the caller's `collect_*_vars`, so a function
+// signature over `Map(k, v)` stays brand-polymorphic.
+fn saturate_cons(t: Type, data: &BTreeMap<String, super::DataInfo>) -> Type {
+    saturate_fill(t, data, &|| Type::Var(Sym::fresh()))
+}
+
+// Datatype-field saturation: an omitted brand is pinned to the concrete
+// `Canonical` default rather than left polymorphic, since a field's brand is not
+// a parameter of the enclosing type and cannot be quantified over. This lets a
+// `Map`-backed newtype field (`type Graph(k) = Graph(Map(k, List(k)))`) agree
+// with a `Map` value, which a fresh per-field variable could not.
+fn saturate_field(t: Type, data: &BTreeMap<String, super::DataInfo>) -> Type {
+    saturate_fill(t, data, &|| Type::Con(Sym::from(CANONICAL), vec![]))
 }
 
 // The core of `convert_data`, aware of the current declaration's `Row`-kinded
@@ -666,10 +686,15 @@ pub(super) fn collect_type_vars(t: &Type, out: &mut BTreeSet<Sym>) {
         Type::Var(n) => {
             out.insert(*n);
         }
-        Type::Fun(ps, _row, r) => {
+        Type::Fun(ps, row, r) => {
             for p in ps {
                 collect_type_vars(p, out);
             }
+            // The effect row's label arguments carry type variables too
+            // (`{Log(w) | e}`): missing them here made an enclosing signature's
+            // row-only variable look free at a local `let`, so generalization
+            // wrongly quantified it.
+            row.for_each_arg(&mut |a| collect_type_vars(a, out));
             collect_type_vars(r, out);
         }
         Type::Con(_, ps) | Type::Tuple(ps) | Type::UnboxedTuple(ps) => {
@@ -1064,6 +1089,7 @@ const NON_ENUM_SIGS: &[(&str, &str)] = &[
     ("prim_read_int", "() -> Int ! {IO}"),
     ("prim_read_line", "() -> String ! {IO}"),
     ("prim_rand", "() -> Int ! {IO}"),
+    ("prim_entropy", "() -> Int ! {IO}"),
     ("srand", "(Int) -> Unit ! {IO}"),
     ("error", "forall a. (Int) -> a ! {Exn}"),
     ("fatal", "forall a. (String) -> a ! {Exn}"),
@@ -1197,10 +1223,15 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
             ctors: vec![],
         },
     );
-    // `F64x2`/`I64x2` are the baseline 128-bit SIMD vector types: opaque
+    // The 128-bit SIMD vector types (two 64-bit or four 32-bit lanes): opaque
     // 0-parameter built-ins with no surface constructors, produced and consumed
     // only through the `simd_*` builtins.
-    for name in [crate::types::F64X2, crate::types::I64X2] {
+    for name in [
+        crate::types::F64X2,
+        crate::types::I64X2,
+        crate::types::F32X4,
+        crate::types::I32X4,
+    ] {
         data.insert(
             name.to_string(),
             DataInfo {
@@ -1210,6 +1241,21 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
             },
         );
     }
+    // Register every declared type's header (params and kinds) before any field
+    // is converted, so the field-type saturation below sees the full arity of
+    // every constructor it references, including forward and mutual references.
+    for dd in &prog.types {
+        let kinds = normalize_kinds(&dd.params, &dd.param_kinds);
+        data.insert(
+            dd.name.clone(),
+            DataInfo {
+                params: dd.params.clone(),
+                param_kinds: kinds,
+                ctors: dd.ctors.iter().map(|c| c.name.clone()).collect(),
+            },
+        );
+    }
+    // Build each constructor's scheme against the now-complete `data`.
     for dd in &prog.types {
         let kinds = normalize_kinds(&dd.params, &dd.param_kinds);
         // The `Row`-kinded parameters of this declaration; a field row that
@@ -1221,14 +1267,6 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
             .filter(|(_, k)| **k == Kind::Row)
             .map(|(p, _)| Sym::from(p))
             .collect();
-        data.insert(
-            dd.name.clone(),
-            DataInfo {
-                params: dd.params.clone(),
-                param_kinds: kinds.clone(),
-                ctors: dd.ctors.iter().map(|c| c.name.clone()).collect(),
-            },
-        );
         // The applied head `Cmd(a, e)`: a `Row`-kinded parameter rides in the
         // spine as `Type::Row(Var(..))`, matching how fields refer to it.
         let head_args: Vec<Type> = dd
@@ -1241,10 +1279,16 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
             })
             .collect();
         for (tag, c) in dd.ctors.iter().enumerate() {
+            // Saturate an under-applied phantom parameter: writing `Map(k, v)`
+            // for the arity-3 `Map(k, v, ord)` pins the omitted brand to the
+            // concrete `Canonical` default (a field's brand cannot be a parameter
+            // of the enclosing type). Without it a `Map`-backed field carried
+            // arity 2 while every `Map` value carried arity 3, and the two never
+            // unified.
             let args: Vec<Type> = c
                 .args
                 .iter()
-                .map(|t| convert_data_rp(t, &row_params))
+                .map(|t| saturate_field(convert_data_rp(t, &row_params), &data))
                 .collect();
             let fields: Vec<Sym> = c
                 .fields
@@ -1352,12 +1396,21 @@ mod tests {
                 | "prim_getenv" | "prim_read_file" | "prim_read_bytes" | "prim_write_bytes"
                 | "write_file" | "prim_file_exists" | "append_file" | "remove_file"
                 | "prim_store_get" | "prim_store_put" | "prim_store_has" | "prim_args_count"
-                | "prim_arg" | "prim_wall_now" | "prim_mono_now" => &["IO"],
+                | "prim_arg" | "prim_wall_now" | "prim_mono_now" | "prim_entropy" => &["IO"],
                 "error" | "fatal" => &["Exn"],
                 _ => &[],
             };
             assert_eq!(effs, want, "builtin {name} effect row drifted");
         }
+    }
+
+    #[test]
+    fn checked_signatures_parse_qualified_effect_labels() {
+        let (ty, effects) =
+            super::parse_sig("package-effect", "(String) -> Unit ! {Spectra.DeckBuilder}")
+                .expect("qualified package effect parses");
+        assert_eq!(effects, ["Spectra.DeckBuilder"]);
+        assert!(matches!(ty, crate::types::Type::Fun(_, _, _)));
     }
 
     #[test]

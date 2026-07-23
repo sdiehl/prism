@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use prism::core::{lint_core, pass_fingerprint, CorePass, OptLevel, PassSpec, PassStage};
-use prism::{dump, with_prelude, DynFlags};
+use prism::{default_roots, dump, dump_on, with_prelude, Config, DynFlags};
 
 fn core(src: &str) -> String {
     dump("core", &with_prelude(src)).expect("core dump")
@@ -142,17 +142,24 @@ fn pass_spec_parse() {
     assert!(PassSpec::parse("").is_err());
 }
 
-// The optimization tier reaches a fixed point: re-running specialization on the
-// already-optimized Core changes nothing (no new clones, no further reductions).
-// A pass that churned its own output would fail here.
+// The optimization tier reaches a fixed point: an explicit pass spec that runs
+// specialization twice dumps the same Core as running it once. A pass that
+// churned its own output would fail here.
 #[test]
 fn specialization_is_idempotent() {
     let src = std::fs::read_to_string("examples/classes.pr").expect("read classes.pr");
-    let once = prism::core_of(&src).expect("core_of");
-    let twice = prism::core::specialize(&once);
+    let full = with_prelude(&src);
+    let roots = default_roots(Path::new("."));
+    let dump_with = |spec: &str| {
+        let mut cfg = Config::from_env();
+        cfg.flags.quiet = true;
+        cfg.passes = Some(PassSpec::parse(spec).expect("valid spec"));
+        dump_on("core", &full, &roots, &cfg).expect("core dump")
+    };
+    let once = dump_with("pre:EraseNewtypes,Specialize");
+    let twice = dump_with("pre:EraseNewtypes,Specialize,Specialize");
     assert_eq!(
-        prism::core::pp_core(&once),
-        prism::core::pp_core(&twice),
+        once, twice,
         "specialization is not idempotent on its own output"
     );
 }

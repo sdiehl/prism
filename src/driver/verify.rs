@@ -62,7 +62,7 @@ fn attest_index_line(root: &str, cfg: &Config) -> String {
         return String::new();
     };
     let rows = parse_index(&artifact.body);
-    let Some(row) = rows.iter().find(|r| r.root == root) else {
+    let Some(row) = rows.iter().find(|r| r.root.as_str() == root) else {
         return String::new();
     };
     let sig = match verify_signature(&artifact, &cfg.flags) {

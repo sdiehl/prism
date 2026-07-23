@@ -10,7 +10,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::core::HASH_PREFIX_HEX;
+use crate::core::{Digest, HASH_PREFIX_HEX};
 use crate::driver::Config;
 use crate::error::Error;
 use crate::project::{self, DepSource};
@@ -70,9 +70,8 @@ pub fn init(name: &str, dir: &Path) -> Result<String, Error> {
 ///
 /// The argument is a bare content-hash pin (`<scheme>:<hex>` or a bare hex digest)
 /// or a git reference `<url>@<tag>`. A hash pin resolves to itself and is always
-/// locked; a git reference names an opaque release tag whose mapping to a root
-/// hash needs the signed index and transport, so it is written to the manifest and
-/// left for `prism build` to resolve once those land.
+/// locked; a git reference resolves its opaque release tag through the signed
+/// package index and locks the authenticated root hash.
 ///
 /// # Errors
 /// Fails when no project is found, the argument is neither a pin nor a git
@@ -94,7 +93,7 @@ pub fn add(arg: &str, cfg: &Config) -> Result<String, Error> {
         lock.set(LockEntry {
             name: name.clone(),
             scheme: pin.scheme.clone(),
-            hash: pin.hash.clone(),
+            hash: Digest::from(pin.hash.clone()),
             source,
         });
         write_lock(&root, &lock)?;
@@ -103,10 +102,7 @@ pub fn add(arg: &str, cfg: &Config) -> Result<String, Error> {
             report.push_str("\n  (object not in the local store yet; `prism build` will fetch it)");
         }
     } else {
-        report.push_str(
-            "\n  (a git tag resolves to a root hash through the signed index; \
-             `prism build` will pin it once transport lands)",
-        );
+        report.push_str("\n  (editable path dependencies are not pinned in prism.lock)");
     }
     Ok(report)
 }
@@ -135,7 +131,7 @@ pub fn why(target: &str, cfg: &Config) -> Result<String, Error> {
     // The git-backed transport is a drop-in here when a build must reach a
     // remote; the resolver does not change.
     let transport = DiskTransport::open(resolve_store_path(cfg.flags.store_path.as_deref()))?;
-    let roots: Vec<String> = lock.entries.iter().map(|e| e.hash.clone()).collect();
+    let roots: Vec<String> = lock.entries.iter().map(|e| e.hash.to_string()).collect();
     let closure =
         resolve_closure(&transport, &roots).map_err(|e| Error::ResolvePackage(e.to_string()))?;
 
@@ -245,7 +241,7 @@ fn lockable_pin(
                 crate::pkg::signed_index_pointer(url, name, version, &store_root, &cfg.flags)?;
             Ok(Some(ResolvedPin {
                 scheme: pointer.scheme,
-                hash: pointer.root,
+                hash: pointer.root.into_string(),
             }))
         }
     }
@@ -259,7 +255,7 @@ fn target_hash(target: &str, lock: &Lock, store: &Store) -> Result<String, Error
         return Ok(hex.to_string());
     }
     if let Some(entry) = lock.get(target) {
-        return Ok(entry.hash.clone());
+        return Ok(entry.hash.to_string());
     }
     if let Some(hash) = store.lookup_name(target)? {
         return Ok(hash);

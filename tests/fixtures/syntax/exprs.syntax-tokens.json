@@ -1,0 +1,6031 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.14.0",
+  "source": {
+    "digest": "ab952b49b82a4dd4b2e6444d34d5d54165723e98787a7645979ffd84d00f4e26",
+    "text": "-- Expression forms: operators, records, paths, ranges, comprehensions.\ntype Wheel = Wheel { psi: Float }\n\ntype Car = Car { name: String, wheels: List(Wheel) }\n\nfn arith(x : Int, y : Int) : Int = -x + y * 2 - x % 3 + x ^ 2\n\nfn logic_ops(a : Bool, b : Bool) : Bool = a && b || not(a)\n\nfn compare(x : Int, y : Int) : Bool =\n  x < y && x <= y && x > y || x >= y || x == y || x /= y\n\nfn pipes(xs : List(Int)) : Int = xs |> map(\\(v) -> v + 1) |> length\n\nfn composed(f : (Int) -> Int, g : (Int) -> Int) : (Int) -> Int = f >> g << f\n\nfn records(c : Car) : Car =\n  let bumped =\n    { c\n    | name = \"vx\"\n    , wheels.each.psi ~ \\(p) -> p + 1.0\n    }\n  { bumped | wheels[0].psi = 30.0 }\n\nfn reads(c : Car) : List(Float) = c.[wheels.each.psi]\n\nfn collections() : List(Int) =\n  let squares = [v * v for v in [1..5], if v % 2 == 1, let w = v + 1]\n  let pair = (1, \"two\")\n  let evens = [2, 4..10]\n  append(squares, evens)\n\nfn stringy(name : String) : String = \"hello {name}, {1 + 2} wide\"\n\nfn indexed(xs : List(Int)) : Int = xs[0] ?? 0\n\nfn chained(c : Option(Car)) : String = c?.name ?? \"none\"\n\nfn multikey(t : Tensor(Float)) : Float = t[1, 2]\n\nfn holey(x : Int) : Int = ?fill\n"
+  },
+  "raw": [
+    {
+      "kind": "type",
+      "span": [
+        72,
+        76
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        77,
+        82
+      ],
+      "value": "Wheel"
+    },
+    {
+      "kind": "=",
+      "span": [
+        83,
+        84
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        85,
+        90
+      ],
+      "value": "Wheel"
+    },
+    {
+      "kind": "{",
+      "span": [
+        91,
+        92
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        93,
+        96
+      ],
+      "value": "psi"
+    },
+    {
+      "kind": ":",
+      "span": [
+        96,
+        97
+      ]
+    },
+    {
+      "kind": "Float",
+      "span": [
+        98,
+        103
+      ]
+    },
+    {
+      "kind": "}",
+      "span": [
+        104,
+        105
+      ]
+    },
+    {
+      "kind": "type",
+      "span": [
+        107,
+        111
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        112,
+        115
+      ],
+      "value": "Car"
+    },
+    {
+      "kind": "=",
+      "span": [
+        116,
+        117
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        118,
+        121
+      ],
+      "value": "Car"
+    },
+    {
+      "kind": "{",
+      "span": [
+        122,
+        123
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        124,
+        128
+      ],
+      "value": "name"
+    },
+    {
+      "kind": ":",
+      "span": [
+        128,
+        129
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        130,
+        136
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        136,
+        137
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        138,
+        144
+      ],
+      "value": "wheels"
+    },
+    {
+      "kind": ":",
+      "span": [
+        144,
+        145
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        146,
+        150
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        150,
+        151
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        151,
+        156
+      ],
+      "value": "Wheel"
+    },
+    {
+      "kind": ")",
+      "span": [
+        156,
+        157
+      ]
+    },
+    {
+      "kind": "}",
+      "span": [
+        158,
+        159
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        161,
+        163
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        164,
+        169
+      ],
+      "value": "arith"
+    },
+    {
+      "kind": "(",
+      "span": [
+        169,
+        170
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        170,
+        171
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ":",
+      "span": [
+        172,
+        173
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        174,
+        177
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        177,
+        178
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        179,
+        180
+      ],
+      "value": "y"
+    },
+    {
+      "kind": ":",
+      "span": [
+        181,
+        182
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        183,
+        186
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        186,
+        187
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        188,
+        189
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        190,
+        193
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        194,
+        195
+      ]
+    },
+    {
+      "kind": "-",
+      "span": [
+        196,
+        197
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        197,
+        198
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "+",
+      "span": [
+        199,
+        200
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        201,
+        202
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "*",
+      "span": [
+        203,
+        204
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        205,
+        206
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "-",
+      "span": [
+        207,
+        208
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        209,
+        210
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "%",
+      "span": [
+        211,
+        212
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        213,
+        214
+      ],
+      "value": "3"
+    },
+    {
+      "kind": "+",
+      "span": [
+        215,
+        216
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        217,
+        218
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "^",
+      "span": [
+        219,
+        220
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        221,
+        222
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        224,
+        226
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        227,
+        236
+      ],
+      "value": "logic_ops"
+    },
+    {
+      "kind": "(",
+      "span": [
+        236,
+        237
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        237,
+        238
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ":",
+      "span": [
+        239,
+        240
+      ]
+    },
+    {
+      "kind": "Bool",
+      "span": [
+        241,
+        245
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        245,
+        246
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        247,
+        248
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ":",
+      "span": [
+        249,
+        250
+      ]
+    },
+    {
+      "kind": "Bool",
+      "span": [
+        251,
+        255
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        255,
+        256
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        257,
+        258
+      ]
+    },
+    {
+      "kind": "Bool",
+      "span": [
+        259,
+        263
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        264,
+        265
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        266,
+        267
+      ],
+      "value": "a"
+    },
+    {
+      "kind": "&&",
+      "span": [
+        268,
+        270
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        271,
+        272
+      ],
+      "value": "b"
+    },
+    {
+      "kind": "||",
+      "span": [
+        273,
+        275
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        276,
+        279
+      ],
+      "value": "not"
+    },
+    {
+      "kind": "(",
+      "span": [
+        279,
+        280
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        280,
+        281
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        281,
+        282
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        284,
+        286
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        287,
+        294
+      ],
+      "value": "compare"
+    },
+    {
+      "kind": "(",
+      "span": [
+        294,
+        295
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        295,
+        296
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ":",
+      "span": [
+        297,
+        298
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        299,
+        302
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        302,
+        303
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        304,
+        305
+      ],
+      "value": "y"
+    },
+    {
+      "kind": ":",
+      "span": [
+        306,
+        307
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        308,
+        311
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        311,
+        312
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        313,
+        314
+      ]
+    },
+    {
+      "kind": "Bool",
+      "span": [
+        315,
+        319
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        320,
+        321
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        324,
+        325
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "<",
+      "span": [
+        326,
+        327
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        328,
+        329
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "&&",
+      "span": [
+        330,
+        332
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        333,
+        334
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "<=",
+      "span": [
+        335,
+        337
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        338,
+        339
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "&&",
+      "span": [
+        340,
+        342
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        343,
+        344
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ">",
+      "span": [
+        345,
+        346
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        347,
+        348
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "||",
+      "span": [
+        349,
+        351
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        352,
+        353
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ">=",
+      "span": [
+        354,
+        356
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        357,
+        358
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "||",
+      "span": [
+        359,
+        361
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        362,
+        363
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "==",
+      "span": [
+        364,
+        366
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        367,
+        368
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "||",
+      "span": [
+        369,
+        371
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        372,
+        373
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "/=",
+      "span": [
+        374,
+        376
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        377,
+        378
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        380,
+        382
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        383,
+        388
+      ],
+      "value": "pipes"
+    },
+    {
+      "kind": "(",
+      "span": [
+        388,
+        389
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        389,
+        391
+      ],
+      "value": "xs"
+    },
+    {
+      "kind": ":",
+      "span": [
+        392,
+        393
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        394,
+        398
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        398,
+        399
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        399,
+        402
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        402,
+        403
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        403,
+        404
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        405,
+        406
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        407,
+        410
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        411,
+        412
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        413,
+        415
+      ],
+      "value": "xs"
+    },
+    {
+      "kind": "|>",
+      "span": [
+        416,
+        418
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        419,
+        422
+      ],
+      "value": "map"
+    },
+    {
+      "kind": "(",
+      "span": [
+        422,
+        423
+      ]
+    },
+    {
+      "kind": "\\",
+      "span": [
+        423,
+        424
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        424,
+        425
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        425,
+        426
+      ],
+      "value": "v"
+    },
+    {
+      "kind": ")",
+      "span": [
+        426,
+        427
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        428,
+        430
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        431,
+        432
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "+",
+      "span": [
+        433,
+        434
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        435,
+        436
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        436,
+        437
+      ]
+    },
+    {
+      "kind": "|>",
+      "span": [
+        438,
+        440
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        441,
+        447
+      ],
+      "value": "length"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        449,
+        451
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        452,
+        460
+      ],
+      "value": "composed"
+    },
+    {
+      "kind": "(",
+      "span": [
+        460,
+        461
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        461,
+        462
+      ],
+      "value": "f"
+    },
+    {
+      "kind": ":",
+      "span": [
+        463,
+        464
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        465,
+        466
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        466,
+        469
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        469,
+        470
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        471,
+        473
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        474,
+        477
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        477,
+        478
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        479,
+        480
+      ],
+      "value": "g"
+    },
+    {
+      "kind": ":",
+      "span": [
+        481,
+        482
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        483,
+        484
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        484,
+        487
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        487,
+        488
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        489,
+        491
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        492,
+        495
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        495,
+        496
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        497,
+        498
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        499,
+        500
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        500,
+        503
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        503,
+        504
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        505,
+        507
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        508,
+        511
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        512,
+        513
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        514,
+        515
+      ],
+      "value": "f"
+    },
+    {
+      "kind": ">>",
+      "span": [
+        516,
+        518
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        519,
+        520
+      ],
+      "value": "g"
+    },
+    {
+      "kind": "<<",
+      "span": [
+        521,
+        523
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        524,
+        525
+      ],
+      "value": "f"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        527,
+        529
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        530,
+        537
+      ],
+      "value": "records"
+    },
+    {
+      "kind": "(",
+      "span": [
+        537,
+        538
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        538,
+        539
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ":",
+      "span": [
+        540,
+        541
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        542,
+        545
+      ],
+      "value": "Car"
+    },
+    {
+      "kind": ")",
+      "span": [
+        545,
+        546
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        547,
+        548
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        549,
+        552
+      ],
+      "value": "Car"
+    },
+    {
+      "kind": "=",
+      "span": [
+        553,
+        554
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        557,
+        560
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        561,
+        567
+      ],
+      "value": "bumped"
+    },
+    {
+      "kind": "=",
+      "span": [
+        568,
+        569
+      ]
+    },
+    {
+      "kind": "{",
+      "span": [
+        574,
+        575
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        576,
+        577
+      ],
+      "value": "c"
+    },
+    {
+      "kind": "|",
+      "span": [
+        582,
+        583
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        584,
+        588
+      ],
+      "value": "name"
+    },
+    {
+      "kind": "=",
+      "span": [
+        589,
+        590
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        591,
+        595
+      ],
+      "value": "vx"
+    },
+    {
+      "kind": ",",
+      "span": [
+        600,
+        601
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        602,
+        608
+      ],
+      "value": "wheels"
+    },
+    {
+      "kind": ".",
+      "span": [
+        608,
+        609
+      ]
+    },
+    {
+      "kind": "each",
+      "span": [
+        609,
+        613
+      ]
+    },
+    {
+      "kind": ".",
+      "span": [
+        613,
+        614
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        614,
+        617
+      ],
+      "value": "psi"
+    },
+    {
+      "kind": "~",
+      "span": [
+        618,
+        619
+      ]
+    },
+    {
+      "kind": "\\",
+      "span": [
+        620,
+        621
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        621,
+        622
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        622,
+        623
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ")",
+      "span": [
+        623,
+        624
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        625,
+        627
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        628,
+        629
+      ],
+      "value": "p"
+    },
+    {
+      "kind": "+",
+      "span": [
+        630,
+        631
+      ]
+    },
+    {
+      "kind": "float",
+      "span": [
+        632,
+        635
+      ],
+      "value": "1.0"
+    },
+    {
+      "kind": "}",
+      "span": [
+        640,
+        641
+      ]
+    },
+    {
+      "kind": "{",
+      "span": [
+        644,
+        645
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        646,
+        652
+      ],
+      "value": "bumped"
+    },
+    {
+      "kind": "|",
+      "span": [
+        653,
+        654
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        655,
+        661
+      ],
+      "value": "wheels"
+    },
+    {
+      "kind": "[",
+      "span": [
+        661,
+        662
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        662,
+        663
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "]",
+      "span": [
+        663,
+        664
+      ]
+    },
+    {
+      "kind": ".",
+      "span": [
+        664,
+        665
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        665,
+        668
+      ],
+      "value": "psi"
+    },
+    {
+      "kind": "=",
+      "span": [
+        669,
+        670
+      ]
+    },
+    {
+      "kind": "float",
+      "span": [
+        671,
+        675
+      ],
+      "value": "30.0"
+    },
+    {
+      "kind": "}",
+      "span": [
+        676,
+        677
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        679,
+        681
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        682,
+        687
+      ],
+      "value": "reads"
+    },
+    {
+      "kind": "(",
+      "span": [
+        687,
+        688
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        688,
+        689
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ":",
+      "span": [
+        690,
+        691
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        692,
+        695
+      ],
+      "value": "Car"
+    },
+    {
+      "kind": ")",
+      "span": [
+        695,
+        696
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        697,
+        698
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        699,
+        703
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        703,
+        704
+      ]
+    },
+    {
+      "kind": "Float",
+      "span": [
+        704,
+        709
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        709,
+        710
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        711,
+        712
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        713,
+        714
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ".",
+      "span": [
+        714,
+        715
+      ]
+    },
+    {
+      "kind": "[",
+      "span": [
+        715,
+        716
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        716,
+        722
+      ],
+      "value": "wheels"
+    },
+    {
+      "kind": ".",
+      "span": [
+        722,
+        723
+      ]
+    },
+    {
+      "kind": "each",
+      "span": [
+        723,
+        727
+      ]
+    },
+    {
+      "kind": ".",
+      "span": [
+        727,
+        728
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        728,
+        731
+      ],
+      "value": "psi"
+    },
+    {
+      "kind": "]",
+      "span": [
+        731,
+        732
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        734,
+        736
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        737,
+        748
+      ],
+      "value": "collections"
+    },
+    {
+      "kind": "(",
+      "span": [
+        748,
+        749
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        749,
+        750
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        751,
+        752
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        753,
+        757
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        757,
+        758
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        758,
+        761
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        761,
+        762
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        763,
+        764
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        767,
+        770
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        771,
+        778
+      ],
+      "value": "squares"
+    },
+    {
+      "kind": "=",
+      "span": [
+        779,
+        780
+      ]
+    },
+    {
+      "kind": "[",
+      "span": [
+        781,
+        782
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        782,
+        783
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "*",
+      "span": [
+        784,
+        785
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        786,
+        787
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "for",
+      "span": [
+        788,
+        791
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        792,
+        793
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "in",
+      "span": [
+        794,
+        796
+      ]
+    },
+    {
+      "kind": "[",
+      "span": [
+        797,
+        798
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        798,
+        799
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "..",
+      "span": [
+        799,
+        801
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        801,
+        802
+      ],
+      "value": "5"
+    },
+    {
+      "kind": "]",
+      "span": [
+        802,
+        803
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        803,
+        804
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        805,
+        807
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        808,
+        809
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "%",
+      "span": [
+        810,
+        811
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        812,
+        813
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "==",
+      "span": [
+        814,
+        816
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        817,
+        818
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ",",
+      "span": [
+        818,
+        819
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        820,
+        823
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        824,
+        825
+      ],
+      "value": "w"
+    },
+    {
+      "kind": "=",
+      "span": [
+        826,
+        827
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        828,
+        829
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "+",
+      "span": [
+        830,
+        831
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        832,
+        833
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "]",
+      "span": [
+        833,
+        834
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        837,
+        840
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        841,
+        845
+      ],
+      "value": "pair"
+    },
+    {
+      "kind": "=",
+      "span": [
+        846,
+        847
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        848,
+        849
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        849,
+        850
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ",",
+      "span": [
+        850,
+        851
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        852,
+        857
+      ],
+      "value": "two"
+    },
+    {
+      "kind": ")",
+      "span": [
+        857,
+        858
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        861,
+        864
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        865,
+        870
+      ],
+      "value": "evens"
+    },
+    {
+      "kind": "=",
+      "span": [
+        871,
+        872
+      ]
+    },
+    {
+      "kind": "[",
+      "span": [
+        873,
+        874
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        874,
+        875
+      ],
+      "value": "2"
+    },
+    {
+      "kind": ",",
+      "span": [
+        875,
+        876
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        877,
+        878
+      ],
+      "value": "4"
+    },
+    {
+      "kind": "..",
+      "span": [
+        878,
+        880
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        880,
+        882
+      ],
+      "value": "10"
+    },
+    {
+      "kind": "]",
+      "span": [
+        882,
+        883
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        886,
+        892
+      ],
+      "value": "append"
+    },
+    {
+      "kind": "(",
+      "span": [
+        892,
+        893
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        893,
+        900
+      ],
+      "value": "squares"
+    },
+    {
+      "kind": ",",
+      "span": [
+        900,
+        901
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        902,
+        907
+      ],
+      "value": "evens"
+    },
+    {
+      "kind": ")",
+      "span": [
+        907,
+        908
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        910,
+        912
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        913,
+        920
+      ],
+      "value": "stringy"
+    },
+    {
+      "kind": "(",
+      "span": [
+        920,
+        921
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        921,
+        925
+      ],
+      "value": "name"
+    },
+    {
+      "kind": ":",
+      "span": [
+        926,
+        927
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        928,
+        934
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        934,
+        935
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        936,
+        937
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        938,
+        944
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        945,
+        946
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        947,
+        955
+      ],
+      "value": "hello "
+    },
+    {
+      "kind": "ident",
+      "span": [
+        955,
+        959
+      ],
+      "value": "name"
+    },
+    {
+      "kind": "imid",
+      "span": [
+        959,
+        963
+      ],
+      "value": ", "
+    },
+    {
+      "kind": "int",
+      "span": [
+        963,
+        964
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "+",
+      "span": [
+        965,
+        966
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        967,
+        968
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "iend",
+      "span": [
+        968,
+        975
+      ],
+      "value": " wide"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        977,
+        979
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        980,
+        987
+      ],
+      "value": "indexed"
+    },
+    {
+      "kind": "(",
+      "span": [
+        987,
+        988
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        988,
+        990
+      ],
+      "value": "xs"
+    },
+    {
+      "kind": ":",
+      "span": [
+        991,
+        992
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        993,
+        997
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        997,
+        998
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        998,
+        1001
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1001,
+        1002
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1002,
+        1003
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1004,
+        1005
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1006,
+        1009
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1010,
+        1011
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1012,
+        1014
+      ],
+      "value": "xs"
+    },
+    {
+      "kind": "[",
+      "span": [
+        1014,
+        1015
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1015,
+        1016
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "]",
+      "span": [
+        1016,
+        1017
+      ]
+    },
+    {
+      "kind": "??",
+      "span": [
+        1018,
+        1020
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1021,
+        1022
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1024,
+        1026
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1027,
+        1034
+      ],
+      "value": "chained"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1034,
+        1035
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1035,
+        1036
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1037,
+        1038
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1039,
+        1045
+      ],
+      "value": "Option"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1045,
+        1046
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1046,
+        1049
+      ],
+      "value": "Car"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1049,
+        1050
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1050,
+        1051
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1052,
+        1053
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        1054,
+        1060
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1061,
+        1062
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1063,
+        1064
+      ],
+      "value": "c"
+    },
+    {
+      "kind": "?.",
+      "span": [
+        1064,
+        1066
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1066,
+        1070
+      ],
+      "value": "name"
+    },
+    {
+      "kind": "??",
+      "span": [
+        1071,
+        1073
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        1074,
+        1080
+      ],
+      "value": "none"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1082,
+        1084
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1085,
+        1093
+      ],
+      "value": "multikey"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1093,
+        1094
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1094,
+        1095
+      ],
+      "value": "t"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1096,
+        1097
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1098,
+        1104
+      ],
+      "value": "Tensor"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1104,
+        1105
+      ]
+    },
+    {
+      "kind": "Float",
+      "span": [
+        1105,
+        1110
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1110,
+        1111
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1111,
+        1112
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1113,
+        1114
+      ]
+    },
+    {
+      "kind": "Float",
+      "span": [
+        1115,
+        1120
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1121,
+        1122
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1123,
+        1124
+      ],
+      "value": "t"
+    },
+    {
+      "kind": "[",
+      "span": [
+        1124,
+        1125
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1125,
+        1126
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1126,
+        1127
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1128,
+        1129
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "]",
+      "span": [
+        1129,
+        1130
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1132,
+        1134
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1135,
+        1140
+      ],
+      "value": "holey"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1140,
+        1141
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1141,
+        1142
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1143,
+        1144
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1145,
+        1148
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1148,
+        1149
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1150,
+        1151
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1152,
+        1155
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1156,
+        1157
+      ]
+    },
+    {
+      "kind": "?",
+      "span": [
+        1158,
+        1159
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1159,
+        1163
+      ],
+      "value": "fill"
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        72,
+        72
+      ]
+    },
+    {
+      "kind": "type",
+      "span": [
+        72,
+        76
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        77,
+        82
+      ],
+      "value": "Wheel"
+    },
+    {
+      "kind": "=",
+      "span": [
+        83,
+        84
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        85,
+        90
+      ],
+      "value": "Wheel"
+    },
+    {
+      "kind": "{",
+      "span": [
+        91,
+        92
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        93,
+        96
+      ],
+      "value": "psi"
+    },
+    {
+      "kind": ":",
+      "span": [
+        96,
+        97
+      ]
+    },
+    {
+      "kind": "Float",
+      "span": [
+        98,
+        103
+      ]
+    },
+    {
+      "kind": "}",
+      "span": [
+        104,
+        105
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        105,
+        105
+      ]
+    },
+    {
+      "kind": "type",
+      "span": [
+        107,
+        111
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        112,
+        115
+      ],
+      "value": "Car"
+    },
+    {
+      "kind": "=",
+      "span": [
+        116,
+        117
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        118,
+        121
+      ],
+      "value": "Car"
+    },
+    {
+      "kind": "{",
+      "span": [
+        122,
+        123
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        124,
+        128
+      ],
+      "value": "name"
+    },
+    {
+      "kind": ":",
+      "span": [
+        128,
+        129
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        130,
+        136
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        136,
+        137
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        138,
+        144
+      ],
+      "value": "wheels"
+    },
+    {
+      "kind": ":",
+      "span": [
+        144,
+        145
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        146,
+        150
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        150,
+        151
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        151,
+        156
+      ],
+      "value": "Wheel"
+    },
+    {
+      "kind": ")",
+      "span": [
+        156,
+        157
+      ]
+    },
+    {
+      "kind": "}",
+      "span": [
+        158,
+        159
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        159,
+        159
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        161,
+        163
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        164,
+        169
+      ],
+      "value": "arith"
+    },
+    {
+      "kind": "(",
+      "span": [
+        169,
+        170
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        170,
+        171
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ":",
+      "span": [
+        172,
+        173
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        174,
+        177
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        177,
+        178
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        179,
+        180
+      ],
+      "value": "y"
+    },
+    {
+      "kind": ":",
+      "span": [
+        181,
+        182
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        183,
+        186
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        186,
+        187
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        188,
+        189
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        190,
+        193
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        194,
+        195
+      ]
+    },
+    {
+      "kind": "-",
+      "span": [
+        196,
+        197
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        197,
+        198
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "+",
+      "span": [
+        199,
+        200
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        201,
+        202
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "*",
+      "span": [
+        203,
+        204
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        205,
+        206
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "-",
+      "span": [
+        207,
+        208
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        209,
+        210
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "%",
+      "span": [
+        211,
+        212
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        213,
+        214
+      ],
+      "value": "3"
+    },
+    {
+      "kind": "+",
+      "span": [
+        215,
+        216
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        217,
+        218
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "^",
+      "span": [
+        219,
+        220
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        221,
+        222
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        222,
+        222
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        224,
+        226
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        227,
+        236
+      ],
+      "value": "logic_ops"
+    },
+    {
+      "kind": "(",
+      "span": [
+        236,
+        237
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        237,
+        238
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ":",
+      "span": [
+        239,
+        240
+      ]
+    },
+    {
+      "kind": "Bool",
+      "span": [
+        241,
+        245
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        245,
+        246
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        247,
+        248
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ":",
+      "span": [
+        249,
+        250
+      ]
+    },
+    {
+      "kind": "Bool",
+      "span": [
+        251,
+        255
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        255,
+        256
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        257,
+        258
+      ]
+    },
+    {
+      "kind": "Bool",
+      "span": [
+        259,
+        263
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        264,
+        265
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        266,
+        267
+      ],
+      "value": "a"
+    },
+    {
+      "kind": "&&",
+      "span": [
+        268,
+        270
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        271,
+        272
+      ],
+      "value": "b"
+    },
+    {
+      "kind": "||",
+      "span": [
+        273,
+        275
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        276,
+        279
+      ],
+      "value": "not"
+    },
+    {
+      "kind": "(",
+      "span": [
+        279,
+        280
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        280,
+        281
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        281,
+        282
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        282,
+        282
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        284,
+        286
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        287,
+        294
+      ],
+      "value": "compare"
+    },
+    {
+      "kind": "(",
+      "span": [
+        294,
+        295
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        295,
+        296
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ":",
+      "span": [
+        297,
+        298
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        299,
+        302
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        302,
+        303
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        304,
+        305
+      ],
+      "value": "y"
+    },
+    {
+      "kind": ":",
+      "span": [
+        306,
+        307
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        308,
+        311
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        311,
+        312
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        313,
+        314
+      ]
+    },
+    {
+      "kind": "Bool",
+      "span": [
+        315,
+        319
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        320,
+        321
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        324,
+        324
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        324,
+        325
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "<",
+      "span": [
+        326,
+        327
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        328,
+        329
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "&&",
+      "span": [
+        330,
+        332
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        333,
+        334
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "<=",
+      "span": [
+        335,
+        337
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        338,
+        339
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "&&",
+      "span": [
+        340,
+        342
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        343,
+        344
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ">",
+      "span": [
+        345,
+        346
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        347,
+        348
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "||",
+      "span": [
+        349,
+        351
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        352,
+        353
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ">=",
+      "span": [
+        354,
+        356
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        357,
+        358
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "||",
+      "span": [
+        359,
+        361
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        362,
+        363
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "==",
+      "span": [
+        364,
+        366
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        367,
+        368
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "||",
+      "span": [
+        369,
+        371
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        372,
+        373
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "/=",
+      "span": [
+        374,
+        376
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        377,
+        378
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        378,
+        378
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        378,
+        378
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        380,
+        382
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        383,
+        388
+      ],
+      "value": "pipes"
+    },
+    {
+      "kind": "(",
+      "span": [
+        388,
+        389
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        389,
+        391
+      ],
+      "value": "xs"
+    },
+    {
+      "kind": ":",
+      "span": [
+        392,
+        393
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        394,
+        398
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        398,
+        399
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        399,
+        402
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        402,
+        403
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        403,
+        404
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        405,
+        406
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        407,
+        410
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        411,
+        412
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        413,
+        415
+      ],
+      "value": "xs"
+    },
+    {
+      "kind": "|>",
+      "span": [
+        416,
+        418
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        419,
+        422
+      ],
+      "value": "map"
+    },
+    {
+      "kind": "(",
+      "span": [
+        422,
+        423
+      ]
+    },
+    {
+      "kind": "\\",
+      "span": [
+        423,
+        424
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        424,
+        425
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        425,
+        426
+      ],
+      "value": "v"
+    },
+    {
+      "kind": ")",
+      "span": [
+        426,
+        427
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        428,
+        430
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        431,
+        432
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "+",
+      "span": [
+        433,
+        434
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        435,
+        436
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        436,
+        437
+      ]
+    },
+    {
+      "kind": "|>",
+      "span": [
+        438,
+        440
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        441,
+        447
+      ],
+      "value": "length"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        447,
+        447
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        449,
+        451
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        452,
+        460
+      ],
+      "value": "composed"
+    },
+    {
+      "kind": "(",
+      "span": [
+        460,
+        461
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        461,
+        462
+      ],
+      "value": "f"
+    },
+    {
+      "kind": ":",
+      "span": [
+        463,
+        464
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        465,
+        466
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        466,
+        469
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        469,
+        470
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        471,
+        473
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        474,
+        477
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        477,
+        478
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        479,
+        480
+      ],
+      "value": "g"
+    },
+    {
+      "kind": ":",
+      "span": [
+        481,
+        482
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        483,
+        484
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        484,
+        487
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        487,
+        488
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        489,
+        491
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        492,
+        495
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        495,
+        496
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        497,
+        498
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        499,
+        500
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        500,
+        503
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        503,
+        504
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        505,
+        507
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        508,
+        511
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        512,
+        513
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        514,
+        515
+      ],
+      "value": "f"
+    },
+    {
+      "kind": ">>",
+      "span": [
+        516,
+        518
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        519,
+        520
+      ],
+      "value": "g"
+    },
+    {
+      "kind": "<<",
+      "span": [
+        521,
+        523
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        524,
+        525
+      ],
+      "value": "f"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        525,
+        525
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        527,
+        529
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        530,
+        537
+      ],
+      "value": "records"
+    },
+    {
+      "kind": "(",
+      "span": [
+        537,
+        538
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        538,
+        539
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ":",
+      "span": [
+        540,
+        541
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        542,
+        545
+      ],
+      "value": "Car"
+    },
+    {
+      "kind": ")",
+      "span": [
+        545,
+        546
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        547,
+        548
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        549,
+        552
+      ],
+      "value": "Car"
+    },
+    {
+      "kind": "=",
+      "span": [
+        553,
+        554
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        557,
+        557
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        557,
+        560
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        561,
+        567
+      ],
+      "value": "bumped"
+    },
+    {
+      "kind": "=",
+      "span": [
+        568,
+        569
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        574,
+        574
+      ]
+    },
+    {
+      "kind": "{",
+      "span": [
+        574,
+        575
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        576,
+        577
+      ],
+      "value": "c"
+    },
+    {
+      "kind": "|",
+      "span": [
+        582,
+        583
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        584,
+        588
+      ],
+      "value": "name"
+    },
+    {
+      "kind": "=",
+      "span": [
+        589,
+        590
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        591,
+        595
+      ],
+      "value": "vx"
+    },
+    {
+      "kind": ",",
+      "span": [
+        600,
+        601
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        602,
+        608
+      ],
+      "value": "wheels"
+    },
+    {
+      "kind": ".",
+      "span": [
+        608,
+        609
+      ]
+    },
+    {
+      "kind": "each",
+      "span": [
+        609,
+        613
+      ]
+    },
+    {
+      "kind": ".",
+      "span": [
+        613,
+        614
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        614,
+        617
+      ],
+      "value": "psi"
+    },
+    {
+      "kind": "~",
+      "span": [
+        618,
+        619
+      ]
+    },
+    {
+      "kind": "\\",
+      "span": [
+        620,
+        621
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        621,
+        622
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        622,
+        623
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ")",
+      "span": [
+        623,
+        624
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        625,
+        627
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        628,
+        629
+      ],
+      "value": "p"
+    },
+    {
+      "kind": "+",
+      "span": [
+        630,
+        631
+      ]
+    },
+    {
+      "kind": "float",
+      "span": [
+        632,
+        635
+      ],
+      "value": "1.0"
+    },
+    {
+      "kind": "}",
+      "span": [
+        640,
+        641
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        641,
+        641
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        641,
+        641
+      ]
+    },
+    {
+      "kind": "{",
+      "span": [
+        644,
+        645
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        646,
+        652
+      ],
+      "value": "bumped"
+    },
+    {
+      "kind": "|",
+      "span": [
+        653,
+        654
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        655,
+        661
+      ],
+      "value": "wheels"
+    },
+    {
+      "kind": "[",
+      "span": [
+        661,
+        662
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        662,
+        663
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "]",
+      "span": [
+        663,
+        664
+      ]
+    },
+    {
+      "kind": ".",
+      "span": [
+        664,
+        665
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        665,
+        668
+      ],
+      "value": "psi"
+    },
+    {
+      "kind": "=",
+      "span": [
+        669,
+        670
+      ]
+    },
+    {
+      "kind": "float",
+      "span": [
+        671,
+        675
+      ],
+      "value": "30.0"
+    },
+    {
+      "kind": "}",
+      "span": [
+        676,
+        677
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        677,
+        677
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        677,
+        677
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        679,
+        681
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        682,
+        687
+      ],
+      "value": "reads"
+    },
+    {
+      "kind": "(",
+      "span": [
+        687,
+        688
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        688,
+        689
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ":",
+      "span": [
+        690,
+        691
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        692,
+        695
+      ],
+      "value": "Car"
+    },
+    {
+      "kind": ")",
+      "span": [
+        695,
+        696
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        697,
+        698
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        699,
+        703
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        703,
+        704
+      ]
+    },
+    {
+      "kind": "Float",
+      "span": [
+        704,
+        709
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        709,
+        710
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        711,
+        712
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        713,
+        714
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ".",
+      "span": [
+        714,
+        715
+      ]
+    },
+    {
+      "kind": "[",
+      "span": [
+        715,
+        716
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        716,
+        722
+      ],
+      "value": "wheels"
+    },
+    {
+      "kind": ".",
+      "span": [
+        722,
+        723
+      ]
+    },
+    {
+      "kind": "each",
+      "span": [
+        723,
+        727
+      ]
+    },
+    {
+      "kind": ".",
+      "span": [
+        727,
+        728
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        728,
+        731
+      ],
+      "value": "psi"
+    },
+    {
+      "kind": "]",
+      "span": [
+        731,
+        732
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        732,
+        732
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        734,
+        736
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        737,
+        748
+      ],
+      "value": "collections"
+    },
+    {
+      "kind": "(",
+      "span": [
+        748,
+        749
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        749,
+        750
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        751,
+        752
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        753,
+        757
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        757,
+        758
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        758,
+        761
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        761,
+        762
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        763,
+        764
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        767,
+        767
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        767,
+        770
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        771,
+        778
+      ],
+      "value": "squares"
+    },
+    {
+      "kind": "=",
+      "span": [
+        779,
+        780
+      ]
+    },
+    {
+      "kind": "[",
+      "span": [
+        781,
+        782
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        782,
+        783
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "*",
+      "span": [
+        784,
+        785
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        786,
+        787
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "for",
+      "span": [
+        788,
+        791
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        792,
+        793
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "in",
+      "span": [
+        794,
+        796
+      ]
+    },
+    {
+      "kind": "[",
+      "span": [
+        797,
+        798
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        798,
+        799
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "..",
+      "span": [
+        799,
+        801
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        801,
+        802
+      ],
+      "value": "5"
+    },
+    {
+      "kind": "]",
+      "span": [
+        802,
+        803
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        803,
+        804
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        805,
+        807
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        808,
+        809
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "%",
+      "span": [
+        810,
+        811
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        812,
+        813
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "==",
+      "span": [
+        814,
+        816
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        817,
+        818
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ",",
+      "span": [
+        818,
+        819
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        820,
+        823
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        824,
+        825
+      ],
+      "value": "w"
+    },
+    {
+      "kind": "=",
+      "span": [
+        826,
+        827
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        828,
+        829
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "+",
+      "span": [
+        830,
+        831
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        832,
+        833
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "]",
+      "span": [
+        833,
+        834
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        834,
+        834
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        837,
+        840
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        841,
+        845
+      ],
+      "value": "pair"
+    },
+    {
+      "kind": "=",
+      "span": [
+        846,
+        847
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        848,
+        849
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        849,
+        850
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ",",
+      "span": [
+        850,
+        851
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        852,
+        857
+      ],
+      "value": "two"
+    },
+    {
+      "kind": ")",
+      "span": [
+        857,
+        858
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        858,
+        858
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        861,
+        864
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        865,
+        870
+      ],
+      "value": "evens"
+    },
+    {
+      "kind": "=",
+      "span": [
+        871,
+        872
+      ]
+    },
+    {
+      "kind": "[",
+      "span": [
+        873,
+        874
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        874,
+        875
+      ],
+      "value": "2"
+    },
+    {
+      "kind": ",",
+      "span": [
+        875,
+        876
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        877,
+        878
+      ],
+      "value": "4"
+    },
+    {
+      "kind": "..",
+      "span": [
+        878,
+        880
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        880,
+        882
+      ],
+      "value": "10"
+    },
+    {
+      "kind": "]",
+      "span": [
+        882,
+        883
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        883,
+        883
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        886,
+        892
+      ],
+      "value": "append"
+    },
+    {
+      "kind": "(",
+      "span": [
+        892,
+        893
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        893,
+        900
+      ],
+      "value": "squares"
+    },
+    {
+      "kind": ",",
+      "span": [
+        900,
+        901
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        902,
+        907
+      ],
+      "value": "evens"
+    },
+    {
+      "kind": ")",
+      "span": [
+        907,
+        908
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        908,
+        908
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        908,
+        908
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        910,
+        912
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        913,
+        920
+      ],
+      "value": "stringy"
+    },
+    {
+      "kind": "(",
+      "span": [
+        920,
+        921
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        921,
+        925
+      ],
+      "value": "name"
+    },
+    {
+      "kind": ":",
+      "span": [
+        926,
+        927
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        928,
+        934
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        934,
+        935
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        936,
+        937
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        938,
+        944
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        945,
+        946
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        947,
+        955
+      ],
+      "value": "hello "
+    },
+    {
+      "kind": "ident",
+      "span": [
+        955,
+        959
+      ],
+      "value": "name"
+    },
+    {
+      "kind": "imid",
+      "span": [
+        959,
+        963
+      ],
+      "value": ", "
+    },
+    {
+      "kind": "int",
+      "span": [
+        963,
+        964
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "+",
+      "span": [
+        965,
+        966
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        967,
+        968
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "iend",
+      "span": [
+        968,
+        975
+      ],
+      "value": " wide"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        975,
+        975
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        977,
+        979
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        980,
+        987
+      ],
+      "value": "indexed"
+    },
+    {
+      "kind": "(",
+      "span": [
+        987,
+        988
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        988,
+        990
+      ],
+      "value": "xs"
+    },
+    {
+      "kind": ":",
+      "span": [
+        991,
+        992
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        993,
+        997
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        997,
+        998
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        998,
+        1001
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1001,
+        1002
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1002,
+        1003
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1004,
+        1005
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1006,
+        1009
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1010,
+        1011
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1012,
+        1014
+      ],
+      "value": "xs"
+    },
+    {
+      "kind": "[",
+      "span": [
+        1014,
+        1015
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1015,
+        1016
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "]",
+      "span": [
+        1016,
+        1017
+      ]
+    },
+    {
+      "kind": "??",
+      "span": [
+        1018,
+        1020
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1021,
+        1022
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1022,
+        1022
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1024,
+        1026
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1027,
+        1034
+      ],
+      "value": "chained"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1034,
+        1035
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1035,
+        1036
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1037,
+        1038
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1039,
+        1045
+      ],
+      "value": "Option"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1045,
+        1046
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1046,
+        1049
+      ],
+      "value": "Car"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1049,
+        1050
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1050,
+        1051
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1052,
+        1053
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        1054,
+        1060
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1061,
+        1062
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1063,
+        1064
+      ],
+      "value": "c"
+    },
+    {
+      "kind": "?.",
+      "span": [
+        1064,
+        1066
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1066,
+        1070
+      ],
+      "value": "name"
+    },
+    {
+      "kind": "??",
+      "span": [
+        1071,
+        1073
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        1074,
+        1080
+      ],
+      "value": "none"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1080,
+        1080
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1082,
+        1084
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1085,
+        1093
+      ],
+      "value": "multikey"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1093,
+        1094
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1094,
+        1095
+      ],
+      "value": "t"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1096,
+        1097
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1098,
+        1104
+      ],
+      "value": "Tensor"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1104,
+        1105
+      ]
+    },
+    {
+      "kind": "Float",
+      "span": [
+        1105,
+        1110
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1110,
+        1111
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1111,
+        1112
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1113,
+        1114
+      ]
+    },
+    {
+      "kind": "Float",
+      "span": [
+        1115,
+        1120
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1121,
+        1122
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1123,
+        1124
+      ],
+      "value": "t"
+    },
+    {
+      "kind": "[",
+      "span": [
+        1124,
+        1125
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1125,
+        1126
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1126,
+        1127
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1128,
+        1129
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "]",
+      "span": [
+        1129,
+        1130
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1130,
+        1130
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1132,
+        1134
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1135,
+        1140
+      ],
+      "value": "holey"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1140,
+        1141
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1141,
+        1142
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1143,
+        1144
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1145,
+        1148
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1148,
+        1149
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1150,
+        1151
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1152,
+        1155
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1156,
+        1157
+      ]
+    },
+    {
+      "kind": "?",
+      "span": [
+        1158,
+        1159
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1159,
+        1163
+      ],
+      "value": "fill"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1163,
+        1163
+      ]
+    }
+  ],
+  "trivia": [
+    {
+      "kind": "comment",
+      "span": [
+        0,
+        71
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        105,
+        107
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        159,
+        161
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        222,
+        224
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        282,
+        284
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        378,
+        380
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        447,
+        449
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        525,
+        527
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        677,
+        679
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        732,
+        734
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        908,
+        910
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        975,
+        977
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        1022,
+        1024
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        1080,
+        1082
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        1130,
+        1132
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+-- The standalone Spectra executable. Build with:
+--
+--   prism build packages/spectra --out ./spectra
+
+import Cli as C
+
+import SpectraCli (SpectraCommand, Check, Build, Clean, spectra_command)
+
+import SpectraBuild (check_project, build_project, clean_project)
+
+fn dispatch(command : SpectraCommand) : Int ! {FileSystem, IO, Output} =
+  match command of
+    Check(path) => check_project(path)
+    Build(path, output, open) => build_project(path, output, open)
+    Clean(path) => clean_project(path)
+
+fn main() =
+  match C.run_args(spectra_command) of
+    C.Parsed(command) => exit(dispatch(command))
+    C.ShowHelp(help) =>
+      out_println(help)
+      exit(0)
+    C.BadUsage(message) =>
+      eprintln(message)
+      exit(2)

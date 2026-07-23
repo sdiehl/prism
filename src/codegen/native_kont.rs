@@ -15,6 +15,12 @@ pub(crate) const TABLE_GLOBAL: &str = "prism_native_kont_table";
 pub(crate) const STATE_MAP_GLOBAL: &str = "prism_native_kont_state_map";
 pub(crate) const PTRS_GLOBAL: &str = "prism_native_kont_ptrs";
 pub(crate) const PTRS_LEN_GLOBAL: &str = "prism_native_kont_ptrs_len";
+// Mach-O section names are a `__SEGMENT,__section` pair; a bare ELF-style
+// name lands in a nameless segment, which Darwin 25 rejects at exec with
+// EBADMACHO. The snapshot normalizer maps both spellings to one canonical form.
+#[cfg(target_os = "macos")]
+pub(crate) const TABLE_SECTION: &str = "__DATA,__prism_kont";
+#[cfg(not(target_os = "macos"))]
 pub(crate) const TABLE_SECTION: &str = ".prism_kont";
 
 pub(crate) const ENTER_SYMBOL: &str = "prism_native_kont_enter";

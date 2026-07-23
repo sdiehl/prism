@@ -1,0 +1,13 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/control_validate.pr
+---
+Data.Validation.Valid(42)
+Data.Validation.Invalid(["before", "boom"])
+Data.Validation.Invalid(["first", "second"])
+Data.Validation.Invalid(["before", "boom", "after"])
+Data.Validation.Invalid(["first", "second"])
+Data.Validation.Invalid(["left", "right"])
+["only"]
+=> ()

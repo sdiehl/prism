@@ -1,0 +1,60 @@
+-- | Source identity for the versioned syntax artifacts: byte spans and source
+-- files. A span is a half-open byte range into one source text; byte offsets
+-- are the canonical position vocabulary (line and column are projections for
+-- people, never a second identity). The compiler emits these in the
+-- `prism-syntax-tokens-v1` and `prism-surface-syntax-v1` exports; this module
+-- is the Prism-side vocabulary those artifacts decode into.
+
+import Data.String (..)
+
+-- | A half-open byte range `[lo, hi)` into one source text.
+--
+-- ```prism
+-- span_len(Span { lo = 3, hi = 8 })
+-- ```
+-- ```output
+-- 5
+-- ```
+pub type Span = Span { lo: Int, hi: Int } deriving (Eq, Show)
+
+-- | The number of bytes a span covers.
+pub fn span_len(s : Span) : Int = s.hi - s.lo
+
+-- | Whether a span is well formed: non-negative start, start at or before end.
+--
+-- ```prism
+-- (span_valid(Span { lo = 2, hi = 2 }), span_valid(Span { lo = 5, hi = 4 }))
+-- ```
+-- ```output
+-- (true, false)
+-- ```
+pub fn span_valid(s : Span) : Bool = 0 <= s.lo && s.lo <= s.hi
+
+-- | Whether a byte offset falls inside the span (half-open, so the end offset
+-- is outside).
+pub fn span_contains(s : Span, pos : Int) : Bool = s.lo <= pos && pos < s.hi
+
+-- | One source file as an artifact embeds it: the exact text and its digest.
+-- Every span in an artifact indexes this text, so a persisted document needs
+-- no external file.
+pub type SourceFile = SourceFile { digest: String, text: String } deriving (Eq)
+
+-- | The one-based line and column of a byte offset, as a projection over the
+-- text. Offsets past the end clamp to the final position.
+--
+-- ```prism
+-- line_col("ab\ncd", 4)
+-- ```
+-- ```output
+-- (2, 2)
+-- ```
+pub fn line_col(text : String, off : Int) : (Int, Int) =
+  line_col_go(text, 0, min(off, str_len(text)), 1, 1)
+
+fn line_col_go(s : String, i : Int, stop : Int, l : Int, c : Int) : (Int, Int) =
+  if i >= stop then
+    (l, c)
+  elif char_at(s, i) == 10 then
+    line_col_go(s, i + 1, stop, l + 1, 1)
+  else
+    line_col_go(s, i + 1, stop, l, c + 1)

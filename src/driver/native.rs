@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::codegen::rt::{write_libm_archive, write_runtime_for, RuntimeProfile};
+use crate::codegen::rt::{cc, cc_flags, write_libm_archive, write_runtime_for, RuntimeProfile};
 use crate::error::Error;
 use crate::lineage::FactOutcome;
 
@@ -34,7 +34,7 @@ pub(super) fn run_native(bin: &Path) -> Result<Vec<u8>, Error> {
 
 fn cc_args(cfg: &Config) -> Vec<String> {
     let mut args = vec![
-        format!("-O{}", cfg.backend_opt.as_str()),
+        format!("-O{}", cfg.backend_opt().as_str()),
         THIN_LTO_FLAG.to_string(),
         NO_FP_CONTRACT_FLAG.to_string(),
         NO_OVERRIDE_MODULE_WARNING_FLAG.to_string(),
@@ -49,12 +49,7 @@ fn cc_args(cfg: &Config) -> Vec<String> {
     if cfg.flags.native_kont_frames {
         args.extend(NATIVE_KONT_FRAME_FLAGS.iter().map(ToString::to_string));
     }
-    args.extend(
-        env::var("PRISM_CC_FLAGS")
-            .unwrap_or_default()
-            .split_whitespace()
-            .map(ToString::to_string),
-    );
+    args.extend(cc_flags().split_whitespace().map(ToString::to_string));
     args
 }
 
@@ -131,7 +126,7 @@ pub(super) fn cc_link_many(
     let first_ir = ir.first().ok_or_else(|| {
         Error::CodegenBackend("cannot link an empty backend artifact set".to_string())
     })?;
-    let cc = env::var("PRISM_CC").unwrap_or_else(|_| env!("PRISM_BUILD_CC").into());
+    let cc = cc();
     let args = cc_args(cfg);
     let rt_dir = out.with_extension("prism_rt.d");
     let sources = write_runtime_for(&rt_dir, runtime_profile)?;

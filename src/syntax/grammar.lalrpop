@@ -633,8 +633,8 @@ Fn: Decl = {
     <l:@L> <mods:DeclMods> <rep:"replayable"?> <fip:FipKw> "fn" <name:"ident"> "(" <params:Comma<Param>> ")" <ann:RetAnn> <wh:GivenClause?> <reqs:Requires*> <ens:Ensures*> <dec:Decreases?> "=" <body:ExprOrBlock> <wb:WhereBlock?> <r:@R> => {
         // A `@ noalloc` row at the root of the return annotation is the
         // declaration's allocation certificate, not part of the type.
-        let (ret, no_alloc) = lift_noalloc(ann.1);
-        Decl { name, params, eff: ann.0, ret, constraints: wh.unwrap_or_default(), body, wheres: wb.unwrap_or_default(), requires: reqs, ensures: ens, decreases: dec, konst: false, test: mods.0, total: mods.1, fip, replayable: rep.is_some(), no_alloc, span: Span::new(l, r) }
+        let (ret, no_alloc) = lift_noalloc(ann.2);
+        Decl { name, params, eff: ann.0, eff_tail: ann.1, ret, constraints: wh.unwrap_or_default(), body, wheres: wb.unwrap_or_default(), requires: reqs, ensures: ens, decreases: dec, konst: false, test: mods.0, total: mods.1, fip, replayable: rep.is_some(), no_alloc, span: Span::new(l, r) }
     },
 };
 
@@ -692,7 +692,7 @@ FipKw: Fip = {
 // value rather than push a call frame.
 ConstD: Decl = {
     <l:@L> "let" <name:"ident"> <ann:(":" <Type>)?> "=" <body:ExprOrBlock> <r:@R> =>
-        Decl { name, params: vec![], eff: None, ret: ann, constraints: vec![], body, wheres: vec![], requires: vec![], ensures: vec![], decreases: None, konst: true, test: false, total: Total::No, fip: Fip::No, replayable: false, no_alloc: false, span: Span::new(l, r) },
+        Decl { name, params: vec![], eff: None, eff_tail: None, ret: ann, constraints: vec![], body, wheres: vec![], requires: vec![], ensures: vec![], decreases: None, konst: true, test: false, total: Total::No, fip: Fip::No, replayable: false, no_alloc: false, span: Span::new(l, r) },
 };
 
 // Haskell-style trailing definitions: `body where { x = e; y = e }`. Bindings
@@ -760,9 +760,9 @@ Stmts: S<Expr> = {
 // diagnostic points at the whole annotation with the fix, rather than failing as
 // a bare parse error; both start `: !`, so they never conflict with the postfix
 // form, which starts `: <type>`.
-RetAnn: (Option<Vec<EffLabel>>, Option<Ty>) = {
+RetAnn: (Option<Vec<EffLabel>>, Option<String>, Option<Ty>) = {
     ":" <rt:RetType>                                => rt,
-    ()                                              => (None, None),
+    ()                                              => (None, None, None),
     <l:@L> ":" "!" "{" Comma<EffLabel> "}" Type <r:@R> =>? Err(lalrpop_util::ParseError::User {
         error: (Span::new(l, r), MIGRATE_RET_ORDER.to_string()),
     }),
@@ -776,21 +776,20 @@ RetAnn: (Option<Vec<EffLabel>>, Option<Ty>) = {
 // function type (the returned closure's effect) and is the declaration's own
 // effect otherwise; a declaration effect must be a closed row. The empty
 // annotation `()` is handled by `RetAnn`, so this always yields a type.
-RetType: (Option<Vec<EffLabel>>, Option<Ty>) = {
+RetType: (Option<Vec<EffLabel>>, Option<String>, Option<Ty>) = {
     "forall" <vs:(<"ident">)+> "." <rt:RetType> =>
-        (rt.0, rt.1.map(|t| Ty::Forall(vs, Box::new(t)))),
-    <l:@L> <a:Arrow> <eff:ArrowEff?> <r:@R> =>? match eff {
-        None => Ok((None, Some(a))),
+        (rt.0, rt.1, rt.2.map(|t| Ty::Forall(vs, Box::new(t)))),
+    <a:Arrow> <eff:ArrowEff?> => match eff {
+        None => (None, None, Some(a)),
         Some(row) => match a {
-            Ty::Fun(ps, _, cod) => Ok((None, Some(Ty::Fun(ps, row, cod)))),
+            Ty::Fun(ps, _, cod) => (None, None, Some(Ty::Fun(ps, row, cod))),
+            // A declaration effect row may be open: the tail names the row an
+            // effect-forwarding runner forwards (`: T ! {A | e}`). The row stays
+            // inferred (principal); the tail's soundness (a bound signature row
+            // variable) is checked in the typechecker, not here.
             other => match row {
-                Row::Cons(labels, None) => Ok((Some(labels), Some(other))),
-                _ => Err(lalrpop_util::ParseError::User {
-                    error: (
-                        Span::new(l, r),
-                        "a declaration effect row must be closed; write `: T ! {A, B}`".to_string(),
-                    ),
-                }),
+                Row::Cons(labels, tail) => (Some(labels), tail, Some(other)),
+                Row::Empty => (Some(vec![]), None, Some(other)),
             },
         },
     },
@@ -799,6 +798,10 @@ RetType: (Option<Vec<EffLabel>>, Option<Ty>) = {
 EffLabel: EffLabel = {
     <s:"ident"> => EffLabel::bare(s),
     <s:"uid"> <args:CtorArgs?> => EffLabel { name: s, args: args.unwrap_or_default() },
+    // Canonical checked-body and module-interface signatures qualify effects
+    // at package boundaries (`Spectra.DeckBuilder`). Rehydrating those
+    // signatures must accept the same resolved spelling that type names do.
+    <s:"qual"> <args:CtorArgs?> => EffLabel { name: s, args: args.unwrap_or_default() },
 };
 
 Param: Param = {

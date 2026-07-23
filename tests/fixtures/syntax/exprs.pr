@@ -1,0 +1,41 @@
+-- Expression forms: operators, records, paths, ranges, comprehensions.
+type Wheel = Wheel { psi: Float }
+
+type Car = Car { name: String, wheels: List(Wheel) }
+
+fn arith(x : Int, y : Int) : Int = -x + y * 2 - x % 3 + x ^ 2
+
+fn logic_ops(a : Bool, b : Bool) : Bool = a && b || not(a)
+
+fn compare(x : Int, y : Int) : Bool =
+  x < y && x <= y && x > y || x >= y || x == y || x /= y
+
+fn pipes(xs : List(Int)) : Int = xs |> map(\(v) -> v + 1) |> length
+
+fn composed(f : (Int) -> Int, g : (Int) -> Int) : (Int) -> Int = f >> g << f
+
+fn records(c : Car) : Car =
+  let bumped =
+    { c
+    | name = "vx"
+    , wheels.each.psi ~ \(p) -> p + 1.0
+    }
+  { bumped | wheels[0].psi = 30.0 }
+
+fn reads(c : Car) : List(Float) = c.[wheels.each.psi]
+
+fn collections() : List(Int) =
+  let squares = [v * v for v in [1..5], if v % 2 == 1, let w = v + 1]
+  let pair = (1, "two")
+  let evens = [2, 4..10]
+  append(squares, evens)
+
+fn stringy(name : String) : String = "hello {name}, {1 + 2} wide"
+
+fn indexed(xs : List(Int)) : Int = xs[0] ?? 0
+
+fn chained(c : Option(Car)) : String = c?.name ?? "none"
+
+fn multikey(t : Tensor(Float)) : Float = t[1, 2]
+
+fn holey(x : Int) : Int = ?fill

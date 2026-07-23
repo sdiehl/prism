@@ -1,0 +1,25 @@
+-- The wired nullable carries no cell on the native tiers: `Null` is the null
+-- word and `This(v)` is its element word. Building a list of N nullables must
+-- allocate exactly the N `Cons` cells; the nullables themselves contribute
+-- nothing to the runtime allocation counter.
+
+fn wrap(n : Int) : OrNull(Int) =
+  match n < 3 of
+    true => Null
+    false => This(n)
+
+fn build(n : Int, acc : List(OrNull(Int))) : List(OrNull(Int)) =
+  if n == 0 then
+    acc
+  else
+    build(n - 1, Cons(wrap(n), acc))
+
+fn total(xs : List(OrNull(Int))) : Int =
+  match xs of
+    Nil => 0
+    Cons(o, t) =>
+      match o of
+        This(x) => x + total(t)
+        Null => total(t)
+
+fn main() = println(total(build(__N__, Nil)))

@@ -14,6 +14,7 @@ use std::process::{self, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use prism::core::Digest;
 use prism::core::HASH_SCHEME;
 use prism::flags::SignMode;
 use prism::pkg::export::{export, verify_manifest, EXPORT_MANIFEST_HEADER};
@@ -299,7 +300,7 @@ fn package_index_rows_name_the_hash_scheme() {
         tag: "2.0".into(),
         scheme: HASH_SCHEME.into(),
         kind: INDEX_KIND_SOURCE.into(),
-        root: "a3f9".repeat(16),
+        root: Digest::from("a3f9".repeat(16)),
     };
     let body = serialize_index(std::slice::from_ref(&row));
     let text = String::from_utf8(body.clone()).unwrap();
@@ -342,7 +343,7 @@ fn signed_index_round_trips_and_detects_tampering() {
         tag: "2.0".into(),
         scheme: HASH_SCHEME.into(),
         kind: INDEX_KIND_SOURCE.into(),
-        root: "a3f9".repeat(16),
+        root: Digest::from("a3f9".repeat(16)),
     }];
     let body = serialize_index(&rows);
     let sig = sign(&body, &flags).expect("sign").expect("a signature");
@@ -380,7 +381,7 @@ fn unsigned_mode_produces_no_signature() {
         tag: "1".into(),
         scheme: HASH_SCHEME.into(),
         kind: INDEX_KIND_SOURCE.into(),
-        root: "00".repeat(32),
+        root: Digest::from("00".repeat(32)),
     }]);
     assert!(sign(&body, &flags).unwrap().is_none());
     let artifact = SignedArtifact { body, sig: None };
@@ -486,7 +487,7 @@ fn publish_unsigned(root: &Path, name: &str, tag: &str) -> IndexRow {
         tag: tag.to_string(),
         scheme: identity.scheme.to_string(),
         kind: identity.kind.to_string(),
-        root: identity.root.into_string(),
+        root: identity.root,
     }
 }
 
@@ -551,7 +552,7 @@ fn audit_passes_the_green_path_and_names_each_failure() {
 
     // Failure 2: a pin the signed index does not match is a named failure.
     let mismatch = IndexRow {
-        root: "de".repeat(32),
+        root: Digest::from("de".repeat(32)),
         ..row.clone()
     };
     let bad = audit(

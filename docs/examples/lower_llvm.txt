@@ -1,5 +1,5 @@
 ; Function Attrs: nounwind
-define i64 @prism_unwrap(i64 %a0) #0 {
+define i64 @prismfn_unwrap(i64 %a0) #0 {
 entry:
   %t0 = inttoptr i64 %a0 to ptr
   %t1 = getelementptr inbounds i8, ptr %t0, i64 8

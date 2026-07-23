@@ -1,9 +1,10 @@
 -- The essential adapter type is polymorphic in the ambient tail `e`: it removes
 -- its source protocol, introduces its target protocol, and forwards the rest of
--- the row untouched. That result row cannot be spelled as a declaration
--- annotation: a declaration effect row must be closed, so an open tail in result
--- position is rejected. Ambient preservation is available only implicitly, by
--- leaving an adapter's result row to inference.
+-- the row untouched. That open result row can be spelled explicitly as a
+-- declaration annotation (`: a ! {KvV2 | e}`): an effect-forwarding runner may
+-- name the row it forwards rather than eliding the `!` and leaving ambient
+-- preservation implicit. The row still stays inferred; the annotation documents
+-- and checks the introduced protocol.
 effect KvV1
   get_v1(Int) : Int
   put_v1(Int, Int) : Unit

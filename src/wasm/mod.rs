@@ -801,10 +801,20 @@ fn parse_incr_trace(term: &str) -> Result<IncrTrace<'_>, &'static str> {
         values: HashMap::new(),
     };
     for line in previous_rows.lines().filter(|line| !line.is_empty()) {
-        let IncrTraceRow::Previous(name, value) = parse_incr_row(line)? else {
-            return Err("non-previous row before incremental step marker");
-        };
-        trace.previous.insert(name, value);
+        match parse_incr_row(line)? {
+            IncrTraceRow::Previous(name, value) => {
+                trace.previous.insert(name, value);
+            }
+            // The cold first demand runs every memo body to establish the prior
+            // values, so its fire lines land in the pre-step section. They report
+            // that initial computation, not the re-demand under observation, and
+            // only the post-step fires classify the incremental step, so these are
+            // ignored here.
+            IncrTraceRow::Fired(_) => {}
+            IncrTraceRow::Value(_, _) => {
+                return Err("value row before incremental step marker");
+            }
+        }
     }
     for line in step_rows.lines().filter(|line| !line.is_empty()) {
         match parse_incr_row(line)? {
@@ -974,5 +984,45 @@ mod tests {
         assert!(term.contains("v:total=18"), "{term}");
         assert!(term.contains("v:peak=7"), "{term}");
         assert!(term.contains("v:board=106"), "{term}");
+    }
+
+    // The cold first demand runs every memo body, so its fire lines land before
+    // the step marker; the trace parser must read past them and still classify the
+    // re-demand. This is the exact drift that dead-paged the resident.
+    #[test]
+    fn incr_trace_survives_cold_demand_fires() {
+        let src = incr_resident_source(3, 7, 5, 6, 7, 5);
+        let term = interpret(&with_prelude(&src))
+            .expect("resident must run")
+            .term;
+        let trace = parse_incr_trace(&term).expect("trace must parse past cold-demand fires");
+        // Lowering a from 3 to 6 keeps peak at 7, so peak re-runs to the same value
+        // (a cutoff) and alert never fires (served from cache).
+        assert!(trace.fired.contains("peak"), "peak should re-run");
+        assert!(!trace.fired.contains("alert"), "alert should be cached");
+        assert_eq!(trace.previous.get("peak"), Some(&7));
+        assert_eq!(trace.values.get("board"), Some(&106));
+    }
+
+    // The public export the incremental resident calls: a warm re-demand must
+    // return classified nodes, not an error, and mark the cutoff.
+    #[test]
+    fn incr_run_classifies_warm_demand() {
+        let out = incr_run(r#"{"prev":{"a":3,"b":7,"c":5},"next":{"a":6,"b":7,"c":5}}"#);
+        let doc: serde_json::Value = serde_json::from_str(&out).expect("valid json");
+        assert!(doc.get("error").is_none(), "unexpected error: {out}");
+        let nodes = doc.get("nodes").and_then(Value::as_array).expect("nodes");
+        let state_of = |name: &str| -> String {
+            nodes
+                .iter()
+                .find(|n| n.get("name").and_then(Value::as_str) == Some(name))
+                .and_then(|n| n.get("state").and_then(Value::as_str))
+                .unwrap_or_default()
+                .to_string()
+        };
+        assert_eq!(state_of("a"), "changed");
+        assert_eq!(state_of("peak"), "cutoff");
+        assert_eq!(state_of("alert"), "cached");
+        assert_eq!(state_of("board"), "recomputed");
     }
 }

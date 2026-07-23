@@ -77,6 +77,9 @@ pub fn dump_at(phase: &str, src: &str, base: &Path) -> Result<String, Error> {
 ///
 /// # Errors
 /// Fails on front-end errors or an unknown phase name.
+// One coherent dispatch match over every dump phase; splitting it into
+// single-use helpers would only scatter the phase table.
+#[allow(clippy::too_many_lines)]
 pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
     match phase {
         "tokens" => {
@@ -87,6 +90,12 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                 .join(" "))
         }
         "ast" => Ok(format!("{:#?}", parse(src)?.program)),
+        // The two versioned syntax seams (see `dump_syntax`): the token-stream
+        // export a Prism-written lexer/layout pass is diffed against, and the
+        // ordered semantic surface-AST export a Prism-written parser is diffed
+        // against. Deterministic, self-contained JSON, refusing malformed input.
+        "syntax-tokens" => super::dump_syntax::syntax_tokens(src),
+        "surface-syntax" => super::dump_syntax::surface_syntax(src),
         "types" => Ok(types_section(&check_on(src, roots)?)),
         "typespans" => {
             let (program, checked) = tooltip_checked_on(src, roots, cfg)?;
@@ -181,7 +190,10 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         }
         "core" => {
             let (_, _, core) = frontend(src, roots, cfg)?;
-            Ok(pp_core_pretty(&strip_prelude(core.0, &prelude_fn_names()?)))
+            Ok(pp_core_pretty(&strip_prelude(
+                core.into_core(),
+                &prelude_fn_names()?,
+            )))
         }
         "core-json" => {
             let (_, _, core) = frontend(src, roots, cfg)?;
@@ -697,8 +709,9 @@ const ELAB_INPUT_SCHEMA: &str = "prism-elab-input-v1";
 
 // The producing compiler version, stamped into every versioned export envelope so
 // a persisted fixture records which compiler emitted it. One home for the crate
-// version so the three seams (and any future one) never re-type the `env!`.
-const COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
+// version so the front-end and syntax seams (and any future one) never re-type
+// the `env!`.
+pub(super) const COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // The versioned checked-HIR fixture document: the schema tag, the checked
 // declarations in source order, and every node the checker recorded a fact for,

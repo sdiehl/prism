@@ -38,7 +38,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(unix)]
 use rustix::fs::{flock, FlockOperation};
 
-use crate::core::HASH_SCHEME;
+use crate::core::{Digest, HASH_SCHEME};
 use crate::driver::Config;
 use crate::error::Error;
 use crate::flags::{DynFlags, SignMode};
@@ -91,7 +91,7 @@ pub struct IndexRow {
     /// The opaque git tag the release was cut at (never a range).
     pub tag: String,
     /// The namespace root content hash the name and tag map to.
-    pub root: String,
+    pub root: Digest,
     /// The hash scheme that gives `root` its meaning.
     pub scheme: String,
     /// The artifact kind the root names.
@@ -177,7 +177,7 @@ pub fn parse_index(body: &[u8]) -> Vec<IndexRow> {
                         tag: (*tag).to_string(),
                         scheme: (*scheme).to_string(),
                         kind: (*kind).to_string(),
-                        root: (*root).to_string(),
+                        root: Digest::from(*root),
                     })
                 }
                 _ => None,
@@ -216,20 +216,20 @@ pub fn upsert(rows: &[IndexRow], row: IndexRow) -> Vec<IndexRow> {
         .map(|r| {
             (
                 (r.origin.clone(), r.name.clone(), r.tag.clone()),
-                (r.scheme.clone(), r.kind.clone(), r.root.clone()),
+                (r.scheme.clone(), r.kind.clone(), r.root.to_string()),
             )
         })
         .collect();
     map.insert(
         (row.origin.clone(), row.name.clone(), row.tag.clone()),
-        (row.scheme, row.kind, row.root),
+        (row.scheme, row.kind, row.root.into_string()),
     );
     map.into_iter()
         .map(|((origin, name, tag), (scheme, kind, root))| IndexRow {
             origin,
             name,
             tag,
-            root,
+            root: Digest::from(root),
             scheme,
             kind,
         })
@@ -577,7 +577,7 @@ pub struct LogEntry {
     /// The artifact kind the root names.
     pub kind: String,
     /// The root hash the name and tag were pointed at.
-    pub root: String,
+    pub root: Digest,
     /// The chain link: the digest of the previous log line's exact bytes
     /// (`sha256:<hex>`, the header line for entry zero).
     pub prev: Option<String>,
@@ -815,7 +815,7 @@ impl Log {
                         tag: (*tag).to_string(),
                         scheme: (*scheme).to_string(),
                         kind: (*kind).to_string(),
-                        root: (*root).to_string(),
+                        root: Digest::from(*root),
                         prev: Some((*prev).to_string()),
                     });
                 }
@@ -852,7 +852,7 @@ impl Log {
         for e in self.entries()? {
             let key = (e.origin.clone(), e.name.clone(), e.tag.clone());
             if let Some(prev) = latest.get(&key) {
-                if prev != &(e.scheme.clone(), e.kind.clone(), e.root.clone()) {
+                if prev != &(e.scheme.clone(), e.kind.clone(), e.root.to_string()) {
                     out.push(Repoint {
                         origin: e.origin.clone(),
                         name: e.name.clone(),
@@ -862,11 +862,11 @@ impl Log {
                         from_root: prev.2.clone(),
                         to_scheme: e.scheme.clone(),
                         to_kind: e.kind.clone(),
-                        to_root: e.root.clone(),
+                        to_root: e.root.to_string(),
                     });
                 }
             }
-            latest.insert(key, (e.scheme, e.kind, e.root));
+            latest.insert(key, (e.scheme, e.kind, e.root.into_string()));
         }
         Ok(out)
     }
@@ -1236,7 +1236,7 @@ pub fn publish_cmd(
         tag: tag.to_string(),
         scheme: identity.scheme.to_string(),
         kind: identity.kind.to_string(),
-        root: identity.root.into_string(),
+        root: identity.root,
     };
     let receipt = publish(&dst, &log, row, &cfg.flags)?;
 
@@ -1284,7 +1284,7 @@ pub fn publish_source_cmd(
     let store_root = resolve_store_path(cfg.flags.store_path.as_deref());
     let store = Store::open_or_create(&store_root)?;
     let bundle = encode_source_bundle([(name, user_src)]);
-    let root = blake3::hash(&bundle).to_hex().to_string();
+    let root = Digest::from(blake3::hash(&bundle).to_hex().to_string());
     store.put(&root, &bundle)?;
     let dst = DiskTransport::open(&store_root)?;
     let log = store_log(&store_root);

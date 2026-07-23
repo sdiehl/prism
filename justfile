@@ -29,7 +29,7 @@ parity:
 
 # Whole runnable corpus across every supported optimizer configuration. Kept
 # ignored in the ordinary unit sweep because it recompiles each case at eight
-# pass configurations; the authoritative release gate invokes it explicitly.
+# pass configurations; the authoritative gate invokes it explicitly.
 opt-equiv *FLAGS:
     PRISM_COMPILER_CACHE=0 PRISM_QUIET=1 cargo test {{FLAGS}} --test opt_equiv gate::optimizer_configurations_have_identical_observation_traces -- --ignored --exact
 

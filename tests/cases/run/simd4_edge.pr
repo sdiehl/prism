@@ -1,0 +1,41 @@
+-- Four-lane 32-bit SIMD parity under the cases where single precision can
+-- silently diverge from double: narrowing rounds, arithmetic double-rounds if
+-- either side promotes, and 32-bit wrap happens 32 bits earlier. The
+-- interpreter's f32/i32 lanes are the oracle; native must reproduce every lane
+-- bit for bit, including NaN through min/max and the widening extract.
+
+fn nan() : Float = 0.0 / 0.0
+
+fn main() : Unit ! {IO} =
+  -- 0.1 is not representable in f32: the splat narrows (round-to-nearest) and
+  -- the extract widens the f32 value exactly, so the printed double is the
+  -- f32 rounding of 0.1, not 0.1 itself.
+  let tenth = simd_fsplat4(0.1)
+  println(show_float(simd_fextract4(tenth, 0)))
+  println(show_float(simd_fextract4(tenth, 3)))
+  -- Single-precision arithmetic: 16777216 + 1 is absorbed in f32 (2^24 is the
+  -- integer precision limit), a divergence from f64 that catches any lane
+  -- computed in double.
+  let limit = simd_fsplat4(16777216.0)
+  let one = simd_fsplat4(1.0)
+  println(show_float(simd_fextract4(simd_fadd4(limit, one), 1)))
+  -- NaN through the comparison-form min/max returns the other operand.
+  let bad = simd_fsplat4(nan())
+  let ok = simd_fsplat4(2.5)
+  println(show_float(simd_fextract4(simd_fmin4(bad, ok), 2)))
+  println(show_float(simd_fextract4(simd_fmax4(bad, ok), 2)))
+  -- Signed zero orders by the comparison, identically on both backends.
+  let nz = simd_fsplat4(0.0 - 0.0)
+  let pz = simd_fsplat4(0.0)
+  println(show_float(simd_fextract4(simd_fmin4(nz, pz), 0)))
+  -- Integer wrap at the 32-bit boundary: 2147483647 + 1 wraps to -2147483648
+  -- in a lane; the extract sign-extends the wrapped i32.
+  let imax = simd_isplat4(2147483647)
+  println(simd_iextract4(simd_iadd4(imax, simd_isplat4(1)), 0))
+  -- The i64 -> i32 splat truncation keeps the low 32 bits.
+  let wide = simd_isplat4(4294967297)
+  println(simd_iextract4(wide, 3))
+  -- Bitwise lanes and subtraction wrap below zero.
+  let m = simd_iand4(simd_isplat4(12), simd_isplat4(10))
+  println(simd_iextract4(m, 1))
+  println(simd_iextract4(simd_isub4(simd_isplat4(0), simd_isplat4(1)), 2))

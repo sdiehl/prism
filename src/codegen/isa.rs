@@ -182,8 +182,11 @@ impl FloatIntrinsic {
 /// Instruction-spelling interface for the shared Core lowering walker.
 ///
 /// External experimental backends implement this trait and pass the instance to
-/// [`super::emit_with_isa`]. Semantic lowering remains in Prism; implementations
-/// only render the target's primitive instructions and control-flow operations.
+/// [`super::emit_with_isa`] along with a stage-checked lowered program (the
+/// pipeline's own, or one admitted through `LoweredCore::validate_structural`,
+/// whose assurance is structural stage validation, not typed verification).
+/// Semantic lowering remains in Prism; implementations only render the target's
+/// primitive instructions and control-flow operations.
 pub trait Isa {
     fn const_int(&self, b: &mut Buf, n: i64) -> String;
     fn const_float(&self, b: &mut Buf, f: f64) -> String;

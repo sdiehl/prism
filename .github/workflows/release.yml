@@ -301,23 +301,6 @@ jobs:
       # version. The tap ships the macOS arm64 tarball. No-op until the tap repo
       # and the HOMEBREW_TAP_TOKEN secret (a PAT with contents:write on
       # sdiehl/homebrew-prism) exist. See packaging/homebrew/README.md.
-      # Push deb/rpm to Gemfury for `apt install prism` (no-op without the token).
-      - name: Check fury token
-        id: fury
-        env:
-          TOKEN: ${{ secrets.FURY_PUSH_TOKEN }}
-        run: |
-          if [ -n "$TOKEN" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Publish to Gemfury
-        if: steps.fury.outputs.enabled == 'true'
-        env:
-          FURY_PUSH_TOKEN: ${{ secrets.FURY_PUSH_TOKEN }}
-          FURY_ACCOUNT: ${{ vars.FURY_ACCOUNT || 'sdiehl' }}
-        run: ./scripts/publish-fury.sh dist
-
       - name: Check tap token
         id: tap
         env:
@@ -341,8 +324,8 @@ jobs:
 
   # On a tag: build and push ghcr.io/sdiehl/prism:<version> + :latest using the
   # built-in GITHUB_TOKEN (no secret needed). On dispatch: build + smoke only.
-  # Make the package Public once in the GitHub UI after the first push. amd64
-  # only for now (multi-arch needs per-arch runners + a manifest).
+  # Make the package Public once in the GitHub UI after the first push. This job
+  # emits amd64 only; it has no per-architecture runners or manifest assembly.
   docker:
     name: Docker image
     needs: gate

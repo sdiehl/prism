@@ -1,21 +1,61 @@
 -- | The canonical `Writer(w)` effect: accumulate output on the side.
 --
 -- `tell(m)` appends `m` to a log the producer never sees; `run_writer` returns
--- the whole log as a list in emission order. The handler threads the growing log
--- as a parameter (tail-resumptive, so it fuses), so nothing shared or mutable is
--- involved. Opt-in: not in Base.
+-- the computation's result paired with the whole log in emission order. The
+-- handler threads the growing log as a parameter (tail-resumptive, so it
+-- fuses), so nothing shared or mutable is involved. `eval_writer` keeps only
+-- the result, `exec_writer` only the log, and `listen`/`censor` observe or
+-- rewrite an inner computation's log while staying inside the effect.
+-- Opt-in: not in Base.
 
-import Data.List (reverse)
+import Data.List (append, reverse)
 
 -- | Append one item of type `w` to the accumulated log.
 pub effect Writer(w)
   tell(w) : Unit
 
--- | Run `action`, collecting every `tell` into a log, and return that log in
--- emission order (the computation's own result value is discarded).
-pub fn run_writer(action : () -> a ! {Writer(w) | e}) : List(w) =
+-- | Run `action`, collecting every `tell` into a log, and return the
+-- computation's result paired with that log in emission order.
+pub fn run_writer(action : () -> a ! {Writer(w) | e}) : (a, List(w)) =
   let f =
     handle action() with
       tell(m) resume k => \(log) -> k(())(Cons(m, log))
-      return r => \(log) -> reverse(log)
+      return r => \(log) -> (r, reverse(log))
   f(Nil)
+
+-- | Run `action` and keep only its result, discarding the log.
+pub fn eval_writer(action : () -> a ! {Writer(w) | e}) : a =
+  match run_writer(action) of
+    (r, _log) => r
+
+-- | Run `action` and keep only the log, discarding the result.
+pub fn exec_writer(action : () -> a ! {Writer(w) | e}) : List(w) =
+  match run_writer(action) of
+    (_r, log) => log
+
+-- | Run `action`, re-emit its log unchanged, and return the result paired with
+-- that log, so an outer writer both observes and keeps the inner output.
+pub fn listen(action : () -> a ! {Writer(w) | e}) : (a, List(w)) ! {Writer(w) | e} =
+  match run_writer(action) of
+    (r, log) =>
+      tells(log)
+      (r, log)
+
+-- | Run `action`, rewrite its whole log with `f`, and re-emit the rewritten
+-- log, returning the result. The rewrite sees the log in emission order.
+pub fn censor(
+  f : (List(w)) -> List(w),
+  action : () -> a ! {Writer(w) | e}
+) : a ! {Writer(w) | e} =
+  match run_writer(action) of
+    (r, log) =>
+      tells(f(log))
+      r
+
+-- | Emit every item of `log` in order.
+pub fn tells(log : List(w)) : Unit ! {Writer(w)} =
+  match log of
+    Nil => ()
+    Cons(m, rest) =>
+      tell(m)
+      tells(rest)

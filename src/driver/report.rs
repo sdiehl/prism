@@ -24,7 +24,7 @@ use crate::codegen::emit_llvm_with_native_kont_table;
 #[cfg(feature = "native")]
 use crate::core::{fip_annots, hash_program};
 
-use super::front::{run_front, FrontOpts};
+use super::front::{run_front, FrontRequest};
 #[cfg(feature = "native")]
 use super::identity::{native_kont_table_of, NativeKontIdentityRows};
 use super::query::section;
@@ -86,7 +86,7 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
     // check. Elaboration and the fip / replayable validators continue below,
     // keeping their own per-phase sections (a checked program whose elaboration
     // later fails still shows its `types` section before the `core (cbpv)` error).
-    let (program, checked) = match run_front(src, roots, cfg, FrontOpts::REPORT) {
+    let (program, checked) = match run_front(src, roots, cfg, FrontRequest::Report) {
         Ok(front) => front.into_program_checked(),
         Err(e) => {
             section(&mut out, "types", &render(e));
@@ -103,7 +103,7 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
         }
     };
     let (core, typed, verify_env) = elaboration.into_parts();
-    let core = ElaboratedCore(core);
+    let core = ElaboratedCore::new(core);
     section(&mut out, "core (cbpv)", pp_core_pretty(&core).trim_end());
 
     if let Err(e) = fip_check(&program, &checked, &core) {

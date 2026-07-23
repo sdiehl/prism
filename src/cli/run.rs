@@ -163,6 +163,13 @@ pub(crate) fn collect_prism_sources(dir: &Path, out: &mut Vec<PathBuf>) -> Resul
         let path = entry.path();
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
+            // A directory with a manifest is a project, not a set of standalone
+            // examples: its modules import each other (and dependencies), so
+            // compiling them file-by-file fails resolution by construction.
+            // Projects run through the project pipeline; the sweep skips them.
+            if path.join(crate::project::MANIFEST).is_file() {
+                continue;
+            }
             collect_prism_sources(&path, out)?;
         } else if file_type.is_file()
             && path.extension().and_then(OsStr::to_str) == Some(PRISM_SOURCE_EXTENSION)

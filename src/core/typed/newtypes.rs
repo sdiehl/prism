@@ -340,10 +340,9 @@ impl Erase<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeSet;
 
-    use crate::core::hash::hash_program;
-    use crate::core::opt;
+    use crate::core::pretty::pp_core;
     use crate::types::Type;
 
     use super::*;
@@ -409,20 +408,25 @@ mod tests {
     }
 
     #[test]
-    fn typed_erasure_matches_legacy_tree_and_hash_exactly() {
+    fn typed_erasure_removes_the_constructor_box_and_the_irrefutable_match() {
         let (typed, env, constructors) = fixture(true);
         verify(&typed, &env).expect("fixture is valid before newtype erasure");
-        let legacy = opt::erase_newtypes(&typed.clone().erase(), &constructors);
+        assert!(
+            pp_core(&typed.clone().erase()).contains("UserId"),
+            "the fixture must start with the newtype constructor present"
+        );
 
         let (rewritten, stats) = erase_newtypes(typed, &constructors, &env);
         verify(&rewritten, &env).expect("newtype witnesses verify after the typed pass");
         let erased = rewritten.erase();
 
+        // Both the constructor box and the irrefutable constructor match are
+        // rewritten, and each `NewtypeRepr` erases transparently to its inner
+        // witness, so no `UserId` constructor survives semantic erasure.
         assert_eq!(stats.ticks(), 2);
-        assert_eq!(erased, legacy);
-        assert_eq!(
-            hash_program(&erased, &BTreeMap::new()),
-            hash_program(&legacy, &BTreeMap::new())
+        assert!(
+            !pp_core(&erased).contains("UserId"),
+            "the erased result must carry no newtype constructor node"
         );
     }
 

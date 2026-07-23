@@ -1,0 +1,174 @@
+-- | Typed, deterministic construction of Typst source documents.
+--
+-- This package owns Typst syntax composition and escaping. It deliberately
+-- knows nothing about presentations, slides, themes, or Spectra.
+
+import Data.String (split, str_of_char)
+
+import Data.Pretty as Pretty
+
+opaque type Doc = TypstDoc(Pretty.Doc)
+
+fn wrap(doc : Pretty.Doc) : Doc = TypstDoc(doc)
+
+fn unwrap(doc : Doc) : Pretty.Doc =
+  match doc of
+    TypstDoc(value) => value
+
+fn unwrap_docs(docs : List(Doc)) : List(Pretty.Doc) =
+  match docs of
+    Nil => Nil
+    Cons(doc, rest) => Cons(unwrap(doc), unwrap_docs(rest))
+
+fn raw_lines(values : List(String)) : List(Doc) =
+  match values of
+    Nil => Nil
+    Cons(value, rest) => Cons(atom(value), raw_lines(rest))
+
+-- | An empty document.
+pub fn empty() : Doc = wrap(Pretty.empty())
+
+-- | One atomic piece of trusted Typst syntax.
+pub fn atom(source : String) : Doc = wrap(Pretty.text(source))
+
+-- | A document containing raw Typst, preserving line boundaries.
+pub fn raw(source : String) : Doc = lines(raw_lines(split(10, source)))
+
+-- | Documents separated by `sep`.
+pub fn join(sep : Doc, docs : List(Doc)) : Doc =
+  wrap(Pretty.join_docs(unwrap(sep), unwrap_docs(docs)))
+
+-- | Documents separated by forced line breaks.
+pub fn lines(docs : List(Doc)) : Doc =
+  wrap(Pretty.join_docs(Pretty.hardline(), unwrap_docs(docs)))
+
+-- | Concatenate documents without a separator.
+pub fn concat_docs(docs : List(Doc)) : Doc =
+  wrap(Pretty.concat_docs(unwrap_docs(docs)))
+
+fn comma_sep(docs : List(Doc)) : Pretty.Doc =
+  Pretty.group(
+      Pretty.join_docs(
+          Pretty.cat(Pretty.text(","), Pretty.line()),
+          unwrap_docs(docs),
+        ),
+    )
+
+-- | A parenthesized tuple or argument group.
+pub fn tuple(docs : List(Doc)) : Doc = wrap(Pretty.parens(comma_sep(docs)))
+
+-- | A Typst function call.
+pub fn call(name : String, args : List(Doc)) : Doc =
+  wrap(
+      Pretty.cat(
+          Pretty.text(name),
+          Pretty.parens(Pretty.nest(2, comma_sep(args))),
+        ),
+    )
+
+-- | A named argument.
+pub fn named(name : String, value : Doc) : Doc =
+  concat_docs([atom(name), atom(": "), value])
+
+-- | Prefix a document with Typst's code marker.
+pub fn code(doc : Doc) : Doc = concat_docs([atom("#"), doc])
+
+-- | Attach a content block whose body is a code expression.
+pub fn content_call(name : String, args : List(Doc), body : Doc) : Doc =
+  wrap(
+      Pretty.cat(
+          unwrap(call(name, args)),
+          Pretty.brackets(
+              Pretty.cat(Pretty.text("#"), Pretty.parens(unwrap(body))),
+            ),
+        ),
+    )
+
+-- | A braced code suite with stable indentation.
+pub fn suite(docs : List(Doc)) : Doc =
+  wrap(
+      Pretty.braces(
+          Pretty.cat(
+              Pretty.hardline(),
+              Pretty.cat(
+                  Pretty.nest(
+                      2,
+                      Pretty.join_docs(Pretty.hardline(), unwrap_docs(docs)),
+                    ),
+                  Pretty.hardline(),
+                ),
+            ),
+        ),
+    )
+
+-- | A top-level `#set name(...)` rule.
+pub fn set_rule(name : String, args : List(Doc)) : Doc =
+  code(concat_docs([atom("set "), call(name, args)]))
+
+-- | A `#let name(params) = { ... }` function binding.
+pub fn let_function(name : String, params : List(Doc), body : List(Doc)) : Doc =
+  concat_docs([atom("#let "), call(name, params), atom(" = "), suite(body)])
+
+-- | An `if condition { ... }` suite.
+pub fn if_suite(condition : String, body : List(Doc)) : Doc =
+  concat_docs([atom("if "), atom(condition), atom(" "), suite(body)])
+
+-- | A point length.
+pub fn pt(n : Int) : Doc = atom("{n}pt")
+
+-- | A percentage length.
+pub fn percent(n : Int) : Doc = atom("{n}%")
+
+fn escape_go(s : String, i : Int, acc : String) : String =
+  if i >= str_len(s) then
+    acc
+  else
+    let c = char_at(s, i)
+    let escaped =
+      if c == 34 then
+        "\\\""
+      elif c == 92 then
+        "\\\\"
+      elif c == 10 then
+        "\\n"
+      elif c == 13 then
+        "\\r"
+      elif c == 9 then
+        "\\t"
+      else
+        str_of_char(chr(c))
+    escape_go(s, i + 1, "{acc}{escaped}")
+
+-- | Escape arbitrary text as a Typst string value.
+pub fn string(value : String) : Doc = atom("\"{escape_go(value, 0, "")}\"")
+
+-- | Render at a selected source width.
+pub fn render(width : Int, doc : Doc) : String = Pretty.render(width, unwrap(doc))
+
+-- | Render a conventional 96-column Typst source document.
+pub fn document(docs : List(Doc)) : String = render(96, lines(docs))
+
+test fn strings_are_escaped() =
+  if render(96, string("a\"b\\c\n")) == "\"a\\\"b\\\\c\\n\"" then
+    ()
+  else
+    fail()
+
+test fn calls_break_deterministically() =
+  let doc = call("f", [named("left", atom("1")), named("right", atom("2"))])
+  if render(80, doc) == "f(left: 1, right: 2)" then
+    ()
+  else
+    fail()
+
+test fn content_bodies_remain_one_code_expression() =
+  let body = concat_docs([
+      call("text", [string("a")]),
+      atom(" + "),
+      call("raw", [string("b")]),
+    ])
+  if (render(80, content_call("box", Nil, body))
+      == "box()[#(text(\"a\") + raw(\"b\"))]") then
+    ()
+  else
+    fail()

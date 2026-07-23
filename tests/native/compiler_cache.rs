@@ -327,7 +327,7 @@ fn warm_native_build_materializes_byte_identical_binary() {
 }
 
 #[test]
-fn surviving_shadow_reporting_preserves_warm_cache_artifacts() {
+fn typed_route_second_build_preserves_warm_cache_artifacts() {
     require_cc();
     let tmp = TempDir::new("compiler-cache", "typed-shadow-report");
     let src = with_prelude(include_str!("../../examples/imperative.pr"));
@@ -365,10 +365,8 @@ fn surviving_shadow_reporting_preserves_warm_cache_artifacts() {
         "typed effect lowering must publish no retired legacy query family"
     );
 
-    let mut reporting_cfg = cfg.clone();
-    reporting_cfg.flags.typed_parity_report = true;
     let observed_bin = tmp.join("observed");
-    let observed_report = build_on_report(&src, &roots, &observed_bin, &reporting_cfg).unwrap();
+    let observed_report = build_on_report(&src, &roots, &observed_bin, &cfg).unwrap();
     assert_eq!(observed_report.cache, NativeCacheStatus::Write);
     assert_eq!(observed_report.bitcode_cache, NativeCacheStatus::Hit);
     let observed_bytes = fs::read(&observed_bin).unwrap();
@@ -380,13 +378,13 @@ fn surviving_shadow_reporting_preserves_warm_cache_artifacts() {
             observed_run.status.code().unwrap(),
         ),
         cold_trace,
-        "surviving post-lowering shadow reporting must not change program behavior"
+        "a second typed-route build must not change program behavior"
     );
     for (kind, cold_bindings) in semantic_bindings {
         assert_eq!(
             query_bindings(&tmp.store_root(), kind),
             cold_bindings,
-            "classified shadow reporting changed semantic cache artifacts for {kind}"
+            "a second typed-route build changed semantic cache artifacts for {kind}"
         );
     }
 
@@ -395,7 +393,7 @@ fn surviving_shadow_reporting_preserves_warm_cache_artifacts() {
     assert_eq!(
         warm_report.cache,
         NativeCacheStatus::Hit,
-        "the reporting-only flag must not participate in artifact identity"
+        "an unchanged input must reuse the final artifact"
     );
     assert_eq!(warm_report.bitcode_cache, NativeCacheStatus::Disabled);
     assert_eq!(fs::read(observed_bin).unwrap(), observed_bytes);

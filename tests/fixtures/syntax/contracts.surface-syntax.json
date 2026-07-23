@@ -1,0 +1,542 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.14.0",
+  "source": {
+    "digest": "c025e67e984f56f67a95de415733f5b802c38515484bf092520c1cb9639993d1",
+    "text": "-- Verification surface: logic fns, contracts, totality, disciplines.\nlogic fn nonneg(x : Int) : Bool = x >= 0\n\nfn clamp(x : Int, lo : Int, hi : Int) : Int\n  requires lo <= hi\n  ensures |r| nonneg(r)\n  =\n    if x < lo then\n      lo\n    elif x > hi then\n      hi\n    else\n      x\n\ntotal fn down(n : Int) : Int\n  decreases n\n  =\n    if n <= 0 then\n      0\n    else\n      down(n - 1)\n\nassume total fn trusted(n : Int) : Int = n\n\ntest fn clamp_holds() = assert_eq(clamp(5, 0, 3), 3)\n\nfip fn swap(p : (Int, Int)) : (Int, Int) =\n  match p of\n    (a, b) => (b, a)\n"
+  },
+  "items": [
+    {
+      "body": {
+        "kind": "bin",
+        "lhs": {
+          "kind": "var",
+          "name": "x",
+          "span": [
+            104,
+            105
+          ]
+        },
+        "op": ">=",
+        "rhs": {
+          "kind": "int",
+          "span": [
+            109,
+            110
+          ],
+          "value": "0"
+        },
+        "span": [
+          104,
+          110
+        ]
+      },
+      "kind": "logic-fn",
+      "name": "nonneg",
+      "params": [
+        {
+          "name": "x",
+          "ty": {
+            "kind": "int"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "bool"
+      },
+      "span": [
+        76,
+        110
+      ]
+    },
+    {
+      "body": {
+        "cond": {
+          "kind": "bin",
+          "lhs": {
+            "kind": "var",
+            "name": "x",
+            "span": [
+              211,
+              212
+            ]
+          },
+          "op": "<",
+          "rhs": {
+            "kind": "var",
+            "name": "lo",
+            "span": [
+              215,
+              217
+            ]
+          },
+          "span": [
+            211,
+            217
+          ]
+        },
+        "else": {
+          "cond": {
+            "kind": "bin",
+            "lhs": {
+              "kind": "var",
+              "name": "x",
+              "span": [
+                241,
+                242
+              ]
+            },
+            "op": ">",
+            "rhs": {
+              "kind": "var",
+              "name": "hi",
+              "span": [
+                245,
+                247
+              ]
+            },
+            "span": [
+              241,
+              247
+            ]
+          },
+          "else": {
+            "kind": "var",
+            "name": "x",
+            "span": [
+              277,
+              278
+            ]
+          },
+          "kind": "if",
+          "span": [
+            231,
+            278
+          ],
+          "then": {
+            "kind": "var",
+            "name": "hi",
+            "span": [
+              259,
+              261
+            ]
+          }
+        },
+        "kind": "if",
+        "span": [
+          208,
+          278
+        ],
+        "then": {
+          "kind": "var",
+          "name": "lo",
+          "span": [
+            229,
+            231
+          ]
+        }
+      },
+      "ensures": [
+        {
+          "binder": "r",
+          "expr": {
+            "args": [
+              {
+                "kind": "var",
+                "name": "r",
+                "span": [
+                  197,
+                  198
+                ]
+              }
+            ],
+            "head": {
+              "kind": "var",
+              "name": "nonneg",
+              "span": [
+                190,
+                196
+              ]
+            },
+            "kind": "call",
+            "span": [
+              190,
+              199
+            ]
+          }
+        }
+      ],
+      "kind": "fn",
+      "name": "clamp",
+      "params": [
+        {
+          "name": "x",
+          "ty": {
+            "kind": "int"
+          }
+        },
+        {
+          "name": "lo",
+          "ty": {
+            "kind": "int"
+          }
+        },
+        {
+          "name": "hi",
+          "ty": {
+            "kind": "int"
+          }
+        }
+      ],
+      "requires": [
+        {
+          "kind": "bin",
+          "lhs": {
+            "kind": "var",
+            "name": "lo",
+            "span": [
+              167,
+              169
+            ]
+          },
+          "op": "<=",
+          "rhs": {
+            "kind": "var",
+            "name": "hi",
+            "span": [
+              173,
+              175
+            ]
+          },
+          "span": [
+            167,
+            175
+          ]
+        }
+      ],
+      "ret": {
+        "kind": "int"
+      },
+      "span": [
+        112,
+        278
+      ]
+    },
+    {
+      "body": {
+        "cond": {
+          "kind": "bin",
+          "lhs": {
+            "kind": "var",
+            "name": "n",
+            "span": [
+              334,
+              335
+            ]
+          },
+          "op": "<=",
+          "rhs": {
+            "kind": "int",
+            "span": [
+              339,
+              340
+            ],
+            "value": "0"
+          },
+          "span": [
+            334,
+            340
+          ]
+        },
+        "else": {
+          "args": [
+            {
+              "kind": "bin",
+              "lhs": {
+                "kind": "var",
+                "name": "n",
+                "span": [
+                  374,
+                  375
+                ]
+              },
+              "op": "-",
+              "rhs": {
+                "kind": "int",
+                "span": [
+                  378,
+                  379
+                ],
+                "value": "1"
+              },
+              "span": [
+                374,
+                379
+              ]
+            }
+          ],
+          "head": {
+            "kind": "var",
+            "name": "down",
+            "span": [
+              369,
+              373
+            ]
+          },
+          "kind": "call",
+          "span": [
+            369,
+            380
+          ]
+        },
+        "kind": "if",
+        "span": [
+          331,
+          380
+        ],
+        "then": {
+          "kind": "int",
+          "span": [
+            352,
+            353
+          ],
+          "value": "0"
+        }
+      },
+      "decreases": {
+        "kind": "var",
+        "name": "n",
+        "span": [
+          321,
+          322
+        ]
+      },
+      "kind": "fn",
+      "name": "down",
+      "params": [
+        {
+          "name": "n",
+          "ty": {
+            "kind": "int"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "int"
+      },
+      "span": [
+        280,
+        380
+      ],
+      "total": "prove"
+    },
+    {
+      "body": {
+        "kind": "var",
+        "name": "n",
+        "span": [
+          423,
+          424
+        ]
+      },
+      "kind": "fn",
+      "name": "trusted",
+      "params": [
+        {
+          "name": "n",
+          "ty": {
+            "kind": "int"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "int"
+      },
+      "span": [
+        382,
+        424
+      ],
+      "total": "assume"
+    },
+    {
+      "body": {
+        "args": [
+          {
+            "args": [
+              {
+                "kind": "int",
+                "span": [
+                  466,
+                  467
+                ],
+                "value": "5"
+              },
+              {
+                "kind": "int",
+                "span": [
+                  469,
+                  470
+                ],
+                "value": "0"
+              },
+              {
+                "kind": "int",
+                "span": [
+                  472,
+                  473
+                ],
+                "value": "3"
+              }
+            ],
+            "head": {
+              "kind": "var",
+              "name": "clamp",
+              "span": [
+                460,
+                465
+              ]
+            },
+            "kind": "call",
+            "span": [
+              460,
+              474
+            ]
+          },
+          {
+            "kind": "int",
+            "span": [
+              476,
+              477
+            ],
+            "value": "3"
+          }
+        ],
+        "head": {
+          "kind": "var",
+          "name": "assert_eq",
+          "span": [
+            450,
+            459
+          ]
+        },
+        "kind": "call",
+        "span": [
+          450,
+          478
+        ]
+      },
+      "kind": "fn",
+      "name": "clamp_holds",
+      "span": [
+        426,
+        478
+      ],
+      "test": true
+    },
+    {
+      "body": {
+        "arms": [
+          {
+            "body": {
+              "items": [
+                {
+                  "kind": "var",
+                  "name": "b",
+                  "span": [
+                    551,
+                    552
+                  ]
+                },
+                {
+                  "kind": "var",
+                  "name": "a",
+                  "span": [
+                    554,
+                    555
+                  ]
+                }
+              ],
+              "kind": "tuple",
+              "span": [
+                550,
+                556
+              ]
+            },
+            "pat": {
+              "items": [
+                {
+                  "kind": "var",
+                  "name": "a",
+                  "span": [
+                    541,
+                    542
+                  ]
+                },
+                {
+                  "kind": "var",
+                  "name": "b",
+                  "span": [
+                    544,
+                    545
+                  ]
+                }
+              ],
+              "kind": "tuple",
+              "span": [
+                540,
+                546
+              ]
+            }
+          }
+        ],
+        "kind": "match",
+        "scrutinee": {
+          "kind": "var",
+          "name": "p",
+          "span": [
+            531,
+            532
+          ]
+        },
+        "span": [
+          525,
+          556
+        ]
+      },
+      "fip": "fip",
+      "kind": "fn",
+      "name": "swap",
+      "params": [
+        {
+          "name": "p",
+          "ty": {
+            "items": [
+              {
+                "kind": "int"
+              },
+              {
+                "kind": "int"
+              }
+            ],
+            "kind": "tuple"
+          }
+        }
+      ],
+      "ret": {
+        "items": [
+          {
+            "kind": "int"
+          },
+          {
+            "kind": "int"
+          }
+        ],
+        "kind": "tuple"
+      },
+      "span": [
+        480,
+        556
+      ]
+    }
+  ]
+}

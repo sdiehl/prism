@@ -1,0 +1,15 @@
+-- A stable family: rungs, defaults, a migrations table with an override.
+import Wire (..)
+
+stable Save {
+  V1 = { hero: String, depth: Int },
+  V2 = { ..V1, fog: Int = 30 },
+  V3 = { ..V2, mist: Int = 5 },
+  migrations {
+    V1 -> V2 = auto
+    V2 -> V3 = version(upgrade = \(s) -> Save { hero = s.hero, depth = s.depth, fog = s.fog, mist = 7 }, downgrade = auto)
+    V1 -> V3 = auto
+  }
+}
+
+fn current() : Save = Save { hero = "Ada", depth = 12, fog = 30, mist = 99 }

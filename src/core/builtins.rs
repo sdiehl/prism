@@ -475,6 +475,7 @@ builtins! {
     Arg "prim_arg" "Arg" 23 IMM0 surface 1 Str "(Int) -> String ! {IO}";
     WallNow "prim_wall_now" "WallNow" 92 RETAG surface 0 Str "() -> Int ! {IO}";
     MonoNow "prim_mono_now" "MonoNow" 93 RETAG surface 0 Str "() -> Int ! {IO}";
+    Entropy "prim_entropy" "Entropy" 122 RETAG surface 0 Str "() -> Int ! {IO}";
     ShowInt "show_int" "ShowInt" 24 RAW surface 1 Str "(Int) -> String";
     ShowI64 "show_i64" "ShowI64" 25 RAW surface 1 Str "(I64) -> String";
     ShowU64 "show_u64" "ShowU64" 26 RAW surface 1 Str "(U64) -> String";
@@ -582,6 +583,26 @@ builtins! {
     SimdIAnd "simd_iand" "SimdIAnd" 119 RAW surface 2 Str "(I64x2, I64x2) -> I64x2";
     SimdIOr "simd_ior" "SimdIOr" 120 RAW surface 2 Str "(I64x2, I64x2) -> I64x2";
     SimdIXor "simd_ixor" "SimdIXor" 121 RAW surface 2 Str "(I64x2, I64x2) -> I64x2";
+    // The four-lane 32-bit interpretations of the same two-word vector cell.
+    // `simd_fsplat4` narrows its double to f32 (round-to-nearest) and
+    // `simd_isplat4` truncates its i64 to i32; `extract` widens back exactly
+    // (f32 -> f64, i32 sign-extended), so a splat-extract round trip is the
+    // narrowing alone. Arithmetic is per-lane in true single precision or
+    // wrapping 32-bit, defined bit-exactly by the interpreter oracle.
+    SimdF32Splat "simd_fsplat4" "SimdF32Splat" 123 F0 surface 1 Str "(Float) -> F32x4";
+    SimdF32Extract "simd_fextract4" "SimdF32Extract" 124 IDX1 surface 2 Str "(F32x4, Int) -> Float";
+    SimdF32Add "simd_fadd4" "SimdF32Add" 125 RAW surface 2 Str "(F32x4, F32x4) -> F32x4";
+    SimdF32Sub "simd_fsub4" "SimdF32Sub" 126 RAW surface 2 Str "(F32x4, F32x4) -> F32x4";
+    SimdF32Mul "simd_fmul4" "SimdF32Mul" 127 RAW surface 2 Str "(F32x4, F32x4) -> F32x4";
+    SimdF32Min "simd_fmin4" "SimdF32Min" 128 RAW surface 2 Str "(F32x4, F32x4) -> F32x4";
+    SimdF32Max "simd_fmax4" "SimdF32Max" 129 RAW surface 2 Str "(F32x4, F32x4) -> F32x4";
+    SimdI32Splat "simd_isplat4" "SimdI32Splat" 130 RAW surface 1 Str "(I64) -> I32x4";
+    SimdI32Extract "simd_iextract4" "SimdI32Extract" 131 IDX1 surface 2 Str "(I32x4, Int) -> I64";
+    SimdI32Add "simd_iadd4" "SimdI32Add" 132 RAW surface 2 Str "(I32x4, I32x4) -> I32x4";
+    SimdI32Sub "simd_isub4" "SimdI32Sub" 133 RAW surface 2 Str "(I32x4, I32x4) -> I32x4";
+    SimdI32And "simd_iand4" "SimdI32And" 134 RAW surface 2 Str "(I32x4, I32x4) -> I32x4";
+    SimdI32Or "simd_ior4" "SimdI32Or" 135 RAW surface 2 Str "(I32x4, I32x4) -> I32x4";
+    SimdI32Xor "simd_ixor4" "SimdI32Xor" 136 RAW surface 2 Str "(I32x4, I32x4) -> I32x4";
     ]
 }
 
@@ -762,6 +783,7 @@ mod tag_tests {
                 (Builtin::Arg, "Arg"),
                 (Builtin::WallNow, "WallNow"),
                 (Builtin::MonoNow, "MonoNow"),
+                (Builtin::Entropy, "Entropy"),
                 (Builtin::ShowInt, "ShowInt"),
                 (Builtin::ShowI64, "ShowI64"),
                 (Builtin::ShowU64, "ShowU64"),
@@ -849,6 +871,20 @@ mod tag_tests {
                 (Builtin::SimdIAnd, "SimdIAnd"),
                 (Builtin::SimdIOr, "SimdIOr"),
                 (Builtin::SimdIXor, "SimdIXor"),
+                (Builtin::SimdF32Splat, "SimdF32Splat"),
+                (Builtin::SimdF32Extract, "SimdF32Extract"),
+                (Builtin::SimdF32Add, "SimdF32Add"),
+                (Builtin::SimdF32Sub, "SimdF32Sub"),
+                (Builtin::SimdF32Mul, "SimdF32Mul"),
+                (Builtin::SimdF32Min, "SimdF32Min"),
+                (Builtin::SimdF32Max, "SimdF32Max"),
+                (Builtin::SimdI32Splat, "SimdI32Splat"),
+                (Builtin::SimdI32Extract, "SimdI32Extract"),
+                (Builtin::SimdI32Add, "SimdI32Add"),
+                (Builtin::SimdI32Sub, "SimdI32Sub"),
+                (Builtin::SimdI32And, "SimdI32And"),
+                (Builtin::SimdI32Or, "SimdI32Or"),
+                (Builtin::SimdI32Xor, "SimdI32Xor"),
             ],
             Builtin::hash_tag,
         );

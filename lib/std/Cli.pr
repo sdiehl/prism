@@ -44,6 +44,7 @@ pub let help_col : Int = 24
 pub type CliError
   = MissingFlag(String)
   | MissingArg(String)
+  | UnexpectedArg(String)
   | NeedsValue(String)
   | BadValue(String, String)
   | UnknownFlag(String)
@@ -60,7 +61,7 @@ pub type OptSpec = OptSpec {
 }
 
 -- | The static description of one positional argument.
-pub type ArgSpec = ArgSpec { meta: String, help: String }
+pub type ArgSpec = ArgSpec { meta: String, help: String, required: Bool }
 
 -- | argv after lexing: options canonicalized to their long name, and the
 -- positionals in order. `--help`/`-h` are handled before lexing (`has_help`), so
@@ -182,15 +183,24 @@ pub fn switch(long, short, help) =
 pub fn arg_str(meta, help) =
   Parser {
     opts = Nil,
-    args = [ArgSpec { meta = meta, help = help }],
+    args = [ArgSpec { meta = meta, help = help, required = true }],
     run = \(t, i) -> read_arg_str(meta, t, i)
+  }
+
+-- | An optional string positional, consumed in declaration order and yielding
+-- `default` when absent. Help renders it as `[<META>]`.
+pub fn arg_str_default(meta, help, default) =
+  Parser {
+    opts = Nil,
+    args = [ArgSpec { meta = meta, help = help, required = false }],
+    run = \(t, i) -> read_arg_str_default(default, t, i)
   }
 
 -- | A required integer positional; a non-integer token is an error.
 pub fn arg_int(meta, help) =
   Parser {
     opts = Nil,
-    args = [ArgSpec { meta = meta, help = help }],
+    args = [ArgSpec { meta = meta, help = help, required = true }],
     run = \(t, i) -> read_arg_int(meta, t, i)
   }
 
@@ -230,6 +240,11 @@ fn read_arg_str(meta, t : Tokens, i) =
   match nth(i, t.pos) of
     Some(v) => Ok((v, i + 1))
     None => Err(MissingArg(meta))
+
+fn read_arg_str_default(default, t : Tokens, i) =
+  match nth(i, t.pos) of
+    Some(v) => Ok((v, i + 1))
+    None => Ok((default, i))
 
 fn read_arg_int(meta, t : Tokens, i) =
   match nth(i, t.pos) of
@@ -336,7 +351,10 @@ fn run_leaf(p : Parser(a), argv) =
 
 fn finish_leaf(p : Parser(a), toks) =
   match (p.run)(toks, 0) of
-    Ok((a, _)) => Ok(a)
+    Ok((a, i)) =>
+      match nth(i, toks.pos) of
+        None => Ok(a)
+        Some(value) => Err(UnexpectedArg(value))
     Err(e) => Err(e)
 
 fn find_sub(subs : List(SubCmd(a)), key) =
@@ -434,7 +452,12 @@ fn opt_synopsis(s : OptSpec) =
   else
     concat_all(["[--", s.long, "]"])
 
-fn arg_synopsis(ar : ArgSpec) = concat_all(["<", ar.meta, ">"])
+fn arg_synopsis(ar : ArgSpec) =
+  let body = concat_all(["<", ar.meta, ">"])
+  if ar.required then
+    body
+  else
+    concat_all(["[", body, "]"])
 
 fn synopsis(cmd : Command(a), p : Parser(a)) =
   let opts = map(opt_synopsis, p.opts)
@@ -523,6 +546,8 @@ pub fn describe(err) =
     MissingFlag(f) =>
       concat_all(["error: required flag '--", f, "' was not provided"])
     MissingArg(m) => concat_all(["error: missing argument <", m, ">"])
+    UnexpectedArg(value) =>
+      concat_all(["error: unexpected argument '", value, "'"])
     NeedsValue(f) => concat_all(["error: flag '", f, "' expects a value"])
     BadValue(tok, exp) =>
       concat_all(["error: '", tok, "' is not a valid <", exp, ">"])
@@ -536,4 +561,4 @@ fn err_with_usage(usage, err) = str_join("\n", [describe(err), "", usage])
 -- | Parse the process arguments against `cmd`. argv arrives through the `Env`
 -- capability (`args`), so a recorded run replays its arguments from the trace:
 -- CLI parsing is inside the determinism contract.
-fn run_args(cmd) = run_argv(cmd, args())
+pub fn run_args(cmd) = run_argv(cmd, args())

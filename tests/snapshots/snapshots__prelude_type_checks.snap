@@ -162,6 +162,7 @@ concat_map : forall e0 a b. ((a) -> List(b) ! {e0}, List(a)) -> List(b) ! {e0}
 const : forall a b. (a, b) -> a
 default : forall e0 a. (() -> a ! {e0}, a) -> a ! {e0}
 e : Float
+entropy : () -> Int ! {Entropy} ! {Entropy}
 enum_from_then_to : (Int, Int, Int) -> List(Int)
 enum_from_to : (Int, Int) -> List(Int)
 enum_seq : (Int, Int, Int) -> List(Int)
@@ -226,7 +227,7 @@ read_int : () -> Int ! {Console} ! {Console}
 read_line : () -> String ! {Console} ! {Console}
 repeat : forall e0 a. (Int, () -> a ! {e0}) -> Unit ! {e0}
 repeat_while : forall e0 a. (() -> Bool ! {e0}, () -> a ! {e0}) -> Unit ! {e0}
-run_io : forall e0 a. ((Unit) -> a ! {Console, Env, FileSystem, IO, Output, Random, e0}) -> a ! {IO, e0} ! {IO}
+run_io : forall e0 a. ((Unit) -> a ! {Console, Entropy, Env, FileSystem, IO, Output, Random, e0}) -> a ! {IO, e0} ! {IO}
 scollect : forall e0 a b. ((Unit) -> a ! {Emit(b), e0}) -> List(b) ! {e0}
 sfold : forall e0 a b c. ((Unit) -> b ! {Emit(c), e0}, a, (a, c) -> a ! {e0}) -> a ! {e0}
 show_list_body : forall a. (List(a), Bool) -> String

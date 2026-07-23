@@ -1,0 +1,1772 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.14.0",
+  "source": {
+    "digest": "f8ee1e543384e46f4ba1a050c3697b7a7280750acc419a266d278f32eac64a20",
+    "text": "-- Declaration families: imports, datatypes, aliases, constants, visibility.\nimport Data.List (map, filter)\n\nimport Json as J\n\nimport Data.Map (..)\n\npub type Color = Red | Green | Blue deriving (Eq, Show)\n\nopaque type Token = MkToken(Int)\n\nnewtype Meters = Meters(Float) deriving (Eq)\n\ntype Point = Point { x: Int, y: Int }\n\nalias Pair(a) = (a, a)\n\nerror NotFound(String)\n\nlet limit = 512\n\ndeprecated \"use limit\"\nlet old_limit = 256\n\npub fn origin() : Point = Point { x = 0, y = 0 }\n"
+  },
+  "raw": [
+    {
+      "kind": "import",
+      "span": [
+        77,
+        83
+      ]
+    },
+    {
+      "kind": "qual",
+      "span": [
+        84,
+        93
+      ],
+      "value": "Data.List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        94,
+        95
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        95,
+        98
+      ],
+      "value": "map"
+    },
+    {
+      "kind": ",",
+      "span": [
+        98,
+        99
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        100,
+        106
+      ],
+      "value": "filter"
+    },
+    {
+      "kind": ")",
+      "span": [
+        106,
+        107
+      ]
+    },
+    {
+      "kind": "import",
+      "span": [
+        109,
+        115
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        116,
+        120
+      ],
+      "value": "Json"
+    },
+    {
+      "kind": "as",
+      "span": [
+        121,
+        123
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        124,
+        125
+      ],
+      "value": "J"
+    },
+    {
+      "kind": "import",
+      "span": [
+        127,
+        133
+      ]
+    },
+    {
+      "kind": "qual",
+      "span": [
+        134,
+        142
+      ],
+      "value": "Data.Map"
+    },
+    {
+      "kind": "(",
+      "span": [
+        143,
+        144
+      ]
+    },
+    {
+      "kind": "..",
+      "span": [
+        144,
+        146
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        146,
+        147
+      ]
+    },
+    {
+      "kind": "pub",
+      "span": [
+        149,
+        152
+      ]
+    },
+    {
+      "kind": "type",
+      "span": [
+        153,
+        157
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        158,
+        163
+      ],
+      "value": "Color"
+    },
+    {
+      "kind": "=",
+      "span": [
+        164,
+        165
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        166,
+        169
+      ],
+      "value": "Red"
+    },
+    {
+      "kind": "|",
+      "span": [
+        170,
+        171
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        172,
+        177
+      ],
+      "value": "Green"
+    },
+    {
+      "kind": "|",
+      "span": [
+        178,
+        179
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        180,
+        184
+      ],
+      "value": "Blue"
+    },
+    {
+      "kind": "deriving",
+      "span": [
+        185,
+        193
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        194,
+        195
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        195,
+        197
+      ],
+      "value": "Eq"
+    },
+    {
+      "kind": ",",
+      "span": [
+        197,
+        198
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        199,
+        203
+      ],
+      "value": "Show"
+    },
+    {
+      "kind": ")",
+      "span": [
+        203,
+        204
+      ]
+    },
+    {
+      "kind": "opaque",
+      "span": [
+        206,
+        212
+      ]
+    },
+    {
+      "kind": "type",
+      "span": [
+        213,
+        217
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        218,
+        223
+      ],
+      "value": "Token"
+    },
+    {
+      "kind": "=",
+      "span": [
+        224,
+        225
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        226,
+        233
+      ],
+      "value": "MkToken"
+    },
+    {
+      "kind": "(",
+      "span": [
+        233,
+        234
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        234,
+        237
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        237,
+        238
+      ]
+    },
+    {
+      "kind": "newtype",
+      "span": [
+        240,
+        247
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        248,
+        254
+      ],
+      "value": "Meters"
+    },
+    {
+      "kind": "=",
+      "span": [
+        255,
+        256
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        257,
+        263
+      ],
+      "value": "Meters"
+    },
+    {
+      "kind": "(",
+      "span": [
+        263,
+        264
+      ]
+    },
+    {
+      "kind": "Float",
+      "span": [
+        264,
+        269
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        269,
+        270
+      ]
+    },
+    {
+      "kind": "deriving",
+      "span": [
+        271,
+        279
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        280,
+        281
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        281,
+        283
+      ],
+      "value": "Eq"
+    },
+    {
+      "kind": ")",
+      "span": [
+        283,
+        284
+      ]
+    },
+    {
+      "kind": "type",
+      "span": [
+        286,
+        290
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        291,
+        296
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "=",
+      "span": [
+        297,
+        298
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        299,
+        304
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "{",
+      "span": [
+        305,
+        306
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        307,
+        308
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ":",
+      "span": [
+        308,
+        309
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        310,
+        313
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        313,
+        314
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        315,
+        316
+      ],
+      "value": "y"
+    },
+    {
+      "kind": ":",
+      "span": [
+        316,
+        317
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        318,
+        321
+      ]
+    },
+    {
+      "kind": "}",
+      "span": [
+        322,
+        323
+      ]
+    },
+    {
+      "kind": "alias",
+      "span": [
+        325,
+        330
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        331,
+        335
+      ],
+      "value": "Pair"
+    },
+    {
+      "kind": "(",
+      "span": [
+        335,
+        336
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        336,
+        337
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        337,
+        338
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        339,
+        340
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        341,
+        342
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        342,
+        343
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        343,
+        344
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        345,
+        346
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        346,
+        347
+      ]
+    },
+    {
+      "kind": "error",
+      "span": [
+        349,
+        354
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        355,
+        363
+      ],
+      "value": "NotFound"
+    },
+    {
+      "kind": "(",
+      "span": [
+        363,
+        364
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        364,
+        370
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        370,
+        371
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        373,
+        376
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        377,
+        382
+      ],
+      "value": "limit"
+    },
+    {
+      "kind": "=",
+      "span": [
+        383,
+        384
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        385,
+        388
+      ],
+      "value": "512"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        390,
+        400
+      ],
+      "value": "deprecated"
+    },
+    {
+      "kind": "str",
+      "span": [
+        401,
+        412
+      ],
+      "value": "use limit"
+    },
+    {
+      "kind": "let",
+      "span": [
+        413,
+        416
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        417,
+        426
+      ],
+      "value": "old_limit"
+    },
+    {
+      "kind": "=",
+      "span": [
+        427,
+        428
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        429,
+        432
+      ],
+      "value": "256"
+    },
+    {
+      "kind": "pub",
+      "span": [
+        434,
+        437
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        438,
+        440
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        441,
+        447
+      ],
+      "value": "origin"
+    },
+    {
+      "kind": "(",
+      "span": [
+        447,
+        448
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        448,
+        449
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        450,
+        451
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        452,
+        457
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "=",
+      "span": [
+        458,
+        459
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        460,
+        465
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "{",
+      "span": [
+        466,
+        467
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        468,
+        469
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "=",
+      "span": [
+        470,
+        471
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        472,
+        473
+      ],
+      "value": "0"
+    },
+    {
+      "kind": ",",
+      "span": [
+        473,
+        474
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        475,
+        476
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "=",
+      "span": [
+        477,
+        478
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        479,
+        480
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "}",
+      "span": [
+        481,
+        482
+      ]
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        77,
+        77
+      ]
+    },
+    {
+      "kind": "import",
+      "span": [
+        77,
+        83
+      ]
+    },
+    {
+      "kind": "qual",
+      "span": [
+        84,
+        93
+      ],
+      "value": "Data.List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        94,
+        95
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        95,
+        98
+      ],
+      "value": "map"
+    },
+    {
+      "kind": ",",
+      "span": [
+        98,
+        99
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        100,
+        106
+      ],
+      "value": "filter"
+    },
+    {
+      "kind": ")",
+      "span": [
+        106,
+        107
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        107,
+        107
+      ]
+    },
+    {
+      "kind": "import",
+      "span": [
+        109,
+        115
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        116,
+        120
+      ],
+      "value": "Json"
+    },
+    {
+      "kind": "as",
+      "span": [
+        121,
+        123
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        124,
+        125
+      ],
+      "value": "J"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        125,
+        125
+      ]
+    },
+    {
+      "kind": "import",
+      "span": [
+        127,
+        133
+      ]
+    },
+    {
+      "kind": "qual",
+      "span": [
+        134,
+        142
+      ],
+      "value": "Data.Map"
+    },
+    {
+      "kind": "(",
+      "span": [
+        143,
+        144
+      ]
+    },
+    {
+      "kind": "..",
+      "span": [
+        144,
+        146
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        146,
+        147
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        147,
+        147
+      ]
+    },
+    {
+      "kind": "pub",
+      "span": [
+        149,
+        152
+      ]
+    },
+    {
+      "kind": "type",
+      "span": [
+        153,
+        157
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        158,
+        163
+      ],
+      "value": "Color"
+    },
+    {
+      "kind": "=",
+      "span": [
+        164,
+        165
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        166,
+        169
+      ],
+      "value": "Red"
+    },
+    {
+      "kind": "|",
+      "span": [
+        170,
+        171
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        172,
+        177
+      ],
+      "value": "Green"
+    },
+    {
+      "kind": "|",
+      "span": [
+        178,
+        179
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        180,
+        184
+      ],
+      "value": "Blue"
+    },
+    {
+      "kind": "deriving",
+      "span": [
+        185,
+        193
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        194,
+        195
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        195,
+        197
+      ],
+      "value": "Eq"
+    },
+    {
+      "kind": ",",
+      "span": [
+        197,
+        198
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        199,
+        203
+      ],
+      "value": "Show"
+    },
+    {
+      "kind": ")",
+      "span": [
+        203,
+        204
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        204,
+        204
+      ]
+    },
+    {
+      "kind": "opaque",
+      "span": [
+        206,
+        212
+      ]
+    },
+    {
+      "kind": "type",
+      "span": [
+        213,
+        217
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        218,
+        223
+      ],
+      "value": "Token"
+    },
+    {
+      "kind": "=",
+      "span": [
+        224,
+        225
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        226,
+        233
+      ],
+      "value": "MkToken"
+    },
+    {
+      "kind": "(",
+      "span": [
+        233,
+        234
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        234,
+        237
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        237,
+        238
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        238,
+        238
+      ]
+    },
+    {
+      "kind": "newtype",
+      "span": [
+        240,
+        247
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        248,
+        254
+      ],
+      "value": "Meters"
+    },
+    {
+      "kind": "=",
+      "span": [
+        255,
+        256
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        257,
+        263
+      ],
+      "value": "Meters"
+    },
+    {
+      "kind": "(",
+      "span": [
+        263,
+        264
+      ]
+    },
+    {
+      "kind": "Float",
+      "span": [
+        264,
+        269
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        269,
+        270
+      ]
+    },
+    {
+      "kind": "deriving",
+      "span": [
+        271,
+        279
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        280,
+        281
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        281,
+        283
+      ],
+      "value": "Eq"
+    },
+    {
+      "kind": ")",
+      "span": [
+        283,
+        284
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        284,
+        284
+      ]
+    },
+    {
+      "kind": "type",
+      "span": [
+        286,
+        290
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        291,
+        296
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "=",
+      "span": [
+        297,
+        298
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        299,
+        304
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "{",
+      "span": [
+        305,
+        306
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        307,
+        308
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ":",
+      "span": [
+        308,
+        309
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        310,
+        313
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        313,
+        314
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        315,
+        316
+      ],
+      "value": "y"
+    },
+    {
+      "kind": ":",
+      "span": [
+        316,
+        317
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        318,
+        321
+      ]
+    },
+    {
+      "kind": "}",
+      "span": [
+        322,
+        323
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        323,
+        323
+      ]
+    },
+    {
+      "kind": "alias",
+      "span": [
+        325,
+        330
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        331,
+        335
+      ],
+      "value": "Pair"
+    },
+    {
+      "kind": "(",
+      "span": [
+        335,
+        336
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        336,
+        337
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        337,
+        338
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        339,
+        340
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        341,
+        342
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        342,
+        343
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        343,
+        344
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        345,
+        346
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        346,
+        347
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        347,
+        347
+      ]
+    },
+    {
+      "kind": "error",
+      "span": [
+        349,
+        354
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        355,
+        363
+      ],
+      "value": "NotFound"
+    },
+    {
+      "kind": "(",
+      "span": [
+        363,
+        364
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        364,
+        370
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        370,
+        371
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        371,
+        371
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        373,
+        376
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        377,
+        382
+      ],
+      "value": "limit"
+    },
+    {
+      "kind": "=",
+      "span": [
+        383,
+        384
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        385,
+        388
+      ],
+      "value": "512"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        388,
+        388
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        390,
+        400
+      ],
+      "value": "deprecated"
+    },
+    {
+      "kind": "str",
+      "span": [
+        401,
+        412
+      ],
+      "value": "use limit"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        412,
+        412
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        413,
+        416
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        417,
+        426
+      ],
+      "value": "old_limit"
+    },
+    {
+      "kind": "=",
+      "span": [
+        427,
+        428
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        429,
+        432
+      ],
+      "value": "256"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        432,
+        432
+      ]
+    },
+    {
+      "kind": "pub",
+      "span": [
+        434,
+        437
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        438,
+        440
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        441,
+        447
+      ],
+      "value": "origin"
+    },
+    {
+      "kind": "(",
+      "span": [
+        447,
+        448
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        448,
+        449
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        450,
+        451
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        452,
+        457
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "=",
+      "span": [
+        458,
+        459
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        460,
+        465
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "{",
+      "span": [
+        466,
+        467
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        468,
+        469
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "=",
+      "span": [
+        470,
+        471
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        472,
+        473
+      ],
+      "value": "0"
+    },
+    {
+      "kind": ",",
+      "span": [
+        473,
+        474
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        475,
+        476
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "=",
+      "span": [
+        477,
+        478
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        479,
+        480
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "}",
+      "span": [
+        481,
+        482
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        482,
+        482
+      ]
+    }
+  ],
+  "trivia": [
+    {
+      "kind": "comment",
+      "span": [
+        0,
+        76
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        107,
+        109
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        125,
+        127
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        147,
+        149
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        204,
+        206
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        238,
+        240
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        284,
+        286
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        323,
+        325
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        347,
+        349
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        371,
+        373
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        388,
+        390
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        432,
+        434
+      ]
+    }
+  ]
+}

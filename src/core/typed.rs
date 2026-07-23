@@ -10,9 +10,7 @@ mod cse;
 mod effect_lower;
 mod fuse;
 mod inline;
-mod late;
 mod newtypes;
-mod pre;
 mod rc;
 mod reuse;
 mod simplify;
@@ -21,12 +19,17 @@ mod specialize_support;
 mod verify;
 
 pub(in crate::core) use build::{build_typed, build_verify_env, core_fn_sig, dict_type};
+// The raw typed passes, exposed for the driver's ordered stage runner (which
+// owns verification boundaries and the SCC fixed-point cache).
+pub(crate) use cse::cse;
+pub(crate) use fuse::fuse;
+pub(crate) use inline::inline;
+pub(crate) use newtypes::erase_newtypes;
+pub(crate) use simplify::simplify;
 // Exposed for typed-lowering compatibility tests. The production route accepts
 // only strategies whose erased result is exact at the compatibility boundary.
 pub use effect_lower::abi::LoweredReprProof;
 pub(crate) use effect_lower::{lower_effects, TypedLowering};
-pub(crate) use late::{execute as execute_late, LateExecutorFailure};
-pub(crate) use pre::{execute as execute_pre, PreExecutorFailure};
 pub(crate) use rc::insert_rc;
 pub(crate) use reuse::reuse;
 pub(in crate::core) use verify::{
@@ -856,10 +859,21 @@ pub enum ReuseLowered {}
 ///
 /// The phase marker prevents routing errors while the private node builders and
 /// independent verifier prevent local type/effect witness drift.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct TypedCore<P> {
     fns: Vec<TypedCoreFn>,
     phase: PhantomData<fn() -> P>,
+}
+
+// Manual so a phase-generic caller can clone: the derive would demand
+// `P: Clone`, but the marker only ever appears under `PhantomData`.
+impl<P> Clone for TypedCore<P> {
+    fn clone(&self) -> Self {
+        Self {
+            fns: self.fns.clone(),
+            phase: PhantomData,
+        }
+    }
 }
 
 impl<P> TypedCore<P> {
@@ -874,6 +888,20 @@ impl<P> TypedCore<P> {
             fns,
             phase: PhantomData,
         }
+    }
+
+    /// Decompose into owned functions, for the driver's SCC-local pass cache.
+    #[must_use]
+    pub(crate) fn into_functions(self) -> Vec<TypedCoreFn> {
+        self.fns
+    }
+
+    /// Regroup verified functions at the same phase. [`TypedCoreFn`]s can only
+    /// be built inside `core`, so this can subset or reorder verified programs
+    /// but never forge a witness.
+    #[must_use]
+    pub(crate) const fn from_functions(fns: Vec<TypedCoreFn>) -> Self {
+        Self::new(fns)
     }
 
     /// Consume all type/effect witnesses, yielding the existing executable

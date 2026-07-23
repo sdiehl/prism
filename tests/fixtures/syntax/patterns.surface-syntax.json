@@ -1,0 +1,1004 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.14.0",
+  "source": {
+    "digest": "2b66dac5bef5e8c3bfecd323a13d1343a743f3657a0d9cafebbdd794b87577d0",
+    "text": "-- Pattern forms: constructors, tuples, records, literals, guards, views.\ntype Point = Point { x: Int, y: Int }\n\ntype Shape = Dot | Line(Point, Point) | Poly(List(Point))\n\npattern Diag(n) for Point =\n  view \\(p) -> if p.x == p.y then Some(p.x) else None\n  make \\(n) -> Point { x = n, y = n }\n\nfn classify(s : Shape) : Int =\n  match s of\n    Dot => 0\n    Line(Point { x = 0, y = 0 }, _) => 1\n    Line(a, b) if a.x == b.x => 2\n    Poly(Nil) => 3\n    Poly(Cons(p, Nil)) => p.x\n    _ => 9\n\nfn literals(v : Int, c : Char, f : Float, b : Bool) : Int =\n  match (v, c, f, b) of\n    (0, 'a', 1.5, true) => 1\n    (n, _, _, false) => n\n    _ => 2\n\nfn record_rest(p : Point) : Int =\n  match p of\n    Point { x = 0, .. } => 0\n    Point { x = x, y = y } => x + y\n\nfn views(p : Point) : Int =\n  match p of\n    Diag(n) if n > 3 => n * 2\n    Diag(n) => n\n    _ => 0\n"
+  },
+  "items": [
+    {
+      "ctors": [
+        {
+          "fields": [
+            {
+              "name": "x",
+              "ty": {
+                "kind": "int"
+              }
+            },
+            {
+              "name": "y",
+              "ty": {
+                "kind": "int"
+              }
+            }
+          ],
+          "name": "Point"
+        }
+      ],
+      "kind": "data",
+      "name": "Point",
+      "span": [
+        74,
+        111
+      ]
+    },
+    {
+      "ctors": [
+        {
+          "name": "Dot"
+        },
+        {
+          "args": [
+            {
+              "kind": "con",
+              "name": "Point"
+            },
+            {
+              "kind": "con",
+              "name": "Point"
+            }
+          ],
+          "name": "Line"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "kind": "con",
+                  "name": "Point"
+                }
+              ],
+              "kind": "con",
+              "name": "List"
+            }
+          ],
+          "name": "Poly"
+        }
+      ],
+      "kind": "data",
+      "name": "Shape",
+      "span": [
+        113,
+        170
+      ]
+    },
+    {
+      "for": "Point",
+      "kind": "pattern",
+      "make": {
+        "body": {
+          "fields": [
+            {
+              "name": "x",
+              "value": {
+                "kind": "var",
+                "name": "n",
+                "span": [
+                  281,
+                  282
+                ]
+              }
+            },
+            {
+              "name": "y",
+              "value": {
+                "kind": "var",
+                "name": "n",
+                "span": [
+                  288,
+                  289
+                ]
+              }
+            }
+          ],
+          "kind": "record",
+          "name": "Point",
+          "span": [
+            269,
+            291
+          ]
+        },
+        "kind": "lam",
+        "params": [
+          {
+            "name": "n"
+          }
+        ],
+        "span": [
+          261,
+          291
+        ]
+      },
+      "name": "Diag",
+      "params": [
+        "n"
+      ],
+      "span": [
+        172,
+        291
+      ],
+      "view": {
+        "body": {
+          "cond": {
+            "kind": "bin",
+            "lhs": {
+              "expr": {
+                "kind": "var",
+                "name": "p",
+                "span": [
+                  218,
+                  219
+                ]
+              },
+              "kind": "field",
+              "name": "x",
+              "span": [
+                218,
+                221
+              ]
+            },
+            "op": "==",
+            "rhs": {
+              "expr": {
+                "kind": "var",
+                "name": "p",
+                "span": [
+                  225,
+                  226
+                ]
+              },
+              "kind": "field",
+              "name": "y",
+              "span": [
+                225,
+                228
+              ]
+            },
+            "span": [
+              218,
+              228
+            ]
+          },
+          "else": {
+            "kind": "var",
+            "name": "None",
+            "span": [
+              249,
+              253
+            ]
+          },
+          "kind": "if",
+          "span": [
+            215,
+            253
+          ],
+          "then": {
+            "args": [
+              {
+                "expr": {
+                  "kind": "var",
+                  "name": "p",
+                  "span": [
+                    239,
+                    240
+                  ]
+                },
+                "kind": "field",
+                "name": "x",
+                "span": [
+                  239,
+                  242
+                ]
+              }
+            ],
+            "head": {
+              "kind": "var",
+              "name": "Some",
+              "span": [
+                234,
+                238
+              ]
+            },
+            "kind": "call",
+            "span": [
+              234,
+              243
+            ]
+          }
+        },
+        "kind": "lam",
+        "params": [
+          {
+            "name": "p"
+          }
+        ],
+        "span": [
+          207,
+          253
+        ]
+      }
+    },
+    {
+      "body": {
+        "arms": [
+          {
+            "body": {
+              "kind": "int",
+              "span": [
+                348,
+                349
+              ],
+              "value": "0"
+            },
+            "pat": {
+              "kind": "ctor",
+              "name": "Dot",
+              "span": [
+                341,
+                344
+              ]
+            }
+          },
+          {
+            "body": {
+              "kind": "int",
+              "span": [
+                389,
+                390
+              ],
+              "value": "1"
+            },
+            "pat": {
+              "args": [
+                {
+                  "fields": [
+                    {
+                      "name": "x",
+                      "pat": {
+                        "kind": "int",
+                        "span": [
+                          371,
+                          372
+                        ],
+                        "value": "0"
+                      }
+                    },
+                    {
+                      "name": "y",
+                      "pat": {
+                        "kind": "int",
+                        "span": [
+                          378,
+                          379
+                        ],
+                        "value": "0"
+                      }
+                    }
+                  ],
+                  "kind": "record",
+                  "name": "Point",
+                  "span": [
+                    359,
+                    381
+                  ]
+                },
+                {
+                  "kind": "wild",
+                  "span": [
+                    383,
+                    384
+                  ]
+                }
+              ],
+              "kind": "ctor",
+              "name": "Line",
+              "span": [
+                354,
+                385
+              ]
+            }
+          },
+          {
+            "body": {
+              "kind": "int",
+              "span": [
+                423,
+                424
+              ],
+              "value": "2"
+            },
+            "guard": {
+              "kind": "bin",
+              "lhs": {
+                "expr": {
+                  "kind": "var",
+                  "name": "a",
+                  "span": [
+                    409,
+                    410
+                  ]
+                },
+                "kind": "field",
+                "name": "x",
+                "span": [
+                  409,
+                  412
+                ]
+              },
+              "op": "==",
+              "rhs": {
+                "expr": {
+                  "kind": "var",
+                  "name": "b",
+                  "span": [
+                    416,
+                    417
+                  ]
+                },
+                "kind": "field",
+                "name": "x",
+                "span": [
+                  416,
+                  419
+                ]
+              },
+              "span": [
+                409,
+                419
+              ]
+            },
+            "pat": {
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "a",
+                  "span": [
+                    400,
+                    401
+                  ]
+                },
+                {
+                  "kind": "var",
+                  "name": "b",
+                  "span": [
+                    403,
+                    404
+                  ]
+                }
+              ],
+              "kind": "ctor",
+              "name": "Line",
+              "span": [
+                395,
+                405
+              ]
+            }
+          },
+          {
+            "body": {
+              "kind": "int",
+              "span": [
+                442,
+                443
+              ],
+              "value": "3"
+            },
+            "pat": {
+              "args": [
+                {
+                  "kind": "ctor",
+                  "name": "Nil",
+                  "span": [
+                    434,
+                    437
+                  ]
+                }
+              ],
+              "kind": "ctor",
+              "name": "Poly",
+              "span": [
+                429,
+                438
+              ]
+            }
+          },
+          {
+            "body": {
+              "expr": {
+                "kind": "var",
+                "name": "p",
+                "span": [
+                  470,
+                  471
+                ]
+              },
+              "kind": "field",
+              "name": "x",
+              "span": [
+                470,
+                473
+              ]
+            },
+            "pat": {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "p",
+                      "span": [
+                        458,
+                        459
+                      ]
+                    },
+                    {
+                      "kind": "ctor",
+                      "name": "Nil",
+                      "span": [
+                        461,
+                        464
+                      ]
+                    }
+                  ],
+                  "kind": "ctor",
+                  "name": "Cons",
+                  "span": [
+                    453,
+                    465
+                  ]
+                }
+              ],
+              "kind": "ctor",
+              "name": "Poly",
+              "span": [
+                448,
+                466
+              ]
+            }
+          },
+          {
+            "body": {
+              "kind": "int",
+              "span": [
+                483,
+                484
+              ],
+              "value": "9"
+            },
+            "pat": {
+              "kind": "wild",
+              "span": [
+                478,
+                479
+              ]
+            }
+          }
+        ],
+        "kind": "match",
+        "scrutinee": {
+          "kind": "var",
+          "name": "s",
+          "span": [
+            332,
+            333
+          ]
+        },
+        "span": [
+          326,
+          484
+        ]
+      },
+      "kind": "fn",
+      "name": "classify",
+      "params": [
+        {
+          "name": "s",
+          "ty": {
+            "kind": "con",
+            "name": "Shape"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "int"
+      },
+      "span": [
+        293,
+        484
+      ]
+    },
+    {
+      "body": {
+        "arms": [
+          {
+            "body": {
+              "kind": "int",
+              "span": [
+                597,
+                598
+              ],
+              "value": "1"
+            },
+            "pat": {
+              "items": [
+                {
+                  "kind": "int",
+                  "span": [
+                    575,
+                    576
+                  ],
+                  "value": "0"
+                },
+                {
+                  "kind": "char",
+                  "span": [
+                    578,
+                    581
+                  ],
+                  "value": "a"
+                },
+                {
+                  "kind": "float",
+                  "span": [
+                    583,
+                    586
+                  ],
+                  "value": "1.5"
+                },
+                {
+                  "kind": "bool",
+                  "span": [
+                    588,
+                    592
+                  ],
+                  "value": true
+                }
+              ],
+              "kind": "tuple",
+              "span": [
+                574,
+                593
+              ]
+            }
+          },
+          {
+            "body": {
+              "kind": "var",
+              "name": "n",
+              "span": [
+                623,
+                624
+              ]
+            },
+            "pat": {
+              "items": [
+                {
+                  "kind": "var",
+                  "name": "n",
+                  "span": [
+                    604,
+                    605
+                  ]
+                },
+                {
+                  "kind": "wild",
+                  "span": [
+                    607,
+                    608
+                  ]
+                },
+                {
+                  "kind": "wild",
+                  "span": [
+                    610,
+                    611
+                  ]
+                },
+                {
+                  "kind": "bool",
+                  "span": [
+                    613,
+                    618
+                  ],
+                  "value": false
+                }
+              ],
+              "kind": "tuple",
+              "span": [
+                603,
+                619
+              ]
+            }
+          },
+          {
+            "body": {
+              "kind": "int",
+              "span": [
+                634,
+                635
+              ],
+              "value": "2"
+            },
+            "pat": {
+              "kind": "wild",
+              "span": [
+                629,
+                630
+              ]
+            }
+          }
+        ],
+        "kind": "match",
+        "scrutinee": {
+          "items": [
+            {
+              "kind": "var",
+              "name": "v",
+              "span": [
+                555,
+                556
+              ]
+            },
+            {
+              "kind": "var",
+              "name": "c",
+              "span": [
+                558,
+                559
+              ]
+            },
+            {
+              "kind": "var",
+              "name": "f",
+              "span": [
+                561,
+                562
+              ]
+            },
+            {
+              "kind": "var",
+              "name": "b",
+              "span": [
+                564,
+                565
+              ]
+            }
+          ],
+          "kind": "tuple",
+          "span": [
+            554,
+            566
+          ]
+        },
+        "span": [
+          548,
+          635
+        ]
+      },
+      "kind": "fn",
+      "name": "literals",
+      "params": [
+        {
+          "name": "v",
+          "ty": {
+            "kind": "int"
+          }
+        },
+        {
+          "name": "c",
+          "ty": {
+            "kind": "char"
+          }
+        },
+        {
+          "name": "f",
+          "ty": {
+            "kind": "float"
+          }
+        },
+        {
+          "name": "b",
+          "ty": {
+            "kind": "bool"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "int"
+      },
+      "span": [
+        486,
+        635
+      ]
+    },
+    {
+      "body": {
+        "arms": [
+          {
+            "body": {
+              "kind": "int",
+              "span": [
+                711,
+                712
+              ],
+              "value": "0"
+            },
+            "pat": {
+              "fields": [
+                {
+                  "name": "x",
+                  "pat": {
+                    "kind": "int",
+                    "span": [
+                      700,
+                      701
+                    ],
+                    "value": "0"
+                  }
+                }
+              ],
+              "kind": "record",
+              "name": "Point",
+              "rest": true,
+              "span": [
+                688,
+                707
+              ]
+            }
+          },
+          {
+            "body": {
+              "kind": "bin",
+              "lhs": {
+                "kind": "var",
+                "name": "x",
+                "span": [
+                  743,
+                  744
+                ]
+              },
+              "op": "+",
+              "rhs": {
+                "kind": "var",
+                "name": "y",
+                "span": [
+                  747,
+                  748
+                ]
+              },
+              "span": [
+                743,
+                748
+              ]
+            },
+            "pat": {
+              "fields": [
+                {
+                  "name": "x",
+                  "pat": {
+                    "kind": "var",
+                    "name": "x",
+                    "span": [
+                      729,
+                      730
+                    ]
+                  }
+                },
+                {
+                  "name": "y",
+                  "pat": {
+                    "kind": "var",
+                    "name": "y",
+                    "span": [
+                      736,
+                      737
+                    ]
+                  }
+                }
+              ],
+              "kind": "record",
+              "name": "Point",
+              "span": [
+                717,
+                739
+              ]
+            }
+          }
+        ],
+        "kind": "match",
+        "scrutinee": {
+          "kind": "var",
+          "name": "p",
+          "span": [
+            679,
+            680
+          ]
+        },
+        "span": [
+          673,
+          748
+        ]
+      },
+      "kind": "fn",
+      "name": "record_rest",
+      "params": [
+        {
+          "name": "p",
+          "ty": {
+            "kind": "con",
+            "name": "Point"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "int"
+      },
+      "span": [
+        637,
+        748
+      ]
+    },
+    {
+      "body": {
+        "arms": [
+          {
+            "body": {
+              "kind": "bin",
+              "lhs": {
+                "kind": "var",
+                "name": "n",
+                "span": [
+                  815,
+                  816
+                ]
+              },
+              "op": "*",
+              "rhs": {
+                "kind": "int",
+                "span": [
+                  819,
+                  820
+                ],
+                "value": "2"
+              },
+              "span": [
+                815,
+                820
+              ]
+            },
+            "guard": {
+              "kind": "bin",
+              "lhs": {
+                "kind": "var",
+                "name": "n",
+                "span": [
+                  806,
+                  807
+                ]
+              },
+              "op": ">",
+              "rhs": {
+                "kind": "int",
+                "span": [
+                  810,
+                  811
+                ],
+                "value": "3"
+              },
+              "span": [
+                806,
+                811
+              ]
+            },
+            "pat": {
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "n",
+                  "span": [
+                    800,
+                    801
+                  ]
+                }
+              ],
+              "kind": "ctor",
+              "name": "Diag",
+              "span": [
+                795,
+                802
+              ]
+            }
+          },
+          {
+            "body": {
+              "kind": "var",
+              "name": "n",
+              "span": [
+                836,
+                837
+              ]
+            },
+            "pat": {
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "n",
+                  "span": [
+                    830,
+                    831
+                  ]
+                }
+              ],
+              "kind": "ctor",
+              "name": "Diag",
+              "span": [
+                825,
+                832
+              ]
+            }
+          },
+          {
+            "body": {
+              "kind": "int",
+              "span": [
+                847,
+                848
+              ],
+              "value": "0"
+            },
+            "pat": {
+              "kind": "wild",
+              "span": [
+                842,
+                843
+              ]
+            }
+          }
+        ],
+        "kind": "match",
+        "scrutinee": {
+          "kind": "var",
+          "name": "p",
+          "span": [
+            786,
+            787
+          ]
+        },
+        "span": [
+          780,
+          848
+        ]
+      },
+      "kind": "fn",
+      "name": "views",
+      "params": [
+        {
+          "name": "p",
+          "ty": {
+            "kind": "con",
+            "name": "Point"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "int"
+      },
+      "span": [
+        750,
+        848
+      ]
+    }
+  ]
+}

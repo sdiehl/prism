@@ -728,6 +728,59 @@ impl Token {
             | Self::InterpEnd(_) => "",
         }
     }
+
+    /// The canonical wire name of this token kind, the spelling the versioned
+    /// syntax artifacts use. Fixed tokens use their exact source spelling (via
+    /// `Self::text`); value-carrying and virtual tokens use the grammar's
+    /// terminal aliases, re-stated here as the one non-grammar home so an
+    /// artifact reader and the grammar can never disagree. `Comment` and
+    /// `VHead` never reach an artifact stream (comments are trivia, the head
+    /// opener is consumed by the layout pass), but carry names so the mapping
+    /// stays total.
+    #[must_use]
+    pub const fn wire_name(&self) -> &'static str {
+        match self {
+            Self::Ident(_) => "ident",
+            Self::UIdent(_) => "uid",
+            Self::QualName(_) => "qual",
+            Self::Int(_) => "int",
+            Self::Float(_) => "float",
+            Self::CharLit(_) => "char",
+            Self::StringLit(_) => "str",
+            Self::InterpStart(_) => "istart",
+            Self::InterpMid(_) => "imid",
+            Self::InterpEnd(_) => "iend",
+            Self::VOpen => "v{",
+            Self::VClose => "v}",
+            Self::VSemi => "v;",
+            Self::VHead => "vhead",
+            Self::Comment(_) => "comment",
+            t => t.text(),
+        }
+    }
+
+    /// The decoded payload of a value-carrying token, for the versioned syntax
+    /// artifacts. `None` for fixed and virtual tokens. The original spelling is
+    /// always recoverable from the token's source span; this is the decoded
+    /// value (escapes resolved, digit separators stripped). Floats render via
+    /// the shortest round-trip form so the payload is deterministic.
+    #[must_use]
+    pub fn wire_value(&self) -> Option<String> {
+        match self {
+            Self::Ident(s)
+            | Self::UIdent(s)
+            | Self::QualName(s)
+            | Self::StringLit(s)
+            | Self::InterpStart(s)
+            | Self::InterpMid(s)
+            | Self::InterpEnd(s)
+            | Self::Comment(s) => Some(s.clone()),
+            Self::Int(i) => Some(i.to_string()),
+            Self::Float(x) => Some(format!("{x:?}")),
+            Self::CharLit(c) => Some(c.to_string()),
+            _ => None,
+        }
+    }
 }
 
 impl std::fmt::Display for Token {
@@ -787,9 +840,12 @@ mod tests {
     use super::Token;
     use Token::{Ident, InterpEnd, InterpStart};
 
+    use std::collections::HashSet;
+
     use crate::error::LexError;
     use crate::kw;
-    use crate::syntax::ast::{BigInt, Suffix};
+    use crate::lex::highlight::tok_class;
+    use crate::syntax::ast::{BigInt, IntLit, Suffix};
 
     // Digit separators are cosmetic: they strip out to the same value in every
     // lane, and scientific notation always lexes to a Float. The exponent sign is
@@ -1020,5 +1076,130 @@ mod tests {
         let n = spellings.len();
         spellings.dedup();
         assert_eq!(n, spellings.len(), "two fixed tokens share a spelling");
+    }
+
+    // The value-carrying and virtual tokens with their canonical wire names,
+    // re-typed from the grammar's terminal aliases so the artifact vocabulary
+    // and the grammar cannot drift apart silently.
+    fn special_wire_names() -> Vec<(Token, &'static str)> {
+        let int = IntLit {
+            value: BigInt::from(0),
+            suffix: Suffix::None,
+        };
+        vec![
+            (Token::Ident(String::new()), "ident"),
+            (Token::UIdent(String::new()), "uid"),
+            (Token::QualName(String::new()), "qual"),
+            (Token::Int(int), "int"),
+            (Token::Float(0.0), "float"),
+            (Token::CharLit('a'), "char"),
+            (Token::StringLit(String::new()), "str"),
+            (Token::InterpStart(String::new()), "istart"),
+            (Token::InterpMid(String::new()), "imid"),
+            (Token::InterpEnd(String::new()), "iend"),
+            (Token::VOpen, "v{"),
+            (Token::VClose, "v}"),
+            (Token::VSemi, "v;"),
+            (Token::VHead, "vhead"),
+            (Token::Comment(String::new()), "comment"),
+        ]
+    }
+
+    // Every token kind has a nonempty wire name, fixed tokens reuse their exact
+    // spelling, the specials match the grammar's terminal aliases, and no two
+    // kinds share a name. Together with `fixed_tokens` this covers the enum, so
+    // the syntax artifacts' token vocabulary is pinned in one place.
+    #[test]
+    fn wire_names_total_and_unique() {
+        let mut names: Vec<&str> = Vec::new();
+        for (tok, spelling) in fixed_tokens() {
+            assert_eq!(
+                tok.wire_name(),
+                spelling,
+                "a fixed token's wire name must be its spelling"
+            );
+            names.push(spelling);
+        }
+        for (tok, expected) in special_wire_names() {
+            assert_eq!(
+                tok.wire_name(),
+                expected,
+                "{tok:?} wire name disagrees with the grammar terminal alias"
+            );
+            names.push(expected);
+        }
+        assert!(
+            names.iter().all(|n| !n.is_empty()),
+            "every wire name is nonempty"
+        );
+        let n = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(n, names.len(), "two token kinds share a wire name");
+    }
+
+    // Maximal identifier runs in `src`, as a set.
+    fn words(src: &str) -> HashSet<&str> {
+        src.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .filter(|w| !w.is_empty())
+            .collect()
+    }
+
+    fn highlighter(rel: &str) -> String {
+        let path = format!("{}/{rel}", env!("CARGO_MANIFEST_DIR"));
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {path}: {e}"))
+    }
+
+    // The four keyword highlighters (this lexer's `tok_class`, the REPL
+    // categorizer, the mdbook JS grammar, and the nvim syntax file) must agree on
+    // the keyword vocabulary. `tok_class` and the REPL categorizer are exhaustive
+    // `match`es, so the Rust compiler already pins those two: a new keyword token
+    // that is not classified fails to compile. This test pins the two external
+    // files, which the compiler cannot see: every fixed token the lexer paints as
+    // a keyword, builtin type name, or boolean literal must also appear in each.
+    //
+    // The relation is subset, not equality: the external files may list contextual
+    // keywords the lexer treats as ordinary identifiers (`total`, `assume`, the
+    // handler verbs), so an extra word there is fine, a missing one is the drift.
+    #[test]
+    fn highlighter_keyword_lists_mirror_the_lexer() {
+        let canonical: Vec<&'static str> = fixed_tokens()
+            .into_iter()
+            .filter(|(t, _)| matches!(tok_class(t), "kw" | "ty" | "lit"))
+            .map(|(_, s)| s)
+            .collect();
+
+        // mdbook JS: the `keywords { keyword/literal/type }` object, which the
+        // `contains:` array immediately follows.
+        let js = highlighter("docs/theme/prism-highlight.js");
+        let obj_start = js
+            .find("keywords:")
+            .expect("JS highlighter has a `keywords:` object");
+        let obj_len = js[obj_start..]
+            .find("contains:")
+            .expect("the JS `keywords` object precedes the `contains:` array");
+        let js_words = words(&js[obj_start..obj_start + obj_len]);
+
+        // nvim: the vocabulary of every `syntax keyword prism*` line.
+        let lua = highlighter("scripts/nvim/syntax/prism.lua");
+        let lua_lines: String = lua
+            .lines()
+            .filter(|l| l.contains("syntax keyword"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let lua_words = words(&lua_lines);
+
+        for spelling in canonical {
+            assert!(
+                js_words.contains(spelling),
+                "keyword `{spelling}` is missing from docs/theme/prism-highlight.js \
+                 (its keyword list drifted from the lexer)"
+            );
+            assert!(
+                lua_words.contains(spelling),
+                "keyword `{spelling}` is missing from scripts/nvim/syntax/prism.lua \
+                 (its keyword list drifted from the lexer)"
+            );
+        }
     }
 }

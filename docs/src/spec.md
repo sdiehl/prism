@@ -1,13 +1,13 @@
 # The Prism Language Specification {#the-prism-language-specification}
 
-Prism is a strict, impure functional language in the ML family whose type system tracks side effects. This document is a modest proposal of the surface language as the `prism` compiler accepts it: its lexical structure, grammar, type system, and evaluation.
+Prism is a strict, impure functional language in the ML family whose type system tracks side effects. This document is a Modest Proposal of the language as the `prism` compiler accepts it: its lexical structure, grammar, type system, and evaluation.
 
 ## 0. Goals {#goal}
 
 1. Take deterministic simulation testing down to the language level: a deterministic core, typed effects, content-addressed identity, and replayable observations make every output an accountable artifact that can be mechanically rebuilt, moved, cached, diffed, audited, and explained using modern type-system methods.
 2. Lineage is the user-facing form of determinism: given an output, Prism should be able to precisely describe and check what code, packages, inputs, effects, handlers, and compiler artifacts produced it.
 3. The so-called "real world" meets Prism only at effect boundaries: every nondeterministic observation is named, typed, handled, and therefore available to record, replay, sandbox, or audit. The unfortunate existence of the physical world should be constrained by types.
-4. Obtain pure functional language purity by being completely inaccessible and having zero users, but having fun!
+4. Obtain pure functional language nirvana by being completely inaccessible, utterly useless, completely divorced from the real world, and having zero users.
 
 ## 1. Introduction {#introduction}
 
@@ -1480,7 +1480,7 @@ migrations {
 }
 ```
 
-The lambda is checked against the edge's exact interface, `PlayerManual.V2 -> PlayerManual` for the upgrade and `PlayerManual -> (PlayerManual.V2, Wire.Loss)` for the downgrade; a reversed endpoint, an extra effect, an upgrade that returns a `Loss`, or a downgrade that omits one is rejected against that signature. Naming a predecessor rung type in the signature of an ordinary top-level function (for example `fn f(x : PlayerManual.V1)`) does not yet resolve, so a `version(...)` direction is written inline; a named-converter form is a documented follow-up. A `version(...)` row overrides only an adjacent edge, since a non-adjacent route is always `auto`.
+The lambda is checked against the edge's exact interface, `PlayerManual.V2 -> PlayerManual` for the upgrade and `PlayerManual -> (PlayerManual.V2, Wire.Loss)` for the downgrade; a reversed endpoint, an extra effect, an upgrade that returns a `Loss`, or a downgrade that omits one is rejected against that signature. Naming a predecessor rung type in the signature of an ordinary top-level function (for example `fn f(x : PlayerManual.V1)`) does not yet resolve, so a `version(...)` direction is written inline. A `version(...)` row overrides only an adjacent edge, since a non-adjacent route is always `auto`.
 
 Under the family-qualified surface, each adjacent step is an ordinary generated function whose flat spelling, `upgrade_PlayerManual_V1_V2` and `downgrade_PlayerManual_V2_V1`, is minted mechanically from the type name and the two rung tags and reads in the direction of travel, source rung then destination. It is the internal adjacency the composed `PlayerManual.Vn` routes call, not a surface a program is meant to write; because the names are synthesized from the block header alone, renaming the type moves the whole family at once and no later phase parses a fact back out of a spelling.
 
@@ -1659,7 +1659,7 @@ fn main() =
 
 `Celsius` values below absolute zero cannot exist, and the proof is the module boundary rather than a runtime check at every use site: `celsius` clamps once, on the only road in.
 
-Name resolution rewrites every top-level definition to a canonical, module-qualified symbol (an export as `Data.Map.insert`, a private as the unforgeable, source-unwritable `Data.Map@helper`) and merges the checked modules into one program keyed by those symbols. Because identity is canonical, two modules may export the same short name and coexist. Merged Core remains the whole-program semantic authority, while durable module interfaces and checked bodies provide early cutoff: an implementation-only edit may rebuild its module without forcing importers whose interface dependency is unchanged. Later compiler artifacts use content-addressed Core identity, so formatting and local renaming do not move behavior and a semantic change propagates only through its dependency closure ([content-addressed core](./compiler.md#content-addressed-core)).
+Name resolution rewrites every top-level definition to a canonical, module-qualified symbol (an export as `Data.Map.insert`, a private as the unforgeable, source-unwritable `Data.Map@helper`) and merges the checked modules into one program keyed by those symbols. Because identity is canonical, two modules may export the same short name and coexist. Whole-program merging remains the semantic authority, while durable module interfaces and checked bodies provide early cutoff: an implementation-only edit may rebuild its module without forcing importers whose interface dependency is unchanged. Later compiler artifacts use content-addressed Core identity, so formatting and local renaming do not move behavior and a semantic change propagates only through its dependency closure ([content-addressed core](./compiler.md#content-addressed-core)).
 
 Instances are global, but each records its defining module. An **orphan** instance (defined apart from both its class and its head type) and instances that overlap across modules are reported as warnings; an ambiguity names each candidate's module.
 
@@ -1675,7 +1675,7 @@ name = "myapp"
 entry = "src/main.pr"
 ```
 
-`prism build` compiles the nearest enclosing project to a native binary under a `target/` directory at the project root (rustc-style), named after the package; `prism run <path>` interprets it instead, and `prism clean` removes `target/`. A single file is still built with a bare `prism file.pr`. The manifest keys are:
+Inside a project, the everyday verbs default to the nearest enclosing manifest: `prism build` compiles it to a native binary under a `target/` directory at the project root (rustc-style), named after the package; a bare `prism run` builds that binary and executes it, forwarding arguments after `--` and its exit status; `prism check` and `prism test` operate on the project; and `prism clean` removes `target/`. `prism run <path>` interprets a file or project directly, and a single file is still built with a bare `prism file.pr`. The manifest keys are:
 
 | Key              | Section     | Required           | Meaning                                                                   |
 | ---------------- | ----------- | ------------------ | ------------------------------------------------------------------------- |

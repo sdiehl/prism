@@ -1,3 +1,4 @@
+use prism::core::Digest;
 use prism::{
     check_with_seed, module_interface, with_prelude, ModuleInterface, Root, Sym,
     MODULE_INTERFACE_FORMAT,
@@ -52,10 +53,13 @@ fn interface_projection_is_versioned_and_self_verifying() {
     let json = interface.to_json().unwrap();
     assert_eq!(ModuleInterface::from_json(&json).unwrap(), interface);
 
-    let corrupt = json.replace(&interface.digest, &"0".repeat(interface.digest.len()));
+    let corrupt = json.replace(
+        interface.digest.as_str(),
+        &"0".repeat(interface.digest.len()),
+    );
     assert!(ModuleInterface::from_json(&corrupt).is_err());
 
-    interface.entries[0].digest = "0".repeat(interface.entries[0].digest.len());
+    interface.entries[0].digest = Digest::from("0".repeat(interface.entries[0].digest.len()));
     let error = ModuleInterface::from_json(&interface.to_json().unwrap()).unwrap_err();
     assert!(error.contains("row"));
     assert!(interface.exported_value_env().is_err());

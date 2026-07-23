@@ -11,21 +11,18 @@
 //!
 //! Objects are read through the [`Transport`] seam, so the resolver does not know
 //! or care whether an object comes from the local store, a git clone, or a
-//! mirror; the transport verifies each fetched blob against the hash that asked
-//! for it before returning it, so an untrusted host supplies availability but
-//! never integrity. The resolver is driven local-store-only, by
-//! a [`DiskTransport`](crate::pkg::transport::DiskTransport) over the configured
-//! store: a hash absent from that store is a [`ResolveError::Missing`] naming the
-//! hash and the edge that pulled it in, and pointing the transport at a remote is
-//! the whole of what the transport stage adds.
+//! mirror; the transport verifies each fetched blob against the requested hash
+//! before returning it, so an untrusted host supplies availability but never
+//! integrity. `prism why` uses a
+//! [`DiskTransport`](crate::pkg::transport::DiskTransport) over the configured
+//! store: an absent hash is a [`ResolveError::Missing`] naming both the hash and
+//! the dependency edge that requested it.
 //!
-//! The resolved [`Closure`] is the store-backed build unit. The compiler funnels
-//! every build through `resolve_modules_in` over a set of roots (`src/resolve/`),
-//! so once the closure's objects are present locally it is the input a
-//! store-backed build reads, exactly where `Root::Dir` source directories feed a
-//! source build today. Materializing the closure's anonymous Core back into that
-//! seam rides on `prism export` (the transport stage) and is left as the one
-//! documented boundary, so the resolver stays independent of the pipeline below.
+//! The resolved [`Closure`] is the graph inspected by `prism why` and the
+//! transport verification commands. Compilation loads locked source bundles
+//! through `package_source_roots` and the module resolver instead, so this walk
+//! never reconstructs anonymous Core as source and remains independent of the
+//! compiler pipeline.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;

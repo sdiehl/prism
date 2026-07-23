@@ -1,0 +1,16 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/simd4_edge.pr
+---
+0.10000000149011612
+0.10000000149011612
+16777216
+2.5
+2.5
+0
+-2147483648
+1
+8
+-1
+=> ()

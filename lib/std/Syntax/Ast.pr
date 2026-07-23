@@ -1,0 +1,312 @@
+-- | The surface abstract syntax of the `prism-surface-syntax-v1` artifact. The
+-- compiler exports one parsed source file as an ordered item list, each node an
+-- object tagged by a `kind` string; this module is the typed vocabulary that
+-- list decodes into. Constructor prefixes name the family: `I` items, `E`
+-- expressions, `P` patterns, `Ty` types. Every node that the parser spans wraps
+-- in `Sp`; types and kinds carry no span. The shapes here mirror the exporter
+-- exactly, so a decoded document re-encodes to the identical bytes.
+
+import Syntax.Source (..)
+
+-- | A parsed node with its byte span and the parse-sugar bit. Expressions and
+-- patterns are spanned; `synth` is set when the parser rewrote surface sugar
+-- into this node rather than reading it verbatim.
+pub type Sp(a) = Sp { node: a, span: Span, synth: Bool }
+
+-- | An integer literal's optional width suffix: `i64`, `u64`, or none.
+pub type Suffix = SufNone | SufI64 | SufU64
+
+-- | A kind: the classifier of a type parameter. Ground kinds classify types,
+-- rows, and type-level naturals; `KFun` is the kind of a type constructor.
+pub type Kind
+  = KType
+  | KRow
+  | KNat
+  | KFun(Kind, Kind)
+
+-- | One effect label: an effect name applied to zero or more type arguments,
+-- as it appears in an effect row or an effect alias.
+pub type EffLabel = EffLabel { name: String, args: List(Ty) }
+
+-- | An effect row: the labels present plus an optional row-variable tail. The
+-- empty row and a tail-less label list share this one shape.
+pub type Row = Row { labels: List(EffLabel), tail: Option(String) }
+
+-- | A surface type. Ground types, type variables, applications, function types
+-- with an effect row, saturated constructors, tuples, unboxed aggregates, row
+-- literals, type-level naturals, and usage-qualified types.
+pub type Ty
+  = TyInt
+  | TyI64
+  | TyU64
+  | TyBool
+  | TyUnit
+  | TyFloat
+  | TyChar
+  | TyStr
+  | TyVar(String)
+  | TyApp(String, List(Ty))
+  | TyState(Int)
+  | TyForall(List(String), Ty)
+  | TyFun(List(Ty), Row, Ty)
+  | TyCon(String, List(Ty))
+  | TyTuple(List(Ty))
+  | TyUnboxedTuple(List(Ty))
+  | TyUnboxedRecord(List(CField))
+  | TyRowLit(Row)
+  | TyNat(Int)
+  | TyUsage(Ty, List(String))
+
+-- | A named field carrying a type: a record constructor field or an unboxed
+-- record field.
+pub type CField = CField { name: String, ty: Ty }
+
+-- | A named field carrying an expression: a record literal field, a record
+-- update field, a where binding, or a converter override.
+pub type NamedExpr = NamedExpr { name: String, value: Sp(Expr) }
+
+-- | A surface expression. One constructor per node kind the exporter emits,
+-- including the desugarable surface forms (loops, comprehensions, throw and
+-- try-catch, path reads and updates) that the parser records before lowering.
+pub type Expr
+  = EInt(String, Suffix)
+  | EFloat(String)
+  | EChar(String)
+  | EBool(Bool)
+  | EUnit
+  | EStr(String)
+  | EVar(String)
+  | EHole(String)
+  | EBin(String, Sp(Expr), Sp(Expr))
+  | ENeg(Sp(Expr))
+  | EIf(Sp(Expr), Sp(Expr), Sp(Expr))
+  | ELet(String, Sp(Expr), Sp(Expr))
+  | ELam(List(Param), Sp(Expr))
+  | ECall(Sp(Expr), List(Sp(Expr)))
+  | EPipe(Sp(Expr), Sp(Expr))
+  | EMatch(Sp(Expr), List(Arm))
+  | EList(List(Sp(Expr)))
+  | ETuple(List(Sp(Expr)))
+  | EField(Sp(Expr), String)
+  | EUnboxedTuple(List(Sp(Expr)))
+  | EUnboxedRecord(List(NamedExpr))
+  | EUnboxedField(Sp(Expr), String)
+  | ERecord(String, List(NamedExpr))
+  | ERecordUpdate(Sp(Expr), String, List(NamedExpr))
+  | EPathUpdate(Sp(Expr), List(PathUpdate))
+  | EHandle(Sp(Expr), List(HandlerArm), Bool)
+  | EMask(String, Sp(Expr))
+  | EInst(Sp(Expr), List(String))
+  | EIndex(Sp(Expr), Sp(Expr))
+  | EIndexSet(Sp(Expr), Sp(Expr), Sp(Expr))
+  | EAnn(Sp(Expr), Ty)
+  | EMarker(String)
+  | ENamedHandle(String, Sp(Expr), List(HandlerArm))
+  | EVarDecl(String, Sp(Expr), Sp(Expr))
+  | EAssign(String, Sp(Expr))
+  | EIndexAssign(Sp(Expr), Sp(Expr), Sp(Expr))
+  | EThrow(String, List(Sp(Expr)))
+  | ETryCatch(Sp(Expr), List(CatchArm))
+  | EFor(String, Sp(Expr), List(Qual), Sp(Expr))
+  | EWhile(Sp(Expr), Sp(Expr))
+  | ELoop(Sp(Expr))
+  | EBreak
+  | EContinue
+  | EReturn(Sp(Expr))
+  | EComp(Sp(Expr), String, Sp(Expr), List(Qual))
+  | EDefault(Sp(Expr), Sp(Expr))
+  | ETransact(Sp(Expr), Sp(Expr))
+  | EProbe(String, Sp(Expr))
+  | EOptChain(Sp(Expr), String)
+  | ERange(List(Sp(Expr)), Sp(Expr))
+  | ECompose(String, Sp(Expr), Sp(Expr))
+  | EReadPath(Sp(Expr), List(PathStep))
+
+-- | One match arm: a spanned pattern, an optional boolean guard, and the body
+-- taken when the pattern matches and the guard holds.
+pub type Arm = Arm { pat: Sp(Pat), guard: Option(Sp(Expr)), body: Sp(Expr) }
+
+-- | One arm of an effect handler: the return clause, a full operation clause
+-- binding the resumption, or the `once`, `val`, and `never` sugars.
+pub type HandlerArm
+  = HReturn(String, Sp(Expr))
+  | HOp(String, List(String), String, Sp(Expr))
+  | HOnce(String, List(String), Sp(Expr))
+  | HVal(String, Sp(Expr))
+  | HNever(String, List(String), Sp(Expr))
+
+-- | One catch arm of a try-catch: the error name, the binders for its payload,
+-- and the handler body.
+pub type CatchArm = CatchArm {
+  name: String,
+  binders: List(String),
+  body: Sp(Expr),
+  span: Span
+}
+
+-- | One qualifier of a for-loop or comprehension: a boolean guard or a binding
+-- generator.
+pub type Qual = QGuard(Sp(Expr)) | QBind(String, Sp(Expr))
+
+-- | One step of an optic path: a field, every element, a case selection, an
+-- index, or a where filter.
+pub type PathStep
+  = PSField(String)
+  | PSEach
+  | PSCase(String)
+  | PSIndex(Sp(Expr))
+  | PSWhere(Sp(Expr))
+
+-- | The write at the end of an optic path: set to a value or modify by a
+-- function.
+pub type PathOp = POSet(Sp(Expr)) | POModify(Sp(Expr))
+
+-- | One update in a path-update expression: the path walked and the write
+-- performed at its end.
+pub type PathUpdate = PathUpdate { path: List(PathStep), op: PathOp }
+
+-- | A surface pattern: wildcards, variables, literals, constructor and tuple
+-- patterns, and record patterns with an optional rest.
+pub type Pat
+  = PWild
+  | PVar(String)
+  | PInt(String, Suffix)
+  | PFloat(String)
+  | PChar(String)
+  | PBool(Bool)
+  | PCtor(String, List(Sp(Pat)))
+  | PTuple(List(Sp(Pat)))
+  | PRecord(String, List(PatField), Bool)
+
+-- | One field of a record pattern: the field name and the pattern bound to it.
+pub type PatField = PatField { name: String, pat: Sp(Pat) }
+
+-- | A function parameter: its name, an optional type annotation, whether it is
+-- taken by borrow, and an optional default expression.
+pub type Param = Param {
+  name: String,
+  ty: Option(Ty),
+  is_borrow: Bool,
+  dflt: Option(Sp(Expr))
+}
+
+-- | A class constraint on a type: the class name, the constrained type, and its
+-- span.
+pub type Constraint = Constraint { cls: String, ty: Ty, span: Span }
+
+-- | A function, constant, or logic-function declaration, with every optional
+-- clause the parser can attach: effect row, constraints, where bindings,
+-- requires and ensures, a decreases measure, and the totality and resource
+-- modifiers.
+pub type Decl = Decl {
+  name: String,
+  params: List(Param),
+  ret: Option(Ty),
+  eff: Option(Row),
+  constraints: List(Constraint),
+  body: Sp(Expr),
+  wheres: List(NamedExpr),
+  reqs: List(Sp(Expr)),
+  enss: List(Ensure),
+  measure: Option(Sp(Expr)),
+  is_test: Bool,
+  totality: Option(String),
+  fip_word: Option(String),
+  is_replayable: Bool,
+  is_no_alloc: Bool,
+  span: Span
+}
+
+-- | One ensures clause: the binder for the result and the postcondition
+-- expression over it.
+pub type Ensure = Ensure { binder: String, expr: Sp(Expr) }
+
+-- | The shape of a data constructor: a positional argument list or a named
+-- field list.
+pub type CtorShape = CPositional(List(Ty)) | CRecord(List(CField))
+
+-- | One data constructor: its name and its argument shape.
+pub type Ctor = Ctor { name: String, shape: CtorShape }
+
+-- | One derived class on a data declaration: the class name and its span.
+pub type Deriving = Deriving { name: String, span: Span }
+
+-- | One class method signature: the method name and its declared type.
+pub type Method = Method { name: String, ty: Ty }
+
+-- | One operation of an effect declaration: its name, parameter types, result
+-- type, and optional resumption grade.
+pub type EffOp = EffOp {
+  name: String,
+  params: List(Ty),
+  ret: Ty,
+  grade: Option(String)
+}
+
+-- | One rung of a stable type: the version name, an optional base to inherit
+-- from, its fields, and an optional frozen marker.
+pub type Rung = Rung {
+  name: String,
+  base: Option(String),
+  fields: List(RungField),
+  frozen: Option(String),
+  span: Span
+}
+
+-- | One field of a stable rung: the field name, its type, and an optional
+-- default expression.
+pub type RungField = RungField { name: String, ty: Ty, dflt: Option(Sp(Expr)) }
+
+-- | One converter between stable rungs: the direction, the from and to rung
+-- names, the base expression, overriding field bindings, and dropped fields.
+pub type Converter = Converter {
+  dir: String,
+  from: String,
+  to: String,
+  base: Sp(Expr),
+  overrides: List(NamedExpr),
+  drop_loss: List(String),
+  span: Span
+}
+
+-- | The route of a stable migration: automatic, or an explicit upgrade and
+-- downgrade pair.
+pub type MigrationRoute = MAuto | MVersion(MigrationDir, MigrationDir)
+
+-- | One direction of an explicit migration: automatic or a given expression.
+pub type MigrationDir = DAuto | DExpr(Sp(Expr))
+
+-- | One migration of a stable type: the from and to rung names and its route.
+pub type Migration = Migration {
+  from: String,
+  to: String,
+  route: MigrationRoute,
+  span: Span
+}
+
+-- | A top-level item of a source file, tagged by its declaration family.
+-- Named items carry an optional visibility (`pub` or `opaque`) and an optional
+-- deprecation message; imports, instances, and canonical bindings do not.
+pub type Item
+  = IImport { path: List(String), mod_alias: Option(String), names: Option(List(String)), glob: Bool, reexport: Bool, span: Span }
+  | IData { nt: Bool, name: String, params: List(String), param_kinds: List(Kind), ctors: List(Ctor), derivs: List(Deriving), span: Span, vis: Option(String), dep: Option(String) }
+  | IEffect { name: String, params: List(String), ops: List(EffOp), span: Span, vis: Option(String), dep: Option(String) }
+  | IError { name: String, params: List(Ty), span: Span, vis: Option(String), dep: Option(String) }
+  | IEffAlias { name: String, labels: List(EffLabel), span: Span, vis: Option(String), dep: Option(String) }
+  | ISynonym { name: String, params: List(String), ty: Ty, span: Span, vis: Option(String), dep: Option(String) }
+  | IClass { name: String, param: String, supers: List(String), methods: List(Method), span: Span, vis: Option(String), dep: Option(String) }
+  | IInstance { name: String, cls: String, head: Ty, context: List(Constraint), methods: List(Decl), span: Span }
+  | ICanonical { cls: String, head: Ty, name: String, span: Span }
+  | IPattern { name: String, params: List(String), forty: String, viewfn: Sp(Expr), makefn: Option(Sp(Expr)), span: Span, vis: Option(String), dep: Option(String) }
+  | IStable { name: String, rungs: List(Rung), converters: List(Converter), migrations: List(Migration), span: Span, vis: Option(String), dep: Option(String) }
+  | IDecl { decl: Decl, declkind: String, vis: Option(String), dep: Option(String) }
+
+-- | The wrapped node, without its location.
+pub fn node_of(sp : Sp(a)) : a = sp.node
+
+-- | The node's byte span.
+pub fn span_of(sp : Sp(a)) : Span = sp.span
+
+-- | Whether the parser synthesized this node from surface sugar rather than
+-- reading it verbatim from the source.
+pub fn is_synth(sp : Sp(a)) : Bool = sp.synth

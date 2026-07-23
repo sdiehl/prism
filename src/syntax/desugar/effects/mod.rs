@@ -98,6 +98,21 @@ pub(super) type Vars = BTreeMap<String, Binding>;
 // plain effects. Also home to the misuse diagnostics (a bare instance or pattern
 // name as a value, a trailing `with`, assigning a non-var).
 pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, TypeError> {
+    // The desugar rewrite recurses per surface node with fat frames, so a long
+    // statement block (which parses into a right-nested `Let` chain) is deep
+    // recursion: ~1000 sequential `let`s overflowed the default stack. Grow
+    // segments on demand, same discipline as the typed-Core builder.
+    stacker::maybe_grow(DESUGAR_MIN_STACK, DESUGAR_GROW_STACK, || {
+        rw_inner(e, env, cx)
+    })
+}
+
+// Red zone / segment size for the desugar recursion, matching the typed-Core
+// builder's constants (`core/typed/build.rs`).
+const DESUGAR_MIN_STACK: usize = 4 * 1024 * 1024;
+const DESUGAR_GROW_STACK: usize = 8 * 1024 * 1024;
+
+fn rw_inner(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, TypeError> {
     let span = e.span;
     let node: Expr<Core> = match &e.node {
         Expr::Marker(Marker::With) => {

@@ -1,0 +1,59 @@
+-- Three shapes of recursion over inductive data: direct, mutual, and
+-- semi-mutual. The last is a zygomorphism: one recursive attribute may use
+-- another, while the dependency does not run in the opposite direction.
+
+type Nat = Zero | Succ(Nat)
+
+type Tree(a) = Leaf(a) | Branch(Tree(a), Tree(a))
+
+-- Direct structural recursion: each call consumes one constructor.
+fn build_nat(n : Int) : Nat =
+  if n <= 0 then
+    Zero
+  else
+    Succ(build_nat(n - 1))
+
+fn to_int(n : Nat) : Int =
+  match n of
+    Zero => 0
+    Succ(rest) => 1 + to_int(rest)
+
+-- Genuine mutual recursion: both definitions inhabit one recursive SCC.
+fn even_nat(n : Nat) : Bool =
+  match n of
+    Zero => true
+    Succ(rest) => odd_nat(rest)
+
+fn odd_nat(n : Nat) : Bool =
+  match n of
+    Zero => false
+    Succ(rest) => even_nat(rest)
+
+-- Semi-mutual recursion, fused into one traversal. `balanced` needs the
+-- recursively computed heights, while `height` never needs `balanced`.
+type Shape = Shape { height: Int, balanced: Bool }
+
+fn shape(t : Tree(a)) : Shape =
+  match t of
+    Leaf(_) => Shape { height = 1, balanced = true }
+    Branch(left, right) =>
+      let l = shape(left)
+      let r = shape(right)
+      Shape {
+        height = 1 + max(l.height, r.height),
+        balanced = l.balanced && r.balanced && abs(l.height - r.height) <= 1
+      }
+
+fn main() : Unit ! {IO} =
+  let six = build_nat(6)
+  let seven = Succ(six)
+  println(to_int(seven))
+  println(even_nat(six))
+  println(odd_nat(seven))
+  let full = Branch(Branch(Leaf(1), Leaf(2)), Branch(Leaf(3), Leaf(4)))
+  let leaning = Branch(Branch(Branch(Leaf(1), Leaf(2)), Leaf(3)), Leaf(4))
+  let full_shape = shape(full)
+  let leaning_shape = shape(leaning)
+  println(full_shape.height)
+  println(full_shape.balanced)
+  println(leaning_shape.balanced)

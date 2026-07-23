@@ -457,7 +457,13 @@ impl Fmt<'_> {
         // matching a function type's own `-> cod ! {row}`. An empty explicit row
         // is a bare trailing `!`.
         let eff_suffix = |effs: &[EffLabel]| {
-            if effs.is_empty() {
+            // An open declaration row forwards a signature row variable, printed
+            // as its tail: `! {A | e}` (or `! {| e}` when it names only the tail).
+            let tail = d
+                .eff_tail
+                .as_deref()
+                .map_or_else(String::new, |t| format!(" | {t}"));
+            if effs.is_empty() && d.eff_tail.is_none() {
                 // An explicit empty declaration row is pure; omit it unless the
                 // printer is configured to surface the empty row.
                 if SHOW_EMPTY_EFFECT_ROW {
@@ -466,7 +472,7 @@ impl Fmt<'_> {
                     String::new()
                 }
             } else {
-                format!(" ! {{{}}}", fmt_labels(effs))
+                format!(" ! {{{}{tail}}}", fmt_labels(effs))
             }
         };
         let ret_ann = match (&d.eff, &d.ret) {

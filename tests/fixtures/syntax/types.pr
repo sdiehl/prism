@@ -1,0 +1,24 @@
+-- Type syntax: rows, kinds, dimensions, unboxed shapes, open effect tails.
+effect Tick
+  tick() : Int
+
+type Cmd(a, e : Row) = Cmd(() -> a ! {e})
+
+type Grid(n) = Grid(Vec(Int, n))
+
+fn poly(x : a, f : f(a)) : a = x
+
+fn generic(xs : List(Int), p : (Int, Float)) : Option(Int) = head(xs)
+
+fn effectful() : Int ! {Tick} = tick()
+
+fn forwarding(act : () -> Int ! {e}) : Int ! {Tick | e} = act()
+
+fn boxed_unboxed(t : #(Int, Float), r : #{ w : Int, h : Int }) : Int =
+  let s = #{ w = r.#w, h = r.#h }
+  let u = #(1, 2.5)
+  s.#w + s.#h
+
+fn annotated() : Int =
+  let f = (\(v) -> v : forall a. (a) -> a)
+  f((3 : Int))

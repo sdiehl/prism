@@ -2,17 +2,16 @@
 //!
 //! The compiler-owned wire payload a structured test failure carries from the
 //! stdlib assertion layer to the harness, which converts it into a `test_failed`
-//! event. The harness recognizes the payload-free built-in `Fail`; this reserves the
-//! versioned envelope the later `Test.pr` expectations (`expect`, `expect_equal`,
-//! context attachment) raise through, so the assertion wrappers can land without a
-//! second wire contract. It is identified by its schema tag plus ABI version, not
-//! an arbitrary user-visible name; a foreign tag or ABI is rejected rather than
-//! misread. The bytes follow the same discipline as the manifest codec
+//! event. The harness also recognizes the payload-free built-in `Fail`;
+//! `Test.pr` expectations (`expect`, `expect_equal`, and context attachment) use
+//! the versioned envelope so assertion wrappers need no second wire contract. It
+//! is identified by its schema tag plus ABI version, not an arbitrary user-visible
+//! name; a foreign tag or ABI is rejected rather than misread. The bytes follow
+//! the same discipline as the manifest codec
 //! (`crate::util::binary`: LEB128 lengths, bounded reads, a trailing-byte check).
 //!
-//! The `site` field is reserved diagnostic metadata: a caller node/location the
-//! test-mode elaboration entry may later populate for source-located assertion
-//! failures. It is not part of semantic identity and never enters a Core hash.
+//! The `site` field is optional diagnostic metadata for a caller node/location.
+//! It is not part of semantic identity and never enters a Core hash.
 
 use crate::store::CodecError;
 use crate::util::binary::{put_str, put_uvarint, Reader};

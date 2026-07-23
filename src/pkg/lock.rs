@@ -23,7 +23,7 @@
 
 use std::fmt::Write as _;
 
-use crate::core::HASH_SCHEME;
+use crate::core::{Digest, HASH_SCHEME};
 use crate::error::Error;
 use crate::project::DepSource;
 
@@ -51,7 +51,7 @@ const STD_ROOT_NAME: &str = "std";
 pub struct LockEntry {
     pub name: String,
     pub scheme: String,
-    pub hash: String,
+    pub hash: Digest,
     pub source: DepSource,
 }
 
@@ -226,7 +226,7 @@ fn parse_row(line: &str) -> Result<LockEntry, Error> {
         [name, scheme, hash, source] => Ok(LockEntry {
             name: (*name).to_string(),
             scheme: (*scheme).to_string(),
-            hash: (*hash).to_string(),
+            hash: Digest::from(*hash),
             source: parse_source_field(source)?,
         }),
         _ => Err(Error::ResolvePackage(format!(
@@ -273,7 +273,7 @@ mod tests {
         lock.set(LockEntry {
             name: "http".to_string(),
             scheme: HASH_SCHEME.to_string(),
-            hash: "a3f9".to_string(),
+            hash: Digest::from("a3f9"),
             source: DepSource::Git {
                 url: "github.com/x/http".to_string(),
                 version: "2.0".to_string(),
@@ -282,13 +282,13 @@ mod tests {
         lock.set(LockEntry {
             name: "geo".to_string(),
             scheme: HASH_SCHEME.to_string(),
-            hash: "7c21".to_string(),
+            hash: Digest::from("7c21"),
             source: DepSource::Path(PathBuf::from("../geo")),
         });
         lock.set(LockEntry {
             name: "crypto".to_string(),
             scheme: HASH_SCHEME.to_string(),
-            hash: "9f86".to_string(),
+            hash: Digest::from("9f86"),
             source: DepSource::Hash("9f86".to_string()),
         });
         lock
@@ -316,10 +316,10 @@ mod tests {
         lock.set(LockEntry {
             name: "geo".to_string(),
             scheme: HASH_SCHEME.to_string(),
-            hash: "beef".to_string(),
+            hash: Digest::from("beef"),
             source: DepSource::Path(PathBuf::from("../geo2")),
         });
-        assert_eq!(lock.get("geo").unwrap().hash, "beef");
+        assert_eq!(lock.get("geo").unwrap().hash.as_str(), "beef");
         assert_eq!(lock.entries.len(), 3);
     }
 
@@ -356,7 +356,7 @@ mod tests {
         lock.set(LockEntry {
             name: "bad".to_string(),
             scheme: HASH_SCHEME.to_string(),
-            hash: "00".to_string(),
+            hash: Digest::from("00"),
             source: DepSource::Path(PathBuf::from("../a b")),
         });
         assert!(lock.render().is_err());

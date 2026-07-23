@@ -1,0 +1,34 @@
+-- Pattern forms: constructors, tuples, records, literals, guards, views.
+type Point = Point { x: Int, y: Int }
+
+type Shape = Dot | Line(Point, Point) | Poly(List(Point))
+
+pattern Diag(n) for Point =
+  view \(p) -> if p.x == p.y then Some(p.x) else None
+  make \(n) -> Point { x = n, y = n }
+
+fn classify(s : Shape) : Int =
+  match s of
+    Dot => 0
+    Line(Point { x = 0, y = 0 }, _) => 1
+    Line(a, b) if a.x == b.x => 2
+    Poly(Nil) => 3
+    Poly(Cons(p, Nil)) => p.x
+    _ => 9
+
+fn literals(v : Int, c : Char, f : Float, b : Bool) : Int =
+  match (v, c, f, b) of
+    (0, 'a', 1.5, true) => 1
+    (n, _, _, false) => n
+    _ => 2
+
+fn record_rest(p : Point) : Int =
+  match p of
+    Point { x = 0, .. } => 0
+    Point { x = x, y = y } => x + y
+
+fn views(p : Point) : Int =
+  match p of
+    Diag(n) if n > 3 => n * 2
+    Diag(n) => n
+    _ => 0

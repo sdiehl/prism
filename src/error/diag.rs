@@ -311,9 +311,9 @@ pub enum ErrKind {
     MissingFields { fields: String, ctor: String },
     #[error("field access on non-record type {ty}")]
     FieldAccessNonRecord { ty: String },
-    /// Unboxed-values surface (`#(...)`, `#{...}`, `.#field`) parsed, but its
-    /// representation-aware checking and lowering are not implemented yet. The
-    /// `what` names the form ("tuples", "records", "projection").
+    /// The unboxed-values surface (`#(...)`, `#{...}`, `.#field`) parses, but
+    /// representation-aware checking and lowering are unsupported. The `what`
+    /// names the form ("tuples", "records", "projection").
     #[error("unboxed {what} are not lowered: the `#` surface parses, but representation-aware compilation is not implemented")]
     UnboxedUnsupported { what: String },
     #[error("conflicting update paths `{a}` and `{b}`")]

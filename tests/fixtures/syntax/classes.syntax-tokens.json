@@ -1,0 +1,2716 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.14.0",
+  "source": {
+    "digest": "91aaf0fef720c662e99baebd264ddf09f2fc3e91feab725bc4a16544f8a48b2a",
+    "text": "-- Classes, instances, canonical designations, constrained functions.\nclass Same(a)\n  same : (a, a) -> Bool\n\nclass Bigger(a) given Same(a)\n  bigger : (a, a) -> Bool\n\ninstance sameInt : Same(Int)\n  fn same(x, y) = x == y\n\ninstance samePair : Same((a, b)) given Same(a), Same(b)\n  fn same(p, q) =\n    match (p, q) of\n      ((a1, b1), (a2, b2)) => same(a1, a2) && same(b1, b2)\n\ncanonical Same(Int) = sameInt\n\nfn alike(x : a, y : a) : Bool given Same(a) = same(x, y)\n\nfn where_helper(n : Int) : Int =\n    double + offset\n  where\n    double = n * 2\n    offset = 10\n"
+  },
+  "raw": [
+    {
+      "kind": "class",
+      "span": [
+        70,
+        75
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        76,
+        80
+      ],
+      "value": "Same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        80,
+        81
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        81,
+        82
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        82,
+        83
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        86,
+        90
+      ],
+      "value": "same"
+    },
+    {
+      "kind": ":",
+      "span": [
+        91,
+        92
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        93,
+        94
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        94,
+        95
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        95,
+        96
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        97,
+        98
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        98,
+        99
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        100,
+        102
+      ]
+    },
+    {
+      "kind": "Bool",
+      "span": [
+        103,
+        107
+      ]
+    },
+    {
+      "kind": "class",
+      "span": [
+        109,
+        114
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        115,
+        121
+      ],
+      "value": "Bigger"
+    },
+    {
+      "kind": "(",
+      "span": [
+        121,
+        122
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        122,
+        123
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        123,
+        124
+      ]
+    },
+    {
+      "kind": "given",
+      "span": [
+        125,
+        130
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        131,
+        135
+      ],
+      "value": "Same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        135,
+        136
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        136,
+        137
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        137,
+        138
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        141,
+        147
+      ],
+      "value": "bigger"
+    },
+    {
+      "kind": ":",
+      "span": [
+        148,
+        149
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        150,
+        151
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        151,
+        152
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        152,
+        153
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        154,
+        155
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        155,
+        156
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        157,
+        159
+      ]
+    },
+    {
+      "kind": "Bool",
+      "span": [
+        160,
+        164
+      ]
+    },
+    {
+      "kind": "instance",
+      "span": [
+        166,
+        174
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        175,
+        182
+      ],
+      "value": "sameInt"
+    },
+    {
+      "kind": ":",
+      "span": [
+        183,
+        184
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        185,
+        189
+      ],
+      "value": "Same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        189,
+        190
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        190,
+        193
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        193,
+        194
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        197,
+        199
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        200,
+        204
+      ],
+      "value": "same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        204,
+        205
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        205,
+        206
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ",",
+      "span": [
+        206,
+        207
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        208,
+        209
+      ],
+      "value": "y"
+    },
+    {
+      "kind": ")",
+      "span": [
+        209,
+        210
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        211,
+        212
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        213,
+        214
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "==",
+      "span": [
+        215,
+        217
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        218,
+        219
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "instance",
+      "span": [
+        221,
+        229
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        230,
+        238
+      ],
+      "value": "samePair"
+    },
+    {
+      "kind": ":",
+      "span": [
+        239,
+        240
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        241,
+        245
+      ],
+      "value": "Same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        245,
+        246
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        246,
+        247
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        247,
+        248
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        248,
+        249
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        250,
+        251
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ")",
+      "span": [
+        251,
+        252
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        252,
+        253
+      ]
+    },
+    {
+      "kind": "given",
+      "span": [
+        254,
+        259
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        260,
+        264
+      ],
+      "value": "Same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        264,
+        265
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        265,
+        266
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        266,
+        267
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        267,
+        268
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        269,
+        273
+      ],
+      "value": "Same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        273,
+        274
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        274,
+        275
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ")",
+      "span": [
+        275,
+        276
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        279,
+        281
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        282,
+        286
+      ],
+      "value": "same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        286,
+        287
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        287,
+        288
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ",",
+      "span": [
+        288,
+        289
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        290,
+        291
+      ],
+      "value": "q"
+    },
+    {
+      "kind": ")",
+      "span": [
+        291,
+        292
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        293,
+        294
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        299,
+        304
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        305,
+        306
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        306,
+        307
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ",",
+      "span": [
+        307,
+        308
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        309,
+        310
+      ],
+      "value": "q"
+    },
+    {
+      "kind": ")",
+      "span": [
+        310,
+        311
+      ]
+    },
+    {
+      "kind": "of",
+      "span": [
+        312,
+        314
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        321,
+        322
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        322,
+        323
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        323,
+        325
+      ],
+      "value": "a1"
+    },
+    {
+      "kind": ",",
+      "span": [
+        325,
+        326
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        327,
+        329
+      ],
+      "value": "b1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        329,
+        330
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        330,
+        331
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        332,
+        333
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        333,
+        335
+      ],
+      "value": "a2"
+    },
+    {
+      "kind": ",",
+      "span": [
+        335,
+        336
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        337,
+        339
+      ],
+      "value": "b2"
+    },
+    {
+      "kind": ")",
+      "span": [
+        339,
+        340
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        340,
+        341
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        342,
+        344
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        345,
+        349
+      ],
+      "value": "same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        349,
+        350
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        350,
+        352
+      ],
+      "value": "a1"
+    },
+    {
+      "kind": ",",
+      "span": [
+        352,
+        353
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        354,
+        356
+      ],
+      "value": "a2"
+    },
+    {
+      "kind": ")",
+      "span": [
+        356,
+        357
+      ]
+    },
+    {
+      "kind": "&&",
+      "span": [
+        358,
+        360
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        361,
+        365
+      ],
+      "value": "same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        365,
+        366
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        366,
+        368
+      ],
+      "value": "b1"
+    },
+    {
+      "kind": ",",
+      "span": [
+        368,
+        369
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        370,
+        372
+      ],
+      "value": "b2"
+    },
+    {
+      "kind": ")",
+      "span": [
+        372,
+        373
+      ]
+    },
+    {
+      "kind": "canonical",
+      "span": [
+        375,
+        384
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        385,
+        389
+      ],
+      "value": "Same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        389,
+        390
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        390,
+        393
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        393,
+        394
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        395,
+        396
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        397,
+        404
+      ],
+      "value": "sameInt"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        406,
+        408
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        409,
+        414
+      ],
+      "value": "alike"
+    },
+    {
+      "kind": "(",
+      "span": [
+        414,
+        415
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        415,
+        416
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ":",
+      "span": [
+        417,
+        418
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        419,
+        420
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        420,
+        421
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        422,
+        423
+      ],
+      "value": "y"
+    },
+    {
+      "kind": ":",
+      "span": [
+        424,
+        425
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        426,
+        427
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        427,
+        428
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        429,
+        430
+      ]
+    },
+    {
+      "kind": "Bool",
+      "span": [
+        431,
+        435
+      ]
+    },
+    {
+      "kind": "given",
+      "span": [
+        436,
+        441
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        442,
+        446
+      ],
+      "value": "Same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        446,
+        447
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        447,
+        448
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        448,
+        449
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        450,
+        451
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        452,
+        456
+      ],
+      "value": "same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        456,
+        457
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        457,
+        458
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ",",
+      "span": [
+        458,
+        459
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        460,
+        461
+      ],
+      "value": "y"
+    },
+    {
+      "kind": ")",
+      "span": [
+        461,
+        462
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        464,
+        466
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        467,
+        479
+      ],
+      "value": "where_helper"
+    },
+    {
+      "kind": "(",
+      "span": [
+        479,
+        480
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        480,
+        481
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ":",
+      "span": [
+        482,
+        483
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        484,
+        487
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        487,
+        488
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        489,
+        490
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        491,
+        494
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        495,
+        496
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        501,
+        507
+      ],
+      "value": "double"
+    },
+    {
+      "kind": "+",
+      "span": [
+        508,
+        509
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        510,
+        516
+      ],
+      "value": "offset"
+    },
+    {
+      "kind": "where",
+      "span": [
+        519,
+        524
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        529,
+        535
+      ],
+      "value": "double"
+    },
+    {
+      "kind": "=",
+      "span": [
+        536,
+        537
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        538,
+        539
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "*",
+      "span": [
+        540,
+        541
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        542,
+        543
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        548,
+        554
+      ],
+      "value": "offset"
+    },
+    {
+      "kind": "=",
+      "span": [
+        555,
+        556
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        557,
+        559
+      ],
+      "value": "10"
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        70,
+        70
+      ]
+    },
+    {
+      "kind": "class",
+      "span": [
+        70,
+        75
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        76,
+        80
+      ],
+      "value": "Same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        80,
+        81
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        81,
+        82
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        82,
+        83
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        86,
+        86
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        86,
+        90
+      ],
+      "value": "same"
+    },
+    {
+      "kind": ":",
+      "span": [
+        91,
+        92
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        93,
+        94
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        94,
+        95
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        95,
+        96
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        97,
+        98
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        98,
+        99
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        100,
+        102
+      ]
+    },
+    {
+      "kind": "Bool",
+      "span": [
+        103,
+        107
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        107,
+        107
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        107,
+        107
+      ]
+    },
+    {
+      "kind": "class",
+      "span": [
+        109,
+        114
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        115,
+        121
+      ],
+      "value": "Bigger"
+    },
+    {
+      "kind": "(",
+      "span": [
+        121,
+        122
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        122,
+        123
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        123,
+        124
+      ]
+    },
+    {
+      "kind": "given",
+      "span": [
+        125,
+        130
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        131,
+        135
+      ],
+      "value": "Same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        135,
+        136
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        136,
+        137
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        137,
+        138
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        141,
+        141
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        141,
+        147
+      ],
+      "value": "bigger"
+    },
+    {
+      "kind": ":",
+      "span": [
+        148,
+        149
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        150,
+        151
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        151,
+        152
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        152,
+        153
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        154,
+        155
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        155,
+        156
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        157,
+        159
+      ]
+    },
+    {
+      "kind": "Bool",
+      "span": [
+        160,
+        164
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        164,
+        164
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        164,
+        164
+      ]
+    },
+    {
+      "kind": "instance",
+      "span": [
+        166,
+        174
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        175,
+        182
+      ],
+      "value": "sameInt"
+    },
+    {
+      "kind": ":",
+      "span": [
+        183,
+        184
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        185,
+        189
+      ],
+      "value": "Same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        189,
+        190
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        190,
+        193
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        193,
+        194
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        197,
+        197
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        197,
+        199
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        200,
+        204
+      ],
+      "value": "same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        204,
+        205
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        205,
+        206
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ",",
+      "span": [
+        206,
+        207
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        208,
+        209
+      ],
+      "value": "y"
+    },
+    {
+      "kind": ")",
+      "span": [
+        209,
+        210
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        211,
+        212
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        213,
+        214
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "==",
+      "span": [
+        215,
+        217
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        218,
+        219
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        219,
+        219
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        219,
+        219
+      ]
+    },
+    {
+      "kind": "instance",
+      "span": [
+        221,
+        229
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        230,
+        238
+      ],
+      "value": "samePair"
+    },
+    {
+      "kind": ":",
+      "span": [
+        239,
+        240
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        241,
+        245
+      ],
+      "value": "Same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        245,
+        246
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        246,
+        247
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        247,
+        248
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        248,
+        249
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        250,
+        251
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ")",
+      "span": [
+        251,
+        252
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        252,
+        253
+      ]
+    },
+    {
+      "kind": "given",
+      "span": [
+        254,
+        259
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        260,
+        264
+      ],
+      "value": "Same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        264,
+        265
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        265,
+        266
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        266,
+        267
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        267,
+        268
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        269,
+        273
+      ],
+      "value": "Same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        273,
+        274
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        274,
+        275
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ")",
+      "span": [
+        275,
+        276
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        279,
+        279
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        279,
+        281
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        282,
+        286
+      ],
+      "value": "same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        286,
+        287
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        287,
+        288
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ",",
+      "span": [
+        288,
+        289
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        290,
+        291
+      ],
+      "value": "q"
+    },
+    {
+      "kind": ")",
+      "span": [
+        291,
+        292
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        293,
+        294
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        299,
+        299
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        299,
+        304
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        305,
+        306
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        306,
+        307
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ",",
+      "span": [
+        307,
+        308
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        309,
+        310
+      ],
+      "value": "q"
+    },
+    {
+      "kind": ")",
+      "span": [
+        310,
+        311
+      ]
+    },
+    {
+      "kind": "of",
+      "span": [
+        312,
+        314
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        321,
+        321
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        321,
+        322
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        322,
+        323
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        323,
+        325
+      ],
+      "value": "a1"
+    },
+    {
+      "kind": ",",
+      "span": [
+        325,
+        326
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        327,
+        329
+      ],
+      "value": "b1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        329,
+        330
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        330,
+        331
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        332,
+        333
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        333,
+        335
+      ],
+      "value": "a2"
+    },
+    {
+      "kind": ",",
+      "span": [
+        335,
+        336
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        337,
+        339
+      ],
+      "value": "b2"
+    },
+    {
+      "kind": ")",
+      "span": [
+        339,
+        340
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        340,
+        341
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        342,
+        344
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        345,
+        349
+      ],
+      "value": "same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        349,
+        350
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        350,
+        352
+      ],
+      "value": "a1"
+    },
+    {
+      "kind": ",",
+      "span": [
+        352,
+        353
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        354,
+        356
+      ],
+      "value": "a2"
+    },
+    {
+      "kind": ")",
+      "span": [
+        356,
+        357
+      ]
+    },
+    {
+      "kind": "&&",
+      "span": [
+        358,
+        360
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        361,
+        365
+      ],
+      "value": "same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        365,
+        366
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        366,
+        368
+      ],
+      "value": "b1"
+    },
+    {
+      "kind": ",",
+      "span": [
+        368,
+        369
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        370,
+        372
+      ],
+      "value": "b2"
+    },
+    {
+      "kind": ")",
+      "span": [
+        372,
+        373
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        373,
+        373
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        373,
+        373
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        373,
+        373
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        373,
+        373
+      ]
+    },
+    {
+      "kind": "canonical",
+      "span": [
+        375,
+        384
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        385,
+        389
+      ],
+      "value": "Same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        389,
+        390
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        390,
+        393
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        393,
+        394
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        395,
+        396
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        397,
+        404
+      ],
+      "value": "sameInt"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        404,
+        404
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        406,
+        408
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        409,
+        414
+      ],
+      "value": "alike"
+    },
+    {
+      "kind": "(",
+      "span": [
+        414,
+        415
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        415,
+        416
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ":",
+      "span": [
+        417,
+        418
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        419,
+        420
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        420,
+        421
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        422,
+        423
+      ],
+      "value": "y"
+    },
+    {
+      "kind": ":",
+      "span": [
+        424,
+        425
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        426,
+        427
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        427,
+        428
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        429,
+        430
+      ]
+    },
+    {
+      "kind": "Bool",
+      "span": [
+        431,
+        435
+      ]
+    },
+    {
+      "kind": "given",
+      "span": [
+        436,
+        441
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        442,
+        446
+      ],
+      "value": "Same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        446,
+        447
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        447,
+        448
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        448,
+        449
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        450,
+        451
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        452,
+        456
+      ],
+      "value": "same"
+    },
+    {
+      "kind": "(",
+      "span": [
+        456,
+        457
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        457,
+        458
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ",",
+      "span": [
+        458,
+        459
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        460,
+        461
+      ],
+      "value": "y"
+    },
+    {
+      "kind": ")",
+      "span": [
+        461,
+        462
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        462,
+        462
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        464,
+        466
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        467,
+        479
+      ],
+      "value": "where_helper"
+    },
+    {
+      "kind": "(",
+      "span": [
+        479,
+        480
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        480,
+        481
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ":",
+      "span": [
+        482,
+        483
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        484,
+        487
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        487,
+        488
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        489,
+        490
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        491,
+        494
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        495,
+        496
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        501,
+        501
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        501,
+        507
+      ],
+      "value": "double"
+    },
+    {
+      "kind": "+",
+      "span": [
+        508,
+        509
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        510,
+        516
+      ],
+      "value": "offset"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        516,
+        516
+      ]
+    },
+    {
+      "kind": "where",
+      "span": [
+        519,
+        524
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        529,
+        529
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        529,
+        535
+      ],
+      "value": "double"
+    },
+    {
+      "kind": "=",
+      "span": [
+        536,
+        537
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        538,
+        539
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "*",
+      "span": [
+        540,
+        541
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        542,
+        543
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        543,
+        543
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        548,
+        554
+      ],
+      "value": "offset"
+    },
+    {
+      "kind": "=",
+      "span": [
+        555,
+        556
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        557,
+        559
+      ],
+      "value": "10"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        559,
+        559
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        559,
+        559
+      ]
+    }
+  ],
+  "trivia": [
+    {
+      "kind": "comment",
+      "span": [
+        0,
+        69
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        107,
+        109
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        164,
+        166
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        219,
+        221
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        373,
+        375
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        404,
+        406
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        462,
+        464
+      ]
+    }
+  ]
+}

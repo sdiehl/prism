@@ -65,7 +65,17 @@ struct Elab<'a> {
     strict: bool,
 }
 
-type Locals = BTreeMap<String, Option<Type>>;
+// Persistent, so the per-binder scope extension at every `let`, lambda, and
+// match arm clones in O(1) by structural sharing instead of deep-copying the
+// whole visible scope (which made elaborating an n-binder body O(n^2)).
+// Iteration stays name-ordered exactly like the `BTreeMap` it replaced, so the
+// positional shadow sentinels in `local_env` are unchanged.
+type Locals = im::OrdMap<String, Option<Type>>;
+
+// Red zone / segment size for the elaboration recursion, matching the typed-Core
+// builder's constants (`core/typed/build.rs`).
+const ELAB_MIN_STACK: usize = 4 * 1024 * 1024;
+const ELAB_GROW_STACK: usize = 8 * 1024 * 1024;
 
 // The pointed error for the not-yet-lowered unboxed-values surface, shared by the
 // elaborator's exhaustive-match backstop. The typechecker rejects these first
@@ -825,6 +835,15 @@ impl Elab<'_> {
     }
 
     fn elab(&mut self, e: &S<Expr<CorePhase>>, locals: &Locals) -> Result<Comp, Error> {
+        // Elaboration recurses per surface node, so a long statement block (a
+        // right-nested `Let` chain) is deep recursion; grow stack segments on
+        // demand, same discipline as the desugar rewrite and typed-Core builder.
+        stacker::maybe_grow(ELAB_MIN_STACK, ELAB_GROW_STACK, || {
+            self.elab_inner(e, locals)
+        })
+    }
+
+    fn elab_inner(&mut self, e: &S<Expr<CorePhase>>, locals: &Locals) -> Result<Comp, Error> {
         Ok(match &e.node {
             Expr::Int(lit) if self.hir.evidence(e.id).is_some() => {
                 self.elab_from_int_lit(lit, e.id)?
@@ -950,7 +969,13 @@ impl Elab<'_> {
             }
             Expr::Let(x, v, b) => {
                 let cv = self.elab(v, locals)?;
-                let ty = self.infer_local(v, locals);
+                // HIR-first (`local_ty`): the checker already recorded the
+                // bound expression's zonked type, so re-inference (which
+                // rebuilds a full checker Env from every visible local, an
+                // O(scope) cost per `let` that made long statement blocks
+                // quadratic) is only the fallback for nodes whose recorded
+                // type still carries free existentials.
+                let ty = self.local_ty(v, locals);
                 let mut l2 = locals.clone();
                 l2.insert(x.clone(), ty);
                 let cb = self.elab(b, &l2)?;

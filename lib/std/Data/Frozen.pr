@@ -1,0 +1,92 @@
+-- | Frozen arrays: the immutable array representation.
+--
+-- A `Frozen(a)` is an `Array(a)` with the write surface removed at the type
+-- level: construction happens once and afterwards the contents are fixed, so a
+-- frozen array can be shared, stored, and indexed with no defensive copies.
+-- Freezing is O(1) and adds no storage: arrays already carry value semantics
+-- (a uniquely owned array updates in place, a shared one copies on write), so
+-- a frozen view can never observe later writes to its source.
+
+-- | An immutable array of `a`.
+pub type Frozen(a) = Frz(Array(a))
+
+-- | Freeze a growable array, O(1). Value semantics guarantee the frozen view
+-- is independent of any later writes to `arr`.
+--
+-- ```prism
+-- fz_len(fz_freeze(array_of_list([1, 2, 3])))
+-- ```
+-- ```output
+-- 3
+-- ```
+pub fn fz_freeze(arr : Array(a)) : Frozen(a) = Frz(arr)
+
+-- | Build a frozen array from a list.
+--
+-- ```prism
+-- fz_get(fz_of_list([5, 6, 7]), 2)
+-- ```
+-- ```output
+-- 7
+-- ```
+pub fn fz_of_list(xs : List(a)) : Frozen(a) = Frz(array_of_list(xs))
+
+-- | A growable array with the frozen contents. The frozen view is unaffected
+-- by writes to the result (a shared array copies on write).
+pub fn fz_thaw(xs : Frozen(a)) : Array(a) =
+  match xs of
+    Frz(arr) => arr
+
+-- | The element count.
+pub fn fz_len(xs : Frozen(a)) : Int =
+  match xs of
+    Frz(arr) => array_len(arr)
+
+-- | The element at `i`, or `fail()` out of bounds.
+--
+-- ```prism
+-- fz_get(fz_of_list([5, 6, 7]), 0)
+-- ```
+-- ```output
+-- 5
+-- ```
+pub fn fz_get(xs : Frozen(a), i : Int) : a ! {Fail} =
+  match xs of
+    Frz(arr) => at_array(arr, i)
+
+-- | Left-fold over the elements in order.
+--
+-- ```prism
+-- fz_foldl(\(acc, x) -> acc + x, 0, fz_of_list([1, 2, 3]))
+-- ```
+-- ```output
+-- 6
+-- ```
+pub fn fz_foldl(f, acc, xs) =
+  match xs of
+    Frz(arr) => array_foldl(f, acc, arr)
+
+-- | The elements as a list, in order.
+--
+-- ```prism
+-- fz_to_list(fz_of_list([1, 2, 3]))
+-- ```
+-- ```output
+-- [1, 2, 3]
+-- ```
+pub fn fz_to_list(xs : Frozen(a)) : List(a) =
+  match xs of
+    Frz(arr) => array_to_list(arr)
+
+-- | A new frozen array with `f` applied to every element, one pass.
+--
+-- ```prism
+-- fz_to_list(fz_map(\(x) -> x * 2, fz_of_list([1, 2, 3])))
+-- ```
+-- ```output
+-- [2, 4, 6]
+-- ```
+pub fn fz_map(f, xs) =
+  match xs of
+    Frz(arr) =>
+      Frz(array_foldl(\(acc, x) -> array_push(acc, f(x)), array_empty(), arr))

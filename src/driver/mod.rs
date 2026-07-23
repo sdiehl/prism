@@ -5,14 +5,14 @@ use std::sync::OnceLock;
 use crate::core::fbip::{borrow_sigs, Fips, Sigs};
 use crate::core::opt::PassStage;
 use crate::core::typed::{
-    execute_late as execute_typed_late, insert_rc as insert_typed_rc,
-    lower_effects as lower_typed_effects, reuse as reuse_typed, LateExecutorFailure, TypedLowering,
+    insert_rc as insert_typed_rc, lower_effects as lower_typed_effects, reuse as reuse_typed,
+    TypedLowering,
 };
 use crate::core::{
-    balanced, effective_passes, fip_annots, hash_program, hash_root, insert_rc, pp_core_pretty,
-    reuse, typed_verification_error, verify_typed_core, Comp, Core, DepGraph, Digest,
-    EffectStrategy, ElaboratedCore, LoweredCore, OpGrades, TypedCore, TypedEffectLowered,
-    TypedElaborated, Value, VerifyEnv, HASH_SCHEME,
+    balanced, fip_annots, hash_program, hash_root, insert_rc, pp_core_pretty, reuse,
+    typed_verification_error, verify_typed_core, Comp, Core, DepGraph, Digest, EffectStrategy,
+    ElaboratedCore, LoweredCore, OpGrades, TypedCore, TypedEffectLowered, TypedElaborated, Value,
+    VerifyEnv, HASH_SCHEME,
 };
 use crate::error::{Error, TypeError};
 use crate::parse::{parse, ParseResult};
@@ -33,6 +33,7 @@ mod decision;
 mod diff;
 mod downstream;
 mod dump;
+mod dump_syntax;
 mod dupes;
 mod execution;
 mod front;
@@ -63,6 +64,8 @@ pub use build::{
 #[cfg(feature = "mlir")]
 pub use build::{build_mlir, build_mlir_at, build_mlir_on};
 #[cfg(feature = "native")]
+pub(crate) use cache::CheckVerdictCache;
+#[cfg(feature = "native")]
 pub use cache::NativeCacheStatus;
 pub use config::{BackendOpt, BuildMode, Config, Scheduler};
 pub use decision::ModuleQueryDecision;
@@ -81,7 +84,7 @@ pub use execution::{
     DurableRun, RecordedRun, StepRuler, StepRulerRow, SuspendAtCut, SuspendCut, SuspendResult,
     STEP_RULER_FORMAT,
 };
-use front::{run_front, Front, FrontOpts};
+use front::{run_front, Front, FrontRequest};
 pub(crate) use identity::stdlib_driver_src;
 pub use identity::{
     module_interface, namespace_identity, namespace_root, public_surface, stdlib_hash,
@@ -393,7 +396,7 @@ pub fn check_with_seed(src: &str, seed: &crate::types::TypecheckSeed) -> Result<
 /// # Errors
 /// Fails on lex, parse, module, or type errors.
 pub fn check_on_in(src: &str, roots: &[Root], cfg: &Config) -> Result<Checked, Error> {
-    Ok(run_front(src, roots, cfg, FrontOpts::CHECK)?.into_checked())
+    Ok(run_front(src, roots, cfg, FrontRequest::Check)?.into_checked())
 }
 
 // The checked Core-surface tree plus presentation facts used only by
@@ -403,7 +406,7 @@ fn tooltip_checked_on(
     roots: &[Root],
     cfg: &Config,
 ) -> Result<(Program<CorePhase>, Checked), Error> {
-    Ok(run_front(src, roots, cfg, FrontOpts::TYPED_TOOLTIPS)?.into_program_checked())
+    Ok(run_front(src, roots, cfg, FrontRequest::TypedTooltips)?.into_program_checked())
 }
 
 /// The public validity verdict behind `prism check`.
@@ -417,7 +420,7 @@ fn tooltip_checked_on(
 /// # Errors
 /// Fails on lex, parse, module, type, or semantic-validator errors.
 pub fn check_validated_on_in(src: &str, roots: &[Root], cfg: &Config) -> Result<Checked, Error> {
-    Ok(run_front(src, roots, cfg, FrontOpts::CHECK_VALIDATED)?.into_checked())
+    Ok(run_front(src, roots, cfg, FrontRequest::CheckValidated)?.into_checked())
 }
 
 // Unused-binding and shadowed-name lints over the resolved surface program,
@@ -454,7 +457,7 @@ pub(crate) fn frontend(
     roots: &[Root],
     cfg: &Config,
 ) -> Result<(Program<CorePhase>, Checked, ElaboratedCore), Error> {
-    run_front(src, roots, cfg, FrontOpts::FULL).map(Front::into_elaborated)
+    run_front(src, roots, cfg, FrontRequest::Full).map(Front::into_elaborated)
 }
 
 /// Elaborate `src` and commit its definitions into the content-addressed store.
@@ -554,7 +557,7 @@ pub fn store_def_inputs(
     let (program, checked, core) = elaborated(src, &roots)?;
     let metas = hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program));
     let hashes = hash_program(&core, &metas);
-    Ok((core.0, hashes, metas))
+    Ok((core.into_core(), hashes, metas))
 }
 
 // Elaborate a source to Core *before* the Core-to-Core optimizer runs: the one
@@ -571,7 +574,7 @@ fn elaborated(
 ) -> Result<(Program<CorePhase>, Checked, ElaboratedCore), Error> {
     // The `IDENTITY` preset consults no `cfg` field (no retarget, no optimizer),
     // so a default config keeps this a pure function of source and roots.
-    run_front(src, roots, &Config::default(), FrontOpts::IDENTITY).map(Front::into_elaborated)
+    run_front(src, roots, &Config::default(), FrontRequest::Identity).map(Front::into_elaborated)
 }
 
 // The identity surface, additionally validated: same byte-identical pre-optimizer
@@ -586,7 +589,7 @@ fn elaborated_validated(
         src,
         roots,
         &Config::default(),
-        FrontOpts::IDENTITY_VALIDATED,
+        FrontRequest::IdentityValidated,
     )
     .map(Front::into_elaborated)
 }
@@ -595,7 +598,7 @@ fn elaborated_validated(
 // interpreter runs the un-lowered core, but the balance check over the
 // effect-lowered core still runs so a bad lowering is caught here too.
 fn prepared_core(src: &str, roots: &[Root], cfg: &Config) -> Result<ElaboratedCore, Error> {
-    prepared_core_with_opts(src, roots, cfg, FrontOpts::FULL)
+    prepared_core_with_opts(src, roots, cfg, FrontRequest::Full)
 }
 
 // Interpreter-only typed-hole lane. Native/wasm/build never call this and keep
@@ -605,17 +608,17 @@ fn prepared_core_deferred_holes(
     roots: &[Root],
     cfg: &Config,
 ) -> Result<ElaboratedCore, Error> {
-    prepared_core_with_opts(src, roots, cfg, FrontOpts::FULL_DEFERRED_HOLES)
+    prepared_core_with_opts(src, roots, cfg, FrontRequest::FullDeferredHoles)
 }
 
 fn prepared_core_with_opts(
     src: &str,
     roots: &[Root],
     cfg: &Config,
-    opts: FrontOpts,
+    request: FrontRequest,
 ) -> Result<ElaboratedCore, Error> {
     let (program, checked, core, typed, verify_env) =
-        run_front(src, roots, cfg, opts)?.into_typed_pre();
+        run_front(src, roots, cfg, request)?.into_typed_pre();
     let sigs = borrow_sigs(&program);
     let lowered = lower_opt(
         typed,
@@ -631,59 +634,15 @@ fn prepared_core_with_opts(
 
 struct LoweredSpine {
     core: TypedCore<TypedEffectLowered>,
-    mirror: LoweredCore,
     verify_env: VerifyEnv,
     ctors: BTreeMap<String, CtorInfo>,
     warning: Option<String>,
-    parity_report: bool,
-    parity_deltas: Vec<ParityDelta>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ParityStage {
-    PostLowering,
-    ReferenceCounted,
-    ReuseLowered,
-}
-
-impl ParityStage {
-    const fn label(self) -> &'static str {
-        match self {
-            Self::PostLowering => "post-lowering",
-            Self::ReferenceCounted => "reference-counted",
-            Self::ReuseLowered => "reuse-lowered",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ParityDeltaKind {
-    CoreStructural,
-    ObservationError,
-}
-
-impl ParityDeltaKind {
-    const fn label(self) -> &'static str {
-        match self {
-            Self::CoreStructural => "core-structural",
-            Self::ObservationError => "observation-error",
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct ParityDelta {
-    stage: ParityStage,
-    kind: ParityDeltaKind,
-    typed_digest: Option<String>,
-    shadow_digest: Option<String>,
-    detail: Option<String>,
 }
 
 // Effect-lower the verified typed Core, then run the late (post-lowering)
-// optimization passes. The witness-carrying tree is authoritative. Raw late
-// optimization remains temporarily as an implementation-drift observer, but
-// no legacy effect-lowering query or cache artifact is produced.
+// optimization passes. The witness-carrying tree is authoritative and the sole
+// transformation path; no legacy effect-lowering query or cache artifact is
+// produced.
 const TYPED_LOWER_STACK: usize = 64 * 1024 * 1024;
 
 fn on_typed_lower_stack<T>(f: impl FnOnce() -> T) -> T {
@@ -723,179 +682,44 @@ fn lower_opt_on_grown_stack(
         warning: typed_warning,
         strategy: _,
     } = typed;
-    let parity_report = cfg.flags.typed_parity_report;
-    let mut parity_deltas = Vec::new();
-    let typed_erased = typed.clone().erase();
-
-    let passes = effective_passes(
-        cfg.opt,
-        cfg.passes.as_ref(),
-        PassStage::Late,
-        &cfg.disabled,
-        &cfg.flags,
-    );
-    let empty = BTreeSet::new();
-    let (typed, mirror) = timing::timed_res(
+    let typed = timing::timed_res(
         cfg.timing.as_ref(),
         timing::Phase::OptLate,
         "",
         || {
-            let (typed, _) =
-                execute_typed_late(typed, &typed_env, &passes).map_err(typed_late_error)?;
-            let mirror = downstream::run_opt_queries(&typed_erased, &empty, PassStage::Late, cfg)?;
-            Ok::<_, Error>((typed, mirror))
+            downstream::run_typed_opt_queries(
+                typed,
+                &typed_env,
+                &BTreeSet::new(),
+                PassStage::Late,
+                cfg,
+            )
         },
         |_| timing::RowExtras::default(),
     )?;
-    let typed_erased = typed.clone().erase();
-    observe_core_parity(
-        &mut parity_deltas,
-        parity_report,
-        ParityStage::PostLowering,
-        &typed_erased,
-        &mirror,
-    );
     Ok(LoweredSpine {
         core: typed,
-        mirror: LoweredCore(typed_erased),
         verify_env: typed_env,
         ctors: typed_ctors,
         warning: typed_warning,
-        parity_report,
-        parity_deltas,
     })
 }
 
 fn finish_lowered(lowered: LoweredSpine, sigs: &Sigs) -> Result<LoweredCore, Error> {
-    finish_lowered_with_deltas(lowered, sigs).map(|(core, _)| core)
+    on_typed_lower_stack(|| finish_lowered_on_grown_stack(lowered, sigs))
 }
 
-fn finish_lowered_with_deltas(
-    lowered: LoweredSpine,
-    sigs: &Sigs,
-) -> Result<(LoweredCore, Vec<ParityDelta>), Error> {
-    on_typed_lower_stack(|| finish_lowered_with_deltas_on_grown_stack(lowered, sigs))
-}
-
-fn finish_lowered_with_deltas_on_grown_stack(
-    mut lowered: LoweredSpine,
-    sigs: &Sigs,
-) -> Result<(LoweredCore, Vec<ParityDelta>), Error> {
+fn finish_lowered_on_grown_stack(lowered: LoweredSpine, sigs: &Sigs) -> Result<LoweredCore, Error> {
     let typed_owned = insert_typed_rc(lowered.core, sigs);
     verify_typed_core(&typed_owned, &lowered.verify_env).map_err(typed_verification_error)?;
-    let typed_owned_erased = typed_owned.clone().erase();
-    let mirror_owned = insert_rc(&lowered.mirror, sigs);
-    observe_core_parity(
-        &mut lowered.parity_deltas,
-        lowered.parity_report,
-        ParityStage::ReferenceCounted,
-        &typed_owned_erased,
-        &mirror_owned,
-    );
-
     let typed_reused = reuse_typed(typed_owned);
     verify_typed_core(&typed_reused, &lowered.verify_env).map_err(typed_verification_error)?;
-    let mirror_reused = reuse(&typed_owned_erased);
+    // The one semantic erasure on the native route: nothing downstream of this
+    // call sees a typed node.
     let final_core = typed_reused.erase();
-    observe_core_parity(
-        &mut lowered.parity_deltas,
-        lowered.parity_report,
-        ParityStage::ReuseLowered,
-        &final_core,
-        &mirror_reused,
-    );
     balanced(&final_core, sigs)
         .map_err(|error| Error::CodegenBackend(format!("ICE: rc imbalance: {error}")))?;
-    Ok((LoweredCore(final_core), lowered.parity_deltas))
-}
-
-fn observe_core_parity(
-    deltas: &mut Vec<ParityDelta>,
-    report: bool,
-    stage: ParityStage,
-    typed: &Core,
-    shadow: &Core,
-) {
-    let typed_bytes = serde_json::to_vec(typed);
-    let shadow_bytes = serde_json::to_vec(shadow);
-    match (typed_bytes, shadow_bytes) {
-        (Ok(typed_bytes), Ok(shadow_bytes)) if typed_bytes == shadow_bytes => {}
-        (Ok(typed_bytes), Ok(shadow_bytes)) => record_parity_delta(
-            deltas,
-            report,
-            ParityDelta {
-                stage,
-                kind: ParityDeltaKind::CoreStructural,
-                typed_digest: Some(blake3::hash(&typed_bytes).to_hex().to_string()),
-                shadow_digest: Some(blake3::hash(&shadow_bytes).to_hex().to_string()),
-                detail: Some(format!(
-                    "typed_bytes={} shadow_bytes={}",
-                    typed_bytes.len(),
-                    shadow_bytes.len()
-                )),
-            },
-        ),
-        (typed, shadow) => record_parity_delta(
-            deltas,
-            report,
-            ParityDelta {
-                stage,
-                kind: ParityDeltaKind::ObservationError,
-                typed_digest: None,
-                shadow_digest: None,
-                detail: Some(format!(
-                    "typed={} shadow={}",
-                    typed
-                        .err()
-                        .map_or_else(|| "ok".to_string(), |error| error.to_string()),
-                    shadow
-                        .err()
-                        .map_or_else(|| "ok".to_string(), |error| error.to_string())
-                )),
-            },
-        ),
-    }
-}
-
-fn record_parity_delta(deltas: &mut Vec<ParityDelta>, report: bool, delta: ParityDelta) {
-    if report {
-        let detail = parity_detail_json(delta.detail.as_deref());
-        eprintln!(
-            "TYPED_SHADOW stage={} class={} typed={} shadow={} detail={}",
-            delta.stage.label(),
-            delta.kind.label(),
-            delta.typed_digest.as_deref().unwrap_or("-"),
-            delta.shadow_digest.as_deref().unwrap_or("-"),
-            detail,
-        );
-    }
-    deltas.push(delta);
-}
-
-fn parity_detail_json(detail: Option<&str>) -> String {
-    const LIMIT: usize = 512;
-    let detail = detail.unwrap_or("-");
-    let mut chars = detail.chars();
-    let mut bounded = chars.by_ref().take(LIMIT).collect::<String>();
-    if chars.next().is_some() {
-        bounded.push('…');
-    }
-    serde_json::to_string(&bounded).unwrap_or_else(|_| "\"<unavailable>\"".to_string())
-}
-
-fn typed_late_error(failure: LateExecutorFailure) -> Error {
-    match failure {
-        LateExecutorFailure::UnsupportedPass { occurrence, pass } => {
-            Error::InternalInvariant(format!(
-                "typed post-lowering executor rejected {} at occurrence {occurrence}",
-                pass.name()
-            ))
-        }
-        LateExecutorFailure::Verification { violations, .. } => {
-            typed_verification_error(violations)
-        }
-        LateExecutorFailure::Simplify { failure, .. } => failure.into(),
-    }
+    Ok(LoweredCore::new(final_core))
 }
 
 fn lowered_core(
@@ -904,7 +728,7 @@ fn lowered_core(
     cfg: &Config,
 ) -> Result<(Checked, LoweredCore, BTreeMap<String, CtorInfo>, Sigs), Error> {
     let (checked, sigs, lowered) = lowered_front(src, roots, cfg)?;
-    let core = on_typed_lower_stack(|| LoweredCore(lowered.core.clone().erase()));
+    let core = on_typed_lower_stack(|| LoweredCore::new(lowered.core.clone().erase()));
     Ok((checked, core, lowered.ctors, sigs))
 }
 
@@ -925,7 +749,7 @@ fn lowered_front(
     cfg: &Config,
 ) -> Result<(Checked, Sigs, LoweredSpine), Error> {
     let (program, checked, _, typed, verify_env) =
-        run_front(src, roots, cfg, FrontOpts::FULL)?.into_typed_pre();
+        run_front(src, roots, cfg, FrontRequest::Full)?.into_typed_pre();
     let sigs = borrow_sigs(&program);
     let lowered = lower_opt(
         typed,
@@ -953,9 +777,9 @@ fn lowered_core_with_identity(
     Error,
 > {
     let (program, checked, identity_core, _, typed, verify_env) =
-        run_front(src, roots, cfg, FrontOpts::FULL)?.into_compilation();
+        run_front(src, roots, cfg, FrontRequest::Full)?.into_compilation();
     let sigs = borrow_sigs(&program);
-    let hashes = if cfg.scheduler.retarget().is_some() {
+    let hashes = if cfg.scheduler().retarget().is_some() {
         // Scheduler policy is execution configuration, never source identity.
         // The full path has already retargeted its surface program, so recover
         // the policy-neutral identity only for this non-default configuration.
@@ -1009,17 +833,6 @@ mod typed_post_route_tests {
     use super::*;
     use crate::flags::EffectTier;
 
-    fn float_core(bits: u64) -> Core {
-        Core {
-            fns: vec![crate::core::CoreFn {
-                name: Sym::new("main"),
-                params: Vec::new(),
-                body: Comp::Return(Value::Float(f64::from_bits(bits))),
-                dict_arity: 0,
-            }],
-        }
-    }
-
     fn assert_route(source: &str, cfg: &Config) {
         let (_, core, _, sigs) = reuse_lowered_core(source, &[], cfg).expect("typed route");
         balanced(&core, &sigs).expect("the final typed term is balanced");
@@ -1051,47 +864,6 @@ mod typed_post_route_tests {
     }
 
     #[test]
-    fn surviving_shadow_core_identity_is_float_bit_exact() {
-        let nan = float_core(0x7ff8_0000_0000_0001);
-        let same_nan = nan.clone();
-        let other_nan = float_core(0x7ff8_0000_0000_0002);
-        let positive_zero = float_core(0.0f64.to_bits());
-        let negative_zero = float_core((-0.0f64).to_bits());
-
-        let mut deltas = Vec::new();
-        observe_core_parity(
-            &mut deltas,
-            false,
-            ParityStage::PostLowering,
-            &nan,
-            &same_nan,
-        );
-        assert!(deltas.is_empty(), "identical NaN bits are reflexive");
-
-        observe_core_parity(
-            &mut deltas,
-            false,
-            ParityStage::PostLowering,
-            &nan,
-            &other_nan,
-        );
-        observe_core_parity(
-            &mut deltas,
-            false,
-            ParityStage::PostLowering,
-            &positive_zero,
-            &negative_zero,
-        );
-        assert_eq!(
-            deltas
-                .iter()
-                .filter(|delta| delta.kind == ParityDeltaKind::CoreStructural)
-                .count(),
-            2
-        );
-    }
-
-    #[test]
     fn production_route_accepts_the_verified_typed_control_shape() {
         // A bare `forever` loop can only leave through `return`. Typed control
         // erasure omits the legacy builder's unreachable `SMore(Unit)` branch,
@@ -1103,7 +875,7 @@ mod typed_post_route_tests {
         cfg.flags.compiler_cache = false;
         cfg.flags.quiet = true;
         let (program, checked, _, typed, verify_env) =
-            run_front(&src, &roots, &cfg, FrontOpts::FULL)
+            run_front(&src, &roots, &cfg, FrontRequest::Full)
                 .expect("front")
                 .into_typed_pre();
         let sigs = borrow_sigs(&program);
@@ -1115,17 +887,9 @@ mod typed_post_route_tests {
             &cfg,
         )
         .expect("typed lowering");
-        let (final_core, deltas) =
-            finish_lowered_with_deltas(lowered, &sigs).expect("typed final route");
+        let final_core = finish_lowered(lowered, &sigs).expect("typed final route");
         balanced(&final_core, &sigs).expect("balanced typed final");
         crate::core::residual_effects(&final_core).expect("no residual effect nodes");
-        assert!(
-            deltas
-                .iter()
-                .all(|delta| delta.stage != ParityStage::PostLowering
-                    || delta.kind != ParityDeltaKind::CoreStructural),
-            "{deltas:?}"
-        );
     }
 
     #[test]
@@ -1136,7 +900,7 @@ mod typed_post_route_tests {
         cfg.flags.compiler_cache = false;
         cfg.flags.quiet = true;
         let (program, checked, _, typed, verify_env) =
-            run_front(&src, &roots, &cfg, FrontOpts::FULL)
+            run_front(&src, &roots, &cfg, FrontRequest::Full)
                 .expect("front")
                 .into_typed_pre();
         let sigs = borrow_sigs(&program);
@@ -1148,25 +912,7 @@ mod typed_post_route_tests {
             &cfg,
         )
         .expect("typed lowering");
-        let (_, deltas) = finish_lowered_with_deltas(lowered, &sigs).expect("typed final route");
-        assert!(
-            !deltas.iter().any(|delta| {
-                delta.stage == ParityStage::PostLowering
-                    && delta.kind == ParityDeltaKind::CoreStructural
-            }),
-            "{deltas:?}"
-        );
-    }
-
-    #[test]
-    fn parity_detail_is_single_line_and_bounded() {
-        let detail = format!("first\nsecond {}", "x".repeat(600));
-        let encoded = parity_detail_json(Some(&detail));
-        assert!(!encoded.contains('\n'));
-        assert!(encoded.contains("\\n"));
-        let decoded: String = serde_json::from_str(&encoded).expect("valid JSON string");
-        assert!(decoded.chars().count() <= 513);
-        assert!(decoded.ends_with('…'));
+        finish_lowered(lowered, &sigs).expect("typed final route");
     }
 
     #[test]
@@ -1178,13 +924,13 @@ mod typed_post_route_tests {
         let mut cfg = Config::default();
         cfg.flags.compiler_cache = false;
         cfg.flags.quiet = true;
-        let (_, _, expected, _, _) = run_front(&src, &roots, &cfg, FrontOpts::FULL)
+        let (_, _, expected, _, _) = run_front(&src, &roots, &cfg, FrontRequest::Full)
             .expect("front")
             .into_typed_pre();
         let actual = prepared_core(&src, &roots, &cfg).expect("prepared interpreter core");
         assert_eq!(
-            serde_json::to_vec(&actual.0).expect("expected bytes"),
-            serde_json::to_vec(&expected.0).expect("actual bytes"),
+            serde_json::to_vec(&*actual).expect("expected bytes"),
+            serde_json::to_vec(&*expected).expect("actual bytes"),
             "the interpreter must keep evaluating pre-effect-lowering Core"
         );
         assert!(
@@ -1250,7 +996,7 @@ fn typed_effect_facts(
     let mut cfg = cfg.clone();
     cfg.flags.quiet = true;
     let (_, checked, _, typed, verify_env) =
-        run_front(src, roots, &cfg, FrontOpts::FULL)?.into_typed_pre();
+        run_front(src, roots, &cfg, FrontRequest::Full)?.into_typed_pre();
     let lowering = on_typed_lower_stack(|| {
         lower_typed_effects(
             typed,
@@ -1291,7 +1037,7 @@ pub fn core_of(src: &str) -> Result<Core, Error> {
         &default_roots(Path::new(".")),
         &Config::from_env(),
     )?;
-    Ok(core.0)
+    Ok(core.into_core())
 }
 
 /// Like [`core_ir`], but `full` already carries the prelude (as the REPL's
@@ -1445,7 +1191,7 @@ fn prelude_fn_names() -> Result<HashSet<Sym>, Error> {
         return Ok(cached.clone());
     }
     let (_, _, core) = frontend(PRELUDE, &default_roots(Path::new(".")), &Config::from_env())?;
-    let names: HashSet<Sym> = core.0.fns.into_iter().map(|f| f.name).collect();
+    let names: HashSet<Sym> = core.into_core().fns.into_iter().map(|f| f.name).collect();
     let _ = CACHE.set(names.clone());
     Ok(names)
 }

@@ -4,6 +4,8 @@ mod alloc_certificate;
 mod arena;
 #[path = "compiler/base_surface.rs"]
 mod base_surface;
+#[path = "compiler/deep_nesting.rs"]
+mod deep_nesting;
 #[path = "compiler/expect.rs"]
 mod expect;
 #[path = "compiler/frontend_fixtures.rs"]
@@ -28,5 +30,9 @@ mod stdlib;
 mod store_codec;
 #[path = "compiler/store_oracle.rs"]
 mod store_oracle;
+#[path = "compiler/syntax_fixtures.rs"]
+mod syntax_fixtures;
+#[path = "compiler/syntax_roundtrip.rs"]
+mod syntax_roundtrip;
 #[path = "compiler/typespans.rs"]
 mod typespans;

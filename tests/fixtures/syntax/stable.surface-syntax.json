@@ -1,0 +1,287 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.14.0",
+  "source": {
+    "digest": "8f7f59322ffaa712c60fff1c424bd7c02c640d52fa9fe7652f33833222054821",
+    "text": "-- A stable family: rungs, defaults, a migrations table with an override.\nimport Wire (..)\n\nstable Save {\n  V1 = { hero: String, depth: Int },\n  V2 = { ..V1, fog: Int = 30 },\n  V3 = { ..V2, mist: Int = 5 },\n  migrations {\n    V1 -> V2 = auto\n    V2 -> V3 = version(upgrade = \\(s) -> Save { hero = s.hero, depth = s.depth, fog = s.fog, mist = 7 }, downgrade = auto)\n    V1 -> V3 = auto\n  }\n}\n\nfn current() : Save = Save { hero = \"Ada\", depth = 12, fog = 30, mist = 99 }\n"
+  },
+  "items": [
+    {
+      "glob": true,
+      "kind": "import",
+      "path": [
+        "Wire"
+      ],
+      "span": [
+        74,
+        90
+      ]
+    },
+    {
+      "kind": "stable",
+      "migrations": [
+        {
+          "from": "V1",
+          "route": "auto",
+          "span": [
+            226,
+            241
+          ],
+          "to": "V2"
+        },
+        {
+          "from": "V2",
+          "route": {
+            "downgrade": "auto",
+            "upgrade": {
+              "body": {
+                "fields": [
+                  {
+                    "name": "hero",
+                    "value": {
+                      "expr": {
+                        "kind": "var",
+                        "name": "s",
+                        "span": [
+                          297,
+                          298
+                        ]
+                      },
+                      "kind": "field",
+                      "name": "hero",
+                      "span": [
+                        297,
+                        303
+                      ]
+                    }
+                  },
+                  {
+                    "name": "depth",
+                    "value": {
+                      "expr": {
+                        "kind": "var",
+                        "name": "s",
+                        "span": [
+                          313,
+                          314
+                        ]
+                      },
+                      "kind": "field",
+                      "name": "depth",
+                      "span": [
+                        313,
+                        320
+                      ]
+                    }
+                  },
+                  {
+                    "name": "fog",
+                    "value": {
+                      "expr": {
+                        "kind": "var",
+                        "name": "s",
+                        "span": [
+                          328,
+                          329
+                        ]
+                      },
+                      "kind": "field",
+                      "name": "fog",
+                      "span": [
+                        328,
+                        333
+                      ]
+                    }
+                  },
+                  {
+                    "name": "mist",
+                    "value": {
+                      "kind": "int",
+                      "span": [
+                        342,
+                        343
+                      ],
+                      "value": "7"
+                    }
+                  }
+                ],
+                "kind": "record",
+                "name": "Save",
+                "span": [
+                  283,
+                  345
+                ]
+              },
+              "kind": "lam",
+              "params": [
+                {
+                  "name": "s"
+                }
+              ],
+              "span": [
+                275,
+                345
+              ]
+            }
+          },
+          "span": [
+            246,
+            364
+          ],
+          "to": "V3"
+        },
+        {
+          "from": "V1",
+          "route": "auto",
+          "span": [
+            369,
+            384
+          ],
+          "to": "V3"
+        }
+      ],
+      "name": "Save",
+      "rungs": [
+        {
+          "fields": [
+            {
+              "name": "hero",
+              "ty": {
+                "kind": "str"
+              }
+            },
+            {
+              "name": "depth",
+              "ty": {
+                "kind": "int"
+              }
+            }
+          ],
+          "name": "V1",
+          "span": [
+            108,
+            141
+          ]
+        },
+        {
+          "base": "V1",
+          "fields": [
+            {
+              "default": {
+                "kind": "int",
+                "span": [
+                  169,
+                  171
+                ],
+                "value": "30"
+              },
+              "name": "fog",
+              "ty": {
+                "kind": "int"
+              }
+            }
+          ],
+          "name": "V2",
+          "span": [
+            145,
+            173
+          ]
+        },
+        {
+          "base": "V2",
+          "fields": [
+            {
+              "default": {
+                "kind": "int",
+                "span": [
+                  202,
+                  203
+                ],
+                "value": "5"
+              },
+              "name": "mist",
+              "ty": {
+                "kind": "int"
+              }
+            }
+          ],
+          "name": "V3",
+          "span": [
+            177,
+            205
+          ]
+        }
+      ],
+      "span": [
+        92,
+        390
+      ]
+    },
+    {
+      "body": {
+        "fields": [
+          {
+            "name": "hero",
+            "value": {
+              "kind": "str",
+              "span": [
+                428,
+                433
+              ],
+              "value": "Ada"
+            }
+          },
+          {
+            "name": "depth",
+            "value": {
+              "kind": "int",
+              "span": [
+                443,
+                445
+              ],
+              "value": "12"
+            }
+          },
+          {
+            "name": "fog",
+            "value": {
+              "kind": "int",
+              "span": [
+                453,
+                455
+              ],
+              "value": "30"
+            }
+          },
+          {
+            "name": "mist",
+            "value": {
+              "kind": "int",
+              "span": [
+                464,
+                466
+              ],
+              "value": "99"
+            }
+          }
+        ],
+        "kind": "record",
+        "name": "Save",
+        "span": [
+          414,
+          468
+        ]
+      },
+      "kind": "fn",
+      "name": "current",
+      "ret": {
+        "kind": "con",
+        "name": "Save"
+      },
+      "span": [
+        392,
+        468
+      ]
+    }
+  ]
+}

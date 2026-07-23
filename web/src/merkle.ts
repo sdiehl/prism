@@ -6,20 +6,14 @@
 // so does every hash that transitively depends on it, while independent code
 // keeps its exact address. The real hashes come from the compiler (`hash_defs`);
 // the graph structure and the cascade highlight are pure functions of that map.
-import init, { tokens } from "../pkg/prism.js";
+//
+// `hash_defs` is a statically imported named export, so a rename or drift on the
+// wasm side is a `pnpm typecheck` failure against the generated `pkg` types rather
+// than a silent dead page.
+import init, { hash_defs, tokens } from "../pkg/prism.js";
 import { highlight, initFaces } from "./showcase.js";
 import "./showcase.css";
 import "./merkle.css";
-
-// The wasm module namespace, reached through a plain-object alias so the one
-// export this page adds is looked up dynamically. That keeps the page building
-// against a pkg compiled before `hash_defs` shipped (the bundler cannot flag a
-// missing named export it never sees statically); at runtime the export is
-// present in every deployed bundle.
-import * as wasm from "../pkg/prism.js";
-
-const wasmNs: Record<string, unknown> = wasm;
-const wasmHashDefs = wasmNs.hash_defs as ((src: string) => string) | undefined;
 
 // One definition as the compiler addresses it: its name, its short content hash,
 // and the names of the other user definitions it references. Emitted by
@@ -38,15 +32,15 @@ const SEED = `-- Every definition is content-addressed: its hash folds in the
 -- hashes of everything it calls, so this is a Merkle DAG. Edit a
 -- body below and watch which node hashes move.
 
-fn inc(x) : ! Int = x + 1
+fn inc(x) : Int = x + 1
 
-fn dbl(x) : ! Int = x + x
+fn dbl(x) : Int = x + x
 
-fn step(x) : ! Int = dbl(inc(x))
+fn step(x) : Int = dbl(inc(x))
 
-fn run(x) : ! Int = step(x) + step(inc(x))
+fn run(x) : Int = step(x) + step(inc(x))
 
-fn solo(x) : ! Int = x * 100
+fn solo(x) : Int = x * 100
 `;
 
 const el = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -82,85 +76,12 @@ let prevHash = new Map<string, string>();
 // Timers clearing the transient `.changed` class, keyed by node name.
 const pulseTimers = new Map<string, number>();
 
-// A development fallback used only if the loaded pkg predates the `hash_defs`
-// export. It applies the same Merkle rule as the compiler (a definition's digest
-// folds its normalized body together with its dependencies' digests), so the
-// cascade behaves identically; only the hex differs from the real content hash.
-// Every deployed bundle ships the real export and never reaches this path.
-function mockHashDefs(src: string): string {
-  const defRe =
-    /(^|\n)\s*fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)[^=]*=([\s\S]*?)(?=\n\s*fn\s|\n\s*--|\s*$)/g;
-  const bodies = new Map<string, { body: string; params: Set<string> }>();
-  const order: string[] = [];
-  for (let m = defRe.exec(src); m; m = defRe.exec(src)) {
-    const name = m[2];
-    const params = new Set(
-      m[3]
-        .split(",")
-        .map((p) => p.trim().split(/[:\s]/)[0])
-        .filter(Boolean),
-    );
-    // Normalize the body the way content addressing does: drop whitespace and
-    // comments so a reformat leaves the hash unchanged.
-    const body = m[4]
-      .replace(/--[^\n]*/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-    bodies.set(name, { body, params });
-    order.push(name);
-  }
-  const names = new Set(order);
-  const depsOf = (name: string): string[] => {
-    const entry = bodies.get(name);
-    if (!entry) return [];
-    const { body, params } = entry;
-    const seen = new Set<string>();
-    for (const m of body.matchAll(/[A-Za-z_][A-Za-z0-9_]*/g)) {
-      const id = m[0];
-      if (id !== name && names.has(id) && !params.has(id)) seen.add(id);
-    }
-    return [...seen].sort();
-  };
-  const fold = (s: string): string => {
-    // A small avalanching string hash, rendered as hex; stands in for blake3.
-    let h = 0x811c9dc5;
-    for (let i = 0; i < s.length; i++) {
-      h ^= s.charCodeAt(i);
-      h = Math.imul(h, 0x01000193) >>> 0;
-    }
-    h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d) >>> 0;
-    h = Math.imul(h ^ (h >>> 12), 0x297a2d39) >>> 0;
-    return (h >>> 0).toString(16).padStart(8, "0").repeat(2).slice(0, 16);
-  };
-  const hash = new Map<string, string>();
-  const compute = (name: string, stack: Set<string>): string => {
-    const cached = hash.get(name);
-    if (cached !== undefined) return cached;
-    const body = bodies.get(name)?.body ?? name;
-    const deps = depsOf(name);
-    // Cycles fall back to hashing the name so the fold still terminates.
-    const depDigest = deps
-      .map((d) => (stack.has(d) ? d : compute(d, new Set(stack).add(name))))
-      .join("|");
-    const h = fold(`${body}||${depDigest}`);
-    hash.set(name, h);
-    return h;
-  };
-  const out: Def[] = order.map((name) => ({
-    name,
-    hash: compute(name, new Set()),
-    deps: depsOf(name),
-  }));
-  return JSON.stringify(out);
-}
-
-// Ask the compiler for the current program's `name/hash/deps`, or the mock if the
-// bundle predates the export. Returns the parsed defs, or an error string.
+// Ask the compiler for the current program's `name/hash/deps`. Returns the parsed
+// defs, or an error string (the export answers `{error}` on a front-end failure).
 function hashDefs(src: string): Def[] | { error: string } {
   let raw: string;
   try {
-    raw = wasmHashDefs ? wasmHashDefs(src) : mockHashDefs(src);
-    if (!wasmHashDefs) console.warn("merkle: wasm hash_defs missing, using dev fallback hashes");
+    raw = hash_defs(src);
   } catch (e) {
     return { error: String(e) };
   }

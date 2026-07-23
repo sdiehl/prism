@@ -21,6 +21,7 @@ void prism_print_int(long w);
 void prism_print_nl(void);
 void prism_srand(long seed);
 long prism_prim_rand(void);
+long prism_prim_entropy(void);
 long prism_prim_wall_now(void);
 long prism_prim_mono_now(void);
 long prism_prim_args_count(void);

@@ -471,10 +471,10 @@ fn diff_public_api(baseline: &Value, name: &str, current: &[crate::PublicDef]) -
     for def in current {
         seen.insert(def.name.clone());
         match prior.get(&def.name) {
-            Some(old) if *old != def.hash => {
+            Some(old) if *old != *def.hash => {
                 changes
                     .moved
-                    .push((def.name.clone(), old.clone(), def.hash.clone()));
+                    .push((def.name.clone(), old.clone(), def.hash.to_string()));
             }
             Some(_) => {}
             None => changes.added.push(def.name.clone()),

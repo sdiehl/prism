@@ -34,5 +34,13 @@ fn main() =
   println(show(eval_state(10, count_up)))
   println(show(exec_state(10, count_up)))
   println(run_reader("world", greet))
-  println(show(run_writer(logs)))
+  match run_writer(logs) of
+    (result, log) =>
+      println(show(result))
+      println(show(log))
+  println(show(eval_writer(logs)))
+  println(show(exec_writer(logs)))
+  println(show(exec_writer(\() -> listen(logs))))
+  println(show(exec_writer(\() -> censor(reverse, logs))))
+  println(show(run_state(5, \() -> state(\(s) -> (s * 2, s + 1)))))
   println(show(run_fresh(names)))

@@ -1,8 +1,9 @@
 //! The `prism-smt-query-v1` artifact: the canonical, content-addressed form of a
 //! single verification obligation. It carries the narrowest logic, the
-//! canonical SMT-LIB bytes, and the query digest that is its identity. Source-definition,
-//! contract, logical-dependency, and typed-Core input digests can be added later
-//! without changing what the digest already commits to.
+//! canonical SMT-LIB bytes, and the query digest that is its identity. The digest
+//! deliberately commits only to the schema, logic, and canonical query bytes;
+//! source-definition, contract, dependency, and typed-Core digests are outside
+//! this artifact's identity.
 
 use crate::verify::logic::Obligation;
 use crate::verify::{normalize, smtlib};

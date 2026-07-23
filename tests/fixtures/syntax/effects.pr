@@ -1,0 +1,81 @@
+-- Effects and control: graded ops, handlers, masks, loops, state, errors.
+effect Ask
+  ask() : Int
+
+effect Log
+  never fail(String) : Int
+  once emit(Int) : Unit
+
+error Boom(String)
+
+fn handled() : Int =
+  handle ask() + ask() with
+    ask() resume k => k(21)
+    return r => r
+
+fn sugar_arms() : Int =
+  handle emit(ask()) with
+    once ask() => 7
+    never fail(msg) => 0
+    val base = 5
+    once emit(v) => ()
+    return r => base()
+
+fn named() : Int =
+  with f <- handler
+    ask() resume k => k(1)
+    return r => r
+  f.ask()
+
+fn tunneled() : Int =
+  handle mask<Ask>(ask()) with
+    ask() resume k => k(2)
+    return r => r
+
+fn thrower(n : Int) : Int =
+  if n < 0 then
+    throw Boom("negative")
+  else
+    n
+
+fn catcher() : Int = try thrower(-1) catch { Boom(msg) => 0 }
+
+fn looping() : Int =
+  var acc := 0
+  var i := 0
+  while i < 10 do
+    i += 1
+    if i % 2 == 0 then
+      continue
+    if i > 7 then
+      break
+    acc := acc + i
+  for v in [1, 2, 3],
+      if v > 1,
+      let w = v * 2 do
+    acc += w
+  loop
+    break
+  acc
+
+fn early(n : Int) : Int =
+  if n == 0 then
+    return 99
+  n + 1
+
+fn atomic() : Int =
+  var balance := 100
+  let r =
+    transact
+      balance -= 40
+      guard(balance >= 80)
+      1
+    else
+      0
+  probe "trace" do println("attempted")
+  balance
+
+fn grid_write() : List(List(Int)) =
+  var grid := [[0, 1], [2, 3]]
+  grid[0][1] := 9
+  grid

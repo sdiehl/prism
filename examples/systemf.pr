@@ -1,0 +1,404 @@
+-- A compact System F typechecker in Prism. The surface AST is explicit System F
+-- (`ETLam`/`ETApp` are type abstraction/application), while ordinary application
+-- also performs predicative instantiation, as in a small bidirectional checker.
+--
+-- Metavariables are equivalence classes in Data.UnionFind. A separate solution
+-- map assigns a type to a class root; the occurs check prevents infinite types.
+-- State is an effect, and its nested fields are changed with optic paths, so the
+-- inference rules contain no context-copying or substitution plumbing.
+--
+-- Expected output:
+--   id                 : forall a. a -> a
+--   id[Int] 42         : Int
+--   implicit id true   : Bool
+--   higher rank        : (forall a. a -> a) -> Bool
+--   union-find         : (forall a. a) -> Int
+--   bad application    : error: application expects a function, got Int
+--   bad branches       : error: cannot unify Int with Bool
+
+import Control.State (..)
+
+import Data.Map (map_empty, map_insert, map_lookup)
+
+import Data.UnionFind (uf_empty, uf_find, uf_union)
+
+type Ty
+  = TyInt
+  | TyBool
+  | TyVar(String)
+  | TyMeta(Int)
+  | TyArrow(Ty, Ty)
+  | TyForall(String, Ty)
+
+type Op
+  = Add
+  | Sub
+  | Mul
+  | Div
+  | And
+  | Or
+  | Eq
+  | Ne
+  | Lt
+  | Le
+  | Gt
+  | Ge
+
+type Expr
+  = EVar(String)
+  | EInt(Int)
+  | EBool(Bool)
+  | ELam(String, Ty, Expr)
+  | EApp(Expr, Expr)
+  | ETLam(String, Expr)
+  | ETApp(Expr, Ty)
+  | EAnn(Expr, Ty)
+  | ELet(String, Expr, Expr)
+  | EIf(Expr, Expr, Expr)
+  | EBin(Op, Expr, Expr)
+
+type Env = Env { terms: List((String, Ty)), tyvars: List(String) }
+
+type Metas = Metas {
+  parents: Map(Int, Int),
+  solutions: Map(Int, Ty),
+  next: Int
+}
+
+type Solver = Solver { metas: Metas }
+
+error TypeError(String)
+
+-- The checker stack has one name at every recursive boundary.
+alias Tc = {State(Solver), TypeError}
+
+fn empty_env() : Env = Env { terms = [], tyvars = [] }
+
+fn empty_solver() : Solver =
+  Solver {
+    metas = Metas { parents = uf_empty, solutions = map_empty, next = 0 }
+  }
+
+fn type_error(msg : String) : a ! {TypeError} = throw TypeError(msg)
+
+fn member_name(x : String, xs : List(String)) : Bool =
+  match xs of
+    Nil => false
+    Cons(y, ys) => x == y || member_name(x, ys)
+
+fn lookup_term(name : String, xs : List((String, Ty))) : Ty ! {TypeError} =
+  match xs of
+    Nil => type_error("unbound variable {name}")
+    Cons((x, ty), rest) =>
+      if name == x then
+        ty
+      else
+        lookup_term(name, rest)
+
+fn with_term(env : Env, name : String, ty : Ty) : Env =
+  { env | terms ~ \(xs) -> Cons((name, ty), xs) }
+
+fn with_tyvar(env : Env, name : String) : Env =
+  { env | tyvars ~ \(xs) -> Cons(name, xs) }
+
+-- Source annotations may contain rigid variables, but never solver metas.
+fn well_formed(env : Env, ty : Ty) : Unit ! {TypeError} =
+  match ty of
+    TyInt => ()
+    TyBool => ()
+    TyVar(a) =>
+      if member_name(a, env.tyvars) then
+        ()
+      else
+        type_error("unbound type variable {a}")
+    TyMeta(_) => type_error("metavariable escaped into a source annotation")
+    TyArrow(a, b) =>
+      well_formed(env, a)
+      well_formed(env, b)
+    TyForall(a, body) => well_formed(with_tyvar(env, a), body)
+
+-- Capture-avoiding substitution. A deterministic tick suffix is enough because
+-- binders are strings and the term is finite.
+fn free_in(name : String, ty : Ty) : Bool =
+  match ty of
+    TyVar(a) => name == a
+    TyArrow(a, b) => free_in(name, a) || free_in(name, b)
+    TyForall(a, body) => name /= a && free_in(name, body)
+    _ => false
+
+fn fresh_name(seed : String, a : Ty, b : Ty) : String =
+  let candidate = concat(seed, "'")
+  if free_in(candidate, a) || free_in(candidate, b) then
+    fresh_name(candidate, a, b)
+  else
+    candidate
+
+fn subst(name : String, replacement : Ty, ty : Ty) : Ty =
+  match ty of
+    TyVar(a) =>
+      if name == a then
+        replacement
+      else
+        ty
+    TyArrow(a, b) =>
+      TyArrow(subst(name, replacement, a), subst(name, replacement, b))
+    TyForall(a, body) =>
+      if name == a then
+        ty
+      elif free_in(a, replacement) then
+        let fresh = fresh_name(a, body, replacement)
+        let renamed = subst(a, TyVar(fresh), body)
+        TyForall(fresh, subst(name, replacement, renamed))
+      else
+        TyForall(a, subst(name, replacement, body))
+    _ => ty
+
+-- The three state changes below are the whole mutable-looking solver. Notice the
+-- nested optic paths: allocation changes `metas.next`, union changes
+-- `metas.parents`, and solving changes `metas.solutions`.
+fn fresh_meta() : Ty ! {State(Solver)} =
+  let s = get()
+  let n = s.metas.next
+  put({ s | metas.next ~ \(i) -> i + 1 })
+  TyMeta(n)
+
+fn root(a : Int) : Int ! {State(Solver)} =
+  let s = get()
+  uf_find(s.metas.parents, a)
+
+fn link(a : Int, b : Int) : Unit ! {State(Solver)} =
+  let s = get()
+  put({ s | metas.parents = uf_union(s.metas.parents, a, b) })
+
+fn solution(a : Int) : Option(Ty) ! {State(Solver)} =
+  let s = get()
+  map_lookup(uf_find(s.metas.parents, a), s.metas.solutions)
+
+fn assign(a : Int, ty : Ty) : Unit ! {State(Solver)} =
+  let s = get()
+  let r = uf_find(s.metas.parents, a)
+  put({ s | metas.solutions = map_insert(r, ty, s.metas.solutions) })
+
+fn zonk(ty : Ty) : Ty ! {State(Solver)} =
+  match ty of
+    TyMeta(a) =>
+      let r = root(a)
+      match solution(r) of
+        None => TyMeta(r)
+        Some(t) => zonk(t)
+    TyArrow(a, b) => TyArrow(zonk(a), zonk(b))
+    TyForall(a, body) => TyForall(a, zonk(body))
+    _ => ty
+
+fn mono(ty : Ty) : Bool =
+  match ty of
+    TyForall(_, _) => false
+    TyArrow(a, b) => mono(a) && mono(b)
+    _ => true
+
+fn occurs(a : Int, ty : Ty) : Bool ! {State(Solver)} =
+  match zonk(ty) of
+    TyMeta(b) => root(a) == root(b)
+    TyArrow(x, y) => occurs(a, x) || occurs(a, y)
+    TyForall(_, body) => occurs(a, body)
+    _ => false
+
+fn show_ty(ty : Ty) : String = show_ty_at(0, ty)
+
+fn show_ty_at(precedence : Int, ty : Ty) : String =
+  match ty of
+    TyInt => "Int"
+    TyBool => "Bool"
+    TyVar(a) => a
+    TyMeta(a) => "?{a}"
+    TyArrow(a, b) =>
+      let text = "{show_ty_at(2, a)} -> {show_ty_at(1, b)}"
+      if precedence > 1 then
+        "({text})"
+      else
+        text
+    TyForall(a, body) =>
+      let text = "forall {a}. {show_ty_at(0, body)}"
+      if precedence > 0 then
+        "({text})"
+      else
+        text
+
+fn mismatch(a : Ty, b : Ty) : Unit ! {TypeError} =
+  type_error("cannot unify {show_ty(a)} with {show_ty(b)}")
+
+fn solve(a : Int, ty : Ty) : Unit ! {Tc} =
+  let t = zonk(ty)
+  if not(mono(t)) then
+    type_error("implicit instantiation is predicative, got {show_ty(t)}")
+  elif occurs(a, t) then
+    type_error("occurs check: ?{a} occurs in {show_ty(t)}")
+  else
+    assign(a, t)
+
+fn unify(left : Ty, right : Ty) : Unit ! {Tc} =
+  let a = zonk(left)
+  let b = zonk(right)
+  match (a, b) of
+    (TyMeta(x), TyMeta(y)) =>
+      if root(x) == root(y) then
+        ()
+      else
+        link(x, y)
+    (TyMeta(x), t) => solve(x, t)
+    (t, TyMeta(x)) => solve(x, t)
+    (TyInt, TyInt) => ()
+    (TyBool, TyBool) => ()
+    (TyVar(x), TyVar(y)) =>
+      if x == y then
+        ()
+      else
+        mismatch(a, b)
+    (TyArrow(a1, a2), TyArrow(b1, b2)) =>
+      unify(a1, b1)
+      unify(a2, b2)
+    (TyForall(x, body1), TyForall(y, body2)) =>
+      unify(body1, subst(y, TyVar(x), body2))
+    _ => mismatch(a, b)
+
+-- Subsumption differs from equality only at a polymorphic value: eliminate its
+-- forall with a fresh existential, then continue. Explicit ETApp remains fully
+-- impredicative; only this convenient implicit path is predicative.
+fn subsume(got : Ty, wanted : Ty) : Unit ! {Tc} =
+  match (zonk(got), zonk(wanted)) of
+    (TyForall(a, body), TyForall(b, other)) =>
+      unify(body, subst(b, TyVar(a), other))
+    (TyForall(a, body), want) =>
+      let m = fresh_meta()
+      subsume(subst(a, m, body), want)
+    (have, want) => unify(have, want)
+
+fn apply_type(fn_ty : Ty, arg_ty : Ty) : Ty ! {Tc} =
+  match zonk(fn_ty) of
+    TyForall(a, body) =>
+      let m = fresh_meta()
+      apply_type(subst(a, m, body), arg_ty)
+    TyArrow(domain, codomain) =>
+      subsume(arg_ty, domain)
+      zonk(codomain)
+    other => type_error("application expects a function, got {show_ty(other)}")
+
+fn infer(env : Env, expr : Expr) : Ty ! {Tc} =
+  match expr of
+    EVar(x) => lookup_term(x, env.terms)
+    EInt(_) => TyInt
+    EBool(_) => TyBool
+    ELam(x, param, body) =>
+      well_formed(env, param)
+      TyArrow(param, infer(with_term(env, x, param), body))
+    EApp(f, x) => apply_type(infer(env, f), infer(env, x))
+    ETLam(a, body) => TyForall(a, infer(with_tyvar(env, a), body))
+    ETApp(f, arg) =>
+      well_formed(env, arg)
+      match zonk(infer(env, f)) of
+        TyForall(a, body) => subst(a, arg, body)
+        other =>
+          type_error("type application expects forall, got {show_ty(other)}")
+    EAnn(e, annotation) =>
+      well_formed(env, annotation)
+      subsume(infer(env, e), annotation)
+      annotation
+    ELet(x, value, body) =>
+      let ty = infer(env, value)
+      infer(with_term(env, x, ty), body)
+    EIf(cond, yes, no) =>
+      subsume(infer(env, cond), TyBool)
+      let a = infer(env, yes)
+      let b = infer(env, no)
+      unify(a, b)
+      zonk(a)
+    EBin(op, x, y) => infer_binop(env, op, x, y)
+
+fn infer_binop(env : Env, op : Op, x : Expr, y : Expr) : Ty ! {Tc} =
+  match op of
+    Add =>
+      subsume(infer(env, x), TyInt)
+      subsume(infer(env, y), TyInt)
+      TyInt
+    Sub =>
+      subsume(infer(env, x), TyInt)
+      subsume(infer(env, y), TyInt)
+      TyInt
+    Mul =>
+      subsume(infer(env, x), TyInt)
+      subsume(infer(env, y), TyInt)
+      TyInt
+    Div =>
+      subsume(infer(env, x), TyInt)
+      subsume(infer(env, y), TyInt)
+      TyInt
+    Lt =>
+      subsume(infer(env, x), TyInt)
+      subsume(infer(env, y), TyInt)
+      TyBool
+    Le =>
+      subsume(infer(env, x), TyInt)
+      subsume(infer(env, y), TyInt)
+      TyBool
+    Gt =>
+      subsume(infer(env, x), TyInt)
+      subsume(infer(env, y), TyInt)
+      TyBool
+    Ge =>
+      subsume(infer(env, x), TyInt)
+      subsume(infer(env, y), TyInt)
+      TyBool
+    And =>
+      subsume(infer(env, x), TyBool)
+      subsume(infer(env, y), TyBool)
+      TyBool
+    Or =>
+      subsume(infer(env, x), TyBool)
+      subsume(infer(env, y), TyBool)
+      TyBool
+    Eq =>
+      let a = infer(env, x)
+      subsume(infer(env, y), a)
+      TyBool
+    Ne =>
+      let a = infer(env, x)
+      subsume(infer(env, y), a)
+      TyBool
+
+fn type_of(expr : Expr) : Result(Ty, String) =
+  try
+    let (ty, _solver) =
+      run_state(empty_solver(), \() -> zonk(infer(empty_env(), expr)))
+    Ok(ty)
+  catch
+    TypeError(msg) => Err(msg)
+
+fn report(label : String, expr : Expr) : Unit ! {IO} =
+  match type_of(expr) of
+    Ok(ty) => println("{label} : {show_ty(ty)}")
+    Err(msg) => println("{label} : error: {msg}")
+
+fn identity() : Expr = ETLam("a", ELam("x", TyVar("a"), EVar("x")))
+
+fn main() : Unit ! {IO} =
+  report("id                ", identity())
+  report("id[Int] 42        ", EApp(ETApp(identity(), TyInt), EInt(42)))
+  report("implicit id true  ", EApp(identity(), EBool(true)))
+  let poly_id = TyForall("a", TyArrow(TyVar("a"), TyVar("a")))
+  report(
+      "higher rank       ",
+      ELam("f", poly_id, EApp(ETApp(EVar("f"), TyBool), EBool(true))),
+    )
+  -- Instantiating both `identity` and `x : forall a. a` creates two metas.
+  -- Their equality goes through uf_union; arithmetic subsequently solves the
+  -- shared root to Int. This is a small executable union-find witness.
+  report(
+      "union-find        ",
+      ELam(
+          "x",
+          TyForall("a", TyVar("a")),
+          EBin(Add, EApp(identity(), EVar("x")), EInt(1)),
+        ),
+    )
+  report("bad application   ", EApp(EInt(1), EBool(true)))
+  report("bad branches      ", EIf(EBool(true), EInt(1), EBool(false)))
