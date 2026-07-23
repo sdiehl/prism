@@ -23,7 +23,7 @@ const CLOSURE_TAG_MASK: u64 = i64::MAX.cast_unsigned();
 // forking the two tiers; such a literal must reach codegen boxed as I64/bignum.
 const TAGGED_INT_VALUE_BITS: u32 = i64::BITS - 2;
 
-use super::abi::{ctor_tag, idx64, BIG_TAG, HDR_BYTES, STR_TAG, TAG_OFF, WORD_BYTES};
+use super::abi::{ctor_tag, idx64, BIG_TAG, HDR_BYTES, NULL_WORD, STR_TAG, TAG_OFF, WORD_BYTES};
 use super::dispatch::partial_app_body;
 use super::isa::{Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa};
 use super::rt;
@@ -32,7 +32,10 @@ use crate::core::builtins::BUILTINS;
 use crate::core::builtins::{builtin, AbiArg, AbiResult, Builtin, BuiltinKind, FloatOp};
 use crate::core::effect_abi::{is_free_monad_driver, EOP};
 use crate::core::tailrec::{reassoc, trmc_mode, trmc_shape, TrmcMode, TrmcShape};
-use crate::core::{fv, reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, IoOp, NegLane, Value};
+use crate::core::{
+    fv, reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, IoOp, LoweredCore, NegLane, Value,
+};
+use crate::kw;
 use crate::names::{closure_cap, generated_param};
 use crate::sym::Sym;
 use crate::types::CtorInfo;
@@ -357,6 +360,20 @@ impl<'a, I: Isa> Cg<'a, I> {
                 Ok(self.alloc_obj(0, &fvs))
             }
             Value::Ctor(name, tag, fields) => {
+                // The wired nullable carries no cell on the native tiers: `Null`
+                // IS the null word and `This(v)` IS its element word, which the
+                // element contract (`types::is_or_null_element`) guarantees is
+                // never zero. The interpreter keeps the tagged form; parity pins
+                // the two layouts to one observable behavior.
+                if name.as_str() == kw::CTOR_NULL {
+                    return Ok(self.isa.const_int(&mut self.b, NULL_WORD));
+                }
+                if name.as_str() == kw::CTOR_THIS {
+                    let [elem] = fields.as_slice() else {
+                        return Err(format!("codegen: {name} expects exactly one field"));
+                    };
+                    return self.value(regs, elem);
+                }
                 let fvs = self.values(regs, fields)?;
                 let obj = self.alloc_obj(idx64(*tag), &fvs);
                 // Count the EOp cell each `do op` builds (stderr-only under
@@ -897,8 +914,19 @@ impl<'a, I: Isa> Cg<'a, I> {
         let ptr_int = self.value(regs, val)?;
         let ptr = self.dst(|i, b, d| i.inttoptr(b, d, &ptr_int));
 
+        let or_null = arms.iter().any(
+            |(p, _)| matches!(p, CorePat::Ctor(name, _) if kw::is_or_null_ctor(name.as_str())),
+        );
         let needs_tag = arms.iter().any(|(p, _)| matches!(p, CorePat::Ctor(..)));
-        let tag = if needs_tag {
+        let tag = if or_null {
+            // Null-word dispatch: the scrutinee is the wired nullable, so there
+            // is no header cell to read (`Null` is the bare zero word). The tag
+            // is derived from the word itself; `zext(word != 0)` is exactly the
+            // wired tag pair (asserted next to `ctor_tag`).
+            let zero = self.isa.const_int(&mut self.b, NULL_WORD);
+            let nz = self.dst(|i, b, d| i.icmp(b, d, Cmp::Ne, &ptr_int, &zero));
+            Some(self.dst(|i, b, d| i.zext(b, d, &nz)))
+        } else if needs_tag {
             let tag_ptr = self.dst(|i, b, d| i.gep(b, d, &ptr, TAG_OFF));
             Some(self.dst(|i, b, d| i.load(b, d, &tag_ptr)))
         } else {
@@ -946,6 +974,14 @@ impl<'a, I: Isa> Cg<'a, I> {
             self.isa.open_block(&mut self.b, &arm_lbls[arm_idx]);
             let mut arm_regs = regs.clone();
             match pat {
+                CorePat::Ctor(name, fields) if kw::is_or_null_ctor(name.as_str()) => {
+                    // `This(x)` binds the scrutinee word itself (the element IS
+                    // the value); `Null` has no fields. Never read through the
+                    // pointer here: a null scrutinee has no cell.
+                    if let Some(Some(vname)) = fields.first() {
+                        arm_regs.insert(*vname, ptr_int.clone());
+                    }
+                }
                 CorePat::Ctor(_, fields) | CorePat::Tuple(fields) => {
                     for (fi, sub) in fields.iter().enumerate() {
                         if let Some(vname) = sub {
@@ -1258,10 +1294,26 @@ impl From<String> for SelectedEmissionError {
 /// The shared walker owns evaluation order, representation, reference counting,
 /// and tail-call lowering. The [`Isa`] implementation only spells instructions.
 ///
+/// Takes the stage-checked lowered product, never a bare `Core`: the pipeline
+/// constructs [`LoweredCore`] after verified effect lowering, and an external
+/// producer goes through [`LoweredCore::validate_structural`], so a supposedly
+/// lowered program cannot be forged from public parts.
+///
 /// # Errors
 /// Returns a diagnostic when the lowered Core violates a code-generation
 /// invariant or the backend cannot emit a required construct.
 pub fn emit_with_isa<I: Isa>(
+    isa: &I,
+    core: &LoweredCore,
+    ctors: &BTreeMap<String, CtorInfo>,
+) -> Result<String, String> {
+    emit_lowered_with_isa(isa, core, ctors)
+}
+
+// The crate-internal entry for callers that already hold the pipeline's own
+// lowered `Core` (the LLVM module builder, whose product was constructed behind
+// the same verified boundary).
+pub(crate) fn emit_lowered_with_isa<I: Isa>(
     isa: &I,
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,

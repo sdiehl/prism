@@ -617,6 +617,11 @@ effect FileSystem
 effect Random
   rng_rand() : Int
 
+-- | Real, non-replayable entropy capability (`entropy`). Distinct from the
+-- seeded, replayable `Random`: use `Entropy` for key material, never `Random`.
+effect Entropy
+  entropy_word() : Int
+
 -- | Process-environment capability (`getenv`, `args_count`, `arg`).
 effect Env
   env_get(String) : String
@@ -642,6 +647,10 @@ fn file_exists(p) = fs_file_exists(p)
 -- | A random integer.
 fn rand() = rng_rand()
 
+-- | A fresh integer of real OS entropy. Non-reproducible, unlike the seeded
+-- `rand`; a `replayable` function may not use it.
+fn entropy() = entropy_word()
+
 -- | The value of environment variable `s` (empty when unset).
 fn getenv(s) = env_get(s)
 
@@ -655,8 +664,8 @@ fn arg(i) = env_arg(i)
 -- effect is discharged by a tail-resumptive handler that resumes with the
 -- matching `prim_*` builtin, so the chain fuses to direct calls (no effect-op
 -- allocation), leaving only `{IO | e}`.
-fn run_io(action : (Unit) -> a ! {Console, FileSystem, Random, Env, Output | e}) =
-  handle (handle handle handle handle action(()) with {
+fn run_io(action : (Unit) -> a ! {Console, FileSystem, Random, Entropy, Env, Output | e}) =
+  handle (handle handle handle handle handle action(()) with {
       con_read_int() resume k => k(prim_read_int()),
       con_read_line() resume k => k(prim_read_line()),
       return r => r
@@ -667,6 +676,9 @@ fn run_io(action : (Unit) -> a ! {Console, FileSystem, Random, Env, Output | e})
       return r => r
     } with {
       rng_rand() resume k => k(prim_rand()),
+      return r => r
+    } with {
+      entropy_word() resume k => k(prim_entropy()),
       return r => r
     } with {
       env_get(s) resume k => k(prim_getenv(s)),

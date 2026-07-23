@@ -71,12 +71,14 @@ examples/stlc.pr: selective-free-monad
 examples/stream_fold.pr: state-fusion
 examples/stream_fuse.pr: evidence
 examples/streams.pr: state-fusion
+examples/systemf.pr: whole-program-free-monad
 examples/tensor_ops.pr: selective-free-monad
 examples/time.pr: whole-program-free-monad
 examples/transact.pr: selective-free-monad
 examples/ufcs.pr: state-fusion
 examples/validate.pr: whole-program-free-monad
 examples/var_pure.pr: evidence
+tests/cases/adapter_open_result_row.pr: whole-program-free-monad
 tests/cases/annot_effect_unused.pr: evidence
 tests/cases/effect_rows.pr: selective-free-monad
 tests/cases/effects.pr: selective-free-monad
@@ -99,7 +101,9 @@ tests/cases/run/comp_guard_dispatch.pr: whole-program-free-monad
 tests/cases/run/comp_guards.pr: whole-program-free-monad
 tests/cases/run/comp_in_annotated_row.pr: whole-program-free-monad
 tests/cases/run/comp_map_once.pr: state-fusion
+tests/cases/run/constrained_mutual.pr: evidence
 tests/cases/run/control_effects.pr: whole-program-free-monad
+tests/cases/run/control_validate.pr: whole-program-free-monad
 tests/cases/run/curry_effect.pr: evidence
 tests/cases/run/deep_effect_recursion.pr: state-fusion
 tests/cases/run/default_or.pr: selective-free-monad
@@ -109,6 +113,7 @@ tests/cases/run/eff_fn_list.pr: whole-program-free-monad
 tests/cases/run/eff_fuse.pr: evidence
 tests/cases/run/eff_pending_arg.pr: evidence
 tests/cases/run/eff_poly_fn_arg.pr: whole-program-free-monad
+tests/cases/run/eff_row_forward.pr: evidence
 tests/cases/run/eff_two_handlers.pr: evidence
 tests/cases/run/effop_tax.pr: evidence
 tests/cases/run/errors.pr: selective-free-monad
@@ -119,6 +124,7 @@ tests/cases/run/fold_chains.pr: state-fusion
 tests/cases/run/for_blocks.pr: evidence
 tests/cases/run/for_break.pr: whole-program-free-monad
 tests/cases/run/forward.pr: selective-free-monad
+tests/cases/run/frozen_array.pr: selective-free-monad
 tests/cases/run/fs.pr: evidence
 tests/cases/run/fs_bytes.pr: evidence
 tests/cases/run/grade_ops.pr: selective-free-monad
@@ -148,6 +154,7 @@ tests/cases/run/read_bad_utf8.pr: evidence
 tests/cases/run/reified_under_world.pr: whole-program-free-monad
 tests/cases/run/replayable_ok.pr: evidence
 tests/cases/run/rollback.pr: selective-free-monad
+tests/cases/run/scc_effect_row.pr: evidence
 tests/cases/run/stable_ladder.pr: whole-program-free-monad
 tests/cases/run/stable_migrations.pr: selective-free-monad
 tests/cases/run/stream_take.pr: state-fusion

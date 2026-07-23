@@ -27,9 +27,11 @@
 /examples/lineage_tiles/summary.json
 /examples/lineage_tiles/*.replay
 /examples/lineage_tiles/*.plineage
+/examples/spectra-deck/target/
 # Local private-workflow helper scripts: kept on disk, never shipped (they drive
 # the private scratch remote, not the compiler).
 /block_public
 /unblock_public
 /push_private
 /pull_private
+setup.sh

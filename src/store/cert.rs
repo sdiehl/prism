@@ -57,7 +57,7 @@
 
 use std::io;
 
-use crate::core::{HASH_PREFIX_HEX, HASH_SCHEME};
+use crate::core::{Digest, HASH_PREFIX_HEX, HASH_SCHEME};
 use crate::driver::WireKind;
 use crate::store::codec::{put_str, put_uvarint, Reader};
 use crate::store::disk::{Store, Written};
@@ -155,7 +155,7 @@ fn reserved_claim_name(n: u64) -> String {
 pub struct Cert {
     /// The content hash whose property this certificate attests (the envelope's
     /// contract digest).
-    pub subject: String,
+    pub subject: Digest,
     /// The property claimed.
     pub claim: Claim,
     /// The hash scheme the claim was established under; a scheme bump retires it.
@@ -173,7 +173,7 @@ pub struct Cert {
 #[must_use]
 pub fn parity_cert(subject: &str, backends: (&str, &str)) -> Cert {
     Cert {
-        subject: subject.to_string(),
+        subject: Digest::from(subject),
         claim: Claim::ParityPassed,
         scheme: HASH_SCHEME.to_string(),
         check: CheckKind::Parity.as_str().to_string(),
@@ -223,7 +223,7 @@ pub fn decode_cert(bytes: &[u8]) -> Result<Cert, CodecError> {
         return Err(CodecError::TrailingBytes);
     }
     Ok(Cert {
-        subject,
+        subject: Digest::from(subject),
         claim,
         scheme,
         check,
@@ -274,7 +274,7 @@ pub fn check_cert(store: &Store, subject: &str) -> CertStatus {
         Ok(c) => c,
         Err(e) => return CertStatus::Failed(format!("corrupt certificate ({e})")),
     };
-    if cert.subject != subject {
+    if cert.subject.as_str() != subject {
         return CertStatus::Failed(format!(
             "certificate subject {} does not match root {}",
             short(&cert.subject),
@@ -330,8 +330,8 @@ pub enum LineageClaim {
     /// A build or docs sidecar's artifact bytes and graph edges rehash to their
     /// recorded digests (`lineage verify` passed).
     LineageVerified,
-    /// A claim this build recognizes structurally but does not verify: a future
-    /// rung. The discriminant is preserved so the frame round-trips.
+    /// A claim this build recognizes structurally but does not verify. The
+    /// discriminant is preserved so the frame round-trips.
     Reserved(u64),
 }
 
@@ -378,7 +378,7 @@ pub struct CertRow {
 pub struct LineageCert {
     /// The sidecar digest this vouches for, a `scheme:hex` string (the envelope's
     /// contract digest).
-    pub subject: String,
+    pub subject: Digest,
     /// The property claimed.
     pub claim: LineageClaim,
     /// The hash scheme the certificate's own identity is under; a scheme bump
@@ -409,7 +409,7 @@ pub fn replay_cert(
     input_files: usize,
 ) -> LineageCert {
     LineageCert {
-        subject: subject.to_string(),
+        subject: Digest::from(subject),
         claim: LineageClaim::ReplayVerified,
         scheme: HASH_SCHEME.to_string(),
         compiler: COMPILER_VERSION.to_string(),
@@ -433,7 +433,7 @@ pub fn lineage_cert(
     writes_skipped: usize,
 ) -> LineageCert {
     LineageCert {
-        subject: subject.to_string(),
+        subject: Digest::from(subject),
         claim: LineageClaim::LineageVerified,
         scheme: HASH_SCHEME.to_string(),
         compiler: COMPILER_VERSION.to_string(),
@@ -499,7 +499,7 @@ pub fn decode_lineage_cert(bytes: &[u8]) -> Result<LineageCert, CodecError> {
         return Err(CodecError::TrailingBytes);
     }
     Ok(LineageCert {
-        subject,
+        subject: Digest::from(subject),
         claim,
         scheme,
         compiler,
@@ -530,7 +530,7 @@ pub fn check_lineage_cert(bytes: &[u8], recomputed_subject: &str) -> CertStatus 
             cert.scheme
         ));
     }
-    if cert.subject != recomputed_subject {
+    if cert.subject.as_str() != recomputed_subject {
         return CertStatus::Failed(format!(
             "sidecar digest mismatch: certificate vouches for {}, sidecar bytes hash to {}",
             short(&cert.subject),

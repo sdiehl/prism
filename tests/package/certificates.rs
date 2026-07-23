@@ -16,6 +16,7 @@ use std::process::{self, Command};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use prism::core::Digest;
 use prism::core::HASH_SCHEME;
 use prism::lineage::provenance::{sha256_hex, EVENT_HASH_SCHEME};
 use prism::store::cert::{
@@ -81,11 +82,11 @@ fn a_subject_mismatch_is_a_named_failure() {
 
 #[test]
 fn a_reserved_claim_is_recognized_but_untrusted() {
-    // A future rung's claim rides the same envelope; an old build must read it as
-    // recognized-but-untrusted, not corruption.
+    // A reserved claim uses the same envelope; a build that cannot verify it must
+    // report it as recognized-but-untrusted, not corrupt.
     let subject = subject_of(b"sidecar");
     let reserved = LineageCert {
-        subject: subject.clone(),
+        subject: Digest::from(subject.clone()),
         claim: LineageClaim::Reserved(99),
         scheme: HASH_SCHEME.to_string(),
         compiler: "future".to_string(),
@@ -259,7 +260,7 @@ fn an_unknown_claim_certificate_is_rejected() {
     // this build does not recognize: an older build must not trust a future claim.
     let sidecar_bytes = fs::read(tmp.path.join("run.plineage")).unwrap();
     let forged = LineageCert {
-        subject: subject_of(&sidecar_bytes),
+        subject: Digest::from(subject_of(&sidecar_bytes)),
         claim: LineageClaim::Reserved(4096),
         scheme: HASH_SCHEME.to_string(),
         compiler: "a-future-build".to_string(),

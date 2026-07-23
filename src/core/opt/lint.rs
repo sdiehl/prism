@@ -23,16 +23,35 @@
 //!   on any path is flagged. The complementary leak direction (a token never
 //!   spent) is already gated dynamically by the runtime cell-balance check.
 //!
-//! Richer checks (constructor arity against the ctor table, ANF argument shape)
-//! are future additions; the harness is built to grow them.
+//! Constructor arity against the ctor table and ANF argument shape are outside
+//! this lint's current contract.
 
 use std::collections::BTreeSet;
 
-use super::super::cbpv::{Comp, Core, Value};
+use super::super::cbpv::{Comp, Core, LoweredCore, Value};
 use super::super::fv;
 use super::super::traverse::Visit;
 use super::PassStage;
 use crate::sym::Sym;
+
+impl LoweredCore {
+    /// Structural stage validation, lint-grade: the checked public constructor
+    /// for a lowered program an external producer hands to the backends.
+    ///
+    /// It establishes exactly what the pipeline's own stage lint enforces at
+    /// this boundary: no pre-lowering effect node remains, every variable is
+    /// bound, and no reuse token is spent twice on a path. It is NOT typed
+    /// verification: no type, effect, handler, or ownership witness is checked,
+    /// and a structurally valid program can still be semantically wrong. The
+    /// pipeline's own product carries the stronger, verified claim.
+    ///
+    /// # Errors
+    /// One message per structural violation, as the stage lint reports them.
+    pub fn validate_structural(core: Core) -> Result<Self, Vec<String>> {
+        lint(&core, PassStage::Late)?;
+        Ok(Self::new(core))
+    }
+}
 
 /// Lint `core` at pipeline `stage`, returning one message per violation.
 /// `Ok(())` means well-formed.

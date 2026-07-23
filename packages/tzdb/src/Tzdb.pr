@@ -1,8 +1,8 @@
 -- A tiny content-addressed timezone package seed.
 --
 -- The real IANA database is intentionally not frozen into Std. This module is a
--- small deterministic slice that proves the package path: named zones are data,
--- offsets apply to `Time.Wall`, and the source can travel as a package bundle.
+-- small deterministic dataset exercising package transport: named zones are
+-- data, offsets apply to `Time.Wall`, and the source travels as a package bundle.
 
 import Time (..)
 

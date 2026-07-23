@@ -5,7 +5,9 @@
 #include "prism_int.h"
 #include "prism_mem.h"
 #include "prism_string.h"
+#include <fcntl.h>
 #include <time.h>
+#include <unistd.h>
 
 _Noreturn void prism_div_zero(void) {
     fprintf(stderr, "fatal: division by zero\n");
@@ -145,6 +147,27 @@ long prism_prim_rand(void) {
     z = (z ^ (z >> 27)) * 0x94D049BB133111EBUL;
     z ^= z >> 31;
     return (long)(z >> 2);
+}
+
+/* Real OS entropy: eight bytes from /dev/urandom, backing the non-replayable
+ * `Entropy` capability. Unlike the seeded `prism_prim_rand` stream this is not
+ * reproducible from any seed; its reads are recorded so a replay serves the
+ * captured value. Best-effort: an unavailable source yields zero rather than
+ * aborting. The low bit is dropped so the result is a non-negative 63-bit Int,
+ * exactly as `prism_prim_rand` keeps its value non-negative. */
+long prism_prim_entropy(void) {
+    unsigned long v = 0;
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd >= 0) {
+        size_t got = 0;
+        while (got < sizeof v) {
+            ssize_t n = read(fd, (unsigned char *)&v + got, sizeof v - got);
+            if (n <= 0) { break; }
+            got += (size_t)n;
+        }
+        (void)close(fd);
+    }
+    return (long)(v >> 1);
 }
 
 /* Wall-clock and monotonic reads, in nanoseconds, backing the `Clock` capability
@@ -346,8 +369,12 @@ long prism_exit(long code) {
 extern long prismfn_main(void);
 
 int main(int argc, char **argv) {
-    prism_argc = argc;
-    prism_argv = argv;
+    /* Surface `args()` is the program argument list, not C's process argv:
+     * argv[0] is the launcher path and is deliberately excluded.  The
+     * interpreter already receives only arguments after `prism run ... --`, so
+     * doing the normalization here keeps native and interpreted CLIs equal. */
+    prism_argc = argc > 0 ? argc - 1 : 0;
+    prism_argv = argc > 0 ? argv + 1 : argv;
     long r = prismfn_main();
     /* Only an explicit `exit(n)` sets the process code (it calls libc exit
      * directly, before returning here); a value-returning main exits 0. The

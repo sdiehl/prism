@@ -1,0 +1,16 @@
+-- Interpolation and layout edges: nested holes, bare-indent bodies, blanks.
+effect Env
+  read(String) : String
+
+class Render(a)
+  render : (a) -> String
+
+instance renderInt : Render(Int)
+  fn render(v) = "v={v}"
+
+fn nested(name : String) : String =
+  "outer {concat("inner {name} deep", read("home"))} tail"
+
+fn multiline() : Int =
+  let a = let b = 1 in let c = 2 in b + c
+  a

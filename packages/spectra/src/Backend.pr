@@ -1,0 +1,289 @@
+-- | Spectra's pure lowering from presentation values to Typst documents.
+--
+-- Generic syntax construction and escaping belong to the independent `Typst`
+-- package. This module contains only presentation-specific mapping decisions.
+
+import Data.List (append)
+
+import Data.String (contains)
+
+import Typst as T
+
+import Layout (..)
+
+import Theme (Theme, prism_theme)
+
+pub type TypstDocument = TypstDocument {
+  format: String,
+  source: String,
+  logical_slides: Int,
+  physical_pages: Int,
+  assets: List(String)
+} deriving (Eq, Show)
+
+fn color(name : String, theme : Theme) : T.Doc =
+  let value =
+    if name == "" then
+      theme.foreground
+    elif name == "accent" then
+      theme.accent
+    elif name == "muted" then
+      theme.muted
+    else
+      name
+  T.call("rgb", [T.string("#{value}")])
+
+fn alignment(align : Align) : T.Doc =
+  match align of
+    Left => T.atom("left")
+    Center => T.atom("center")
+    Right => T.atom("right")
+
+fn inline_doc(x : Inline, theme : Theme) : T.Doc =
+  match x of
+    Plain(s) => T.call("text", [T.string(s)])
+    InlineCode(s) =>
+      T.call("raw", [T.string(s), T.named("lang", T.string("prism"))])
+    Emphasis(xs) => T.content_call("emph", Nil, inline_docs(xs, theme))
+    Strong(xs) => T.content_call("strong", Nil, inline_docs(xs, theme))
+    Link(url, xs) =>
+      T.content_call("link", [T.string(url)], inline_docs(xs, theme))
+    Colored(name, xs) =>
+      T.content_call(
+          "text",
+          [T.named("fill", color(name, theme))],
+          inline_docs(xs, theme),
+        )
+
+fn inline_docs(xs : List(Inline), theme : Theme) : T.Doc =
+  match xs of
+    Nil => T.empty()
+    Cons(x, Nil) => inline_doc(x, theme)
+    Cons(x, rest) =>
+      T.concat_docs([
+          inline_doc(x, theme),
+          T.atom(" + "),
+          inline_docs(rest, theme),
+        ])
+
+fn max2(a : Int, b : Int) : Int =
+  if a > b then
+    a
+  else
+    b
+
+fn max_stage_list(xs : List(Pict)) : Int =
+  match xs of
+    Nil => 0
+    Cons(p, rest) => max2(max_stage(p), max_stage_list(rest))
+
+-- | Highest reveal stage mentioned by a pict tree.
+pub fn max_stage(p : Pict) : Int =
+  match p of
+    Empty => 0
+    Text(_, _) => 0
+    CodeBlock(_, _) => 0
+    Image(_) => 0
+    Rectangle(_, _, _) => 0
+    Row(_, xs) => max_stage_list(xs)
+    Column(_, _, xs) => max_stage_list(xs)
+    Overlay(xs) => max_stage_list(xs)
+    Inset(_, _, _, _, child) => max_stage(child)
+    Fit(_, child) => max_stage(child)
+    Fragment(stage, child) => max2(stage, max_stage(child))
+    RawTypst(_) => 0
+
+fn assets_list(xs : List(Pict)) : List(String) =
+  match xs of
+    Nil => Nil
+    Cons(p, rest) => append(pict_assets(p), assets_list(rest))
+
+-- | Logical, project-relative asset names reached by a pict tree.
+pub fn pict_assets(p : Pict) : List(String) =
+  match p of
+    Empty => Nil
+    Text(_, _) => Nil
+    CodeBlock(_, _) => Nil
+    Image(path) => [path]
+    Rectangle(_, _, _) => Nil
+    Row(_, xs) => assets_list(xs)
+    Column(_, _, xs) => assets_list(xs)
+    Overlay(xs) => assets_list(xs)
+    Inset(_, _, _, _, child) => pict_assets(child)
+    Fit(_, child) => pict_assets(child)
+    Fragment(_, child) => pict_assets(child)
+    RawTypst(_) => Nil
+
+fn pict_docs(xs : List(Pict), stage : Int, theme : Theme) : List(T.Doc) =
+  match xs of
+    Nil => Nil
+    Cons(p, rest) =>
+      Cons(pict_doc(p, stage, theme), pict_docs(rest, stage, theme))
+
+fn pict_doc(p : Pict, stage : Int, theme : Theme) : T.Doc =
+  match p of
+    Empty => T.atom("none")
+    Text(style, xs) =>
+      let size =
+        if style.size <= 0 then
+          theme.body_size
+        else
+          style.size
+      T.call("align", [
+          alignment(style.align),
+          T.content_call(
+              "text",
+              [
+                  T.named("size", T.pt(size)),
+                  T.named("fill", color(style.color, theme)),
+                ],
+              inline_docs(xs, theme),
+            ),
+        ])
+    CodeBlock(language, source) =>
+      T.content_call("block", [T.named("width", T.percent(100)), T.named("fill", color(theme.code_background, theme)), T.named("inset", T.pt(14)), T.named("radius", T.pt(7))], T.content_call("text", [T.named("fill", color(theme.code_foreground, theme)), T.named("font", T.string(theme.code_font)), T.named("size", T.pt(theme.code_size))], T.call("raw", [
+          T.string(source),
+          T.named("block", T.atom("true")),
+          T.named("lang", T.string(language)),
+        ])))
+    Image(path) =>
+      T.call("image", [
+          T.string(path),
+          T.named("width", T.percent(100)),
+          T.named("height", T.percent(100)),
+          T.named("fit", T.string("contain")),
+        ])
+    Rectangle(name, width, height) =>
+      T.call("rect", [
+          T.named("width", T.pt(width)),
+          T.named("height", T.pt(height)),
+          T.named("fill", color(name, theme)),
+        ])
+    Row(gap, children) =>
+      T.call(
+          "stack",
+          Cons(
+              T.named("dir", T.atom("ltr")),
+              Cons(
+                  T.named("spacing", T.pt(gap)),
+                  pict_docs(children, stage, theme),
+                ),
+            ),
+        )
+    Column(gap, align, children) =>
+      T.call("align", [
+          alignment(align),
+          T.call(
+              "stack",
+              Cons(
+                  T.named("dir", T.atom("ttb")),
+                  Cons(
+                      T.named("spacing", T.pt(gap)),
+                      pict_docs(children, stage, theme),
+                    ),
+                ),
+            ),
+        ])
+    Overlay(children) =>
+      T.content_call(
+          "block",
+          [T.named("width", T.percent(100)), T.named("height", T.percent(100))],
+          T.call("stack", pict_docs(children, stage, theme)),
+        )
+    Inset(top, right, bottom, left, child) =>
+      T.content_call(
+          "block",
+          [
+              T.named("inset", T.tuple([
+                  T.named("top", T.pt(top)),
+                  T.named("right", T.pt(right)),
+                  T.named("bottom", T.pt(bottom)),
+                  T.named("left", T.pt(left)),
+                ])),
+            ],
+          pict_doc(child, stage, theme),
+        )
+    Fit(_, child) =>
+      T.content_call(
+          "box",
+          [T.named("width", T.percent(100)), T.named("height", T.percent(100))],
+          pict_doc(child, stage, theme),
+        )
+    Fragment(at, child) =>
+      if at <= stage then
+        pict_doc(child, stage, theme)
+      else
+        T.atom("none")
+    RawTypst(source) => T.raw(source)
+
+-- | Render a pict for one concrete reveal stage.
+pub fn render_pict(p : Pict, stage : Int, theme : Theme) : String =
+  T.render(96, pict_doc(p, stage, theme))
+
+fn title_doc(title : Option(String)) : T.Doc =
+  match title of
+    None => T.atom("none")
+    Some(value) => T.string(value)
+
+-- | Render one physical page from a logical slide and reveal stage.
+pub fn render_slide_page(
+  title : Option(String),
+  body : Pict,
+  stage : Int,
+  theme : Theme
+) : String =
+  T.render(96, T.code(T.call("spectra-slide", [
+      title_doc(title),
+      pict_doc(body, stage, theme),
+    ])))
+
+-- | The small presentation runtime prepended to every generated document.
+pub fn typst_prelude(theme : Theme) : String =
+  T.document([
+      T.atom("// Generated by Spectra. Inspect, diff, and keep this artifact."),
+      T.set_rule("document", [T.named("date", T.atom("none"))]),
+      T.set_rule("page", [
+          T.named("width", T.atom("13.333in")),
+          T.named("height", T.atom("7.5in")),
+          T.named("margin", T.pt(theme.margin_pt)),
+          T.named("fill", color(theme.background, theme)),
+        ]),
+      T.set_rule("text", [
+          T.named("font", T.string(theme.text_font)),
+          T.named("size", T.pt(theme.body_size)),
+          T.named("fill", color(theme.foreground, theme)),
+        ]),
+      T.set_rule("par", [T.named("leading", T.atom("0.65em"))]),
+      T.let_function("spectra-slide", [T.atom("title"), T.atom("body")], [
+          T.call("rect", [
+              T.named("width", T.percent(100)),
+              T.named("height", T.pt(2)),
+              T.named("fill", color("accent", theme)),
+            ]),
+          T.call("v", [T.pt(16)]),
+          T.concat_docs([
+              T.atom("set "),
+              T.call("align", [T.atom("left + top")]),
+            ]),
+          T.if_suite("title != none", [
+              T.content_call(
+                  "text",
+                  [
+                      T.named("size", T.pt(theme.title_size)),
+                      T.named("weight", T.atom("700")),
+                      T.named("fill", color(theme.accent, theme)),
+                    ],
+                  T.atom("title"),
+                ),
+              T.call("v", [T.pt(18)]),
+            ]),
+          T.atom("body"),
+        ]),
+      T.empty(),
+    ])
+
+test fn prelude_disables_ambient_pdf_dates() =
+  if (contains("#set document(date: none)", typst_prelude(prism_theme))) then
+    ()
+  else
+    fail()

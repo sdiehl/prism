@@ -109,7 +109,7 @@ fn stat_src(full: &str, tag: &str, stat_env: &str, suffix: &str) -> Result<i64, 
 fn stat_src_o2(full: &str, tag: &str, stat_env: &str, suffix: &str) -> Result<i64, String> {
     stat_build(full, tag, stat_env, suffix, |src, bin| {
         let mut cfg = prism::Config::from_env();
-        cfg.opt = prism::OptLevel::O2;
+        cfg.flags.opt_level = prism::OptLevel::O2;
         prism::build_on(src, &prism::default_roots(Path::new(".")), bin, &cfg)
     })
 }
@@ -353,7 +353,43 @@ fn pull_sequence_module_allocation_baseline() {
 }
 
 // ---------------------------------------------------------------------------
-// Lane A region ratchets. A `with_arena` scope routes every eligible
+// Wired-nullable layout ratchet. On the native tiers `Null` is the null word
+// and `This(v)` is its element word, so the nullables in an N-element list
+// allocate nothing: the list costs exactly its N `Cons` cells. Parity cannot
+// see a silent regression to a tagged wrapper cell (the layouts are
+// observationally identical); this counter can, reading 2 cells/element.
+
+const PERF_OR_NULL_LIST: &str = include_str!("../cases/perf/or_null_list.pr");
+
+#[test]
+fn or_null_values_allocate_no_cells() {
+    require_cc();
+    let (small, big) = (1_000_i64, 10_000_i64);
+    let lo = stat_src_o2(
+        &perf_src_n(PERF_OR_NULL_LIST, small),
+        "or_null_list_lo",
+        "PRISM_ALLOC_STATS",
+        "cells allocated",
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let hi = stat_src_o2(
+        &perf_src_n(PERF_OR_NULL_LIST, big),
+        "or_null_list_hi",
+        "PRISM_ALLOC_STATS",
+        "cells allocated",
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let per = (hi - lo) / (big - small);
+    assert_eq!(
+        per, 1,
+        "a list of nullables allocates {per} cells/element ({lo} at n={small}, {hi} at \
+         n={big}; baseline 1, the `Cons` cell alone); the wired nullable's cell-free \
+         layout regressed to a wrapper allocation"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Region-allocation ratchets. A `with_arena` scope routes every eligible
 // constructor through the region's bump pointer, so the cells never touch
 // `prism_alloc` and the whole region is reclaimed at the handler's return.
 // Parity and the leak balance cannot see a silent fallback to per-cell malloc
@@ -362,9 +398,9 @@ fn pull_sequence_module_allocation_baseline() {
 const PERF_ARENA_REGION_FILL: &str = include_str!("../cases/perf/arena_region_fill.pr");
 const PERF_ARENA_REGION_LOOP: &str = include_str!("../cases/perf/arena_region_loop.pr");
 
-// The headline Lane A claim: growing the list built under one `with_arena`
-// activation must not grow the runtime allocation count at all. Every `Cons`
-// comes from the region; only the scalar sum escapes.
+// Growing the list built under one `with_arena` activation must not grow the
+// runtime allocation count at all. Every `Cons` comes from the region; only the
+// scalar sum escapes.
 #[test]
 fn arena_region_fill_allocates_zero_cells_per_element() {
     require_cc();
@@ -394,9 +430,9 @@ fn arena_region_fill_allocates_zero_cells_per_element() {
 // Region activations in a loop: the 65 per-iteration constructor cells come
 // from the region, leaving exactly the two loop-invariant evidence closures of
 // the handler activation itself. Ratcheted so the region path cannot silently
-// regress to per-cell malloc (a fallback reads ~66 here); hoisting the
-// captureless evidence closures is the follow-up that takes this to zero, and
-// then this baseline ratchets down.
+// regress to per-cell malloc (a fallback reads ~66 here). The two remaining
+// allocations are captureless evidence closures; hoisting them would reduce the
+// baseline to zero.
 #[test]
 fn arena_region_loop_allocates_only_activation_constants() {
     require_cc();

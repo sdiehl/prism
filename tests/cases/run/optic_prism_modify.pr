@@ -1,0 +1,26 @@
+-- A prism-step modify through a record-update path: `?Doing` narrows to one
+-- constructor and the `~` modify must reach its field, while every other
+-- constructor passes through unchanged. Pins the case-of-case soundness rule:
+-- a wildcard arm must never be selected statically for a value whose
+-- constructor is only known at run time (the simplifier once collapsed the
+-- `Doing`-or-default case to the default over a bare variable, so the modify
+-- vanished natively while the interpreter applied it).
+type St = Doing { progress: Int } | Finished
+
+type Task = Task { state: St }
+
+fn bump(state : St) : Int =
+  match state of
+    Doing { progress = progress } => progress
+    _ => 0 - 1
+
+fn main() =
+  let t =
+    Task {
+      state = Doing { progress = 40 }
+    }
+  let t2 = { t | state.?Doing.progress ~ \(p) -> p + 10 }
+  let done = Task { state = Finished }
+  let done2 = { done | state.?Doing.progress ~ \(p) -> p + 10 }
+  println(bump(t2.state))
+  println(bump(done2.state))

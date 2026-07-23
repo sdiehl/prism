@@ -3,18 +3,18 @@
 //! Every driver entry point (`check`, `frontend`, `elaborated`, the dumps, the
 //! interpreters) runs a prefix of lex/parse/resolve/desugar/typecheck/elaborate,
 //! historically each with its own subtly different stops and warning policies. A
-//! single [`run_front`] holds that pipeline; the differences that exist on purpose
-//! between entry points become the named fields of [`FrontOpts`], so a divergence
-//! is either expressible there or it cannot happen. Consumers read the stage they
-//! need off the returned [`Front`] and apply their own presentation.
+//! single [`run_front`] holds that pipeline; an entry point names WHAT it wants
+//! as a [`FrontRequest`], and this module alone maps each request to its policy
+//! preset, so a divergence is either a named request or it cannot happen (the
+//! boolean policy bundle is private and cannot be assembled by callers).
+//! Consumers read the stage they need off the returned [`Front`] and apply
+//! their own presentation.
 
 use crate::core::opt::PassStage;
-use crate::core::typed::{execute_pre as execute_typed_pre, PreExecutorFailure};
 use crate::core::{
-    effective_passes, elaborate_typed, newtype_ctors, typed_verification_error, Core,
-    ElaboratedCore, TypedCore, TypedElaborated, VerifyEnv,
+    elaborate_typed, newtype_ctors, Core, ElaboratedCore, TypedCore, TypedElaborated, VerifyEnv,
 };
-use crate::error::{Error, TypedCoreErasureFailure};
+use crate::error::Error;
 use crate::flags::WarnDupes;
 use crate::parse::{parse, ParseResult};
 use crate::resolve::{resolve_loaded_modules, resolve_modules_in, Module, Root};
@@ -24,7 +24,7 @@ use crate::types::{check as typecheck, check_allow_holes, Checked};
 
 use crate::tc::WarningOrigin;
 
-use super::downstream::run_opt_queries;
+use super::downstream::run_typed_opt_queries;
 use super::input::{
     field, load_front_inputs, semantic_inputs_digest, semantic_loaded_inputs_digest,
     source_inputs_digest,
@@ -48,6 +48,53 @@ enum FrontStop {
     Elaborated,
 }
 
+// The explicit request algebra: every frontend consumer names WHAT it wants and
+// this module alone decides HOW, mapping each request to a policy preset in one
+// place (`policy` below). An invalid flag combination is unrepresentable
+// because callers cannot construct `FrontOpts` at all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FrontRequest {
+    /// Type-check only, with diagnostics: the `check` family.
+    Check,
+    /// The public validity verdict (`prism check`): elaborate and run every
+    /// semantic validator, but stop before retarget/opt/lowering/codegen.
+    CheckValidated,
+    /// The full compile path feeding lowering and codegen.
+    Full,
+    /// The full interpreter path with typed holes elaborated to deterministic
+    /// faults; kept distinct so native and wasm cannot inherit it.
+    FullDeferredHoles,
+    /// The content-addressed identity surface: pre-optimizer Core, no
+    /// diagnostics, no retarget, so a hash depends on the source alone.
+    Identity,
+    /// The identity surface with the semantic validators, for store/package
+    /// commits; byte-identical Core to `Identity`.
+    IdentityValidated,
+    /// Typecheck-only analysis with per-node type/effect strings, for
+    /// `dump typespans` and static documentation tooltips.
+    TypedTooltips,
+    /// The rendered-pipeline inspection surface (`report`).
+    Report,
+}
+
+impl FrontRequest {
+    // The single request-to-policy mapping. Private to this module on purpose:
+    // the boolean bundle is an implementation detail of `run_front`, not a
+    // surface any caller may assemble.
+    const fn policy(self) -> FrontOpts {
+        match self {
+            Self::Check => FrontOpts::CHECK,
+            Self::CheckValidated => FrontOpts::CHECK_VALIDATED,
+            Self::Full => FrontOpts::FULL,
+            Self::FullDeferredHoles => FrontOpts::FULL_DEFERRED_HOLES,
+            Self::Identity => FrontOpts::IDENTITY,
+            Self::IdentityValidated => FrontOpts::IDENTITY_VALIDATED,
+            Self::TypedTooltips => FrontOpts::TYPED_TOOLTIPS,
+            Self::Report => FrontOpts::REPORT,
+        }
+    }
+}
+
 // The intentional, named divergences between frontend consumers. Every field is
 // a difference that exists on purpose between two existing entry points; anything
 // not expressible here cannot differ between them, because each entry point runs
@@ -57,13 +104,13 @@ enum FrontStop {
 // table.
 #[derive(Clone, Copy, Debug)]
 #[allow(clippy::struct_excessive_bools)]
-pub(super) struct FrontOpts {
+struct FrontOpts {
     // The stage to stop at.
     stop: FrontStop,
     // Compute surface lints and print checker/lint warnings to stderr. Off for the
     // quiet identity surface, which observes Core rather than diagnostics.
     diagnostics: bool,
-    // Retarget the policy-neutral cooperative scheduler entry per `cfg.scheduler`.
+    // Retarget the policy-neutral cooperative scheduler entry per `cfg.scheduler()`.
     // Off for the identity surface: a program's hash must not move with the
     // `--scheduler` choice.
     scheduler_retarget: bool,
@@ -85,7 +132,7 @@ pub(super) struct FrontOpts {
 
 impl FrontOpts {
     // Type-check only, with diagnostics: the `check` family.
-    pub(super) const CHECK: Self = Self {
+    const CHECK: Self = Self {
         stop: FrontStop::Checked,
         diagnostics: true,
         scheduler_retarget: false,
@@ -96,7 +143,7 @@ impl FrontOpts {
     };
     // The full compile path: scheduler retarget, validators, and the pre-lowering
     // optimizer, feeding lowering and codegen.
-    pub(super) const FULL: Self = Self {
+    const FULL: Self = Self {
         stop: FrontStop::Elaborated,
         diagnostics: true,
         scheduler_retarget: true,
@@ -107,7 +154,7 @@ impl FrontOpts {
     };
     // The full interpreter path with typed holes elaborated to deterministic
     // faults. Kept distinct from `FULL` so native and wasm cannot inherit it.
-    pub(super) const FULL_DEFERRED_HOLES: Self = Self {
+    const FULL_DEFERRED_HOLES: Self = Self {
         stop: FrontStop::Elaborated,
         diagnostics: true,
         scheduler_retarget: true,
@@ -123,7 +170,7 @@ impl FrontOpts {
     // compiler considers valid, the fip / noalloc / replayable annotations
     // included. The type-only `CHECK` preset stays for internal callers (dump,
     // report, snapshots) that observe the checked program rather than judging it.
-    pub(super) const CHECK_VALIDATED: Self = Self {
+    const CHECK_VALIDATED: Self = Self {
         stop: FrontStop::Elaborated,
         diagnostics: true,
         scheduler_retarget: false,
@@ -137,7 +184,7 @@ impl FrontOpts {
     // so a persisted definition never carries an fbip / noalloc / replayable
     // claim the build path would reject. Validation is side-effect-free on the
     // pre-optimizer Core, so the committed identity is byte-identical to `IDENTITY`.
-    pub(super) const IDENTITY_VALIDATED: Self = Self {
+    const IDENTITY_VALIDATED: Self = Self {
         stop: FrontStop::Elaborated,
         diagnostics: false,
         scheduler_retarget: false,
@@ -149,7 +196,7 @@ impl FrontOpts {
     // The content-addressed identity surface: pre-optimizer Core with no scheduler
     // retarget, no validators, and no diagnostics, so a hash depends on the source
     // alone.
-    pub(super) const IDENTITY: Self = Self {
+    const IDENTITY: Self = Self {
         stop: FrontStop::Elaborated,
         diagnostics: false,
         scheduler_retarget: false,
@@ -160,7 +207,7 @@ impl FrontOpts {
     };
     // Typecheck-only analysis for `dump typespans` and static documentation
     // tooltips. It shares every ordinary check policy except the extra facts.
-    pub(super) const TYPED_TOOLTIPS: Self = Self {
+    const TYPED_TOOLTIPS: Self = Self {
         stop: FrontStop::Checked,
         diagnostics: false,
         scheduler_retarget: false,
@@ -176,7 +223,7 @@ impl FrontOpts {
     // drift from a real check on test-fn visibility or contract validity. The
     // report re-elaborates and runs its own fip / replayable validators after this
     // stop, keeping their per-phase rendering.
-    pub(super) const REPORT: Self = Self {
+    const REPORT: Self = Self {
         stop: FrontStop::Checked,
         diagnostics: false,
         scheduler_retarget: false,
@@ -299,8 +346,9 @@ pub(super) fn run_front(
     src: &str,
     roots: &[Root],
     cfg: &Config,
-    opts: FrontOpts,
+    request: FrontRequest,
 ) -> Result<Front, Error> {
+    let opts = request.policy();
     let Some(session) = &cfg.session else {
         return run_front_uncached(src, roots, cfg, opts);
     };
@@ -487,7 +535,7 @@ fn prepare_resolved_front(
         |_| RowExtras::default(),
     )?;
     if opts.scheduler_retarget {
-        if let Some(target) = cfg.scheduler.retarget() {
+        if let Some(target) = cfg.scheduler().retarget() {
             retarget_cooperative(&mut program, target);
         }
     }
@@ -578,20 +626,9 @@ fn finish_front(
             src,
             || -> Result<(Core, TypedCore<TypedElaborated>), Error> {
                 let nt = newtype_ctors(&program);
-                let passes = effective_passes(
-                    cfg.opt,
-                    cfg.passes.as_ref(),
-                    PassStage::PreLowering,
-                    &cfg.disabled,
-                    &cfg.flags,
-                );
-                let (typed, _stats) =
-                    execute_typed_pre(typed, &verify_env, &nt, &passes).map_err(typed_pre_error)?;
-                let compatibility = run_opt_queries(&core, &nt, PassStage::PreLowering, cfg)?;
-                if typed.clone().erase() != compatibility {
-                    return Err(TypedCoreErasureFailure.into());
-                }
-                Ok((compatibility, typed))
+                let typed =
+                    run_typed_opt_queries(typed, &verify_env, &nt, PassStage::PreLowering, cfg)?;
+                Ok((typed.clone().erase(), typed))
             },
             |_| RowExtras::default(),
         )?
@@ -605,23 +642,10 @@ fn finish_front(
             core: typed,
             verify_env,
         }),
-        core: Some(ElaboratedCore(core)),
+        core: Some(ElaboratedCore::new(core)),
         #[cfg(feature = "native")]
-        identity_core: Some(ElaboratedCore(identity_core)),
+        identity_core: Some(ElaboratedCore::new(identity_core)),
     })
-}
-
-fn typed_pre_error(failure: PreExecutorFailure) -> Error {
-    match failure {
-        PreExecutorFailure::UnsupportedPass { occurrence, pass } => {
-            Error::InternalInvariant(format!(
-                "typed pre-lowering executor rejected {} at occurrence {occurrence}",
-                pass.name()
-            ))
-        }
-        PreExecutorFailure::Verification { violations, .. } => typed_verification_error(violations),
-        PreExecutorFailure::Specialize { failure, .. } => failure.into(),
-    }
 }
 
 // Run duplicate detection and surface each finding per the knob that governs it:
@@ -703,20 +727,20 @@ mod typed_pass_route_tests {
     fn front_retains_the_verified_full_typed_pre_result_across_session_clones() {
         let session = CompilerSession::new();
         let cfg = Config {
-            opt: OptLevel::O2,
             session: Some(session.clone()),
             ..Config::default()
-        };
+        }
+        .with_opt(OptLevel::O2);
         let source = concat!(
             "newtype Wrap = Wrap(Int)\n",
             "fn unwrap(w : Wrap) : Int = match w of { Wrap(n) => n }\n",
             "fn main() : Int = unwrap(Wrap(42))\n",
         );
 
-        let cold = run_front(source, &[], &cfg, FrontOpts::FULL)
+        let cold = run_front(source, &[], &cfg, FrontRequest::Full)
             .expect("cold front with retained typed pre result")
             .into_typed_pre();
-        let warm = run_front(source, &[], &cfg, FrontOpts::FULL)
+        let warm = run_front(source, &[], &cfg, FrontRequest::Full)
             .expect("warm front with retained typed pre result")
             .into_typed_pre();
         let (_, _, cold_compatibility, cold_typed, cold_env) = cold;
@@ -728,8 +752,8 @@ mod typed_pass_route_tests {
         crate::core::verify_typed_core(&warm_typed, &warm_env)
             .expect("cached retained pre result verifies");
         assert_eq!(cold_typed, warm_typed, "the cache clones typed witnesses");
-        assert_eq!(cold_typed.erase(), cold_compatibility.0);
-        assert_eq!(warm_typed.erase(), warm_compatibility.0);
+        assert_eq!(&cold_typed.erase(), &*cold_compatibility);
+        assert_eq!(&warm_typed.erase(), &*warm_compatibility);
     }
 
     #[test]
@@ -740,10 +764,10 @@ mod typed_pass_route_tests {
 
         let session = CompilerSession::new();
         let mut cfg = Config {
-            opt: OptLevel::O1,
             session: Some(session.clone()),
             ..Config::default()
-        };
+        }
+        .with_opt(OptLevel::O1);
         cfg.flags.compiler_cache = true;
         cfg.flags.store_path = Some(store.clone());
         let source = concat!(
@@ -753,7 +777,7 @@ mod typed_pass_route_tests {
             "fn main() : Int = untouched(unwrap(Wrap(42)))\n",
         );
 
-        run_front(source, &[], &cfg, FrontOpts::FULL).expect("cold typed frontend");
+        run_front(source, &[], &cfg, FrontRequest::Full).expect("cold typed frontend");
         let cold = session.decisions();
         assert!(cold.iter().any(|decision| {
             decision.kind == QueryKind::Optimizer
@@ -767,7 +791,7 @@ mod typed_pass_route_tests {
         );
 
         session.clear();
-        run_front(source, &[], &cfg, FrontOpts::FULL).expect("warm typed frontend");
+        run_front(source, &[], &cfg, FrontRequest::Full).expect("warm typed frontend");
         let warm = session.decisions();
         assert!(warm.iter().any(|decision| {
             decision.kind == QueryKind::Optimizer

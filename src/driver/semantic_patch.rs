@@ -729,7 +729,7 @@ fn verify_semantic_patch_behavior_inner(
     // Behavior receipts use the unoptimized interpreter oracle. Optimization
     // equivalence is a separate gate and cannot influence patch classification.
     let mut oracle_cfg = cfg.clone();
-    oracle_cfg.opt = crate::core::OptLevel::O0;
+    oracle_cfg.flags.opt_level = crate::core::OptLevel::O0;
     oracle_cfg.passes = None;
     let mut cases = Vec::with_capacity(corpus.cases.len());
     let mut first_divergence = None;
@@ -1109,8 +1109,8 @@ fn interface_delta(before: &ModuleInterface, after: &ModuleInterface) -> Interfa
         })
         .collect();
     InterfaceDelta {
-        before: before.digest.clone(),
-        after: after.digest.clone(),
+        before: before.digest.to_string(),
+        after: after.digest.to_string(),
         changed: before.digest != after.digest,
         rows,
     }

@@ -1,0 +1,16 @@
+-- The round-trip gate for the versioned syntax artifacts: read one artifact
+-- file, decode it into the typed Syntax vocabulary, re-encode, and print the
+-- exact bytes. arg(0) is the artifact path; arg(1) selects the family
+-- ("tokens" or "surface"). A refusal prints one structured error line.
+import Syntax.Codec (..)
+
+fn main() =
+  let text = read_file(arg(0))
+  if arg(1) == "tokens" then
+    match decode_tokens(text) of
+      Err(e) => println("decode error: {codec_error_message(e)}")
+      Ok(d) => println(encode_tokens(d))
+  else
+    match decode_surface(text) of
+      Err(e) => println("decode error: {codec_error_message(e)}")
+      Ok(d) => println(encode_surface(d))

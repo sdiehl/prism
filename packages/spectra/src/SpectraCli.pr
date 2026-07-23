@@ -1,0 +1,79 @@
+-- | Spectra's command grammar, built applicatively with Std `Cli`.
+
+import Cli as C
+
+import Cli (Command, Group, SubCmd)
+
+pub type SpectraCommand
+  = Check(String)
+  | Build(String, String, Bool)
+  | Clean(String)
+  deriving (Eq, Show)
+
+fn path_parser() =
+  C.arg_str_default(
+      "PATH",
+      "project directory (default: current directory)",
+      ".",
+    )
+
+fn check_parser() = C.map_p(\(path) -> Check(path), path_parser())
+
+fn clean_parser() = C.map_p(\(path) -> Clean(path), path_parser())
+
+fn build_parser() =
+  C.build3(
+      \(path) -> \(output) -> \(open) -> Build(path, output, open),
+      path_parser(),
+      C.opt_str("output", "o", "PDF", "output PDF name", "deck.pdf"),
+      C.switch("open", "", "open the resulting PDF"),
+    )
+
+pub let spectra_command : C.Command(SpectraCommand) =
+  Command {
+    name = "spectra",
+    about = "build typed Prism presentations through Typst",
+    body = Group([
+        SubCmd {
+          key = "check",
+          about = "check a deck and required tools",
+          sub = check_parser()
+        },
+        SubCmd {
+          key = "build",
+          about = "build inspectable Typst and a PDF",
+          sub = build_parser()
+        },
+        SubCmd {
+          key = "clean",
+          about = "remove only target/spectra",
+          sub = clean_parser()
+        },
+      ])
+  }
+
+pub fn parse_spectra_argv(argv : List(String)) : C.Outcome(SpectraCommand) =
+  C.run_argv(spectra_command, argv)
+
+test fn default_paths_are_current_directory() =
+  match parse_spectra_argv(["check"]) of
+    C.Parsed(Check(path)) =>
+      if path == "." then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn build_combines_path_output_and_open_applicatively() =
+  match (parse_spectra_argv(["build", "talk", "--output", "talk.pdf", "--open"])) of
+    C.Parsed(Build(path, output, open)) =>
+      if path == "talk" && output == "talk.pdf" && open then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn extra_paths_are_rejected() =
+  match parse_spectra_argv(["clean", "one", "two"]) of
+    C.BadUsage(_) => ()
+    _ => fail()

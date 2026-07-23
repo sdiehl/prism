@@ -1,0 +1,2440 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.14.0",
+  "source": {
+    "digest": "c025e67e984f56f67a95de415733f5b802c38515484bf092520c1cb9639993d1",
+    "text": "-- Verification surface: logic fns, contracts, totality, disciplines.\nlogic fn nonneg(x : Int) : Bool = x >= 0\n\nfn clamp(x : Int, lo : Int, hi : Int) : Int\n  requires lo <= hi\n  ensures |r| nonneg(r)\n  =\n    if x < lo then\n      lo\n    elif x > hi then\n      hi\n    else\n      x\n\ntotal fn down(n : Int) : Int\n  decreases n\n  =\n    if n <= 0 then\n      0\n    else\n      down(n - 1)\n\nassume total fn trusted(n : Int) : Int = n\n\ntest fn clamp_holds() = assert_eq(clamp(5, 0, 3), 3)\n\nfip fn swap(p : (Int, Int)) : (Int, Int) =\n  match p of\n    (a, b) => (b, a)\n"
+  },
+  "raw": [
+    {
+      "kind": "logic",
+      "span": [
+        70,
+        75
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        76,
+        78
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        79,
+        85
+      ],
+      "value": "nonneg"
+    },
+    {
+      "kind": "(",
+      "span": [
+        85,
+        86
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        86,
+        87
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ":",
+      "span": [
+        88,
+        89
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        90,
+        93
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        93,
+        94
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        95,
+        96
+      ]
+    },
+    {
+      "kind": "Bool",
+      "span": [
+        97,
+        101
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        102,
+        103
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        104,
+        105
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ">=",
+      "span": [
+        106,
+        108
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        109,
+        110
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        112,
+        114
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        115,
+        120
+      ],
+      "value": "clamp"
+    },
+    {
+      "kind": "(",
+      "span": [
+        120,
+        121
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        121,
+        122
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ":",
+      "span": [
+        123,
+        124
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        125,
+        128
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        128,
+        129
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        130,
+        132
+      ],
+      "value": "lo"
+    },
+    {
+      "kind": ":",
+      "span": [
+        133,
+        134
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        135,
+        138
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        138,
+        139
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        140,
+        142
+      ],
+      "value": "hi"
+    },
+    {
+      "kind": ":",
+      "span": [
+        143,
+        144
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        145,
+        148
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        148,
+        149
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        150,
+        151
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        152,
+        155
+      ]
+    },
+    {
+      "kind": "requires",
+      "span": [
+        158,
+        166
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        167,
+        169
+      ],
+      "value": "lo"
+    },
+    {
+      "kind": "<=",
+      "span": [
+        170,
+        172
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        173,
+        175
+      ],
+      "value": "hi"
+    },
+    {
+      "kind": "ensures",
+      "span": [
+        178,
+        185
+      ]
+    },
+    {
+      "kind": "|",
+      "span": [
+        186,
+        187
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        187,
+        188
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "|",
+      "span": [
+        188,
+        189
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        190,
+        196
+      ],
+      "value": "nonneg"
+    },
+    {
+      "kind": "(",
+      "span": [
+        196,
+        197
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        197,
+        198
+      ],
+      "value": "r"
+    },
+    {
+      "kind": ")",
+      "span": [
+        198,
+        199
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        202,
+        203
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        208,
+        210
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        211,
+        212
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "<",
+      "span": [
+        213,
+        214
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        215,
+        217
+      ],
+      "value": "lo"
+    },
+    {
+      "kind": "then",
+      "span": [
+        218,
+        222
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        229,
+        231
+      ],
+      "value": "lo"
+    },
+    {
+      "kind": "elif",
+      "span": [
+        236,
+        240
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        241,
+        242
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ">",
+      "span": [
+        243,
+        244
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        245,
+        247
+      ],
+      "value": "hi"
+    },
+    {
+      "kind": "then",
+      "span": [
+        248,
+        252
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        259,
+        261
+      ],
+      "value": "hi"
+    },
+    {
+      "kind": "else",
+      "span": [
+        266,
+        270
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        277,
+        278
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        280,
+        285
+      ],
+      "value": "total"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        286,
+        288
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        289,
+        293
+      ],
+      "value": "down"
+    },
+    {
+      "kind": "(",
+      "span": [
+        293,
+        294
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        294,
+        295
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ":",
+      "span": [
+        296,
+        297
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        298,
+        301
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        301,
+        302
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        303,
+        304
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        305,
+        308
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        311,
+        320
+      ],
+      "value": "decreases"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        321,
+        322
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "=",
+      "span": [
+        325,
+        326
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        331,
+        333
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        334,
+        335
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "<=",
+      "span": [
+        336,
+        338
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        339,
+        340
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "then",
+      "span": [
+        341,
+        345
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        352,
+        353
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "else",
+      "span": [
+        358,
+        362
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        369,
+        373
+      ],
+      "value": "down"
+    },
+    {
+      "kind": "(",
+      "span": [
+        373,
+        374
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        374,
+        375
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "-",
+      "span": [
+        376,
+        377
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        378,
+        379
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        379,
+        380
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        382,
+        388
+      ],
+      "value": "assume"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        389,
+        394
+      ],
+      "value": "total"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        395,
+        397
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        398,
+        405
+      ],
+      "value": "trusted"
+    },
+    {
+      "kind": "(",
+      "span": [
+        405,
+        406
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        406,
+        407
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ":",
+      "span": [
+        408,
+        409
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        410,
+        413
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        413,
+        414
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        415,
+        416
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        417,
+        420
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        421,
+        422
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        423,
+        424
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        426,
+        430
+      ],
+      "value": "test"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        431,
+        433
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        434,
+        445
+      ],
+      "value": "clamp_holds"
+    },
+    {
+      "kind": "(",
+      "span": [
+        445,
+        446
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        446,
+        447
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        448,
+        449
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        450,
+        459
+      ],
+      "value": "assert_eq"
+    },
+    {
+      "kind": "(",
+      "span": [
+        459,
+        460
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        460,
+        465
+      ],
+      "value": "clamp"
+    },
+    {
+      "kind": "(",
+      "span": [
+        465,
+        466
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        466,
+        467
+      ],
+      "value": "5"
+    },
+    {
+      "kind": ",",
+      "span": [
+        467,
+        468
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        469,
+        470
+      ],
+      "value": "0"
+    },
+    {
+      "kind": ",",
+      "span": [
+        470,
+        471
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        472,
+        473
+      ],
+      "value": "3"
+    },
+    {
+      "kind": ")",
+      "span": [
+        473,
+        474
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        474,
+        475
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        476,
+        477
+      ],
+      "value": "3"
+    },
+    {
+      "kind": ")",
+      "span": [
+        477,
+        478
+      ]
+    },
+    {
+      "kind": "fip",
+      "span": [
+        480,
+        483
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        484,
+        486
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        487,
+        491
+      ],
+      "value": "swap"
+    },
+    {
+      "kind": "(",
+      "span": [
+        491,
+        492
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        492,
+        493
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ":",
+      "span": [
+        494,
+        495
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        496,
+        497
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        497,
+        500
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        500,
+        501
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        502,
+        505
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        505,
+        506
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        506,
+        507
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        508,
+        509
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        510,
+        511
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        511,
+        514
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        514,
+        515
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        516,
+        519
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        519,
+        520
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        521,
+        522
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        525,
+        530
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        531,
+        532
+      ],
+      "value": "p"
+    },
+    {
+      "kind": "of",
+      "span": [
+        533,
+        535
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        540,
+        541
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        541,
+        542
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        542,
+        543
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        544,
+        545
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ")",
+      "span": [
+        545,
+        546
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        547,
+        549
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        550,
+        551
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        551,
+        552
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ",",
+      "span": [
+        552,
+        553
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        554,
+        555
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        555,
+        556
+      ]
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        70,
+        70
+      ]
+    },
+    {
+      "kind": "logic",
+      "span": [
+        70,
+        75
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        76,
+        78
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        79,
+        85
+      ],
+      "value": "nonneg"
+    },
+    {
+      "kind": "(",
+      "span": [
+        85,
+        86
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        86,
+        87
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ":",
+      "span": [
+        88,
+        89
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        90,
+        93
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        93,
+        94
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        95,
+        96
+      ]
+    },
+    {
+      "kind": "Bool",
+      "span": [
+        97,
+        101
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        102,
+        103
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        104,
+        105
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ">=",
+      "span": [
+        106,
+        108
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        109,
+        110
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        110,
+        110
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        112,
+        114
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        115,
+        120
+      ],
+      "value": "clamp"
+    },
+    {
+      "kind": "(",
+      "span": [
+        120,
+        121
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        121,
+        122
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ":",
+      "span": [
+        123,
+        124
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        125,
+        128
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        128,
+        129
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        130,
+        132
+      ],
+      "value": "lo"
+    },
+    {
+      "kind": ":",
+      "span": [
+        133,
+        134
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        135,
+        138
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        138,
+        139
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        140,
+        142
+      ],
+      "value": "hi"
+    },
+    {
+      "kind": ":",
+      "span": [
+        143,
+        144
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        145,
+        148
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        148,
+        149
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        150,
+        151
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        152,
+        155
+      ]
+    },
+    {
+      "kind": "requires",
+      "span": [
+        158,
+        166
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        167,
+        169
+      ],
+      "value": "lo"
+    },
+    {
+      "kind": "<=",
+      "span": [
+        170,
+        172
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        173,
+        175
+      ],
+      "value": "hi"
+    },
+    {
+      "kind": "ensures",
+      "span": [
+        178,
+        185
+      ]
+    },
+    {
+      "kind": "|",
+      "span": [
+        186,
+        187
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        187,
+        188
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "|",
+      "span": [
+        188,
+        189
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        190,
+        196
+      ],
+      "value": "nonneg"
+    },
+    {
+      "kind": "(",
+      "span": [
+        196,
+        197
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        197,
+        198
+      ],
+      "value": "r"
+    },
+    {
+      "kind": ")",
+      "span": [
+        198,
+        199
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        202,
+        203
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        208,
+        208
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        208,
+        210
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        211,
+        212
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "<",
+      "span": [
+        213,
+        214
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        215,
+        217
+      ],
+      "value": "lo"
+    },
+    {
+      "kind": "then",
+      "span": [
+        218,
+        222
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        229,
+        229
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        229,
+        231
+      ],
+      "value": "lo"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        231,
+        231
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        231,
+        231
+      ]
+    },
+    {
+      "kind": "elif",
+      "span": [
+        236,
+        240
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        241,
+        242
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ">",
+      "span": [
+        243,
+        244
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        245,
+        247
+      ],
+      "value": "hi"
+    },
+    {
+      "kind": "then",
+      "span": [
+        248,
+        252
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        259,
+        259
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        259,
+        261
+      ],
+      "value": "hi"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        261,
+        261
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        261,
+        261
+      ]
+    },
+    {
+      "kind": "else",
+      "span": [
+        266,
+        270
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        277,
+        277
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        277,
+        278
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        278,
+        278
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        278,
+        278
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        278,
+        278
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        280,
+        285
+      ],
+      "value": "total"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        286,
+        288
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        289,
+        293
+      ],
+      "value": "down"
+    },
+    {
+      "kind": "(",
+      "span": [
+        293,
+        294
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        294,
+        295
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ":",
+      "span": [
+        296,
+        297
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        298,
+        301
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        301,
+        302
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        303,
+        304
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        305,
+        308
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        311,
+        320
+      ],
+      "value": "decreases"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        321,
+        322
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "=",
+      "span": [
+        325,
+        326
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        331,
+        331
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        331,
+        333
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        334,
+        335
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "<=",
+      "span": [
+        336,
+        338
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        339,
+        340
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "then",
+      "span": [
+        341,
+        345
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        352,
+        352
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        352,
+        353
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        353,
+        353
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        353,
+        353
+      ]
+    },
+    {
+      "kind": "else",
+      "span": [
+        358,
+        362
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        369,
+        369
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        369,
+        373
+      ],
+      "value": "down"
+    },
+    {
+      "kind": "(",
+      "span": [
+        373,
+        374
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        374,
+        375
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "-",
+      "span": [
+        376,
+        377
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        378,
+        379
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        379,
+        380
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        380,
+        380
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        380,
+        380
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        380,
+        380
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        382,
+        388
+      ],
+      "value": "assume"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        389,
+        394
+      ],
+      "value": "total"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        395,
+        397
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        398,
+        405
+      ],
+      "value": "trusted"
+    },
+    {
+      "kind": "(",
+      "span": [
+        405,
+        406
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        406,
+        407
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ":",
+      "span": [
+        408,
+        409
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        410,
+        413
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        413,
+        414
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        415,
+        416
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        417,
+        420
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        421,
+        422
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        423,
+        424
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        424,
+        424
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        426,
+        430
+      ],
+      "value": "test"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        431,
+        433
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        434,
+        445
+      ],
+      "value": "clamp_holds"
+    },
+    {
+      "kind": "(",
+      "span": [
+        445,
+        446
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        446,
+        447
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        448,
+        449
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        450,
+        459
+      ],
+      "value": "assert_eq"
+    },
+    {
+      "kind": "(",
+      "span": [
+        459,
+        460
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        460,
+        465
+      ],
+      "value": "clamp"
+    },
+    {
+      "kind": "(",
+      "span": [
+        465,
+        466
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        466,
+        467
+      ],
+      "value": "5"
+    },
+    {
+      "kind": ",",
+      "span": [
+        467,
+        468
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        469,
+        470
+      ],
+      "value": "0"
+    },
+    {
+      "kind": ",",
+      "span": [
+        470,
+        471
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        472,
+        473
+      ],
+      "value": "3"
+    },
+    {
+      "kind": ")",
+      "span": [
+        473,
+        474
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        474,
+        475
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        476,
+        477
+      ],
+      "value": "3"
+    },
+    {
+      "kind": ")",
+      "span": [
+        477,
+        478
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        478,
+        478
+      ]
+    },
+    {
+      "kind": "fip",
+      "span": [
+        480,
+        483
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        484,
+        486
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        487,
+        491
+      ],
+      "value": "swap"
+    },
+    {
+      "kind": "(",
+      "span": [
+        491,
+        492
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        492,
+        493
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ":",
+      "span": [
+        494,
+        495
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        496,
+        497
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        497,
+        500
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        500,
+        501
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        502,
+        505
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        505,
+        506
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        506,
+        507
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        508,
+        509
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        510,
+        511
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        511,
+        514
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        514,
+        515
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        516,
+        519
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        519,
+        520
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        521,
+        522
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        525,
+        525
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        525,
+        530
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        531,
+        532
+      ],
+      "value": "p"
+    },
+    {
+      "kind": "of",
+      "span": [
+        533,
+        535
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        540,
+        540
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        540,
+        541
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        541,
+        542
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        542,
+        543
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        544,
+        545
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ")",
+      "span": [
+        545,
+        546
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        547,
+        549
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        550,
+        551
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        551,
+        552
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ",",
+      "span": [
+        552,
+        553
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        554,
+        555
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        555,
+        556
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        556,
+        556
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        556,
+        556
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        556,
+        556
+      ]
+    }
+  ],
+  "trivia": [
+    {
+      "kind": "comment",
+      "span": [
+        0,
+        69
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        110,
+        112
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        278,
+        280
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        380,
+        382
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        424,
+        426
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        478,
+        480
+      ]
+    }
+  ]
+}

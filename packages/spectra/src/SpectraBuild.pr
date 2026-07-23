@@ -1,0 +1,212 @@
+-- | Standalone Spectra build orchestration, written in Prism.
+--
+-- The executable treats `prism` and `typst` as explicit external tools. Deck
+-- construction and Typst lowering remain pure package code; this module is the
+-- narrow host shell that captures the framed envelope and writes artifacts.
+
+import Data.String (contains, ends_with, starts_with, str_of_char, trim)
+
+import Data.Result (map_err)
+
+import Json (Json, JObj, JStr, JInt, decode, encode, json_error_message)
+
+pub type DeckEnvelope = DeckEnvelope {
+  source: String,
+  logical_slides: Int,
+  physical_pages: Int,
+  title: String
+} deriving (Eq, Show)
+
+let envelope_prefix : String = "SPECTRA/1 "
+
+fn quote_body(value : String, i : Int, acc : String) : String =
+  if i >= str_len(value) then
+    acc
+  elif char_at(value, i) == 39 then
+    quote_body(value, i + 1, "{acc}'\\''")
+  else
+    quote_body(value, i + 1, "{acc}{str_of_char(chr(char_at(value, i)))}")
+
+-- | Quote one opaque argument for the POSIX shell used by `system`.
+pub fn shell_quote(value : String) : String = "'{quote_body(value, 0, "")}'"
+
+fn join_path(root : String, rest : String) : String =
+  if ends_with("/", root) then
+    "{root}{rest}"
+  else
+    "{root}/{rest}"
+
+fn field(name : String, fields : List((String, Json))) : Option(Json) =
+  match fields of
+    Nil => None
+    Cons((key, value), rest) =>
+      if key == name then
+        Some(value)
+      else
+        field(name, rest)
+
+fn string_field(
+  name : String,
+  fields : List((String, Json))
+) : Result(String, String) =
+  match field(name, fields) of
+    Some(JStr(value)) => Ok(value)
+    _ => Err("deck envelope field '{name}' must be a string")
+
+fn int_field(
+  name : String,
+  fields : List((String, Json))
+) : Result(Int, String) =
+  match field(name, fields) of
+    Some(JInt(value)) => Ok(value)
+    _ => Err("deck envelope field '{name}' must be an integer")
+
+fn envelope_fields(fields : List((String, Json))) : Result(DeckEnvelope, String) =
+  let format = string_field("format", fields)?
+  let document_format = string_field("document_format", fields)?
+  let source = string_field("source", fields)?
+  let logical = int_field("logical_slides", fields)?
+  let physical = int_field("physical_pages", fields)?
+  let title = string_field("title", fields)?
+  if format /= "spectra-envelope-v1" then
+    Err("unsupported deck envelope '{format}'")
+  elif document_format /= "spectra-typst-document-v1" then
+    Err("unsupported Typst document envelope '{document_format}'")
+  elif logical <= 0 || physical < logical then
+    Err("invalid logical/physical page counts")
+  else
+    Ok(
+        DeckEnvelope {
+          source = source,
+          logical_slides = logical,
+          physical_pages = physical,
+          title = title
+        },
+      )
+
+pub fn parse_envelope(stdout : String) : Result((DeckEnvelope, String), String) =
+  let framed = trim(stdout)
+  if not(starts_with(envelope_prefix, framed)) then
+    Err("expected one 'SPECTRA/1 ' envelope; does main call Spectra.emit_deck?")
+  else
+    let body = substring(
+        framed,
+        str_len(envelope_prefix),
+        str_len(framed) - str_len(envelope_prefix),
+      )
+    let decoded = map_err(
+        \(err) -> "invalid deck envelope JSON: {json_error_message(err)}",
+        decode(body),
+      )?
+    match decoded of
+      JObj(fields) =>
+        let envelope = envelope_fields(fields)?
+        Ok((envelope, encode(JObj(fields))))
+      _ => Err("deck envelope must be a JSON object")
+
+fn run(label : String, command : String) : Result(Unit, String) ! {IO} =
+  let status = system(command)
+  if status == 0 then
+    Ok(())
+  else
+    Err("{label} failed with exit status {status}")
+
+fn safe_output(name : String) : Bool =
+  name /= ""
+    && ends_with(".pdf", name)
+    && not(contains("/", name))
+    && not(contains("\\", name))
+    && name /= ".pdf"
+
+fn write_text(path : String, body : String) : Result(Unit, String) ! {IO} =
+  map_err(
+      \(message) -> "cannot write {path}: {message}",
+      write_file(path, body),
+    )
+
+fn check_steps(project : String) : Result(Unit, String) ! {IO} =
+  run("Prism check", "prism check {shell_quote(project)}")?
+  run("Typst discovery", "typst --version")?
+  Ok(())
+
+pub fn check_project(project : String) : Int ! {IO, Output} =
+  match check_steps(project) of
+    Ok(_) =>
+      out_println("Spectra project is ready")
+      0
+    Err(message) =>
+      eprintln("spectra: {message}")
+      1
+
+fn build_steps(
+  project : String,
+  output : String
+) : Result((DeckEnvelope, String), String) ! {FileSystem, IO} =
+  let target = join_path(project, "target/spectra")
+  let evaluator = join_path(target, "deck-evaluator")
+  let captured = join_path(target, "deck.stdout")
+  let deck_path = join_path(target, "deck.deck.json")
+  let typst_path = join_path(target, "deck.typ")
+  let pdf_path = join_path(target, output)
+  run("creating target/spectra", "mkdir -p -- {shell_quote(target)}")?
+  run(
+      "deck compilation",
+      "prism build {shell_quote(project)} --out {shell_quote(evaluator)}",
+    )?
+  run("deck evaluation", "{shell_quote(evaluator)} > {shell_quote(captured)}")?
+  let parsed = parse_envelope(read_file(captured))?
+  let (envelope, envelope_json) = parsed
+  write_text(deck_path, "{envelope_json}\n")?
+  write_text(typst_path, envelope.source)?
+  run(
+      "Typst compilation (generated source retained at {typst_path})",
+      "typst compile {shell_quote(typst_path)} {shell_quote(pdf_path)}",
+    )?
+  Ok((envelope, pdf_path))
+
+pub fn build_project(
+  project : String,
+  output : String,
+  open : Bool
+) : Int ! {FileSystem, IO, Output} =
+  if not(safe_output(output)) then
+    eprintln("spectra: --output must be a plain relative .pdf filename")
+    2
+  else
+    match build_steps(project, output) of
+      Err(message) =>
+        eprintln("spectra: {message}")
+        1
+      Ok((envelope, pdf_path)) =>
+        out_println(
+            "built {pdf_path} ({envelope.logical_slides} logical slides, {envelope.physical_pages} physical pages)",
+          )
+        if open then
+          let _opened = system(
+              "open {shell_quote(pdf_path)} 2>/dev/null || xdg-open {shell_quote(pdf_path)}",
+            )
+          ()
+        0
+
+pub fn clean_project(project : String) : Int ! {IO} =
+  if project == "" || project == "/" then
+    eprintln("spectra: refusing unsafe project path")
+    2
+  else
+    let target = join_path(project, "target/spectra")
+    match run("clean", "rm -rf -- {shell_quote(target)}") of
+      Ok(_) => 0
+      Err(message) =>
+        eprintln("spectra: {message}")
+        1
+
+test fn shell_arguments_are_single_quoted() =
+  if shell_quote("a'b c") == "'a'\\''b c'" then
+    ()
+  else
+    fail()
+
+test fn framed_envelope_rejects_plain_output() =
+  match parse_envelope("debug output") of
+    Err(_) => ()
+    Ok(_) => fail()

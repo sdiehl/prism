@@ -1,7 +1,7 @@
 fn tick(ev@0, ev@1, st@) =
   (force ev@0)(st@) to 0@st
-  st@ + 1 to t@735
-  (force ev@1)(t@735, 0@st) to 1@st
+  st@ + 1 to t@737
+  (force ev@1)(t@737, 0@st) to 1@st
   return 1@st
 fn counter(ev@0, ev@1, st@) =
   tick(ev@0, ev@1, st@) to 2@st

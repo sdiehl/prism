@@ -51,7 +51,7 @@ fn execution_bundle(src: &str, roots: &[Root], cfg: &Config) -> Result<String, E
         ("stdlib".to_string(), stdlib),
         (
             "scheduler".to_string(),
-            crate::core::hash_str(cfg.scheduler.label()),
+            crate::core::hash_str(cfg.scheduler().label()),
         ),
         (
             "runtime".to_string(),
@@ -348,7 +348,7 @@ pub fn observe_lowered_run_on(
     let lowered = crate::core::pp_core_pretty(&core);
     let mut output = Vec::new();
     let mut input = Cursor::new(Vec::new());
-    let run = run_observed_lowered_with_args(&core.0, &mut output, &mut input, Vec::new());
+    let run = run_observed_lowered_with_args(&core, &mut output, &mut input, Vec::new());
     Ok((ObservationTrace::new(run.observations), lowered))
 }
 

@@ -1,0 +1,8 @@
+[package]
+name = "spectra"
+
+[bin]
+entry = "src/Main.pr"
+
+[dependencies]
+typst = { path = "../typst" }

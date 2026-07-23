@@ -1,5 +1,5 @@
-// SMT contract surface (Lane V): `logic fn` declarations and `requires`/`ensures`
-// clauses format canonically and round-trip. The `=` is pushed onto its own
+// SMT contract surface: `logic fn` declarations and `requires`/`ensures` clauses
+// format canonically and round-trip. The `=` is pushed onto its own
 // indented line so the offside rule cannot shear it off at column 0, and layout
 // idempotence (`format(format(x)) == format(x)`) rides along.
 
@@ -56,4 +56,16 @@ fn contextual_words_are_reserved_but_body_shapes_are_free() {
     // still formats byte-identically to before the feature.
     let src = "fn add(a : Int, b : Int) : Int = a + b\n";
     assert_eq!(fmt(src), src);
+}
+
+#[test]
+fn open_declaration_effect_row_round_trips() {
+    // An effect-forwarding runner may name the row it forwards with an open
+    // declared effect row (`! {A | e}`); the tail must survive formatting, or the
+    // annotation silently closes on a reprint. The bare-tail form (`! {| e}`)
+    // renders with a leading space and must stay idempotent.
+    let labelled = "fn run_it(action : () -> a ! {Beep | e}) : a ! {Beep | e} = action()\n";
+    assert_eq!(fmt(labelled), labelled);
+    let bare = "fn run_it(action : () -> a ! {Beep | e}) : a ! { | e} = action()\n";
+    assert_eq!(fmt(bare), bare);
 }

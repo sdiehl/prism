@@ -1,0 +1,29 @@
+-- Verification surface: logic fns, contracts, totality, disciplines.
+logic fn nonneg(x : Int) : Bool = x >= 0
+
+fn clamp(x : Int, lo : Int, hi : Int) : Int
+  requires lo <= hi
+  ensures |r| nonneg(r)
+  =
+    if x < lo then
+      lo
+    elif x > hi then
+      hi
+    else
+      x
+
+total fn down(n : Int) : Int
+  decreases n
+  =
+    if n <= 0 then
+      0
+    else
+      down(n - 1)
+
+assume total fn trusted(n : Int) : Int = n
+
+test fn clamp_holds() = assert_eq(clamp(5, 0, 3), 3)
+
+fip fn swap(p : (Int, Int)) : (Int, Int) =
+  match p of
+    (a, b) => (b, a)

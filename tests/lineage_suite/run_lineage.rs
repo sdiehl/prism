@@ -353,7 +353,7 @@ fn why_output_unknown_selector_lists_the_available_outputs() {
 // The top-level `prism why-output`: explains an artifact purely from its sidecar,
 // without reading source. With no output selector it defaults to the sidecar's
 // primary output (stdout for a run), and it resolves the sidecar from the artifact
-// path. This is the Future VI verb over the existing lineage graph.
+// path. It reads only the existing lineage graph.
 #[test]
 fn why_output_top_level_defaults_to_the_primary_output() {
     let tmp = TempDir::new("why-top");

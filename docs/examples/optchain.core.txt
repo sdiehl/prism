@@ -1,19 +1,19 @@
 fn zip_of(a) =
   handle
-    return a to t@733
-    force(t@733) to t@734
-    case t@734 of
-      Addr(t@735) =>
-        return t@735
-    to t@736
-    force(t@736) to t@737
-    case t@737 of
-      City(t@738) =>
-        return t@738
+    return a to t@735
+    force(t@735) to t@736
+    case t@736 of
+      Addr(t@737) =>
+        return t@737
+    to t@738
+    force(t@738) to t@739
+    case t@739 of
+      City(t@740) =>
+        return t@740
   with
     fail(k@) =>
-      return 0 to t@739
-      return 1 to t@740
-      t@739 - t@740
+      return 0 to t@741
+      return 1 to t@742
+      t@741 - t@742
     return r@ =>
       return r@

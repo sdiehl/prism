@@ -17,12 +17,38 @@ use crate::types::is_or_null_element;
 use crate::types::ty::{EffRow, Label, Type, LIST, NUM_CLASS, SHOW_CLASS};
 use crate::wired::Indexable;
 
+// Red zone / segment size for the checker's per-node recursion, matching the
+// desugar and typed-Core-builder guards.
+const TC_MIN_STACK: usize = 4 * 1024 * 1024;
+const TC_GROW_STACK: usize = 8 * 1024 * 1024;
+
 mod decl;
 mod defaulting;
 mod diagnostics;
 mod numeric;
 mod paths;
 mod records;
+
+// Whether two schemes are the same reference up to the outermost function type's
+// latent effect row. A constrained sibling in a recursion group is exposed with
+// the group's shared row existential on its arrow (so its effects propagate to a
+// caller, the SCC effect-witness fix), while its registered `constrained` scheme
+// carries the pre-group row; they are still the same polymorphic reference. The
+// dictionary-instantiation trigger must see through that one row difference, or
+// a mutually-recursive constrained call records no dictionary evidence and
+// elaboration hits `no dict record`. Only the top arrow's row is neutralised; a
+// monomorphic or instantiated use still differs structurally and is unaffected.
+fn same_modulo_latent_row(a: &Type, b: &Type) -> bool {
+    fn bare(t: &Type) -> Type {
+        match t {
+            Type::Forall(v, body) => Type::Forall(*v, Box::new(bare(body))),
+            Type::RowForall(v, body) => Type::RowForall(*v, Box::new(bare(body))),
+            Type::Fun(ps, _, r) => Type::Fun(ps.clone(), EffRow::Empty, r.clone()),
+            other => other.clone(),
+        }
+    }
+    bare(a) == bare(b)
+}
 
 impl Tc<'_> {
     // Record a syntactically direct operation. This is the only source of a
@@ -99,6 +125,21 @@ impl Tc<'_> {
     }
 
     fn check_node(&mut self, env: &Env, e: &S<Expr<Core>>, ty: &Type) -> Result<(), TypeError> {
+        // Checking recurses per surface node, so a long statement block (a
+        // right-nested `Let` chain) is deep recursion; grow stack segments
+        // inside the recursion, same discipline as desugar and the typed-Core
+        // builder.
+        stacker::maybe_grow(TC_MIN_STACK, TC_GROW_STACK, || {
+            self.check_node_inner(env, e, ty)
+        })
+    }
+
+    fn check_node_inner(
+        &mut self,
+        env: &Env,
+        e: &S<Expr<Core>>,
+        ty: &Type,
+    ) -> Result<(), TypeError> {
         let span = e.span;
         let id = e.id;
         match (&e.node, ty) {
@@ -412,6 +453,14 @@ impl Tc<'_> {
     }
 
     fn synth_node(&mut self, env: &Env, e: &S<Expr<Core>>) -> Result<Type, TypeError> {
+        // See `check_node`: the same per-node recursion depth applies on the
+        // synthesis path.
+        stacker::maybe_grow(TC_MIN_STACK, TC_GROW_STACK, || {
+            self.synth_node_inner(env, e)
+        })
+    }
+
+    fn synth_node_inner(&mut self, env: &Env, e: &S<Expr<Core>>) -> Result<Type, TypeError> {
         let span = e.span;
         let id = e.id;
         match &e.node {
@@ -456,8 +505,17 @@ impl Tc<'_> {
                     )
                 })?;
                 if let Some((scheme, cs)) = self.constrained.get(&Sym::from(x)).cloned() {
-                    if t == scheme && !cs.is_empty() {
-                        return Ok(self.instantiate_constrained(&scheme, &cs, id, span, None));
+                    if same_modulo_latent_row(&t, &scheme) && !cs.is_empty() {
+                        // For a mutually-recursive constrained sibling the env-visible
+                        // scheme `t` carries the recursion group's shared row
+                        // existential and the registered `scheme` does not;
+                        // instantiate from `t` so the sibling's effects propagate to
+                        // this caller (matching the unconstrained sibling path),
+                        // while its dictionary evidence is still recorded. For an
+                        // ordinary finalized constrained reference `t == scheme`, so
+                        // this is a no-op.
+                        let from = if t == scheme { &scheme } else { &t };
+                        return Ok(self.instantiate_constrained(from, &cs, id, span, None));
                     }
                 }
                 if let Some(s) = &self.cur_self {

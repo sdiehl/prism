@@ -1,0 +1,1489 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.14.0",
+  "source": {
+    "digest": "ab952b49b82a4dd4b2e6444d34d5d54165723e98787a7645979ffd84d00f4e26",
+    "text": "-- Expression forms: operators, records, paths, ranges, comprehensions.\ntype Wheel = Wheel { psi: Float }\n\ntype Car = Car { name: String, wheels: List(Wheel) }\n\nfn arith(x : Int, y : Int) : Int = -x + y * 2 - x % 3 + x ^ 2\n\nfn logic_ops(a : Bool, b : Bool) : Bool = a && b || not(a)\n\nfn compare(x : Int, y : Int) : Bool =\n  x < y && x <= y && x > y || x >= y || x == y || x /= y\n\nfn pipes(xs : List(Int)) : Int = xs |> map(\\(v) -> v + 1) |> length\n\nfn composed(f : (Int) -> Int, g : (Int) -> Int) : (Int) -> Int = f >> g << f\n\nfn records(c : Car) : Car =\n  let bumped =\n    { c\n    | name = \"vx\"\n    , wheels.each.psi ~ \\(p) -> p + 1.0\n    }\n  { bumped | wheels[0].psi = 30.0 }\n\nfn reads(c : Car) : List(Float) = c.[wheels.each.psi]\n\nfn collections() : List(Int) =\n  let squares = [v * v for v in [1..5], if v % 2 == 1, let w = v + 1]\n  let pair = (1, \"two\")\n  let evens = [2, 4..10]\n  append(squares, evens)\n\nfn stringy(name : String) : String = \"hello {name}, {1 + 2} wide\"\n\nfn indexed(xs : List(Int)) : Int = xs[0] ?? 0\n\nfn chained(c : Option(Car)) : String = c?.name ?? \"none\"\n\nfn multikey(t : Tensor(Float)) : Float = t[1, 2]\n\nfn holey(x : Int) : Int = ?fill\n"
+  },
+  "items": [
+    {
+      "ctors": [
+        {
+          "fields": [
+            {
+              "name": "psi",
+              "ty": {
+                "kind": "float"
+              }
+            }
+          ],
+          "name": "Wheel"
+        }
+      ],
+      "kind": "data",
+      "name": "Wheel",
+      "span": [
+        72,
+        105
+      ]
+    },
+    {
+      "ctors": [
+        {
+          "fields": [
+            {
+              "name": "name",
+              "ty": {
+                "kind": "str"
+              }
+            },
+            {
+              "name": "wheels",
+              "ty": {
+                "args": [
+                  {
+                    "kind": "con",
+                    "name": "Wheel"
+                  }
+                ],
+                "kind": "con",
+                "name": "List"
+              }
+            }
+          ],
+          "name": "Car"
+        }
+      ],
+      "kind": "data",
+      "name": "Car",
+      "span": [
+        107,
+        159
+      ]
+    },
+    {
+      "body": {
+        "kind": "bin",
+        "lhs": {
+          "kind": "bin",
+          "lhs": {
+            "kind": "bin",
+            "lhs": {
+              "expr": {
+                "kind": "var",
+                "name": "x",
+                "span": [
+                  197,
+                  198
+                ]
+              },
+              "kind": "neg",
+              "span": [
+                196,
+                198
+              ]
+            },
+            "op": "+",
+            "rhs": {
+              "kind": "bin",
+              "lhs": {
+                "kind": "var",
+                "name": "y",
+                "span": [
+                  201,
+                  202
+                ]
+              },
+              "op": "*",
+              "rhs": {
+                "kind": "int",
+                "span": [
+                  205,
+                  206
+                ],
+                "value": "2"
+              },
+              "span": [
+                201,
+                206
+              ]
+            },
+            "span": [
+              196,
+              206
+            ]
+          },
+          "op": "-",
+          "rhs": {
+            "kind": "bin",
+            "lhs": {
+              "kind": "var",
+              "name": "x",
+              "span": [
+                209,
+                210
+              ]
+            },
+            "op": "%",
+            "rhs": {
+              "kind": "int",
+              "span": [
+                213,
+                214
+              ],
+              "value": "3"
+            },
+            "span": [
+              209,
+              214
+            ]
+          },
+          "span": [
+            196,
+            214
+          ]
+        },
+        "op": "+",
+        "rhs": {
+          "kind": "bin",
+          "lhs": {
+            "kind": "var",
+            "name": "x",
+            "span": [
+              217,
+              218
+            ]
+          },
+          "op": "^",
+          "rhs": {
+            "kind": "int",
+            "span": [
+              221,
+              222
+            ],
+            "value": "2"
+          },
+          "span": [
+            217,
+            222
+          ]
+        },
+        "span": [
+          196,
+          222
+        ]
+      },
+      "kind": "fn",
+      "name": "arith",
+      "params": [
+        {
+          "name": "x",
+          "ty": {
+            "kind": "int"
+          }
+        },
+        {
+          "name": "y",
+          "ty": {
+            "kind": "int"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "int"
+      },
+      "span": [
+        161,
+        222
+      ]
+    },
+    {
+      "body": {
+        "kind": "bin",
+        "lhs": {
+          "kind": "bin",
+          "lhs": {
+            "kind": "var",
+            "name": "a",
+            "span": [
+              266,
+              267
+            ]
+          },
+          "op": "&&",
+          "rhs": {
+            "kind": "var",
+            "name": "b",
+            "span": [
+              271,
+              272
+            ]
+          },
+          "span": [
+            266,
+            272
+          ]
+        },
+        "op": "||",
+        "rhs": {
+          "args": [
+            {
+              "kind": "var",
+              "name": "a",
+              "span": [
+                280,
+                281
+              ]
+            }
+          ],
+          "head": {
+            "kind": "var",
+            "name": "not",
+            "span": [
+              276,
+              279
+            ]
+          },
+          "kind": "call",
+          "span": [
+            276,
+            282
+          ]
+        },
+        "span": [
+          266,
+          282
+        ]
+      },
+      "kind": "fn",
+      "name": "logic_ops",
+      "params": [
+        {
+          "name": "a",
+          "ty": {
+            "kind": "bool"
+          }
+        },
+        {
+          "name": "b",
+          "ty": {
+            "kind": "bool"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "bool"
+      },
+      "span": [
+        224,
+        282
+      ]
+    },
+    {
+      "body": {
+        "kind": "bin",
+        "lhs": {
+          "kind": "bin",
+          "lhs": {
+            "kind": "bin",
+            "lhs": {
+              "kind": "bin",
+              "lhs": {
+                "kind": "bin",
+                "lhs": {
+                  "kind": "bin",
+                  "lhs": {
+                    "kind": "var",
+                    "name": "x",
+                    "span": [
+                      324,
+                      325
+                    ]
+                  },
+                  "op": "<",
+                  "rhs": {
+                    "kind": "var",
+                    "name": "y",
+                    "span": [
+                      328,
+                      329
+                    ]
+                  },
+                  "span": [
+                    324,
+                    329
+                  ]
+                },
+                "op": "&&",
+                "rhs": {
+                  "kind": "bin",
+                  "lhs": {
+                    "kind": "var",
+                    "name": "x",
+                    "span": [
+                      333,
+                      334
+                    ]
+                  },
+                  "op": "<=",
+                  "rhs": {
+                    "kind": "var",
+                    "name": "y",
+                    "span": [
+                      338,
+                      339
+                    ]
+                  },
+                  "span": [
+                    333,
+                    339
+                  ]
+                },
+                "span": [
+                  324,
+                  339
+                ]
+              },
+              "op": "&&",
+              "rhs": {
+                "kind": "bin",
+                "lhs": {
+                  "kind": "var",
+                  "name": "x",
+                  "span": [
+                    343,
+                    344
+                  ]
+                },
+                "op": ">",
+                "rhs": {
+                  "kind": "var",
+                  "name": "y",
+                  "span": [
+                    347,
+                    348
+                  ]
+                },
+                "span": [
+                  343,
+                  348
+                ]
+              },
+              "span": [
+                324,
+                348
+              ]
+            },
+            "op": "||",
+            "rhs": {
+              "kind": "bin",
+              "lhs": {
+                "kind": "var",
+                "name": "x",
+                "span": [
+                  352,
+                  353
+                ]
+              },
+              "op": ">=",
+              "rhs": {
+                "kind": "var",
+                "name": "y",
+                "span": [
+                  357,
+                  358
+                ]
+              },
+              "span": [
+                352,
+                358
+              ]
+            },
+            "span": [
+              324,
+              358
+            ]
+          },
+          "op": "||",
+          "rhs": {
+            "kind": "bin",
+            "lhs": {
+              "kind": "var",
+              "name": "x",
+              "span": [
+                362,
+                363
+              ]
+            },
+            "op": "==",
+            "rhs": {
+              "kind": "var",
+              "name": "y",
+              "span": [
+                367,
+                368
+              ]
+            },
+            "span": [
+              362,
+              368
+            ]
+          },
+          "span": [
+            324,
+            368
+          ]
+        },
+        "op": "||",
+        "rhs": {
+          "kind": "bin",
+          "lhs": {
+            "kind": "var",
+            "name": "x",
+            "span": [
+              372,
+              373
+            ]
+          },
+          "op": "/=",
+          "rhs": {
+            "kind": "var",
+            "name": "y",
+            "span": [
+              377,
+              378
+            ]
+          },
+          "span": [
+            372,
+            378
+          ]
+        },
+        "span": [
+          324,
+          378
+        ]
+      },
+      "kind": "fn",
+      "name": "compare",
+      "params": [
+        {
+          "name": "x",
+          "ty": {
+            "kind": "int"
+          }
+        },
+        {
+          "name": "y",
+          "ty": {
+            "kind": "int"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "bool"
+      },
+      "span": [
+        284,
+        378
+      ]
+    },
+    {
+      "body": {
+        "kind": "pipe",
+        "lhs": {
+          "kind": "pipe",
+          "lhs": {
+            "kind": "var",
+            "name": "xs",
+            "span": [
+              413,
+              415
+            ]
+          },
+          "rhs": {
+            "args": [
+              {
+                "body": {
+                  "kind": "bin",
+                  "lhs": {
+                    "kind": "var",
+                    "name": "v",
+                    "span": [
+                      431,
+                      432
+                    ]
+                  },
+                  "op": "+",
+                  "rhs": {
+                    "kind": "int",
+                    "span": [
+                      435,
+                      436
+                    ],
+                    "value": "1"
+                  },
+                  "span": [
+                    431,
+                    436
+                  ]
+                },
+                "kind": "lam",
+                "params": [
+                  {
+                    "name": "v"
+                  }
+                ],
+                "span": [
+                  423,
+                  436
+                ]
+              }
+            ],
+            "head": {
+              "kind": "var",
+              "name": "map",
+              "span": [
+                419,
+                422
+              ]
+            },
+            "kind": "call",
+            "span": [
+              419,
+              437
+            ]
+          },
+          "span": [
+            413,
+            437
+          ]
+        },
+        "rhs": {
+          "kind": "var",
+          "name": "length",
+          "span": [
+            441,
+            447
+          ]
+        },
+        "span": [
+          413,
+          447
+        ]
+      },
+      "kind": "fn",
+      "name": "pipes",
+      "params": [
+        {
+          "name": "xs",
+          "ty": {
+            "args": [
+              {
+                "kind": "int"
+              }
+            ],
+            "kind": "con",
+            "name": "List"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "int"
+      },
+      "span": [
+        380,
+        447
+      ]
+    },
+    {
+      "body": {
+        "dir": "backward",
+        "kind": "compose",
+        "lhs": {
+          "dir": "forward",
+          "kind": "compose",
+          "lhs": {
+            "kind": "var",
+            "name": "f",
+            "span": [
+              514,
+              515
+            ]
+          },
+          "rhs": {
+            "kind": "var",
+            "name": "g",
+            "span": [
+              519,
+              520
+            ]
+          },
+          "span": [
+            514,
+            520
+          ]
+        },
+        "rhs": {
+          "kind": "var",
+          "name": "f",
+          "span": [
+            524,
+            525
+          ]
+        },
+        "span": [
+          514,
+          525
+        ]
+      },
+      "kind": "fn",
+      "name": "composed",
+      "params": [
+        {
+          "name": "f",
+          "ty": {
+            "effects": {
+              "labels": []
+            },
+            "kind": "fun",
+            "params": [
+              {
+                "kind": "int"
+              }
+            ],
+            "ret": {
+              "kind": "int"
+            }
+          }
+        },
+        {
+          "name": "g",
+          "ty": {
+            "effects": {
+              "labels": []
+            },
+            "kind": "fun",
+            "params": [
+              {
+                "kind": "int"
+              }
+            ],
+            "ret": {
+              "kind": "int"
+            }
+          }
+        }
+      ],
+      "ret": {
+        "effects": {
+          "labels": []
+        },
+        "kind": "fun",
+        "params": [
+          {
+            "kind": "int"
+          }
+        ],
+        "ret": {
+          "kind": "int"
+        }
+      },
+      "span": [
+        449,
+        525
+      ]
+    },
+    {
+      "body": {
+        "body": {
+          "base": {
+            "kind": "var",
+            "name": "bumped",
+            "span": [
+              646,
+              652
+            ]
+          },
+          "kind": "path-update",
+          "span": [
+            644,
+            677
+          ],
+          "updates": [
+            {
+              "op": {
+                "expr": {
+                  "kind": "float",
+                  "span": [
+                    671,
+                    675
+                  ],
+                  "value": "30.0"
+                },
+                "kind": "set"
+              },
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "wheels"
+                },
+                {
+                  "expr": {
+                    "kind": "int",
+                    "span": [
+                      662,
+                      663
+                    ],
+                    "value": "0"
+                  },
+                  "kind": "index"
+                },
+                {
+                  "kind": "field",
+                  "name": "psi"
+                }
+              ]
+            }
+          ]
+        },
+        "kind": "let",
+        "name": "bumped",
+        "span": [
+          557,
+          677
+        ],
+        "value": {
+          "base": {
+            "kind": "var",
+            "name": "c",
+            "span": [
+              576,
+              577
+            ]
+          },
+          "kind": "path-update",
+          "span": [
+            574,
+            641
+          ],
+          "updates": [
+            {
+              "op": {
+                "expr": {
+                  "kind": "str",
+                  "span": [
+                    591,
+                    595
+                  ],
+                  "value": "vx"
+                },
+                "kind": "set"
+              },
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "name"
+                }
+              ]
+            },
+            {
+              "op": {
+                "expr": {
+                  "body": {
+                    "kind": "bin",
+                    "lhs": {
+                      "kind": "var",
+                      "name": "p",
+                      "span": [
+                        628,
+                        629
+                      ]
+                    },
+                    "op": "+",
+                    "rhs": {
+                      "kind": "float",
+                      "span": [
+                        632,
+                        635
+                      ],
+                      "value": "1.0"
+                    },
+                    "span": [
+                      628,
+                      635
+                    ]
+                  },
+                  "kind": "lam",
+                  "params": [
+                    {
+                      "name": "p"
+                    }
+                  ],
+                  "span": [
+                    620,
+                    635
+                  ]
+                },
+                "kind": "modify"
+              },
+              "path": [
+                {
+                  "kind": "field",
+                  "name": "wheels"
+                },
+                {
+                  "kind": "each"
+                },
+                {
+                  "kind": "field",
+                  "name": "psi"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "kind": "fn",
+      "name": "records",
+      "params": [
+        {
+          "name": "c",
+          "ty": {
+            "kind": "con",
+            "name": "Car"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "con",
+        "name": "Car"
+      },
+      "span": [
+        527,
+        677
+      ]
+    },
+    {
+      "body": {
+        "base": {
+          "kind": "var",
+          "name": "c",
+          "span": [
+            713,
+            714
+          ]
+        },
+        "kind": "read-path",
+        "path": [
+          {
+            "kind": "field",
+            "name": "wheels"
+          },
+          {
+            "kind": "each"
+          },
+          {
+            "kind": "field",
+            "name": "psi"
+          }
+        ],
+        "span": [
+          713,
+          732
+        ]
+      },
+      "kind": "fn",
+      "name": "reads",
+      "params": [
+        {
+          "name": "c",
+          "ty": {
+            "kind": "con",
+            "name": "Car"
+          }
+        }
+      ],
+      "ret": {
+        "args": [
+          {
+            "kind": "float"
+          }
+        ],
+        "kind": "con",
+        "name": "List"
+      },
+      "span": [
+        679,
+        732
+      ]
+    },
+    {
+      "body": {
+        "body": {
+          "body": {
+            "body": {
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "squares",
+                  "span": [
+                    893,
+                    900
+                  ]
+                },
+                {
+                  "kind": "var",
+                  "name": "evens",
+                  "span": [
+                    902,
+                    907
+                  ]
+                }
+              ],
+              "head": {
+                "kind": "var",
+                "name": "append",
+                "span": [
+                  886,
+                  892
+                ]
+              },
+              "kind": "call",
+              "span": [
+                886,
+                908
+              ]
+            },
+            "kind": "let",
+            "name": "evens",
+            "span": [
+              861,
+              908
+            ],
+            "value": {
+              "end": {
+                "kind": "int",
+                "span": [
+                  880,
+                  882
+                ],
+                "value": "10"
+              },
+              "kind": "range",
+              "prefix": [
+                {
+                  "kind": "int",
+                  "span": [
+                    874,
+                    875
+                  ],
+                  "value": "2"
+                },
+                {
+                  "kind": "int",
+                  "span": [
+                    877,
+                    878
+                  ],
+                  "value": "4"
+                }
+              ],
+              "span": [
+                873,
+                883
+              ]
+            }
+          },
+          "kind": "let",
+          "name": "pair",
+          "span": [
+            837,
+            908
+          ],
+          "value": {
+            "items": [
+              {
+                "kind": "int",
+                "span": [
+                  849,
+                  850
+                ],
+                "value": "1"
+              },
+              {
+                "kind": "str",
+                "span": [
+                  852,
+                  857
+                ],
+                "value": "two"
+              }
+            ],
+            "kind": "tuple",
+            "span": [
+              848,
+              858
+            ]
+          }
+        },
+        "kind": "let",
+        "name": "squares",
+        "span": [
+          767,
+          908
+        ],
+        "value": {
+          "binder": "v",
+          "head": {
+            "kind": "bin",
+            "lhs": {
+              "kind": "var",
+              "name": "v",
+              "span": [
+                782,
+                783
+              ]
+            },
+            "op": "*",
+            "rhs": {
+              "kind": "var",
+              "name": "v",
+              "span": [
+                786,
+                787
+              ]
+            },
+            "span": [
+              782,
+              787
+            ]
+          },
+          "kind": "comprehension",
+          "quals": [
+            {
+              "expr": {
+                "kind": "bin",
+                "lhs": {
+                  "kind": "bin",
+                  "lhs": {
+                    "kind": "var",
+                    "name": "v",
+                    "span": [
+                      808,
+                      809
+                    ]
+                  },
+                  "op": "%",
+                  "rhs": {
+                    "kind": "int",
+                    "span": [
+                      812,
+                      813
+                    ],
+                    "value": "2"
+                  },
+                  "span": [
+                    808,
+                    813
+                  ]
+                },
+                "op": "==",
+                "rhs": {
+                  "kind": "int",
+                  "span": [
+                    817,
+                    818
+                  ],
+                  "value": "1"
+                },
+                "span": [
+                  808,
+                  818
+                ]
+              },
+              "kind": "guard"
+            },
+            {
+              "kind": "bind",
+              "name": "w",
+              "value": {
+                "kind": "bin",
+                "lhs": {
+                  "kind": "var",
+                  "name": "v",
+                  "span": [
+                    828,
+                    829
+                  ]
+                },
+                "op": "+",
+                "rhs": {
+                  "kind": "int",
+                  "span": [
+                    832,
+                    833
+                  ],
+                  "value": "1"
+                },
+                "span": [
+                  828,
+                  833
+                ]
+              }
+            }
+          ],
+          "seq": {
+            "end": {
+              "kind": "int",
+              "span": [
+                801,
+                802
+              ],
+              "value": "5"
+            },
+            "kind": "range",
+            "prefix": [
+              {
+                "kind": "int",
+                "span": [
+                  798,
+                  799
+                ],
+                "value": "1"
+              }
+            ],
+            "span": [
+              797,
+              803
+            ]
+          },
+          "span": [
+            781,
+            834
+          ]
+        }
+      },
+      "kind": "fn",
+      "name": "collections",
+      "ret": {
+        "args": [
+          {
+            "kind": "int"
+          }
+        ],
+        "kind": "con",
+        "name": "List"
+      },
+      "span": [
+        734,
+        908
+      ]
+    },
+    {
+      "body": {
+        "args": [
+          {
+            "kind": "str",
+            "span": [
+              947,
+              947
+            ],
+            "value": "hello "
+          },
+          {
+            "kind": "var",
+            "name": "name",
+            "span": [
+              955,
+              959
+            ]
+          },
+          {
+            "kind": "str",
+            "span": [
+              947,
+              947
+            ],
+            "value": ", "
+          },
+          {
+            "kind": "bin",
+            "lhs": {
+              "kind": "int",
+              "span": [
+                963,
+                964
+              ],
+              "value": "1"
+            },
+            "op": "+",
+            "rhs": {
+              "kind": "int",
+              "span": [
+                967,
+                968
+              ],
+              "value": "2"
+            },
+            "span": [
+              963,
+              968
+            ]
+          },
+          {
+            "kind": "str",
+            "span": [
+              947,
+              947
+            ],
+            "value": " wide"
+          }
+        ],
+        "head": {
+          "kind": "marker",
+          "marker": "interp",
+          "span": [
+            947,
+            947
+          ]
+        },
+        "kind": "call",
+        "span": [
+          947,
+          975
+        ]
+      },
+      "kind": "fn",
+      "name": "stringy",
+      "params": [
+        {
+          "name": "name",
+          "ty": {
+            "kind": "str"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "str"
+      },
+      "span": [
+        910,
+        975
+      ]
+    },
+    {
+      "body": {
+        "expr": {
+          "expr": {
+            "kind": "var",
+            "name": "xs",
+            "span": [
+              1012,
+              1014
+            ]
+          },
+          "index": {
+            "kind": "int",
+            "span": [
+              1015,
+              1016
+            ],
+            "value": "0"
+          },
+          "kind": "index",
+          "span": [
+            1012,
+            1017
+          ]
+        },
+        "fallback": {
+          "kind": "int",
+          "span": [
+            1021,
+            1022
+          ],
+          "value": "0"
+        },
+        "kind": "default",
+        "span": [
+          1012,
+          1022
+        ]
+      },
+      "kind": "fn",
+      "name": "indexed",
+      "params": [
+        {
+          "name": "xs",
+          "ty": {
+            "args": [
+              {
+                "kind": "int"
+              }
+            ],
+            "kind": "con",
+            "name": "List"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "int"
+      },
+      "span": [
+        977,
+        1022
+      ]
+    },
+    {
+      "body": {
+        "expr": {
+          "expr": {
+            "kind": "var",
+            "name": "c",
+            "span": [
+              1063,
+              1064
+            ]
+          },
+          "kind": "opt-chain",
+          "name": "name",
+          "span": [
+            1063,
+            1070
+          ]
+        },
+        "fallback": {
+          "kind": "str",
+          "span": [
+            1074,
+            1080
+          ],
+          "value": "none"
+        },
+        "kind": "default",
+        "span": [
+          1063,
+          1080
+        ]
+      },
+      "kind": "fn",
+      "name": "chained",
+      "params": [
+        {
+          "name": "c",
+          "ty": {
+            "args": [
+              {
+                "kind": "con",
+                "name": "Car"
+              }
+            ],
+            "kind": "con",
+            "name": "Option"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "str"
+      },
+      "span": [
+        1024,
+        1080
+      ]
+    },
+    {
+      "body": {
+        "expr": {
+          "kind": "var",
+          "name": "t",
+          "span": [
+            1123,
+            1124
+          ]
+        },
+        "index": {
+          "items": [
+            {
+              "kind": "int",
+              "span": [
+                1125,
+                1126
+              ],
+              "value": "1"
+            },
+            {
+              "kind": "int",
+              "span": [
+                1128,
+                1129
+              ],
+              "value": "2"
+            }
+          ],
+          "kind": "list",
+          "span": [
+            1123,
+            1130
+          ],
+          "synth": true
+        },
+        "kind": "index",
+        "span": [
+          1123,
+          1130
+        ]
+      },
+      "kind": "fn",
+      "name": "multikey",
+      "params": [
+        {
+          "name": "t",
+          "ty": {
+            "args": [
+              {
+                "kind": "float"
+              }
+            ],
+            "kind": "con",
+            "name": "Tensor"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "float"
+      },
+      "span": [
+        1082,
+        1130
+      ]
+    },
+    {
+      "body": {
+        "kind": "hole",
+        "name": "fill",
+        "span": [
+          1158,
+          1163
+        ]
+      },
+      "kind": "fn",
+      "name": "holey",
+      "params": [
+        {
+          "name": "x",
+          "ty": {
+            "kind": "int"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "int"
+      },
+      "span": [
+        1132,
+        1163
+      ]
+    }
+  ]
+}

@@ -277,7 +277,7 @@ pub(crate) fn lineage_root(role: RootRole, root: &BuildRoot) -> LineageRoot {
         origin,
         artifact_kind: root.artifact_kind.clone(),
         scheme: root.scheme.clone(),
-        root: root.root.clone(),
+        root: root.root.to_string(),
     }
 }
 

@@ -31,6 +31,7 @@ pub const STDLIB: &[(&str, &str)] = &[
         "Data.FlatArray",
         include_str!("../lib/std/Data/FlatArray.pr"),
     ),
+    ("Data.Frozen", include_str!("../lib/std/Data/Frozen.pr")),
     ("Teleport", include_str!("../lib/std/Teleport.pr")),
     ("Replay", include_str!("../lib/std/Replay.pr")),
     ("Concurrent", include_str!("../lib/std/Concurrent.pr")),
@@ -57,9 +58,17 @@ pub const STDLIB: &[(&str, &str)] = &[
         include_str!("../lib/std/Control/Writer.pr"),
     ),
     ("Control.Fresh", include_str!("../lib/std/Control/Fresh.pr")),
+    ("Syntax.Source", include_str!("../lib/std/Syntax/Source.pr")),
+    ("Syntax.Token", include_str!("../lib/std/Syntax/Token.pr")),
+    ("Syntax.Ast", include_str!("../lib/std/Syntax/Ast.pr")),
+    ("Syntax.Codec", include_str!("../lib/std/Syntax/Codec.pr")),
     (
         "Data.Validation",
         include_str!("../lib/std/Data/Validation.pr"),
+    ),
+    (
+        "Control.Validate",
+        include_str!("../lib/std/Control/Validate.pr"),
     ),
     (
         "Data.UnionFind",

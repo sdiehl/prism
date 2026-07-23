@@ -1,65 +1,65 @@
 fn fib_iter(n) =
   handle
     handle
-      return n to t@737
+      return n to t@739
       thunk { \.
-        return () to t@738
-        do get@a@0(t@738) to t@740
-        return () to t@739
-        do get@b@1(t@739) to t@741
-        t@740 + t@741 to t
-        return () to t@742
-        do get@b@1(t@742) to t@743
-        do set@a@0(t@743)
-        return t to t@744
-        do set@b@1(t@744)
-      } to t@745
-      repeat(t@737, t@745)
-      return () to t@746
-      do get@a@0(t@746)
+        return () to t@740
+        do get@a@0(t@740) to t@742
+        return () to t@741
+        do get@b@1(t@741) to t@743
+        t@742 + t@743 to t
+        return () to t@744
+        do get@b@1(t@744) to t@745
+        do set@a@0(t@745)
+        return t to t@746
+        do set@b@1(t@746)
+      } to t@747
+      repeat(t@739, t@747)
+      return () to t@748
+      do get@a@0(t@748)
     with
       get@b@1(u@, k@) =>
         thunk { \s@.
-          return s@ to t@747
-          return s@ to t@748
-          return k@ to t@749
-          (force t@749)(t@748) to t@750
-          (force t@750)(t@747)
+          return s@ to t@749
+          return s@ to t@750
+          return k@ to t@751
+          (force t@751)(t@750) to t@752
+          (force t@752)(t@749)
         }
       set@b@1(v@, k@) =>
         thunk { \s@.
-          return v@ to t@751
-          return () to t@752
-          return k@ to t@753
-          (force t@753)(t@752) to t@754
-          (force t@754)(t@751)
+          return v@ to t@753
+          return () to t@754
+          return k@ to t@755
+          (force t@755)(t@754) to t@756
+          (force t@756)(t@753)
         }
       return r@ =>
         return thunk { \s@. return r@ }
     to run@1
-    return 1 to t@755
-    return run@1 to t@756
-    (force t@756)(t@755)
+    return 1 to t@757
+    return run@1 to t@758
+    (force t@758)(t@757)
   with
     get@a@0(u@, k@) =>
       thunk { \s@.
-        return s@ to t@757
-        return s@ to t@758
-        return k@ to t@759
-        (force t@759)(t@758) to t@760
-        (force t@760)(t@757)
+        return s@ to t@759
+        return s@ to t@760
+        return k@ to t@761
+        (force t@761)(t@760) to t@762
+        (force t@762)(t@759)
       }
     set@a@0(v@, k@) =>
       thunk { \s@.
-        return v@ to t@761
-        return () to t@762
-        return k@ to t@763
-        (force t@763)(t@762) to t@764
-        (force t@764)(t@761)
+        return v@ to t@763
+        return () to t@764
+        return k@ to t@765
+        (force t@765)(t@764) to t@766
+        (force t@766)(t@763)
       }
     return r@ =>
       return thunk { \s@. return r@ }
   to run@0
-  return 0 to t@765
-  return run@0 to t@766
-  (force t@766)(t@765)
+  return 0 to t@767
+  return run@0 to t@768
+  (force t@768)(t@767)

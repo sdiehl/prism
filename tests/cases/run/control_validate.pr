@@ -1,0 +1,43 @@
+import Control.Validate (..)
+
+import Data.Validation (Validation)
+
+fn success() : Int = 42
+
+fn successful_validation() : Validation(String, Int) = run_validate(success)
+
+fn fatal_then_dead() : Int ! {Validate(String)} =
+  dispute("before")
+  refute("boom")
+  dispute("dead")
+  0
+
+fn disputes_then_value() : Int ! {Validate(String)} =
+  dispute("first")
+  dispute("second")
+  42
+
+fn recovered_branch() : Int ! {Validate(String)} =
+  let recovered = tolerate(\() -> fatal_then_dead())
+  match recovered of
+    None =>
+      dispute("after")
+      7
+    Some(value) => value
+
+fn disputed_branch() : Option(Int) ! {Validate(String)} =
+  tolerate(\() -> disputes_then_value())
+
+fn independent_branches() : Int ! {Validate(String)} =
+  let _left = tolerate(\() -> refute("left"))
+  let _right = tolerate(\() -> refute("right"))
+  9
+
+fn main() =
+  println(show(successful_validation()))
+  println(show(run_validate(fatal_then_dead)))
+  println(show(run_validate(disputes_then_value)))
+  println(show(run_validate(recovered_branch)))
+  println(show(run_validate(disputed_branch)))
+  println(show(run_validate(independent_branches)))
+  println(show(exec_validate(\() -> dispute("only"))))

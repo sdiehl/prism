@@ -25,7 +25,11 @@ use super::{Config, PRELUDE, ROOT_MODULE_NAME};
 const MODULE_CHECK_QUERY_SCHEMA: &[u8] = b"prism-module-check-query-v1";
 const CHECKED_INTERFACE_QUERY_SCHEMA: &[u8] = b"prism-checked-interface-query-v1";
 const CHECKED_INTERFACE_QUERY: &str = "checked-interface";
-const CHECKED_BODY_QUERY_SCHEMA: &[u8] = b"prism-checked-body-query-v2";
+// v4 never publishes a body whose inferred declarations or node facts still
+// contain unification metavariables. Such a body cannot be parsed back as a
+// checked signature and a cache must never turn a valid cold build into a
+// warm-build failure.
+const CHECKED_BODY_QUERY_SCHEMA: &[u8] = b"prism-checked-body-query-v4";
 const CHECKED_BODY_QUERY: &str = "checked-body";
 // v2 carries the checked handler-residual facts (known operations, opaque
 // effect labels, and an open-row marker). A v1 body cannot be promoted by
@@ -95,8 +99,10 @@ struct ModuleJob {
 /// digests, so a private dependency edit cannot invalidate its importers.
 ///
 /// # Errors
-/// Fails on loading, resolution, a cyclic module graph, malformed interface
-/// metadata, or any local type error.
+/// Fails on loading, resolution, malformed interface metadata, or any local
+/// type error. A cyclic module graph is not an error here: it takes the
+/// whole-program fallback documented above, and only that checker's own
+/// failures surface.
 pub fn check_modules_on(
     src: &str,
     roots: &[Root],
@@ -645,6 +651,10 @@ struct CheckedBodyPayload<'a> {
     seeds: u32,
 }
 
+fn body_is_surface_rehydratable(decls: &[DeclWire], facts: &str) -> bool {
+    decls.iter().all(|decl| !decl.ty.contains('?')) && !facts.contains('?')
+}
+
 impl CheckedBody {
     fn new(
         entry: &Program,
@@ -709,10 +719,19 @@ impl CheckedBody {
                 }
             })
             .collect::<Vec<_>>();
+        // Private inferred helpers can retain an open row meta in either their
+        // declaration or a HIR node fact after the public interface is closed.
+        // The checked-body wire format is a rehydratable artifact, not a debug
+        // dump: skip this optional cache until both are surface-parseable. The
+        // interface cache remains usable and the module is checked again next
+        // build.
         let facts = checked
             .facts
             .to_json()
             .map_err(|error| Error::ResolveModule(format!("serialize checked HIR: {error}")))?;
+        if !body_is_surface_rehydratable(&decls, &facts) {
+            return Ok(None);
+        }
         let digest = checked_body_digest(
             public_interface,
             &seed_interface,
@@ -1049,4 +1068,33 @@ where
         );
     }
     Ok(seed)
+}
+
+#[cfg(test)]
+mod checked_body_tests {
+    use super::{body_is_surface_rehydratable, DeclWire};
+
+    use std::slice::from_ref;
+
+    #[test]
+    fn unresolved_type_metavariables_are_not_surface_rehydratable() {
+        let closed = DeclWire {
+            name: "closed".to_string(),
+            params: Vec::new(),
+            ty: "() -> Int ! {}".to_string(),
+            effects: Vec::new(),
+        };
+        let open = DeclWire {
+            name: "open".to_string(),
+            params: Vec::new(),
+            ty: "() -> Int ! {?r3}".to_string(),
+            effects: Vec::new(),
+        };
+        assert!(body_is_surface_rehydratable(from_ref(&closed), "[]"));
+        assert!(!body_is_surface_rehydratable(&[open], "[]"));
+        assert!(!body_is_surface_rehydratable(
+            &[closed],
+            r#"[{"ty":"() -> Int ! {?r3}"}]"#,
+        ));
+    }
 }

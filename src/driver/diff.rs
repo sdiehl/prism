@@ -50,7 +50,7 @@ fn program_hashes(src: &str, roots: &[Root]) -> Result<Revision, Error> {
 // inflate the unchanged count.
 fn prelude_hash_names(roots: &[Root]) -> Result<std::collections::HashSet<Sym>, Error> {
     let (_, _, core) = elaborated(PRELUDE, roots)?;
-    Ok(core.0.fns.into_iter().map(|f| f.name).collect())
+    Ok(core.into_core().fns.into_iter().map(|f| f.name).collect())
 }
 
 /// A behavior diff between two revisions of a source.

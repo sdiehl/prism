@@ -196,11 +196,11 @@ enum Cmd {
     },
     /// Print one pipeline phase artifact
     ///
-    /// PHASE is one of: tokens, ast, types, hir, interface, module-graph, core,
-    /// core-json, core-hash, tc-input, tc-facts, elab-input, native-kont-table,
-    /// native-kont-state-map, shape, dupes, namespace, stdlib-hash, fbip, lowered,
-    /// tier, captures, usage-summary, usage-summary-md, usage-summary-json,
-    /// llvm, mlir, verify, smt, totality.
+    /// PHASE is one of: tokens, syntax-tokens, surface-syntax, ast, types, typespans, hir,
+    /// interface, module-graph, core, core-json, core-hash, tc-input, tc-facts,
+    /// elab-input, native-kont-table, native-kont-state-map, shape, dupes,
+    /// namespace, stdlib-hash, fbip, lowered, tier, captures, usage-summary,
+    /// usage-summary-md, usage-summary-json, llvm, mlir, verify, smt, totality.
     Dump { phase: String, file: PathBuf },
     /// Behavior or lineage diff by content hash
     ///
@@ -617,7 +617,7 @@ fn main() -> ExitCode {
             eprintln!("invalid optimization level `-O{s}` (expected 0, 1, or 2)");
             return ExitCode::FAILURE;
         };
-        cfg.opt = level;
+        cfg.flags.opt_level = level;
     }
     if let Some(s) = &cli.passes {
         match prism::PassSpec::parse(s) {
@@ -636,14 +636,14 @@ fn main() -> ExitCode {
             );
             return ExitCode::FAILURE;
         };
-        cfg.backend_opt = level;
+        cfg.flags.backend_opt = level;
     }
     if let Some(s) = &cli.scheduler {
         let Some(sched) = prism::Scheduler::parse(s) else {
             eprintln!("invalid scheduler `--scheduler {s}` (expected cooperative, fifo, or lifo)");
             return ExitCode::FAILURE;
         };
-        cfg.scheduler = sched;
+        cfg.flags.scheduler = sched;
     }
     cfg.disabled.extend(
         [

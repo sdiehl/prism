@@ -6,11 +6,285 @@ input_file: tests/cases/adapter_open_result_row.pr
 == tokens ==
 VOpen Effect UIdent("KvV1") VOpen Ident("get_v1") LParen KwInt RParen Colon KwInt VSemi Ident("put_v1") LParen KwInt Comma KwInt RParen Colon KwUnit VClose VSemi Effect UIdent("KvV2") VOpen Ident("get_v2") LParen KwInt RParen Colon KwInt VSemi Ident("put_v2") LParen KwInt Comma KwInt RParen Colon KwUnit VClose VSemi Fn Ident("adapt_v1_to_v2") LParen Ident("action") Colon LParen RParen Arrow Ident("a") Bang LBrace UIdent("KvV1") Bar Ident("e") RBrace RParen Colon Ident("a") Bang LBrace UIdent("KvV2") Bar Ident("e") RBrace Eq VOpen Handle Ident("action") LParen RParen With VOpen Ident("get_v1") LParen Ident("key") RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen Ident("get_v2") LParen Ident("key") RParen RParen VSemi Ident("put_v1") LParen Ident("key") Comma Ident("value") RParen Ident("resume") Ident("k") FatArrow VOpen Ident("put_v2") LParen Ident("key") Comma Ident("value") RParen VSemi Ident("k") LParen LParen RParen RParen VClose VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VClose
 
-== parse ==
-[E7100] Parse Error: a declaration effect row must be closed; write `: T ! {A, B}`
-    ╭─[ <source>:15:52 ]
-    │
- 15 │ fn adapt_v1_to_v2(action : () -> a ! {KvV1 | e}) : a ! {KvV2 | e} =
-    │                                                    ───────┬──────  
-    │                                                           ╰──────── here
-────╯
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "KvV1",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "get_v1",
+                    params: [
+                        Int,
+                    ],
+                    ret: Int,
+                    grade: Many,
+                },
+                EffOp {
+                    name: "put_v1",
+                    params: [
+                        Int,
+                        Int,
+                    ],
+                    ret: Unit,
+                    grade: Many,
+                },
+            ],
+            span: 512..569,
+        },
+        EffectDecl {
+            name: "KvV2",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "get_v2",
+                    params: [
+                        Int,
+                    ],
+                    ret: Int,
+                    grade: Many,
+                },
+                EffOp {
+                    name: "put_v2",
+                    params: [
+                        Int,
+                        Int,
+                    ],
+                    ret: Unit,
+                    grade: Many,
+                },
+            ],
+            span: 571..628,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "adapt_v1_to_v2",
+            params: [
+                Param {
+                    name: "action",
+                    ty: Some(
+                        Fun(
+                            [],
+                            Cons(
+                                [
+                                    EffLabel {
+                                        name: "KvV1",
+                                        args: [],
+                                    },
+                                ],
+                                Some(
+                                    "e",
+                                ),
+                            ),
+                            Var(
+                                "a",
+                            ),
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Var(
+                    "a",
+                ),
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "KvV2",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Handle(
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "action",
+                                ),
+                                span: 707..713,
+                            },
+                            [],
+                        ),
+                        span: 707..715,
+                    },
+                    [
+                        Op(
+                            "get_v1",
+                            [
+                                "key",
+                            ],
+                            "k",
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "k",
+                                        ),
+                                        span: 749..750,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Call(
+                                                Spanned {
+                                                    node: Var(
+                                                        "get_v2",
+                                                    ),
+                                                    span: 751..757,
+                                                },
+                                                [
+                                                    Spanned {
+                                                        node: Var(
+                                                            "key",
+                                                        ),
+                                                        span: 758..761,
+                                                    },
+                                                ],
+                                            ),
+                                            span: 751..762,
+                                        },
+                                    ],
+                                ),
+                                span: 749..763,
+                            },
+                        ),
+                        Op(
+                            "put_v1",
+                            [
+                                "key",
+                                "value",
+                            ],
+                            "k",
+                            Spanned {
+                                node: Let(
+                                    "_",
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "put_v2",
+                                                ),
+                                                span: 805..811,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Var(
+                                                        "key",
+                                                    ),
+                                                    span: 812..815,
+                                                },
+                                                Spanned {
+                                                    node: Var(
+                                                        "value",
+                                                    ),
+                                                    span: 817..822,
+                                                },
+                                            ],
+                                        ),
+                                        span: 805..823,
+                                    },
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "k",
+                                                ),
+                                                span: 830..831,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Unit,
+                                                    span: 832..834,
+                                                },
+                                            ],
+                                        ),
+                                        span: 830..835,
+                                    },
+                                ),
+                                span: 805..835,
+                            },
+                        ),
+                        Return(
+                            "r",
+                            Spanned {
+                                node: Var(
+                                    "r",
+                                ),
+                                span: 852..853,
+                            },
+                        ),
+                    ],
+                    Exhaustive,
+                ),
+                span: 700..853,
+            },
+            wheres: [],
+            eff_tail: "e",
+            span: 630..853,
+        },
+    ],
+}
+
+== types ==
+adapt_v1_to_v2 : forall e0 a. (() -> a ! {KvV1, KvV2, e0}) -> a ! {KvV2, e0}
+
+== core (cbpv) ==
+fn adapt_v1_to_v2(action) =
+  handle
+    return action to t@0
+    (force t@0)()
+  with
+    get_v1(key, k) =>
+      return key to t@1
+      do get_v2(t@1) to t@2
+      return k to t@3
+      (force t@3)(t@2)
+    put_v1(key, value, k) =>
+      return key to t@4
+      return value to t@5
+      do put_v2(t@4, t@5)
+      return () to t@6
+      return k to t@7
+      (force t@7)(t@6)
+    return r =>
+      return r
+
+== fbip (rc) ==
+fn adapt_v1_to_v2(action) =
+  handle
+    return action to t@0
+    (force t@0)()
+  with
+    get_v1(key, k) =>
+      return key to t@1
+      do get_v2(t@1) to t@2
+      return k to t@3
+      (force t@3)(t@2)
+    put_v1(key, value, k) =>
+      return key to t@4
+      return value to t@5
+      do put_v2(t@4, t@5)
+      drop _
+      return () to t@6
+      return k to t@7
+      (force t@7)(t@6)
+    return r =>
+      return r
+
+== llvm ==
+(skipped: typed effect lowering failed: typed effect lowering produced an unverifiable program: adapt_v1_to_v2 at body: function body row mismatch: stored {KvV2, %evr0}, expected a subrow of {%evr0})
+
+== run ==
+error: no main function

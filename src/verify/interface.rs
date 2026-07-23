@@ -2,7 +2,7 @@
 //! contract summaries, content-addressed by a digest that is a pure function of
 //! the logical content and independent of the runtime Core hash.
 //!
-//! It is the input to contract checking and (later) VC generation, distinct from
+//! It is the input to contract checking and VC generation, distinct from
 //! the runtime `ModuleInterface`: a proof-only edit moves this digest and only its
 //! verification dependents, never the executable Core or native artifacts.
 

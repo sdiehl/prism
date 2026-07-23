@@ -36,7 +36,7 @@ effect IncrRaw
 
 ### `run_incr`
 
-```prism,sig,h-45dd7c92bd32db9ba04a684a77f0ea384728aee656473b84da5f48c08eee082d
+```prism,sig,h-19c671b051b5549d67d1a3bbbbfeba918ad8b0ebd2c14838ea894ac448a7eaf7
 run_incr : forall e0 a. (() -> a ! {Incr.IncrRaw, e0}) -> a ! {e0}
 ```
 
@@ -138,7 +138,7 @@ run_incr() fn
 
 ### `run_incr_durable`
 
-```prism,sig,h-921260143f74c0241d8e90d5dd8b6601130c0d176673aa7f83f0fc8b6e145db9
+```prism,sig,h-e7f7c52bc85ea2217f92cd7b998a6ee3541de6ba2a27c626b4929e8ac5e218d5
 run_incr_durable : forall a. (String, String, () -> a ! {Fail, Incr.IncrRaw}) -> a ! {Fail, IO}
 ```
 
@@ -154,7 +154,7 @@ run_incr_durable("totals.snap", "report") fn
 
 ### `run_incr_store`
 
-```prism,sig,h-97533ae7745d670fafae9b2051e1a30f982f89f0ac8a3452c5b5f3870f8e52e7
+```prism,sig,h-efd3d8ebe7132c026380177f8af8551c5d91116210badbbd1a9d277ec5438691
 run_incr_store : forall a. (String, String, () -> a ! {Fail, Incr.IncrRaw}) -> a ! {Fail, IO}
 ```
 
@@ -170,7 +170,7 @@ run_incr_store(".prism-store", "report") fn
 
 ### `run_incr_durable_replay`
 
-```prism,sig,h-cd7326ae43ab748d95330837f7c10c4cd9897ddca0222b16b14ceb1d63c38471
+```prism,sig,h-e63e8508b0f724890a6f9e9c4d6deaf0b7f18ec59411b3572ea1e9d36aab562a
 run_incr_durable_replay : forall e0 a. (String, String, () -> a ! {Fail, IO, Incr.IncrRaw, Output, e0}) -> a ! {Fail, IO, e0}
 ```
 
@@ -184,7 +184,7 @@ run_incr_durable_replay("run.snap", "job") fn
 
 ### `run_incr_store_replay`
 
-```prism,sig,h-8a3b81238d87e75aa0f3acc0e6d27628a058f7d72d8225193cb3ebdde98233e6
+```prism,sig,h-21121018e44e2336d4c20cc312a9861585a32bf16aea36400e70e1d76eae6421
 run_incr_store_replay : forall e0 a. (String, String, () -> a ! {Fail, IO, Incr.IncrRaw, Output, e0}) -> a ! {Fail, IO, e0}
 ```
 

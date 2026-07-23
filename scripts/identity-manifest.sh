@@ -13,8 +13,8 @@
 # manifest -- the one platform-varying line of the native-kont envelope (the build
 # target triple) is stripped so the envelope compares only where it is portable.
 # Emitting the same manifest on Linux x86-64, Linux ARM64, and macOS ARM64 and
-# diffing them is the cross-platform determinism gate (Lane X); a single divergent
-# byte fails it.
+# diffing them is the cross-platform determinism gate; a single divergent byte
+# fails it.
 #
 # Usage:
 #   scripts/identity-manifest.sh [--out FILE] [--corpus DIR]
@@ -140,7 +140,7 @@ emit() {
   done
 
   # The SMT and totality query bytes verbatim, so the manifest literally carries
-  # the queries Lane X pins across platforms, not only their digests.
+  # the queries compared across platforms, not only their digests.
   echo
   echo "# smt-query-bytes"
   for file in $files; do

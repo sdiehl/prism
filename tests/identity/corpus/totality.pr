@@ -1,5 +1,5 @@
--- Totality claims (Lane T): trivial-acyclic and direct-structural `total fn`
--- forms. Pins the totality problem bytes (`dump totality`) and proves the claim
+-- Trivial-acyclic and direct-structural `total fn` claims. Pins the totality
+-- problem bytes (`dump totality`) and proves the claim
 -- is erased before executable Core, so the run trace is identical on every
 -- platform.
 

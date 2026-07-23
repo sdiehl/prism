@@ -510,14 +510,50 @@ pub struct Core {
 /// The interpreter evaluates it directly and the store / content hasher observe
 /// it (identity is a property of the elaborated term, independent of the
 /// optimizer level).
+///
+/// The field is private so the stage claim is unforgeable: a value of this type
+/// was produced by the pipeline, never assembled from public parts.
 #[derive(Clone, Debug)]
-pub struct ElaboratedCore(pub Core);
+pub struct ElaboratedCore(Core);
+
+impl ElaboratedCore {
+    /// Wrap the pipeline's own elaboration output. Crate-internal on purpose:
+    /// the stage claim is the constructor's, and only the pipeline may make it.
+    pub(crate) const fn new(core: Core) -> Self {
+        Self(core)
+    }
+
+    /// Consume the wrapper, yielding the owned program.
+    pub(crate) fn into_core(self) -> Core {
+        self.0
+    }
+
+    /// Mutable access for the pipeline's own late adjustments (konst injection).
+    pub(crate) const fn core_mut(&mut self) -> &mut Core {
+        &mut self.0
+    }
+}
 
 /// Post-effect-lowering whole-program Core. The effect nodes are gone; the
 /// runtime nodes (`Dup`, `Drop`, `WithReuse`, `Reuse`, `RefNew`/`RefGet`/
 /// `RefSet`) may appear. Only native codegen consumes it.
+///
+/// The field is private so the stage claim is unforgeable. The pipeline
+/// constructs it after verified effect lowering; an external producer goes
+/// through [`LoweredCore::validate_structural`] (defined with the stage lint in
+/// `core::opt::lint`), the checked public constructor whose assurance is
+/// structural stage validation, lint-grade, and explicitly not typed
+/// verification.
 #[derive(Clone, Debug)]
-pub struct LoweredCore(pub Core);
+pub struct LoweredCore(Core);
+
+impl LoweredCore {
+    /// Wrap the pipeline's own verified lowering output. Crate-internal on
+    /// purpose; the public checked path is `validate_structural`.
+    pub(crate) const fn new(core: Core) -> Self {
+        Self(core)
+    }
+}
 
 impl Deref for ElaboratedCore {
     type Target = Core;

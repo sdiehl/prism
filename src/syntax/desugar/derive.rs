@@ -243,6 +243,7 @@ fn mdecl(name: &str, params: &[&str], body: S<Expr>, z: Span) -> Decl {
             .collect(),
         ret: None,
         eff: None,
+        eff_tail: None,
         constraints: Vec::new(),
         body,
         wheres: Vec::new(),

@@ -18,9 +18,9 @@ end
 local cmd = vim.cmd
 
 -- Declarations and binding forms.
-cmd([[syntax keyword prismKeyword let var in val return do borrow with handler given where as forall deriving of handle using]])
+cmd([[syntax keyword prismKeyword let var in val return do borrow with handler given where as forall deriving of handle using probe logic requires ensures]])
 cmd([[syntax keyword prismInclude import pub]])
-cmd([[syntax keyword prismStructure fn fip fbip replayable type newtype opaque alias effect class instance canonical pattern]])
+cmd([[syntax keyword prismStructure fn fip fbip replayable type newtype opaque stable alias effect class instance canonical pattern]])
 cmd([[syntax keyword prismConditional if then else elif match]])
 cmd([[syntax keyword prismRepeat for while loop break continue]])
 -- Effect control and failure forms.

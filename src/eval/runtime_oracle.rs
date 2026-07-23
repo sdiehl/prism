@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "native")]
-use crate::codegen::rt::{write_libm_archive, write_runtime_for, RuntimeProfile};
+use crate::codegen::rt::{cc, write_libm_archive, write_runtime_for, RuntimeProfile};
 #[cfg(feature = "native")]
 use crate::codegen::MAIN_SYMBOL;
 
@@ -71,7 +71,7 @@ impl Drop for ScratchDir {
 
 #[cfg(feature = "native")]
 pub(super) fn rt_oracle(body: &str) -> Option<Vec<String>> {
-    let cc = std::env::var("PRISM_CC").unwrap_or_else(|_| env!("PRISM_BUILD_CC").into());
+    let cc = cc();
     let probed = output_with_timeout(Command::new(&cc).arg("--version"), PROBE_TIMEOUT)
         .is_some_and(|o| o.status.success());
     if !probed {

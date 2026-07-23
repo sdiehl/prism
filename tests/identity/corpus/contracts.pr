@@ -1,4 +1,4 @@
--- Function contracts (Lane V): a `logic fn` plus `requires`/`ensures` clauses.
+-- Function contracts: a `logic fn` plus `requires`/`ensures` clauses.
 -- Pins the canonical SMT query bytes (`dump smt`) and proves the contract is
 -- fully erased before executable Core, so its Core hash and run trace match the
 -- contract-free shape on every platform.

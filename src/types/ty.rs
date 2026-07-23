@@ -56,14 +56,21 @@ impl Kind {
 pub const LIST: &str = "List";
 pub const CONS: &str = "Cons";
 pub const NIL: &str = "Nil";
+// The phantom ordering brand a `Map(k, v, ord)` carries. An under-applied
+// `Map(k, v)` in a function signature stays brand-polymorphic, but a map stored
+// in a datatype field cannot be (the brand is not a parameter of the enclosing
+// type), so the field pins the omitted brand to this concrete default.
+pub const CANONICAL: &str = "Canonical";
 pub const FLOAT_BUF: &str = "FloatBuf";
 pub const INT_BUF: &str = "IntBuf";
-// The baseline 128-bit SIMD vector types: two f64 lanes or two i64 lanes. Opaque
-// 0-parameter built-in types (no surface constructors), produced and consumed
-// only through the `simd_*` builtins. The interpreter holds the two words raw;
-// native stores them in a two-word cell.
+// The 128-bit SIMD vector types: two 64-bit lanes or four 32-bit lanes over
+// the same two-word vector. Opaque 0-parameter built-in types (no surface
+// constructors), produced and consumed only through the `simd_*` builtins. The
+// interpreter holds the two words raw; native stores them in a two-word cell.
 pub const F64X2: &str = "F64x2";
 pub const I64X2: &str = "I64x2";
+pub const F32X4: &str = "F32x4";
+pub const I32X4: &str = "I32x4";
 pub const EQ_CLASS: &str = "Eq";
 pub const ORD_CLASS: &str = "Ord";
 pub const SHOW_CLASS: &str = "Show";

@@ -41,10 +41,7 @@ fn typed_erasure_preserves_corpus_core_identity() {
 fn typed_erasure_preserves_corpus_core_identity_on_compiler_stack() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let roots = prism::default_roots(root);
-    let mut linted_cfg = prism::Config {
-        opt: prism::OptLevel::O1,
-        ..prism::Config::default()
-    };
+    let mut linted_cfg = prism::Config::default().with_opt(prism::OptLevel::O1);
     linted_cfg.flags.warn_dupes = prism::WarnDupes::Off;
     linted_cfg.flags.warn_stdlib_dupes = prism::WarnDupes::Off;
     linted_cfg.flags.core_lint = true;
@@ -158,10 +155,7 @@ fn full_front_crosses_typed_newtype_prefix_across_corpus() {
 fn full_front_crosses_typed_newtype_prefix_across_corpus_on_compiler_stack() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let roots = prism::default_roots(root);
-    let mut cfg = prism::Config {
-        opt: prism::OptLevel::O1,
-        ..prism::Config::default()
-    };
+    let mut cfg = prism::Config::default().with_opt(prism::OptLevel::O1);
     cfg.flags.warn_dupes = prism::WarnDupes::Off;
     cfg.flags.warn_stdlib_dupes = prism::WarnDupes::Off;
     let mut linted_cfg = cfg.clone();
@@ -270,10 +264,7 @@ fn bool_score() : Int = if bools() then 1 else 0
 fn main() : Int = ints() + bool_score()
 ";
     let full = prism::with_prelude(source);
-    let typed_cfg = prism::Config {
-        opt: prism::OptLevel::O1,
-        ..prism::Config::default()
-    };
+    let typed_cfg = prism::Config::default().with_opt(prism::OptLevel::O1);
     let mut linted_cfg = typed_cfg.clone();
     linted_cfg.flags.core_lint = true;
 
@@ -292,10 +283,7 @@ fn main() : Int = ints() + bool_score()
         "two instantiations of the same polymorphic nullary builder share one clone"
     );
 
-    let o0_cfg = prism::Config {
-        opt: prism::OptLevel::O0,
-        ..prism::Config::default()
-    };
+    let o0_cfg = prism::Config::default().with_opt(prism::OptLevel::O0);
     let o0 = prism::dump_on("core", &full, &roots, &o0_cfg).expect("typed O0 front");
     assert!(
         !o0.contains("copy_one$sp"),
@@ -328,10 +316,7 @@ fn higher_order_predicate_under_local_var_retains_its_open_row() {
 fn main() : Int = scan(0, \(x) -> x < 2)
 ";
     let full = prism::with_prelude(source);
-    let typed_cfg = prism::Config {
-        opt: prism::OptLevel::O1,
-        ..prism::Config::default()
-    };
+    let typed_cfg = prism::Config::default().with_opt(prism::OptLevel::O1);
     let mut linted_cfg = typed_cfg.clone();
     linted_cfg.flags.core_lint = true;
 
@@ -349,10 +334,7 @@ fn effect_polymorphic_traverse_stays_compatibility_exact() {
     let source = fs::read_to_string(root.join("examples/effectful_traverse.pr"))
         .expect("effectful traverse example");
     let full = prism::with_prelude(&source);
-    let typed_cfg = prism::Config {
-        opt: prism::OptLevel::O1,
-        ..prism::Config::default()
-    };
+    let typed_cfg = prism::Config::default().with_opt(prism::OptLevel::O1);
     let mut linted_cfg = typed_cfg.clone();
     linted_cfg.flags.core_lint = true;
     let typed = prism::dump_on("core", &full, &roots, &typed_cfg)

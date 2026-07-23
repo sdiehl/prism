@@ -13,7 +13,7 @@ fn batch_frontend_refuses_typed_holes() {
         error.hole_report().map(|report| report.name.as_str()),
         Some("todo")
     );
-    insta::assert_snapshot!(error.to_string(), @"typed hole `?todo`: expected Int with effects {}; candidates: none; 146 binding(s) in scope");
+    insta::assert_snapshot!(error.to_string(), @"typed hole `?todo`: expected Int with effects {}; candidates: none; 161 binding(s) in scope");
 }
 
 #[test]

@@ -3,7 +3,7 @@
 //! values, shared by the machine's step loop.
 
 use std::cmp::Ordering;
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::OnceLock;
@@ -207,6 +207,22 @@ fn simd_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
     };
     let ibin =
         |a: &[u64; 2], c: &[u64; 2], op: fn(u64, u64) -> u64| vec(op(a[0], c[0]), op(a[1], c[1]));
+    // The four-lane views of the same two words (`lane32`/`pack_lanes4`).
+    // Arithmetic runs in true single precision (`f32`) or wrapping 32-bit so
+    // the native C lanes reproduce it bit for bit.
+    let pack4 = |ls: [u32; 4]| {
+        let [w0, w1] = pack_lanes4(ls);
+        vec(w0, w1)
+    };
+    let fbin4 = |a: &[u64; 2], c: &[u64; 2], op: fn(f32, f32) -> f32| {
+        let lane =
+            |i: usize| op(f32::from_bits(lane32(a, i)), f32::from_bits(lane32(c, i))).to_bits();
+        pack4([lane(0), lane(1), lane(2), lane(3)])
+    };
+    let ibin4 = |a: &[u64; 2], c: &[u64; 2], op: fn(u32, u32) -> u32| {
+        let lane = |i: usize| op(lane32(a, i), lane32(c, i));
+        pack4([lane(0), lane(1), lane(2), lane(3)])
+    };
     match (b, vals) {
         (B::SimdFSplat, [Rv::Float(x)]) => Ok(vec(x.to_bits(), x.to_bits())),
         (B::SimdISplat, [Rv::I64(x)]) => Ok(vec(x.cast_unsigned(), x.cast_unsigned())),
@@ -230,6 +246,39 @@ fn simd_builtin(b: Builtin, vals: &[Rv]) -> Result<Rv, String> {
         (B::SimdIExtract, [Rv::Vec128(v), Rv::Int(i)]) => {
             Ok(Rv::I64(simd_lane(v, *i)?.cast_signed()))
         }
+        // Splat narrows (f64 -> f32 round-to-nearest, i64 -> i32 truncation);
+        // extract widens back exactly (f32 -> f64, i32 sign-extended to i64).
+        (B::SimdF32Splat, [Rv::Float(x)]) => {
+            #[expect(clippy::cast_possible_truncation)] // the narrowing IS the semantic
+            let bits = (*x as f32).to_bits();
+            Ok(pack4([bits; 4]))
+        }
+        (B::SimdI32Splat, [Rv::I64(x)]) => {
+            #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            // keep the low 32 bits; the extract reinterprets them as signed
+            let lane = *x as u32;
+            Ok(pack4([lane; 4]))
+        }
+        (B::SimdF32Add, [Rv::Vec128(a), Rv::Vec128(c)]) => Ok(fbin4(a, c, |x, y| x + y)),
+        (B::SimdF32Sub, [Rv::Vec128(a), Rv::Vec128(c)]) => Ok(fbin4(a, c, |x, y| x - y)),
+        (B::SimdF32Mul, [Rv::Vec128(a), Rv::Vec128(c)]) => Ok(fbin4(a, c, |x, y| x * y)),
+        (B::SimdF32Min, [Rv::Vec128(a), Rv::Vec128(c)]) => {
+            Ok(fbin4(a, c, |x, y| if x < y { x } else { y }))
+        }
+        (B::SimdF32Max, [Rv::Vec128(a), Rv::Vec128(c)]) => {
+            Ok(fbin4(a, c, |x, y| if x > y { x } else { y }))
+        }
+        (B::SimdI32Add, [Rv::Vec128(a), Rv::Vec128(c)]) => Ok(ibin4(a, c, u32::wrapping_add)),
+        (B::SimdI32Sub, [Rv::Vec128(a), Rv::Vec128(c)]) => Ok(ibin4(a, c, u32::wrapping_sub)),
+        (B::SimdI32And, [Rv::Vec128(a), Rv::Vec128(c)]) => Ok(ibin4(a, c, |x, y| x & y)),
+        (B::SimdI32Or, [Rv::Vec128(a), Rv::Vec128(c)]) => Ok(ibin4(a, c, |x, y| x | y)),
+        (B::SimdI32Xor, [Rv::Vec128(a), Rv::Vec128(c)]) => Ok(ibin4(a, c, |x, y| x ^ y)),
+        (B::SimdF32Extract, [Rv::Vec128(v), Rv::Int(i)]) => {
+            Ok(Rv::Float(f64::from(f32::from_bits(simd_lane4(v, *i)?))))
+        }
+        (B::SimdI32Extract, [Rv::Vec128(v), Rv::Int(i)]) => {
+            Ok(Rv::I64(i64::from(simd_lane4(v, *i)?.cast_signed())))
+        }
         _ => Err("simd op: wrong args".into()),
     }
 }
@@ -242,6 +291,36 @@ fn simd_lane(v: &[u64; 2], i: i64) -> Result<u64, String> {
         1 => Ok(v[1]),
         _ => Err("simd lane index out of bounds".into()),
     }
+}
+
+// The width of a 32-bit lane in bits, the shift stride of the four-lane view.
+const LANE32_BITS: usize = 32;
+
+// The four-lane read over the same two words: lane `i` is the 32-bit field at
+// word `i / 2`, bit offset `(i % 2) * 32`, low lane first. Native reads the
+// identical fields (`prism_simd_lane4`).
+#[expect(clippy::cast_possible_truncation)] // the low 32 bits ARE the lane
+const fn lane32(v: &[u64; 2], i: usize) -> u32 {
+    (v[i / 2] >> ((i % 2) * LANE32_BITS)) as u32
+}
+
+// Inverse of `lane32`: pack four lanes into the vector's two words. Plain
+// widening casts because `u64::from` is not const-callable yet.
+const fn pack_lanes4(ls: [u32; 4]) -> [u64; 2] {
+    [
+        (ls[0] as u64) | ((ls[1] as u64) << LANE32_BITS),
+        (ls[2] as u64) | ((ls[3] as u64) << LANE32_BITS),
+    ]
+}
+
+// The bounds-checked four-lane read backing `extract`; an out-of-range index
+// is the same deterministic fault as the two-lane form.
+fn simd_lane4(v: &[u64; 2], i: i64) -> Result<u32, String> {
+    usize::try_from(i)
+        .ok()
+        .filter(|k| *k < 4)
+        .map(|k| lane32(v, k))
+        .ok_or_else(|| "simd lane index out of bounds".into())
 }
 
 #[allow(clippy::too_many_lines)]
@@ -384,6 +463,17 @@ pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv
             static MONO_BASE: OnceLock<Instant> = OnceLock::new();
             let ns = MONO_BASE.get_or_init(Instant::now).elapsed().as_nanos();
             Ok(Rv::Int(i64::try_from(ns).unwrap_or(i64::MAX)))
+        }
+        // Real OS entropy, mirroring the native runtime's `/dev/urandom` read. It
+        // is a recorded capability observation (see `capability_obs`), so the live
+        // read here happens only on the recording run; replay serves the trace.
+        // Distinct from the seeded, replayable `Random` stream: an `Entropy` read
+        // is non-reproducible, which is why a `replayable` function may not use it.
+        (B::Entropy, []) => {
+            let mut buf = [0u8; 8];
+            let _ = fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut buf));
+            let v = u64::from_le_bytes(buf) >> 1;
+            Ok(Rv::Int(i64::try_from(v).unwrap_or(i64::MAX)))
         }
         (B::Arg, [Rv::Int(i)]) => Ok(Rv::Str(
             usize::try_from(*i)
@@ -531,7 +621,21 @@ pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv
             | B::SimdISub
             | B::SimdIAnd
             | B::SimdIOr
-            | B::SimdIXor,
+            | B::SimdIXor
+            | B::SimdF32Splat
+            | B::SimdF32Extract
+            | B::SimdF32Add
+            | B::SimdF32Sub
+            | B::SimdF32Mul
+            | B::SimdF32Min
+            | B::SimdF32Max
+            | B::SimdI32Splat
+            | B::SimdI32Extract
+            | B::SimdI32Add
+            | B::SimdI32Sub
+            | B::SimdI32And
+            | B::SimdI32Or
+            | B::SimdI32Xor,
             _,
         ) => simd_builtin(b, vals),
         (B::BufSlice, [Rv::Buf(v), Rv::Int(start), Rv::Int(len)]) => {

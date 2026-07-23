@@ -13,6 +13,13 @@
 //! Each field documents its env var, default, and effect. Booleans that gate a
 //! shipping fast path default on (opt out with `=0`); debug/telemetry switches
 //! default off (opt in by being present).
+//!
+//! This is the home for *compile-time behavior* knobs only. Two other `PRISM_*`
+//! families live elsewhere by design: runtime knobs the running program observes
+//! (read by the C runtime, mirrored by the interpreter), and the C-toolchain seam
+//! (`PRISM_CC` / `PRISM_CC_FLAGS`, centralized in [`crate::codegen::rt`]). The
+//! env-knob audit (`tests/env_knobs.rs`) catalogues all three and fails if any
+//! knob is read from an undocumented site.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -269,10 +276,6 @@ pub struct DynFlags {
     /// once and falls back to `auto` (the tier-parity test independently asserts
     /// the forcing engaged, so a typo cannot make the oracle silently vacuous).
     pub effect_tier: EffectTier,
-    /// `PRISM_TYPED_PARITY_REPORT` (default off): print classified differences
-    /// observed beside the authoritative typed pipeline. Reporting is diagnostic
-    /// only and never changes acceptance, artifacts, or query identity.
-    pub typed_parity_report: bool,
     /// `PRISM_COMPILER_CACHE` (default on): reuse byte-identical compiler
     /// artifacts from the content-addressed query store. Set to `0` for the
     /// from-scratch oracle or when investigating invalidation.
@@ -345,7 +348,6 @@ impl Default for DynFlags {
             fuse: false,
             scheduler: Scheduler::default(),
             effect_tier: EffectTier::default(),
-            typed_parity_report: false,
             compiler_cache: true,
             store: false,
             store_path: None,
@@ -406,7 +408,6 @@ impl DynFlags {
                 .and_then(|s| Scheduler::parse(&s))
                 .unwrap_or(base.scheduler),
             effect_tier: effect_tier_from_env(base.effect_tier),
-            typed_parity_report: env_bool("PRISM_TYPED_PARITY_REPORT", base.typed_parity_report),
             compiler_cache: env_bool("PRISM_COMPILER_CACHE", base.compiler_cache),
             store: base.store || env_present("PRISM_STORE"),
             store_path: std::env::var_os("PRISM_STORE_PATH")

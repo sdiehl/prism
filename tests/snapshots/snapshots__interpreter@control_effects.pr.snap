@@ -8,6 +8,12 @@ input_file: tests/cases/run/control_effects.pr
 13
 13
 hello world
+0
 ["a", "b", "c"]
+0
+["a", "b", "c"]
+["a", "b", "c"]
+["c", "b", "a"]
+(10, 6)
 ["x0", "x1", "y2"]
 => ()

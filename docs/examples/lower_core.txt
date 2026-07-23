@@ -1,6 +1,6 @@
 fn unwrap(o) =
-  return o to t@733
-  case t@733 of
+  return o to t@735
+  case t@735 of
     Non =>
       return 0
     Som(n) =>

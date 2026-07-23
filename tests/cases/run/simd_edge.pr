@@ -1,5 +1,5 @@
--- SIMD parity under the IEEE edge cases the plan calls out: NaN, signed zero,
--- and subnormals. The interpreter is the oracle; native must reproduce every
+-- SIMD parity under IEEE edge cases: NaN, signed zero, and subnormals. The
+-- interpreter is the oracle; native must reproduce every
 -- lane bit for bit. `min`/`max` are a plain lane-wise `a < b ? a : b`, so a NaN
 -- operand returns the other lane on both sides, and signed zero orders the way
 -- the comparison does, identically on each backend.

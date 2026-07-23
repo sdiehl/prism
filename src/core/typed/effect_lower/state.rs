@@ -1316,8 +1316,8 @@ impl Threader<'_> {
             // A handle inside a producer is a re-emitting forwarder: it performs
             // the operation again, so it threads rather than consumes.
             TypedCompKind::Handle { .. } => self.thread_forward(c, evs, loc, st)?,
-            // A take handle's `Step` protocol, and the escaping producer thunks a
-            // pure head can carry, are the next slice.
+            // Take handles using the `Step` protocol and escaping producer thunks
+            // carried by a pure head are not fused here.
             _ => return None,
         })
     }

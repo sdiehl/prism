@@ -1,0 +1,66 @@
+-- A small fold zoo. One eliminator captures the recursion; the remaining
+-- traversals differ only in the algebra they supply at leaves and branches.
+
+type Tree(a) = Leaf(a) | Branch(Tree(a), Tree(a)) deriving (Show)
+
+fn fold_tree(on_leaf : (a) -> b, on_branch : (b, b) -> b, tree : Tree(a)) : b =
+  match tree of
+    Leaf(x) => on_leaf(x)
+    Branch(left, right) =>
+      on_branch(
+          fold_tree(on_leaf, on_branch, left),
+          fold_tree(on_leaf, on_branch, right),
+        )
+
+-- Shape-preserving transformation.
+fn map_tree(f : (a) -> b, tree : Tree(a)) : Tree(b) =
+  fold_tree(\(x) -> Leaf(f(x)), \(left, right) -> Branch(left, right), tree)
+
+-- A non-empty tree needs no seed to reduce its leaves.
+fn reduce_tree(combine : (a, a) -> a, tree : Tree(a)) : a =
+  fold_tree(\(x) -> x, combine, tree)
+
+fn size_tree(tree : Tree(a)) : Int =
+  fold_tree(\(_x) -> 1, \(left, right) -> left + right, tree)
+
+fn depth_tree(tree : Tree(a)) : Int =
+  fold_tree(\(_x) -> 1, \(left, right) -> 1 + max(left, right), tree)
+
+fn all_tree(predicate : (a) -> Bool, tree : Tree(a)) : Bool =
+  fold_tree(predicate, \(left, right) -> left && right, tree)
+
+fn leaves(tree : Tree(a)) : List(a) =
+  fold_tree(\(x) -> Cons(x, Nil), append, tree)
+
+fn mirror(tree : Tree(a)) : Tree(a) =
+  fold_tree(\(x) -> Leaf(x), \(left, right) -> Branch(right, left), tree)
+
+-- A bottom-up synthesized attribute: rebuild the tree with every subtree's
+-- leaf count attached, while calculating the count only once.
+type MeasuredTree(a)
+  = MeasuredLeaf(a)
+  | MeasuredBranch(Int, MeasuredTree(a), MeasuredTree(a))
+  deriving (Show)
+
+type Measured(a) = Measured { tree: MeasuredTree(a), size: Int }
+
+fn join_measured(left : Measured(a), right : Measured(a)) : Measured(a) =
+  let total = left.size + right.size
+  Measured { tree = MeasuredBranch(total, left.tree, right.tree), size = total }
+
+fn measure(tree : Tree(a)) : Measured(a) =
+  fold_tree(
+      \(x) -> Measured { tree = MeasuredLeaf(x), size = 1 },
+      join_measured,
+      tree,
+    )
+
+fn main() : Unit ! {IO} =
+  let tree = Branch(Branch(Leaf(1), Leaf(2)), Leaf(3))
+  println(show(map_tree(\(x) -> x * 10, tree)))
+  println(reduce_tree(\(x, y) -> x + y, tree))
+  println(size_tree(tree))
+  println(depth_tree(tree))
+  println(all_tree(\(x) -> x > 0, tree))
+  println(show(leaves(mirror(tree))))
+  println(show(measure(tree).tree))

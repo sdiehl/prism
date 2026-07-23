@@ -291,6 +291,22 @@ pub fn check_cmd(file: Option<&Path>, cfg: &crate::Config) -> CmdResult {
         })?
     };
     let (full, roots, name, _) = resolve_input(&input, cfg)?;
+    // The warm no-op cutoff: this exact source tree, configuration, mode, and
+    // stable-lock manifest already passed a warning-free validated check, so the
+    // warm run returns the identical (empty) success with no parse or resolve.
+    // Only warning-free passes are ever recorded, so a run that would print
+    // diagnostics always re-runs; a failing check is never cached.
+    let lock_manifest = (!is_project(&input))
+        .then(|| std::fs::read(stable_lock::manifest_path(&input)).ok())
+        .flatten();
+    let verdict_cache =
+        crate::driver::CheckVerdictCache::for_check(&full, &roots, lock_manifest.as_deref(), cfg)
+            .map_err(|e| (e, full.clone(), name.clone()))?;
+    if let Some(cache) = &verdict_cache {
+        if cache.hit().map_err(|e| (e, full.clone(), name.clone()))? {
+            return Ok(());
+        }
+    }
     // A committed stable-lock manifest beside a single source is enforced here, so
     // a locked migration whose generated behavior drifted fails the check. Absent
     // manifest is a no-op, so an unlocked family is not checked.
@@ -300,7 +316,14 @@ pub fn check_cmd(file: Option<&Path>, cfg: &crate::Config) -> CmdResult {
     // The public verdict validates (fip / replayable / effect reconciliation),
     // so `prism check` agrees with `prism build`. The type-only surface stays
     // available to `dump` / `report` / snapshots via `check_on_in`.
-    crate::check_validated_on_in(&full, &roots, cfg).map_err(|e| (e, full, name))?;
+    let checked =
+        crate::check_validated_on_in(&full, &roots, cfg).map_err(|e| (e, full.clone(), name))?;
+    if checked.warnings.is_empty() {
+        if let Some(cache) = &verdict_cache {
+            // Best-effort: a failed record leaves the check's verdict untouched.
+            let _ = cache.record();
+        }
+    }
     Ok(())
 }
 

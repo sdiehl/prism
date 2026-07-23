@@ -1,0 +1,15 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/frozen_array.pr
+---
+3
+10
+30
+60
+[11, 21, 31]
+99
+20
+3
+2
+=> ()

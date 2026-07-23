@@ -1,8 +1,12 @@
-use std::env;
 use std::fmt::Write as _;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "native")]
 use std::process::Command;
 
+// The C-toolchain seam lives in `codegen::rt`, which is `native`-only, so the
+// native-toolchain identity is gated on the same feature (not merely on a
+// non-wasm target: a non-native host build has no native backend either).
+#[cfg(feature = "native")]
+use crate::codegen::rt::{cc, cc_flags, cc_overridden};
 use crate::core::{CorePass, OptLevel, PassSpec, HASH_SCHEME};
 
 use super::Config;
@@ -134,11 +138,11 @@ impl ArtifactIdentity {
             source_root: None,
             stdlib_root: None,
             package_roots: Vec::new(),
-            opt: opt_label(cfg.opt),
+            opt: opt_label(cfg.opt()),
             passes: pass_spec_label(cfg.passes.as_ref()),
             disabled: disabled_label(&cfg.disabled),
-            backend_opt: cfg.backend_opt.as_str().to_string(),
-            scheduler: cfg.scheduler.label(),
+            backend_opt: cfg.backend_opt().as_str().to_string(),
+            scheduler: cfg.scheduler().label(),
             effect_tier: cfg.flags.effect_tier.label(),
             native_effects: cfg.flags.native_effects,
             trampoline: cfg.flags.trampoline,
@@ -246,10 +250,10 @@ fn native_toolchain_identity(backend: &str) -> Option<NativeToolchainIdentity> {
     matches!(backend, "llvm" | "mlir").then(native_toolchain_for_backend)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "native")]
 fn native_toolchain_for_backend() -> NativeToolchainIdentity {
-    let cc = env::var("PRISM_CC").unwrap_or_else(|_| env!("PRISM_BUILD_CC").to_string());
-    let cc_flags = env::var("PRISM_CC_FLAGS").unwrap_or_default();
+    let cc = cc();
+    let cc_flags = cc_flags();
     let cc_version = native_cc_version(&cc);
     NativeToolchainIdentity {
         cc,
@@ -258,7 +262,7 @@ fn native_toolchain_for_backend() -> NativeToolchainIdentity {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(not(feature = "native"))]
 fn native_toolchain_for_backend() -> NativeToolchainIdentity {
     NativeToolchainIdentity {
         cc: String::new(),
@@ -267,7 +271,7 @@ fn native_toolchain_for_backend() -> NativeToolchainIdentity {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "native")]
 fn native_cc_version(cc: &str) -> String {
     Command::new(cc)
         .arg("--version")
@@ -277,7 +281,7 @@ fn native_cc_version(cc: &str) -> String {
         .and_then(|version| version.lines().next().map(str::trim).map(str::to_string))
         .filter(|version| !version.is_empty())
         .unwrap_or_else(|| {
-            if env::var("PRISM_CC").is_ok() {
+            if cc_overridden() {
                 "unavailable".to_string()
             } else {
                 env!("PRISM_BUILD_CC_VERSION").to_string()

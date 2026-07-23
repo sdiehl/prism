@@ -1635,8 +1635,8 @@ mod tests {
     // Every corpus program routed through state threading, read from the tree
     // and checked one by one: the eleven programs
     // `tests/tier_manifest.txt` records as `state-fusion` are the population,
-    // not a sample, so a threading change that loses any one of them fails here
-    // rather than at the release gate. Read at run time rather than
+    // not a sample, so a threading change that loses any one of them fails at its
+    // source. Read at run time rather than
     // `include_str!` so the corpus stays a single source of truth; this is an
     // always-run library test, not a cached native verdict.
     #[test]
@@ -2555,16 +2555,22 @@ fn main() =
         (probed, clean)
     }
 
+    // These pin a blake3 of the `pp_core` dump, which prints raw fresh ids, so the
+    // digests are a function of the process-global `Sym` supply, not just the
+    // program: adding a builtin or prelude effect shifts the supply and moves them.
+    // What the tests actually guard (probed != clean) is intact; only the concrete
+    // hex is regenerated when the supply moves. Canonical (`core-hash`) output is
+    // unaffected, which `tests/determinism.rs` proves.
     #[test]
     fn local_partial_rest_fusion_decline_preserves_the_typed_name_supply() {
         let (probed, clean) = typed_local_decline_digests(LocalDeclinePoint::AfterRestFusion);
         assert_eq!(
             probed,
-            "ef683da779f9ee4c8f74cec907db8bc146ed6babf0b90fc508781bfebc59a13e"
+            "ae751e3cb5038eb25b108909c5bdc02b0218d3c9799aff74cb05de9c695a7ed3"
         );
         assert_eq!(
             clean,
-            "d302274b031cd99c2e4da06bc46e1c73664922f46dbcc008f3bc187cbcc9042a"
+            "fb70e38b468785ce83f2e9ffe33be7edf36a052505eba3e40326b697e9229a75"
         );
     }
 
@@ -2573,11 +2579,11 @@ fn main() =
         let (probed, clean) = typed_local_decline_digests(LocalDeclinePoint::AfterBoundaryAssembly);
         assert_eq!(
             probed,
-            "74cb64809cc4e7608260a5a29ab73ae0c3f33b4004afeb5a9fd0c5537da30175"
+            "86b0fa0e4899076bbbaa4594c7b63ea68aba35dba5af22302afe32b624baba48"
         );
         assert_eq!(
             clean,
-            "d302274b031cd99c2e4da06bc46e1c73664922f46dbcc008f3bc187cbcc9042a"
+            "fb70e38b468785ce83f2e9ffe33be7edf36a052505eba3e40326b697e9229a75"
         );
     }
 }

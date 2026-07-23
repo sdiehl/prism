@@ -1,0 +1,40 @@
+import Spectra (..)
+
+fn value_slide() : Unit ! {SlideBuilder} =
+  pict(para([
+      plain("Spectra keeps presentation structure in "),
+      inline_code("Deck"),
+      plain(" and lets Typst own final typography."),
+    ]))
+  reveal_next()
+  pict(item("Slides, layout, and reveal stages are type checked."))
+  pict(item("Generated Typst is a durable, inspectable artifact."))
+
+fn authoring_slide() : Unit ! {SlideBuilder} =
+  pict(
+      prism_code(
+          "slide(\"Composition\", body)\n\nfn body() =\n  pict(item(\"ordinary values\"))\n  reveal_next()\n  pict(item(\"typed effects\"))",
+        ),
+    )
+  reveal_next()
+  pict(item("Builder effects elaborate to the same pure deck representation."))
+
+fn artifacts_slide() : Unit ! {SlideBuilder} =
+  pict(centered(16, [
+      text("Prism source → Deck → envelope → Typst → PDF"),
+      rich_text([
+          colored("muted", [
+              plain("Every boundary is deterministic and content-addressable."),
+            ]),
+        ]),
+    ]))
+
+fn slides() : Unit ! {DeckBuilder} =
+  cover("Spectra", "Typed presentations, refracted through Typst")
+  slide("A deck is a value", value_slide)
+  slide("The authoring surface is Prism", authoring_slide)
+  slide("One source, a spectrum of artifacts", artifacts_slide)
+
+fn talk() : Deck = deck(metadata("Spectra", "Prism"), prism_theme, slides)
+
+fn main() = emit_deck(talk())

@@ -67,18 +67,21 @@ pub const INPUT_CAPABILITY_EFFECTS: &[&str] = &["Console", "FileSystem", "Random
 // capability, shipped in the `Concurrent` stdlib, so it is an ordinary effect and
 // no longer reserved.)
 pub const PREEMPT_EFFECT: &str = "Preempt";
-// The boundary capabilities that are reserved but unshipped: `Net` (network)
-// and `Entropy` (real randomness beyond the replayable `Random`). Reserving the
-// effect names now means no package can give them an incompatible meaning
-// before their capability protocols (and provenance event kinds) are designed;
-// `Process` is deliberately absent because its observation label is already
-// live. Each entry carries the reason its rejection diagnostic names.
+// The boundary capabilities that are reserved but unshipped: `Net` (network).
+// Reserving the effect name now means no package can give it an incompatible
+// meaning before its capability protocol (and provenance event kind) is designed;
+// `Process` is deliberately absent because its observation label is already live,
+// and `Entropy` shipped (the prelude `effect Entropy`, backed by `prim_entropy`),
+// so it is an ordinary effect and no longer reserved. Each entry carries the
+// reason its rejection diagnostic names.
 pub const NET_EFFECT: &str = "Net";
+// `Entropy`: real, non-replayable OS randomness, shipped as a prelude effect. It
+// is deliberately absent from the `replayable` allowed set ([`INPUT_CAPABILITY_EFFECTS`]),
+// so a durable function cannot consume it and reuse captured key material on replay.
 pub const ENTROPY_EFFECT: &str = "Entropy";
 pub const RESERVED_SEAM_EFFECTS: &[(&str, &str)] = &[
     (PREEMPT_EFFECT, "the concurrency preemption seam"),
     (NET_EFFECT, "the network boundary capability"),
-    (ENTROPY_EFFECT, "the entropy boundary capability"),
 ];
 
 // The `Concurrent` scheduler entry points. `run_cooperative` is the policy-neutral
@@ -104,6 +107,7 @@ pub const CAP_WRAPPERS: &[&str] = &[
     "read_file_bytes",
     "file_exists",
     "rand",
+    "entropy",
     "getenv",
     "args_count",
     "arg",
@@ -873,14 +877,14 @@ mod tests {
         private, sort_prim_kind, split_family_member, stable_family_member, stable_route_downgrade,
         stable_route_upgrade, stable_rung, throw_op, var_effect, var_get, var_runner, var_set,
         ScopedEscape, ARBITRARY_METHOD, CAP_WRAPPERS, CONCAT_MAP_FN, DECODE_METHOD, DIV_MOD_METHOD,
-        DIV_QUOT_METHOD, EMIT_OP, ENCODE_METHOD, EQ_METHOD, FMAP_METHOD, FORCE_FN, FOREVER,
-        GUARD_FN, HASH_METHOD, INCR_REPLAY_DRIVERS, INT_CMP, NUM_ADD_METHOD, NUM_FROMINT_METHOD,
-        NUM_MUL_METHOD, NUM_NEG_METHOD, NUM_SUB_METHOD, ORD_METHOD, POW_METHOD, QC_ARB_GEN,
-        QC_GEN_BIND, QC_GEN_CHOOSE, QC_GEN_CONST, QC_GEN_RESIZE, QC_GEN_RUN, REPEAT_WHILE,
-        REPLAY_DRIVERS, RUN_IO, SCOLLECT_FN, SHAPE_DIGEST_METHOD, SHOW_METHOD, SMAP_FN,
-        SORT_BY_ORD_FN, SORT_FN, SORT_PRIM_INSTANCES, STR_ESCAPE_FN, SUCCEEDS_FN, WIRE_CAT,
-        WIRE_DECODE_VALUE_WITH_DIGEST, WIRE_EMPTY, WIRE_ENCODE_VALUE_WITH_DIGEST, WIRE_GET_TAG,
-        WIRE_IS_EMPTY, WIRE_OPEN_VALUE_ANY, WIRE_TAG,
+        DIV_QUOT_METHOD, EMIT_OP, ENCODE_METHOD, ENTROPY_EFFECT, EQ_METHOD, FMAP_METHOD, FORCE_FN,
+        FOREVER, GUARD_FN, HASH_METHOD, INCR_REPLAY_DRIVERS, INPUT_CAPABILITY_EFFECTS, INT_CMP,
+        NUM_ADD_METHOD, NUM_FROMINT_METHOD, NUM_MUL_METHOD, NUM_NEG_METHOD, NUM_SUB_METHOD,
+        ORD_METHOD, POW_METHOD, QC_ARB_GEN, QC_GEN_BIND, QC_GEN_CHOOSE, QC_GEN_CONST,
+        QC_GEN_RESIZE, QC_GEN_RUN, REPEAT_WHILE, REPLAY_DRIVERS, RUN_IO, SCOLLECT_FN,
+        SHAPE_DIGEST_METHOD, SHOW_METHOD, SMAP_FN, SORT_BY_ORD_FN, SORT_FN, SORT_PRIM_INSTANCES,
+        STR_ESCAPE_FN, SUCCEEDS_FN, WIRE_CAT, WIRE_DECODE_VALUE_WITH_DIGEST, WIRE_EMPTY,
+        WIRE_ENCODE_VALUE_WITH_DIGEST, WIRE_GET_TAG, WIRE_IS_EMPTY, WIRE_OPEN_VALUE_ANY, WIRE_TAG,
     };
 
     #[test]
@@ -1231,5 +1235,15 @@ mod tests {
                  `instance {inst} :` in the prelude"
             );
         }
+    }
+
+    #[test]
+    fn entropy_is_not_a_replayable_capability() {
+        // `Entropy` is real, non-reproducible randomness. A `replayable`/durable
+        // function must not consume it: replaying would reuse the captured key
+        // material. Unlike `Random`/`Clock` it is deliberately kept out of the
+        // allowed set, so non-replayability holds by the existing row-subset check
+        // with no new rule (see `driver::verify`).
+        assert!(!INPUT_CAPABILITY_EFFECTS.contains(&ENTROPY_EFFECT));
     }
 }

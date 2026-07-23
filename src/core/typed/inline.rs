@@ -348,7 +348,6 @@ fn inline_call(
 mod tests {
     use std::collections::BTreeMap;
 
-    use crate::core::opt::{run_spec_stage, CorePass, PassStage};
     use crate::core::{EffectStrategy, OpGrades};
     use crate::flags::{DynFlags, EffectTier};
     use crate::types::ty::Label;
@@ -398,31 +397,16 @@ mod tests {
         )
     }
 
-    fn assert_differential(
-        functions: Vec<TypedCoreFn>,
-        env: &VerifyEnv,
-    ) -> (TypedCore<Elaborated>, u64) {
+    fn run_inline(functions: Vec<TypedCoreFn>, env: &VerifyEnv) -> (TypedCore<Elaborated>, u64) {
         let input = TypedCore::new(functions);
         if let Err(violations) = verify(&input, env) {
             panic!("input fixture is invalid: {violations:#?}");
         }
-        let legacy_input = input.clone().erase();
-        let (expected, legacy_ticks) = run_spec_stage(
-            &legacy_input,
-            &BTreeSet::new(),
-            &[CorePass::Inline],
-            PassStage::Late,
-            &[],
-            &DynFlags::default(),
-        );
-        let expected_ticks = legacy_ticks.total();
         let (actual, stats) = inline(input);
         if let Err(violations) = verify(&actual, env) {
             panic!("inlined typed Core is invalid: {violations:#?}");
         }
-        assert_eq!(actual.clone().erase(), expected);
-        assert_eq!(stats.ticks(), expected_ticks);
-        (actual, expected_ticks)
+        (actual, stats.ticks())
     }
 
     fn lowered_inline_fixture() -> (TypedCore<EffectLowered>, VerifyEnv) {
@@ -566,35 +550,24 @@ mod tests {
         (lowered, env)
     }
 
-    fn assert_lowered_differential(
+    fn run_lowered_inline(
         input: TypedCore<EffectLowered>,
         env: &VerifyEnv,
     ) -> (TypedCore<EffectLowered>, u64) {
         if let Err(violations) = verify(&input, env) {
             panic!("effect-lowered Inline input is invalid: {violations:#?}");
         }
-        let legacy_input = input.clone().erase();
-        let (expected, legacy_ticks) = run_spec_stage(
-            &legacy_input,
-            &BTreeSet::new(),
-            &[CorePass::Inline],
-            PassStage::Late,
-            &[],
-            &DynFlags::default(),
-        );
         let (actual, stats) = inline(input);
         if let Err(violations) = verify(&actual, env) {
             panic!("effect-lowered Inline output is invalid: {violations:#?}");
         }
-        assert_eq!(actual.clone().erase(), expected);
-        assert_eq!(stats.ticks(), legacy_ticks.total());
         (actual, stats.ticks())
     }
 
     #[test]
-    fn effect_lowered_inline_matches_the_legacy_pass() {
+    fn effect_lowered_inline_removes_the_helper_call() {
         let (input, env) = lowered_inline_fixture();
-        let (actual, ticks) = assert_lowered_differential(input, &env);
+        let (actual, ticks) = run_lowered_inline(input, &env);
         assert_eq!(ticks, 1, "the lowered helper call must be inlined");
         assert!(actual
             .functions()
@@ -641,7 +614,7 @@ mod tests {
         // `wrap`) are single-call-site and get spliced: two ticks chain-inline
         // `main`'s call, and a third re-inlines `g` into `wrap`'s own
         // (now-orphaned but still rewritten) body.
-        let (actual, ticks) = assert_differential(vec![main, wrap, g_fn()], &env);
+        let (actual, ticks) = run_inline(vec![main, wrap, g_fn()], &env);
         assert_eq!(ticks, 3);
         let main = actual
             .functions()
@@ -682,7 +655,7 @@ mod tests {
             CoreFnSig::new(Vec::new(), Vec::new(), pure(source(Type::Int))),
             0,
         );
-        let (_, ticks) = assert_differential(vec![looping], &env);
+        let (_, ticks) = run_inline(vec![looping], &env);
         assert_eq!(ticks, 0);
     }
 
@@ -743,7 +716,7 @@ mod tests {
         // `wrap` is used first-class (captured into `_captured`), so its own
         // call from `main` is never inlined; `g`, called once from `wrap` and
         // never captured, is still inlined into `wrap`'s body regardless.
-        let (_, ticks) = assert_differential(vec![main, wrap, g_fn()], &env);
+        let (_, ticks) = run_inline(vec![main, wrap, g_fn()], &env);
         assert_eq!(ticks, 1);
     }
 
@@ -782,7 +755,7 @@ mod tests {
             CoreFnSig::new(Vec::new(), Vec::new(), pure(source(Type::Int))),
             0,
         );
-        let (actual, ticks) = assert_differential(vec![main, identity], &env);
+        let (actual, ticks) = run_inline(vec![main, identity], &env);
         assert_eq!(ticks, 1);
         let main = actual
             .functions()
@@ -864,7 +837,7 @@ mod tests {
         // rewriting their own now-orphaned top-level body: 3 (main's fully
         // chained call) + 2 (outer's own body re-inlining inner then g) + 1
         // (inner's own body re-inlining g) = 6.
-        let (_, ticks) = assert_differential(vec![main, outer, inner, g_fn()], &env);
+        let (_, ticks) = run_inline(vec![main, outer, inner, g_fn()], &env);
         assert_eq!(ticks, 6);
     }
 }

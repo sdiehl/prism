@@ -1,0 +1,75 @@
+-- | Theme values for Spectra decks.
+--
+-- Themes are ordinary immutable Prism data. The Typst backend is the only
+-- place that interprets these values as concrete page and text settings.
+
+pub type Theme = Theme {
+  name: String,
+  background: String,
+  foreground: String,
+  accent: String,
+  muted: String,
+  code_background: String,
+  code_foreground: String,
+  text_font: String,
+  code_font: String,
+  title_size: Int,
+  body_size: Int,
+  code_size: Int,
+  margin_pt: Int
+} deriving (Eq, Show)
+
+-- | The default Spectra theme: a restrained, Beamer-inspired frame on warm
+-- paper, using Prism violet for the title rule and no ornamental chrome.
+pub let prism_theme : Theme =
+  Theme {
+    name = "prism",
+    background = "fbfaf7",
+    foreground = "211a2c",
+    accent = "6d28d9",
+    muted = "6b6572",
+    code_background = "241d30",
+    code_foreground = "f8f5ff",
+    text_font = "New Computer Modern Sans",
+    code_font = "DejaVu Sans Mono",
+    title_size = 30,
+    body_size = 21,
+    code_size = 16,
+    margin_pt = 38
+  }
+
+-- | Alias-like print theme with a slightly darker accent.
+pub let paper_theme : Theme =
+  Theme {
+    name = "paper",
+    background = "fffdf8",
+    foreground = "211a2c",
+    accent = "6d28d9",
+    muted = "665c73",
+    code_background = "eee9f5",
+    code_foreground = "211a2c",
+    text_font = "New Computer Modern Sans",
+    code_font = "DejaVu Sans Mono",
+    title_size = 32,
+    body_size = 22,
+    code_size = 16,
+    margin_pt = 34
+  }
+
+-- | The original dark Prism palette for code-heavy talks.
+pub let prism_dark_theme : Theme =
+  Theme {
+    name = "prism-dark",
+    background = "17131f",
+    foreground = "f7f2ff",
+    accent = "bb86fc",
+    muted = "b8adca",
+    code_background = "0f0c14",
+    code_foreground = "f8f5ff",
+    text_font = "New Computer Modern Sans",
+    code_font = "DejaVu Sans Mono",
+    title_size = 30,
+    body_size = 21,
+    code_size = 16,
+    margin_pt = 38
+  }

@@ -1,12 +1,11 @@
-//! End-to-end conformance for the `prism test` lane (TESTING.md T0-T2).
+//! End-to-end conformance for the `prism test` command.
 //!
-//! Covers the "Initial conformance suite" items: inline private access,
-//! integration public-only access, discovery of an unreachable module, absence
-//! of tests from a normal build, production neutrality, invalid-signature and
-//! duplicate diagnostics, distinct outcome classification, output capture and
-//! `--show-output`, filter/exact/list/no-match, fresh-world isolation, canonical
-//! JSON events, byte-identical repeated manifests, and both project and
-//! single-file invocation.
+//! Covers inline private access, integration public-only access, discovery of an
+//! unreachable module, absence of tests from a normal build, production
+//! neutrality, invalid-signature and duplicate diagnostics, distinct outcome
+//! classification, output capture and `--show-output`, filter/exact/list/no-match,
+//! fresh-world isolation, canonical JSON events, byte-identical repeated
+//! manifests, and both project and single-file invocation.
 
 use std::path::{Path, PathBuf};
 
@@ -438,7 +437,7 @@ fn project_module_interface_is_test_neutral() {
     );
 }
 
-// K0: `test` remains an ordinary identifier everywhere except the item-modifier
+// `test` remains an ordinary identifier everywhere except the item-modifier
 // position, so existing programs that name a function or binding `test` still parse
 // and check.
 #[test]
@@ -452,7 +451,7 @@ fn test_is_still_usable_as_an_identifier() {
     );
 }
 
-// K0: a polymorphic result is an invalid test signature and is rejected at the
+// A polymorphic result is an invalid test signature and is rejected at the
 // declaration (E1998), not left to run tier-dependently.
 #[test]
 fn polymorphic_test_is_rejected() {
@@ -464,7 +463,7 @@ fn polymorphic_test_is_rejected() {
     );
 }
 
-// K0: a test-only edit leaves the emitted (effect-lowered) artifact byte-identical,
+// A test-only edit leaves the emitted (effect-lowered) artifact byte-identical,
 // not merely the semantic hash. This is the emitted-artifact half of production
 // neutrality, complementing the core-hash and interface checks above.
 #[test]
@@ -484,7 +483,7 @@ fn test_only_edit_leaves_emitted_artifact_identical() {
     );
 }
 
-// K0: a test in one module cannot be imported and called by another module's
+// A test in one module cannot be imported and called by another module's
 // production code; the test is stripped from the module's interface, so the name
 // does not resolve.
 #[test]
@@ -508,7 +507,7 @@ fn test_cannot_be_imported_by_another_module() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// K1: a dependency package's own tests are never discovered. The dependency is
+// A dependency package's own tests are never discovered. The dependency is
 // compiled and its public API consumed, but only the top project's tests run.
 #[test]
 fn dependency_tests_are_not_discovered() {
@@ -527,7 +526,7 @@ fn dependency_tests_are_not_discovered() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// K1: the manifest is byte-identical across checkout roots. The same project
+// The manifest is byte-identical across checkout roots. The same project
 // copied to two different absolute paths produces the same manifest bytes, since
 // the diagnostic location is excluded from the canonical encoding.
 #[test]
@@ -551,7 +550,7 @@ fn manifest_is_identical_across_checkout_roots() {
     let _ = std::fs::remove_dir_all(&two);
 }
 
-// K1: `prism test --list` renders both the human (one logical ID per line) and the
+// `prism test --list` renders both the human (one logical ID per line) and the
 // JSON (`suite_started`/`test_started`/`suite_finished`) forms.
 #[test]
 fn list_output_has_human_and_json_forms() {
@@ -584,7 +583,7 @@ fn list_output_has_human_and_json_forms() {
     );
 }
 
-// K2: exit status is nonzero exactly when compilation succeeds but a selected test
+// Exit status is nonzero exactly when compilation succeeds but a selected test
 // fails, and `--fail-if-no-tests` turns an empty selection into a failure while the
 // default keeps it a success.
 #[test]
@@ -628,7 +627,7 @@ fn exit_status_reflects_failures_and_fail_if_no_tests() {
     let _ = std::fs::remove_file(&failing);
 }
 
-// K2: captured output is emitted for a passing test only under `--show-output`,
+// Captured output is emitted for a passing test only under `--show-output`,
 // through the JSON event path.
 #[test]
 fn show_output_gates_pass_output_in_events() {
@@ -657,9 +656,9 @@ fn show_output_gates_pass_output_in_events() {
     );
 }
 
-// K2: the versioned structured-failure test ABI. A `Failure` round-trips through
+// The versioned structured-failure test ABI. A `Failure` round-trips through
 // its wire codec and renders through the same event path the runner uses, so the
-// later stdlib assertion layer has a stable bridge. Golden fixtures pin both the
+// stdlib assertion layer has a stable bridge. Golden fixtures pin both the
 // wire bytes and the event bytes; a foreign ABI is rejected.
 #[test]
 fn structured_failure_bridge_round_trips_through_events() {

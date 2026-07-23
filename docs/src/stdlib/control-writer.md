@@ -4,7 +4,7 @@
 
 The canonical `Writer(w)` effect: accumulate output on the side.
 
-`tell(m)` appends `m` to a log the producer never sees; `run_writer` returns the whole log as a list in emission order. The handler threads the growing log as a parameter (tail-resumptive, so it fuses), so nothing shared or mutable is involved. Opt-in: not in Base.
+`tell(m)` appends `m` to a log the producer never sees; `run_writer` returns the computation's result paired with the whole log in emission order. The handler threads the growing log as a parameter (tail-resumptive, so it fuses), so nothing shared or mutable is involved. `eval_writer` keeps only the result, `exec_writer` only the log, and `listen`/`censor` observe or rewrite an inner computation's log while staying inside the effect. Opt-in: not in Base.
 
 ## Effects
 
@@ -21,8 +21,48 @@ Append one item of type `w` to the accumulated log.
 
 ### `run_writer`
 
-```prism,sig,h-ec98f1809577742b32a34b9c7d0fb8c3dd67432ca8f5448986b1faf7759c6fc6
-run_writer : forall e0 a b. (() -> a ! {Control.Writer.Writer(b), e0}) -> List(b) ! {e0}
+```prism,sig,h-731a9cbb2220ad11e57e781e0b6912e72ae094ed256c1421272c98fafe6620b3
+run_writer : forall e0 a b. (() -> a ! {Control.Writer.Writer(b), e0}) -> (a, List(b)) ! {e0}
 ```
 
-Run `action`, collecting every `tell` into a log, and return that log in emission order (the computation's own result value is discarded).
+Run `action`, collecting every `tell` into a log, and return the computation's result paired with that log in emission order.
+
+### `eval_writer`
+
+```prism,sig,h-9c7d1cf5d5622d7ea70681a03d79f1b6da3ac320a82afd1d396474da74fd9d31
+eval_writer : forall e0 a b. (() -> a ! {Control.Writer.Writer(b), e0}) -> a ! {e0}
+```
+
+Run `action` and keep only its result, discarding the log.
+
+### `exec_writer`
+
+```prism,sig,h-c32fd497ee6db7c7dd2e63869c5d1cfcd2efe4ee7a9676b4f1813365ee261195
+exec_writer : forall e0 a b. (() -> a ! {Control.Writer.Writer(b), e0}) -> List(b) ! {e0}
+```
+
+Run `action` and keep only the log, discarding the result.
+
+### `listen`
+
+```prism,sig,h-0a1ca514650c35d85f4601b1a1ab3f5e680879b8ca13b33dfa432f7da7fb370a
+listen : forall e0 a b. (() -> a ! {Control.Writer.Writer(b), Control.Writer.Writer(b), e0}) -> (a, List(b)) ! {Control.Writer.Writer(b), e0}
+```
+
+Run `action`, re-emit its log unchanged, and return the result paired with that log, so an outer writer both observes and keeps the inner output.
+
+### `censor`
+
+```prism,sig,h-22e1dd6887776215311f61df4302c8fa141ed6098e8d5877d221ed840381fb76
+censor : forall e0 a b. ((List(a)) -> List(a), () -> b ! {Control.Writer.Writer(a), Control.Writer.Writer(a), e0}) -> b ! {Control.Writer.Writer(a), e0}
+```
+
+Run `action`, rewrite its whole log with `f`, and re-emit the rewritten log, returning the result. The rewrite sees the log in emission order.
+
+### `tells`
+
+```prism,sig,h-58b22c2b4382ec9d943528cf8b66e4e8e1ad2b9e5ac389495a609dbec69f23cd
+tells : forall a. (List(a)) -> Unit ! {Control.Writer.Writer(a)}
+```
+
+Emit every item of `log` in order.

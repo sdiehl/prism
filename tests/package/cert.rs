@@ -1,15 +1,16 @@
 //! The minimal certificate: the `cert`-kind envelope, its gate emission into the
 //! store, and the way `prism audit` reads it back.
 //!
-//! The one live claim is `parity-passed`; the envelope shape is reserved for future
-//! rungs (Lean-checked and beyond), so a reserved claim must decode as
-//! recognized-but-unverifiable rather than as corruption. Every decode is total.
+//! The one verifiable claim is `parity-passed`. Reserved claims such as
+//! `Lean-checked` decode as recognized-but-unverifiable rather than as corruption.
+//! Every decode is total.
 
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use prism::core::Digest;
 use prism::core::HASH_SCHEME;
 use prism::pkg::trust::{AuditReport, IndexRow, RootAudit, Verdict, INDEX_KIND_NAMESPACE};
 use prism::store::cert::{
@@ -63,7 +64,7 @@ fn green_row(subject: &str, cert: CertStatus) -> RootAudit {
             origin: "demo".to_string(),
             name: "demo".to_string(),
             tag: "1.0".to_string(),
-            root: subject.to_string(),
+            root: Digest::from(subject),
             scheme: HASH_SCHEME.to_string(),
             kind: INDEX_KIND_NAMESPACE.to_string(),
         },
@@ -86,7 +87,7 @@ fn the_envelope_round_trips() {
     let cert = parity_cert(SUBJECT, (BACKEND_INTERP, BACKEND_LLVM));
     let decoded = decode_cert(&encode_cert(&cert)).expect("decode");
     assert_eq!(decoded, cert);
-    assert_eq!(decoded.subject, SUBJECT);
+    assert_eq!(decoded.subject.as_str(), SUBJECT);
     assert_eq!(decoded.claim, Claim::ParityPassed);
     assert_eq!(decoded.scheme, HASH_SCHEME);
     assert_eq!(decoded.backends, ("interp".to_string(), "llvm".to_string()));
@@ -298,8 +299,8 @@ fn audit_rejects_bad_certificates(
 
 #[test]
 fn a_reserved_claim_decodes_as_recognized_but_unverifiable() {
-    // A future rung's claim (Lean-checked) rides the same envelope; an old build
-    // must read it as a recognized-but-unverifiable certificate, not corruption.
+    // A reserved claim such as Lean-checked uses the same envelope; a build that
+    // cannot verify it must report it as recognized-but-unverifiable, not corrupt.
     let reserved = Cert {
         claim: Claim::Reserved(CLAIM_LEAN_CHECKED),
         ..parity_cert(SUBJECT, (BACKEND_INTERP, BACKEND_LLVM))

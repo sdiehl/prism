@@ -48,8 +48,7 @@ const VALUE_TAG_UNIT: &str = "unit";
 // use them until their capability protocols are defined, so
 // external tooling reading event streams can rely on the prefixes staying
 // meaningless until then. Mirrors the reserved seam effects in `names`.
-pub const RESERVED_EVENT_CAPABILITIES: &[&str] =
-    &[crate::names::NET_EFFECT, crate::names::ENTROPY_EFFECT];
+pub const RESERVED_EVENT_CAPABILITIES: &[&str] = &[crate::names::NET_EFFECT];
 
 /// Canonical capability operation in the provenance protocol.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -70,6 +69,7 @@ pub enum CapOp {
     RandomRand,
     ClockWallNow,
     ClockMonoNow,
+    EntropyRead,
     ConsolePrint,
     ConsoleNewline,
     ConsoleEprint,
@@ -96,6 +96,7 @@ impl CapOp {
             Self::RandomRand => "Random.rand",
             Self::ClockWallNow => "Clock.wall_now",
             Self::ClockMonoNow => "Clock.mono_now",
+            Self::EntropyRead => "Entropy.read",
             Self::ConsolePrint => "Console.print",
             Self::ConsoleNewline => "Console.newline",
             Self::ConsoleEprint => "Console.eprint",
@@ -119,6 +120,7 @@ pub const OP_FS_REMOVE_FILE: CapOp = CapOp::FsRemoveFile;
 pub const OP_RANDOM_RAND: CapOp = CapOp::RandomRand;
 pub const OP_CLOCK_WALL_NOW: CapOp = CapOp::ClockWallNow;
 pub const OP_CLOCK_MONO_NOW: CapOp = CapOp::ClockMonoNow;
+pub const OP_ENTROPY_READ: CapOp = CapOp::EntropyRead;
 pub const OP_CONSOLE_PRINT: CapOp = CapOp::ConsolePrint;
 pub const OP_CONSOLE_NEWLINE: CapOp = CapOp::ConsoleNewline;
 pub const OP_CONSOLE_EPRINT: CapOp = CapOp::ConsoleEprint;
@@ -142,6 +144,7 @@ pub const ALL_CAP_OPS: &[CapOp] = &[
     OP_RANDOM_RAND,
     OP_CLOCK_WALL_NOW,
     OP_CLOCK_MONO_NOW,
+    OP_ENTROPY_READ,
     OP_CONSOLE_PRINT,
     OP_CONSOLE_NEWLINE,
     OP_CONSOLE_EPRINT,

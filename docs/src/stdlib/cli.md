@@ -14,10 +14,11 @@ Everything here is pure: a `Parser` reads a `Tokens` structure, and `Tokens` com
 
 ### `CliError`
 
-```prism,def,h-dfc2effc61d638f0149b2f96f5a2cc3cca28d54e4b5309ae02f6058d07b61ffc
+```prism,def,h-9b186050d84fbb9d6de9db60f5af6e8382a09ee766eb6683024b77a171c8f105
 type CliError
   = MissingFlag(String)
   | MissingArg(String)
+  | UnexpectedArg(String)
   | NeedsValue(String)
   | BadValue(String, String)
   | UnknownFlag(String)
@@ -42,8 +43,8 @@ The static description of one option, carried by the parser for help and to tell
 
 ### `ArgSpec`
 
-```prism,def,h-3140231e4b0a0243b5e56038d514b933350d2dc9134f5cde47bea8c343c3cdc0
-type ArgSpec = ArgSpec { meta: String, help: String }
+```prism,def,h-54a33bde5e5bc4ba36d9475912c24849d8718a81a20ebce9a1161a3e0cdebb93
+type ArgSpec = ArgSpec { meta: String, help: String, required: Bool }
 ```
 
 The static description of one positional argument.
@@ -180,7 +181,7 @@ A required string flag: an error when absent.
 
 ### `opt_int`
 
-```prism,sig,h-554aa1c234df050ed46289b7fd6a94fe293727cc78fef0af29438ced2f0adf1b
+```prism,sig,h-af8a2f1ea79bd71162a34366c78b7bfaa9d5d381a3e4e9271304c624a081e8f6
 opt_int : (String, String, String, String, Int) -> Cli.Parser(Int)
 ```
 
@@ -196,15 +197,23 @@ A boolean switch: true when present, false when absent, never valued.
 
 ### `arg_str`
 
-```prism,sig,h-9b3aa88d8555c590fde88c3d41a04f8d1183015271df186401416d9dae73921e
+```prism,sig,h-ce0f7772a9a796e07bfbe95d0af4b9932192e39b9293c655d89dace63e3ab422
 arg_str : (String, String) -> Cli.Parser(String)
 ```
 
 A required string positional, consumed in declaration order.
 
+### `arg_str_default`
+
+```prism,sig,h-69da1578da05dbf1b0c54369eed27f5ccf0ed60355a4c3845a0039084291aa7b
+arg_str_default : (String, String, String) -> Cli.Parser(String)
+```
+
+An optional string positional, consumed in declaration order and yielding `default` when absent. Help renders it as `[<META>]`.
+
 ### `arg_int`
 
-```prism,sig,h-6297976011ce21245c2e2aa990b4a7a8c4d8707b5a2b4ebb1650de9a0bbaf998
+```prism,sig,h-784d4af37695539bf112b0bdfab1c16c0b1a9079163e79993724b9e609864aee
 arg_int : (String, String) -> Cli.Parser(Int)
 ```
 
@@ -212,7 +221,7 @@ A required integer positional; a non-integer token is an error.
 
 ### `lex`
 
-```prism,sig,h-ef017eaa7f01a702743e4a750c4cd4c39ffbeca733c3f6e3e68b7ca3ec9f0676
+```prism,sig,h-5d0b237ef2e602a282d43a86b87e3a7824fa4ddd0fb9f905ccd191f08db2ecb6
 lex : (List(Cli.OptSpec), List(String)) -> Result(Cli.Tokens, Cli.CliError)
 ```
 
@@ -220,7 +229,7 @@ Lex argv against the option specs (which say whether each flag takes a value). O
 
 ### `run_argv`
 
-```prism,sig,h-157794a9f598e9b7b31bcd0f3dad7d5121d299bb3058ad3b5eedcb4a26c75054
+```prism,sig,h-8d66634bde00f6179a56c6edc758261c53b5763ebb0f325d625e753e6f46d363
 run_argv : forall a. (Cli.Command(a), List(String)) -> Cli.Outcome(a)
 ```
 
@@ -238,7 +247,7 @@ Cli.Parsed((example.com, 8080))
 
 ### `help_text`
 
-```prism,sig,h-f7dd671c97c3f81011e13931ba7cdbff202851f48fea8aaac0c7a9443b909a8f
+```prism,sig,h-08e130c003f2bd6a68178515f326ed364f44fd750a4559aed47ce0a1f241327b
 help_text : forall a. (Cli.Command(a)) -> String
 ```
 
@@ -263,7 +272,7 @@ Options:
 
 ### `describe`
 
-```prism,sig,h-44e2b838a4380920965f36dff3042aa4ff36b75faf23dbfbe027531e11a67b53
+```prism,sig,h-b6904922237fa8f6eeb22c87d2ec82ffa57db38659b8e52efa7403ce582545b9
 describe : (Cli.CliError) -> String
 ```
 
@@ -276,3 +285,11 @@ describe(MissingFlag("host"))
 ```output
 error: required flag '--host' was not provided
 ```
+
+### `run_args`
+
+```prism,sig,h-8060a93f704b8be5d4133d2bf7837349f645053f0d30f7cb7f531665a30a025a
+run_args : forall a. (Cli.Command(a)) -> Cli.Outcome(a) ! {Env}
+```
+
+Parse the process arguments against `cmd`. argv arrives through the `Env` capability (`args`), so a recorded run replays its arguments from the trace: CLI parsing is inside the determinism contract.

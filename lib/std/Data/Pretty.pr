@@ -147,6 +147,12 @@ fn intersperse(s, ds) =
     Cons(x, Nil) => x
     Cons(x, rest) => DCat(x, DCat(s, intersperse(s, rest)))
 
+-- | Put `separator` between each pair of documents. Unlike `hsep` and `vsep`,
+-- the caller selects the exact separator document, which is useful for small
+-- target-language emitters (commas plus soft breaks, operators, or hard lines).
+pub fn join_docs(separator : Doc, docs : List(Doc)) : Doc =
+  intersperse(separator, docs)
+
 -- | Documents separated by a single space, all on one line.
 pub fn hsep(ds) = intersperse(DText(" "), ds)
 

@@ -300,9 +300,8 @@ impl Rewrite for Cse {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeMap;
 
-    use crate::core::opt::{run_spec_stage, CorePass, PassStage};
     use crate::core::{EffectStrategy, OpGrades};
     use crate::flags::{DynFlags, EffectTier};
     use crate::types::ty::{EffRow, Label};
@@ -339,31 +338,16 @@ mod tests {
         TypedComp::new(pure(source(Type::Int)), TypedCompKind::Prim(op, a, b))
     }
 
-    fn assert_differential(
-        functions: Vec<TypedCoreFn>,
-        env: &VerifyEnv,
-    ) -> (TypedCore<Elaborated>, u64) {
+    fn run_cse(functions: Vec<TypedCoreFn>, env: &VerifyEnv) -> (TypedCore<Elaborated>, u64) {
         let input = TypedCore::new(functions);
         if let Err(violations) = verify(&input, env) {
             panic!("input fixture is invalid: {violations:#?}");
         }
-        let legacy_input = input.clone().erase();
-        let (expected, legacy_stats) = run_spec_stage(
-            &legacy_input,
-            &BTreeSet::new(),
-            &[CorePass::Cse],
-            PassStage::Late,
-            &[],
-            &DynFlags::default(),
-        );
-        let expected_ticks = legacy_stats.total();
         let (actual, stats) = cse(input);
         if let Err(violations) = verify(&actual, env) {
             panic!("CSE'd typed Core is invalid: {violations:#?}");
         }
-        assert_eq!(actual.clone().erase(), expected);
-        assert_eq!(stats.ticks(), expected_ticks);
-        (actual, expected_ticks)
+        (actual, stats.ticks())
     }
 
     fn lowered_cse_fixture() -> (TypedCore<EffectLowered>, VerifyEnv) {
@@ -469,36 +453,25 @@ mod tests {
         (core, env)
     }
 
-    fn assert_lowered_differential(
+    fn run_lowered_cse(
         input: TypedCore<EffectLowered>,
         env: &VerifyEnv,
     ) -> (TypedCore<EffectLowered>, u64) {
         if let Err(violations) = verify(&input, env) {
             panic!("effect-lowered CSE input is invalid: {violations:#?}");
         }
-        let legacy_input = input.clone().erase();
-        let (expected, legacy_stats) = run_spec_stage(
-            &legacy_input,
-            &BTreeSet::new(),
-            &[CorePass::Cse],
-            PassStage::Late,
-            &[],
-            &DynFlags::default(),
-        );
         let (actual, stats) = cse(input);
         if let Err(violations) = verify(&actual, env) {
             panic!("effect-lowered CSE output is invalid: {violations:#?}");
         }
-        assert_eq!(actual.clone().erase(), expected);
-        assert_eq!(stats.ticks(), legacy_stats.total());
         (actual, stats.ticks())
     }
 
     #[test]
-    fn effect_lowered_cse_matches_the_legacy_pass() {
+    fn effect_lowered_cse_shares_the_repeated_prim() {
         let (input, env) = lowered_cse_fixture();
-        let (actual, ticks) = assert_lowered_differential(input, &env);
-        assert!(ticks > 0, "the lowered fixture must exercise CSE");
+        let (actual, ticks) = run_lowered_cse(input, &env);
+        assert_eq!(ticks, 1, "the lowered fixture shares exactly one repeat");
         let target = actual
             .functions()
             .iter()
@@ -564,7 +537,7 @@ mod tests {
             ),
             0,
         );
-        let (actual, ticks) = assert_differential(vec![f], &env);
+        let (actual, ticks) = run_cse(vec![f], &env);
         assert_eq!(ticks, 1);
         let f = actual
             .functions()
@@ -631,7 +604,7 @@ mod tests {
             ),
             0,
         );
-        let (_, ticks) = assert_differential(vec![f], &env);
+        let (_, ticks) = run_cse(vec![f], &env);
         assert_eq!(ticks, 0);
     }
 
@@ -680,7 +653,7 @@ mod tests {
             ),
             0,
         );
-        let (_, ticks) = assert_differential(vec![f], &env);
+        let (_, ticks) = run_cse(vec![f], &env);
         assert_eq!(ticks, 1);
     }
 
@@ -739,7 +712,7 @@ mod tests {
             ),
             0,
         );
-        let (_, ticks) = assert_differential(vec![f], &env);
+        let (_, ticks) = run_cse(vec![f], &env);
         assert_eq!(ticks, 0);
     }
 
@@ -831,7 +804,7 @@ mod tests {
             ),
             0,
         );
-        let (_, ticks) = assert_differential(vec![f], &env);
+        let (_, ticks) = run_cse(vec![f], &env);
         assert_eq!(ticks, 1);
     }
 }

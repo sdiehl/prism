@@ -5,8 +5,8 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 ## Merkle root
 
 - **Scheme**: `prism-core-hash-v1`
-- **Hash**: `e8dbdf5053501277950df8c8c0b0ad6934f02ce2bcb0ff93d75a54e770f9252e`
-- **Compiler version**: Prism v0.13.0
+- **Hash**: `0feef93fbf74a654e13bad076ad572f6e6c9c7ac11dd565f4ddbbd5dbd6aae9d`
+- **Compiler version**: Prism v0.14.0
 
 ## Modules
 
@@ -14,12 +14,14 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 - [Control.Fresh](./control-fresh.md) - The `Fresh` effect: a deterministic monotonic name supply (gensym).
 - [Control.Reader](./control-reader.md) - The canonical `Reader(r)` effect: a read-only ambient environment.
 - [Control.State](./control-state.md) - The canonical `State(s)` effect: a threaded piece of mutable-looking state, interpreted by parameter passing.
+- [Control.Validate](./control-validate.md) - Validation as an algebraic effect.
 - [Control.Writer](./control-writer.md) - The canonical `Writer(w)` effect: accumulate output on the side.
 - [Data.Bytes](./data-bytes.md) - Byte strings: the `String`/`Bytes` boundary, and the hex and base64 codecs.
 - [Data.Char](./data-char.md) - ASCII character classification.
 - [Data.Checked](./data-checked.md) - Safe arithmetic families over the machine-integer lanes.
 - [Data.FlatArray](./data-flatarray.md) - Flat, unboxed-element arrays: one typed surface over the raw-word buffers.
 - [Data.Foldable](./data-foldable.md) - Generic operations over any `Foldable` container.
+- [Data.Frozen](./data-frozen.md) - Frozen arrays: the immutable array representation.
 - [Data.Graph](./data-graph.md) - Directed graphs over an ordered node type, with the deterministic algorithms the compiler relies on internally, mirrored into Prism.
 - [Data.List](./data-list.md) - Singly-linked list operations.
 - [Data.Map](./data-map.md) - Persistent ordered map: an AVL-balanced binary search tree over keys.
@@ -34,6 +36,10 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 - [Data.UnionFind](./data-unionfind.md) - A persistent union-find (disjoint-set) over an ordered key type.
 - [Data.Validation](./data-validation.md) - `Validation`, the error-accumulating sibling of `Result`.
 - [Data.Vec](./data-vec.md) - Fixed-length vectors indexed by a `Nat` dimension.
+- [Syntax.Ast](./syntax-ast.md) - The surface abstract syntax of the `prism-surface-syntax-v1` artifact. The compiler exports one parsed source file as an ordered item list, each node an object tagged by a `kind` string; this module is the typed vocabulary that list decodes into. Constructor prefixes name the family: `I` items, `E` expressions, `P` patterns, `Ty` types. Every node that the parser spans wraps in `Sp`; types and kinds carry no span. The shapes here mirror the exporter exactly, so a decoded document re-encodes to the identical bytes.
+- [Syntax.Codec](./syntax-codec.md) - Codecs for the versioned syntax artifacts. Decoding turns the compiler's `prism-syntax-tokens-v1` export into the typed vocabulary of `Syntax.Source` and `Syntax.Token`, refusing wrong schema tags, malformed shapes, and inverted spans with one structured error. Encoding is the exact inverse: a decoded artifact re-encodes to the identical bytes the compiler emitted, checked byte for byte by the syntax round-trip gate.
+- [Syntax.Source](./syntax-source.md) - Source identity for the versioned syntax artifacts: byte spans and source files. A span is a half-open byte range into one source text; byte offsets are the canonical position vocabulary (line and column are projections for people, never a second identity). The compiler emits these in the `prism-syntax-tokens-v1` and `prism-surface-syntax-v1` exports; this module is the Prism-side vocabulary those artifacts decode into.
+- [Syntax.Token](./syntax-token.md) - The token vocabulary of the `prism-syntax-tokens-v1` artifact. A fixed token's wire kind is its exact source spelling, so `TFixed` carries the spelling rather than enumerating every keyword and operator as its own constructor; the value-carrying and virtual layout tokens each get a dedicated constructor matching the grammar's terminal aliases. Keeping fixed tokens spelling-backed aligns the wire vocabulary with compiler output without duplicating the keyword and operator tables.
 - [Arena](./arena.md) - Arena: allocation as an algebraic effect.
 - [Blit](./blit.md) - Range copy over the sequence types a real primitive can back.
 - [Cli](./cli.md) - CLI: an applicative command-line parser as a first-class value.

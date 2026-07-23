@@ -1,0 +1,97 @@
+-- Yes, Prism can encode the infamous zygohistomorphic prepromorphism.
+-- This version is specialized to one base functor so the three ideas remain
+-- visible instead of disappearing under a tower of generic machinery:
+--
+--   zygo   -- the main algebra receives an auxiliary fold result;
+--   histo  -- it also receives the complete history of earlier answers;
+--   prepro -- a natural layer rewrite is hoisted again before every descent.
+
+type ListF(r) = NilF | ConsF(Int, r)
+
+type MuList = Roll(ListF(MuList))
+
+-- The cofree history: an answer annotated with the layer of older answers.
+type History = History { answer: Int, layer: ListF(History) }
+
+-- EnvT in concrete clothes: an auxiliary result paired with that history.
+type Context = Context { auxiliary: Int, history: History }
+
+fn map_layer(f : (a) -> b, layer : ListF(a)) : ListF(b) =
+  match layer of
+    NilF => NilF
+    ConsF(x, rest) => ConsF(x, f(rest))
+
+fn from_list(xs : List(Int)) : MuList =
+  match xs of
+    Nil => Roll(NilF)
+    Cons(x, rest) => Roll(ConsF(x, from_list(rest)))
+
+-- Apply one natural transformation throughout a fixed point. `descend` calls
+-- this before every recursive step, so a node is transformed once per ancestor:
+-- exactly the repeated transformation that distinguishes a prepromorphism.
+fn hoist(natural : (ListF(MuList)) -> ListF(MuList), value : MuList) : MuList =
+  match value of
+    Roll(layer) =>
+      Roll(natural(map_layer(\(child) -> hoist(natural, child), layer)))
+
+fn descend(
+  auxiliary_algebra : (ListF(Int)) -> Int,
+  natural : (ListF(MuList)) -> ListF(MuList),
+  main_algebra : (ListF(Context)) -> Int,
+  value : MuList
+) : Context =
+  match value of
+    Roll(layer) =>
+      let children = map_layer(
+          \(child) -> descend(auxiliary_algebra, natural, main_algebra, hoist(natural, child)),
+          layer,
+        )
+      let auxiliary =
+        auxiliary_algebra(map_layer(\(child) -> child.auxiliary, children))
+      let answer = main_algebra(children)
+      let history = History {
+        answer = answer,
+        layer = map_layer(\(child) -> child.history, children)
+      }
+      Context { auxiliary = auxiliary, history = history }
+
+fn zygo_histo_prepro(
+  auxiliary_algebra : (ListF(Int)) -> Int,
+  natural : (ListF(MuList)) -> ListF(MuList),
+  main_algebra : (ListF(Context)) -> Int,
+  value : MuList
+) : Int =
+  descend(auxiliary_algebra, natural, main_algebra, value).history.answer
+
+-- Zygo: cache the remaining length as the auxiliary fold.
+fn length_algebra(layer : ListF(Int)) : Int =
+  match layer of
+    NilF => 0
+    ConsF(_x, length) => length + 1
+
+-- Prepro: increment the payload in every layer. Repeated hoisting changes
+-- [1, 2, 3, 4] into the effective stream [1, 3, 5, 7].
+fn bump(layer : ListF(a)) : ListF(a) =
+  match layer of
+    NilF => NilF
+    ConsF(x, rest) => ConsF(x + 1, rest)
+
+-- Histo: in addition to the immediate recursive answer, reach one layer into
+-- its cofree history for the answer two positions away. The auxiliary length
+-- weights the current element, so this algebra genuinely uses all three parts.
+fn weighted_history_algebra(layer : ListF(Context)) : Int =
+  match layer of
+    NilF => 0
+    ConsF(x, child) =>
+      let previous = child.history.answer
+      let two_back =
+        match child.history.layer of
+          NilF => 0
+          ConsF(_y, grandchild) => grandchild.answer
+      (child.auxiliary + 1) * x + previous + two_back
+
+fn main() : Unit ! {IO} =
+  let values = from_list([1, 2, 3, 4])
+  println(
+      zygo_histo_prepro(length_algebra, bump, weighted_history_algebra, values),
+    )

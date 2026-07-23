@@ -1,0 +1,19 @@
+-- An effect-forwarding runner may name the row it forwards explicitly with an
+-- open declared effect row (`: a ! {| e}`), rather than eliding the `!` and
+-- letting the row be inferred silently. The row stays inferred; the
+-- annotation documents that `run_beep` discharges `Beep` and forwards the rest.
+effect Beep
+  beep(Int) : Unit
+
+fn run_beep(action : () -> a ! {Beep | e}) : a ! { | e} =
+  handle action() with
+    beep(n) resume k => k(())
+    return r => r
+
+fn used(x : Int) : Int ! {Beep} =
+  beep(x)
+  x + 1
+
+fn main() =
+  println(run_beep(\() -> used(5)))
+  println(run_beep(\() -> used(41)))

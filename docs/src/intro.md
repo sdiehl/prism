@@ -9,6 +9,6 @@ This book has four parts:
 - **[Language Specification](./spec.md)** defines the surface language: lexical structure, grammar, types, effects, and evaluation.
 - **[Compiler](./compiler.md)** documents the implementation: the pipeline, the core calculus, effect lowering, reference counting, the backends, and the verification harness.
 - **[Standard Library](./stdlib/index.md)** is the API reference for the prelude and the standard modules, generated from their source by `prism docs`.
-- **[Semantics](./semantics.pdf)** is an unverified sketch of the Core terms and types for now.
+- **[Semantics](./semantics.pdf)** is an unverified sketch of the Core terms and types.
 
 Use the **[Playground](https://sdiehl.github.io/prism/play/)** to edit, run, and inspect Prism code via an interpreter run in the browser.

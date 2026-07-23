@@ -817,7 +817,6 @@ fn collect_global_refs_comp(
 
 #[cfg(test)]
 mod tests {
-    use crate::core::fbip::{balanced, insert_rc as legacy_insert_rc};
     use crate::core::{Comp, Value};
     use crate::names::ALLOC_OP;
     use crate::types::ty::Label;
@@ -886,7 +885,7 @@ mod tests {
         rest
     }
 
-    fn assert_differential(
+    fn run_and_verify(
         input: &TypedCore<EffectLowered>,
         sigs: &Sigs,
         env: &VerifyEnv,
@@ -894,15 +893,9 @@ mod tests {
         if let Err(violations) = verify(input, env) {
             panic!("input fixture is invalid: {violations:#?}");
         }
-        let legacy_input = input.clone().erase();
-        let expected = legacy_insert_rc(&legacy_input, sigs);
         let actual = insert_rc(input.clone(), sigs);
         if let Err(violations) = verify(&actual, env) {
             panic!("owned typed Core is invalid: {violations:#?}");
-        }
-        assert_eq!(actual.clone().erase(), expected);
-        if let Err(error) = balanced(&expected, sigs) {
-            panic!("legacy balance oracle rejected the fixture: {error}");
         }
         actual
     }
@@ -925,7 +918,7 @@ mod tests {
         let caller = function("caller", vec![retained], call);
         let input = TypedCore::new(vec![observe, caller]);
         let sigs = std::iter::once((sym("observe"), vec![true])).collect();
-        let actual = assert_differential(&input, &sigs, &VerifyEnv::new()).erase();
+        let actual = run_and_verify(&input, &sigs, &VerifyEnv::new()).erase();
         let observe_rest = head_dup(&actual.fns[0].body, "borrowed");
         assert!(matches!(
             observe_rest,
@@ -970,7 +963,7 @@ mod tests {
         let invoking_function = function("caller", vec![shared], call);
         let input = TypedCore::new(vec![callee, invoking_function]);
         let sigs = std::iter::once((sym("consume_and_borrow"), vec![false, true])).collect();
-        let actual = assert_differential(&input, &sigs, &VerifyEnv::new()).erase();
+        let actual = run_and_verify(&input, &sigs, &VerifyEnv::new()).erase();
 
         let after_loan = head_dup(&actual.fns[1].body, "shared");
         let Comp::Bind(call, result, post) = after_loan else {
@@ -1003,7 +996,31 @@ mod tests {
             TypedValueKind::Thunk(Box::new(ret(var("capture", int)))),
         );
         let input = TypedCore::new(vec![function("main", vec![capture], ret(thunk))]);
-        assert_differential(&input, &Sigs::new(), &VerifyEnv::new());
+        let actual = run_and_verify(&input, &Sigs::new(), &VerifyEnv::new()).erase();
+
+        // The capture is threaded through to the suspension's result. Perceus may
+        // insert a balancing `Dup` before the return; its placement tracks this
+        // hand-built fixture's process-global `Sym` supply (adding a builtin or
+        // prelude effect moves it), not real elaboration, so peel any leading `Dup`
+        // binds and assert the tail returns `capture` untouched: no rename, no drop
+        // of the captured value. `run_and_verify` above already proved the RC is
+        // balanced, and real programs are covered by the parity and snapshot
+        // corpora, which are byte-identical across this change.
+        let Comp::Return(Value::Thunk(closure)) = &actual.fns[0].body else {
+            panic!("expected a returned thunk");
+        };
+        let mut tail = &**closure;
+        while let Comp::Bind(bound, _, rest) = tail {
+            assert!(
+                matches!(&**bound, Comp::Dup(_)),
+                "only a balancing Dup may precede the return, got {bound:?}"
+            );
+            tail = rest;
+        }
+        assert!(matches!(
+            tail,
+            Comp::Return(Value::Var(name)) if *name == sym("capture")
+        ));
     }
 
     #[test]
@@ -1022,7 +1039,7 @@ mod tests {
             TypedValueKind::Thunk(Box::new(lambda)),
         );
         let input = TypedCore::new(vec![function("main", vec![capture], ret(thunk))]);
-        let actual = assert_differential(&input, &Sigs::new(), &VerifyEnv::new());
+        let actual = run_and_verify(&input, &Sigs::new(), &VerifyEnv::new());
 
         let TypedCompKind::Return(thunk) = &actual.fns[0].body.kind else {
             panic!("expected returned thunk");
@@ -1076,7 +1093,7 @@ mod tests {
         );
         let record_function = function("record", vec![record_capture], ret(record));
         let input = TypedCore::new(vec![tuple_function, record_function]);
-        let actual = assert_differential(&input, &Sigs::new(), &VerifyEnv::new()).erase();
+        let actual = run_and_verify(&input, &Sigs::new(), &VerifyEnv::new()).erase();
 
         let Comp::Return(Value::UnboxedTuple(tuple_fields)) = &actual.fns[0].body else {
             panic!("expected unboxed tuple return");
@@ -1130,7 +1147,20 @@ mod tests {
             ),
         );
         let input = TypedCore::new(vec![function("main", vec![condition, cell], body)]);
-        assert_differential(&input, &Sigs::new(), &VerifyEnv::new());
+        let actual = run_and_verify(&input, &Sigs::new(), &VerifyEnv::new()).erase();
+
+        // Each arm must independently balance: the unused boolean is dropped on
+        // both paths, and the cell is consumed by its read.
+        let Comp::If(_, yes, no) = &actual.fns[0].body else {
+            panic!("expected the branch structure to survive RC insertion");
+        };
+        for branch in [&**yes, &**no] {
+            let after_drop = head_drop(branch, "condition");
+            assert!(matches!(
+                after_drop,
+                Comp::RefGet(Value::Var(name)) if *name == sym("cell")
+            ));
+        }
     }
 
     #[test]
@@ -1150,7 +1180,7 @@ mod tests {
             ),
         );
         let input = TypedCore::new(vec![function("main", vec![scrutinee], body)]);
-        let actual = assert_differential(&input, &Sigs::new(), &VerifyEnv::new()).erase();
+        let actual = run_and_verify(&input, &Sigs::new(), &VerifyEnv::new()).erase();
         let Comp::Case(_, arms) = &actual.fns[0].body else {
             panic!("expected case after RC insertion");
         };
@@ -1187,7 +1217,7 @@ mod tests {
                 Label::bare(sym("Arena")),
             ),
         );
-        let actual = assert_differential(&input, &Sigs::new(), &env).erase();
+        let actual = run_and_verify(&input, &Sigs::new(), &env).erase();
         let after_dup = head_dup(&actual.fns[0].body, "field");
         assert!(matches!(
             after_dup,
@@ -1240,7 +1270,7 @@ mod tests {
             capture("int_capture", Type::Int),
             capture("bool_capture", Type::Bool),
         ]);
-        let actual = assert_differential(&input, &Sigs::new(), &VerifyEnv::new());
+        let actual = run_and_verify(&input, &Sigs::new(), &VerifyEnv::new());
         let int_instance = CoreType::Function(Box::new(CoreFnSig::new(
             Vec::new(),
             vec![source(Type::Int)],
@@ -1305,7 +1335,7 @@ mod tests {
             ),
         );
         let input = TypedCore::new(vec![poison, global, capture]);
-        let actual = assert_differential(&input, &Sigs::new(), &VerifyEnv::new());
+        let actual = run_and_verify(&input, &Sigs::new(), &VerifyEnv::new());
         let TypedCompKind::Lam(_, body) = &actual.fns[2].body.kind else {
             panic!("expected global-capturing closure");
         };
@@ -1329,13 +1359,13 @@ mod tests {
         let alpha = TypedBinder::new(sym("alpha"), int);
         let unit = TypedValue::new(source(Type::Unit), TypedValueKind::Unit);
         let input = TypedCore::new(vec![function("main", vec![zulu, alpha], ret(unit))]);
-        let actual = assert_differential(&input, &Sigs::new(), &VerifyEnv::new()).erase();
+        let actual = run_and_verify(&input, &Sigs::new(), &VerifyEnv::new()).erase();
         let rendered = crate::core::pp_core(&actual);
         let alpha_at = rendered.find("drop alpha").expect("alpha drop");
         let zulu_at = rendered.find("drop zulu").expect("zulu drop");
         assert!(
             zulu_at < alpha_at,
-            "outer wrapping must match the legacy pass"
+            "name-sorted insertion wraps the later name outermost"
         );
     }
 }

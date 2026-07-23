@@ -1,0 +1,121 @@
+-- | The token vocabulary of the `prism-syntax-tokens-v1` artifact. A fixed
+-- token's wire kind is its exact source spelling, so `TFixed` carries the
+-- spelling rather than enumerating every keyword and operator as its own
+-- constructor; the value-carrying and virtual layout tokens each get a
+-- dedicated constructor matching the grammar's terminal aliases. Keeping fixed
+-- tokens spelling-backed aligns the wire vocabulary with compiler output
+-- without duplicating the keyword and operator tables.
+
+import Data.Maybe (..)
+
+import Syntax.Source (..)
+
+-- | A token kind: a fixed token by exact spelling, or one of the special
+-- value-carrying and virtual kinds.
+pub type TokenKind
+  = TFixed(String)
+  | TIdent
+  | TUid
+  | TQual
+  | TInt
+  | TFloat
+  | TChar
+  | TStr
+  | TIStart
+  | TIMid
+  | TIEnd
+  | TVOpen
+  | TVClose
+  | TVSemi
+  deriving (Eq)
+
+-- | The canonical wire name of a token kind, matching the compiler's artifact
+-- vocabulary (fixed tokens spell themselves; specials use the grammar's
+-- terminal aliases).
+--
+-- ```prism
+-- (kind_name(TIdent), kind_name(TVOpen), kind_name(TFixed("->")))
+-- ```
+-- ```output
+-- (ident, v{, ->)
+-- ```
+pub fn kind_name(k : TokenKind) : String =
+  match k of
+    TFixed(s) => s
+    TIdent => "ident"
+    TUid => "uid"
+    TQual => "qual"
+    TInt => "int"
+    TFloat => "float"
+    TChar => "char"
+    TStr => "str"
+    TIStart => "istart"
+    TIMid => "imid"
+    TIEnd => "iend"
+    TVOpen => "v\{"
+    TVClose => "v\}"
+    TVSemi => "v;"
+
+-- | The token kind a wire name denotes. Any name that is not one of the
+-- special aliases is a fixed token spelling; the fixed vocabulary itself is
+-- pinned by the compiler's own tests, not re-enumerated here.
+--
+-- ```prism
+-- (kind_of_name("uid") == TUid, kind_of_name("match") == TFixed("match"))
+-- ```
+-- ```output
+-- (true, true)
+-- ```
+pub fn kind_of_name(s : String) : TokenKind =
+  if s == "ident" then
+    TIdent
+  elif s == "uid" then
+    TUid
+  elif s == "qual" then
+    TQual
+  elif s == "int" then
+    TInt
+  elif s == "float" then
+    TFloat
+  elif s == "char" then
+    TChar
+  elif s == "str" then
+    TStr
+  elif s == "istart" then
+    TIStart
+  elif s == "imid" then
+    TIMid
+  elif s == "iend" then
+    TIEnd
+  elif s == "v\{" then
+    TVOpen
+  elif s == "v\}" then
+    TVClose
+  elif s == "v;" then
+    TVSemi
+  else
+    TFixed(s)
+
+-- | One token: its kind, its span in the embedded source, and, for
+-- value-carrying kinds, the decoded payload (escapes resolved, digit
+-- separators stripped). The original spelling is always recoverable from the
+-- span.
+pub type Token = Token { kind: TokenKind, span: Span, value: Option(String) }
+
+-- | One trivia event between semantic tokens: a line comment, a delimited
+-- comment, or a blank-line run.
+pub type Trivia = TComment(Span) | TBlockComment(Span) | TBlank(Span)
+
+-- | The wire name of a trivia event.
+pub fn trivia_name(t : Trivia) : String =
+  match t of
+    TComment(_) => "comment"
+    TBlockComment(_) => "block-comment"
+    TBlank(_) => "blank"
+
+-- | The span a trivia event covers.
+pub fn trivia_span(t : Trivia) : Span =
+  match t of
+    TComment(s) => s
+    TBlockComment(s) => s
+    TBlank(s) => s

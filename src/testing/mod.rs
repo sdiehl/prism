@@ -1,11 +1,10 @@
 //! Language-integrated testing: `test fn` discovery, deterministic manifests,
 //! harness construction, and the interpreter runner behind `prism test`.
 //!
-//! The compiler owns test identity, discovery,
-//! harness generation, execution, and events; the stdlib assertion library
-//! arrives later over the versioned test ABI. Production neutrality is the
-//! release gate: test-only edits leave production interface hashes, Core
-//! hashes, and emitted artifacts byte-identical (enforced by the
+//! The compiler owns test identity, discovery, harness generation, execution,
+//! and events. The versioned test ABI is the boundary used by stdlib assertions.
+//! Production neutrality requires test-only edits to leave production interface
+//! hashes, Core hashes, and emitted artifacts byte-identical (enforced by the
 //! `BuildMode::Production` strip in `driver::front` and `driver::modules`).
 
 use std::path::Path;
@@ -37,7 +36,7 @@ pub const TEST_FAILURE_SCHEMA: &str = "prism-test-failure-v1";
 
 /// The effect names the test world observes: `Fail` is a test failure and
 /// `IO` is the ambient output channel captured per test. This is the complete
-/// initial effect contract; any other residual effect (a capability effect or a
+/// supported effect contract; any other residual effect (a capability effect or a
 /// user effect) is a compile-time rejection at the test declaration.
 pub(crate) const TEST_WORLD_EFFECTS: &[&str] =
     &[crate::names::FAIL_EFFECT, crate::names::IO_EFFECT];
@@ -117,9 +116,8 @@ pub fn event_bytes(
 /// The `prism-test-events-v1` NDJSON bytes a structured [`Failure`] renders to.
 ///
 /// Runs through the same emit path the runner uses (`test_started` then the
-/// structured `test_failed`). The seam the later stdlib assertion layer and its
-/// conformance fixture exercise: a decoded failure payload converts to canonical
-/// event bytes without a second event path.
+/// structured `test_failed`). This is the stdlib assertion seam: a decoded
+/// failure payload converts to canonical event bytes without a second event path.
 #[must_use]
 pub fn structured_failure_events(id: &str, failure: &Failure) -> Vec<u8> {
     runner::structured_failure_events(id, failure)

@@ -140,6 +140,14 @@ concat_docs : (List(Data.Pretty.Doc)) -> Data.Pretty.Doc
 
 Concatenate a list of documents end to end.
 
+### `join_docs`
+
+```prism,sig,h-4ba3a5e8d63a72fa5da98b5647ecf050e67e869787a90b9380c2a74cf9322e68
+join_docs : (Data.Pretty.Doc, List(Data.Pretty.Doc)) -> Data.Pretty.Doc
+```
+
+Put `separator` between each pair of documents. Unlike `hsep` and `vsep`, the caller selects the exact separator document, which is useful for small target-language emitters (commas plus soft breaks, operators, or hard lines).
+
 ### `hsep`
 
 ```prism,sig,h-4d85fc9881db4cc575eb134090b794616173a9ffa42459e2fc397f6763d7fe61

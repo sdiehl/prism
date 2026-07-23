@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.14.0
+
+- Determinism: centralized compiler inputs and made parallel builds hash-stable.
+- Typed Core: removed the erased optimizer; all middle-end passes now use checked Core.
+- Types and effects: fixed mutual recursion, effect propagation, newtypes, and forwarding rows.
+- Compiler API: defined the public surface and restricted backends to validated Core.
+- Syntax: added stable JSON dumps and standard-library codecs for tokens and surface ASTs.
+- Front end: unified commands on one explicit pipeline and improved deep-program scaling.
+- Standard library: added `Control.Validate` and `Data.Frozen`; expanded core utilities.
+- Entropy: added replay-aware OS `Entropy`, distinct from seeded `Random`.
+- Identity: replaced raw digest strings with typed `Digest` values.
+- Tooling: completed formatter and syntax-highlighting coverage.
+- Packages: added Typst construction and Spectra presentation libraries.
+- Native codegen: added an allocation-free `OrNull` representation.
+- Soundness: fixed fallback pattern selection and clarified cache misses.
+- Web: fixed incremental residents and added statically checked wasm exports.
+- Examples: added System F, recursion-scheme, fold, and optics examples.
+- Documentation: added design principles and an assurance matrix; corrected compiler docs.
+
 ## 0.13.0
 
 - Contracts: added `logic fn`, `requires`, and `ensures`, discharged through an external SMT solver by `prism verify` as honest solver-oracle receipts.
@@ -89,7 +108,7 @@
 ## 0.8.0
 
 - Package world: package universes are now reported by digest and gated in CI. The first gate is deliberately typecheck-only.
-- Web gallery: added the schedule-map resident and tightened same-origin teleport. Receivers now handshake by identity and code hash before resuming, while cross-origin mobility remains deferred to the typed mobility design.
+- Web gallery: added the schedule-map resident and tightened same-origin teleport. Receivers now handshake by identity and code hash before resuming; the interface is explicitly same-origin and does not provide cross-origin mobility.
 - Instrumentation: source probes add named diagnostics whose bodies are skipped unless enabled, so disabled probes do not evaluate formatting work or perform side effects.
 - Native mobility: native LLVM builds now carry continuation metadata, state-map rows, frame anchors, and optional entry-argument shadow frames. This identifies native frames by content-addressed code, without claiming arbitrary stack or register resume.
 - Packages: source bundles are now loadable package artifacts. Published packages resolve through the signed package index, locked package and Std roots carry hash schemes, and path dependencies remain editable source.

@@ -1,14 +1,14 @@
 fn sumto(n, acc) =
-  return n to t@733
-  return 0 to t@734
-  t@733 == t@734 to t@741
-  if t@741 then
+  return n to t@735
+  return 0 to t@736
+  t@735 == t@736 to t@743
+  if t@743 then
     return acc
   else
-    return n to t@735
-    return 1 to t@736
-    t@735 - t@736 to t@737
-    return acc to t@738
-    return n to t@739
-    t@738 + t@739 to t@740
-    sumto(t@737, t@740)
+    return n to t@737
+    return 1 to t@738
+    t@737 - t@738 to t@739
+    return acc to t@740
+    return n to t@741
+    t@740 + t@741 to t@742
+    sumto(t@739, t@742)

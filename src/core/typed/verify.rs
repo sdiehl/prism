@@ -12,6 +12,11 @@ use crate::sym::Sym;
 use crate::types::ty::{EffRow, Label};
 use crate::types::{repr_of_type, Type};
 
+// Red zone / segment size for the verifier's per-node recursion, matching the
+// builder guards in `core/typed/build.rs`.
+const VERIFY_MIN_STACK: usize = 4 * 1024 * 1024;
+const VERIFY_GROW_STACK: usize = 8 * 1024 * 1024;
+
 use super::build::lower_value_type;
 use super::{
     ArenaPrepared, BinderErasure, CompSig, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType,
@@ -705,8 +710,16 @@ impl<'a, P: TypedCorePhase> Checker<'a, P> {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
     fn comp(&mut self, comp: &TypedComp) {
+        // The verifier recurses per typed node; grow stack segments inside the
+        // recursion, same discipline as the builder it checks.
+        stacker::maybe_grow(VERIFY_MIN_STACK, VERIFY_GROW_STACK, || {
+            self.comp_inner(comp);
+        });
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn comp_inner(&mut self, comp: &TypedComp) {
         self.check_sig(comp.sig());
         match comp.kind() {
             TypedCompKind::Return(value) => {

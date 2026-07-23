@@ -24,6 +24,8 @@
 
 <a id="felleisen-friedman-1986"></a> Felleisen, M., & Friedman, D. P. (1986). Control operators, the SECD-machine, and the lambda-calculus. _Formal Description of Programming Concepts III_, 193-217.
 
+<a id="flanagan-1993"></a> Flanagan, C., Sabry, A., Duba, B. F., & Felleisen, M. (1993). The essence of compiling with continuations. _Programming Language Design and Implementation (PLDI)_.
+
 <a id="foster-2007"></a> Foster, J. N., Greenwald, M. B., Moore, J. T., Pierce, B. C., & Schmitt, A. (2007). Combinators for bidirectional tree transformations: A linguistic approach to the view-update problem. _ACM Transactions on Programming Languages and Systems, 29_(3).
 
 <a id="friedman-wise-1975"></a> Friedman, D. P., & Wise, D. S. (1975). _Unwinding stylized recursions into iterations_ (Technical Report 19). Indiana University.
@@ -48,6 +50,8 @@
 
 <a id="leroy-1994"></a> Leroy, X. (1994). Manifest types, modules, and separate compilation. _Principles of Programming Languages (POPL)_.
 
+<a id="leroy-2009"></a> Leroy, X. (2009). Formal verification of a realistic compiler. _Communications of the ACM, 52_(7), 107-115.
+
 <a id="levy-2004"></a> Levy, P. B. (2004). _Call-by-push-value: A functional/imperative synthesis_. Springer.
 
 <a id="lorenzen-leijen-2022"></a> Lorenzen, A., & Leijen, D. (2022). Reference counting with frame limited reuse. _Proceedings of the ACM on Programming Languages, 6_(ICFP), 357-380.
@@ -60,7 +64,15 @@
 
 <a id="mcbride-paterson-2008"></a> McBride, C., & Paterson, R. (2008). Applicative programming with effects. _Journal of Functional Programming, 18_(1), 1-13.
 
+<a id="mckeeman-1998"></a> McKeeman, W. M. (1998). Differential testing for software. _Digital Technical Journal, 10_(1), 100-107.
+
 <a id="milner-1978"></a> Milner, R. (1978). A theory of type polymorphism in programming. _Journal of Computer and System Sciences, 17_(3), 348-375.
+
+<a id="najd-peytonjones-2017"></a> Najd, S., & Peyton Jones, S. (2017). Trees that grow. _Journal of Universal Computer Science, 23_(1), 42-62.
+
+<a id="necula-2000"></a> Necula, G. C. (2000). Translation validation for an optimizing compiler. _Programming Language Design and Implementation (PLDI)_.
+
+<a id="peterson-jones-1993"></a> Peterson, J., & Jones, M. P. (1993). Implementing type classes. _Programming Language Design and Implementation (PLDI)_.
 
 <a id="pickering-2016"></a> Pickering, M., Érdi, G., Peyton Jones, S., & Eisenberg, R. A. (2016). Pattern synonyms. _Haskell Symposium_.
 
@@ -84,6 +96,8 @@
 
 <a id="wand-1987"></a> Wand, M. (1987). Complete type inference for simple objects. _Logic in Computer Science (LICS)_.
 
+<a id="weeks-2006"></a> Weeks, S. (2006). Whole-program compilation in MLton. _ML Workshop_.
+
 <a id="white-2015"></a> White, L., Bour, F., & Yallop, J. (2015). Modular implicits. _Electronic Proceedings in Theoretical Computer Science, 198_, 22-63.
 
 <a id="wu-2014"></a> Wu, N., Schrijvers, T., & Hinze, R. (2014). Effect handlers in scope. _Haskell Symposium_.
@@ -91,3 +105,5 @@
 <a id="xie-2020"></a> Xie, N., Brachthäuser, J. I., Hillerström, D., Schuster, P., & Leijen, D. (2020). Effect handlers, evidently. _Proceedings of the ACM on Programming Languages, 4_(ICFP).
 
 <a id="xie-leijen-2021"></a> Xie, N., & Leijen, D. (2021). Generalized evidence passing for effect handlers. _Proceedings of the ACM on Programming Languages, 5_(ICFP).
+
+<a id="yang-2011"></a> Yang, X., Chen, Y., Eide, E., & Regehr, J. (2011). Finding and understanding bugs in C compilers. _Programming Language Design and Implementation (PLDI)_.

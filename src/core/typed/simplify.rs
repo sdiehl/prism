@@ -97,6 +97,25 @@ fn known(v: &TypedValue) -> bool {
     ) || trivial(v)
 }
 
+// A value whose head PROVES what it can and cannot match: a constructor,
+// tuple, or literal. A bare variable is deliberately not discriminable; its
+// runtime shape is unknown, so pattern mismatch against it is never a proof.
+fn discriminable(v: &TypedValue) -> bool {
+    matches!(
+        peel(v).kind,
+        TypedValueKind::Ctor { .. }
+            | TypedValueKind::Tuple(_)
+            | TypedValueKind::UnboxedTuple(_)
+            | TypedValueKind::Int(_)
+            | TypedValueKind::I64(_)
+            | TypedValueKind::U64(_)
+            | TypedValueKind::Float(_)
+            | TypedValueKind::Bool(_)
+            | TypedValueKind::Unit
+            | TypedValueKind::Str(_)
+    )
+}
+
 fn trivial(v: &TypedValue) -> bool {
     matches!(
         peel(v).kind,
@@ -365,9 +384,29 @@ impl Cont<'_> {
     // guaranteed).
     fn select(&self, kv: &TypedValue) -> Option<TypedComp> {
         match self {
-            Self::Case(arms) => arms
-                .iter()
-                .find_map(|(pat, body)| pat_match(pat, kv).map(|binds| build_arm(binds, body))),
+            Self::Case(arms) => {
+                // Selecting an arm by scanning in order is sound only when every
+                // earlier arm's failure to match is a PROOF of mismatch, which
+                // needs a discriminable head (a constructor, tuple, or literal).
+                // A bare variable is `known` for copy-propagation but its runtime
+                // constructor is unknown: a preceding constructor arm returning
+                // no match is ignorance, not proof, and skipping to a wildcard
+                // arm would statically select the default for a value that may
+                // match `Doing(..)` at run time (the filtered-optic miscompile).
+                // For a non-discriminable value only an unconditionally matching
+                // FIRST arm (wildcard or variable pattern) may be selected.
+                if discriminable(kv) {
+                    arms.iter().find_map(|(pat, body)| {
+                        pat_match(pat, kv).map(|binds| build_arm(binds, body))
+                    })
+                } else {
+                    arms.first().and_then(|(pat, body)| {
+                        matches!(pat, TypedPattern::Wild | TypedPattern::Var(_))
+                            .then(|| pat_match(pat, kv).map(|binds| build_arm(binds, body)))
+                            .flatten()
+                    })
+                }
+            }
             Self::If(t, e) => match &peel(kv).kind {
                 TypedValueKind::Bool(true) => Some((*t).clone()),
                 TypedValueKind::Bool(false) => Some((*e).clone()),
@@ -609,9 +648,8 @@ impl Rewrite for Simplifier {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeMap;
 
-    use crate::core::opt::{run_spec_stage, CorePass, PassStage};
     use crate::core::{EffectStrategy, OpGrades};
     use crate::flags::{DynFlags, EffectTier};
     use crate::types::ty::Label;
@@ -664,31 +702,16 @@ mod tests {
         )]
     }
 
-    fn assert_differential(
-        functions: Vec<TypedCoreFn>,
-        env: &VerifyEnv,
-    ) -> (TypedCore<Elaborated>, u64) {
+    fn run_simplify(functions: Vec<TypedCoreFn>, env: &VerifyEnv) -> (TypedCore<Elaborated>, u64) {
         let input = TypedCore::new(functions);
         if let Err(violations) = verify(&input, env) {
             panic!("input fixture is invalid: {violations:#?}");
         }
-        let legacy_input = input.clone().erase();
-        let (expected, legacy_stats) = run_spec_stage(
-            &legacy_input,
-            &BTreeSet::new(),
-            &[CorePass::Simplify],
-            PassStage::Late,
-            &[],
-            &DynFlags::default(),
-        );
-        let expected_ticks = legacy_stats.total();
         let (actual, stats) = simplify(input).expect("typed simplification");
         if let Err(violations) = verify(&actual, env) {
             panic!("simplified typed Core is invalid: {violations:#?}");
         }
-        assert_eq!(actual.clone().erase(), expected);
-        assert_eq!(stats.ticks(), expected_ticks);
-        (actual, expected_ticks)
+        (actual, stats.ticks())
     }
 
     fn lowered_simplify_fixture() -> (TypedCore<EffectLowered>, VerifyEnv) {
@@ -774,23 +797,12 @@ mod tests {
     }
 
     #[test]
-    fn effect_lowered_simplify_matches_the_legacy_pass() {
+    fn effect_lowered_simplify_collapses_the_copy_binding() {
         let (input, env) = lowered_simplify_fixture();
-        let legacy_input = input.clone().erase();
-        let (expected, legacy_stats) = run_spec_stage(
-            &legacy_input,
-            &BTreeSet::new(),
-            &[CorePass::Simplify],
-            PassStage::Late,
-            &[],
-            &DynFlags::default(),
-        );
         let (actual, stats) = simplify(input).expect("effect-lowered fixture simplifies");
         if let Err(violations) = verify(&actual, &env) {
             panic!("effect-lowered Simplify output is invalid: {violations:#?}");
         }
-        assert_eq!(actual.clone().erase(), expected);
-        assert_eq!(stats.ticks(), legacy_stats.total());
         assert!(stats.ticks() >= 2, "the lowered fixture must simplify");
         let target = actual
             .functions()
@@ -882,20 +894,36 @@ mod tests {
         let env = VerifyEnv::new();
         let input = TypedCore::<EffectLowered>::new(vec![caller, consume]);
         assert_eq!(verify(&input, &env), Ok(()));
-        let erased = input.clone().erase();
-        let (expected, _) = run_spec_stage(
-            &erased,
-            &BTreeSet::new(),
-            &[CorePass::Simplify],
-            PassStage::Late,
-            &[],
-            &DynFlags::default(),
-        );
 
         let (output, stats) = simplify(input).expect("simplification converges");
         assert!(stats.ticks() > 0);
         assert_eq!(verify(&output, &env), Ok(()));
-        assert_eq!(output.erase(), expected);
+
+        // Copy propagation rewrites the `t` occurrence to `h` reinstantiated at
+        // the use site's empty row, so the `let t = h` binding is dead and the
+        // reinstantiated `h` flows straight into the call under its wrapper.
+        let caller = output
+            .functions()
+            .iter()
+            .find(|function| function.name() == sym("caller"))
+            .expect("caller survives");
+        assert!(!free_comp_vars(caller.body()).contains(&sym("t")));
+        let TypedCompKind::Call { args, .. } = caller.body().kind() else {
+            panic!("the dead alias binding must be eliminated, leaving the call");
+        };
+        let [argument] = args.as_slice() else {
+            panic!("consume takes exactly its one argument");
+        };
+        let TypedValueKind::Reinterpret(inner) = &argument.kind else {
+            panic!("the argument keeps its representation wrapper");
+        };
+        assert!(matches!(
+            &inner.kind,
+            TypedValueKind::Var { name, instantiation }
+                if *name == sym("h")
+                    && instantiation.as_slice()
+                        == [super::super::CoreInstantiation::Row(EffRow::Empty)]
+        ));
     }
 
     // `let sc = Some(v) in match sc { Some(a) => a, None => () }` collapses to
@@ -965,7 +993,7 @@ mod tests {
             CoreFnSig::new(Vec::new(), vec![source(Type::Int)], body.sig),
             0,
         )];
-        let (actual, _) = assert_differential(functions, &env);
+        let (actual, _) = run_simplify(functions, &env);
         assert_eq!(
             actual.functions()[0].body().kind(),
             &TypedCompKind::Return(var("v", source(Type::Int)))
@@ -1000,7 +1028,7 @@ mod tests {
                 )),
             ),
         );
-        let (actual, _) = assert_differential(one_fn(body), &env);
+        let (actual, _) = run_simplify(one_fn(body), &env);
         assert_eq!(
             actual.functions()[0].body().kind(),
             &TypedCompKind::Return(int(5))
@@ -1017,7 +1045,7 @@ mod tests {
             pure(source(Type::Int)),
             TypedCompKind::Prim(CoreOp::Add, int(big), int(big)),
         );
-        let (actual, ticks) = assert_differential(one_fn(body), &env);
+        let (actual, ticks) = run_simplify(one_fn(body), &env);
         assert_eq!(ticks, 0);
         assert!(matches!(
             actual.functions()[0].body().kind(),
@@ -1036,7 +1064,7 @@ mod tests {
             pure(source(Type::Float)),
             TypedCompKind::Prim(CoreOp::Addf, lhs, rhs),
         );
-        let (actual, _) = assert_differential(one_fn(body), &env);
+        let (actual, _) = run_simplify(one_fn(body), &env);
         assert_eq!(
             actual.functions()[0].body().kind(),
             &TypedCompKind::Return(TypedValue::new(
@@ -1075,7 +1103,7 @@ mod tests {
                 )),
             ),
         );
-        let (actual, _) = assert_differential(one_fn(body), &env);
+        let (actual, _) = run_simplify(one_fn(body), &env);
         assert_eq!(
             actual.functions()[0].body().kind(),
             &TypedCompKind::Return(int(9))
@@ -1125,7 +1153,7 @@ mod tests {
             CoreFnSig::new(Vec::new(), vec![source(Type::Bool)], body.sig),
             0,
         )];
-        let (actual, _) = assert_differential(functions, &env);
+        let (actual, _) = run_simplify(functions, &env);
         assert!(!free_comp_vars(actual.functions()[0].body()).contains(&sym("x")));
     }
 
@@ -1150,7 +1178,7 @@ mod tests {
                 Box::new(inner),
             ),
         );
-        let (actual, _) = assert_differential(one_fn(body), &env);
+        let (actual, _) = run_simplify(one_fn(body), &env);
         assert_eq!(
             actual.functions()[0].body().kind(),
             &TypedCompKind::Return(int(2))
@@ -1209,7 +1237,7 @@ mod tests {
                 )),
             ),
         );
-        let (actual, _) = assert_differential(one_fn(body), &env);
+        let (actual, _) = run_simplify(one_fn(body), &env);
         assert_eq!(
             actual.functions()[0].body().kind(),
             &TypedCompKind::Return(int(11))
@@ -1277,7 +1305,7 @@ mod tests {
                 ]),
             },
         );
-        let (actual, _) = assert_differential(one_fn(body), &env);
+        let (actual, _) = run_simplify(one_fn(body), &env);
         let TypedCompKind::Handle { body, ops, .. } = actual.functions()[0].body().kind() else {
             panic!("expected a surviving Handle node");
         };
@@ -1325,7 +1353,7 @@ mod tests {
             CoreFnSig::new(Vec::new(), vec![id_ty], body.sig),
             0,
         )];
-        let (_, ticks) = assert_differential(functions, &env);
+        let (_, ticks) = run_simplify(functions, &env);
         assert_eq!(ticks, 0);
     }
 
@@ -1362,7 +1390,7 @@ mod tests {
             ),
             0,
         )];
-        let (actual, _) = assert_differential(functions, &env);
+        let (actual, _) = run_simplify(functions, &env);
         assert_eq!(
             actual.functions()[0].body().sig().effects(),
             &EffRow::Var(quantified)
@@ -1426,7 +1454,7 @@ mod tests {
                 Box::new(case),
             ),
         );
-        let (actual, ticks) = assert_differential(one_fn(body), &env);
+        let (actual, ticks) = run_simplify(one_fn(body), &env);
         assert!(ticks >= 4);
         assert_eq!(
             actual.functions()[0].body().kind(),

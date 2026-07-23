@@ -1,0 +1,534 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.14.0",
+  "source": {
+    "digest": "91aaf0fef720c662e99baebd264ddf09f2fc3e91feab725bc4a16544f8a48b2a",
+    "text": "-- Classes, instances, canonical designations, constrained functions.\nclass Same(a)\n  same : (a, a) -> Bool\n\nclass Bigger(a) given Same(a)\n  bigger : (a, a) -> Bool\n\ninstance sameInt : Same(Int)\n  fn same(x, y) = x == y\n\ninstance samePair : Same((a, b)) given Same(a), Same(b)\n  fn same(p, q) =\n    match (p, q) of\n      ((a1, b1), (a2, b2)) => same(a1, a2) && same(b1, b2)\n\ncanonical Same(Int) = sameInt\n\nfn alike(x : a, y : a) : Bool given Same(a) = same(x, y)\n\nfn where_helper(n : Int) : Int =\n    double + offset\n  where\n    double = n * 2\n    offset = 10\n"
+  },
+  "items": [
+    {
+      "kind": "class",
+      "methods": [
+        {
+          "name": "same",
+          "ty": {
+            "effects": {
+              "labels": []
+            },
+            "kind": "fun",
+            "params": [
+              {
+                "kind": "var",
+                "name": "a"
+              },
+              {
+                "kind": "var",
+                "name": "a"
+              }
+            ],
+            "ret": {
+              "kind": "bool"
+            }
+          }
+        }
+      ],
+      "name": "Same",
+      "param": "a",
+      "span": [
+        70,
+        107
+      ]
+    },
+    {
+      "kind": "class",
+      "methods": [
+        {
+          "name": "bigger",
+          "ty": {
+            "effects": {
+              "labels": []
+            },
+            "kind": "fun",
+            "params": [
+              {
+                "kind": "var",
+                "name": "a"
+              },
+              {
+                "kind": "var",
+                "name": "a"
+              }
+            ],
+            "ret": {
+              "kind": "bool"
+            }
+          }
+        }
+      ],
+      "name": "Bigger",
+      "param": "a",
+      "span": [
+        109,
+        164
+      ],
+      "supers": [
+        "Same"
+      ]
+    },
+    {
+      "class": "Same",
+      "head": {
+        "kind": "int"
+      },
+      "kind": "instance",
+      "methods": [
+        {
+          "body": {
+            "kind": "bin",
+            "lhs": {
+              "kind": "var",
+              "name": "x",
+              "span": [
+                213,
+                214
+              ]
+            },
+            "op": "==",
+            "rhs": {
+              "kind": "var",
+              "name": "y",
+              "span": [
+                218,
+                219
+              ]
+            },
+            "span": [
+              213,
+              219
+            ]
+          },
+          "kind": "fn",
+          "name": "same",
+          "params": [
+            {
+              "name": "x"
+            },
+            {
+              "name": "y"
+            }
+          ],
+          "span": [
+            197,
+            219
+          ]
+        }
+      ],
+      "name": "sameInt",
+      "span": [
+        166,
+        219
+      ]
+    },
+    {
+      "class": "Same",
+      "context": [
+        {
+          "class": "Same",
+          "span": [
+            260,
+            267
+          ],
+          "ty": {
+            "kind": "var",
+            "name": "a"
+          }
+        },
+        {
+          "class": "Same",
+          "span": [
+            269,
+            276
+          ],
+          "ty": {
+            "kind": "var",
+            "name": "b"
+          }
+        }
+      ],
+      "head": {
+        "items": [
+          {
+            "kind": "var",
+            "name": "a"
+          },
+          {
+            "kind": "var",
+            "name": "b"
+          }
+        ],
+        "kind": "tuple"
+      },
+      "kind": "instance",
+      "methods": [
+        {
+          "body": {
+            "arms": [
+              {
+                "body": {
+                  "kind": "bin",
+                  "lhs": {
+                    "args": [
+                      {
+                        "kind": "var",
+                        "name": "a1",
+                        "span": [
+                          350,
+                          352
+                        ]
+                      },
+                      {
+                        "kind": "var",
+                        "name": "a2",
+                        "span": [
+                          354,
+                          356
+                        ]
+                      }
+                    ],
+                    "head": {
+                      "kind": "var",
+                      "name": "same",
+                      "span": [
+                        345,
+                        349
+                      ]
+                    },
+                    "kind": "call",
+                    "span": [
+                      345,
+                      357
+                    ]
+                  },
+                  "op": "&&",
+                  "rhs": {
+                    "args": [
+                      {
+                        "kind": "var",
+                        "name": "b1",
+                        "span": [
+                          366,
+                          368
+                        ]
+                      },
+                      {
+                        "kind": "var",
+                        "name": "b2",
+                        "span": [
+                          370,
+                          372
+                        ]
+                      }
+                    ],
+                    "head": {
+                      "kind": "var",
+                      "name": "same",
+                      "span": [
+                        361,
+                        365
+                      ]
+                    },
+                    "kind": "call",
+                    "span": [
+                      361,
+                      373
+                    ]
+                  },
+                  "span": [
+                    345,
+                    373
+                  ]
+                },
+                "pat": {
+                  "items": [
+                    {
+                      "items": [
+                        {
+                          "kind": "var",
+                          "name": "a1",
+                          "span": [
+                            323,
+                            325
+                          ]
+                        },
+                        {
+                          "kind": "var",
+                          "name": "b1",
+                          "span": [
+                            327,
+                            329
+                          ]
+                        }
+                      ],
+                      "kind": "tuple",
+                      "span": [
+                        322,
+                        330
+                      ]
+                    },
+                    {
+                      "items": [
+                        {
+                          "kind": "var",
+                          "name": "a2",
+                          "span": [
+                            333,
+                            335
+                          ]
+                        },
+                        {
+                          "kind": "var",
+                          "name": "b2",
+                          "span": [
+                            337,
+                            339
+                          ]
+                        }
+                      ],
+                      "kind": "tuple",
+                      "span": [
+                        332,
+                        340
+                      ]
+                    }
+                  ],
+                  "kind": "tuple",
+                  "span": [
+                    321,
+                    341
+                  ]
+                }
+              }
+            ],
+            "kind": "match",
+            "scrutinee": {
+              "items": [
+                {
+                  "kind": "var",
+                  "name": "p",
+                  "span": [
+                    306,
+                    307
+                  ]
+                },
+                {
+                  "kind": "var",
+                  "name": "q",
+                  "span": [
+                    309,
+                    310
+                  ]
+                }
+              ],
+              "kind": "tuple",
+              "span": [
+                305,
+                311
+              ]
+            },
+            "span": [
+              299,
+              373
+            ]
+          },
+          "kind": "fn",
+          "name": "same",
+          "params": [
+            {
+              "name": "p"
+            },
+            {
+              "name": "q"
+            }
+          ],
+          "span": [
+            279,
+            373
+          ]
+        }
+      ],
+      "name": "samePair",
+      "span": [
+        221,
+        373
+      ]
+    },
+    {
+      "class": "Same",
+      "head": {
+        "kind": "int"
+      },
+      "kind": "canonical",
+      "name": "sameInt",
+      "span": [
+        375,
+        404
+      ]
+    },
+    {
+      "body": {
+        "args": [
+          {
+            "kind": "var",
+            "name": "x",
+            "span": [
+              457,
+              458
+            ]
+          },
+          {
+            "kind": "var",
+            "name": "y",
+            "span": [
+              460,
+              461
+            ]
+          }
+        ],
+        "head": {
+          "kind": "var",
+          "name": "same",
+          "span": [
+            452,
+            456
+          ]
+        },
+        "kind": "call",
+        "span": [
+          452,
+          462
+        ]
+      },
+      "constraints": [
+        {
+          "class": "Same",
+          "span": [
+            442,
+            449
+          ],
+          "ty": {
+            "kind": "var",
+            "name": "a"
+          }
+        }
+      ],
+      "kind": "fn",
+      "name": "alike",
+      "params": [
+        {
+          "name": "x",
+          "ty": {
+            "kind": "var",
+            "name": "a"
+          }
+        },
+        {
+          "name": "y",
+          "ty": {
+            "kind": "var",
+            "name": "a"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "bool"
+      },
+      "span": [
+        406,
+        462
+      ]
+    },
+    {
+      "body": {
+        "kind": "bin",
+        "lhs": {
+          "kind": "var",
+          "name": "double",
+          "span": [
+            501,
+            507
+          ]
+        },
+        "op": "+",
+        "rhs": {
+          "kind": "var",
+          "name": "offset",
+          "span": [
+            510,
+            516
+          ]
+        },
+        "span": [
+          501,
+          516
+        ]
+      },
+      "kind": "fn",
+      "name": "where_helper",
+      "params": [
+        {
+          "name": "n",
+          "ty": {
+            "kind": "int"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "int"
+      },
+      "span": [
+        464,
+        559
+      ],
+      "wheres": [
+        {
+          "name": "double",
+          "value": {
+            "kind": "bin",
+            "lhs": {
+              "kind": "var",
+              "name": "n",
+              "span": [
+                538,
+                539
+              ]
+            },
+            "op": "*",
+            "rhs": {
+              "kind": "int",
+              "span": [
+                542,
+                543
+              ],
+              "value": "2"
+            },
+            "span": [
+              538,
+              543
+            ]
+          }
+        },
+        {
+          "name": "offset",
+          "value": {
+            "kind": "int",
+            "span": [
+              557,
+              559
+            ],
+            "value": "10"
+          }
+        }
+      ]
+    }
+  ]
+}

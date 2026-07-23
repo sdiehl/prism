@@ -141,3 +141,141 @@ long prism_simd_fextract(long v, long i) {
 long prism_simd_iextract(long v, long i) {
     return prism_box(prism_simd_word(v, i));
 }
+
+/* The four-lane 32-bit views of the same two-word cell. Lane `i` is the 32-bit
+ * field at word `i / 2`, bit offset `(i % 2) * 32`, low lane first, exactly the
+ * interpreter's packing. Float lanes run in true single precision (both C and
+ * the oracle evaluate `float` operations without double rounding on the LP64
+ * targets the tagging scheme already assumes); integer lanes are wrapping
+ * 32-bit. Splat narrows (double -> float round-to-nearest, i64 -> i32
+ * truncation) and extract widens back exactly. */
+
+static uint32_t prism_simd_lane4(long v, long i) {
+    if (i < 0 || i > 3) {
+        fprintf(stderr, "fatal: simd lane index %ld out of bounds\n", i);
+        abort();
+    }
+    unsigned long word = (unsigned long)prism_simd_word(v, i / 2);
+    return (uint32_t)(word >> ((uint32_t)(i % 2) * 32u));
+}
+
+static long prism_simd_vec4(const uint32_t ls[4]) {
+    return prism_simd_vec((long)((unsigned long)ls[0] | ((unsigned long)ls[1] << 32u)),
+                          (long)((unsigned long)ls[2] | ((unsigned long)ls[3] << 32u)));
+}
+
+static float as_f32(uint32_t bits) {
+    float f;
+    memcpy(&f, &bits, sizeof f);
+    return f;
+}
+
+static uint32_t f32_bits(float f) {
+    uint32_t bits;
+    memcpy(&bits, &f, sizeof bits);
+    return bits;
+}
+
+/* Like `prism_simd_fsplat`, the scalar arrives as raw f64 bits in an integer
+ * register; the narrowing to f32 happens here, once, and the 32-bit pattern is
+ * replicated into all four lanes. */
+long prism_simd_fsplat4(long bits) {
+    uint32_t lane = f32_bits((float)as_f64(bits));
+    uint32_t ls[4] = {lane, lane, lane, lane};
+    return prism_simd_vec4(ls);
+}
+
+long prism_simd_isplat4(long x) {
+    uint32_t lane = (uint32_t)(unsigned long)prism_unbox(x);
+    uint32_t ls[4] = {lane, lane, lane, lane};
+    return prism_simd_vec4(ls);
+}
+
+typedef float (*prism_f32_op)(float, float);
+typedef uint32_t (*prism_u32_op)(uint32_t, uint32_t);
+
+static long prism_simd_fmap4(long a, long b, prism_f32_op op) {
+    uint32_t ls[4];
+    for (long i = 0; i < 4; i++) {
+        ls[i] = f32_bits(op(as_f32(prism_simd_lane4(a, i)), as_f32(prism_simd_lane4(b, i))));
+    }
+    return prism_simd_vec4(ls);
+}
+
+static long prism_simd_imap4(long a, long b, prism_u32_op op) {
+    uint32_t ls[4];
+    for (long i = 0; i < 4; i++) { ls[i] = op(prism_simd_lane4(a, i), prism_simd_lane4(b, i)); }
+    return prism_simd_vec4(ls);
+}
+
+static float f32_add(float x, float y) {
+    return x + y;
+}
+static float f32_sub(float x, float y) {
+    return x - y;
+}
+static float f32_mul(float x, float y) {
+    return x * y;
+}
+static float f32_min(float x, float y) {
+    return x < y ? x : y;
+}
+static float f32_max(float x, float y) {
+    return x > y ? x : y;
+}
+static uint32_t u32_add(uint32_t x, uint32_t y) {
+    return x + y;
+}
+static uint32_t u32_sub(uint32_t x, uint32_t y) {
+    return x - y;
+}
+static uint32_t u32_and(uint32_t x, uint32_t y) {
+    return x & y;
+}
+static uint32_t u32_or(uint32_t x, uint32_t y) {
+    return x | y;
+}
+static uint32_t u32_xor(uint32_t x, uint32_t y) {
+    return x ^ y;
+}
+
+long prism_simd_fadd4(long a, long b) {
+    return prism_simd_fmap4(a, b, f32_add);
+}
+long prism_simd_fsub4(long a, long b) {
+    return prism_simd_fmap4(a, b, f32_sub);
+}
+long prism_simd_fmul4(long a, long b) {
+    return prism_simd_fmap4(a, b, f32_mul);
+}
+long prism_simd_fmin4(long a, long b) {
+    return prism_simd_fmap4(a, b, f32_min);
+}
+long prism_simd_fmax4(long a, long b) {
+    return prism_simd_fmap4(a, b, f32_max);
+}
+long prism_simd_iadd4(long a, long b) {
+    return prism_simd_imap4(a, b, u32_add);
+}
+long prism_simd_isub4(long a, long b) {
+    return prism_simd_imap4(a, b, u32_sub);
+}
+long prism_simd_iand4(long a, long b) {
+    return prism_simd_imap4(a, b, u32_and);
+}
+long prism_simd_ior4(long a, long b) {
+    return prism_simd_imap4(a, b, u32_or);
+}
+long prism_simd_ixor4(long a, long b) {
+    return prism_simd_imap4(a, b, u32_xor);
+}
+
+/* A float lane widens exactly to the boxed `Float`; an integer lane
+ * sign-extends to the boxed `I64`. */
+long prism_simd_fextract4(long v, long i) {
+    return prism_box(f64_bits((double)as_f32(prism_simd_lane4(v, i))));
+}
+
+long prism_simd_iextract4(long v, long i) {
+    return prism_box((long)(int32_t)prism_simd_lane4(v, i));
+}

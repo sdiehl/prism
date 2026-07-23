@@ -1,0 +1,13 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/or_null_layout.pr
+---
+0
+99
+41
+green 7
+none
+5
+0
+=> ()

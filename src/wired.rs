@@ -25,7 +25,7 @@ const TY_TENSOR: &str = "Tensor";
 /// ([`Self::signature`]) and the two elaboration hooks ([`Self::getter`],
 /// [`Self::setter`]) share one source of truth instead of re-matching type names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Indexable {
+pub(crate) enum Indexable {
     Array,
     HashMap,
     List,
@@ -37,7 +37,7 @@ impl Indexable {
     /// Classify an index-sugar receiver type, or `None` if it is not indexable.
     /// The single home for the container type names.
     #[must_use]
-    pub fn classify(ty: &Type) -> Option<Self> {
+    pub(crate) fn classify(ty: &Type) -> Option<Self> {
         match ty {
             Type::Con(n, args) if bare_name(n.as_str()) == TY_ARRAY && args.len() == 1 => {
                 Some(Self::Array)
@@ -60,7 +60,7 @@ impl Indexable {
     /// `ty` is the already-classified receiver; its type argument supplies the
     /// element for the polymorphic containers.
     #[must_use]
-    pub fn signature(self, ty: &Type) -> (Type, Type, bool) {
+    pub(crate) fn signature(self, ty: &Type) -> (Type, Type, bool) {
         let elem = || match ty {
             Type::Con(_, args) if !args.is_empty() => args[0].clone(),
             _ => Type::Int,
@@ -83,7 +83,7 @@ impl Indexable {
     /// accessors; the tensor accessor is a `Data.Tensor` function, so it is named
     /// by its canonical (module-qualified) form the elaborator can call directly.
     #[must_use]
-    pub const fn getter(self) -> &'static str {
+    pub(crate) const fn getter(self) -> &'static str {
         match self {
             Self::Array => "at_array",
             Self::HashMap => "at_hashmap",
@@ -95,7 +95,7 @@ impl Indexable {
 
     /// The setter backing `e[k] := v`, or `None` for a read-only container.
     #[must_use]
-    pub const fn setter(self) -> Option<&'static str> {
+    pub(crate) const fn setter(self) -> Option<&'static str> {
         match self {
             Self::Array => Some("array_set"),
             Self::HashMap => Some("hm_insert"),

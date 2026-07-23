@@ -1,0 +1,71 @@
+-- | Backend-neutral layout values for Spectra.
+--
+-- These constructors describe intent. They deliberately contain no measured
+-- coordinates or Typst-specific layout state.
+
+pub type Align = Left | Center | Right deriving (Eq, Show)
+
+pub type FitMode = Contain | Cover deriving (Eq, Show)
+
+pub type Inline
+  = Plain(String)
+  | Emphasis(List(Inline))
+  | Strong(List(Inline))
+  | InlineCode(String)
+  | Link(String, List(Inline))
+  | Colored(String, List(Inline))
+  deriving (Eq, Show)
+
+pub type TextStyle = TextStyle {
+  size: Int,
+  color: String,
+  align: Align
+} deriving (Eq, Show)
+
+pub type Pict
+  = Empty
+  | Text(TextStyle, List(Inline))
+  | CodeBlock(String, String)
+  | Image(String)
+  | Rectangle(String, Int, Int)
+  | Row(Int, List(Pict))
+  | Column(Int, Align, List(Pict))
+  | Overlay(List(Pict))
+  | Inset(Int, Int, Int, Int, Pict)
+  | Fit(FitMode, Pict)
+  | Fragment(Int, Pict)
+  | RawTypst(String)
+  deriving (Eq, Show)
+
+-- | Normal body text in the theme foreground. A size of zero means "theme
+-- body size" to the renderer.
+pub fn text(s : String) : Pict =
+  Text(TextStyle { size = 0, color = "", align = Left }, [Plain(s)])
+
+-- | Rich inline text in the theme foreground.
+pub fn rich_text(xs : List(Inline)) : Pict =
+  Text(TextStyle { size = 0, color = "", align = Left }, xs)
+
+-- | A paragraph-sized inline sequence. This is an authoring synonym for
+-- `rich_text`, retained because it reads naturally inside a slide builder.
+pub fn para(xs : List(Inline)) : Pict = rich_text(xs)
+
+-- | A bullet item rendered as an accent arrow and rich inline text.
+pub fn item_text(xs : List(Inline)) : Pict =
+  rich_text(Cons(Colored("accent", [Plain("→ ")]), xs))
+
+-- | A plain bullet item.
+pub fn item(s : String) : Pict = item_text([Plain(s)])
+
+pub fn row(gap : Int, children : List(Pict)) : Pict = Row(gap, children)
+
+pub fn column(gap : Int, children : List(Pict)) : Pict = Column(gap, Left, children)
+
+pub fn centered(gap : Int, children : List(Pict)) : Pict =
+  Column(gap, Center, children)
+
+pub fn overlay(children : List(Pict)) : Pict = Overlay(children)
+
+pub fn inset(all : Int, child : Pict) : Pict = Inset(all, all, all, all, child)
+
+pub fn raw_typst(source : String) : Pict = RawTypst(source)

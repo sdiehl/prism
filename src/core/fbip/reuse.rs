@@ -1,3 +1,4 @@
+use crate::kw;
 use crate::names::reuse_token;
 use crate::sym::Sym;
 
@@ -53,6 +54,9 @@ fn reuse_arm(scrut: &Value, p: &CorePat, body: &Comp) -> Comp {
         return body.clone();
     };
     let arity = match p {
+        // The wired nullable frees no cell when matched (its native form is
+        // the null word or the element itself), so it can never seed a token.
+        CorePat::Ctor(name, _) if kw::is_or_null_ctor(name.as_str()) => return body.clone(),
         CorePat::Ctor(_, fields) | CorePat::Tuple(fields) => fields.len(),
         _ => return body.clone(),
     };
@@ -160,7 +164,9 @@ fn consume_alloc(c: &Comp, tok: Sym, cap: usize) -> Option<Comp> {
                 Box::new(consume_alloc(n, tok, cap)?),
             ))
         }
-        Comp::Return(v @ (Value::Ctor(..) | Value::Tuple(..))) if ctor_arity(v) <= cap => {
+        Comp::Return(v @ (Value::Ctor(..) | Value::Tuple(..)))
+            if ctor_arity(v) <= cap && !is_or_null_alloc(v) =>
+        {
             Some(Comp::Reuse(tok, v.clone()))
         }
         Comp::If(cond, t, e) => Some(Comp::If(
@@ -194,4 +200,9 @@ const fn ctor_arity(v: &Value) -> usize {
         Value::Ctor(_, _, fs) | Value::Tuple(fs) => fs.len(),
         _ => 0,
     }
+}
+
+// The wired nullable allocates no cell, so it can never spend a reuse credit.
+fn is_or_null_alloc(v: &Value) -> bool {
+    matches!(v, Value::Ctor(name, ..) if kw::is_or_null_ctor(name.as_str()))
 }

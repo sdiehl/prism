@@ -1,0 +1,25 @@
+-- A `Map`-backed newtype round-trips: the phantom ordering brand a `Map(k, v)`
+-- omits is pinned to `Canonical` in the field, so a `Map` value stores into and
+-- reads back out of the wrapper (regression for the newtype brand-arity leak).
+import Data.Map (..)
+
+type Graph(k) = Graph(Map(k, List(k)))
+
+fn empty_graph() : Graph(k) given Ord(k) = Graph(map_empty)
+
+fn add(g : Graph(k), u : k, vs : List(k)) : Graph(k) given Ord(k) =
+  match g of
+    Graph(m) => Graph(map_insert(u, vs, m))
+
+fn succ(g : Graph(k), u : k) : List(k) given Ord(k) =
+  match g of
+    Graph(m) =>
+      match map_lookup(u, m) of
+        Some(vs) => vs
+        None => Nil
+
+fn main() =
+  let g = add(add(empty_graph(), 1, [2, 3]), 2, [3])
+  println(length(succ(g, 1)))
+  println(length(succ(g, 2)))
+  println(length(succ(g, 9)))

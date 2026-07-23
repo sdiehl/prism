@@ -30,6 +30,20 @@ const INPUT_CONFIGURATION: &str = "configuration";
 const INPUT_FOUNDATION: &str = "foundation";
 const INPUT_SEMANTIC_SOURCE: &str = "semantic-source";
 const INPUT_SOURCE: &str = "source";
+// Per-row identity slots: the `configuration` slot above keeps the collapsed
+// fingerprint (what the query keys actually fold), and each identity row is
+// ALSO recorded under its own named slot so a miss can say WHICH row moved
+// (`opt` vs `backend-opt` vs a toolchain row) instead of the opaque
+// "configuration changed". Explanation data only: never part of a query key.
+const INPUT_IDENTITY_ROW_PREFIX: &str = "identity:";
+
+fn identity_row_input(label: &str) -> String {
+    format!("{INPUT_IDENTITY_ROW_PREFIX}{label}")
+}
+
+fn identity_row_label_of(input: &str) -> Option<&str> {
+    input.strip_prefix(INPUT_IDENTITY_ROW_PREFIX)
+}
 const DEPENDENCY_INPUT_PREFIX: &str = "dependency:";
 // The configuration context the module checker keys its artifact identity on.
 const MODULE_CHECK_CONTEXT: &str = "module-check";
@@ -110,6 +124,7 @@ impl DecisionTracker {
         roots: &[Root],
         cfg: &Config,
     ) -> Result<Self, Error> {
+        let identity = cfg.artifact_identity_for(MODULE_CHECK_CONTEXT);
         let mut inputs = vec![
             FactInput {
                 name: INPUT_COMPILER.to_string(),
@@ -117,9 +132,7 @@ impl DecisionTracker {
             },
             FactInput {
                 name: INPUT_CONFIGURATION.to_string(),
-                identity: cfg
-                    .artifact_identity_for(MODULE_CHECK_CONTEXT)
-                    .fingerprint(),
+                identity: identity.fingerprint(),
             },
             FactInput {
                 name: INPUT_FOUNDATION.to_string(),
@@ -134,6 +147,12 @@ impl DecisionTracker {
                 identity: blake3::hash(source.as_bytes()).to_hex().to_string(),
             },
         ];
+        // One slot per identity row, in the identity's own deterministic row
+        // order, so a configuration miss names the exact row that diverged.
+        inputs.extend(identity.rows().into_iter().map(|row| FactInput {
+            name: identity_row_input(row.field.label()),
+            identity: row.value,
+        }));
         // Name-sorted dependency slots, so the input order is a pure function
         // of the dependency set. A missing interface is a structured error
         // rather than a map-index panic: the readiness invariant is not proven
@@ -148,7 +167,7 @@ impl DecisionTracker {
         for (name, interface) in ordered {
             inputs.push(FactInput {
                 name: dependency_input(name),
-                identity: interface.digest.clone(),
+                identity: interface.digest.to_string(),
             });
         }
         let scope = FactScope::of_roots(roots);
@@ -208,21 +227,40 @@ fn module_reasons(previous: Option<&QueryFact>, current: &QueryFact) -> Vec<Stri
     let tokens_changed = changes
         .iter()
         .any(|change| change.name == INPUT_SEMANTIC_SOURCE);
+    // Per-row identity attribution: when specific identity rows moved, name
+    // them and suppress the opaque "configuration changed" umbrella. A row
+    // Added/Removed delta appears only once, across a recorder upgrade that
+    // changed the slot layout itself, and is deliberately not phrased.
+    let changed_rows: Vec<&str> = changes
+        .iter()
+        .filter(|change| matches!(change.delta, InputDelta::Changed))
+        .filter_map(|change| identity_row_label_of(&change.name))
+        .collect();
     let mut reasons = Vec::new();
     for change in &changes {
         let reason = match change.name.as_str() {
             INPUT_COMPILER => Some("compiler executable changed".to_string()),
-            INPUT_CONFIGURATION => Some("compiler configuration changed".to_string()),
+            INPUT_CONFIGURATION => {
+                (changed_rows.is_empty()).then(|| "compiler configuration changed".to_string())
+            }
             INPUT_FOUNDATION => Some("semantic foundation changed".to_string()),
             INPUT_SEMANTIC_SOURCE => Some("module tokens changed".to_string()),
             INPUT_SOURCE => {
                 (!tokens_changed).then(|| "source bytes changed without token changes".to_string())
             }
-            name => dependency_name_of(name).map(|dep| match change.delta {
-                InputDelta::Added => format!("dependency `{dep}` was added"),
-                InputDelta::Removed => format!("dependency `{dep}` was removed"),
-                InputDelta::Changed => format!("dependency interface `{dep}` changed"),
-            }),
+            name => identity_row_label_of(name).map_or_else(
+                || {
+                    dependency_name_of(name).map(|dep| match change.delta {
+                        InputDelta::Added => format!("dependency `{dep}` was added"),
+                        InputDelta::Removed => format!("dependency `{dep}` was removed"),
+                        InputDelta::Changed => format!("dependency interface `{dep}` changed"),
+                    })
+                },
+                |label| {
+                    matches!(change.delta, InputDelta::Changed)
+                        .then(|| format!("compiler configuration row `{label}` changed"))
+                },
+            ),
         };
         if let Some(reason) = reason {
             reasons.push(reason);

@@ -1055,9 +1055,7 @@ impl Rewrite for Freshen<'_> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use crate::core::cbpv::Value;
     use crate::core::fv;
-    use crate::core::opt::{freshen_legacy, subst_comp_legacy};
     use crate::names::FRESH_SPECIALIZE;
     use crate::types::ty::{EffRow, Label};
     use crate::types::Type;
@@ -1152,15 +1150,26 @@ mod tests {
     }
 
     #[test]
-    fn freshening_matches_legacy_structure_order_and_counter() {
-        let typed = traversal_fixture();
-        let legacy = typed.clone().erase();
-        let mut typed_counter = 0;
-        let mut legacy_counter = 0;
-        let typed = freshen(&typed, &mut typed_counter, FRESH_SPECIALIZE).erase();
-        let legacy = freshen_legacy(&legacy, &mut legacy_counter, FRESH_SPECIALIZE);
-        assert_eq!(typed, legacy);
-        assert_eq!(typed_counter, legacy_counter);
+    fn freshening_renames_binders_and_preserves_free_variables() {
+        let fixture = traversal_fixture();
+        // The only free reference in the fixture is the outer `Bind` producer.
+        assert_eq!(
+            free_comp_vars(&fixture),
+            std::iter::once(sym("outside")).collect()
+        );
+
+        let mut counter = 0;
+        let freshened = freshen(&fixture, &mut counter, FRESH_SPECIALIZE);
+        // Freshening only rewrites binding occurrences, so the free set is invariant
+        // and the counter advances once per binder it introduces.
+        assert_eq!(free_comp_vars(&freshened), free_comp_vars(&fixture));
+        assert!(counter > 0, "the fixture has binders to freshen");
+
+        // Freshening is deterministic in structure and counter given the same start.
+        let mut again = 0;
+        let repeat = freshen(&fixture, &mut again, FRESH_SPECIALIZE);
+        assert_eq!(freshened.erase(), repeat.erase());
+        assert_eq!(counter, again);
     }
 
     #[test]
@@ -1170,7 +1179,7 @@ mod tests {
     }
 
     #[test]
-    fn term_substitution_matches_legacy_capture_avoidance() {
+    fn term_substitution_avoids_capture() {
         let polymorphic_capture = TypedValue::new(
             int_type(),
             TypedValueKind::Var {
@@ -1196,13 +1205,9 @@ mod tests {
                 )),
             ),
         );
-        let legacy = typed.clone().erase();
         let mut typed_substitution = BTreeMap::new();
         typed_substitution.insert(sym("replace"), var("capture"));
-        let mut legacy_substitution = BTreeMap::new();
-        legacy_substitution.insert(sym("replace"), Value::Var(sym("capture")));
         let mut typed_counter = 0;
-        let mut legacy_counter = 0;
         let typed = substitute_terms(
             &typed,
             &typed_substitution,
@@ -1228,15 +1233,9 @@ mod tests {
             &[CoreInstantiation::Type(Type::Int)],
             "alpha-renaming must retain polymorphic use-site evidence"
         );
+        // The lambda bound `capture`, so substituting `replace -> capture` must
+        // alpha-rename the binder; the freed `capture` therefore stays free.
         let typed = typed.erase();
-        let legacy = subst_comp_legacy(
-            &legacy,
-            &legacy_substitution,
-            &mut legacy_counter,
-            FRESH_SPECIALIZE,
-        );
-        assert_eq!(typed, legacy);
-        assert_eq!(typed_counter, legacy_counter);
         assert_eq!(fv::comp(&typed), std::iter::once(sym("capture")).collect());
     }
 

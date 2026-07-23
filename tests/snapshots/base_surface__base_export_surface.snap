@@ -27,6 +27,7 @@ ctor  Tip
 effop con_read_int
 effop con_read_line
 effop emit
+effop entropy_word
 effop env_arg
 effop env_argc
 effop env_get
@@ -43,9 +44,11 @@ effop rng_rand
 type  Array
 type  Buf
 type  Canonical
+type  F32x4
 type  F64x2
 type  FloatBuf
 type  HashMap
+type  I32x4
 type  I64x2
 type  IntBuf
 type  List
@@ -212,6 +215,7 @@ value concat_map
 value const
 value default
 value e
+value entropy
 value enum_from_then_to
 value enum_from_to
 value enum_seq

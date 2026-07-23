@@ -19,7 +19,7 @@ use inkwell::{AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel};
 use super::abi::idx64;
 use super::emit::{
     closure_summary_with_isa, emit_closure_adapters_with_isa, emit_closure_dispatch_with_isa,
-    emit_selected_plan_with_isa, emit_selected_with_isa, emit_with_isa,
+    emit_lowered_with_isa, emit_selected_plan_with_isa, emit_selected_with_isa,
     plan_closures_from_summaries_with_isa, plan_closures_with_isa, ClosurePlan, ClosureSummary,
     SelectedEmissionError,
 };
@@ -998,7 +998,7 @@ fn with_module<T>(
 ) -> Result<T, String> {
     let ctx = Context::create();
     let isa = Inkwell::new(&ctx, native_kont_frames);
-    emit_with_isa(&isa, core, ctors)?;
+    emit_lowered_with_isa(&isa, core, ctors)?;
     if let Some(table) = native_kont_table {
         isa.native_kont_table_global(core, table);
     }

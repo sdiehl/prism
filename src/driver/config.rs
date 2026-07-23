@@ -126,27 +126,22 @@ pub enum BuildMode {
 
 #[derive(Clone, Debug, Default)]
 pub struct Config {
-    /// The Core-to-Core optimization level (the CLI `-O` flag; default `O1`).
-    pub opt: OptLevel,
     /// The explicit production/test compilation mode (default production;
     /// only `prism test` selects [`BuildMode::Test`]).
     pub mode: BuildMode,
     /// An explicit ordered pass list (the CLI `--passes` flag) that overrides
     /// `opt` when present. The two are mutually exclusive at the CLI.
     pub passes: Option<PassSpec>,
-    /// The LLVM-backend optimization level handed to `cc` as `-O<level>` (the
-    /// `--backend-opt` flag; default `O2`). Tunes clang's own pipeline over the
-    /// emitted bitcode, distinct from the Core-to-Core `opt` above.
-    pub backend_opt: BackendOpt,
     /// Core passes the caller turned off (the `--no-<pass>` flags), filtered out
     /// of whatever pipeline `opt`/`passes` selects.
     pub disabled: Vec<CorePass>,
-    /// Which cooperative scheduler `run_cooperative` binds to (the `--scheduler`
-    /// flag; default cooperative/FIFO).
-    pub scheduler: Scheduler,
-    /// The environment-derived compiler behavior knobs (effect backends, Core
-    /// Lint, dumps). Read once from the process environment and threaded into the
-    /// effect lowerer and optimizer, so no pass reads the environment itself.
+    /// The resolved compiler behavior knobs (opt level, backend `-O`, scheduler,
+    /// effect backends, Core Lint, dumps), layered default -> manifest -> env ->
+    /// CLI. This is the sole home for every knob: the optimization level, backend
+    /// level, and scheduler are read through [`opt`](Self::opt),
+    /// [`backend_opt`](Self::backend_opt), and [`scheduler`](Self::scheduler),
+    /// which project them out of here rather than storing a second copy that a CLI
+    /// override could leave disagreeing. No pass reads the environment itself.
     pub flags: DynFlags,
     /// Optional command-scoped compiler session. Reusing a config carrying the
     /// same session allows successful frontend queries to hit in memory; absence
@@ -184,13 +179,10 @@ impl Config {
             disabled.push(CorePass::Specialize);
         }
         Self {
-            opt: flags.opt_level,
             // The mode is a CLI decision (`prism test`), never an env knob.
             mode: BuildMode::Production,
             passes: None,
-            backend_opt: flags.backend_opt,
             disabled,
-            scheduler: flags.scheduler,
             flags,
             session: None,
             // A timing sink is never installed from the environment: it is a
@@ -198,6 +190,36 @@ impl Config {
             // This is what keeps the internal re-elaboration helpers silent.
             timing: None,
         }
+    }
+
+    /// The Core-to-Core optimization level (the CLI `-O` flag; default `O1`).
+    #[must_use]
+    pub const fn opt(&self) -> OptLevel {
+        self.flags.opt_level
+    }
+
+    /// Set the optimization level, returning the config. A builder convenience for
+    /// tests and embeddings; the level is stored in [`flags`](Self::flags), so this
+    /// is the counterpart to [`opt`](Self::opt) and can never disagree with it.
+    #[must_use]
+    pub const fn with_opt(mut self, opt: OptLevel) -> Self {
+        self.flags.opt_level = opt;
+        self
+    }
+
+    /// The LLVM-backend optimization level handed to `cc` as `-O<level>` (the
+    /// `--backend-opt` flag; default `O2`). Tunes clang's own pipeline over the
+    /// emitted bitcode, distinct from the Core-to-Core [`opt`](Self::opt).
+    #[must_use]
+    pub const fn backend_opt(&self) -> BackendOpt {
+        self.flags.backend_opt
+    }
+
+    /// Which cooperative scheduler `run_cooperative` binds to (the `--scheduler`
+    /// flag; default cooperative/FIFO).
+    #[must_use]
+    pub const fn scheduler(&self) -> Scheduler {
+        self.flags.scheduler
     }
 
     /// Structured identity for behavior-affecting compiler artifacts.

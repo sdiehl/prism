@@ -1,15 +1,13 @@
-//! Mid-level Core-to-Core optimization tier.
+//! The mid-level optimization tier's pass vocabulary and diagnostics.
 //!
-//! Each pass preserves observable behavior (the parity oracle gates it) and runs
-//! above the interpreter/native fork, so a rewrite here lands identically on
-//! every backend.
-//!
-//! `erase_newtypes`: a `newtype N = MkN(T)` is representationally identical to
-//! `T`, so its one-field box is erased. Construction `MkN(v)` becomes `v`, and a
-//! match `MkN(x) => body` becomes a plain rebind of `x` to the scrutinee (a
-//! newtype is single-constructor, so its match is one irrefutable arm). The
-//! surrounding logic, such as a derived `show` that prints `MkN(...)`, is
-//! untouched, so only the representation changes, never the meaning.
+//! The pass implementations live in `core::typed` and transform witness-carrying
+//! typed Core; the driver's stage runner owns their ordering, verification
+//! boundaries, and the SCC fixed-point cache. This module holds what is shared
+//! around them: the pass and stage enums, the level-to-pipeline expansion, the
+//! `--passes` spec, the behavior-bearing pipeline fingerprint, per-pass tick
+//! stats, Core Lint, and the per-pass dump sink. Each pass preserves observable
+//! behavior (the parity oracle gates it) and runs above the interpreter/native
+//! fork, so a rewrite lands identically on every backend.
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -17,34 +15,17 @@ use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use super::cbpv::{Comp, Core, CoreFn, CorePat, Value};
+use super::cbpv::Core;
 use super::pretty::pp_core_pretty;
-use super::traverse::Rewrite;
 use crate::flags::DynFlags;
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Program};
 
-mod cse;
-mod fuse;
-mod inline;
 mod lint;
-mod rename;
-mod simplify;
-mod specialize;
 
 const PASS_FINGERPRINT_SCHEMA: &[u8] = b"prism-core-pass-fingerprint-v1";
 
-use cse::cse_counted;
-use fuse::fuse_counted;
-use inline::inline_counted;
 pub use lint::lint;
-#[cfg(test)]
-pub(in crate::core) use rename::freshen as freshen_legacy;
-use simplify::simplify_counted;
-pub use specialize::specialize;
-use specialize::specialize_counted;
-#[cfg(test)]
-pub(in crate::core) use specialize::subst_comp as subst_comp_legacy;
 
 /// Optimization level: the knob that selects which passes run.
 ///
@@ -292,7 +273,7 @@ pub struct PassStats {
 }
 
 impl PassStats {
-    fn record(&mut self, pass: &'static str, ticks: u64) {
+    pub(crate) fn record(&mut self, pass: &'static str, ticks: u64) {
         self.entries.push((pass, ticks));
     }
 
@@ -308,7 +289,7 @@ impl PassStats {
         &self.entries
     }
 
-    fn report(&self) -> String {
+    pub(crate) fn report(&self) -> String {
         let mut s = String::from("core-opt ticks:\n");
         for (pass, ticks) in &self.entries {
             let _ = writeln!(s, "  {pass:<16} {ticks}");
@@ -318,19 +299,11 @@ impl PassStats {
     }
 }
 
-/// The optimization context: the program-derived newtype constructor set a pass
-/// needs, and the tick counter. The inliner owns
-/// its own deterministic per-compilation fresh-name counter.
-struct OptCx {
-    newtype_ctors: BTreeSet<Sym>,
-    stats: PassStats,
-}
-
 /// The ordered pass list for an opt level. Order matters: erase first (it
 /// exposes inner values), then specialize.
 #[must_use]
 pub fn pipeline(level: OptLevel) -> Vec<CorePass> {
-    // The list spans both stages; `run` executes the passes of one stage at a
+    // The list spans both stages; the driver runs the passes of one stage at a
     // time. The simplifier is a late (post-lowering) pass, so it composes with
     // the var/State fusion instead of defeating it.
     match level {
@@ -380,7 +353,7 @@ pub fn pipeline(level: OptLevel) -> Vec<CorePass> {
 ///
 /// Diagnostic switches such as Core dumps and pass statistics are excluded;
 /// disabled passes are removed, explicit pass specs override optimization levels,
-/// and forced fusion is inserted exactly as [`run`] does.
+/// and forced fusion is inserted exactly as [`effective_passes`] resolves it.
 #[must_use]
 pub fn pass_fingerprint(
     level: OptLevel,
@@ -435,13 +408,19 @@ pub fn effective_passes(
 // places instead of clobbering one another.
 static DUMP_RUN: AtomicUsize = AtomicUsize::new(0);
 
+// Claim the next dump-run ordinal. Every pipeline invocation takes one, dumping
+// or not, so run numbering is stable across mixed-flag compiles in a process.
+pub(crate) fn next_dump_run() -> usize {
+    DUMP_RUN.fetch_add(1, Ordering::Relaxed)
+}
+
 // Render `core` to the `PRISM_DUMP_CORE` sink, labeled with the stage it follows.
 // `stdout`/`stderr` stream a banner plus
 // the block; any other value (or a bare flag) is a base directory under which a
 // `run-N/` subdir holds one ordinal-prefixed file per stage, so directory order
 // matches run order. Dump-only: the rendered form is for reading and diffing, not
 // reloading.
-fn dump_core(sink: &std::ffi::OsStr, run: usize, ord: usize, label: &str, core: &Core) {
+pub(crate) fn dump_core(sink: &std::ffi::OsStr, run: usize, ord: usize, label: &str, core: &Core) {
     let text = pp_core_pretty(core);
     match sink.to_string_lossy().as_ref() {
         "stdout" => print!("=== core[run {run}]: {label} ===\n{text}\n"),
@@ -464,139 +443,6 @@ fn dump_core(sink: &std::ffi::OsStr, run: usize, ord: usize, label: &str, core: 
     }
 }
 
-fn run_pass(pass: CorePass, core: &Core, cx: &mut OptCx) -> Core {
-    let (out, ticks) = match pass {
-        CorePass::Fuse => fuse_counted(core),
-        CorePass::EraseNewtypes => erase_newtypes_counted(core, &cx.newtype_ctors),
-        CorePass::Specialize => specialize_counted(core),
-        CorePass::Simplify => simplify_counted(core),
-        CorePass::Inline => inline_counted(core),
-        CorePass::Cse => cse_counted(core),
-    };
-    cx.stats.record(pass.name(), ticks);
-    out
-}
-
-/// Run the `stage` passes of the Core-to-Core pipeline for `level` over `core`.
-///
-/// The pipeline spans two stages around effect lowering ([`PassStage`]); this
-/// runs only the passes of the requested stage, so the driver calls it twice (the
-/// pre-lowering passes in the front end, the late passes on the lowered core).
-/// `nt` is the program's newtype constructor set, needed by `EraseNewtypes` (pass
-/// an empty set for a late run, which has no use for it). `disabled` is the set of
-/// passes the caller turned off (the `--no-<pass>` flags plus `PRISM_NO_SPECIALIZE`,
-/// resolved by the driver's `Config`). Runs Core Lint between passes under
-/// `PRISM_CORE_LINT`, returns per-pass ticks, and dumps them under `PRISM_OPT_STATS`.
-///
-/// # Panics
-/// Under `PRISM_CORE_LINT`, panics if a pass produces ill-formed Core (a
-/// compiler bug), naming the pass responsible.
-#[must_use]
-pub fn run(
-    core: &Core,
-    nt: &BTreeSet<Sym>,
-    level: OptLevel,
-    stage: PassStage,
-    disabled: &[CorePass],
-    flags: &DynFlags,
-) -> (Core, PassStats) {
-    let mut passes: Vec<CorePass> = pipeline(level)
-        .into_iter()
-        .filter(|p| p.stage() == stage)
-        .collect();
-    // Stream fusion is default-on at `-O2` (listed by `pipeline` there, removable
-    // with `--no-fuse` via `disabled`); the `PRISM_FUSE`/`--fuse` flag force-runs
-    // it at the lower levels too, for experiments and the differential oracle.
-    if flags.fuse && stage == PassStage::PreLowering && !passes.contains(&CorePass::Fuse) {
-        passes.insert(0, CorePass::Fuse);
-    }
-    run_passes(core, nt, &passes, stage, disabled, flags)
-}
-
-/// Run an explicit ordered list of `passes` over `core`, the `--passes` analogue
-/// of [`run`].
-///
-/// `passes` is one stage's worth (the driver calls this twice, once per stage);
-/// `nt` is the newtype constructor set `EraseNewtypes` needs (empty for a late
-/// run); `disabled` is the caller's turned-off pass set. Uses the same lint/dump/
-/// stats machinery and `PRISM_*` switches as [`run`].
-///
-/// # Panics
-/// Under `PRISM_CORE_LINT`, panics if a pass produces ill-formed Core (a
-/// compiler bug), naming the pass responsible.
-#[must_use]
-pub fn run_spec_stage(
-    core: &Core,
-    nt: &BTreeSet<Sym>,
-    passes: &[CorePass],
-    stage: PassStage,
-    disabled: &[CorePass],
-    flags: &DynFlags,
-) -> (Core, PassStats) {
-    run_passes(core, nt, passes, stage, disabled, flags)
-}
-
-// The shared pass-running loop behind [`run`] and [`run_spec_stage`]: Core Lint
-// between passes when `flags.core_lint`, dumps when `flags.dump_core` is set, the
-// disabled-pass filter (the `--no-<pass>` flags plus `PRISM_NO_SPECIALIZE`), and
-// per-pass ticks dumped when `flags.opt_stats`. Those three switches come from the
-// threaded [`DynFlags`], not from the environment (see `crate::flags`).
-fn run_passes(
-    core: &Core,
-    nt: &BTreeSet<Sym>,
-    passes: &[CorePass],
-    stage: PassStage,
-    disabled: &[CorePass],
-    flags: &DynFlags,
-) -> (Core, PassStats) {
-    let lint_on = flags.core_lint;
-    // The effective pass vector: the requested passes minus every one the caller
-    // disabled (the `--no-<pass>` flags and `PRISM_NO_SPECIALIZE`, resolved into
-    // one list by the driver's `Config`). Filtering here applies whether the
-    // passes came from a `-O` level or an explicit `--passes` list, and keeps
-    // disabled passes out of the dump and per-pass stats below.
-    let passes: Vec<CorePass> = passes
-        .iter()
-        .copied()
-        .filter(|p| !disabled.contains(p))
-        .collect();
-    let mut cx = OptCx {
-        newtype_ctors: nt.clone(),
-        stats: PassStats::default(),
-    };
-    let check = |c: &Core, after: &str| {
-        if lint_on {
-            if let Err(errs) = lint(c, stage) {
-                panic!(
-                    "PRISM_CORE_LINT: ill-formed Core after {after}:\n{}",
-                    errs.join("\n")
-                );
-            }
-        }
-    };
-    let dump_sink = flags.dump_core.clone();
-    let dump_run = AtomicUsize::fetch_add(&DUMP_RUN, 1, Ordering::Relaxed);
-    let mut ord = 0;
-    if let Some(sink) = &dump_sink {
-        dump_core(sink, dump_run, ord, "input", core);
-        ord += 1;
-    }
-    check(core, "<input>");
-    let mut cur = core.clone();
-    for &pass in &passes {
-        cur = run_pass(pass, &cur, &mut cx);
-        check(&cur, pass.name());
-        if let Some(sink) = &dump_sink {
-            dump_core(sink, dump_run, ord, pass.name(), &cur);
-            ord += 1;
-        }
-    }
-    if flags.opt_stats {
-        eprint!("{}", cx.stats.report());
-    }
-    (cur, cx.stats)
-}
-
 /// The constructor symbol of every `newtype` in the program (each a single-field
 /// wrapper whose box this tier erases).
 #[must_use]
@@ -607,75 +453,4 @@ pub fn newtype_ctors(prog: &Program<CorePhase>) -> BTreeSet<Sym> {
         .filter_map(|d| d.ctors.first())
         .map(|c| Sym::from(&c.name))
         .collect()
-}
-
-/// Erase every newtype box from `core` (see module docs). A no-op when the
-/// program declares no newtypes.
-#[must_use]
-pub fn erase_newtypes(core: &Core, nt: &BTreeSet<Sym>) -> Core {
-    erase_newtypes_counted(core, nt).0
-}
-
-// As `erase_newtypes`, also returning how many boxes were erased (the pass's
-// tick count for telemetry).
-fn erase_newtypes_counted(core: &Core, nt: &BTreeSet<Sym>) -> (Core, u64) {
-    if nt.is_empty() {
-        return (core.clone(), 0);
-    }
-    let mut e = Erase { nt, ticks: 0 };
-    let fns = core
-        .fns
-        .iter()
-        .map(|f| CoreFn {
-            name: f.name,
-            params: f.params.clone(),
-            dict_arity: f.dict_arity,
-            body: e.comp(&f.body, &()),
-        })
-        .collect();
-    (Core { fns }, e.ticks)
-}
-
-struct Erase<'a> {
-    nt: &'a BTreeSet<Sym>,
-    ticks: u64,
-}
-
-fn is_newtype_match(arms: &[(CorePat, Comp)], nt: &BTreeSet<Sym>) -> bool {
-    arms.len() == 1 && matches!(&arms[0].0, CorePat::Ctor(n, bs) if nt.contains(n) && bs.len() == 1)
-}
-
-impl Rewrite for Erase<'_> {
-    type Ctx = ();
-
-    fn comp(&mut self, c: &Comp, cx: &()) -> Comp {
-        match c {
-            // A newtype match is one irrefutable arm: rebind the matched value
-            // (now the inner value) and run the body.
-            Comp::Case(v, arms) if is_newtype_match(arms, self.nt) => {
-                let CorePat::Ctor(_, binders) = &arms[0].0 else {
-                    unreachable!("is_newtype_match")
-                };
-                self.ticks += 1;
-                let binder = binders[0].unwrap_or_else(|| Sym::from("_"));
-                Comp::Bind(
-                    Box::new(Comp::Return(self.value(v, cx))),
-                    binder,
-                    Box::new(self.comp(&arms[0].1, cx)),
-                )
-            }
-            _ => self.descend_comp(c, cx),
-        }
-    }
-
-    fn value(&mut self, v: &Value, cx: &()) -> Value {
-        match v {
-            // The newtype box is its single field: drop the wrapper.
-            Value::Ctor(name, _, fields) if self.nt.contains(name) && fields.len() == 1 => {
-                self.ticks += 1;
-                self.value(&fields[0], cx)
-            }
-            _ => self.descend_value(v, cx),
-        }
-    }
 }

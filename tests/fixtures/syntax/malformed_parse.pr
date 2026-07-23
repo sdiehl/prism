@@ -1,0 +1,2 @@
+-- Lexes fine but cannot parse: a declaration missing its parameter list.
+fn broken( = 1

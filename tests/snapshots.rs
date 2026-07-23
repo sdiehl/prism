@@ -39,6 +39,10 @@ fn normalize_pipeline_report(report: &str) -> String {
         let line = line.replace(env!("PRISM_TARGET"), "aarch64-apple-darwin");
         let line = normalize_native_kont_global_len(&line);
         let line = line.replace("section \".prism_kont\"", "section \",.prism_kont\"");
+        let line = line.replace(
+            "section \"__DATA,__prism_kont\"",
+            "section \",.prism_kont\"",
+        );
         let line = line.replace("section \"llvm.metadata\"", "section \",llvm.metadata\"");
         out.push_str(&line);
         out.push('\n');

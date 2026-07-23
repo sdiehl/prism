@@ -216,8 +216,7 @@ pub struct PatchArtifact {
     pub base_namespace: PatchTarget,
     pub target: PatchTarget,
     pub replacement: SurfaceTerm,
-    /// Reserved for replay-backed tier 3/4 receipts. v0.12 preserves but never
-    /// judges this value.
+    /// Preserved as opaque proposal metadata; patch judgment never reads it.
     pub claimed_delta: Option<Value>,
 }
 
