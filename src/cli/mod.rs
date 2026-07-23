@@ -150,6 +150,17 @@ fn read_lock(project_root: &Path) -> Result<Lock, Error> {
 // `prism build`. `out` overrides the default name (source stem for a file, the
 // package name for a project).
 pub fn build_input(arg: &Path, out: Option<PathBuf>, mlir: bool, cfg: &crate::Config) -> CmdResult {
+    built_input(arg, out, mlir, cfg).map(|_| ())
+}
+
+/// [`build_input`], returning the path of the binary it wrote so a caller
+/// (`prism run` in a project) can execute it.
+pub fn built_input(
+    arg: &Path,
+    out: Option<PathBuf>,
+    mlir: bool,
+    cfg: &crate::Config,
+) -> Result<PathBuf, CmdError> {
     let lineage_request = project_lineage_request(arg)?;
     let (full, roots, name, default_out) = resolve_input(arg, cfg)?;
     // Enforce a committed stable-lock manifest beside a single source before
@@ -210,7 +221,7 @@ pub fn build_input(arg: &Path, out: Option<PathBuf>, mlir: bool, cfg: &crate::Co
         println!("wrote {}", sidecar.display());
     }
     println!("wrote {}", out.display());
-    Ok(())
+    Ok(out)
 }
 
 fn project_lineage_request(arg: &Path) -> Result<Option<crate::lineage::BuildRequest>, CmdError> {

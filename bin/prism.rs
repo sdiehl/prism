@@ -771,74 +771,110 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
             durable,
             defer_holes,
             args,
-        } => match (file, examples) {
-            (Some(_), Some(_)) => Err((
-                Error::ResolveCommand(
-                    "`prism run` accepts either FILE or `--examples`, not both".into(),
-                ),
-                String::new(),
-                "run".into(),
-            )),
-            (None, None) => Err((
-                Error::ResolveCommand("`prism run` requires FILE or `--examples`".into()),
-                String::new(),
-                "run".into(),
-            )),
-            (None, Some(dir)) => {
-                if defer_holes {
-                    return Err((
-                        Error::ResolveCommand(
-                            "`--defer-holes` requires a single FILE, not `--examples`".into(),
-                        ),
-                        String::new(),
-                        dir.display().to_string(),
-                    ));
+        } => {
+            // Bare `prism run` inside a project is the cargo-style default:
+            // build the project's binary and execute it, forwarding ARGS and
+            // the exit status. The interpreter-only flags (`--record`,
+            // `--lineage`, `--durable`, `--defer-holes`) instead interpret the
+            // project entry, since a native binary cannot honor them.
+            let mut file = file;
+            if file.is_none() && examples.is_none() {
+                let start = PathBuf::from(".");
+                let start = start.canonicalize().unwrap_or(start);
+                if let Some(manifest) = prism::project::find_manifest(&start) {
+                    let interpret_only =
+                        record.is_some() || lineage.is_some() || durable.is_some() || defer_holes;
+                    if interpret_only {
+                        file = Some(manifest);
+                    } else {
+                        let bin = cli::built_input(&manifest, None, false, cfg)?;
+                        let status =
+                            process::Command::new(&bin)
+                                .args(&args)
+                                .status()
+                                .map_err(|e| {
+                                    (Error::Io(e), String::new(), bin.display().to_string())
+                                })?;
+                        if status.success() {
+                            return Ok(());
+                        }
+                        process::exit(status.code().unwrap_or(1));
+                    }
                 }
-                if record.is_some() {
-                    return Err((
-                        Error::ResolveCommand(
-                            "`--record` cannot be combined with `--examples`".into(),
-                        ),
-                        String::new(),
-                        dir.display().to_string(),
-                    ));
-                }
-                if durable.is_some() {
-                    return Err((
-                        Error::ResolveCommand(
-                            "`--durable` cannot be combined with `--examples`".into(),
-                        ),
-                        String::new(),
-                        dir.display().to_string(),
-                    ));
-                }
-                if !args.is_empty() {
-                    return Err((
-                        Error::ResolveCommand(
-                            "program arguments cannot be combined with `--examples`".into(),
-                        ),
-                        String::new(),
-                        dir.display().to_string(),
-                    ));
-                }
-                cli::run::run_examples_cmd(&dir, cfg, stdin)
             }
-            (Some(file), None) => {
-                let exit = cli::run::run_file_cmd(
-                    &file,
-                    record.as_deref(),
-                    lineage.as_deref(),
-                    durable.as_deref(),
-                    args,
-                    cfg,
-                    defer_holes,
-                )?;
-                if let Some(code) = exit {
-                    process::exit(code);
+            match (file, examples) {
+                (Some(_), Some(_)) => Err((
+                    Error::ResolveCommand(
+                        "`prism run` accepts either FILE or `--examples`, not both".into(),
+                    ),
+                    String::new(),
+                    "run".into(),
+                )),
+                (None, None) => Err((
+                    Error::ResolveCommand(
+                        "`prism run` requires FILE, `--examples`, or an enclosing project \
+                     (`prism.toml`)"
+                            .into(),
+                    ),
+                    String::new(),
+                    "run".into(),
+                )),
+                (None, Some(dir)) => {
+                    if defer_holes {
+                        return Err((
+                            Error::ResolveCommand(
+                                "`--defer-holes` requires a single FILE, not `--examples`".into(),
+                            ),
+                            String::new(),
+                            dir.display().to_string(),
+                        ));
+                    }
+                    if record.is_some() {
+                        return Err((
+                            Error::ResolveCommand(
+                                "`--record` cannot be combined with `--examples`".into(),
+                            ),
+                            String::new(),
+                            dir.display().to_string(),
+                        ));
+                    }
+                    if durable.is_some() {
+                        return Err((
+                            Error::ResolveCommand(
+                                "`--durable` cannot be combined with `--examples`".into(),
+                            ),
+                            String::new(),
+                            dir.display().to_string(),
+                        ));
+                    }
+                    if !args.is_empty() {
+                        return Err((
+                            Error::ResolveCommand(
+                                "program arguments cannot be combined with `--examples`".into(),
+                            ),
+                            String::new(),
+                            dir.display().to_string(),
+                        ));
+                    }
+                    cli::run::run_examples_cmd(&dir, cfg, stdin)
                 }
-                Ok(())
+                (Some(file), None) => {
+                    let exit = cli::run::run_file_cmd(
+                        &file,
+                        record.as_deref(),
+                        lineage.as_deref(),
+                        durable.as_deref(),
+                        args,
+                        cfg,
+                        defer_holes,
+                    )?;
+                    if let Some(code) = exit {
+                        process::exit(code);
+                    }
+                    Ok(())
+                }
             }
-        },
+        }
         Cmd::Exec(exec) => dispatch_exec(exec, cfg),
         Cmd::Lineage(lineage) => dispatch_lineage(lineage, cfg),
         Cmd::WhyOutput {

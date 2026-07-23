@@ -1675,7 +1675,7 @@ name = "myapp"
 entry = "src/main.pr"
 ```
 
-`prism build` compiles the nearest enclosing project to a native binary under a `target/` directory at the project root (rustc-style), named after the package; `prism run <path>` interprets it instead, and `prism clean` removes `target/`. A single file is still built with a bare `prism file.pr`. The manifest keys are:
+Inside a project, the everyday verbs default to the nearest enclosing manifest: `prism build` compiles it to a native binary under a `target/` directory at the project root (rustc-style), named after the package; a bare `prism run` builds that binary and executes it, forwarding arguments after `--` and its exit status; `prism check` and `prism test` operate on the project; and `prism clean` removes `target/`. `prism run <path>` interprets a file or project directly, and a single file is still built with a bare `prism file.pr`. The manifest keys are:
 
 | Key              | Section     | Required           | Meaning                                                                   |
 | ---------------- | ----------- | ------------------ | ------------------------------------------------------------------------- |
