@@ -217,7 +217,7 @@ fn resolve_build_cc() -> String {
 
 /// Whether `PRISM_CC` explicitly overrides the build-configured compiler.
 ///
-/// Mirrors [`cc`]'s notion of "set" (valid-UTF-8 present), so the recorded
+/// Mirrors [`cc()`]'s notion of "set" (valid-UTF-8 present), so the recorded
 /// cc-version source and the compiler actually invoked never disagree.
 #[must_use]
 pub fn cc_overridden() -> bool {
@@ -406,6 +406,19 @@ const ALL: &[&str] = &[
     NATIVE_KONT_LEAVE,
 ];
 
+/// The C compiler version string probed at build time, an artifact-identity row.
+#[must_use]
+pub fn build_cc_version() -> &'static str {
+    env!("PRISM_BUILD_CC_VERSION")
+}
+
+/// The macOS deployment target the runtime objects were compiled against
+/// (empty off macOS), pinned so linked programs and runtime agree.
+#[must_use]
+pub fn macos_deployment_target() -> &'static str {
+    env!("PRISM_MACOSX_DEPLOYMENT_TARGET")
+}
+
 #[cfg(test)]
 mod tests {
     use std::process::Command;
@@ -559,7 +572,7 @@ mod tests {
         }
     }
 
-    #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+    #[cfg(not(target_arch = "wasm32"))]
     fn run_kont_lookup_harness(extra_cflags: &[&str]) {
         let cc = super::cc();
         if !Command::new(&cc)
@@ -619,7 +632,7 @@ mod tests {
     // unbalanced-bracket trap, driven directly against the materialized
     // runtime (see tests/fixtures/arena_hostile.c). Honors PRISM_CC_FLAGS so a
     // sanitizer environment sweeps it too.
-    #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn arena_region_hostile_harness() {
         const ARENA_HARNESS: &str = include_str!("../../../../tests/fixtures/arena_hostile.c");
@@ -674,28 +687,15 @@ mod tests {
         );
     }
 
-    #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn native_kont_runtime_lookup_reads_embedded_table() {
         run_kont_lookup_harness(&[]);
     }
 
-    #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn native_kont_runtime_refuses_missing_pointer_table() {
         run_kont_lookup_harness(&["-DPRISM_KONT_NO_PTR_TABLE"]);
     }
-}
-
-/// The C compiler version string probed at build time, an artifact-identity row.
-#[must_use]
-pub fn build_cc_version() -> &'static str {
-    env!("PRISM_BUILD_CC_VERSION")
-}
-
-/// The macOS deployment target the runtime objects were compiled against
-/// (empty off macOS), pinned so linked programs and runtime agree.
-#[must_use]
-pub fn macos_deployment_target() -> &'static str {
-    env!("PRISM_MACOSX_DEPLOYMENT_TARGET")
 }

@@ -4,11 +4,47 @@ expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/vec_dim_arity.pr
 ---
 == tokens ==
-VOpen Type UIdent("Vec") LParen Ident("a") Comma Ident("n") Colon UIdent("Nat") RParen Eq UIdent("MkVec") LParen UIdent("List") LParen Ident("a") RParen RParen VSemi Fn Ident("demo") LParen Ident("x") Colon UIdent("Vec") LParen KwInt Comma Int(IntLit { value: 3, suffix: None }) Comma Int(IntLit { value: 4, suffix: None }) RParen RParen Colon KwInt Eq Int(IntLit { value: 0, suffix: None }) VClose
+VOpen Type UIdent("List") LParen Ident("a") RParen Eq UIdent("Nil") Bar UIdent("Cons") LParen Ident("a") Comma UIdent("List") LParen Ident("a") RParen RParen VSemi Type UIdent("Vec") LParen Ident("a") Comma Ident("n") Colon UIdent("Nat") RParen Eq UIdent("MkVec") LParen UIdent("List") LParen Ident("a") RParen RParen VSemi Fn Ident("demo") LParen Ident("x") Colon UIdent("Vec") LParen KwInt Comma Int(IntLit { value: 3, suffix: None }) Comma Int(IntLit { value: 4, suffix: None }) RParen RParen Colon KwInt Eq Int(IntLit { value: 0, suffix: None }) VClose
 
 == ast ==
 Program {
     types: [
+        DataDecl {
+            name: "List",
+            params: [
+                "a",
+            ],
+            param_kinds: [
+                Type,
+            ],
+            ctors: [
+                Ctor {
+                    name: "Nil",
+                    args: [],
+                    fields: None,
+                },
+                Ctor {
+                    name: "Cons",
+                    args: [
+                        Var(
+                            "a",
+                        ),
+                        Con(
+                            "List",
+                            [
+                                Var(
+                                    "a",
+                                ),
+                            ],
+                        ),
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 269..306,
+        },
         DataDecl {
             name: "Vec",
             params: [
@@ -37,7 +73,7 @@ Program {
             ],
             deriving: [],
             newtype: false,
-            span: 124..161,
+            span: 308..345,
         },
     ],
     effects: [],
@@ -81,19 +117,19 @@ Program {
                         suffix: None,
                     },
                 ),
-                span: 199..200,
+                span: 383..384,
             },
             wheres: [],
-            span: 163..200,
+            span: 347..384,
         },
     ],
 }
 
 == types ==
 [E1002] Type Error: in `demo`: `Vec` is applied to too many arguments: it takes 2, but 3 were given
-   ╭─[ <source>:5:1 ]
+   ╭─[ <source>:9:1 ]
    │
- 5 │ fn demo(x : Vec(Int, 3, 4)) : Int = 0
+ 9 │ fn demo(x : Vec(Int, 3, 4)) : Int = 0
    │ ──────────────────┬──────────────────  
    │                   ╰──────────────────── in `demo`: `Vec` is applied to too many arguments: it takes 2, but 3 were given
 ───╯

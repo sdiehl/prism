@@ -8,7 +8,8 @@
 //! relation accessors ([`LineageGraph::request`], [`LineageGraph::inputs_of`], ...)
 //! that let explain, diff, and verify read the graph without scanning raw edges.
 //!
-//! Build assembly lives in [`super::build`], run assembly in [`super::run`].
+//! Build assembly lives in the driver's `build` module, run assembly in its
+//! `run` module.
 
 use std::fs;
 use std::io;
@@ -23,7 +24,7 @@ pub use super::node_id::minted_id;
 pub use super::node_id::NodeId;
 
 /// The build-lineage projection embedded inside a package-world report (see
-/// [`super::build::BuildLineage::to_json`]); not the standalone sidecar envelope,
+/// `BuildLineage::to_json`); not the standalone sidecar envelope,
 /// which is [`LINEAGE_GRAPH_FORMAT`].
 pub const LINEAGE_FORMAT: &str = "prism-build-lineage-v1";
 /// The shared lineage graph envelope every producer emits.

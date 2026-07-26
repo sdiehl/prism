@@ -28,7 +28,7 @@
 //!     it hands to `with_arena` now suspends a computation that does, so that
 //!     thunk's *witness* gains the label while `main`'s own row does not.
 //!
-//! The widening is additive and local: [`Widen`] adds the one label exactly where
+//! The widening is additive and local: `Widen` adds the one label exactly where
 //! a node's checking rule now derives it, and preserves every other row as
 //! elaboration wrote it. `Return` is the invariant keeping this honest: it is
 //! pure by rule, so it never gains the label however effectful the computation it

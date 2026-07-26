@@ -228,16 +228,21 @@ jobs:
       - name: sccache
         uses: mozilla-actions/sccache-action@v0.0.10
 
+      # `--workspace` is load-bearing: the root is itself a package and there is no
+      # `default-members`, so without it cargo selects only `prism` and the member
+      # crates are linted as path dependencies, where `-D warnings` does not reach
+      # them. That let a permanently-false `cfg` silently drop three tests.
       - name: Run clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       # rustdoc held to the same zero-warning bar as clippy and the C runtime:
       # a broken intra-doc link or a public doc pointing at a private item fails
-      # CI rather than silently shipping degraded API docs.
+      # CI rather than silently shipping degraded API docs. `--workspace` for the
+      # same selection reason as clippy above.
       - name: Build docs (-D warnings)
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --no-deps
+        run: cargo doc --no-deps --workspace
 
       # nextest does not run Rust doctests (the `--test` in `-- | ... --test`
       # doc examples and rustdoc code blocks); cover them with a plain run.

@@ -15,16 +15,16 @@
 //! `is_fold`, `is_id_return`, `is_id_transformer`, and `is_state_transformer`
 //! answer. They take no compiler state: they read a clause and its `ResumeUse`
 //! and return a verdict. So they are called on an erased clone, as
-//! [`super::erase_var`] does to classify multishot resumption through the
+//! `erase_var` does to classify multishot resumption through the
 //! canonical [`CheckedHandler`](crate::core::CheckedHandler).
 //!
-//! [`strip_state`] cannot live in that layer because it returns a *rewritten
+//! `strip_state` cannot live in that layer because it returns a *rewritten
 //! clause body*: an erased rewrite has dropped exactly the witnesses this tree
-//! exists to carry. [`produces`] and [`value_coincident`] also stay here because
+//! exists to carry. [`produces`] and `value_coincident` also stay here because
 //! they ask about latent effects and thunk flow, which require the typed tree.
 //!
 //! Where a rewrite recomputes something a neutral predicate already knows, the
-//! two are cross-checked: [`strip_state`] reports the kind it derived, and its
+//! two are cross-checked: `strip_state` reports the kind it derived, and its
 //! caller checks that against what `is_fold` reports for the same clause.
 
 use std::collections::{BTreeMap, BTreeSet};

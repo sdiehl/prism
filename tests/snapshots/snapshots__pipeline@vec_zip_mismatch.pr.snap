@@ -4,11 +4,47 @@ expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/vec_zip_mismatch.pr
 ---
 == tokens ==
-VOpen Type UIdent("Vec") LParen Ident("a") Comma Ident("n") Colon UIdent("Nat") RParen Eq UIdent("MkVec") LParen UIdent("List") LParen Ident("a") RParen RParen VSemi Fn Ident("vzip") LParen Ident("u") Colon UIdent("Vec") LParen Ident("a") Comma Ident("n") RParen Comma Ident("v") Colon UIdent("Vec") LParen Ident("b") Comma Ident("n") RParen RParen Colon UIdent("Vec") LParen LParen Ident("a") Comma Ident("b") RParen Comma Ident("n") RParen Eq UIdent("MkVec") LParen LBracket RBracket RParen VSemi Fn Ident("demo") LParen Ident("v3") Colon UIdent("Vec") LParen KwInt Comma Int(IntLit { value: 3, suffix: None }) RParen Comma Ident("v4") Colon UIdent("Vec") LParen KwInt Comma Int(IntLit { value: 4, suffix: None }) RParen RParen Colon UIdent("Vec") LParen LParen KwInt Comma KwInt RParen Comma Int(IntLit { value: 3, suffix: None }) RParen Eq Ident("vzip") LParen Ident("v3") Comma Ident("v4") RParen VClose
+VOpen Type UIdent("List") LParen Ident("a") RParen Eq UIdent("Nil") Bar UIdent("Cons") LParen Ident("a") Comma UIdent("List") LParen Ident("a") RParen RParen VSemi Type UIdent("Vec") LParen Ident("a") Comma Ident("n") Colon UIdent("Nat") RParen Eq UIdent("MkVec") LParen UIdent("List") LParen Ident("a") RParen RParen VSemi Fn Ident("vzip") LParen Ident("u") Colon UIdent("Vec") LParen Ident("a") Comma Ident("n") RParen Comma Ident("v") Colon UIdent("Vec") LParen Ident("b") Comma Ident("n") RParen RParen Colon UIdent("Vec") LParen LParen Ident("a") Comma Ident("b") RParen Comma Ident("n") RParen Eq UIdent("MkVec") LParen LBracket RBracket RParen VSemi Fn Ident("demo") LParen Ident("v3") Colon UIdent("Vec") LParen KwInt Comma Int(IntLit { value: 3, suffix: None }) RParen Comma Ident("v4") Colon UIdent("Vec") LParen KwInt Comma Int(IntLit { value: 4, suffix: None }) RParen RParen Colon UIdent("Vec") LParen LParen KwInt Comma KwInt RParen Comma Int(IntLit { value: 3, suffix: None }) RParen Eq Ident("vzip") LParen Ident("v3") Comma Ident("v4") RParen VClose
 
 == ast ==
 Program {
     types: [
+        DataDecl {
+            name: "List",
+            params: [
+                "a",
+            ],
+            param_kinds: [
+                Type,
+            ],
+            ctors: [
+                Ctor {
+                    name: "Nil",
+                    args: [],
+                    fields: None,
+                },
+                Ctor {
+                    name: "Cons",
+                    args: [
+                        Var(
+                            "a",
+                        ),
+                        Con(
+                            "List",
+                            [
+                                Var(
+                                    "a",
+                                ),
+                            ],
+                        ),
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 300..337,
+        },
         DataDecl {
             name: "Vec",
             params: [
@@ -37,7 +73,7 @@ Program {
             ],
             deriving: [],
             newtype: false,
-            span: 155..192,
+            span: 339..376,
         },
     ],
     effects: [],
@@ -114,21 +150,21 @@ Program {
                         node: Var(
                             "MkVec",
                         ),
-                        span: 251..256,
+                        span: 435..440,
                     },
                     [
                         Spanned {
                             node: List(
                                 [],
                             ),
-                            span: 257..259,
+                            span: 441..443,
                         },
                     ],
                 ),
-                span: 251..260,
+                span: 435..444,
             },
             wheres: [],
-            span: 194..260,
+            span: 378..444,
         },
         Decl {
             name: "demo",
@@ -190,36 +226,36 @@ Program {
                         node: Var(
                             "vzip",
                         ),
-                        span: 329..333,
+                        span: 513..517,
                     },
                     [
                         Spanned {
                             node: Var(
                                 "v3",
                             ),
-                            span: 334..336,
+                            span: 518..520,
                         },
                         Spanned {
                             node: Var(
                                 "v4",
                             ),
-                            span: 338..340,
+                            span: 522..524,
                         },
                     ],
                 ),
-                span: 329..341,
+                span: 513..525,
             },
             wheres: [],
-            span: 262..341,
+            span: 446..525,
         },
     ],
 }
 
 == types ==
 [E1998] Type Error: in `demo`: length mismatch: expected length 3, but got length 4
-   ╭─[ <source>:7:77 ]
-   │
- 7 │ fn demo(v3 : Vec(Int, 3), v4 : Vec(Int, 4)) : Vec((Int, Int), 3) = vzip(v3, v4)
-   │                                                                             ─┬  
-   │                                                                              ╰── in `demo`: length mismatch: expected length 3, but got length 4
-───╯
+    ╭─[ <source>:11:77 ]
+    │
+ 11 │ fn demo(v3 : Vec(Int, 3), v4 : Vec(Int, 4)) : Vec((Int, Int), 3) = vzip(v3, v4)
+    │                                                                             ─┬  
+    │                                                                              ╰── in `demo`: length mismatch: expected length 3, but got length 4
+────╯

@@ -17,7 +17,8 @@
 //! This is the home for *compile-time behavior* knobs only. Two other `PRISM_*`
 //! families live elsewhere by design: runtime knobs the running program observes
 //! (read by the C runtime, mirrored by the interpreter), and the C-toolchain seam
-//! (`PRISM_CC` / `PRISM_CC_FLAGS`, centralized in [`crate::codegen::rt`]). The
+//! (`PRISM_CC` / `PRISM_CC_FLAGS`, centralized in the native backend's
+//! `codegen::rt`). The
 //! env-knob audit (`tests/env_knobs.rs`) catalogues all three and fails if any
 //! knob is read from an undocumented site.
 
@@ -227,8 +228,8 @@ pub struct DynFlags {
     pub scc_backend: bool,
     /// `PRISM_TIME_COMPILE` (default off): emit one structured timing row per
     /// compiler phase to stderr. The knob only records the intent; the CLI reads
-    /// it and installs the actual [`TimingSink`](crate::TimingSink) onto the
-    /// top-level compile's [`Config`](crate::Config), so an internal
+    /// it and installs the actual `TimingSink` onto the top-level compile's
+    /// `Config`, so an internal
     /// re-elaboration (which builds its own [`from_env`](Self::from_env) config)
     /// stays silent. Program stdout is unaffected; rows go only to stderr.
     pub time_compile: bool,
@@ -248,7 +249,7 @@ pub struct DynFlags {
     pub mdbook_strict: bool,
     /// `PRISM_OPT_LEVEL` (default `O1`): the Core-to-Core optimization level a
     /// library entry point uses when the CLI does not pass an explicit `-O`. The
-    /// CLI overrides the derived [`Config::opt`](crate::Config::opt); this is the
+    /// CLI overrides the derived `Config::opt`; this is the
     /// env-supplied seed.
     pub opt_level: OptLevel,
     /// `PRISM_BACKEND_OPT` (default `"2"`): the LLVM-backend `-O` level a library
@@ -256,7 +257,7 @@ pub struct DynFlags {
     /// invalid value is reported once here and falls back to the default.
     pub backend_opt: BackendOpt,
     /// `PRISM_NO_SPECIALIZE` (default off): turn off the `Specialize` Core pass.
-    /// Presence-flagged, resolved into [`Config::disabled`](crate::Config::disabled).
+    /// Presence-flagged, resolved into `Config::disabled`.
     pub no_specialize: bool,
     /// `PRISM_FUSE` (default off): run the whole-program stream-fusion pass
     /// (`core/opt/fuse`) first in the pre-lowering stage, collapsing recognized
@@ -285,8 +286,8 @@ pub struct DynFlags {
     /// not perturb the oracles when off.
     pub store: bool,
     /// `PRISM_STORE_PATH` (default none): override the store root. Absent falls
-    /// back to a user-wide cache directory, then `target/prism-store`; see
-    /// [`crate::store::disk::resolve_store_path`].
+    /// back to a user-wide cache directory, then `target/prism-store`; see the
+    /// store's `disk::resolve_store_path`.
     pub store_path: Option<PathBuf>,
     /// `PRISM_SOLVER_TIMEOUT_MS` (default none): the per-obligation wall-clock
     /// budget `prism verify` gives an external solver before it kills the process

@@ -143,7 +143,7 @@ pub enum Written {
     Hit,
 }
 
-/// What one [`commit_program`] did, enough for a caller to assert warm-cache
+/// What one `commit_program` did, enough for a caller to assert warm-cache
 /// behavior (a second commit of an unchanged program writes zero objects).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CommitStats {

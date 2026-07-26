@@ -26,6 +26,34 @@ pub(crate) fn is_builtin_effect(name: &str) -> bool {
         || name == names::RETURN_EFFECT
 }
 
+// Constructor field types are converted before a `Tc` exists. Check their
+// nominal heads once the complete local-plus-imported datatype table is
+// available, so an unopened imported type cannot survive as an arbitrary
+// `Type::Con` and fail in a later compiler phase.
+pub(super) fn check_known_types(
+    t: &ast::Ty,
+    data: &BTreeMap<String, super::DataInfo>,
+    span: Span,
+) -> Result<(), TypeError> {
+    if let ast::Ty::Con(name, _) = t {
+        if name != kw::TY_OR_NULL && !data.contains_key(name) {
+            return Err(ErrKind::UnknownType { name: name.clone() }
+                .at(span)
+                .maybe_help(suggest::suggestion(
+                    name,
+                    data.keys().map(|known| names::bare_name(known)),
+                )));
+        }
+    }
+    let mut error = None;
+    t.each_child(&mut |child| {
+        if error.is_none() {
+            error = check_known_types(child, data, span).err();
+        }
+    });
+    error.map_or(Ok(()), Err)
+}
+
 pub(super) struct Annot<'a> {
     ty_ex: &'a mut BTreeMap<String, u32>,
     row_ex: &'a mut BTreeMap<String, u32>,

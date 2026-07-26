@@ -1,6 +1,10 @@
 -- A dimension literal in a position that wants a type: `Vec`'s first parameter
 -- has kind `Type`, so the literal `3` there is a kind mismatch. The check peels
 -- `Vec`'s `Kind::Fun` arrow and compares the argument's kind at each position.
+-- The element list is declared here: these programs are checked without the
+-- prelude, so a nominal type they name has to be in scope locally.
+type List(a) = Nil | Cons(a, List(a))
+
 type Vec(a, n : Nat) = MkVec(List(a))
 
 fn demo(x : Vec(3, Int)) : Int = 0

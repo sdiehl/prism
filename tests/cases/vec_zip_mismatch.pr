@@ -1,5 +1,9 @@
 -- The marquee dimension error: zipping a length-3 and a length-4 vector. The
 -- shared `n` forces equal lengths, so the mismatch is rejected naming both.
+-- The element list is declared here: these programs are checked without the
+-- prelude, so a nominal type they name has to be in scope locally.
+type List(a) = Nil | Cons(a, List(a))
+
 type Vec(a, n : Nat) = MkVec(List(a))
 
 fn vzip(u : Vec(a, n), v : Vec(b, n)) : Vec((a, b), n) = MkVec([])

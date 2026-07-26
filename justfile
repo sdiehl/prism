@@ -46,7 +46,7 @@ fmt-check:
     cargo fmt --all --check
 
 clippy:
-    cargo clippy --all-targets -- -D warnings
+    cargo clippy --workspace --all-targets -- -D warnings
 
 # --- fast inner loop: filtered output, exit codes preserved ---
 
@@ -212,12 +212,12 @@ ci: fmt-check clippy stub-check doc-check feature-matrix test fmt-examples packa
 # CI-only checks mirrored locally: stub-marker grep + rustdoc deny-warnings.
 stub-check:
     #!/usr/bin/env bash
-    if grep -rEn 'todo!|unimplemented!|FIXME|XXX|allow\(dead_code\)' src bin; then
+    if grep -rEn 'todo!|unimplemented!|FIXME|XXX|allow\(dead_code\)' src bin crates; then
         echo "stub markers found (see above)"; exit 1
     fi
 
 doc-check:
-    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --quiet
+    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --quiet
 
 # Build the wasm playground bundle and sync it into docs/src/pkg; cdylib is requested here (not Cargo.toml) so native builds skip it, and wasm-bindgen CLI must match the crate.
 wasm:

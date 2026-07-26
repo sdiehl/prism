@@ -174,6 +174,27 @@ mod env_summary_tests {
 }
 
 #[cfg(test)]
+mod data_annotation_tests {
+    use super::check;
+    use crate::parse::parse;
+    use crate::resolve::resolve;
+    use crate::syntax::desugar::desugar;
+
+    #[test]
+    fn unknown_constructor_field_type_is_rejected_during_checking() {
+        let surface = parse("type Target = Plain | Wrapped(MissingType)")
+            .expect("parse datatype fixture")
+            .program;
+        let resolved = resolve(surface).expect("resolve datatype fixture");
+        let program = desugar(resolved).expect("desugar datatype fixture");
+
+        let error = check(&program).expect_err("unknown field type must not reach elaboration");
+        assert_eq!(error.code(), Some("E1001"), "{error}");
+        assert!(error.to_string().contains("unknown type `MissingType`"));
+    }
+}
+
+#[cfg(test)]
 mod typed_hole_tests {
     use super::{check, check_allow_holes};
     use crate::parse::parse;
@@ -1265,6 +1286,24 @@ fn check_seeded_mode(
     ctors.extend(seed.ctors.clone());
     eff_ops.extend(seed.eff_ops.clone());
     env.extend(seed.env.iter().map(|(name, ty)| (*name, ty.clone())));
+    // Constructor field annotations are converted while the datatype
+    // environment is built, before its imported half is merged. Validate them
+    // now against the complete local-plus-imported datatype table. In
+    // particular, an unopened imported type must be rejected here as an unknown
+    // type instead of surviving as a nominal `Type::Con` and later making the
+    // structural printer generate an empty match.
+    for data_decl in &prog.types {
+        let span = if crate::names::module_of(&data_decl.name).is_empty() {
+            data_decl.span
+        } else {
+            Span::default()
+        };
+        for ctor in &data_decl.ctors {
+            for field_ty in &ctor.args {
+                env::check_known_types(field_ty, &data, span)?;
+            }
+        }
+    }
     let seeds = env::seed_var_states(&eff_ops);
     let (classes, instances, inst_keys, canonical, methods, mut constrained, mut warnings) =
         classes::build_classes(prog, &mut data, &mut ctors, &mut env, seed)?;
