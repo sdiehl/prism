@@ -1276,16 +1276,55 @@ pub fn check_seeded_allow_holes(
     check_seeded_mode(prog, seed, false)
 }
 
+/// The signatures a program's own constructor and operation declarations put in
+/// `env`, captured before the seed merges over it so they can be restored after.
+fn declared_member_signatures(prog: &Program<Core>, env: &Env) -> Vec<(Sym, Type)> {
+    let ctors = prog
+        .types
+        .iter()
+        .flat_map(|d| d.ctors.iter().map(|c| &c.name));
+    let ops = prog
+        .effects
+        .iter()
+        .flat_map(|e| e.ops.iter().map(|o| &o.name));
+    ctors
+        .chain(ops)
+        .map(|name| Sym::new(name))
+        .filter_map(|name| env.get(&name).map(|ty| (name, ty.clone())))
+        .collect()
+}
+
 fn check_seeded_mode(
     prog: &Program<Core>,
     seed: &TypecheckSeed,
     track_tooltips: bool,
 ) -> Result<Checked, TypeError> {
     let (mut data, mut ctors, mut eff_ops, mut env) = env::build_data(prog)?;
-    data.extend(seed.data.clone());
-    ctors.extend(seed.ctors.clone());
-    eff_ops.extend(seed.eff_ops.clone());
+    // The seed is the ambient foundation: the prelude, the embedded standard
+    // library, and every imported interface. A name the program declares itself
+    // is the program's, so seeding must not overwrite it. That is what the
+    // whole-program checker does, where a user declaration of a prelude name
+    // displaces the prelude's (the resolver relocates the prelude's to a
+    // module-private name), and the modular check has to agree with it: a
+    // program that runs must also build. Plain `extend` has the opposite
+    // precedence, so insert only the keys the program left free.
+    for (name, info) in &seed.data {
+        data.entry(name.clone()).or_insert_with(|| info.clone());
+    }
+    for (name, info) in &seed.ctors {
+        ctors.entry(name.clone()).or_insert_with(|| info.clone());
+    }
+    for (name, info) in &seed.eff_ops {
+        eff_ops.entry(name.clone()).or_insert_with(|| info.clone());
+    }
+    // `env` also holds the builtin base bindings, which the seed is entitled to
+    // refine, so it keeps seed precedence and only the program's own member
+    // signatures are restored over it.
+    let local_members = declared_member_signatures(prog, &env);
     env.extend(seed.env.iter().map(|(name, ty)| (*name, ty.clone())));
+    for (name, ty) in local_members {
+        env.insert(name, ty);
+    }
     // Constructor field annotations are converted while the datatype
     // environment is built, before its imported half is merged. Validate them
     // now against the complete local-plus-imported datatype table. In

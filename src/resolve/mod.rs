@@ -163,8 +163,16 @@ fn each_binder(p: &Program, mut f: impl FnMut(usize, &str)) {
             f(d.span.start, &c.name);
         }
     }
+    // An operation takes its effect declaration's offset, for the same reason a
+    // constructor takes its data declaration's: the parent declaration is what
+    // introduces it and the two share a region. Leaving operations out of this
+    // walk is what kept them out of every module namespace, so an operation name
+    // was global across the whole standard library no matter what was imported.
     for e in &p.effects {
         f(e.span.start, &e.name);
+        for op in &e.ops {
+            f(e.span.start, &op.name);
+        }
     }
     for e in &p.errors {
         f(e.span.start, &e.name);
@@ -212,14 +220,24 @@ fn binders_by_region(p: &Program) -> (BTreeSet<String>, BTreeSet<String>) {
 }
 
 /// The names a module makes visible to importers: every `pub` item, plus the
-/// constructors of every transparent `pub` data type. An `opaque` type exports
-/// its name only; its constructors stay module-private, so their absence from
-/// this set hides them from importers.
+/// constructors of every transparent `pub` data type and the operations of every
+/// `pub` effect. An `opaque` type exports its name only; its constructors stay
+/// module-private, so their absence from this set hides them from importers.
+///
+/// An effect's operations ride on the effect's own visibility: performing or
+/// handling one is the only way to use the effect at all, so a `pub effect`
+/// whose operations stayed private would export a name no importer could do
+/// anything with.
 fn exports_of(p: &Program) -> BTreeSet<String> {
     let mut e = p.exports.clone();
     for d in &p.types {
         if p.exports.contains(&d.name) && !p.opaques.contains(&d.name) {
             e.extend(d.ctors.iter().map(|c| c.name.clone()));
+        }
+    }
+    for eff in &p.effects {
+        if p.exports.contains(&eff.name) {
+            e.extend(eff.ops.iter().map(|op| op.name.clone()));
         }
     }
     e
@@ -439,7 +457,7 @@ fn own_of(p: &Program, path: &str, names: BTreeSet<String>) -> Own {
         .into_iter()
         .map(|n| {
             let canon = if exports.contains(&n) {
-                format!("{path}.{n}")
+                names::exported(path, &n)
             } else {
                 names::private(path, &n)
             };
@@ -745,6 +763,7 @@ impl<'a> Rw<'a> {
             self.at(e.span);
             e.name = self.canon(&e.name);
             for op in &mut e.ops {
+                op.name = self.canon(&op.name);
                 for t in &mut op.params {
                     self.ty(t);
                 }
@@ -1032,7 +1051,7 @@ impl<'a> Rw<'a> {
             Expr::Handle(body, arms, _) => {
                 self.expr(body);
                 for arm in arms {
-                    self.handler_arm(arm);
+                    self.handler_arm(arm, span);
                 }
             }
             Expr::Mask(label, body) => {
@@ -1101,7 +1120,7 @@ impl<'a> Rw<'a> {
                 self.expr(body);
                 self.locals.truncate(base);
                 for arm in arms {
-                    self.handler_arm(arm);
+                    self.handler_arm(arm, span);
                 }
             }
             Sugar::Assign(_, v) => self.expr(v),
@@ -1171,23 +1190,27 @@ impl<'a> Rw<'a> {
         }
     }
 
-    // Effect-op names live in the effect namespace (not the top-level binder
-    // set), so they are left bare; only the bound locals are tracked.
-    fn handler_arm(&mut self, arm: &mut HandlerArm) {
+    /// An arm names the operation it handles, so that name resolves like any
+    /// other reference: through the module's own definitions first, then its
+    /// imports. Leaving it bare would let a handler for a local operation bind
+    /// against an identically named one from an unimported module.
+    fn handler_arm(&mut self, arm: &mut HandlerArm, span: Span) {
         let base = self.locals.len();
         match arm {
             HandlerArm::Return(x, body) | HandlerArm::Sugar(SugarArm::Val(x, body)) => {
                 self.locals.push(x.clone());
                 self.expr(body);
             }
-            HandlerArm::Op(_, params, k, body) => {
+            HandlerArm::Op(name, params, k, body) => {
+                *name = self.value(name, span);
                 self.locals.extend(params.iter().cloned());
                 self.locals.push(k.clone());
                 self.expr(body);
             }
             HandlerArm::Sugar(
-                SugarArm::Once(_, params, body) | SugarArm::Never(_, params, body),
+                SugarArm::Once(name, params, body) | SugarArm::Never(name, params, body),
             ) => {
+                *name = self.value(name, span);
                 self.locals.extend(params.iter().cloned());
                 self.expr(body);
             }

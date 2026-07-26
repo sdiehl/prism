@@ -368,6 +368,64 @@ fn main() = print(Logic.answer())
     let _ = fs::remove_dir_all(&dir);
 }
 
+// A local effect operation may share its name with a stdlib operation from a
+// module the project never imports (`Clock.sleep` in Concurrent). Operation
+// names resolve through the module's own declarations before anything the
+// ambient foundation seeds, so the project must check through the module-query
+// path, and the interpreted and built program must agree, with the local
+// operation in force. This is the regression shape where the seeded stdlib
+// operation silently clobbered the local one and the project build reported
+// the user's own effect as unknown while `prism run` accepted the program.
+#[test]
+fn project_effect_op_sharing_a_stdlib_op_name_builds_and_agrees() {
+    let dir = env::temp_dir().join(format!("prism_op_clash_{}", process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("prism.toml"),
+        r#"[package]
+name = "opclash"
+
+[bin]
+entry = "src/main.pr"
+"#,
+    )
+    .unwrap();
+    let program = r"effect Timer
+  sleep(Int) : Unit
+
+fn nap(d : Int) : Int ! {Timer} =
+  sleep(d)
+  d * 2
+
+fn main() =
+  let r =
+    handle nap(21) with
+      sleep(_d) resume k => k(())
+      return r => r
+  println(r)
+";
+    fs::write(dir.join("src").join("main.pr"), program).unwrap();
+
+    let project = load_project(&dir).expect("manifest loads");
+    let roots = prism::project_roots(&project.src_dir, &project.dep_src_dirs);
+    let mut cfg = prism::Config::default();
+    cfg.flags.compiler_cache = false;
+    let full = with_prelude(&fs::read_to_string(&project.entry).expect("entry reads"));
+    prism::check_modules_on(&full, &roots, &cfg)
+        .expect("a local operation sharing an unimported stdlib operation's name checks");
+    let run = interpret_at(&full, &project.src_dir).expect("interprets");
+    let out: Vec<String> = run.out.iter().map(Rv::show).collect();
+    assert_eq!(
+        out,
+        ["42"],
+        "the local `Timer.sleep` handler must be in force"
+    );
+    assert_native_matches_interp(&dir);
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
 fn have_git() -> bool {
     Command::new("git")
         .arg("--version")
