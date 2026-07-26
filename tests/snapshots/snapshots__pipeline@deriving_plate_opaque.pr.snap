@@ -1,0 +1,158 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/deriving_plate_opaque.pr
+---
+== tokens ==
+VOpen Class UIdent("Plate") LParen Ident("a") RParen VOpen Ident("children") Colon LParen Ident("a") RParen Arrow UIdent("List") LParen Ident("a") RParen VSemi Ident("rebuild") Colon LParen Ident("a") Comma UIdent("List") LParen Ident("a") RParen RParen Arrow Ident("a") Bang LBrace UIdent("Fail") Bar Ident("e") RBrace VClose VSemi Type UIdent("Node") Eq UIdent("Leaf") LParen KwInt RParen Bar UIdent("Thunk") LParen LParen KwInt RParen Arrow UIdent("Node") RParen Deriving LParen UIdent("Plate") RParen VSemi Fn Ident("main") LParen RParen Eq UIdent("Leaf") LParen Int(IntLit { value: 0, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Node",
+            params: [],
+            param_kinds: [],
+            ctors: [
+                Ctor {
+                    name: "Leaf",
+                    args: [
+                        Int,
+                    ],
+                    fields: None,
+                },
+                Ctor {
+                    name: "Thunk",
+                    args: [
+                        Fun(
+                            [
+                                Int,
+                            ],
+                            Empty,
+                            Con(
+                                "Node",
+                                [],
+                            ),
+                        ),
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [
+                (
+                    "Plate",
+                    142..147,
+                ),
+            ],
+            newtype: false,
+            span: 87..148,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [
+        ClassDecl {
+            name: "Plate",
+            param: "a",
+            supers: [],
+            methods: [
+                (
+                    "children",
+                    Fun(
+                        [
+                            Var(
+                                "a",
+                            ),
+                        ],
+                        Empty,
+                        Con(
+                            "List",
+                            [
+                                Var(
+                                    "a",
+                                ),
+                            ],
+                        ),
+                    ),
+                ),
+                (
+                    "rebuild",
+                    Fun(
+                        [
+                            Var(
+                                "a",
+                            ),
+                            Con(
+                                "List",
+                                [
+                                    Var(
+                                        "a",
+                                    ),
+                                ],
+                            ),
+                        ],
+                        Cons(
+                            [
+                                EffLabel {
+                                    name: "Fail",
+                                    args: [],
+                                },
+                            ],
+                            Some(
+                                "e",
+                            ),
+                        ),
+                        Var(
+                            "a",
+                        ),
+                    ),
+                ),
+            ],
+            span: 0..85,
+        },
+    ],
+    instances: [],
+    fns: [
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "Leaf",
+                        ),
+                        span: 162..166,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 0,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 167..168,
+                        },
+                    ],
+                ),
+                span: 162..169,
+            },
+            wheres: [],
+            span: 150..169,
+        },
+    ],
+}
+
+== types ==
+[E6070] Type Error: cannot derive Plate for Node: argument 1 of `Thunk` reaches `(Int) -> Node`, which cannot be traversed. A derived traversal walks lists, optionals, tuples, and the data types declared alongside `Node`; it cannot see inside a function, a built-in container, or a recursive occurrence at different type arguments.
+   ╭─[ <source>:5:56 ]
+   │
+ 5 │ type Node = Leaf(Int) | Thunk((Int) -> Node) deriving (Plate)
+   │                                                        ──┬──  
+   │                                                          ╰──── cannot derive Plate for Node: argument 1 of `Thunk` reaches `(Int) -> Node`, which cannot be traversed. A derived traversal walks lists, optionals, tuples, and the data types declared alongside `Node`; it cannot see inside a function, a built-in container, or a recursive occurrence at different type arguments.
+───╯

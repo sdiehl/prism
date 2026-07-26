@@ -61,8 +61,16 @@ fn assign(src: &str, only_match_arms: bool, into: &mut BTreeMap<String, Vec<Stri
 #[test]
 fn every_error_code_is_unique_and_well_formed() {
     let mut seen: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    assign(&read("src/error/code.rs"), false, &mut seen);
-    assign(&read("src/error/diag.rs"), true, &mut seen);
+    assign(
+        &read("crates/prism-syntax/src/error/code.rs"),
+        false,
+        &mut seen,
+    );
+    assign(
+        &read("crates/prism-syntax/src/error/diag.rs"),
+        true,
+        &mut seen,
+    );
 
     // Non-vacuous: the named catalogue plus the per-kind table is well over a
     // hundred codes; a scan that found almost none would silently pass.

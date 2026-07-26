@@ -1,0 +1,88 @@
+-- The binding-power corpus. Every declaration body is an expression built only
+-- from identifiers, integers, parentheses, and the operators `Syntax.Cursor`
+-- tabulates, so the compiler's parse of it and the Pratt driver's parse of the
+-- same tokens are directly comparable. Each adjacent pair of levels appears at
+-- least once in both orders, each associativity appears as a chain of three,
+-- and unary minus appears on both sides of the levels it sits between.
+--
+-- The names are unbound on purpose: this file is only ever parsed, never
+-- checked, so the corpus stays about grouping and nothing else.
+fn e01() = a + b * c
+
+fn e02() = a * b + c
+
+fn e03() = a - b - c
+
+fn e04() = a / b / c
+
+fn e05() = a % b * c
+
+fn e06() = a ^ b ^ c
+
+fn e07() = a * b ^ c
+
+fn e08() = a ^ b * c
+
+fn e09() = -a * b
+
+fn e10() = -a ^ b
+
+fn e11() = a * -b
+
+fn e12() = a ^ -b
+
+fn e13() = a - -b
+
+fn e14() = -a - b
+
+fn e15() = a == b && c
+
+fn e16() = a && b == c
+
+fn e17() = a && b || c
+
+fn e18() = a || b && c
+
+fn e19() = a + b < c + d
+
+fn e20() = a <= b + c
+
+fn e21() = a /= b * c
+
+fn e22() = a >= b - c
+
+fn e23() = a > b % c
+
+fn e24() = a == b || c == d
+
+fn e25() = a |> b |> c
+
+fn e26() = a ?? b ?? c
+
+fn e27() = a ?? b |> c
+
+fn e28() = a |> b ?? c
+
+fn e29() = f >> g >> h
+
+fn e30() = f >> g << h
+
+fn e31() = a |> f >> g
+
+fn e32() = f >> g || h
+
+fn e33() = a ?? b || c
+
+fn e34() = (a + b) * c
+
+fn e35() = a * (b + c)
+
+fn e36() = 1 + 2 * 3 - 4 / 5
+
+fn e37() = x % y ^ z
+
+fn e38() = a ?? b |> c ?? d
+
+fn e39() = -(a + b) ^ c
+
+fn e40() = a < b + c * d ^ e

@@ -1,18 +1,8 @@
-pub mod ast;
+//! The compiler-side surface-syntax seam: the AST, parser entry points, and
+//! grammar live in the `prism-syntax` crate; desugaring is semantic and stays
+//! here with the rest of the front end.
+
+pub use prism_syntax::ast;
+pub use prism_syntax::{ExprParser, ProgramParser, TypeSigParser};
+
 pub mod desugar;
-
-use lalrpop_util::lalrpop_mod;
-
-lalrpop_mod!(
-    #[allow(
-        clippy::all,
-        clippy::pedantic,
-        clippy::nursery,
-        unreachable_pub,
-        missing_debug_implementations
-    )]
-    grammar,
-    "/syntax/grammar.rs"
-);
-
-pub use grammar::{ExprParser, ProgramParser, TypeSigParser};

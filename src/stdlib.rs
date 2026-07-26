@@ -18,6 +18,8 @@ pub const STDLIB: &[(&str, &str)] = &[
     ("Data.Result", include_str!("../lib/std/Data/Result.pr")),
     ("Data.Map", include_str!("../lib/std/Data/Map.pr")),
     ("Data.Set", include_str!("../lib/std/Data/Set.pr")),
+    ("Data.IntMap", include_str!("../lib/std/Data/IntMap.pr")),
+    ("Data.IntSet", include_str!("../lib/std/Data/IntSet.pr")),
     ("Data.Ordered", include_str!("../lib/std/Data/Ordered.pr")),
     ("Data.Char", include_str!("../lib/std/Data/Char.pr")),
     ("Data.String", include_str!("../lib/std/Data/String.pr")),
@@ -48,6 +50,7 @@ pub const STDLIB: &[(&str, &str)] = &[
     ("Arena", include_str!("../lib/std/Arena.pr")),
     ("Math", include_str!("../lib/std/Math.pr")),
     ("Data.Graph", include_str!("../lib/std/Data/Graph.pr")),
+    ("Data.Fixpoint", include_str!("../lib/std/Data/Fixpoint.pr")),
     ("Control.State", include_str!("../lib/std/Control/State.pr")),
     (
         "Control.Reader",
@@ -58,10 +61,40 @@ pub const STDLIB: &[(&str, &str)] = &[
         include_str!("../lib/std/Control/Writer.pr"),
     ),
     ("Control.Fresh", include_str!("../lib/std/Control/Fresh.pr")),
+    ("Control.Layer", include_str!("../lib/std/Control/Layer.pr")),
+    (
+        "Control.Rewrite",
+        include_str!("../lib/std/Control/Rewrite.pr"),
+    ),
     ("Syntax.Source", include_str!("../lib/std/Syntax/Source.pr")),
     ("Syntax.Token", include_str!("../lib/std/Syntax/Token.pr")),
+    ("Syntax.Lex", include_str!("../lib/std/Syntax/Lex.pr")),
+    ("Syntax.Layout", include_str!("../lib/std/Syntax/Layout.pr")),
+    ("Syntax.Query", include_str!("../lib/std/Syntax/Query.pr")),
     ("Syntax.Ast", include_str!("../lib/std/Syntax/Ast.pr")),
     ("Syntax.Codec", include_str!("../lib/std/Syntax/Codec.pr")),
+    ("Syntax.Walk", include_str!("../lib/std/Syntax/Walk.pr")),
+    (
+        "Syntax.Analysis",
+        include_str!("../lib/std/Syntax/Analysis.pr"),
+    ),
+    (
+        "Syntax.Diagnostic",
+        include_str!("../lib/std/Syntax/Diagnostic.pr"),
+    ),
+    ("Syntax.Report", include_str!("../lib/std/Syntax/Report.pr")),
+    ("Syntax.Cursor", include_str!("../lib/std/Syntax/Cursor.pr")),
+    (
+        "Syntax.Resolved",
+        include_str!("../lib/std/Syntax/Resolved.pr"),
+    ),
+    ("Syntax.Edit", include_str!("../lib/std/Syntax/Edit.pr")),
+    ("Syntax.Rename", include_str!("../lib/std/Syntax/Rename.pr")),
+    ("Syntax.Flow", include_str!("../lib/std/Syntax/Flow.pr")),
+    (
+        "Syntax.Identity",
+        include_str!("../lib/std/Syntax/Identity.pr"),
+    ),
     (
         "Data.Validation",
         include_str!("../lib/std/Data/Validation.pr"),
@@ -74,4 +107,5 @@ pub const STDLIB: &[(&str, &str)] = &[
         "Data.UnionFind",
         include_str!("../lib/std/Data/UnionFind.pr"),
     ),
+    ("Data.Bind", include_str!("../lib/std/Data/Bind.pr")),
 ];

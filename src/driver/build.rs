@@ -21,13 +21,6 @@ use super::{reuse_lowered_core, Config};
 use std::collections::BTreeMap;
 
 #[cfg(feature = "native")]
-use crate::codegen::rt::RuntimeProfile;
-#[cfg(feature = "native")]
-use crate::codegen::{
-    emit_llvm_bc_with_native_kont_table, emit_llvm_with_native_kont_table, llvm_function_map,
-    llvm_scc_function_map,
-};
-#[cfg(feature = "native")]
 use crate::core::residual_effects;
 #[cfg(feature = "native")]
 use crate::core::LoweredCore;
@@ -39,6 +32,13 @@ use crate::resolve::Root;
 use crate::store::disk::CommitStats;
 #[cfg(feature = "native")]
 use crate::types::{Checked, CtorInfo};
+#[cfg(feature = "native")]
+use prism_native::rt::RuntimeProfile;
+#[cfg(feature = "native")]
+use prism_native::{
+    emit_llvm_bc_with_native_kont_table, emit_llvm_with_native_kont_table, llvm_function_map,
+    llvm_scc_function_map,
+};
 
 #[cfg(feature = "mlir")]
 use std::fs;
@@ -46,7 +46,7 @@ use std::fs;
 use std::process::Command;
 
 #[cfg(feature = "mlir")]
-use crate::codegen::emit_mlir;
+use prism_native::emit_mlir;
 
 #[cfg(feature = "native")]
 use super::backend::materialize_scc_bitcode;

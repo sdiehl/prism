@@ -1,4 +1,6 @@
-# deb/rpm/apk via `nfpm package`. VERSION and PKG_ARCH come from the environment.
+# deb/rpm via `nfpm package`. VERSION and PKG_ARCH come from the environment.
+# No apk: the binary is glibc-linked and cannot run on musl (Alpine users take the
+# bundled container image `ghcr.io/sdiehl/prism`).
 name: prism
 arch: ${PKG_ARCH}
 platform: linux
@@ -22,5 +24,3 @@ overrides:
     depends: [llvm-22, clang-22]
   rpm:
     depends: [llvm, clang]
-  apk:
-    depends: [llvm22, clang]

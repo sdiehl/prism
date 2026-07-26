@@ -1,4 +1,5 @@
--- Pattern forms: constructors, tuples, records, literals, guards, views.
+-- Pattern forms: constructors, tuples, records, literals, guards, views,
+-- alternations, and parameters written as patterns.
 type Point = Point { x: Int, y: Int }
 
 type Shape = Dot | Line(Point, Point) | Poly(List(Point))
@@ -32,3 +33,18 @@ fn views(p : Point) : Int =
     Diag(n) if n > 3 => n * 2
     Diag(n) => n
     _ => 0
+
+fn alternation(s : Shape) : Int =
+  match s of
+    Dot | Poly(Nil) => 0
+    Line(Point { x = 0, y = 0 } | Point { x = 1, y = 1 }, _) => 1
+    Line(p, _) | Poly(Cons(p, _)) => p.x
+
+fn alt_literals(c : Char, n : Int) : Int =
+  match (c, n) of
+    ('a' | 'b' | 'c', 0 | 1) => 1
+    (_, _) => 2
+
+fn param_pats(Point { x = x, .. }, (a, b), borrow q : Point) : Int =
+  let f = \(Point { x = u, y = v }) -> u + v
+  x + a + b + q.y + f(q)

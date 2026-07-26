@@ -1,0 +1,29 @@
+[package]
+name = "prism-native"
+version.workspace = true
+authors.workspace = true
+categories = ["compilers"]
+edition.workspace = true
+keywords = ["compiler", "cbpv", "effects", "llvm", "mlir"]
+license.workspace = true
+readme = "../../README.md"
+repository.workspace = true
+description = "Prism compiler workspace member: native"
+
+[dependencies]
+blake3 = "1"
+cc = "1"
+inkwell = { version = "0.9", features = ["llvm22-1"], optional = true }
+prism-common = { path = "../prism-common" }
+prism-core = { path = "../prism-core", features = ["native"] }
+prism-syntax = { path = "../prism-syntax" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["unbounded_depth"] }
+
+[features]
+default = ["llvm"]
+llvm = ["dep:inkwell"]
+mlir = []
+
+[build-dependencies]
+cc = "1"

@@ -17,7 +17,7 @@
 use std::fs;
 use std::path::Path;
 
-const TOKEN_SRC: &str = "src/lex/token.rs";
+const TOKEN_SRC: &str = "crates/prism-syntax/src/lex/token.rs";
 const EBNF_SRC: &str = "models/grammar.ebnf";
 const TOKEN_ATTR: &str = "#[token(\"";
 

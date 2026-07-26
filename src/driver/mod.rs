@@ -18,6 +18,7 @@ use crate::error::{Error, TypeError};
 use crate::parse::{parse, ParseResult};
 use crate::resolve::{default_roots, Root};
 use crate::store::coherence::{self, CoherenceError};
+use crate::store::commit_program;
 use crate::store::disk::{self as store, CommitStats, DefMeta};
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Fip, Program, Span};
@@ -114,7 +115,7 @@ pub use timing::TimingSink;
 #[cfg(feature = "native")]
 pub use verify::attest_on;
 
-pub const PRELUDE: &str = include_str!("../../lib/prelude.pr");
+pub use prism_syntax::error::source::{PRELUDE, PRELUDE_END_MARK};
 
 /// The source file extension. Modules `import Foo` resolve to `Foo.pr`.
 pub const SOURCE_EXT: &str = "pr";
@@ -257,16 +258,6 @@ pub fn source_modules(src: &str, roots: &[Root]) -> Result<Vec<String>, Error> {
     let ParseResult { program, .. } = parse(src)?;
     crate::resolve::imported_paths(&program, roots)
 }
-
-/// The boundary line [`with_custom_prelude`] stamps between a project's own
-/// prelude and the user source.
-///
-/// The built-in prelude is located by its known text, but a custom prelude's
-/// length is unknowable from content alone, so composition records the boundary
-/// in the one artifact that crosses the pipeline (the composed source) and
-/// [`SourceMap`](crate::error::SourceMap) reads it back. A comment to the
-/// lexer; the `@`s keep it a line no formatter or ordinary source spells.
-pub const PRELUDE_END_MARK: &str = "-- prism@prelude@end";
 
 /// Prepend a caller-supplied prelude instead of the built-in one.
 ///
@@ -525,7 +516,7 @@ fn store_commit(
             }
         },
     )?;
-    let stats = store::commit_program(&store, core, &hashes, &hash_metas, &graph, &metas)?;
+    let stats = commit_program(&store, core, &hashes, &hash_metas, &graph, &metas)?;
     // The first user-visible payoff of the store: check cost tracks the Merkle
     // closure of a change. `objects_hit` are the definitions whose hash was
     // unchanged (already compiled and stored); `objects_written` are the ones
@@ -1272,7 +1263,7 @@ mod envelope_tests {
     use super::{default_roots, dump_on, Config, HASH_SCHEME};
     use super::{dump, example_program, EnvelopeHeader, WireKind, NAMESPACE_FORMAT};
     #[cfg(feature = "native")]
-    use crate::codegen::MAIN_SYMBOL;
+    use prism_native::MAIN_SYMBOL;
 
     const STORE_PKG_NAME: &str = "StorePkg";
     #[cfg(feature = "native")]
@@ -1417,10 +1408,7 @@ mod envelope_tests {
             out.contains("slot-format prism-native-abi-word-v1")
                 && out.contains("backend  llvm\n")
                 && out.contains("flag  scheduler  cooperative\n")
-                && out.contains(&format!(
-                    "state {} ",
-                    crate::codegen::native_symbol("count")
-                ))
+                && out.contains(&format!("state {} ", prism_native::native_symbol("count")))
                 && out.contains(" count arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]"),
             "native state map includes concrete entry ABI words:\n{out}"
         );
@@ -1472,10 +1460,8 @@ mod envelope_tests {
             "fn count(i, last) = if i > last then i else count(i + 1, last)\n\nfn main() = count(1, 2)\n",
         );
         assert!(
-            out.contains(&format!(
-                "state {} ",
-                crate::codegen::native_symbol("count")
-            )) && out.contains(" count arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]"),
+            out.contains(&format!("state {} ", prism_native::native_symbol("count")))
+                && out.contains(" count arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]"),
             "LLVM IR embeds concrete ABI-word slots for native arguments:\n{out}"
         );
         assert!(
@@ -1551,5 +1537,36 @@ mod content_hash_canonicity_tests {
             "generalization renames to the canonical `a`, got {left}"
         );
         assert!(!right.contains("zebra"), "canonical rename dropped `zebra`");
+    }
+}
+
+#[cfg(test)]
+mod source_map_tests {
+    use crate::driver::{with_custom_prelude, with_prelude};
+    use crate::error::SourceMap;
+
+    // Diagnostics under a custom prelude must be user-relative, exactly like
+    // the built-in path: the composed source carries the boundary mark, and
+    // SourceMap reads it back. This was silently wrong (offset by the whole
+    // custom prelude) before the mark existed.
+    #[test]
+    fn custom_prelude_positions_are_user_relative() {
+        let user_src = "fn main() =\n  oops()\n";
+        let full = with_custom_prelude("fn helper() = 1\nfn helper2() = 2", user_src);
+        let map = SourceMap::new(&full);
+        assert_eq!(map.user(), user_src);
+        let off = map.prelude_len() + map.user().find("oops").unwrap();
+        assert_eq!(map.at(off), "line 2:3");
+    }
+
+    // The built-in prelude path is unchanged: located by its known text, no
+    // boundary mark involved.
+    #[test]
+    fn builtin_prelude_positions_are_user_relative() {
+        let user_src = "fn main() = 1\n";
+        let full = with_prelude(user_src);
+        let map = SourceMap::new(&full);
+        assert_eq!(map.user(), user_src);
+        assert_eq!(map.at(map.prelude_len()), "line 1:1");
     }
 }

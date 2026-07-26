@@ -1,0 +1,2 @@
+-- An interpolation hole running off the end of the line.
+fn main() = "{x

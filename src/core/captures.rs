@@ -23,9 +23,9 @@ use crate::core::cbpv::{Comp, CoreFn, Value};
 use crate::core::fv;
 use crate::core::traverse::Visit;
 use crate::eval::kont::portable_value_type;
-use crate::names;
-use crate::sym::Sym;
 use crate::types::ty::Type;
+use prism_common::sym::Sym;
+use prism_syntax::names;
 
 // Column labels for the closure form and each capture kind. One home for the
 // vocabulary the dump renders, so a label never drifts between the enum and the

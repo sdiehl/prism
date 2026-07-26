@@ -36,6 +36,10 @@
 -- ever runs. Streaming (gigabyte, SAX-style) JSON is a package; this codec is
 -- value-oriented and total.
 
+import Control.Layer (..)
+
+import Data.Foldable (length)
+
 import Data.List (..)
 
 import Data.Maybe (..)
@@ -614,6 +618,23 @@ pub fn encode(j : Json) : String =
 
 -- | Convert a value to a `Json` tree.
 --
+-- `deriving (ToJson)` writes the instance structurally, for a type whose schema
+-- is its own declaration. One constructor becomes one object: a record
+-- constructor's keys are its declared field names, a positional one's are its
+-- argument positions (`_0`, `_1`), and a sum additionally names the variant it
+-- holds under the key `$`, which no field name can spell. A document therefore
+-- names the constructor it holds rather than an index that quietly changes
+-- meaning when a constructor is inserted; a single-constructor type has nothing
+-- to discriminate and carries no tag. Constructor and field order are the
+-- declaration's, so one value has one tree, and `encode` sorts keys, so it has
+-- one string. Derive it in a pair with `FromJson`: a type that encodes but
+-- cannot decode is a document nobody can read back.
+--
+-- This is not the wire codec. A `Wire.Serialize` byte format is frozen and
+-- versioned; a JSON document is read by something that was not compiled against
+-- this program, so the encoding is self-describing rather than compact, and
+-- nothing here promises stability across a change to the declaration.
+--
 -- ```prism
 -- to_json([1, 2, 3])
 -- ```
@@ -625,6 +646,15 @@ pub class ToJson(a)
 
 -- | Recover a value from a `Json` tree, failing (through `Fail`) on a structural
 -- mismatch. A decode of foreign data is one ordinary failure channel.
+--
+-- `deriving (FromJson)` reads back exactly what the derived `ToJson` wrote, by
+-- the same keys: `from_json(to_json(x))` is `x`. A tree that is not an object, a
+-- sum whose `$` names no constructor of the type, a missing key, and a field
+-- that will not itself decode all leave through the same `Fail`. That failure
+-- carries no payload, so it reports that the document did not fit and not where:
+-- `Fail` is a nullary operation, and reporting a path would mean a different
+-- effect on this class's signature and so on every hand-written instance too.
+-- Catch it with `optional`, `default`, or `succeeds`, as with any other `Fail`.
 --
 -- ```prism
 -- from_json(JInt(41)) + 1
@@ -713,6 +743,30 @@ fn from_json_each(xs : List(Json)) : List(a) given FromJson(a) =
     Nil => Nil
     Cons(y, rest) => Cons(from_json(y), from_json_each(rest))
 
+-- | The member named `key` of an object's member list, or `fail()` when there is
+-- none. Members are kept in parse order and duplicates are preserved, so the
+-- first occurrence wins, which is what makes a decode a function of the document
+-- rather than of a hash order. `deriving (ToJson, FromJson)` reads every field
+-- through this, so a missing field and a mistyped one leave through the same
+-- channel.
+--
+-- ```prism
+-- json_field([("a", JInt(1)), ("b", JInt(2))], "b")
+-- ```
+-- ```output
+-- Json.JInt(2)
+-- ```
+pub fn json_field(kvs : List((String, Json)), key : String) : Json ! {Fail | e} =
+  match kvs of
+    Nil => fail()
+    Cons(kv, rest) =>
+      match kv of
+        (k, v) =>
+          if k == key then
+            v
+          else
+            json_field(rest, key)
+
 -- | Encode a typed value straight to a canonical JSON string.
 --
 -- ```prism
@@ -722,3 +776,53 @@ fn from_json_each(xs : List(Json)) : List(a) given FromJson(a) =
 -- [1,true]
 -- ```
 pub fn to_json_string(x : a) : String given ToJson(a) = encode(to_json(x))
+
+-- | The immediate `Json` children of a value: an array's elements, an object's
+-- field values in field order, and nothing at a scalar.
+pub fn json_children(j : Json) : List(Json) =
+  match j of
+    JArr(items) => items
+    JObj(fields) => map(json_field_value, fields)
+    _ => []
+
+fn json_field_value(kv : (String, Json)) : Json =
+  match kv of
+    (_, v) => v
+
+-- | Put a replacement child list back, in `json_children` order, keeping an
+-- object's field names. Fails closed: a list of the wrong length yields the
+-- value unchanged rather than a truncated or padded one.
+pub fn json_rebuild(j : Json, cs : List(Json)) : Json =
+  match j of
+    JArr(items) =>
+      if length(items) == length(cs) then
+        JArr(cs)
+      else
+        j
+    JObj(fields) =>
+      match json_rekey(fields, cs) of
+        Some(fs) => JObj(fs)
+        None => j
+    _ => j
+
+fn json_rekey(
+  fields : List((String, Json)),
+  cs : List(Json)
+) : Option(List((String, Json))) =
+  match (fields, cs) of
+    (Nil, Nil) => Some(Nil)
+    (Cons(kv, more), Cons(v, rest)) =>
+      match json_rekey(more, rest) of
+        None => None
+        Some(tl) => Some(Cons((json_field_name(kv), v), tl))
+    _ => None
+
+fn json_field_name(kv : (String, Json)) : String =
+  match kv of
+    (k, _) => k
+
+-- | The children-and-rebuild pair for JSON, so every strategy in
+-- `Control.Rewrite` and every query in `Control.Layer` works on a decoded
+-- document.
+pub fn json_layer() : Layer(Json) =
+  Layer { kids = json_children, rebuild = json_rebuild }

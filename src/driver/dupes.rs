@@ -22,6 +22,7 @@ use marginalia::Span;
 use crate::core::fbip::borrow_sigs;
 use crate::core::{fip_annots, hash_program, Core, Digest, Hashes};
 use crate::error::{ErrKind, Error, SourceMap};
+use crate::names;
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Program};
 use crate::tc::{Checked, Warning, WarningOrigin};
@@ -144,10 +145,15 @@ pub(super) fn findings(
     );
 
     // Reverse index of stdlib behavior hashes to the lexically first name that
-    // realizes each, so a reimplementation names one stable suggestion.
+    // realizes each, so a reimplementation names one stable suggestion. A
+    // module-private helper is skipped: it realizes the behavior but no source
+    // can name it, so suggesting it would be advice the user cannot take.
     let mut stdlib_by_hash: BTreeMap<&str, &str> = BTreeMap::new();
     if want.stdlib {
-        for (name, digest) in stdlib_defs {
+        for (name, digest) in stdlib_defs
+            .iter()
+            .filter(|(n, _)| !names::is_private(n.as_str()))
+        {
             stdlib_by_hash
                 .entry(digest.as_str())
                 .and_modify(|first| {

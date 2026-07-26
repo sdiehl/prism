@@ -14,7 +14,7 @@
 // silent skip: these ratchets are worthless if they pass without ever building
 // natively.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;
 use std::process::Command;
@@ -926,6 +926,46 @@ fn parse_manifest(text: &str) -> BTreeMap<String, String> {
         .collect()
 }
 
+// Refuse to regenerate from a corpus that lost programs to a broken tree.
+//
+// `support::corpus` keeps only programs that currently interpret, so a tree that
+// does not compile yields a short corpus (an empty one, at the limit) rather than
+// an error. Writing that out would truncate the golden and report success, and
+// the gate would then pass forever against the survivors. Regenerating is exactly
+// when the tree is most likely to be mid-change, so the accept path is the one
+// that has to be suspicious.
+//
+// A program that left the corpus but whose file is still on disk stopped
+// compiling; one whose file is gone was deleted on purpose. That distinction is
+// exact, so the guard needs no override to stay out of a legitimate deletion's
+// way.
+fn guard_accept(
+    root: &Path,
+    current: &[(String, String)],
+    prior: Option<&BTreeMap<String, String>>,
+) {
+    assert!(
+        !current.is_empty(),
+        "refusing to regenerate {TIER_MANIFEST} from an empty corpus: every program failed to \
+         compile, which truncates the golden and disarms the gate. Fix the tree, then rerun."
+    );
+    let Some(prior) = prior else { return };
+    let live: BTreeSet<&str> = current.iter().map(|(l, _)| l.as_str()).collect();
+    let broken: Vec<&str> = prior
+        .keys()
+        .map(String::as_str)
+        .filter(|label| !live.contains(label) && root.join(label).exists())
+        .collect();
+    assert!(
+        broken.is_empty(),
+        "refusing to regenerate {TIER_MANIFEST}: {} program(s) left the corpus but are still on \
+         disk, so they stopped compiling rather than being deleted. Dropping them would disarm \
+         the gate for each. Fix or delete them, then rerun:\n  {}",
+        broken.len(),
+        broken.join("\n  ")
+    );
+}
+
 #[test]
 fn tier_manifest_holds() {
     let result = std::thread::Builder::new()
@@ -947,6 +987,8 @@ fn tier_manifest_holds_on_compiler_stack() {
     // Accept path: rewrite the golden and pass, the loud INSTA_UPDATE-style
     // regen a reviewed tier improvement (or corpus change) takes.
     if env::var_os(TIER_MANIFEST_ACCEPT).is_some() {
+        let prior = fs::read_to_string(&path).map(|t| parse_manifest(&t)).ok();
+        guard_accept(root, &current, prior.as_ref());
         fs::write(&path, render_manifest(&current)).expect("write tier manifest");
         eprintln!(
             "tier manifest regenerated: {} programs -> {}",

@@ -161,6 +161,8 @@ A file is a module and a dotted path names one in the source tree: `import Data.
 
 A `qualid` such as `Map.insert` is a single token ([identifiers](#identifiers)), so a qualified name never lexes as field projection. The `pub` modifier on any declaration makes it visible to importers; a declaration without it is private to its module.
 
+Bringing a name into bare scope offers it; it does not commit to it. Two imports may offer the same short name, and an import never fails on that account: the clash is reported only where a bare use actually has to choose between them, and qualifying that one use resolves it. [Modules](#modules) gives the full order in which a bare name is looked up.
+
 ## 4. Surface Grammar {#surface-grammar}
 
 A program is a layout-delimited sequence of top-level declarations.
@@ -217,7 +219,7 @@ The surface has grown a broad vocabulary: handlers and named handlers, `try`/`ca
 
 > Add syntax only when it exposes a semantic invariant, eliminates recurring structural boilerplate, or materially improves diagnostics.
 
-By that test effect rows, handlers, `try`/`catch`, `var` and the loop forms, and record update earn their place; further aliases for forms that already exist do not. The stable surface freezes at roughly this point: the approachable ML-like character (no user-defined operators, no macros, no do-notation, no drift toward a more symbolic calculus) is a property to preserve, not a stage to move past. The design rule is to deepen what the existing syntax means rather than widen the syntax itself.
+By that test effect rows, handlers, `try`/`catch`, `var` and the loop forms, and record update earn their place; so do [pattern alternation](#pattern-alternation) and [patterns in parameter position](#pattern-parameters), which remove arms and wrapper matches a reader would otherwise write out by hand and which are expanded away before the checker, adding nothing to the language below the surface. Further aliases for forms that already exist do not. The stable surface freezes at roughly this point: the approachable ML-like character (no user-defined operators, no macros, no do-notation, no drift toward a more symbolic calculus) is a property to preserve, not a stage to move past. The design rule is to deepen what the existing syntax means rather than widen the syntax itself.
 
 ## 5. Types and Kinds {#types-and-kinds}
 
@@ -386,9 +388,11 @@ Floored division, where `/` rounds toward negative infinity and `%` (the Euclide
 
 Division or remainder by zero is the one partial case of integer arithmetic. It is a runtime fault: the program halts immediately with exit status 1 and exactly `fatal: division by zero` on standard error, byte-identical on the interpreter and the native backend, on both `Int` and the fixed-width lanes. It is not a value, and unlike the recoverable `fail()` of [errors and failure](#errors-and-failure) it is not routed through an effect and cannot be caught; it aborts the run the way an unrecoverable `error(code)` does. Every other integer operation is total.
 
-The fixed-width lanes wrap rather than fault or promote ([fixed-width integers](#fixed-width-integers)): `+`, `-`, and `*` on `I64` and `U64` are two's-complement modular arithmetic, so adding one to `I64_MAX` wraps to `I64_MIN` and adding one to `U64_MAX` yields `0`.[^fixed-div-edge] Unary minus follows the same wrap on the fixed-width lane, so `-x` on `I64` is the two's-complement negation and `-I64_MIN` is `I64_MIN`. `Int`, being a bignum, has no such edge: negation and division there are always exact.
+The fixed-width lanes wrap rather than fault or promote ([fixed-width integers](#fixed-width-integers)): `+`, `-`, and `*` on `I64` and `U64` are two's-complement modular arithmetic, so adding one to `I64_MAX` wraps to `I64_MIN` and adding one to `U64_MAX` yields `0`.[^fixed-div-edge] Unary minus follows the same wrap on the fixed-width lane, so `-x` on `I64` is the two's-complement negation and `-I64_MIN` is `I64_MIN`. `Int`, being a bignum, has no such edge: negation and division there are always exact.[^register]
 
 [^fixed-div-edge]: Division wraps on the one signed input that would overflow it, so `I64_MIN / -1` on the `I64` lane is `I64_MIN` and `I64_MIN % -1` is `0`, consistent with the wrapping add/sub/mul rather than trapping; only a zero divisor faults.
+
+[^register]: The edge is where a number stops being a mathematical object and becomes a physical one. An `I64` is not an integer but sixty-four transistors talked into standing for one, and the wrap is the moment they run out of room to carry. The bignum has no edge only because it buys more matter as it climbs, which postpones the confrontation with the machine rather than escaping it.
 
 ```prism
 {{#include ../../tests/cases/run/num_fixed_wrap.pr}}
@@ -396,7 +400,16 @@ The fixed-width lanes wrap rather than fault or promote ([fixed-width integers](
 
 #### 5.7.1 Safe Arithmetic Families {#safe-arithmetic}
 
-The wrapping and faulting defaults above are the primitives; a program that wants overflow to be visible rather than silent reaches for the safe families in the `Data.Checked` library, which layer four disciplines over those primitives through one class, `Checked(a)`. The `checked_*` methods (`checked_add`, `checked_sub`, `checked_mul`, `checked_neg`, `checked_div`, `checked_mod`) return `Option(a)`, `None` exactly when the operation overflows the lane or divides by zero. The `saturating_*` methods (`add`, `sub`, `mul`) clamp to the bound the overflow crossed instead. The `wrapping_*` methods (`add`, `sub`, `mul`, `neg`) are explicit names for the two's-complement wrap the raw operators already perform ([fixed-width integers](#fixed-width-integers)), so a caller can spell the intent rather than rely on the default. And the `overflowing_*` methods (`add`, `sub`, `mul`) return the wrapped result paired with a `Bool` that is true precisely when the operation overflowed. Instances cover `I64`, `U64`, and `Int`; the checked narrowings `int_to_i64` and `int_to_u64` sit beside the class as free functions returning `Option`, the partial inverses of the total widenings `int_of_i64`/`int_of_u64`.
+The wrapping and faulting defaults above are the primitives; a program that wants overflow to be visible rather than silent reaches for the safe families in the `Data.Checked` library, which layer four disciplines over those primitives through one class, `Checked(a)`.
+
+| Family          | Methods                                  | Result      | Behavior                                                                                                                                                                                          |
+| --------------- | ---------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `checked_*`     | `add`, `sub`, `mul`, `neg`, `div`, `mod` | `Option(a)` | `None` exactly when the operation overflows the lane or divides by zero.                                                                                                                          |
+| `saturating_*`  | `add`, `sub`, `mul`                      | `a`         | Clamps to the bound the overflow crossed.                                                                                                                                                         |
+| `wrapping_*`    | `add`, `sub`, `mul`, `neg`               | `a`         | Explicit names for the two's-complement wrap the raw operators already perform ([fixed-width integers](#fixed-width-integers)), so a caller can spell the intent rather than rely on the default. |
+| `overflowing_*` | `add`, `sub`, `mul`                      | `(a, Bool)` | The wrapped result paired with a `Bool` true precisely when the operation overflowed.                                                                                                             |
+
+Instances cover `I64`, `U64`, and `Int`; the checked narrowings `int_to_i64` and `int_to_u64` sit beside the class as free functions returning `Option`, the partial inverses of the total widenings `int_of_i64`/`int_of_u64`.
 
 `Checked` sits beside the arithmetic classes rather than inheriting from them: it carries no superclass and no raw operators, so it stays meaningful for any integer lane independently of what algebraic structure that lane also has. The connection runs the other way, as a law. The `wrapping_*` methods agree exactly, value for value, with the lane's raw arithmetic, `wrapping_add`/`wrapping_sub`/`wrapping_mul` with the two's-complement `+`/`-`/`*` and `wrapping_neg` with unary negation.[^u64-wrapping-neg] Because the agreement is with the raw operators, it is stable under any later refactor that gives those operators a class of their own: the `wrapping_*` methods and the lane's ring operations remain the same function by construction.
 
@@ -468,9 +481,19 @@ A `type` declaration introduces an **algebraic data type**: a **sum** of constru
 
 A **`newtype`** is a data type with exactly one single-field constructor: a type distinct from its payload, with no runtime wrapper. An `alias` on a type expression is a transparent synonym, interchangeable with its definition. An `alias` whose body is a row literal is a **row alias**, the same transparency for a set of effect labels: usable wherever a row is written, expanded before checking, and composable with other aliases ([composing rows](#composing-rows)); a row alias takes no parameters.
 
-A `deriving (C, ...)` clause generates the named instances structurally ([type classes](#type-classes)). `Eq`, `Ord`, `Show`, `Hash`, and `Lens` are derivable everywhere: derived `Ord` compares fields lexicographically in declaration order and orders constructors by declaration, and derived `Hash` folds the value through the same blake3 Merkle construction that content-addresses code ([content-addressed core](compiler.md#content-addressed-core)), so structurally equal values carry one canonical digest on every backend.
+A `deriving (C, ...)` clause generates the named instances structurally ([type classes](#type-classes)). `Eq`, `Ord`, `Show`, `Hash`, `Lens`, and `Plate` are derivable everywhere: derived `Ord` compares fields lexicographically in declaration order and orders constructors by declaration, and derived `Hash` folds the value through the same blake3 Merkle construction that content-addresses code ([content-addressed core](compiler.md#content-addressed-core)), so structurally equal values carry one canonical digest on every backend.
 
-Three more classes derive against opt-in modules: `Serialize` and `Stable` (`import Wire`) for the wire codec, where `Stable` derives only when every component is itself `Stable` and a non-stable field is a compile error at the derive site, and `Arbitrary` (`import Test`) for property-test generators built from the type's structure ([stable blocks](#stable-blocks)). `deriving (Identifiable)` is shorthand for the identity starter pack, expanding to exactly `Eq`, `Ord`, `Hash`, and `Show` so an ID newtype is comparable, hashable, and printable from one keyword with no imports; a class listed alongside it is derived once, not twice, and `Arbitrary` is deliberately excluded (it lives behind `import Test` and is a testing concern), so a value that also wants a generator writes `deriving (Identifiable, Arbitrary)`.
+Derived `Plate` yields one layer of structure, taken apart and put back. `children(x)` is the list of `x`'s immediate subvalues _of `x`'s own type_, in constructor-declaration and field order, and nothing else; `rebuild(x, ks)` is `x` with exactly those positions replaced, left to right, by the elements of `ks`. A whole-tree traversal or rewrite (every subterm, a fold, a count, a bottom-up rewrite) is written once against that one pair rather than once per constructor, and a fifty-constructor syntax tree costs the same to walk as a two-constructor one. The derivation looks through list, optional, tuple, and record fields, and through the other data types declared in the program, to find the occurrences a field can lead to; that is what lets a traversal see through the carrier records a tree holds its nodes in (a match arm, a spanned wrapper, a qualifier) with no second match written for them.
+
+The two methods are inverse on one layer, and that law is what every combinator above them relies on: `rebuild(x, children(x))` is `x`, and the list handed to `rebuild` must have the same length and order as the one `children` returned. `children` is pure and total, returning structurally smaller values, so a recursion driven by it terminates on a finite value. `rebuild` carries `Fail` in its row for exactly one reason: a list of any other length is a programming error, not an input to be repaired, so it raises `Fail` rather than padding the missing positions or dropping the extra ones, either of which would silently hand back a value that is not the one asked for. On a correctly shaped list it performs no effect. Both methods come from one walk of the declaration, read forwards and backwards, so a derived pair satisfies the law by construction; a hand-written instance owes it.
+
+Being structural rather than compositional, this derivation differs from the others in two visible ways. It puts no constraint on the type's own parameters, because a `Plate(T(a))` yields `T` occurrences and never an `a`; and it asks nothing of a component's own instances, taking the component apart by its declaration rather than by dispatch, so a component with no `Plate` instance is traversed all the same. What it cannot take apart it refuses: a field that could still lead back to the derived type through something opaque (a function, a container with no declaration in the program) is an error at the `deriving` clause naming the field and the type it reached, never a silently dropped subterm. Nothing in the class is unforgeable, so a hand-written instance is an ordinary instance and is accepted, which is the escape hatch for an abstract type whose children the compiler cannot see.
+
+Five more classes derive against opt-in modules: `Serialize` and `Stable` (`import Wire`) for the wire codec, where `Stable` derives only when every component is itself `Stable` and a non-stable field is a compile error at the derive site; `Arbitrary` (`import Test`) for property-test generators built from the type's structure ([stable blocks](#stable-blocks)); and `ToJson` with `FromJson` (`import Json`) for conversion to and from the dynamic JSON tree.
+
+The JSON pair is for a type whose schema is its own declaration, and is derived as a pair, since a type that encodes but cannot decode is a document nobody can read back. One constructor becomes one object: a record constructor's keys are its declared field names, a positional one's are its argument positions (`_0`, `_1`), and a sum additionally names the variant it holds under the key `$`, which no field name can spell, so a document names its constructor rather than an index that quietly changes meaning when a constructor is inserted. A single-constructor type has nothing to discriminate and carries no tag. Constructor and field order are the declaration's, so a value has one tree, and the encoder sorts keys, so it has one string on every backend. Unlike `Plate` this derivation is compositional: each field is converted through its own instance, so a component with no instance is a compile error at the field. A decode that does not fit, a tree that is not an object, a `$` naming no constructor of the type, a missing key, or a field that will not itself decode, is one ordinary `Fail`, caught with `optional` or `default`; that failure carries no payload, so it reports that the document did not fit and not where, because `Fail` is nullary and a positioned failure would mean a different effect on the class signature and so on every hand-written instance too. None of this is the wire codec: a `Serialize` byte format is frozen and versioned by `Stable`, while a JSON document is read by something not compiled against this program, so the encoding is self-describing rather than compact and promises nothing across a change to the declaration.
+
+`deriving (Identifiable)` is shorthand for the identity starter pack, expanding to exactly `Eq`, `Ord`, `Hash`, and `Show` so an ID newtype is comparable, hashable, and printable from one keyword with no imports; a class listed alongside it is derived once, not twice, and `Arbitrary` is deliberately excluded (it lives behind `import Test` and is a testing concern), so a value that also wants a generator writes `deriving (Identifiable, Arbitrary)`.
 
 ### 5.10 Records {#record-types}
 
@@ -556,7 +579,7 @@ So `Monad` here is just another class, structure for `List`-style nondeterminism
 
 [^kleisli]: Although, if you think about it, an effectful `(a) -> b ! {E}` _is_ a Kleisli arrow `(a) -> m(b)` with the monad scraped off the result type and smeared into the row `E`: composition collapses to plain `.`, the row keeps the books `bind` used to, and a handler is the `join` you never had to write.
 
-[^burrito]: The folklore that a monad is a burrito, a value wrapped so you must unwrap it to use it, is for once almost accurate. An effect is the burrito: `! {E}` closed around what a computation produces, sealed on the output end. A coeffect is the taco: the `@`-facts the context must supply before it runs, open on the input end. Output-wrapped against input-demanded, the duality survives the tortilla; see [coeffects](#usage-and-resource-annotations).
+[^burrito]: The folklore that a monad is a burrito is wrong in the usual ways, but the menu has structure. The `@` coeffects are the taco, open toward the context and describing how it may consume the value; the outward `! {E}` effect row adds the gordita shell, recording what the computation may perform, so the full computation type is a Cheesy Gordita Crunch. A monad is the burrito one abstraction up, packaging the sequencing discipline itself; a transformer stack is presumably a Crunchwrap Supreme. Nobody knows how far this hierarchy goes. The serious duality survives the tortilla: `@` demands inward and `!` reports outward; see [coeffects](#usage-and-resource-annotations).
 
 The two systems meet in `Traversable`. The example below defines a recursive `Tree`, gives it the `Functor`/`Foldable`/`Traversable` instances, then runs a single generic `traverse` over it four ways. Nothing about the traversal changes between them; the behaviour is chosen entirely by the effect the per-element function performs, since `traverse`'s signature carries that row straight through. `State` numbers the leaves, `Fail` short-circuits, `Choice` (resumed multishot) enumerates every assignment, and `{State, Fail}` does the first two at once under two stacked handlers. Each is a job a monadic language hands to a different `Applicative` instance (`State`, `Maybe`, the list monad) or, for the last, a `StateT s Maybe` transformer stack; here it is one traversal and the effect rows supply the rest. This is the whole type system in one program: higher-kinded classes with a superclass chain, principal effect rows that compose, and handlers (including multishot resumption) discharging them.
 
@@ -805,7 +828,9 @@ The reserved vocabulary is fixed, and an unknown word in usage position is a har
 
 <p align="center"><img src="images/lattice-coeffect-axes.svg" alt="the six coeffect axes as mini-lattices: Allocation over noalloc and Mobility over portable are two-point chains, Fip meets at {linear, bounded_stack}, and Multiplicity (once, many), Aliasing (unique, aliased), and Escape (local, noescape) are exclusive axes with no meet" width="700"></p>
 
-An exclusive axis is a choice of one point, which is why `@ {once, many}` is rejected as a contradiction at parse. Only the fip axis composes, because its facts are cumulative strengthenings of one certificate rather than alternatives. **Polarity** is the axis's variance discipline, the direction its proof obligation flows. A **past** fact is covariant: it records how a value was built, the producer proves it, and the fact travels with the value wherever it goes. A **future** fact is contravariant: it restricts what may still be done with the value, the consumer promises it, and the fact binds at the use site. The polarity is stated by proof obligation, deciding which side of an API seam owes the evidence when a fact is checked, not by an algebraic comonadic/monadic decomposition.
+An exclusive axis is a choice of one point, which is why `@ {once, many}` is rejected as a contradiction at parse. Only the fip axis composes, because its facts are cumulative strengthenings of one certificate rather than alternatives. **Polarity** is the axis's variance discipline, the direction its proof obligation flows. A **past** fact is covariant: it records how a value was built, the producer proves it, and the fact travels with the value wherever it goes. A **future** fact is contravariant: it restricts what may still be done with the value, the consumer promises it, and the fact binds at the use site. The polarity is stated by proof obligation, deciding which side of an API seam owes the evidence when a fact is checked.[^polarity-not-comonad]
+
+[^polarity-not-comonad]: One could cast past and future facts as a comonad and a monad, the covariant modality with its `extract`, the contravariant one with its `unit`, and the types would line up. Prism declines the ceremony: polarity is just a rule about which side of a seam owes the evidence, which costs a checker a direction bit rather than a category.
 
 The multiplicity axis already has a checked instance elsewhere in the language, applied to a continuation rather than a value: an operation's **grade** ([effects and handlers](#effects-and-handlers)) is `never`, `once`, or `many`, the same words on the same lattice, restricting how a handler clause may resume the captured continuation `k`. The grade on an operation and the multiplicity fact on a closure are the same point on the same axis, read at two boundaries: the operation form is checked on a continuation and pins `once` to exactly one resumption in tail position, while the value form is affine, at most one use of the annotated closure. It adds one point the value facts omit, `never` (the continuation is dropped), because a value used zero times is not a tracked usage fact but a clause that never resumes is a real, useful grade. That shared vocabulary is not a coincidence of spelling: the continuation an operation hands its handler is the first value in the language to carry a coeffect, which is what makes "an effect is just a coeffect on its own continuation" ([three posets](#three-posets)) a literal statement rather than a slogan.
 
@@ -836,7 +861,9 @@ This split matters. A function may be `@ noalloc` and still perform `IO`; the ro
 
 **Two mechanisms, one vocabulary.** Allocation can be _forbidden_: `@ noalloc` ([allocation certificates](#allocation-certificates)) proves a call tree allocates no fresh cell. It can also be _avoided_: an [unboxed representation](#unboxed-products) stores a value inline, so no heap cell is created. The certificate establishes whether allocation happens, while the representation determines whether a cell is needed. The `Arena` library expresses allocator selection as a handled `Alloc` effect rather than a surface storage class; it changes the allocation path without changing the certificate vocabulary.
 
-**Checked closure contracts.** Three usage facts are checked closure contracts. `@ once` on a function-typed parameter admits a value used at most once: a `@ many` value fits a `@ once` slot but never the reverse, and using the parameter twice, aliasing it through a `let`, or capturing it under a lambda counts as further use and is rejected (E6059). `@ portable` admits a closure that captures only what travels to a fresh runtime: a content-addressed top-level function or constructor, another portable parameter, or portable scalar data; a captured local closure, `var` cell, or handler operation is rejected by name (E6060). `@ {once, portable}` requires both at once. `@ noescape`, written on a function domain (`(Builder @ noescape) -> a`), promises the callback's argument does not outlive the call: a token that is returned, embedded in returned data, aliased out, or captured by another closure is rejected (E6061), and the callback must be a checkable form, a closure literal, top-level function, or same-contract relay (E6062). Every fact is erased before the core, so an accepted program is byte-identical on both backends: the contract governs what the compiler accepts, never what a passing program does.
+**Checked closure contracts.** Three usage facts are checked closure contracts. `@ once` on a function-typed parameter admits a value used at most once[^trust-me]: a `@ many` value fits a `@ once` slot but never the reverse, and using the parameter twice, aliasing it through a `let`, or capturing it under a lambda counts as further use and is rejected (E6059). `@ portable` admits a closure that captures only what travels to a fresh runtime: a content-addressed top-level function or constructor, another portable parameter, or portable scalar data; a captured local closure, `var` cell, or handler operation is rejected by name (E6060). `@ {once, portable}` requires both at once. `@ noescape`, written on a function domain (`(Builder @ noescape) -> a`), promises the callback's argument does not outlive the call: a token that is returned, embedded in returned data, aliased out, or captured by another closure is rejected (E6061), and the callback must be a checkable form, a closure literal, top-level function, or same-contract relay (E6062). Every fact is erased before the core, so an accepted program is byte-identical on both backends: the contract governs what the compiler accepts, never what a passing program does.
+
+[^trust-me]: A promise the checker holds you to. There is no annotation for "trust me": the only way past the check is to satisfy it.
 
 `teleport(f : (() -> a) @ {once, portable}) : a` (the `Teleport` module) is the checked mobility boundary built from those facts: its parameter type makes each call prove the closure captures only content-addressed code and portable data and runs at most once, so the computation is safe to move to a fresh runtime. Placement is unobservable in exactly the way tier and backend choice are, so running a teleported closure is observationally identical to calling it directly; the boundary changes what is accepted, not what happens.
 
@@ -858,7 +885,18 @@ Cooperative cancellation is source-driven scheduler behavior, not an observation
 
 ### 7.12 Capability Effects and IO {#capability-effects-and-io}
 
-Reading the outside world is itself effectful, and the row records which part of the world a function reads. The nondeterministic input operations are the four capability effects `Console` (`read_int`, `read_line`), `FileSystem` (`read_file`, `file_exists`), `Random` (`rand`), and `Env` (`getenv`, `args_count`, `arg`). A function that reads input names exactly that capability in its row: a function calling `read_int` carries `! {Console}`, not a blanket `! {IO}`, so the row says which part of the world is read rather than merely that some IO happens. (`Console`, `FileSystem`, `Random`, and `Env` are therefore reserved effect names, among the [keywords](#keywords). The `Concurrent` library adds a fifth capability, `Clock`, described below. `Preempt` is also reserved, but the cooperative scheduler does not handle it: user declarations are rejected, and the existing row check classifies it outside the replayable capability set.)
+Reading the outside world is itself effectful, and the row records which part of the world a function reads. The nondeterministic input operations are four capability effects:
+
+| Effect       | Operations                    |
+| ------------ | ----------------------------- |
+| `Console`    | `read_int`, `read_line`       |
+| `FileSystem` | `read_file`, `file_exists`    |
+| `Random`     | `rand`                        |
+| `Env`        | `getenv`, `args_count`, `arg` |
+
+A function that reads input names exactly that capability in its row: a function calling `read_int` carries `! {Console}`, not a blanket `! {IO}`, so the row says which part of the world is read rather than merely that some IO happens.[^confession] (`Console`, `FileSystem`, `Random`, and `Env` are therefore reserved effect names, among the [keywords](#keywords). The `Concurrent` library adds a fifth capability, `Clock`, described below. `Preempt` is also reserved, but the cooperative scheduler does not handle it: user declarations are rejected, and the existing row check classifies it outside the replayable capability set.)
+
+[^confession]: The row is itemized on purpose: a function may not claim a vague `IO` and leave which part of the world unsaid, because the capability it names is exactly the one record and replay will hold it to.
 
 The surface is unchanged: `read_int()`, `read_file(p)`, `getenv(s)`, and friends stay ordinary calls, defined in the prelude as thin wrappers that perform the corresponding capability operation. A default `run_io` world handler is wrapped around `main` on demand, only when `main` reaches a capability, and discharges each operation by performing the real input and resuming with the result, so the capabilities collapse to `! {IO}` at the program boundary. The handler is tail-resumptive, so it fuses to a direct call at no cost ([effect lowering](./compiler.md#effect-lowering)). Output stays an opaque `IO` effect: `print`, `write_file`, `append_file`, and `remove_file` carry `! {IO}` and are not capability operations, because [record and replay](#record-and-replay) needs only inputs pinned. Binary file IO sits on the same split: `read_bytes(p)` is a `FileSystem` capability that reads a file as raw `Bytes` and is recorded like any other input, its own operation rather than a detour through `read_file` (routing bytes through a `String` would corrupt them at the first non-UTF-8 byte), while `write_bytes(p, bs)` is an `IO` output returning a `Result`.
 
@@ -872,7 +910,9 @@ Because input is now an interceptable operation rather than an untracked builtin
 
 #### Virtual Simulation Clocks {#virtual-simulation-clocks}
 
-Time is a capability too. The `Concurrent` library's `Clock` effect (`now`, `sleep`) is discharged by `run_clock`, which threads a pure logical counter: `now()` reads the current tick and `sleep(d)` advances it. Time is therefore virtual, deterministic, and replayable, with no real clock and no time primitive.
+Time is a capability too. The `Concurrent` library's `Clock` effect (`now`, `sleep`) is discharged by `run_clock`, which threads a pure logical counter: `now()` reads the current tick and `sleep(d)` advances it. Time is therefore virtual, deterministic, and replayable, with no real clock and no time primitive.[^no-clock]
+
+[^no-clock]: Prism's answer to the unreliability of physical time is to decline to own a clock. Wall time keeps passing outside the program, uninvited and unread; inside, time is a counter the handler increments, so a run does not happen at a moment so much as recite one. It is the only way to make "what time is it" a pure function of the source.
 
 A fiber may perform `Clock`; because the scheduler does not handle it, `Clock` flows out of `run_async` to an enclosing `run_clock` like any other capability. The important move is routing `now`, `sleep`, and timeouts through an ambient time capability rather than the wall clock. A test advances a virtual clock, scheduling becomes a pure function of it, and the cooperative-deterministic story is _testable_ rather than merely asserted.
 
@@ -922,9 +962,20 @@ The two pieces fit together in a few lines: `roll` is `replayable` because it re
 
 Record and replay pins a run; lineage explains one. A run recorded with a `--lineage` sidecar carries, beside the replay trace, a typed account of everything that produced its output, so an artifact can be asked why it exists after the source, inputs, and environment are gone. `prism run p.pr --record run.replay --lineage run.plineage -- args` writes both: the `.replay` trace ([record and replay](#record-and-replay)) and a `.plineage` sidecar. `--lineage` requires `--record`, because the sidecar names the trace it explains.
 
-The sidecar names the source, Std, and package roots (content-addressed, [content-addressed core](./compiler.md#content-addressed-core)); the full compiler identity (version, hash scheme, target, backend, optimizer surface, and every behavior-affecting flag); the invocation's `argv`; each environment read; each input file by content digest and byte length; any file the run wrote; the stdout digest; and the replay trace digest, recorded as a relation so verification reads the graph rather than a filesystem convention. It records observations of the world, not the world: an input file is named by the hash of the bytes read, never by trusting the file still on disk.
+The sidecar names the source, Std, and package roots (content-addressed, [content-addressed core](./compiler.md#content-addressed-core)); the full compiler identity (version, hash scheme, target, backend, optimizer surface, and every behavior-affecting flag); the invocation's `argv`; each environment read; each input file by content digest and byte length; any file the run wrote; the stdout digest; and the replay trace digest, recorded as a relation so verification reads the graph rather than a filesystem convention. It records observations of the world, not the world: an input file is named by the hash of the bytes read, never by trusting the file still on disk.[^unreliable-disk]
 
-Four verbs read a sidecar. `prism lineage show SIDECAR` renders the why-style explanation, and `prism lineage why SIDECAR OUTPUT` walks one output backward through the request, its inputs, the trace, and the compiler identity; both work after the source files are gone, since every fact is in the sidecar. `prism lineage verify SIDECAR` rehashes what the sidecar recorded and confirms it still matches; `--replay` verifies the stronger way, by re-running the trace and re-checking the result rather than trusting the sidecar's own numbers. `prism diff` takes two sidecars and reports, by logical key, which digests were preserved, moved, added, or removed, exiting nonzero when anything moved. The change-one-input workflow reads directly. The program under observation reads one input file and prints one line:
+[^unreliable-disk]: The disk is treated, correctly, as an unreliable narrator. A file is matter, and matter is revised behind your back, so Prism keeps the hash of the bytes it actually read, an observation made once, rather than a path it would have to trust to still mean the same thing later. What persists on the platter is the world's business, not the run's.
+
+Four verbs read a sidecar. Because every fact lives inside it, `show` and `why` still answer after the source, inputs, and environment are gone.
+
+| Verb                               | What it does                                                                                                                                                                                            |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prism lineage show SIDECAR`       | Renders the why-style explanation of the whole run.                                                                                                                                                     |
+| `prism lineage why SIDECAR OUTPUT` | Walks one output backward through the request, its inputs, the trace, and the compiler identity.                                                                                                        |
+| `prism lineage verify SIDECAR`     | Rehashes what the sidecar recorded and confirms it still matches; `--replay` verifies the stronger way, re-running the trace and re-checking the result rather than trusting the sidecar's own numbers. |
+| `prism diff SIDECAR SIDECAR`       | Reports, by logical key, which digests were preserved, moved, added, or removed, exiting nonzero when anything moved.                                                                                   |
+
+The change-one-input workflow reads directly. The program under observation reads one input file and prints one line:
 
 ```prism
 {{#include ../examples/greet.pr}}
@@ -1033,7 +1084,9 @@ The snapshot is a `kont` envelope whose header carries the program's namespace r
 
 The suspendable subset is explicit. A value that cannot cross the boundary, a graph nested past the suspendable depth, or a native resource is refused at suspend time naming what could not be written, never encoded into a snapshot that would fail on the far side. The envelope is a runtime-value encoding over the interpreter's representation, serialized and resumed by the tree-walking interpreter, including that interpreter compiled to WebAssembly, so the browser demo can move a running program between same-origin contexts that already share the same bundle. Native-code suspension is unsupported.
 
-Mobility is therefore a consequence of the same two invariants the rest of the runtime already uses: continuations are reified values, and code identity is content-addressed. Teleporting a computation means sending the `kont` envelope, not inventing a separate remote-call mechanism: the receiver decodes the suspended continuation, recomputes the namespace root for its local program, and resumes only if that digest matches the envelope. What crosses the wire is the pending computation and captured state; what authorizes it is the hash of the code it was captured in.
+Mobility is therefore a consequence of the same two invariants the rest of the runtime already uses: continuations are reified values, and code identity is content-addressed. Teleporting a computation means sending the `kont` envelope, not inventing a separate remote-call mechanism: the receiver decodes the suspended continuation, recomputes the namespace root for its local program, and resumes only if that digest matches the envelope. What crosses the wire is the pending computation and captured state; what authorizes it is the hash of the code it was captured in.[^packs-a-bag]
+
+[^packs-a-bag]: This is the closest a computation comes to shedding its physical location, and it still has to pack a bag. The suspended form would rather exist nowhere in particular, but to arrive somewhere it must serialize to bytes and cross a wire made of actual copper; the envelope is the ticket. Even the escape from matter is conducted in matter.
 
 That keeps the mobility story aligned with replay rather than distribution magic. A suspended program resumed by another same-origin context must produce the same suffix as the original uninterrupted run, because the step it resumes from and the code it resumes into are both checked facts. Content addressing names the definitions, the `kont` envelope names the live continuation over those definitions, and deterministic replay is the observable contract tying them together.
 
@@ -1183,8 +1236,8 @@ A read is **failable**: a missing index or key performs the `Fail` effect ([erro
 | Broadcast a scalar  | `simd_fsplat`                         | `simd_isplat`                        |
 | Extract a lane      | `simd_fextract`                       | `simd_iextract`                      |
 | Arithmetic          | `simd_fadd`, `simd_fsub`, `simd_fmul` | `simd_iadd`, `simd_isub`             |
-| Minimum and maximum | `simd_fmin`, `simd_fmax`              | —                                    |
-| Bitwise operations  | —                                     | `simd_iand`, `simd_ior`, `simd_ixor` |
+| Minimum and maximum | `simd_fmin`, `simd_fmax`              | none                                 |
+| Bitwise operations  | none                                  | `simd_iand`, `simd_ior`, `simd_ixor` |
 
 | Semantic guarantee                 | Contract                                                                                                                                               |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -1387,7 +1440,43 @@ A single constructor pattern over a recursive type retires the recursion into a 
 {{#include ../examples/tree_fold.pr}}
 ```
 
-### 9.2 Guards {#pattern-guards}
+### 9.2 Alternation {#pattern-alternation}
+
+A pattern may **alternate**: `p | q | r` matches a value that any one of its alternatives matches. Alternation is legal wherever a pattern is, so it nests inside a constructor argument, a tuple, a list, and a record field, and `Line(0 | 1, _)` is one arm rather than two nearly identical ones.
+
+An alternation means exactly the arms it stands for. `p | q => e` is `p => e` followed by `q => e`, and a nested alternation enumerates the product of its positions, leftmost slowest, so overlapping alternatives keep the source order a reader would assume. Everything else follows from that one rule and needs no separate machinery: a guard belongs to each alternative (`p | q if g => e` is `p if g => e` then `q if g => e`, so a value matching both alternatives retries the guard against the second before falling through), and each alternative is checked on its own, so a name shared by two alternatives need not have the same type in both as long as the body checks at each.
+
+Because the body is shared, every alternative must bind the same set of names; one that binds a name another does not is an error (`E6068`) naming the name and pointing at the offending alternative. The enumeration is a product, so alternation in several positions multiplies; an arm expanding past 256 arms is refused (`E6069`) rather than compiled into an unbounded arm list.
+
+```prism
+{{#include ../examples/alternation.pr}}
+```
+
+A `let` binding destructures with a constructor or tuple pattern and admits no alternation, since an irrefutable binding has one shape to name and nothing to choose between.
+
+### 9.3 Patterns in Parameter Position {#pattern-parameters}
+
+A parameter of a `fn` or a lambda may be written as a pattern rather than as a name. `fn area(Circle(r)) = ...` is the function that takes one argument and destructures it, with the same meaning as taking a named argument and matching it around the whole body:
+
+```prism,ignore
+fn area(Circle(r)) : Int = r * r
+
+-- means
+
+fn area(s : Shape) : Int =
+  match s of
+    Circle(r) => r * r
+```
+
+A bare variable in parameter position is still the ordinary named parameter, binding without testing, and `_` still names a parameter the body ignores. Any other pattern is a pattern parameter, and it composes with the rest of a parameter's syntax: a type annotation, `borrow`, and a default all attach as usual (`fn f(borrow Circle(r) : Shape := unit_circle)`). Where several parameters are patterns, the leftmost one's match is the outer one, so a later pattern's bindings cannot capture an earlier one's.
+
+A pattern parameter must be **irrefutable**: it has to cover every value of its type, because there is no next arm to fall through to. A refutable one is reported exactly as the match it denotes, a non-exhaustive match (`E4001`) naming a missing constructor, with the caret under the pattern the author wrote. A pattern parameter has no name of its own, so it cannot be supplied by keyword; other parameters of the same function still can be.
+
+```prism
+{{#include ../examples/pattern_params.pr}}
+```
+
+### 9.4 Guards {#pattern-guards}
 
 A `match` arm may carry a **guard**, `pat if cond => body`: the pattern must match and the guard must evaluate to `true` before the arm fires, and the guard sees every variable the pattern bound. When the pattern fails to match, or matches but the guard is `false`, control falls through to the next arm in source order.
 
@@ -1395,13 +1484,15 @@ A `match` arm may carry a **guard**, `pat if cond => body`: the pattern must mat
 {{#include ../examples/guards.pr}}
 ```
 
-### 9.3 Exhaustiveness and Redundancy {#pattern-exhaustiveness}
+### 9.5 Exhaustiveness and Redundancy {#pattern-exhaustiveness}
 
 Every `match` is checked by default, with no opt-out: the usefulness algorithm of [Maranget (2007)](bibliography.md#maranget-2007) decides, from the arms' patterns alone, whether some value of the scrutinee's type reaches no arm (a **non-exhaustive match**, `E4001`, an error that names a concrete missing pattern as a witness) and whether some arm can never fire because every value it would match is already claimed by an earlier arm (an **unreachable arm**, `E4000`). A guarded arm does not count toward exhaustiveness, since its guard may fail at run time and fall through regardless of what its pattern matched; a wildcard arm underneath a family of guarded arms exists precisely because the guards above it cannot discharge the check on their own.
 
+Both questions are asked of the arms an [alternation](#pattern-alternation) stands for, not of the alternation itself, so an alternation covering the last constructors of a type discharges exhaustiveness exactly as separate arms would. Reachability is the one place the source arm stays visible: an arm is unreachable only when no alternative of it can fire, and the error underlines the whole arm the author wrote. A single dead alternative inside a live arm (`Red | Red`) is not reported, since the arm as written is still doing work.
+
 Exhaustiveness is not a lint: an unhandled case is a compile-time error, not a run-time panic waiting to happen. The proof survives into the compiled program too: the native backend still [lowers a `match` to a constructor `switch`](compiler.md#lowering-core-to-llvm) with a default block, but that block is unreachable code the checker has already proved dead, trapping rather than falling through silently in the one case a bug could ever reach it.
 
-### 9.4 Pattern Synonyms {#pattern-synonyms}
+### 9.6 Pattern Synonyms {#pattern-synonyms}
 
 A `pattern N(x) for T = view ... make ...` declaration defines a bidirectional **pattern synonym**: in match position it runs `view` and succeeds when that returns `Some` (the present case of `Option`, from [the standard prelude](#the-standard-prelude)); in expression position it runs `make`. Here `view` and `make` are contextual keywords, significant only inside a `pattern` declaration. A synonym with both halves is a **prism** (a composable view-and-build pair); one with only `view` is a **view pattern**. The `for` target may also name a class rather than a type, with the view a method of that class: `pattern First(n) for Peek = view peek` matches a value of any type with a `Peek` instance, dispatching `peek` through the dictionary at each match site, so one synonym destructures every instance.
 
@@ -1411,7 +1502,7 @@ A `pattern N(x) for T = view ... make ...` declaration defines a bidirectional *
 
 ## 10. Declarations and Programs {#declarations-and-programs}
 
-A function is declared with `fn`; a parameter may carry a type annotation, a default value `:= e`, or the `borrow` modifier, which lets a pure function read a parameter without taking ownership of it. A return annotation is written `: T ! {R}` for result type `T` and effect row `R`, `: T !` for an explicit empty row, or `: T` to leave the row inferred. A parameter with a default may be omitted, and any argument may be passed by name as `f(p := e)`, in any order and mixed with positional arguments; the call is rewritten to positional form, filling omitted defaults. Defaults and named arguments are honored on top-level functions. A top-level `let` is a constant: its references are inlined. A `where` block attaches non-recursive, lexically scoped definitions to a function body.
+A function is declared with `fn`; a parameter may carry a type annotation, a default value `:= e`, or the `borrow` modifier, which lets a pure function read a parameter without taking ownership of it, and it may be written as an irrefutable [pattern](#pattern-parameters) instead of a name. A return annotation is written `: T ! {R}` for result type `T` and effect row `R`, `: T !` for an explicit empty row, or `: T` to leave the row inferred. A parameter with a default may be omitted, and any argument may be passed by name as `f(p := e)`, in any order and mixed with positional arguments; the call is rewritten to positional form, filling omitted defaults. Defaults and named arguments are honored on top-level functions. A top-level `let` is a constant: its references are inlined. A `where` block attaches non-recursive, lexically scoped definitions to a function body.
 
 ```prism
 {{#include ../examples/named_args.pr}}
@@ -1663,6 +1754,30 @@ Name resolution rewrites every top-level definition to a canonical, module-quali
 
 Instances are global, but each records its defining module. An **orphan** instance (defined apart from both its class and its head type) and instances that overlap across modules are reported as warnings; an ambiguity names each candidate's module.
 
+A **bare** name, one written without an `M.` qualifier, resolves by consulting five tiers in order and taking the first that offers it:
+
+1. locals: parameters, `let` and `var` bindings, match binders, and handler binders
+2. the module's own top-level definitions
+3. the prelude's top-level definitions
+4. names opened by the module's own imports
+5. names opened by the prelude's imports
+
+That order is what lets the library and a program grow independently. A module's own definition of a name outranks a prelude definition of it, and the prelude is looked up in its own scope, so a program that defines `children` gets its own at its use sites while the prelude keeps calling the prelude's: a top-level definition **shadows** a prelude name rather than replacing it. Adding a helper to the prelude therefore cannot silently rebind a program that already defines that name, and defining a name in a program cannot silently rebind the prelude's internals. Tier 4 above tier 5 says the same thing for opens: a module's own `import M (..)` outranks whatever the prelude opened, so a library whose names overlap the prelude's can be opened without editing either. A prelude definition still outranks a module's imports, so importing a name the prelude defines does not by itself replace it; define the name, or qualify the use.
+
+Only tiers 4 and 5 can offer one name from more than one place, and that is not an error at the import. The clash is reported where a bare use actually forces the choice:
+
+```prism,ignore
+import Walk (..)     -- exports `children` and `rename_all`
+import Rename (..)   -- also exports `children`
+
+fn main() =
+  println(show(Walk.children(1)))   -- fine, qualified
+  println(show(rename_all(0)))      -- fine, only one module offers it
+  println(show(children(1)))        -- error: ambiguous
+```
+
+The diagnostic names every module exporting the contested name and asks for a qualifier; `Walk.children` or `Rename.children` says which, and a qualified name is never ambiguous because it names exactly one module. Deciding at the use site is a behavioral commitment, not an implementation detail: a program keeps compiling when a library it imports gains an export that collides with another import, and only a bare use of that particular name has to be updated.
+
 ### 11.1 Projects {#projects}
 
 A single `.pr` file compiles on its own (`prism file.pr`), resolving imports relative to its own directory. A multi-file program is a **project**: a `prism.toml` manifest at the root plus a `src/` tree, where dotted module paths resolve from the source root rather than from the entry file's location. The smallest manifest names the package and its entry point:
@@ -1712,6 +1827,8 @@ A hash dependency names a source bundle directly and is already the exact accoun
 The library ships in two rings.
 
 **Base** is the always-on prelude, in scope in every module without an import: the core types (`Option`, `Result`, `List`, tuples), the class tower (`Eq`, `Ord`, `Show`, `Num`, `Div`, `Hash`, and the `Functor`/`Foldable`/`Applicative`/`Monad`/`Traversable` structures), the string and character basics, the effect vocabulary (`Exn`, `Fail`, and the capability effects), and the core combinators. It is ordinary Prism, not built-in, assembled from modules under `lib/std`: the prelude opens a fixed set of `Data.*` modules with `import M (..)` so their names are unqualified everywhere. Base is small and its surface is frozen: it may only grow, or shrink through one full [deprecation](#deprecation) window, never break in place. The exact surface is pinned by a committed golden, so an accidental addition fails a test in review rather than silently widening the frozen ring.
+
+Being always in scope does not make Base's names reserved. A program that defines a top-level name Base already uses keeps its own definition at its own use sites, and Base goes on calling Base's, so nothing in the library breaks and nothing in the program is captured; Base's opens sit at the bottom of the lookup order, below a program's own imports. The precedence rules are in [modules](#modules).
 
 **Std** is everything else the compiler ships (`Replay`, `Concurrent`, `Incr`, `Wire`, `Time`, `Json`, `Sequence`, and the rest), reached only through an explicit `import`. Std is distributed as a pinned content-addressed root through the store: "the standard library" is a single hash, the fold `prism dump stdlib-hash` reports, over every Std definition's behavior hash and every type, class, and instance digest ([content-addressed core](compiler.md#content-addressed-core)).
 

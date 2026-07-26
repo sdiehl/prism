@@ -1,4 +1,5 @@
--- A user fib shadows the prelude's: the later definition wins everywhere.
+-- A user fib shadows the prelude's: it wins at the user's own use sites, while
+-- the prelude keeps calling the definition it was written against.
 fn fib(n) = n * 100
 
 fn main() = println(fib(10))

@@ -1,0 +1,62 @@
+-- `deriving (ToJson, FromJson)` maps a declaration onto the dynamic `Json` tree
+-- structurally, for a type whose schema is its own declaration. One constructor
+-- becomes one object: a record constructor's keys are its declared field names, a
+-- positional one's are its argument positions, and a sum additionally names the
+-- variant it holds under `$`. The two are derived as a pair, so the round trip
+-- `from_json(to_json(x))` is `x`, and the encoding is a function of the
+-- declaration alone (constructor and field order are the written order), so one
+-- value has one canonical string on every backend.
+
+import Json (..)
+
+type Point = Point { x: Int, y: Int } deriving (ToJson, FromJson, Show, Eq)
+
+type Shape
+  = Circle(Point, Int)
+  | Rect { corner: Point, w: Int, h: Int }
+  | Dot
+  deriving (ToJson, FromJson, Show, Eq)
+
+-- Nested and parameterized fields: the derivation asks only that each component
+-- have its own instance, and the library already supplies them for lists and
+-- options.
+type Scene = Scene {
+  name: String,
+  shapes: List(Shape),
+  origin: Option(Point)
+} deriving (ToJson, FromJson, Show, Eq)
+
+fn round_trips(x : a) : Bool given ToJson(a), FromJson(a), Eq(a) =
+  match optional(\() -> from_json(to_json(x))) of
+    Some(y) => y == x
+    None => false
+
+-- Read a document the way a foreign caller would: parse, then decode.
+fn read_shape(s : String) : Option(Shape) =
+  match decode(s) of
+    Ok(j) => optional(\() -> from_json(j))
+    Err(_) => None
+
+fn main() =
+  let p = Point { x = 1, y = 2 }
+  let scene =
+    Scene {
+      name = "s",
+      shapes = [Circle(p, 3), Rect { corner = p, w = 4, h = 5 }, Dot],
+      origin = Some(p)
+    }
+  -- A single-constructor record has nothing to discriminate, so carries no tag.
+  println(to_json_string(p))
+  -- A sum names its variant; a positional constructor's arguments are `_0`, `_1`.
+  println(to_json_string(Circle(p, 3)))
+  println(to_json_string(Dot))
+  println(to_json_string(scene))
+  -- The law both methods are derived to satisfy.
+  println(show(round_trips(p)))
+  println(show(round_trips(Dot)))
+  println(show(round_trips(scene)))
+  -- A document naming no constructor of the type is one ordinary failure, and so
+  -- is one missing a field the declaration requires, or one that is not an object.
+  println(show(read_shape("\{\"$\":\"Square\"\}")))
+  println(show(read_shape("\{\"$\":\"Circle\",\"_0\":\{\"x\":1,\"y\":2\}\}")))
+  println(show(read_shape("[1,2]")))

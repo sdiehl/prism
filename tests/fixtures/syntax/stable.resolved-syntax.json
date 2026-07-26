@@ -1,0 +1,1209 @@
+{
+  "schema": "prism-resolved-syntax-v1",
+  "compiler": "0.14.0",
+  "source": {
+    "digest": "8f7f59322ffaa712c60fff1c424bd7c02c640d52fa9fe7652f33833222054821",
+    "text": "-- A stable family: rungs, defaults, a migrations table with an override.\nimport Wire (..)\n\nstable Save {\n  V1 = { hero: String, depth: Int },\n  V2 = { ..V1, fog: Int = 30 },\n  V3 = { ..V2, mist: Int = 5 },\n  migrations {\n    V1 -> V2 = auto\n    V2 -> V3 = version(upgrade = \\(s) -> Save { hero = s.hero, depth = s.depth, fog = s.fog, mist = 7 }, downgrade = auto)\n    V1 -> V3 = auto\n  }\n}\n\nfn current() : Save = Save { hero = \"Ada\", depth = 12, fog = 30, mist = 99 }\n"
+  },
+  "functions": [
+    {
+      "name": "current",
+      "params": [],
+      "body": {
+        "id": 1297,
+        "kind": "record",
+        "span": [
+          414,
+          468
+        ],
+        "children": [
+          {
+            "id": 1298,
+            "kind": "str",
+            "span": [
+              428,
+              433
+            ]
+          },
+          {
+            "id": 1299,
+            "kind": "int",
+            "span": [
+              443,
+              445
+            ]
+          },
+          {
+            "id": 1300,
+            "kind": "int",
+            "span": [
+              453,
+              455
+            ]
+          },
+          {
+            "id": 1301,
+            "kind": "int",
+            "span": [
+              464,
+              466
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "upgrade_Save_V1_V2",
+      "params": [
+        {
+          "name": "v1",
+          "borrow": false
+        }
+      ],
+      "body": {
+        "id": 3801,
+        "kind": "record",
+        "span": [
+          145,
+          173
+        ],
+        "children": [
+          {
+            "id": 3802,
+            "kind": "field",
+            "span": [
+              145,
+              173
+            ],
+            "children": [
+              {
+                "id": 3803,
+                "kind": "var",
+                "span": [
+                  145,
+                  173
+                ]
+              }
+            ]
+          },
+          {
+            "id": 3804,
+            "kind": "field",
+            "span": [
+              145,
+              173
+            ],
+            "children": [
+              {
+                "id": 3805,
+                "kind": "var",
+                "span": [
+                  145,
+                  173
+                ]
+              }
+            ]
+          },
+          {
+            "id": 3806,
+            "kind": "int",
+            "span": [
+              169,
+              171
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "downgrade_Save_V2_V1",
+      "params": [
+        {
+          "name": "v2",
+          "borrow": false
+        }
+      ],
+      "body": {
+        "id": 3807,
+        "kind": "tuple",
+        "span": [
+          145,
+          173
+        ],
+        "children": [
+          {
+            "id": 3808,
+            "kind": "record",
+            "span": [
+              145,
+              173
+            ],
+            "children": [
+              {
+                "id": 3809,
+                "kind": "field",
+                "span": [
+                  145,
+                  173
+                ],
+                "children": [
+                  {
+                    "id": 3810,
+                    "kind": "var",
+                    "span": [
+                      145,
+                      173
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": 3811,
+                "kind": "field",
+                "span": [
+                  145,
+                  173
+                ],
+                "children": [
+                  {
+                    "id": 3812,
+                    "kind": "var",
+                    "span": [
+                      145,
+                      173
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": 3813,
+            "kind": "call",
+            "span": [
+              145,
+              173
+            ],
+            "children": [
+              {
+                "id": 3814,
+                "kind": "var",
+                "span": [
+                  145,
+                  173
+                ]
+              },
+              {
+                "id": 3815,
+                "kind": "list",
+                "span": [
+                  145,
+                  173
+                ],
+                "children": [
+                  {
+                    "id": 3816,
+                    "kind": "str",
+                    "span": [
+                      145,
+                      173
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "upgrade_Save_V2_V3",
+      "params": [
+        {
+          "name": "s",
+          "borrow": false
+        }
+      ],
+      "body": {
+        "id": 3817,
+        "kind": "record",
+        "span": [
+          283,
+          345
+        ],
+        "children": [
+          {
+            "id": 3818,
+            "kind": "field",
+            "span": [
+              297,
+              303
+            ],
+            "children": [
+              {
+                "id": 3819,
+                "kind": "var",
+                "span": [
+                  297,
+                  298
+                ]
+              }
+            ]
+          },
+          {
+            "id": 3820,
+            "kind": "field",
+            "span": [
+              313,
+              320
+            ],
+            "children": [
+              {
+                "id": 3821,
+                "kind": "var",
+                "span": [
+                  313,
+                  314
+                ]
+              }
+            ]
+          },
+          {
+            "id": 3822,
+            "kind": "field",
+            "span": [
+              328,
+              333
+            ],
+            "children": [
+              {
+                "id": 3823,
+                "kind": "var",
+                "span": [
+                  328,
+                  329
+                ]
+              }
+            ]
+          },
+          {
+            "id": 3824,
+            "kind": "int",
+            "span": [
+              342,
+              343
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "downgrade_Save_V3_V2",
+      "params": [
+        {
+          "name": "v3",
+          "borrow": false
+        }
+      ],
+      "body": {
+        "id": 3825,
+        "kind": "tuple",
+        "span": [
+          177,
+          205
+        ],
+        "children": [
+          {
+            "id": 3826,
+            "kind": "record",
+            "span": [
+              177,
+              205
+            ],
+            "children": [
+              {
+                "id": 3827,
+                "kind": "field",
+                "span": [
+                  177,
+                  205
+                ],
+                "children": [
+                  {
+                    "id": 3828,
+                    "kind": "var",
+                    "span": [
+                      177,
+                      205
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": 3829,
+                "kind": "field",
+                "span": [
+                  177,
+                  205
+                ],
+                "children": [
+                  {
+                    "id": 3830,
+                    "kind": "var",
+                    "span": [
+                      177,
+                      205
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": 3831,
+                "kind": "field",
+                "span": [
+                  177,
+                  205
+                ],
+                "children": [
+                  {
+                    "id": 3832,
+                    "kind": "var",
+                    "span": [
+                      177,
+                      205
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": 3833,
+            "kind": "call",
+            "span": [
+              177,
+              205
+            ],
+            "children": [
+              {
+                "id": 3834,
+                "kind": "var",
+                "span": [
+                  177,
+                  205
+                ]
+              },
+              {
+                "id": 3835,
+                "kind": "list",
+                "span": [
+                  177,
+                  205
+                ],
+                "children": [
+                  {
+                    "id": 3836,
+                    "kind": "str",
+                    "span": [
+                      177,
+                      205
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "upgrade_route_Save_V1",
+      "params": [
+        {
+          "name": "v1",
+          "borrow": false
+        }
+      ],
+      "body": {
+        "id": 3837,
+        "kind": "call",
+        "span": [
+          108,
+          141
+        ],
+        "children": [
+          {
+            "id": 3838,
+            "kind": "var",
+            "span": [
+              108,
+              141
+            ]
+          },
+          {
+            "id": 3839,
+            "kind": "call",
+            "span": [
+              108,
+              141
+            ],
+            "children": [
+              {
+                "id": 3840,
+                "kind": "var",
+                "span": [
+                  108,
+                  141
+                ]
+              },
+              {
+                "id": 3841,
+                "kind": "var",
+                "span": [
+                  108,
+                  141
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "downgrade_route_Save_V1",
+      "params": [
+        {
+          "name": "v3",
+          "borrow": false
+        }
+      ],
+      "body": {
+        "id": 3842,
+        "kind": "call",
+        "span": [
+          108,
+          141
+        ],
+        "children": [
+          {
+            "id": 3843,
+            "kind": "call",
+            "span": [
+              108,
+              141
+            ],
+            "children": [
+              {
+                "id": 3844,
+                "kind": "var",
+                "span": [
+                  108,
+                  141
+                ]
+              },
+              {
+                "id": 3845,
+                "kind": "var",
+                "span": [
+                  108,
+                  141
+                ]
+              },
+              {
+                "id": 3846,
+                "kind": "var",
+                "span": [
+                  108,
+                  141
+                ]
+              }
+            ]
+          },
+          {
+            "id": 3847,
+            "kind": "var",
+            "span": [
+              108,
+              141
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "upgrade_route_Save_V2",
+      "params": [
+        {
+          "name": "v2",
+          "borrow": false
+        }
+      ],
+      "body": {
+        "id": 3848,
+        "kind": "call",
+        "span": [
+          145,
+          173
+        ],
+        "children": [
+          {
+            "id": 3849,
+            "kind": "var",
+            "span": [
+              145,
+              173
+            ]
+          },
+          {
+            "id": 3850,
+            "kind": "var",
+            "span": [
+              145,
+              173
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "downgrade_route_Save_V2",
+      "params": [
+        {
+          "name": "v3",
+          "borrow": false
+        }
+      ],
+      "body": {
+        "id": 3851,
+        "kind": "call",
+        "span": [
+          145,
+          173
+        ],
+        "children": [
+          {
+            "id": 3852,
+            "kind": "var",
+            "span": [
+              145,
+              173
+            ]
+          },
+          {
+            "id": 3853,
+            "kind": "var",
+            "span": [
+              145,
+              173
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "wire_encode_Save",
+      "params": [
+        {
+          "name": "_x",
+          "borrow": false
+        }
+      ],
+      "body": {
+        "id": 3854,
+        "kind": "call",
+        "span": [
+          92,
+          390
+        ],
+        "children": [
+          {
+            "id": 3855,
+            "kind": "var",
+            "span": [
+              92,
+              390
+            ]
+          },
+          {
+            "id": 3856,
+            "kind": "str",
+            "span": [
+              92,
+              390
+            ]
+          },
+          {
+            "id": 3857,
+            "kind": "var",
+            "span": [
+              92,
+              390
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "wire_decode_Save",
+      "params": [
+        {
+          "name": "_bs",
+          "borrow": false
+        }
+      ],
+      "body": {
+        "id": 3858,
+        "kind": "call",
+        "span": [
+          92,
+          390
+        ],
+        "children": [
+          {
+            "id": 3859,
+            "kind": "var",
+            "span": [
+              92,
+              390
+            ]
+          },
+          {
+            "id": 3860,
+            "kind": "var",
+            "span": [
+              92,
+              390
+            ]
+          },
+          {
+            "id": 3861,
+            "kind": "str",
+            "span": [
+              92,
+              390
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "decode_ladder_Save",
+      "params": [
+        {
+          "name": "_bs",
+          "borrow": false
+        }
+      ],
+      "body": {
+        "id": 3862,
+        "kind": "match",
+        "span": [
+          92,
+          390
+        ],
+        "children": [
+          {
+            "id": 3863,
+            "kind": "call",
+            "span": [
+              92,
+              390
+            ],
+            "children": [
+              {
+                "id": 3864,
+                "kind": "var",
+                "span": [
+                  92,
+                  390
+                ]
+              },
+              {
+                "id": 3865,
+                "kind": "var",
+                "span": [
+                  92,
+                  390
+                ]
+              }
+            ]
+          },
+          {
+            "id": 3866,
+            "kind": "if",
+            "span": [
+              92,
+              390
+            ],
+            "children": [
+              {
+                "id": 3867,
+                "kind": "bin",
+                "span": [
+                  92,
+                  390
+                ],
+                "children": [
+                  {
+                    "id": 3868,
+                    "kind": "var",
+                    "span": [
+                      92,
+                      390
+                    ]
+                  },
+                  {
+                    "id": 3869,
+                    "kind": "str",
+                    "span": [
+                      92,
+                      390
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": 3870,
+                "kind": "match",
+                "span": [
+                  92,
+                  390
+                ],
+                "children": [
+                  {
+                    "id": 3871,
+                    "kind": "call",
+                    "span": [
+                      92,
+                      390
+                    ],
+                    "children": [
+                      {
+                        "id": 3872,
+                        "kind": "var",
+                        "span": [
+                          92,
+                          390
+                        ]
+                      },
+                      {
+                        "id": 3873,
+                        "kind": "var",
+                        "span": [
+                          92,
+                          390
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": 3874,
+                    "kind": "if",
+                    "span": [
+                      92,
+                      390
+                    ],
+                    "children": [
+                      {
+                        "id": 3875,
+                        "kind": "call",
+                        "span": [
+                          92,
+                          390
+                        ],
+                        "children": [
+                          {
+                            "id": 3876,
+                            "kind": "var",
+                            "span": [
+                              92,
+                              390
+                            ]
+                          },
+                          {
+                            "id": 3877,
+                            "kind": "var",
+                            "span": [
+                              92,
+                              390
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "id": 3878,
+                        "kind": "call",
+                        "span": [
+                          92,
+                          390
+                        ],
+                        "children": [
+                          {
+                            "id": 3879,
+                            "kind": "var",
+                            "span": [
+                              92,
+                              390
+                            ]
+                          },
+                          {
+                            "id": 3880,
+                            "kind": "call",
+                            "span": [
+                              92,
+                              390
+                            ],
+                            "children": [
+                              {
+                                "id": 3881,
+                                "kind": "var",
+                                "span": [
+                                  92,
+                                  390
+                                ]
+                              },
+                              {
+                                "id": 3882,
+                                "kind": "var",
+                                "span": [
+                                  92,
+                                  390
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "id": 3883,
+                        "kind": "call",
+                        "span": [
+                          92,
+                          390
+                        ],
+                        "children": [
+                          {
+                            "id": 3884,
+                            "kind": "var",
+                            "span": [
+                              92,
+                              390
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": 3885,
+                "kind": "if",
+                "span": [
+                  92,
+                  390
+                ],
+                "children": [
+                  {
+                    "id": 3886,
+                    "kind": "bin",
+                    "span": [
+                      92,
+                      390
+                    ],
+                    "children": [
+                      {
+                        "id": 3887,
+                        "kind": "var",
+                        "span": [
+                          92,
+                          390
+                        ]
+                      },
+                      {
+                        "id": 3888,
+                        "kind": "str",
+                        "span": [
+                          92,
+                          390
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": 3889,
+                    "kind": "match",
+                    "span": [
+                      92,
+                      390
+                    ],
+                    "children": [
+                      {
+                        "id": 3890,
+                        "kind": "call",
+                        "span": [
+                          92,
+                          390
+                        ],
+                        "children": [
+                          {
+                            "id": 3891,
+                            "kind": "var",
+                            "span": [
+                              92,
+                              390
+                            ]
+                          },
+                          {
+                            "id": 3892,
+                            "kind": "var",
+                            "span": [
+                              92,
+                              390
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "id": 3893,
+                        "kind": "if",
+                        "span": [
+                          92,
+                          390
+                        ],
+                        "children": [
+                          {
+                            "id": 3894,
+                            "kind": "call",
+                            "span": [
+                              92,
+                              390
+                            ],
+                            "children": [
+                              {
+                                "id": 3895,
+                                "kind": "var",
+                                "span": [
+                                  92,
+                                  390
+                                ]
+                              },
+                              {
+                                "id": 3896,
+                                "kind": "var",
+                                "span": [
+                                  92,
+                                  390
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "id": 3897,
+                            "kind": "call",
+                            "span": [
+                              92,
+                              390
+                            ],
+                            "children": [
+                              {
+                                "id": 3898,
+                                "kind": "var",
+                                "span": [
+                                  92,
+                                  390
+                                ]
+                              },
+                              {
+                                "id": 3899,
+                                "kind": "var",
+                                "span": [
+                                  92,
+                                  390
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "id": 3900,
+                            "kind": "call",
+                            "span": [
+                              92,
+                              390
+                            ],
+                            "children": [
+                              {
+                                "id": 3901,
+                                "kind": "var",
+                                "span": [
+                                  92,
+                                  390
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": 3902,
+                    "kind": "if",
+                    "span": [
+                      92,
+                      390
+                    ],
+                    "children": [
+                      {
+                        "id": 3903,
+                        "kind": "bin",
+                        "span": [
+                          92,
+                          390
+                        ],
+                        "children": [
+                          {
+                            "id": 3904,
+                            "kind": "var",
+                            "span": [
+                              92,
+                              390
+                            ]
+                          },
+                          {
+                            "id": 3905,
+                            "kind": "str",
+                            "span": [
+                              92,
+                              390
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "id": 3906,
+                        "kind": "match",
+                        "span": [
+                          92,
+                          390
+                        ],
+                        "children": [
+                          {
+                            "id": 3907,
+                            "kind": "call",
+                            "span": [
+                              92,
+                              390
+                            ],
+                            "children": [
+                              {
+                                "id": 3908,
+                                "kind": "var",
+                                "span": [
+                                  92,
+                                  390
+                                ]
+                              },
+                              {
+                                "id": 3909,
+                                "kind": "var",
+                                "span": [
+                                  92,
+                                  390
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "id": 3910,
+                            "kind": "if",
+                            "span": [
+                              92,
+                              390
+                            ],
+                            "children": [
+                              {
+                                "id": 3911,
+                                "kind": "call",
+                                "span": [
+                                  92,
+                                  390
+                                ],
+                                "children": [
+                                  {
+                                    "id": 3912,
+                                    "kind": "var",
+                                    "span": [
+                                      92,
+                                      390
+                                    ]
+                                  },
+                                  {
+                                    "id": 3913,
+                                    "kind": "var",
+                                    "span": [
+                                      92,
+                                      390
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "id": 3914,
+                                "kind": "var",
+                                "span": [
+                                  92,
+                                  390
+                                ]
+                              },
+                              {
+                                "id": 3915,
+                                "kind": "call",
+                                "span": [
+                                  92,
+                                  390
+                                ],
+                                "children": [
+                                  {
+                                    "id": 3916,
+                                    "kind": "var",
+                                    "span": [
+                                      92,
+                                      390
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "id": 3917,
+                        "kind": "call",
+                        "span": [
+                          92,
+                          390
+                        ],
+                        "children": [
+                          {
+                            "id": 3918,
+                            "kind": "var",
+                            "span": [
+                              92,
+                              390
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

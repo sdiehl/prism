@@ -28,11 +28,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::syntax::ast::{Decl, Expr, Program, Total, S};
-use crate::util::scc::tarjan_scc;
 use crate::verify::check::{self, Checker};
 use crate::verify::logic::{LogicExpr, LogicSort, Obligation};
 use crate::verify::query::SmtQuery;
 use crate::verify::wf;
+use prism_common::scc::tarjan_scc;
 
 /// The role of one ranking obligation, for diagnostics and the SMT dump banner.
 #[derive(Clone, PartialEq, Eq, Debug)]

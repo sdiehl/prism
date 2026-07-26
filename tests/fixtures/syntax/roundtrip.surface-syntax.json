@@ -1,11 +1,39 @@
 {
   "schema": "prism-surface-syntax-v1",
-  "compiler": "0.14.0",
+  "compiler": "0.15.0",
   "source": {
-    "digest": "2f5871b80671dd5530849665ad73a00d54b4fcf92e51934c8d025aa73769ec4e",
-    "text": "-- The round-trip gate for the versioned syntax artifacts: read one artifact\n-- file, decode it into the typed Syntax vocabulary, re-encode, and print the\n-- exact bytes. arg(0) is the artifact path; arg(1) selects the family\n-- (\"tokens\" or \"surface\"). A refusal prints one structured error line.\nimport Syntax.Codec (..)\n\nfn main() =\n  let text = read_file(arg(0))\n  if arg(1) == \"tokens\" then\n    match decode_tokens(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_tokens(d))\n  else\n    match decode_surface(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_surface(d))\n"
+    "digest": "824285947cca6219db9c0dc018a3aa859659730b55bf122b8fc3abc77867ab16",
+    "text": "-- The round-trip gate for the versioned syntax artifacts: read one artifact\n-- file, decode it into the typed Syntax vocabulary, re-encode, and print the\n-- exact bytes. arg(0) is the artifact path; arg(1) selects the family\n-- (\"tokens\", \"surface\", \"diagnostics\", or \"resolved\"). The \"resolved-nodes\"\n-- mode instead decodes the resolved document and prints the id of every node\n-- reached by traversing each function body with `rnode_universe`, one per\n-- line: the Prism-side traversal the checker join is diffed against, reading\n-- only the artifact bytes. A refusal prints one structured error line.\nimport Data.Foldable (length)\n\nimport Data.List (concat_map)\n\nimport Syntax.Codec (..)\n\nimport Syntax.Resolved (..)\n\nfn main() =\n  let text = read_file(arg(0))\n  if arg(1) == \"tokens\" then\n    match decode_tokens(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_tokens(d))\n  elif arg(1) == \"diagnostics\" then\n    match decode_diagnostics(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_diagnostics(d))\n  elif arg(1) == \"resolved\" then\n    match decode_resolved(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_resolved(d))\n  elif arg(1) == \"resolved-nodes\" then\n    match decode_resolved(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => print_resolved_ids(d)\n  else\n    match decode_surface(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_surface(d))\n\n-- Every node id reached by walking each function body with the Prism-side\n-- `rnode_universe`, sorted ascending, one per line under a `count` header. A\n-- pure function of the decoded document: no source file or compiler state is\n-- consulted.\nfn print_resolved_ids(d : ResolvedDoc) =\n  let ids = sort(\n      concat_map(\n          \\(f) -> map(\\(n) -> n.id, rnode_universe(f.body)),\n          d.functions,\n        ),\n    )\n  println(\"count {length(ids)}\")\n  print_ids(ids)\n\nfn print_ids(ids : List(Int)) : Unit ! {IO} =\n  match ids of\n    Nil => ()\n    Cons(i, rest) =>\n      println(\"{i}\")\n      print_ids(rest)\n"
   },
   "items": [
+    {
+      "kind": "import",
+      "names": [
+        "length"
+      ],
+      "path": [
+        "Data",
+        "Foldable"
+      ],
+      "span": [
+        606,
+        635
+      ]
+    },
+    {
+      "kind": "import",
+      "names": [
+        "concat_map"
+      ],
+      "path": [
+        "Data",
+        "List"
+      ],
+      "span": [
+        637,
+        666
+      ]
+    },
     {
       "glob": true,
       "kind": "import",
@@ -14,8 +42,20 @@
         "Codec"
       ],
       "span": [
-        298,
-        322
+        668,
+        692
+      ]
+    },
+    {
+      "glob": true,
+      "kind": "import",
+      "path": [
+        "Syntax",
+        "Resolved"
+      ],
+      "span": [
+        694,
+        721
       ]
     },
     {
@@ -28,8 +68,8 @@
                 {
                   "kind": "int",
                   "span": [
-                    376,
-                    377
+                    775,
+                    776
                   ],
                   "value": "1"
                 }
@@ -38,225 +78,925 @@
                 "kind": "var",
                 "name": "arg",
                 "span": [
-                  372,
-                  375
+                  771,
+                  774
                 ]
               },
               "kind": "call",
               "span": [
-                372,
-                378
+                771,
+                777
               ]
             },
             "op": "==",
             "rhs": {
               "kind": "str",
               "span": [
-                382,
-                390
+                781,
+                789
               ],
               "value": "tokens"
             },
             "span": [
-              372,
-              390
+              771,
+              789
             ]
           },
           "else": {
-            "arms": [
-              {
-                "body": {
+            "cond": {
+              "kind": "bin",
+              "lhs": {
+                "args": [
+                  {
+                    "kind": "int",
+                    "span": [
+                      946,
+                      947
+                    ],
+                    "value": "1"
+                  }
+                ],
+                "head": {
+                  "kind": "var",
+                  "name": "arg",
+                  "span": [
+                    942,
+                    945
+                  ]
+                },
+                "kind": "call",
+                "span": [
+                  942,
+                  948
+                ]
+              },
+              "op": "==",
+              "rhs": {
+                "kind": "str",
+                "span": [
+                  952,
+                  965
+                ],
+                "value": "diagnostics"
+              },
+              "span": [
+                942,
+                965
+              ]
+            },
+            "else": {
+              "cond": {
+                "kind": "bin",
+                "lhs": {
                   "args": [
                     {
-                      "args": [
-                        {
-                          "kind": "str",
-                          "span": [
-                            601,
-                            601
-                          ],
-                          "value": "decode error: "
-                        },
-                        {
-                          "args": [
-                            {
-                              "kind": "var",
-                              "name": "e",
-                              "span": [
-                                637,
-                                638
-                              ]
-                            }
-                          ],
-                          "head": {
-                            "kind": "var",
-                            "name": "codec_error_message",
-                            "span": [
-                              617,
-                              636
-                            ]
-                          },
-                          "kind": "call",
-                          "span": [
-                            617,
-                            639
-                          ]
-                        },
-                        {
-                          "kind": "str",
-                          "span": [
-                            601,
-                            601
-                          ],
-                          "value": ""
-                        }
-                      ],
-                      "head": {
-                        "kind": "marker",
-                        "marker": "interp",
-                        "span": [
-                          601,
-                          601
-                        ]
-                      },
-                      "kind": "call",
+                      "kind": "int",
                       "span": [
-                        601,
-                        641
-                      ]
+                        1132,
+                        1133
+                      ],
+                      "value": "1"
                     }
                   ],
                   "head": {
                     "kind": "var",
-                    "name": "println",
+                    "name": "arg",
                     "span": [
-                      593,
-                      600
+                      1128,
+                      1131
                     ]
                   },
                   "kind": "call",
                   "span": [
-                    593,
-                    642
+                    1128,
+                    1134
                   ]
                 },
-                "pat": {
-                  "args": [
-                    {
+                "op": "==",
+                "rhs": {
+                  "kind": "str",
+                  "span": [
+                    1138,
+                    1148
+                  ],
+                  "value": "resolved"
+                },
+                "span": [
+                  1128,
+                  1148
+                ]
+              },
+              "else": {
+                "cond": {
+                  "kind": "bin",
+                  "lhs": {
+                    "args": [
+                      {
+                        "kind": "int",
+                        "span": [
+                          1309,
+                          1310
+                        ],
+                        "value": "1"
+                      }
+                    ],
+                    "head": {
                       "kind": "var",
-                      "name": "e",
+                      "name": "arg",
                       "span": [
-                        587,
-                        588
+                        1305,
+                        1308
                       ]
+                    },
+                    "kind": "call",
+                    "span": [
+                      1305,
+                      1311
+                    ]
+                  },
+                  "op": "==",
+                  "rhs": {
+                    "kind": "str",
+                    "span": [
+                      1315,
+                      1331
+                    ],
+                    "value": "resolved-nodes"
+                  },
+                  "span": [
+                    1305,
+                    1331
+                  ]
+                },
+                "else": {
+                  "arms": [
+                    {
+                      "body": {
+                        "args": [
+                          {
+                            "args": [
+                              {
+                                "kind": "str",
+                                "span": [
+                                  1540,
+                                  1540
+                                ],
+                                "value": "decode error: "
+                              },
+                              {
+                                "args": [
+                                  {
+                                    "kind": "var",
+                                    "name": "e",
+                                    "span": [
+                                      1576,
+                                      1577
+                                    ]
+                                  }
+                                ],
+                                "head": {
+                                  "kind": "var",
+                                  "name": "codec_error_message",
+                                  "span": [
+                                    1556,
+                                    1575
+                                  ]
+                                },
+                                "kind": "call",
+                                "span": [
+                                  1556,
+                                  1578
+                                ]
+                              },
+                              {
+                                "kind": "str",
+                                "span": [
+                                  1540,
+                                  1540
+                                ],
+                                "value": ""
+                              }
+                            ],
+                            "head": {
+                              "kind": "marker",
+                              "marker": "interp",
+                              "span": [
+                                1540,
+                                1540
+                              ]
+                            },
+                            "kind": "call",
+                            "span": [
+                              1540,
+                              1580
+                            ]
+                          }
+                        ],
+                        "head": {
+                          "kind": "var",
+                          "name": "println",
+                          "span": [
+                            1532,
+                            1539
+                          ]
+                        },
+                        "kind": "call",
+                        "span": [
+                          1532,
+                          1581
+                        ]
+                      },
+                      "pat": {
+                        "args": [
+                          {
+                            "kind": "var",
+                            "name": "e",
+                            "span": [
+                              1526,
+                              1527
+                            ]
+                          }
+                        ],
+                        "kind": "ctor",
+                        "name": "Err",
+                        "span": [
+                          1522,
+                          1528
+                        ]
+                      }
+                    },
+                    {
+                      "body": {
+                        "args": [
+                          {
+                            "args": [
+                              {
+                                "kind": "var",
+                                "name": "d",
+                                "span": [
+                                  1620,
+                                  1621
+                                ]
+                              }
+                            ],
+                            "head": {
+                              "kind": "var",
+                              "name": "encode_surface",
+                              "span": [
+                                1605,
+                                1619
+                              ]
+                            },
+                            "kind": "call",
+                            "span": [
+                              1605,
+                              1622
+                            ]
+                          }
+                        ],
+                        "head": {
+                          "kind": "var",
+                          "name": "println",
+                          "span": [
+                            1597,
+                            1604
+                          ]
+                        },
+                        "kind": "call",
+                        "span": [
+                          1597,
+                          1623
+                        ]
+                      },
+                      "pat": {
+                        "args": [
+                          {
+                            "kind": "var",
+                            "name": "d",
+                            "span": [
+                              1591,
+                              1592
+                            ]
+                          }
+                        ],
+                        "kind": "ctor",
+                        "name": "Ok",
+                        "span": [
+                          1588,
+                          1593
+                        ]
+                      }
                     }
                   ],
-                  "kind": "ctor",
-                  "name": "Err",
+                  "kind": "match",
+                  "scrutinee": {
+                    "args": [
+                      {
+                        "kind": "var",
+                        "name": "text",
+                        "span": [
+                          1507,
+                          1511
+                        ]
+                      }
+                    ],
+                    "head": {
+                      "kind": "var",
+                      "name": "decode_surface",
+                      "span": [
+                        1492,
+                        1506
+                      ]
+                    },
+                    "kind": "call",
+                    "span": [
+                      1492,
+                      1512
+                    ]
+                  },
                   "span": [
-                    583,
-                    589
+                    1486,
+                    1623
+                  ]
+                },
+                "kind": "if",
+                "span": [
+                  1297,
+                  1623
+                ],
+                "then": {
+                  "arms": [
+                    {
+                      "body": {
+                        "args": [
+                          {
+                            "args": [
+                              {
+                                "kind": "str",
+                                "span": [
+                                  1396,
+                                  1396
+                                ],
+                                "value": "decode error: "
+                              },
+                              {
+                                "args": [
+                                  {
+                                    "kind": "var",
+                                    "name": "e",
+                                    "span": [
+                                      1432,
+                                      1433
+                                    ]
+                                  }
+                                ],
+                                "head": {
+                                  "kind": "var",
+                                  "name": "codec_error_message",
+                                  "span": [
+                                    1412,
+                                    1431
+                                  ]
+                                },
+                                "kind": "call",
+                                "span": [
+                                  1412,
+                                  1434
+                                ]
+                              },
+                              {
+                                "kind": "str",
+                                "span": [
+                                  1396,
+                                  1396
+                                ],
+                                "value": ""
+                              }
+                            ],
+                            "head": {
+                              "kind": "marker",
+                              "marker": "interp",
+                              "span": [
+                                1396,
+                                1396
+                              ]
+                            },
+                            "kind": "call",
+                            "span": [
+                              1396,
+                              1436
+                            ]
+                          }
+                        ],
+                        "head": {
+                          "kind": "var",
+                          "name": "println",
+                          "span": [
+                            1388,
+                            1395
+                          ]
+                        },
+                        "kind": "call",
+                        "span": [
+                          1388,
+                          1437
+                        ]
+                      },
+                      "pat": {
+                        "args": [
+                          {
+                            "kind": "var",
+                            "name": "e",
+                            "span": [
+                              1382,
+                              1383
+                            ]
+                          }
+                        ],
+                        "kind": "ctor",
+                        "name": "Err",
+                        "span": [
+                          1378,
+                          1384
+                        ]
+                      }
+                    },
+                    {
+                      "body": {
+                        "args": [
+                          {
+                            "kind": "var",
+                            "name": "d",
+                            "span": [
+                              1472,
+                              1473
+                            ]
+                          }
+                        ],
+                        "head": {
+                          "kind": "var",
+                          "name": "print_resolved_ids",
+                          "span": [
+                            1453,
+                            1471
+                          ]
+                        },
+                        "kind": "call",
+                        "span": [
+                          1453,
+                          1474
+                        ]
+                      },
+                      "pat": {
+                        "args": [
+                          {
+                            "kind": "var",
+                            "name": "d",
+                            "span": [
+                              1447,
+                              1448
+                            ]
+                          }
+                        ],
+                        "kind": "ctor",
+                        "name": "Ok",
+                        "span": [
+                          1444,
+                          1449
+                        ]
+                      }
+                    }
+                  ],
+                  "kind": "match",
+                  "scrutinee": {
+                    "args": [
+                      {
+                        "kind": "var",
+                        "name": "text",
+                        "span": [
+                          1363,
+                          1367
+                        ]
+                      }
+                    ],
+                    "head": {
+                      "kind": "var",
+                      "name": "decode_resolved",
+                      "span": [
+                        1347,
+                        1362
+                      ]
+                    },
+                    "kind": "call",
+                    "span": [
+                      1347,
+                      1368
+                    ]
+                  },
+                  "span": [
+                    1341,
+                    1474
                   ]
                 }
               },
-              {
-                "body": {
-                  "args": [
-                    {
+              "kind": "if",
+              "span": [
+                1120,
+                1623
+              ],
+              "then": {
+                "arms": [
+                  {
+                    "body": {
                       "args": [
                         {
-                          "kind": "var",
-                          "name": "d",
+                          "args": [
+                            {
+                              "kind": "str",
+                              "span": [
+                                1213,
+                                1213
+                              ],
+                              "value": "decode error: "
+                            },
+                            {
+                              "args": [
+                                {
+                                  "kind": "var",
+                                  "name": "e",
+                                  "span": [
+                                    1249,
+                                    1250
+                                  ]
+                                }
+                              ],
+                              "head": {
+                                "kind": "var",
+                                "name": "codec_error_message",
+                                "span": [
+                                  1229,
+                                  1248
+                                ]
+                              },
+                              "kind": "call",
+                              "span": [
+                                1229,
+                                1251
+                              ]
+                            },
+                            {
+                              "kind": "str",
+                              "span": [
+                                1213,
+                                1213
+                              ],
+                              "value": ""
+                            }
+                          ],
+                          "head": {
+                            "kind": "marker",
+                            "marker": "interp",
+                            "span": [
+                              1213,
+                              1213
+                            ]
+                          },
+                          "kind": "call",
                           "span": [
-                            681,
-                            682
+                            1213,
+                            1253
                           ]
                         }
                       ],
                       "head": {
                         "kind": "var",
-                        "name": "encode_surface",
+                        "name": "println",
                         "span": [
-                          666,
-                          680
+                          1205,
+                          1212
                         ]
                       },
                       "kind": "call",
                       "span": [
-                        666,
-                        683
+                        1205,
+                        1254
+                      ]
+                    },
+                    "pat": {
+                      "args": [
+                        {
+                          "kind": "var",
+                          "name": "e",
+                          "span": [
+                            1199,
+                            1200
+                          ]
+                        }
+                      ],
+                      "kind": "ctor",
+                      "name": "Err",
+                      "span": [
+                        1195,
+                        1201
+                      ]
+                    }
+                  },
+                  {
+                    "body": {
+                      "args": [
+                        {
+                          "args": [
+                            {
+                              "kind": "var",
+                              "name": "d",
+                              "span": [
+                                1294,
+                                1295
+                              ]
+                            }
+                          ],
+                          "head": {
+                            "kind": "var",
+                            "name": "encode_resolved",
+                            "span": [
+                              1278,
+                              1293
+                            ]
+                          },
+                          "kind": "call",
+                          "span": [
+                            1278,
+                            1296
+                          ]
+                        }
+                      ],
+                      "head": {
+                        "kind": "var",
+                        "name": "println",
+                        "span": [
+                          1270,
+                          1277
+                        ]
+                      },
+                      "kind": "call",
+                      "span": [
+                        1270,
+                        1297
+                      ]
+                    },
+                    "pat": {
+                      "args": [
+                        {
+                          "kind": "var",
+                          "name": "d",
+                          "span": [
+                            1264,
+                            1265
+                          ]
+                        }
+                      ],
+                      "kind": "ctor",
+                      "name": "Ok",
+                      "span": [
+                        1261,
+                        1266
+                      ]
+                    }
+                  }
+                ],
+                "kind": "match",
+                "scrutinee": {
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "text",
+                      "span": [
+                        1180,
+                        1184
                       ]
                     }
                   ],
                   "head": {
                     "kind": "var",
-                    "name": "println",
+                    "name": "decode_resolved",
                     "span": [
-                      658,
-                      665
+                      1164,
+                      1179
                     ]
                   },
                   "kind": "call",
                   "span": [
-                    658,
-                    684
+                    1164,
+                    1185
                   ]
                 },
-                "pat": {
-                  "args": [
-                    {
-                      "kind": "var",
-                      "name": "d",
-                      "span": [
-                        652,
-                        653
-                      ]
-                    }
-                  ],
-                  "kind": "ctor",
-                  "name": "Ok",
-                  "span": [
-                    649,
-                    654
-                  ]
-                }
+                "span": [
+                  1158,
+                  1297
+                ]
               }
+            },
+            "kind": "if",
+            "span": [
+              934,
+              1623
             ],
-            "kind": "match",
-            "scrutinee": {
-              "args": [
+            "then": {
+              "arms": [
                 {
-                  "kind": "var",
-                  "name": "text",
-                  "span": [
-                    568,
-                    572
-                  ]
+                  "body": {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "kind": "str",
+                            "span": [
+                              1033,
+                              1033
+                            ],
+                            "value": "decode error: "
+                          },
+                          {
+                            "args": [
+                              {
+                                "kind": "var",
+                                "name": "e",
+                                "span": [
+                                  1069,
+                                  1070
+                                ]
+                              }
+                            ],
+                            "head": {
+                              "kind": "var",
+                              "name": "codec_error_message",
+                              "span": [
+                                1049,
+                                1068
+                              ]
+                            },
+                            "kind": "call",
+                            "span": [
+                              1049,
+                              1071
+                            ]
+                          },
+                          {
+                            "kind": "str",
+                            "span": [
+                              1033,
+                              1033
+                            ],
+                            "value": ""
+                          }
+                        ],
+                        "head": {
+                          "kind": "marker",
+                          "marker": "interp",
+                          "span": [
+                            1033,
+                            1033
+                          ]
+                        },
+                        "kind": "call",
+                        "span": [
+                          1033,
+                          1073
+                        ]
+                      }
+                    ],
+                    "head": {
+                      "kind": "var",
+                      "name": "println",
+                      "span": [
+                        1025,
+                        1032
+                      ]
+                    },
+                    "kind": "call",
+                    "span": [
+                      1025,
+                      1074
+                    ]
+                  },
+                  "pat": {
+                    "args": [
+                      {
+                        "kind": "var",
+                        "name": "e",
+                        "span": [
+                          1019,
+                          1020
+                        ]
+                      }
+                    ],
+                    "kind": "ctor",
+                    "name": "Err",
+                    "span": [
+                      1015,
+                      1021
+                    ]
+                  }
+                },
+                {
+                  "body": {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "kind": "var",
+                            "name": "d",
+                            "span": [
+                              1117,
+                              1118
+                            ]
+                          }
+                        ],
+                        "head": {
+                          "kind": "var",
+                          "name": "encode_diagnostics",
+                          "span": [
+                            1098,
+                            1116
+                          ]
+                        },
+                        "kind": "call",
+                        "span": [
+                          1098,
+                          1119
+                        ]
+                      }
+                    ],
+                    "head": {
+                      "kind": "var",
+                      "name": "println",
+                      "span": [
+                        1090,
+                        1097
+                      ]
+                    },
+                    "kind": "call",
+                    "span": [
+                      1090,
+                      1120
+                    ]
+                  },
+                  "pat": {
+                    "args": [
+                      {
+                        "kind": "var",
+                        "name": "d",
+                        "span": [
+                          1084,
+                          1085
+                        ]
+                      }
+                    ],
+                    "kind": "ctor",
+                    "name": "Ok",
+                    "span": [
+                      1081,
+                      1086
+                    ]
+                  }
                 }
               ],
-              "head": {
-                "kind": "var",
-                "name": "decode_surface",
+              "kind": "match",
+              "scrutinee": {
+                "args": [
+                  {
+                    "kind": "var",
+                    "name": "text",
+                    "span": [
+                      1000,
+                      1004
+                    ]
+                  }
+                ],
+                "head": {
+                  "kind": "var",
+                  "name": "decode_diagnostics",
+                  "span": [
+                    981,
+                    999
+                  ]
+                },
+                "kind": "call",
                 "span": [
-                  553,
-                  567
+                  981,
+                  1005
                 ]
               },
-              "kind": "call",
               "span": [
-                553,
-                573
+                975,
+                1120
               ]
-            },
-            "span": [
-              547,
-              684
-            ]
+            }
           },
           "kind": "if",
           "span": [
-            369,
-            684
+            768,
+            1623
           ],
           "then": {
             "arms": [
@@ -268,8 +1008,8 @@
                         {
                           "kind": "str",
                           "span": [
-                            453,
-                            453
+                            852,
+                            852
                           ],
                           "value": "decode error: "
                         },
@@ -279,8 +1019,8 @@
                               "kind": "var",
                               "name": "e",
                               "span": [
-                                489,
-                                490
+                                888,
+                                889
                               ]
                             }
                           ],
@@ -288,21 +1028,21 @@
                             "kind": "var",
                             "name": "codec_error_message",
                             "span": [
-                              469,
-                              488
+                              868,
+                              887
                             ]
                           },
                           "kind": "call",
                           "span": [
-                            469,
-                            491
+                            868,
+                            890
                           ]
                         },
                         {
                           "kind": "str",
                           "span": [
-                            453,
-                            453
+                            852,
+                            852
                           ],
                           "value": ""
                         }
@@ -311,14 +1051,14 @@
                         "kind": "marker",
                         "marker": "interp",
                         "span": [
-                          453,
-                          453
+                          852,
+                          852
                         ]
                       },
                       "kind": "call",
                       "span": [
-                        453,
-                        493
+                        852,
+                        892
                       ]
                     }
                   ],
@@ -326,14 +1066,14 @@
                     "kind": "var",
                     "name": "println",
                     "span": [
-                      445,
-                      452
+                      844,
+                      851
                     ]
                   },
                   "kind": "call",
                   "span": [
-                    445,
-                    494
+                    844,
+                    893
                   ]
                 },
                 "pat": {
@@ -342,16 +1082,16 @@
                       "kind": "var",
                       "name": "e",
                       "span": [
-                        439,
-                        440
+                        838,
+                        839
                       ]
                     }
                   ],
                   "kind": "ctor",
                   "name": "Err",
                   "span": [
-                    435,
-                    441
+                    834,
+                    840
                   ]
                 }
               },
@@ -364,8 +1104,8 @@
                           "kind": "var",
                           "name": "d",
                           "span": [
-                            532,
-                            533
+                            931,
+                            932
                           ]
                         }
                       ],
@@ -373,14 +1113,14 @@
                         "kind": "var",
                         "name": "encode_tokens",
                         "span": [
-                          518,
-                          531
+                          917,
+                          930
                         ]
                       },
                       "kind": "call",
                       "span": [
-                        518,
-                        534
+                        917,
+                        933
                       ]
                     }
                   ],
@@ -388,14 +1128,14 @@
                     "kind": "var",
                     "name": "println",
                     "span": [
-                      510,
-                      517
+                      909,
+                      916
                     ]
                   },
                   "kind": "call",
                   "span": [
-                    510,
-                    535
+                    909,
+                    934
                   ]
                 },
                 "pat": {
@@ -404,16 +1144,16 @@
                       "kind": "var",
                       "name": "d",
                       "span": [
-                        504,
-                        505
+                        903,
+                        904
                       ]
                     }
                   ],
                   "kind": "ctor",
                   "name": "Ok",
                   "span": [
-                    501,
-                    506
+                    900,
+                    905
                   ]
                 }
               }
@@ -425,8 +1165,8 @@
                   "kind": "var",
                   "name": "text",
                   "span": [
-                    420,
-                    424
+                    819,
+                    823
                   ]
                 }
               ],
@@ -434,27 +1174,27 @@
                 "kind": "var",
                 "name": "decode_tokens",
                 "span": [
-                  406,
-                  419
+                  805,
+                  818
                 ]
               },
               "kind": "call",
               "span": [
-                406,
-                425
+                805,
+                824
               ]
             },
             "span": [
-              400,
-              535
+              799,
+              934
             ]
           }
         },
         "kind": "let",
         "name": "text",
         "span": [
-          338,
-          684
+          737,
+          1623
         ],
         "value": {
           "args": [
@@ -463,8 +1203,8 @@
                 {
                   "kind": "int",
                   "span": [
-                    363,
-                    364
+                    762,
+                    763
                   ],
                   "value": "0"
                 }
@@ -473,14 +1213,14 @@
                 "kind": "var",
                 "name": "arg",
                 "span": [
-                  359,
-                  362
+                  758,
+                  761
                 ]
               },
               "kind": "call",
               "span": [
-                359,
-                365
+                758,
+                764
               ]
             }
           ],
@@ -488,22 +1228,480 @@
             "kind": "var",
             "name": "read_file",
             "span": [
-              349,
-              358
+              748,
+              757
             ]
           },
           "kind": "call",
           "span": [
-            349,
-            366
+            748,
+            765
           ]
         }
       },
       "kind": "fn",
       "name": "main",
       "span": [
-        324,
-        684
+        723,
+        1623
+      ]
+    },
+    {
+      "body": {
+        "body": {
+          "body": {
+            "args": [
+              {
+                "kind": "var",
+                "name": "ids",
+                "span": [
+                  2093,
+                  2096
+                ]
+              }
+            ],
+            "head": {
+              "kind": "var",
+              "name": "print_ids",
+              "span": [
+                2083,
+                2092
+              ]
+            },
+            "kind": "call",
+            "span": [
+              2083,
+              2097
+            ]
+          },
+          "kind": "let",
+          "name": "_",
+          "span": [
+            2050,
+            2097
+          ],
+          "value": {
+            "args": [
+              {
+                "args": [
+                  {
+                    "kind": "str",
+                    "span": [
+                      2058,
+                      2058
+                    ],
+                    "value": "count "
+                  },
+                  {
+                    "args": [
+                      {
+                        "kind": "var",
+                        "name": "ids",
+                        "span": [
+                          2073,
+                          2076
+                        ]
+                      }
+                    ],
+                    "head": {
+                      "kind": "var",
+                      "name": "length",
+                      "span": [
+                        2066,
+                        2072
+                      ]
+                    },
+                    "kind": "call",
+                    "span": [
+                      2066,
+                      2077
+                    ]
+                  },
+                  {
+                    "kind": "str",
+                    "span": [
+                      2058,
+                      2058
+                    ],
+                    "value": ""
+                  }
+                ],
+                "head": {
+                  "kind": "marker",
+                  "marker": "interp",
+                  "span": [
+                    2058,
+                    2058
+                  ]
+                },
+                "kind": "call",
+                "span": [
+                  2058,
+                  2079
+                ]
+              }
+            ],
+            "head": {
+              "kind": "var",
+              "name": "println",
+              "span": [
+                2050,
+                2057
+              ]
+            },
+            "kind": "call",
+            "span": [
+              2050,
+              2080
+            ]
+          }
+        },
+        "kind": "let",
+        "name": "ids",
+        "span": [
+          1913,
+          2097
+        ],
+        "value": {
+          "args": [
+            {
+              "args": [
+                {
+                  "body": {
+                    "args": [
+                      {
+                        "body": {
+                          "expr": {
+                            "kind": "var",
+                            "name": "n",
+                            "span": [
+                              1977,
+                              1978
+                            ]
+                          },
+                          "kind": "field",
+                          "name": "id",
+                          "span": [
+                            1977,
+                            1981
+                          ]
+                        },
+                        "kind": "lam",
+                        "params": [
+                          {
+                            "name": "n"
+                          }
+                        ],
+                        "span": [
+                          1969,
+                          1981
+                        ]
+                      },
+                      {
+                        "args": [
+                          {
+                            "expr": {
+                              "kind": "var",
+                              "name": "f",
+                              "span": [
+                                1998,
+                                1999
+                              ]
+                            },
+                            "kind": "field",
+                            "name": "body",
+                            "span": [
+                              1998,
+                              2004
+                            ]
+                          }
+                        ],
+                        "head": {
+                          "kind": "var",
+                          "name": "rnode_universe",
+                          "span": [
+                            1983,
+                            1997
+                          ]
+                        },
+                        "kind": "call",
+                        "span": [
+                          1983,
+                          2005
+                        ]
+                      }
+                    ],
+                    "head": {
+                      "kind": "var",
+                      "name": "map",
+                      "span": [
+                        1965,
+                        1968
+                      ]
+                    },
+                    "kind": "call",
+                    "span": [
+                      1965,
+                      2006
+                    ]
+                  },
+                  "kind": "lam",
+                  "params": [
+                    {
+                      "name": "f"
+                    }
+                  ],
+                  "span": [
+                    1957,
+                    2006
+                  ]
+                },
+                {
+                  "expr": {
+                    "kind": "var",
+                    "name": "d",
+                    "span": [
+                      2018,
+                      2019
+                    ]
+                  },
+                  "kind": "field",
+                  "name": "functions",
+                  "span": [
+                    2018,
+                    2029
+                  ]
+                }
+              ],
+              "head": {
+                "kind": "var",
+                "name": "concat_map",
+                "span": [
+                  1935,
+                  1945
+                ]
+              },
+              "kind": "call",
+              "span": [
+                1935,
+                2040
+              ]
+            }
+          ],
+          "head": {
+            "kind": "var",
+            "name": "sort",
+            "span": [
+              1923,
+              1927
+            ]
+          },
+          "kind": "call",
+          "span": [
+            1923,
+            2047
+          ]
+        }
+      },
+      "kind": "fn",
+      "name": "print_resolved_ids",
+      "params": [
+        {
+          "name": "d",
+          "ty": {
+            "kind": "con",
+            "name": "ResolvedDoc"
+          }
+        }
+      ],
+      "span": [
+        1870,
+        2097
+      ]
+    },
+    {
+      "body": {
+        "arms": [
+          {
+            "body": {
+              "kind": "unit",
+              "span": [
+                2171,
+                2173
+              ]
+            },
+            "pat": {
+              "kind": "ctor",
+              "name": "Nil",
+              "span": [
+                2164,
+                2167
+              ]
+            }
+          },
+          {
+            "body": {
+              "body": {
+                "args": [
+                  {
+                    "kind": "var",
+                    "name": "rest",
+                    "span": [
+                      2232,
+                      2236
+                    ]
+                  }
+                ],
+                "head": {
+                  "kind": "var",
+                  "name": "print_ids",
+                  "span": [
+                    2222,
+                    2231
+                  ]
+                },
+                "kind": "call",
+                "span": [
+                  2222,
+                  2237
+                ]
+              },
+              "kind": "let",
+              "name": "_",
+              "span": [
+                2201,
+                2237
+              ],
+              "value": {
+                "args": [
+                  {
+                    "args": [
+                      {
+                        "kind": "str",
+                        "span": [
+                          2209,
+                          2209
+                        ],
+                        "value": ""
+                      },
+                      {
+                        "kind": "var",
+                        "name": "i",
+                        "span": [
+                          2211,
+                          2212
+                        ]
+                      },
+                      {
+                        "kind": "str",
+                        "span": [
+                          2209,
+                          2209
+                        ],
+                        "value": ""
+                      }
+                    ],
+                    "head": {
+                      "kind": "marker",
+                      "marker": "interp",
+                      "span": [
+                        2209,
+                        2209
+                      ]
+                    },
+                    "kind": "call",
+                    "span": [
+                      2209,
+                      2214
+                    ]
+                  }
+                ],
+                "head": {
+                  "kind": "var",
+                  "name": "println",
+                  "span": [
+                    2201,
+                    2208
+                  ]
+                },
+                "kind": "call",
+                "span": [
+                  2201,
+                  2215
+                ]
+              }
+            },
+            "pat": {
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "i",
+                  "span": [
+                    2183,
+                    2184
+                  ]
+                },
+                {
+                  "kind": "var",
+                  "name": "rest",
+                  "span": [
+                    2186,
+                    2190
+                  ]
+                }
+              ],
+              "kind": "ctor",
+              "name": "Cons",
+              "span": [
+                2178,
+                2191
+              ]
+            }
+          }
+        ],
+        "kind": "match",
+        "scrutinee": {
+          "kind": "var",
+          "name": "ids",
+          "span": [
+            2153,
+            2156
+          ]
+        },
+        "span": [
+          2147,
+          2237
+        ]
+      },
+      "effects": {
+        "labels": [
+          {
+            "name": "IO"
+          }
+        ]
+      },
+      "kind": "fn",
+      "name": "print_ids",
+      "params": [
+        {
+          "name": "ids",
+          "ty": {
+            "args": [
+              {
+                "kind": "int"
+              }
+            ],
+            "kind": "con",
+            "name": "List"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "unit"
+      },
+      "span": [
+        2099,
+        2237
       ]
     }
   ]

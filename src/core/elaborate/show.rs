@@ -3,7 +3,7 @@ use super::{
     IoOp, Locals, NodeId, Pattern, Span, Spanned, Sym, Type, TypeError, Value, CONS, LIST, NIL, S,
 };
 use crate::core::typed::core_fn_sig;
-use crate::names;
+use prism_syntax::names;
 
 // Name prefix for a generated structural `show` function, completed by the
 // type's injective mangling.
@@ -48,14 +48,16 @@ impl Elab<'_> {
         Ok(match self.printable_ty(arg_expr, locals) {
             Some(Type::Float) => Comp::Io(IoOp::PrintF, vec![v]),
             Some(Type::Str) => Comp::Io(IoOp::PrintS, vec![v]),
-            // Int prints through the runtime integer printer. `None` is a value
-            // whose type is a free rigid var (an enclosing parameter): its type
-            // is unknowable here, so it likewise lowers to the raw printer, which
-            // self-dispatches on the cell tag at runtime (Int/Unit/String/bignum)
-            // and traps on any other cell rather than misread it. A structural
-            // value can only reach that path through a truly polymorphic `print`,
-            // which no static type could have shown.
-            Some(Type::Int) | None => Comp::Io(IoOp::Print, vec![v]),
+            // Int prints through the runtime integer printer.
+            Some(Type::Int) => Comp::Io(IoOp::Print, vec![v]),
+            // A free rigid var (an enclosing parameter): no static type to
+            // print. Reject at compile time, exactly as the `Output`-routed
+            // `display_comp` sibling does. Whether a `print(x)` of a polymorphic
+            // `x` is legal must not depend on whether a world handler happens to
+            // be in scope, and a value with no static type cannot be shown
+            // consistently across tiers; the fix requires a `Show` constraint
+            // and `show`, not a raw-printer guess.
+            None => return Err(polymorphic_print(arg_expr.span)),
             // Everything else (ADTs, tuples, lists, I64/U64/Bool, Unit) reuses the
             // type-directed structural printer so native matches the interpreter.
             // A known-but-unshowable type (e.g. a function) is a hard error here,

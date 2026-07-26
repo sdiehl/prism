@@ -540,3 +540,61 @@ fn noescape_uncheckable_argument_is_rejected() {
     );
     assert_eq!(once_code(&src, "uncheckable noescape argument"), "E6062");
 }
+
+// A field name shared across a datatype's constructors with DIFFERING types is
+// unsound: a record read `x.field` resolves the field type from whichever
+// constructor `find_field` visits first, so `Square { size: String }` read as
+// the `Circle { size: Int }` field would reinterpret a string pointer as an
+// integer. This must be rejected at the declaration, not fault at runtime.
+#[test]
+fn conflicting_shared_field_type_is_rejected() {
+    let src = prism::with_prelude(
+        "type Shape = Circle { size: Int } | Square { size: String }\n\
+         fn main() = println(\"x\")\n",
+    );
+    let err = prism::check(&src).expect_err("a conflicting shared field type must be rejected");
+    let Error::Type(ty) = &err else {
+        panic!("expected a type error, got: {err}");
+    };
+    assert_eq!(ty.code(), Some("E4008"), "got: {err}");
+}
+
+// A field name shared across constructors with the SAME type is the sound
+// common-field case and must keep compiling: `id` is `Int` in both arms.
+#[test]
+fn compatible_shared_field_type_is_accepted() {
+    let src = prism::with_prelude(
+        "type Tagged = A { id: Int, kind: String } | B { id: Int }\n\
+         fn tag_id(t : Tagged) : Int = t.id\n\
+         fn main() = println(show(tag_id(B { id = 7 })))\n",
+    );
+    prism::check(&src).expect("a shared field of identical type must be accepted");
+}
+
+// A record pattern without `..` must bind every field of its constructor: the
+// spread is what licenses omitting the rest. Before this check, `..` was parsed
+// and dropped, so a forgotten field became a silent wildcard.
+#[test]
+fn record_pattern_without_spread_must_bind_all_fields() {
+    let src = prism::with_prelude(
+        "type P = P { x: Int, y: Int }\n\
+         fn f(p : P) : Int = match p of\n  P { x = a } => a\n\
+         fn main() = println(show(f(P { x = 1, y = 2 })))\n",
+    );
+    let err = prism::check(&src).expect_err("a partial record pattern without `..` must reject");
+    let Error::Type(ty) = &err else {
+        panic!("expected a type error, got: {err}");
+    };
+    assert_eq!(ty.code(), Some("E4009"), "got: {err}");
+}
+
+// The same pattern with `..` is well formed: the spread ignores `y`.
+#[test]
+fn record_pattern_with_spread_is_accepted() {
+    let src = prism::with_prelude(
+        "type P = P { x: Int, y: Int }\n\
+         fn f(p : P) : Int = match p of\n  P { x = a, .. } => a\n\
+         fn main() = println(show(f(P { x = 1, y = 2 })))\n",
+    );
+    prism::check(&src).expect("a record pattern with `..` must be accepted");
+}

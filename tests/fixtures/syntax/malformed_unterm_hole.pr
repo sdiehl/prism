@@ -1,0 +1,4 @@
+-- An interpolation hole that runs off the end of input: the lexer refuses this
+-- file at the opening brace, the compiler's `LexError::UnterminatedHole`
+-- (E7002). The string never closes because the hole stays open.
+fn main() = println("value = {x

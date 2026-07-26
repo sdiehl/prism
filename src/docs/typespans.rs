@@ -613,6 +613,11 @@ fn collect_pattern_heads(
                 collect_pattern_heads(pattern, names, tokens, out);
             }
         }
+        Pattern::Or(alts) => {
+            for pattern in alts {
+                collect_pattern_heads(pattern, names, tokens, out);
+            }
+        }
         Pattern::Wild
         | Pattern::Var(_)
         | Pattern::Int(_)
@@ -1845,6 +1850,12 @@ fn collect_typed_pattern(
                 let expected = info
                     .and_then(|info| info.fields.iter().position(|name| name.as_str() == field))
                     .and_then(|index| types.get(index));
+                collect_typed_pattern(pattern, expected, body, checked, resolved);
+            }
+        }
+        // Every alternative is matched against the same scrutinee type.
+        Pattern::Or(alts) => {
+            for pattern in alts {
                 collect_typed_pattern(pattern, expected, body, checked, resolved);
             }
         }

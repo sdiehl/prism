@@ -1,0 +1,56 @@
+-- An alternation matches when any one of its alternatives does, and is legal
+-- wherever a pattern is: nested in a constructor argument, a tuple, a list, or
+-- a record field.
+type Shape
+  = Dot
+  | Line(Int, Int)
+  | Ring(Int)
+  | Poly(List(Int))
+
+-- One arm, not four.
+fn is_thin(s : Shape) : Bool =
+  match s of
+    Dot | Line(_, _) => true
+    Ring(_) | Poly(_) => false
+
+-- Every alternative must bind the same names, since all of them share the one
+-- body. Here `n` is the first coordinate of a line and the radius of a ring.
+fn extent(s : Shape) : Int =
+  match s of
+    Line(n, _) | Ring(n) => n
+    Dot => 0
+    Poly(_) => 1
+
+-- Alternation nested in an argument position, and a guard, which belongs to
+-- each alternative in turn: a value matching both alternatives retries the
+-- guard against the second before falling through.
+fn label(s : Shape, cap : Int) : String =
+  match s of
+    Line(0 | 1, _) => "short"
+    Ring(n) | Line(n, _) if n > cap => "over"
+    _ => "plain"
+
+-- The arms an alternation stands for are what the exhaustiveness check sees,
+-- so covering the last constructors with one arm needs no catchall.
+fn corners(s : Shape) : Int =
+  match s of
+    Dot => 0
+    Line(_, _) => 2
+    Ring(_) | Poly(_) => 9
+
+-- Expected output:
+--   true
+--   false
+--   7
+--   short
+--   over
+--   plain
+--   9
+fn main() =
+  println("{is_thin(Dot)}")
+  println("{is_thin(Ring(4))}")
+  println("{extent(Ring(7))}")
+  println(label(Line(1, 2), 3))
+  println(label(Ring(9), 3))
+  println(label(Ring(2), 3))
+  println("{corners(Poly(Nil))}")

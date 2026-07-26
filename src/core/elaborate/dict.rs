@@ -2,8 +2,8 @@ use super::{
     builtin, dict_ctor, instance_method, wrap_binds, Builtin, BuiltinKind, Comp, CorePat, Dict,
     Elab, Error, FloatOp, IoOp, NodeId, Sym, Type, Value,
 };
-use crate::names;
 use crate::types::SHOW_CLASS;
+use prism_syntax::names;
 
 impl Elab<'_> {
     pub(super) fn needs_dict(&self, name: &str) -> bool {

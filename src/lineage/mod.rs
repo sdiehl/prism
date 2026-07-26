@@ -11,8 +11,8 @@
 //!   adapter and the sidecar's on-disk siting and reader).
 //! - `run`: collecting and assembling a recorded-run sidecar from provenance events.
 //! - `explain`: `why-output`, walking the graph backward to an `explain::Explanation`.
-//! - [`diff`]: aligning two graphs by logical key into a `diff::DiffReport`.
-//! - [`verify`]: rehashing content nodes and closing the record loop by replay.
+//! - `diff`: aligning two graphs by logical key into a `diff::DiffReport`.
+//! - `verify`: rehashing content nodes and closing the record loop by replay.
 //! - `render`: all human prose, consuming the answer objects the queries produce.
 //! - `facts`: persisted query-decision facts with previous/current graph diffs,
 //!   feeding `why-recompiled` from the store rather than session-only events.
@@ -22,22 +22,22 @@ mod build;
 #[cfg(feature = "native")]
 mod cert;
 #[cfg(feature = "native")]
-mod diff;
+pub use prism_lineage::diff;
 #[cfg(feature = "native")]
 mod docs;
 #[cfg(feature = "native")]
-mod explain;
+pub use prism_lineage::explain;
 mod facts;
 #[cfg(feature = "native")]
-mod graph;
-mod node_id;
-pub mod provenance;
+pub use prism_lineage::graph;
+pub use prism_lineage::node_id;
+pub use prism_lineage::provenance;
 #[cfg(feature = "native")]
-mod render;
+pub use prism_lineage::render;
 #[cfg(feature = "native")]
 mod run;
 #[cfg(feature = "native")]
-mod verify;
+pub use prism_lineage::verify;
 
 #[cfg(feature = "native")]
 pub use build::{
@@ -83,6 +83,3 @@ pub use verify::{
     resolve_replay_file, verify, verify_run_replay, verify_world, RunVerification, VerifyReport,
     WorldVerifyReport,
 };
-
-#[cfg(all(test, feature = "native"))]
-mod tests;

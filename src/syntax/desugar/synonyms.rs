@@ -177,8 +177,10 @@ fn check_arity(name: &str, want: usize, got: usize, prog: &Program) -> Result<()
     .at(span))
 }
 
-// Substitute synonym parameters with their arguments in an expanded body.
-fn subst_ty(t: &Ty, sub: &BTreeMap<String, Ty>) -> Ty {
+// Substitute synonym parameters with their arguments in an expanded body. Shared
+// with `deriving (Plate)`, which instantiates a carrier type's field types the
+// same way before walking them.
+pub(super) fn subst_ty(t: &Ty, sub: &BTreeMap<String, Ty>) -> Ty {
     match t {
         Ty::Var(n) => sub.get(n).cloned().unwrap_or_else(|| t.clone()),
         // A higher-kinded application `f(a)`: the head may itself be a synonym

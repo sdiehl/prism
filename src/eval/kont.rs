@@ -72,7 +72,7 @@ use num_bigint::BigInt;
 use crate::core::{CoreOp, CorePat};
 use crate::driver::WireKind;
 use crate::lineage::provenance::Observation;
-use crate::util::binary::{
+use prism_common::binary::{
     from_wire, put_indices, put_str, put_svarint, put_uvarint, to_wire, Reader, MAX_EXPANSION,
     MAX_NODES,
 };

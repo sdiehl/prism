@@ -1,0 +1,461 @@
+-- Recompute `prism-core-hash-v1` in Prism from an exported identity surface.
+--
+-- arg(0) is a `prism-core-identity-v1` artifact. The output is one
+-- `<abbreviated hash>  <name>` line per exported definition, name-sorted, in the
+-- exact shape `dump core-hash` prints, so the two can be diffed line for line.
+-- The compiler stays authoritative; this is the differential reader.
+--
+-- The whole computation is the hasher's own shape. `enc_def` builds a
+-- `Data.Bind` rendering skeleton in the encoder's write order and lets
+-- `bind_nameless` spell every binder reference as outward distance; a free name
+-- goes to a resolver that substitutes an intra-group index, a dependency's
+-- content hash, or the bare name, exactly as the encoder's reference resolution
+-- does. `hash_group_of` then reproduces the component pass: an ordering pass with
+-- intra-group references left neutral, a real pass folding each member's
+-- metadata, and one derived hash per member.
+--
+-- Accessors are total and return a marked sentinel rather than aborting. A
+-- structural violation therefore surfaces as a hash that does not match the
+-- compiler's, which is what this harness reports anyway; nothing is accepted on
+-- a missing field.
+import Json (Json, JNull, JBool, JInt, JFloat, JStr, JArr, JObj, decode, json_error_message)
+
+import Data.Bind (Nameless, NTok, NLit, NRef, NScope, NSeq, bind_nameless, bind_token)
+
+import Control.State (..)
+
+import Wire (wire_scheme_tag)
+
+-- The schema this reader accepts. A different tag is refused outright.
+let identity_schema : String = "prism-core-identity-v1"
+
+-- Marks a field the artifact did not carry. It cannot collide with a real
+-- payload, and it poisons the hash it lands in.
+let absent : String = "<absent>"
+
+-- The per-definition renumbering of generated `var` operations, threaded through
+-- one definition's encoding. A newtype so the state is not confusable with any
+-- other map in scope.
+type VarIds = VarIds { slots: Map(String, Int) }
+
+-- Everything an encoding pass resolves a free name against: the group being
+-- hashed (with each member's component index, used only on the real pass), and
+-- the content hashes known so far.
+type Scope = Scope {
+  members: Map(String, Int),
+  indexed: Bool,
+  hashes: Map(String, String)
+}
+
+fn jlook(fs : List((String, Json)), k : String) : Json =
+  match fs of
+    Nil => JStr(absent)
+    Cons(f, rest) =>
+      if fst(f) == k then
+        snd(f)
+      else
+        jlook(rest, k)
+
+fn jfield(j : Json, k : String) : Json =
+  match j of
+    JObj(fs) => jlook(fs, k)
+    _ => JStr(absent)
+
+fn jhas(j : Json, k : String) : Bool =
+  match jfield(j, k) of
+    JStr(s) => s /= absent
+    _ => true
+
+fn jstr(j : Json) : String =
+  match j of
+    JStr(s) => s
+    _ => absent
+
+fn jint(j : Json) : Int =
+  match j of
+    JInt(n) => n
+    _ => 0 - 1
+
+fn jarr(j : Json) : List(Json) =
+  match j of
+    JArr(xs) => xs
+    _ => Nil
+
+fn jstrs(j : Json) : List(String) = map(jstr, jarr(j))
+
+fn jat(j : Json, k : String) : String = jstr(jfield(j, k))
+
+-- A reference to a top-level symbol, the encoder's `%` prefix and all.
+fn enc_ref(x : String) : Nameless = NSeq([NLit("%"), NRef(x)])
+
+-- How a name that no enclosing binder introduced is spelled: an intra-group
+-- member by its component index (neutral on the ordering pass), an already
+-- hashed dependency by its content hash, anything else by its own name.
+fn enc_free_at(sc : Scope, x : String) : String =
+  match map_lookup(x, sc.members) of
+    Some(i) =>
+      if sc.indexed then
+        concat("r", show_int(i))
+      else
+        "r?"
+    None =>
+      match map_lookup(x, sc.hashes) of
+        Some(h) => concat("h", h)
+        None => concat("g", bind_token(x))
+
+fn enc_free(sc : Scope) : (String) -> String = \(x) -> enc_free_at(sc, x)
+
+-- The canonical spelling of an effect-operation name. A generated `var`
+-- operation carries its verb and State slot as data, so the slot maps to an id
+-- assigned by first occurrence in this walk and the get/set pair of one variable
+-- share it. Any user-declared operation is committed verbatim.
+fn enc_op_canon(name : String, o : Json) : String ! {State(VarIds)} =
+  if jhas(o, "varSlot") then
+    let st = get()
+    let slot = jat(o, "varSlot")
+    let verb = jat(o, "varVerb")
+    match map_lookup(slot, st.slots) of
+      Some(k) => concat(verb, concat("@#", show_int(k)))
+      None =>
+        let k = map_size(st.slots)
+        put(VarIds { slots = map_insert(slot, k, st.slots) })
+        concat(verb, concat("@#", show_int(k)))
+  else
+    name
+
+fn enc_vals(js : List(Json)) : List(Nameless) ! {State(VarIds)} =
+  match js of
+    Nil => Nil
+    Cons(v, rest) =>
+      let e = enc_val(v)
+      Cons(e, enc_vals(rest))
+
+-- A bracketed operand list.
+fn enc_args(j : Json) : Nameless ! {State(VarIds)} =
+  let es = enc_vals(jarr(j))
+  NSeq(append(Cons(NLit("["), es), [NLit("]")]))
+
+fn enc_record(fs : List(Json)) : List(Nameless) ! {State(VarIds)} =
+  match fs of
+    Nil => Nil
+    Cons(f, rest) =>
+      let n = NTok(jat(f, "name"))
+      let v = enc_val(jfield(f, "val"))
+      Cons(NSeq([n, v]), enc_record(rest))
+
+fn enc_bool(j : Json) : String =
+  match j of
+    JBool(b) =>
+      if b then
+        "1"
+      else
+        "0"
+    _ => absent
+
+fn enc_val(j : Json) : Nameless ! {State(VarIds)} =
+  let k = jat(j, "v")
+  if k == "Var" then
+    NSeq([NLit("v"), enc_ref(jat(j, "x"))])
+  elif k == "Int" then
+    NLit(concat("i", jat(j, "n")))
+  elif k == "I64" then
+    NLit(concat("j", jat(j, "n")))
+  elif k == "U64" then
+    NLit(concat("u", jat(j, "n")))
+  elif k == "Float" then
+    NLit(concat("f", jat(j, "bits")))
+  elif k == "Bool" then
+    NLit(concat("o", enc_bool(jfield(j, "b"))))
+  elif k == "Unit" then
+    NLit("1")
+  elif k == "Str" then
+    NSeq([NLit("s"), NTok(jat(j, "s"))])
+  elif k == "Thunk" then
+    NSeq([NLit("t"), enc_comp(jfield(j, "c"))])
+  elif k == "Ctor" then
+    let args = enc_args(jfield(j, "args"))
+    NSeq([
+        NLit("c"),
+        NTok(jat(j, "name")),
+        NLit(concat("/", show_int(jint(jfield(j, "tag"))))),
+        args,
+      ])
+  elif k == "Tuple" then
+    NSeq([NLit("p"), enc_args(jfield(j, "args"))])
+  elif k == "UnboxedTuple" then
+    NSeq([NLit("P"), enc_args(jfield(j, "args"))])
+  elif k == "UnboxedRecord" then
+    let fs = enc_record(jarr(jfield(j, "fields")))
+    NSeq(append(Cons(NLit("R\{"), fs), [NLit("\}")]))
+  else
+    NLit(concat("<unknown value ", concat(k, ">")))
+
+-- A pattern's shape and the binders it introduces, left to right.
+fn enc_pat(j : Json) : (Nameless, List(String)) =
+  let k = jat(j, "p")
+  if k == "Wild" then
+    (NLit("_w"), Nil)
+  elif k == "Var" then
+    (NLit("_v"), [jat(j, "x")])
+  elif k == "Ctor" then
+    let (shape, bs) = enc_fields(jarr(jfield(j, "fields")))
+    (NSeq([NLit("_c"), NTok(jat(j, "name")), shape]), bs)
+  elif k == "Tuple" then
+    let (shape, bs) = enc_fields(jarr(jfield(j, "fields")))
+    (NSeq([NLit("_t"), shape]), bs)
+  else
+    (NLit(concat("<unknown pattern ", concat(k, ">"))), Nil)
+
+fn enc_fields(fs : List(Json)) : (Nameless, List(String)) =
+  let (marks, bs) = enc_fields_go(fs)
+  (NLit(concat("[", concat(marks, "]"))), bs)
+
+fn enc_fields_go(fs : List(Json)) : (String, List(String)) =
+  match fs of
+    Nil => ("", Nil)
+    Cons(f, rest) =>
+      let (marks, bs) = enc_fields_go(rest)
+      match f of
+        JNull => (concat("_", marks), bs)
+        _ => (concat("v", marks), Cons(jstr(f), bs))
+
+fn enc_arms(js : List(Json)) : List(Nameless) ! {State(VarIds)} =
+  match js of
+    Nil => Nil
+    Cons(a, rest) =>
+      let (shape, bs) = enc_pat(jfield(a, "pat"))
+      let body = enc_comp(jfield(a, "body"))
+      Cons(NSeq([shape, NScope(bs, body)]), enc_arms(rest))
+
+-- Canonicalize every handler clause name in source order, which is where the
+-- generated-`var` ids are minted, before any clause body is walked.
+fn enc_op_names(js : List(Json)) : List((String, Json)) ! {State(VarIds)} =
+  match js of
+    Nil => Nil
+    Cons(o, rest) =>
+      let c = enc_op_canon(jat(o, "name"), o)
+      Cons((c, o), enc_op_names(rest))
+
+fn enc_op_clauses(ops : List((String, Json))) : List(Nameless) ! {State(VarIds)} =
+  match ops of
+    Nil => Nil
+    Cons(p, rest) =>
+      let (canon, o) = p
+      let binders = append(jstrs(jfield(o, "params")), [jat(o, "resume")])
+      let body = enc_comp(jfield(o, "body"))
+      Cons(NSeq([NTok(canon), NScope(binders, body)]), enc_op_clauses(rest))
+
+-- Handler clauses form a set, so they are emitted in canonical-name order; the
+-- source position keeps the order total when two clauses somehow share a name.
+fn enc_handle(j : Json) : Nameless ! {State(VarIds)} =
+  let body = enc_comp(jfield(j, "body"))
+  let ret = enc_handle_return(j)
+  let named = enc_op_names(jarr(jfield(j, "ops")))
+  let keys = sort(zip(map(fst, named), range(0, length(named))))
+  let sorted = map(\(k) -> (fst(k), clause_at(snd(k), named)), keys)
+  let clauses = enc_op_clauses(sorted)
+  NSeq(append([body, ret, NLit("\{")], append(clauses, [NLit("\}")])))
+
+fn enc_handle_return(j : Json) : Nameless ! {State(VarIds)} =
+  if jhas(j, "retVar") && jhas(j, "retBody") then
+    let rb = enc_comp(jfield(j, "retBody"))
+    NSeq([NLit("R"), NScope([jat(j, "retVar")], rb)])
+  else
+    NLit("N")
+
+fn clause_at(i : Int, named : List((String, Json))) : Json =
+  match nth(i, named) of
+    Some(p) => snd(p)
+    None => JStr(absent)
+
+fn enc_comp(j : Json) : Nameless ! {State(VarIds)} =
+  let k = jat(j, "k")
+  NSeq([NLit(concat("<", concat(k, ">"))), enc_node(k, j)])
+
+fn enc_node(k : String, j : Json) : Nameless ! {State(VarIds)} =
+  if is_one_value(k) then
+    enc_val(jfield(j, "v"))
+  elif is_io(k) then
+    NSeq(enc_vals(jarr(jfield(j, "args"))))
+  elif k == "FloatBuiltin" || k == "Neg" then
+    NSeq([NTok(jat(j, "tag")), enc_val(jfield(j, "v"))])
+  elif k == "UnboxedProject" then
+    NSeq([enc_val(jfield(j, "v")), NTok(jat(j, "field"))])
+  elif k == "Bind" then
+    let m = enc_comp(jfield(j, "m"))
+    let n = enc_comp(jfield(j, "n"))
+    NSeq([m, NScope([jat(j, "x")], n)])
+  elif k == "Lam" then
+    let xs = jstrs(jfield(j, "xs"))
+    NSeq([NLit(show_int(length(xs))), NScope(xs, enc_comp(jfield(j, "body")))])
+  elif k == "App" then
+    let f = enc_comp(jfield(j, "f"))
+    NSeq([f, enc_args(jfield(j, "args"))])
+  elif k == "If" then
+    let c = enc_val(jfield(j, "cond"))
+    let t = enc_comp(jfield(j, "t"))
+    NSeq([c, t, enc_comp(jfield(j, "e"))])
+  elif k == "Prim" then
+    let a = enc_val(jfield(j, "a"))
+    NSeq([NTok(jat(j, "tag")), a, enc_val(jfield(j, "b"))])
+  elif k == "Call" then
+    NSeq([enc_ref(jat(j, "name")), enc_args(jfield(j, "args"))])
+  elif k == "Do" then
+    let canon = enc_op_canon(jat(j, "op"), j)
+    NSeq([NTok(canon), enc_args(jfield(j, "args"))])
+  elif k == "Case" then
+    let scrut = enc_val(jfield(j, "scrut"))
+    let arms = enc_arms(jarr(jfield(j, "arms")))
+    NSeq(append([scrut, NLit("\{")], append(arms, [NLit("\}")])))
+  elif k == "Handle" then
+    enc_handle(j)
+  elif k == "Mask" then
+    let names = map(\(n) -> NTok(n), sort(jstrs(jfield(j, "ops"))))
+    NSeq(append(names, [enc_comp(jfield(j, "body"))]))
+  elif k == "StrBuiltin" then
+    NSeq([NTok(jat(j, "tag")), enc_args(jfield(j, "args"))])
+  elif k == "WithReuse" then
+    let freed = enc_val(jfield(j, "freed"))
+    let body = enc_comp(jfield(j, "body"))
+    NSeq([freed, NScope([jat(j, "token")], body)])
+  elif k == "Reuse" then
+    NSeq([enc_ref(jat(j, "token")), enc_val(jfield(j, "v"))])
+  elif is_two_value(k) then
+    let a = enc_val(jfield(j, "a"))
+    NSeq([a, enc_val(jfield(j, "b"))])
+  else
+    NLit(concat("<unknown node ", concat(k, ">")))
+
+fn is_one_value(k : String) : Bool =
+  elem(k, ["Return", "Force", "Error", "Dup", "Drop", "RefNew", "RefGet"])
+
+fn is_two_value(k : String) : Bool = elem(k, ["RefSet", "InitAt"])
+
+-- The builtin IO operations, whose node tag already names the operation, so only
+-- their operands are encoded.
+fn is_io(k : String) : Bool =
+  elem(k, [
+      "Print",
+      "PrintF",
+      "PrintS",
+      "PrintNl",
+      "ReadInt",
+      "ReadLine",
+      "Rand",
+      "Srand",
+    ])
+
+-- One definition's encoding: the parameters are the outermost binders, and the
+-- parameter and dictionary arities are committed before the body.
+fn enc_def(sc : Scope, d : Json) : String =
+  let params = jstrs(jfield(d, "params"))
+  let header = concat(
+      "fn",
+      concat(
+          show_int(length(params)),
+          concat("d", show_int(jint(jfield(d, "dictArity")))),
+        ),
+    )
+  let tree =
+    eval_state(VarIds { slots = map_empty }, \() -> enc_comp(jfield(d, "body")))
+  bind_nameless(enc_free(sc), NScope(params, NSeq([NLit(header), tree])))
+
+-- Hash one recursive group and return each member's content hash.
+--
+-- The ordering pass encodes every member with intra-group references left
+-- neutral and sorts on the result, giving the cycle a name-independent canonical
+-- order (the name is only a tiebreak). The real pass then encodes with those
+-- indices, length-prefixing each member's metadata so its bytes cannot forge a
+-- member boundary, and each member's hash is derived from the component hash and
+-- its position.
+fn hash_group_of(
+  known : Map(String, String),
+  defs : Map(String, Json),
+  group : List(String)
+) : List((String, String)) =
+  let neutral = Scope {
+    members = map_from_list(zip(group, replicate(length(group), 0))),
+    indexed = false,
+    hashes = known
+  }
+  let probes = map(\(m) -> (enc_def(neutral, def_of(defs, m)), m), group)
+  let order = map(snd, sort(probes))
+  let indexed = Scope {
+    members = map_from_list(zip(order, range(0, length(order)))),
+    indexed = true,
+    hashes = known
+  }
+  let blob = str_join(
+      "",
+      Cons(wire_scheme_tag, map(\(m) -> member_blob(indexed, defs, m), order)),
+    )
+  let component = blake3(blob)
+  zip_with(
+      \(m, i) -> (m, blake3(concat(component, concat(":", show_int(i))))),
+      order,
+      range(0, length(order)),
+    )
+
+fn member_blob(sc : Scope, defs : Map(String, Json), m : String) : String =
+  let d = def_of(defs, m)
+  let meta = jat(d, "meta")
+  concat(concat("|meta", bind_token(meta)), enc_def(sc, d))
+
+fn def_of(defs : Map(String, Json), m : String) : Json =
+  match map_lookup(m, defs) of
+    Some(d) => d
+    None => JStr(absent)
+
+fn hash_groups(
+  known : Map(String, String),
+  defs : Map(String, Json),
+  groups : List(List(String))
+) : Map(String, String) =
+  match groups of
+    Nil => known
+    Cons(g, rest) =>
+      let got = hash_group_of(known, defs, g)
+      hash_groups(
+          foldl(\(m, p) -> map_insert(fst(p), snd(p), m), known, got),
+          defs,
+          rest,
+        )
+
+fn dep_pair(j : Json) : (String, String) = (jat(j, "name"), jat(j, "hash"))
+
+fn def_pair(j : Json) : (String, Json) = (jat(j, "name"), j)
+
+-- One `<abbreviated hash>  <name>` line, the shape `dump core-hash` prints.
+fn hash_line(name : String, hash : String) : String =
+  concat(substring(hash, 0, 16), concat("  ", name))
+
+fn report(doc : Json) : Unit ! {IO} =
+  if jat(doc, "schema") /= identity_schema then
+    println(concat("error: not a ", identity_schema))
+  else
+    let defs = map(def_pair, jarr(jfield(doc, "defs")))
+    let deps = map_from_list(map(dep_pair, jarr(jfield(doc, "deps"))))
+    let groups = map(jstrs, jarr(jfield(doc, "groups")))
+    let hashes = hash_groups(deps, map_from_list(defs), groups)
+    emit_lines(hashes, sort(map(fst, defs)))
+
+fn emit_lines(
+  hashes : Map(String, String),
+  names : List(String)
+) : Unit ! {IO} =
+  match names of
+    Nil => ()
+    Cons(n, rest) =>
+      println(hash_line(n, lookup_hash(hashes, n)))
+      emit_lines(hashes, rest)
+
+fn lookup_hash(hashes : Map(String, String), name : String) : String =
+  match map_lookup(name, hashes) of
+    Some(h) => h
+    None => absent
+
+fn main() =
+  let text = read_file(arg(0))
+  match decode(text) of
+    Err(e) => println(concat("error: decode: ", json_error_message(e)))
+    Ok(doc) => report(doc)

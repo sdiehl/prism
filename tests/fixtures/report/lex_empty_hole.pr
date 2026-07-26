@@ -1,0 +1,2 @@
+-- An interpolation hole with nothing in it.
+fn main() = "{}"

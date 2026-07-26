@@ -1,10 +1,8 @@
 -- | The token vocabulary of the `prism-syntax-tokens-v1` artifact. A fixed
--- token's wire kind is its exact source spelling, so `TFixed` carries the
--- spelling rather than enumerating every keyword and operator as its own
--- constructor; the value-carrying and virtual layout tokens each get a
--- dedicated constructor matching the grammar's terminal aliases. Keeping fixed
--- tokens spelling-backed aligns the wire vocabulary with compiler output
--- without duplicating the keyword and operator tables.
+-- token's wire kind is its source spelling, so `TFixed` carries the spelling
+-- rather than enumerating every keyword and operator; value-carrying and
+-- virtual layout tokens each get a dedicated constructor matching the grammar's
+-- terminal aliases.
 
 import Data.Maybe (..)
 

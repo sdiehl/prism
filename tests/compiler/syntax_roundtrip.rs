@@ -62,7 +62,11 @@ fn roundtrip(artifact: &Path, mode: &str) -> String {
 // artifact families.
 fn assert_stem_roundtrips(stem: &str) {
     let dir = fixture_dir();
-    for (family, mode) in [("syntax-tokens", "tokens"), ("surface-syntax", "surface")] {
+    for (family, mode) in [
+        ("syntax-tokens", "tokens"),
+        ("surface-syntax", "surface"),
+        ("syntax-diagnostics", "diagnostics"),
+    ] {
         let path = dir.join(format!("{stem}.{family}.json"));
         let golden = fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("{stem}.{family}: missing golden: {e}"));
@@ -124,6 +128,7 @@ fn syntax_roundtrip_rejects_wrong_schema() {
     for (fixture, mode) in [
         ("mismatch.syntax-tokens.json", "tokens"),
         ("mismatch.surface-syntax.json", "surface"),
+        ("mismatch.syntax-diagnostics.json", "diagnostics"),
     ] {
         let out = roundtrip(&dir.join(fixture), mode);
         assert!(

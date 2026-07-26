@@ -22,6 +22,11 @@ const GENERATED_CASES: usize = 12;
 const SEED: u64 = 0x7479_7065_645f_667a;
 const ARENA_CASES: usize = 8;
 const ARENA_SEED: u64 = 0x6172_656e_615f_667a;
+// The two families run concurrently as separate `#[test]` threads of one test
+// binary, and the parity harness derives its build directory from the tag, so
+// each family needs its own or the two racing builds share one directory.
+const FAMILY: &str = "typed-fuzz";
+const ARENA_FAMILY: &str = "typed-fuzz-arena";
 
 fn forced(tier: EffectTier) -> Config {
     let mut config = Config::from_env();
@@ -31,12 +36,12 @@ fn forced(tier: EffectTier) -> Config {
 }
 
 // The failure reason if `program` diverges on any tier, `None` if all agree.
-fn divergence(program: &Program, path: &Path) -> Option<String> {
+fn divergence(family: &str, program: &Program, path: &Path) -> Option<String> {
     fs::write(path, program.render()).unwrap();
     let roots = default_roots(Path::new("."));
     for &tier in TIERS {
         let config = forced(tier);
-        let tag = format!("typed-fuzz-{}", tier.label());
+        let tag = format!("{family}-{}", tier.label());
         if let Err(reason) = check_native_parity(path, &tag, |full, binary| {
             prism::build_on(full, &roots, binary, &config)
         }) {
@@ -49,11 +54,11 @@ fn divergence(program: &Program, path: &Path) -> Option<String> {
 #[test]
 fn generated_programs_agree_across_all_tiers() {
     require_cc();
-    let scratch = TempDir::new("typed-fuzz", "cases");
+    let scratch = TempDir::new(FAMILY, "cases");
     let path = scratch.join("candidate.pr");
     for (index, program) in generate(SEED, GENERATED_CASES).into_iter().enumerate() {
-        if let Some(failure) = divergence(&program, &path) {
-            let (minimal, failure) = shrink(program, failure, |p| divergence(p, &path));
+        if let Some(failure) = divergence(FAMILY, &program, &path) {
+            let (minimal, failure) = shrink(program, failure, |p| divergence(FAMILY, p, &path));
             panic!(
                 "generated case {index} diverged after shrinking:\n{failure}\n\nminimal reproducer:\n{}",
                 minimal.render()
@@ -70,14 +75,15 @@ fn generated_programs_agree_across_all_tiers() {
 #[test]
 fn generated_arena_programs_agree_across_all_tiers() {
     require_cc();
-    let scratch = TempDir::new("typed-fuzz-arena", "cases");
+    let scratch = TempDir::new(ARENA_FAMILY, "cases");
     let path = scratch.join("candidate.pr");
     for (index, program) in generate_arena(ARENA_SEED, ARENA_CASES)
         .into_iter()
         .enumerate()
     {
-        if let Some(failure) = divergence(&program, &path) {
-            let (minimal, failure) = shrink(program, failure, |p| divergence(p, &path));
+        if let Some(failure) = divergence(ARENA_FAMILY, &program, &path) {
+            let (minimal, failure) =
+                shrink(program, failure, |p| divergence(ARENA_FAMILY, p, &path));
             panic!(
                 "generated arena case {index} diverged after shrinking:\n{failure}\n\nminimal \
                  reproducer:\n{}",

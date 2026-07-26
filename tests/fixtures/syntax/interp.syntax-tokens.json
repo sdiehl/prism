@@ -1,6 +1,6 @@
 {
   "schema": "prism-syntax-tokens-v1",
-  "compiler": "0.14.0",
+  "compiler": "0.15.0",
   "source": {
     "digest": "d916367af5ed0ae848f8847fade024e1809a5b1aa1650bec6ef1ef6ffb3f8f73",
     "text": "-- Interpolation and layout edges: nested holes, bare-indent bodies, blanks.\neffect Env\n  read(String) : String\n\nclass Render(a)\n  render : (a) -> String\n\ninstance renderInt : Render(Int)\n  fn render(v) = \"v={v}\"\n\nfn nested(name : String) : String =\n  \"outer {concat(\"inner {name} deep\", read(\"home\"))} tail\"\n\nfn multiline() : Int =\n  let a = let b = 1 in let c = 2 in b + c\n  a\n"

@@ -1,0 +1,7 @@
+class Plate(a)
+  children : (a) -> List(a)
+  rebuild : (a, List(a)) -> a ! {Fail | e}
+
+type Node = Leaf(Int) | Thunk((Int) -> Node) deriving (Plate)
+
+fn main() = Leaf(0)

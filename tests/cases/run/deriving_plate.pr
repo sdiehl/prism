@@ -1,0 +1,80 @@
+-- `deriving (Plate)` generates the one-layer traversal and its inverse:
+-- `children(e)` is the list of `e`'s immediate subvalues of its own type, in
+-- constructor-declaration and field order, and `rebuild(e, ks)` is `e` with those
+-- positions replaced by `ks`. A whole-tree walk or rewrite is then written once
+-- against the pair instead of once per constructor. The derivation reaches
+-- through list, optional, and carrier-record fields as well as direct ones, and a
+-- type with no recursive occurrence at all still gets an instance (with no
+-- children).
+
+import Control.Layer (lay_depth, lay_size, plate_layer)
+
+import Control.Rewrite (rw_everywhere)
+
+import Data.Foldable (length)
+
+import Data.List (map)
+
+type Arm = Arm { tag: Int, body: Expr } deriving (Show)
+
+type Expr
+  = Lit(Int)
+  | Add(Expr, Expr)
+  | Neg(Option(Expr))
+  | Block(List(Expr))
+  | Switch(Expr, List(Arm))
+  deriving (Plate, Show)
+
+type Hue = Red | Green deriving (Plate, Show)
+
+-- A parameterized type: its children are `Rose(a)` values found structurally, so
+-- the derived instance needs no `given Plate(a)` and works at `Rose(Int)`.
+type Rose(a) = Rose(a, List(Rose(a))) deriving (Plate)
+
+-- The whole point: one generic walk, written against `children` alone, standing
+-- in for the per-constructor match every traversal would otherwise repeat.
+fn universe(e : Expr) : List(Expr) = Cons(e, concat_map(universe, children(e)))
+
+-- And one generic bottom-up rewrite, written against the pair: every node is put
+-- back from its rewritten children, whatever its constructor holds them in.
+fn transform(f : (Expr) -> Expr, e : Expr) : Expr ! {Fail | r} =
+  f(rebuild(e, map(\(c) -> transform(f, c), children(e))))
+
+fn bump(e : Expr) : Expr =
+  match e of
+    Lit(n) => Lit(n + 1)
+    _ => e
+
+-- The partial form the strategy combinators take: `None` is where the rule
+-- declines, which is what lets a traversal tell a no-op from a hit.
+fn bump_lit(e : Expr) : Option(Expr) =
+  match e of
+    Lit(n) => Some(Lit(n + 1))
+    _ => None
+
+fn main() =
+  let sample = Switch(Add(Lit(1), Lit(2)), [
+      Arm { tag = 0, body = Neg(Some(Lit(3))) },
+      Arm { tag = 1, body = Block([Lit(4), Lit(5)]) },
+    ])
+  println(show(children(sample)))
+  println(show(length(universe(sample))))
+  println(show(children(Lit(1))))
+  println(show(children(Neg(None))))
+  println(show(children(Block([]))))
+  println(show(children(Red)))
+  println(show(length(children(Rose(7, [Rose(8, []), Rose(9, [])])))))
+  -- The law: put the children back where they came from and nothing moved.
+  println(show(optional(\() -> rebuild(sample, children(sample)))))
+  println(show(optional(\() -> rebuild(Red, []))))
+  println(show(optional(\() -> transform(bump, sample))))
+  -- A list of any other length is the caller's error, and says so.
+  println(show(optional(\() -> rebuild(sample, []))))
+  println(show(optional(\() -> rebuild(Lit(1), [Lit(2)]))))
+  -- The derived pair is also a `Layer`, so every query in `Control.Layer` and
+  -- every strategy in `Control.Rewrite` runs on this tree with nothing further
+  -- written. `plate_layer` discharges the `Fail` a mis-shaped list would raise
+  -- by returning the node unchanged, which is what a layer promises.
+  println(show(lay_size(plate_layer(), sample)))
+  println(show(lay_depth(plate_layer(), sample)))
+  println(show(rw_everywhere(plate_layer(), bump_lit, sample)))

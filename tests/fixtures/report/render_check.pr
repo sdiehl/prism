@@ -1,0 +1,38 @@
+-- The differential harness for `Syntax.Report`. arg(0) is a
+-- `prism-syntax-diagnostics-v1` artifact carrying the exact source text and the
+-- compiler's own diagnostic for it. This decodes the artifact and prints what
+-- `Syntax.Report` draws from that diagnostic alone; the gate diffs those bytes
+-- against the compiler's own renderer over the same source. A diagnostic whose
+-- shape the module does not draw prints the decline marker instead, so the
+-- boundary is reported rather than approximated.
+import Syntax.Codec (..)
+
+import Syntax.Diagnostic (..)
+
+import Syntax.Report (..)
+
+import Syntax.Source (..)
+
+-- The name the compiler stamps in the location line when reporting on a single
+-- source.
+fn source_name() : String = "<source>"
+
+-- Printed when the source raised no diagnostic at all: the corpus is negative,
+-- so this is itself a failure the gate reports.
+fn accepted() : String = "accepted\n"
+
+-- Printed when the diagnostic falls outside the shape `rp_report` draws.
+fn declined() : String = "declined\n"
+
+fn render(doc : DiagnosticsDoc) : String =
+  if doc_accepted(doc) then
+    accepted()
+  else
+    match rp_report_doc(source_name(), doc) of
+      None => declined()
+      Some(s) => s
+
+fn main() =
+  match decode_diagnostics(read_file(arg(0))) of
+    Err(e) => print("decode error: {codec_error_message(e)}\n")
+    Ok(doc) => print(render(doc))

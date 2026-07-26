@@ -200,7 +200,8 @@ jobs:
           echo "output: $out"
           [ "$out" = "42" ] || { echo "unexpected output: $out"; exit 1; }
 
-      # Linux: also emit deb/rpm/apk via the same `just pkg` used locally.
+      # Linux: also emit deb/rpm via the same `just pkg` used locally. No apk: the
+      # glibc binary can't run on musl; Alpine uses the container image instead.
       - name: Install nfpm + just (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -208,7 +209,7 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - uses: extractions/setup-just@v4
         if: runner.os == 'Linux'
-      - name: Build deb/rpm/apk
+      - name: Build deb/rpm
         if: runner.os == 'Linux'
         run: just pkg "$VERSION"
 
@@ -223,7 +224,6 @@ jobs:
             ${{ env.PKG }}.tar.gz.sha256
             dist/*.deb
             dist/*.rpm
-            dist/*.apk
             dist/*.pkg.tar.zst
           if-no-files-found: error
 
@@ -290,7 +290,6 @@ jobs:
             dist/*.tar.gz.sha256
             dist/*.deb
             dist/*.rpm
-            dist/*.apk
             dist/*.pkg.tar.zst
             dist/PKGBUILD
             dist/stdlib-merkle-root.txt

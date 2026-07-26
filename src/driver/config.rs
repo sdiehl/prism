@@ -6,109 +6,12 @@
 //! `prism::Scheduler`, `prism::BackendOpt`) resolves through the re-export in
 //! `mod.rs`, so the split is invisible to callers.
 
+pub use crate::flags::{BackendOpt, Scheduler};
+
 use crate::core::{CorePass, OptLevel, PassSpec};
 use crate::flags::DynFlags;
 
 use super::{ArtifactIdentity, CompilerSession, TimingSink};
-
-/// Which cooperative scheduler `run_cooperative` resolves to (the `--scheduler`
-/// flag).
-///
-/// `run_async` and `run_lifo` name a specific policy directly and are never
-/// retargeted, so the flag only picks the default wrap, never the semantics of a
-/// program that pins its own scheduler.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Scheduler {
-    /// FIFO round-robin: `run_cooperative` stays its default alias for `run_async`.
-    #[default]
-    Cooperative,
-    /// LIFO depth-first: retarget `run_cooperative` to `run_lifo`.
-    Lifo,
-}
-
-impl Scheduler {
-    /// Parse a `--scheduler` value: `cooperative`/`fifo`, or `lifo`.
-    #[must_use]
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "cooperative" | "fifo" => Some(Self::Cooperative),
-            "lifo" => Some(Self::Lifo),
-            _ => None,
-        }
-    }
-
-    /// The `Concurrent` entry `run_cooperative` retargets to, or `None` when the
-    /// default (`run_async`) already is the choice and no rewrite is needed.
-    #[must_use]
-    pub(super) const fn retarget(self) -> Option<&'static str> {
-        match self {
-            Self::Cooperative => None,
-            Self::Lifo => Some(crate::names::RUN_LIFO),
-        }
-    }
-
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Cooperative => "cooperative",
-            Self::Lifo => "lifo",
-        }
-    }
-}
-
-/// A backend optimization level clang accepts via `-O`.
-///
-/// The single source of truth shared by the `--backend-opt` flag and the
-/// `PRISM_BACKEND_OPT` env knob. An invalid level is unrepresentable; every
-/// spelling flows through [`BackendOpt::as_str`], so the `-O` argument handed to
-/// `cc` and the artifact-identity label can never drift apart or off the set.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum BackendOpt {
-    O0,
-    O1,
-    #[default]
-    O2,
-    O3,
-    Os,
-    Oz,
-}
-
-impl BackendOpt {
-    /// Every level in canonical order: the value set `--backend-opt` accepts.
-    pub const ALL: [Self; 6] = [Self::O0, Self::O1, Self::O2, Self::O3, Self::Os, Self::Oz];
-
-    /// The clang `-O` suffix. The single spelling used for both the `cc` argument
-    /// and the artifact-identity label; kept byte-stable so hashes never move.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::O0 => "0",
-            Self::O1 => "1",
-            Self::O2 => "2",
-            Self::O3 => "3",
-            Self::Os => "s",
-            Self::Oz => "z",
-        }
-    }
-
-    /// The level named by `s`, or `None` for a value clang does not accept. Both
-    /// entry paths (`--backend-opt`, `PRISM_BACKEND_OPT`) parse through here so a
-    /// bad level never reaches `cc`.
-    #[must_use]
-    pub fn parse(s: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|o| o.as_str() == s)
-    }
-
-    /// The accepted levels as a comma-separated list, for diagnostics.
-    #[must_use]
-    pub fn levels() -> String {
-        Self::ALL
-            .iter()
-            .map(|o| o.as_str())
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-}
 
 /// The explicit compilation mode.
 ///

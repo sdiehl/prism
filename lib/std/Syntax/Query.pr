@@ -1,0 +1,212 @@
+-- | A source query over a decoded `prism-syntax-tokens-v1` artifact.
+--
+-- This is a *consumer* of the public token representation, not part of the
+-- compiler. Given a `TokensDoc` (the exact source text plus the compiler's own
+-- raw stream, layout-resolved parse stream, and trivia), it reports a stable,
+-- machine-readable inventory of the source: the content digest, the ordered
+-- imports, the comment spans, the ordered top-level declaration heads, and a
+-- token-kind histogram in first-seen order.
+--
+-- Every field is a pure function of the artifact bytes. Nothing here reads
+-- ambient workspace state: the same artifact always yields the same report,
+-- byte for byte. The inventory is a *source-identity* view. Two programs that
+-- differ only in comments or formatting have different digests and different
+-- comment spans here, yet elaborate to the identical Core; that duality is the
+-- point of the query.
+
+import Data.List (map, flatten, reverse, filter)
+
+import Syntax.Source (..)
+
+import Syntax.Token (..)
+
+import Syntax.Codec (..)
+
+-- | The head of a top-level declaration: its leading keyword, the first name it
+-- binds, and the keyword's start offset.
+pub type DeclHead = DeclHead {
+  keyword: String,
+  name: String,
+  lo: Int
+} deriving (Eq, Show)
+
+-- | One bucket of the token-kind histogram: a wire kind and how many raw tokens
+-- carried it.
+pub type KindCount = KindCount { kind: String, count: Int } deriving (Eq, Show)
+
+-- | The full source inventory of an artifact.
+pub type QueryReport = QueryReport {
+  digest: String,
+  imports: List(String),
+  comments: List(Span),
+  decls: List(DeclHead),
+  kinds: List(KindCount)
+} deriving (Eq)
+
+-- The value a token carries, or the empty string for a value-free kind.
+fn q_val(t : Token) : String =
+  match t.value of
+    Some(s) => s
+    None => ""
+
+-- Whether a kind carries an identifier-like name (ident, uid, or qualified).
+fn q_is_name(k : TokenKind) : Bool =
+  match k of
+    TIdent => true
+    TUid => true
+    TQual => true
+    _ => false
+
+-- The comment spans of a trivia stream, in order.
+fn q_comments(ts : List(Trivia)) : List(Span) =
+  match ts of
+    Nil => Nil
+    Cons(t, rest) =>
+      match t of
+        TComment(s) => Cons(s, q_comments(rest))
+        _ => q_comments(rest)
+
+-- Record `k` in a first-seen-order histogram: bump an existing bucket or append
+-- a fresh one at the end.
+fn q_bump(acc : List(KindCount), k : String) : List(KindCount) =
+  match acc of
+    Nil => Cons(KindCount { kind = k, count = 1 }, Nil)
+    Cons(p, rest) =>
+      if p.kind == k then
+        Cons(KindCount { kind = k, count = p.count + 1 }, rest)
+      else
+        Cons(p, q_bump(rest, k))
+
+-- The kind histogram of a raw token stream, in first-seen order.
+fn q_kinds_go(ts : List(Token), acc : List(KindCount)) : List(KindCount) =
+  match ts of
+    Nil => acc
+    Cons(t, rest) => q_kinds_go(rest, q_bump(acc, kind_name(t.kind)))
+
+fn q_kinds(ts : List(Token)) : List(KindCount) = q_kinds_go(ts, Nil)
+
+-- Push the current (reversed) item onto the output if it holds any token,
+-- restoring source order.
+fn q_flush(cur : List(Token), out : List(List(Token))) : List(List(Token)) =
+  match cur of
+    Nil => out
+    Cons(_, _) => Cons(reverse(cur), out)
+
+-- Split the layout-resolved parse stream into top-level items. Only depth-one
+-- tokens (a declaration's head, before its body block opens) are retained, and
+-- only a depth-one virtual semicolon ends an item; nested layout is skipped.
+fn q_items_go(
+  ts : List(Token),
+  depth : Int,
+  cur : List(Token),
+  out : List(List(Token))
+) : List(List(Token)) =
+  match ts of
+    Nil => reverse(q_flush(cur, out))
+    Cons(t, rest) =>
+      match t.kind of
+        TVOpen => q_items_go(rest, depth + 1, cur, out)
+        TVClose => q_items_go(rest, depth - 1, cur, out)
+        TVSemi =>
+          if depth == 1 then
+            q_items_go(rest, depth, Nil, q_flush(cur, out))
+          else
+            q_items_go(rest, depth, cur, out)
+        _ =>
+          if depth == 1 then
+            q_items_go(rest, depth, Cons(t, cur), out)
+          else
+            q_items_go(rest, depth, cur, out)
+
+fn q_items(parse : List(Token)) : List(List(Token)) =
+  q_items_go(parse, 0, Nil, Nil)
+
+-- Drop a leading `pub` visibility modifier from an item's head tokens.
+fn q_drop_pub(item : List(Token)) : List(Token) =
+  match item of
+    Nil => Nil
+    Cons(h, rest) =>
+      if kind_name(h.kind) == "pub" then
+        rest
+      else
+        item
+
+-- The first identifier-like name in a token list, or the empty string.
+fn q_first_name(ts : List(Token)) : String =
+  match ts of
+    Nil => ""
+    Cons(t, rest) =>
+      if q_is_name(t.kind) then
+        q_val(t)
+      else
+        q_first_name(rest)
+
+-- The declaration head of one item, if it has a leading keyword.
+fn q_head(item : List(Token)) : Option(DeclHead) =
+  match q_drop_pub(item) of
+    Nil => None
+    Cons(h, rest) =>
+      Some(
+          DeclHead {
+            keyword = kind_name(h.kind),
+            name = q_first_name(rest),
+            lo = h.span.lo
+          },
+        )
+
+fn q_heads(items : List(List(Token))) : List(DeclHead) =
+  match items of
+    Nil => Nil
+    Cons(it, rest) =>
+      match q_head(it) of
+        Some(d) => Cons(d, q_heads(rest))
+        None => q_heads(rest)
+
+-- The ordered top-level declaration heads of a parse stream.
+fn q_decls(parse : List(Token)) : List(DeclHead) = q_heads(q_items(parse))
+
+-- The import module names among a declaration list, in order.
+fn q_imports(decls : List(DeclHead)) : List(String) =
+  match decls of
+    Nil => Nil
+    Cons(d, rest) =>
+      if d.keyword == "import" then
+        Cons(d.name, q_imports(rest))
+      else
+        q_imports(rest)
+
+-- | The full source inventory of a decoded artifact.
+pub fn query(doc : TokensDoc) : QueryReport =
+  let ds = q_decls(doc.parse)
+  QueryReport {
+    digest = doc.source.digest,
+    imports = q_imports(ds),
+    comments = q_comments(doc.trivia),
+    decls = ds,
+    kinds = q_kinds(doc.raw)
+  }
+
+-- | The inventory rendered as one stable line per fact: a `digest` line, then
+-- an `import` line per module, a `comment` line per span, a `decl` line per
+-- declaration head, and a `kind` line per histogram bucket. The ordering is
+-- deterministic, so the text is a machine-readable fingerprint of the source's
+-- surface identity.
+pub fn query_lines(r : QueryReport) : List(String) =
+  flatten([
+      ["digest {r.digest}"],
+      map(\(m) -> "import {m}", r.imports),
+      map(\(s) -> "comment {show_int(s.lo)} {show_int(s.hi)}", r.comments),
+      map(\(d) -> "decl {d.keyword} {d.name} {show_int(d.lo)}", r.decls),
+      map(\(k) -> "kind {k.kind} {show_int(k.count)}", r.kinds),
+    ])
+
+-- Join report lines with newlines, no trailing newline.
+fn q_join(ls : List(String)) : String =
+  match ls of
+    Nil => ""
+    Cons(l, Nil) => l
+    Cons(l, rest) => "{l}\n{q_join(rest)}"
+
+-- | The inventory rendered as one newline-joined block, ready to print in a
+-- single call. Same content and ordering as `query_lines`.
+pub fn query_text(r : QueryReport) : String = q_join(query_lines(r))

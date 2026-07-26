@@ -1,6 +1,6 @@
 [package]
 name = "prism"
-version = "0.14.0"
+version = "0.15.0"
 authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
 categories = ["compilers"]
 default-run = "prism"
@@ -18,14 +18,16 @@ blake3 = "1"
 clap = { version = "4", features = ["derive"], optional = true }
 glob = { version = "0.3", optional = true }
 im = "15.1"
-inkwell = { version = "0.9", features = ["llvm22-1"], optional = true }
-lalrpop-util = { version = "0.23", features = ["lexer"] }
-lasso = { version = "0.7", default-features = false }
 libmimalloc-sys = { version = "0.1", optional = true }
 logos = "0.16"
 marginalia = "0.2.1"
 num-bigint = "0.5.0"
-offsides = "0.2"
+prism-common = { path = "crates/prism-common" }
+prism-core = { path = "crates/prism-core" }
+prism-lineage = { path = "crates/prism-lineage" }
+prism-native = { path = "crates/prism-native", optional = true }
+prism-store = { path = "crates/prism-store" }
+prism-syntax = { path = "crates/prism-syntax" }
 rustyline = { version = "18.0", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["unbounded_depth"] }
@@ -57,20 +59,24 @@ libm = "0.2.16"
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"
 
-[build-dependencies]
-cc = "1"
-lalrpop = "0.23"
-
 [dev-dependencies]
 blake3 = "1"
 # Lean bench harness (no plotting/rayon pull-in): just the measurement engine for
 # the compile-time baseline corpus in `benches/compile.rs`.
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 insta = { version = "1.41", features = ["glob"] }
+prism-core = { path = "crates/prism-core", features = ["test-hooks"] }
 rstest = "0.26.1"
 
 [[bench]]
 name = "compile"
+harness = false
+
+# The Rust half of the lexer throughput comparison: a plain argv driver, not a
+# criterion harness, so `scripts/lexperf.py` can time it from the outside in the
+# same shape as its natively compiled Prism twin.
+[[bench]]
+name = "lexbench"
 harness = false
 
 # `native` (the LLVM backend, the `prism` CLI, and the REPL) is the default.
@@ -78,9 +84,16 @@ harness = false
 #   cargo build --target wasm32-unknown-unknown --no-default-features --features wasm
 [features]
 default = ["native"]
-native = ["dep:inkwell", "dep:clap", "dep:rustyline", "dep:glob", "dep:toml"]
-mlir = ["native"]
-wasm = ["dep:wasm-bindgen"]
+native = [
+  "dep:prism-native",
+  "dep:clap",
+  "dep:rustyline",
+  "dep:glob",
+  "dep:toml",
+  "prism-core/native",
+]
+mlir = ["native", "prism-native/mlir"]
+wasm = ["dep:wasm-bindgen", "prism-syntax/wasm"]
 # Opt-in: route the native C runtime allocator through mimalloc. The mi_*
 # symbols come from the libmimalloc-sys crate (no in-tree source).
 mimalloc = ["dep:libmimalloc-sys"]
@@ -138,3 +151,21 @@ sign-tag = false
 pre-release-replacements = [
   { file = "CHANGELOG.md", search = "## Unreleased", replace = "## {{version}}", exactly = 1 },
 ]
+
+[workspace]
+members = [
+  "crates/prism-common",
+  "crates/prism-core",
+  "crates/prism-lineage",
+  "crates/prism-native",
+  "crates/prism-store",
+  "crates/prism-syntax",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.15.0"
+authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/sdiehl/prism"

@@ -1,0 +1,15 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/syntax_hostile.pr
+---
+control decodes a well-formed document: OK
+control accepts nesting under the limit: OK
+wrong schema tag rejected: OK
+truncated document rejected: OK
+missing stream rejected: OK
+inverted span rejected: OK
+span past the source rejected: OK
+absurd offset rejected: OK
+nesting past the limit rejected: OK
+=> ()

@@ -1,0 +1,22 @@
+-- The identity view of one `prism-surface-syntax-v1` artifact. arg(0) is the
+-- artifact path; arg(1) selects the identity: "source" prints the digest of the
+-- exact source bytes, anything else prints the canonical span-erased surface
+-- subject. Both are pure functions of the artifact bytes. A refusal prints one
+-- structured error line.
+import Json (json_error_message)
+
+import Syntax.Codec (..)
+
+import Syntax.Identity (..)
+
+fn main() =
+  let text = read_file(arg(0))
+  match decode_surface(text) of
+    Err(e) => println("decode error: {codec_error_message(e)}")
+    Ok(d) =>
+      if arg(1) == "source" then
+        println(source_identity(d.source))
+      else
+        match surface_identity(d) of
+          Err(e) => println("encode error: {json_error_message(e)}")
+          Ok(s) => println(s)

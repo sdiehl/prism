@@ -1,0 +1,99 @@
+-- The differential gate for the Prism-side raw lexer. arg(0) is a
+-- `prism-syntax-tokens-v1` artifact. The artifact embeds both the exact source
+-- text and the compiler's own raw token stream and trivia; this harness decodes
+-- it, re-lexes the embedded text with `Syntax.Lex.lex_raw`, and reports whether
+-- the Prism lexer reproduces the compiler's raw tokens (kind, byte span, and
+-- decoded value) and trivia. The Rust lexer stays authoritative: the Prism
+-- result is compared and reported, never substituted.
+--
+-- Float values are compared numerically: both sides are renormalized through
+-- `parse_float`/`show_float` so a difference in byte spelling of the same double
+-- is not a spurious mismatch. Every other value is compared byte for byte, which
+-- covers identifiers, qualified paths, separator-stripped integers, and the
+-- cooked and interpolated string segments.
+import Data.Foldable (length)
+
+import Syntax.Source (..)
+
+import Syntax.Token (..)
+
+import Syntax.Codec (..)
+
+import Syntax.Lex (..)
+
+-- Renormalize a float spelling to the runtime's canonical form so two spellings
+-- of the same double compare equal.
+fn float_norm(s : String) : String = show_float(parse_float(s))
+
+-- The canonical key of a token's decoded value: absent, a normalized float, or
+-- the verbatim string. The kind selects float normalization.
+fn val_key(k : TokenKind, v : Option(String)) : String =
+  match v of
+    None => "-"
+    Some(s) =>
+      match k of
+        TFloat => "={float_norm(s)}"
+        _ => "={s}"
+
+-- The canonical one-line key of a token: wire kind, half-open span, and value.
+fn tok_key(t : Token) : String =
+  "{kind_name(t.kind)} {show_int(t.span.lo)} {show_int(t.span.hi)} {val_key(t.kind, t.value)}"
+
+-- The canonical one-line key of a trivium: wire kind and its span.
+fn triv_key(t : Trivia) : String =
+  let s = trivia_span(t)
+  "{trivia_name(t)} {show_int(s.lo)} {show_int(s.hi)}"
+
+-- Compare the Prism token stream against the artifact's, returning "ok" or the
+-- first divergence.
+fn cmp_toks(got : List(Token), want : List(Token), idx : Int) : String =
+  match got of
+    Nil =>
+      match want of
+        Nil => "ok"
+        Cons(_, _) => "mismatch raw-count got=fewer at idx={show_int(idx)}"
+    Cons(g, gr) =>
+      match want of
+        Nil => "mismatch raw-count got=more at idx={show_int(idx)}"
+        Cons(w, wr) =>
+          if tok_key(g) == tok_key(w) then
+            cmp_toks(gr, wr, idx + 1)
+          else
+            "mismatch raw idx={show_int(idx)} got=[{tok_key(g)}] want=[{tok_key(w)}]"
+
+-- Compare the Prism trivia stream against the artifact's, returning "ok" or the
+-- first divergence.
+fn cmp_trivs(got : List(Trivia), want : List(Trivia), idx : Int) : String =
+  match got of
+    Nil =>
+      match want of
+        Nil => "ok"
+        Cons(_, _) => "mismatch trivia-count got=fewer at idx={show_int(idx)}"
+    Cons(g, gr) =>
+      match want of
+        Nil => "mismatch trivia-count got=more at idx={show_int(idx)}"
+        Cons(w, wr) =>
+          if triv_key(g) == triv_key(w) then
+            cmp_trivs(gr, wr, idx + 1)
+          else
+            "mismatch trivia idx={show_int(idx)} got=[{triv_key(g)}] want=[{triv_key(w)}]"
+
+fn report(d : TokensDoc) : String =
+  match lex_raw(d.source.text) of
+    Err(le) => "error offset={show_int(lex_offset(le))} {lex_message(le)}"
+    Ok(r) =>
+      let rv = cmp_toks(r.tokens, d.raw, 0)
+      if rv == "ok" then
+        let tv = cmp_trivs(r.trivia, d.trivia, 0)
+        if tv == "ok" then
+          "ok raw={show_int(length(r.tokens))} trivia={show_int(length(r.trivia))}"
+        else
+          tv
+      else
+        rv
+
+fn main() =
+  let text = read_file(arg(0))
+  match decode_tokens(text) of
+    Err(e) => println("decode error: {codec_error_message(e)}")
+    Ok(d) => println(report(d))

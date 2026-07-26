@@ -37,21 +37,23 @@
 //!
 //! # The claim vocabulary
 //!
-//! The parity claim [`Claim::ParityPassed`] is live over a core hash. Two more
-//! claims are live over a lineage sidecar's digest ([`LineageClaim::ReplayVerified`]
-//! and [`LineageClaim::LineageVerified`]); they ride the identical scheme, kind, and
+//! The parity claim [`Claim::ParityPassed`](crate::store::cert::Claim::ParityPassed) is
+//! live over a core hash. Two more claims are live over a lineage sidecar's digest
+//! ([`LineageClaim::ReplayVerified`](crate::store::cert::LineageClaim::ReplayVerified)
+//! and [`LineageClaim::LineageVerified`](crate::store::cert::LineageClaim::LineageVerified));
+//! they ride the identical scheme, kind, and
 //! codec, differing only in a body that carries evidence rows instead of a backend
 //! pair. The varint claim family is one global number space (parity 0, the reserved
 //! Lean-checked rung 1, replay-verified 2, lineage-verified 3), so a claim number
 //! means the same thing to every reader. Any claim a build does not verify decodes
 //! as its `Reserved` variant and is reported as recognized-but-untrusted rather than
 //! an error, so an old build reads a newer certificate's envelope without mistaking
-//! it for corruption. Claim [`CLAIM_LEAN_CHECKED`] is reserved for a Lean-checked
-//! property drawn from `models/Prism.lean`.
+//! it for corruption. Claim [`CLAIM_LEAN_CHECKED`](crate::store::cert::CLAIM_LEAN_CHECKED)
+//! is reserved for a Lean-checked property drawn from `models/Prism.lean`.
 //!
 //! # Totality
 //!
-//! [`decode_cert`] never panics on hostile bytes: every varint is byte-capped and
+//! [`decode_cert`](crate::store::cert::decode_cert) never panics on hostile bytes: every varint is byte-capped and
 //! every length is bounded (the shared `def`-codec reader), the scheme and kind are
 //! checked before the body, and trailing bytes are rejected. Decode is a `Result`.
 

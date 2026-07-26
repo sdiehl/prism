@@ -20,9 +20,9 @@ use crate::resolve::{default_roots, Root};
 use crate::types::Checked;
 
 #[cfg(feature = "native")]
-use crate::codegen::emit_llvm_with_native_kont_table;
-#[cfg(feature = "native")]
 use crate::core::{fip_annots, hash_program};
+#[cfg(feature = "native")]
+use prism_native::emit_llvm_with_native_kont_table;
 
 use super::front::{run_front, FrontRequest};
 #[cfg(feature = "native")]

@@ -1,0 +1,499 @@
+-- | The mechanical half of recursive descent: a token cursor with peek,
+-- advance, and expect, and a Pratt driver over a binding-power table.
+--
+-- Deliberately not a combinator library. There is no alternation operator, no
+-- backtracking engine, no grammar vocabulary; a caller writes the grammar by
+-- hand, in ordinary functions, and hands this module the two things a
+-- hand-written parser gets subtly wrong. The first is span arithmetic: joining
+-- two spans, covering a consumed run, and pointing a caret at a position where
+-- nothing was read. The second is expectation merging: unmet expectations join
+-- a set held at the furthest token the cursor ever reached, so a refusal names
+-- every alternative tried at the position the parse died at rather than only
+-- the last one attempted. Rewinding is where that record is classically lost,
+-- so rewinding is a named operation (`cursor_restore`) that returns the
+-- position and keeps the record.
+--
+-- Expectations are token wire names, the vocabulary of `Syntax.Token`, and a
+-- refusal renders as a `Syntax.Diagnostic` under the compiler's own parse
+-- codes. A parser built on this cursor therefore reports through the same
+-- document every other syntax fault does, with no error type of its own.
+
+import Data.List (..)
+
+import Data.Maybe (..)
+
+import Data.String (..)
+
+import Syntax.Source (..)
+
+import Syntax.Token (..)
+
+import Syntax.Diagnostic (..)
+
+-- -------------------------------------------------------------------------
+-- Span arithmetic
+-- -------------------------------------------------------------------------
+
+-- | The smallest span covering both: the earlier start and the later end. The
+-- one operation a parser needs to give a node built from parts the extent of
+-- those parts.
+--
+-- ```prism
+-- let s = span_join(span_at(2), span_at(11))
+-- (s.lo, s.hi)
+-- ```
+-- ```output
+-- (2, 11)
+-- ```
+pub fn span_join(a : Span, b : Span) : Span =
+  Span { lo = min(a.lo, b.lo), hi = max(a.hi, b.hi) }
+
+-- | The empty span at a byte offset: the caret a diagnostic points with when it
+-- has a position but nothing was consumed there.
+--
+-- ```prism
+-- let s = span_at(12)
+-- (s.lo, s.hi)
+-- ```
+-- ```output
+-- (12, 12)
+-- ```
+pub fn span_at(pos : Int) : Span = Span { lo = pos, hi = pos }
+
+-- | The smallest span covering every span in the list, or None for the empty
+-- list. Joining has no identity over spans (the empty span at offset zero is a
+-- position, not a neutral element), so the empty case is absent rather than
+-- invented.
+pub fn span_cover(ss : List(Span)) : Option(Span) =
+  match ss of
+    Nil => None
+    Cons(s, rest) => Some(cover_go(s, rest))
+
+fn cover_go(acc : Span, ss : List(Span)) : Span =
+  match ss of
+    Nil => acc
+    Cons(s, rest) => cover_go(span_join(acc, s), rest)
+
+-- -------------------------------------------------------------------------
+-- The cursor
+-- -------------------------------------------------------------------------
+
+-- | A token cursor: the tokens being read, the read position, the byte offset
+-- the end-of-input caret points at, and the failure record (the furthest
+-- position at which an expectation was recorded, and the names recorded there).
+-- The failure record is part of the cursor rather than of a failure value
+-- because it must outlive every failure a parse recovers from.
+pub type Cursor = Cursor {
+  toks: Array(Token),
+  pos: Int,
+  stop: Int,
+  far: Int,
+  wanted: List(String)
+}
+
+-- | The reply of a cursor step: the value and the advanced cursor, or the
+-- cursor alone. A refusal still carries a cursor, because the failure record it
+-- accumulated is the part worth reporting.
+pub type Reply(a) = Took(a, Cursor) | Stuck(Cursor)
+
+-- | A cursor over a token list. `stop` is the byte offset the end-of-input
+-- caret points at, normally the length of the source the tokens were lexed
+-- from, so a refusal past the last token still carries a position.
+pub fn cursor_of(ts : List(Token), stop : Int) : Cursor =
+  Cursor {
+    toks = array_of_list(ts),
+    pos = 0,
+    stop = stop,
+    far = 0,
+    wanted = Nil
+  }
+
+-- | The number of tokens the cursor reads over.
+pub fn cursor_count(c : Cursor) : Int = array_len(c.toks)
+
+-- | Whether every token has been consumed.
+pub fn cursor_at_end(c : Cursor) : Bool = c.pos >= cursor_count(c)
+
+-- | The token `k` positions ahead of the read position, or None past the end.
+pub fn cursor_peek_at(c : Cursor, k : Int) : Option(Token) =
+  let i = c.pos + k
+  if i >= 0 && i < cursor_count(c) then
+    Some(array_get(c.toks, i))
+  else
+    None
+
+-- | The token at the read position, or None at the end. Peeking never consumes
+-- and never records an expectation: a parser that looks before it leaps says
+-- what it wanted with `cursor_note`.
+pub fn cursor_peek(c : Cursor) : Option(Token) = cursor_peek_at(c, 0)
+
+-- | The kind of the token at the read position, or None at the end.
+pub fn cursor_kind(c : Cursor) : Option(TokenKind) =
+  match cursor_peek(c) of
+    None => None
+    Some(t) => Some(t.kind)
+
+-- The span of the token at absolute index `i`, or the end-of-input caret when
+-- the index is past the last token.
+fn span_index(c : Cursor, i : Int) : Span =
+  if i >= 0 && i < cursor_count(c) then
+    array_get(c.toks, i).span
+  else
+    span_at(c.stop)
+
+-- | The span the cursor points at: the next token's span, or the end-of-input
+-- caret when the stream is exhausted.
+pub fn cursor_span(c : Cursor) : Span = span_index(c, c.pos)
+
+-- | The cursor advanced past one token. At the end this is the identity, so a
+-- parser that advances on a token it did not check cannot run off the stream.
+pub fn cursor_advance(c : Cursor) : Cursor =
+  if cursor_at_end(c) then
+    c
+  else
+    Cursor { ..c, pos = c.pos + 1 }
+
+-- | The span covering the tokens consumed between `saved` and `c`, or the caret
+-- at the current position when nothing was consumed. A parser gives a node its
+-- extent by saving the cursor before it and asking for the run after it, rather
+-- than by joining the spans of its parts by hand and forgetting the delimiters.
+pub fn cursor_since(saved : Cursor, c : Cursor) : Span =
+  if c.pos <= saved.pos then
+    span_at(cursor_span(c).lo)
+  else
+    span_join(span_index(saved, saved.pos), span_index(c, c.pos - 1))
+
+-- -------------------------------------------------------------------------
+-- Expectations
+-- -------------------------------------------------------------------------
+
+-- | The name the end of the token stream is expected under. Not a token, so not
+-- a token kind, but an expectation like any other.
+pub fn end_of_input() : String = "end of input"
+
+fn has_name(xs : List(String), name : String) : Bool =
+  match xs of
+    Nil => false
+    Cons(x, rest) =>
+      if x == name then
+        true
+      else
+        has_name(rest, name)
+
+fn add_name(xs : List(String), name : String) : List(String) =
+  if has_name(xs, name) then
+    xs
+  else
+    append(xs, [name])
+
+-- | Record `name` as admissible at the read position, consuming nothing.
+--
+-- The record only ever moves forward. A name recorded past the furthest
+-- position reached replaces the set and moves the mark; a name at the furthest
+-- position joins the set; a name behind it is dropped. That ordering is the
+-- whole point: a parse that tries an alternative, gets three tokens deep and
+-- fails, then rewinds, must still report what was wanted three tokens in, not
+-- what was wanted at the place it rewound to.
+pub fn cursor_note_name(c : Cursor, name : String) : Cursor =
+  if c.pos > c.far then
+    Cursor { ..c, far = c.pos, wanted = [name] }
+  elif c.pos == c.far then
+    Cursor { ..c, wanted = add_name(c.wanted, name) }
+  else
+    c
+
+-- | Record a token kind as admissible at the read position. The name recorded
+-- is the kind's wire name, so an expectation set, a token artifact, and a
+-- diagnostic's `expected` field all speak one vocabulary.
+pub fn cursor_note(c : Cursor, k : TokenKind) : Cursor =
+  cursor_note_name(c, kind_name(k))
+
+-- | Consume the next token when its kind is `k`. On a mismatch nothing is
+-- consumed and `k` joins the expectation set at this position, so a parser that
+-- tries several kinds in turn accumulates all of them: expecting one of a set
+-- is spelled as expecting each of its members at one position, never as a
+-- separate combinator.
+pub fn cursor_expect(c : Cursor, k : TokenKind) : Reply(Token) =
+  match cursor_peek(c) of
+    None => Stuck(cursor_note(c, k))
+    Some(t) =>
+      if t.kind == k then
+        Took(t, cursor_advance(c))
+      else
+        Stuck(cursor_note(c, k))
+
+-- | Consume the next token when it is the fixed token spelled `s`.
+pub fn cursor_expect_fixed(c : Cursor, s : String) : Reply(Token) =
+  cursor_expect(c, TFixed(s))
+
+-- | Require that every token has been consumed, recording the end of the stream
+-- as the expectation when one is left over.
+pub fn cursor_expect_end(c : Cursor) : Reply(Unit) =
+  if cursor_at_end(c) then
+    Took((), c)
+  else
+    Stuck(cursor_note_name(c, end_of_input()))
+
+-- | Rewind to a saved cursor while keeping the failure record reached since.
+--
+-- A parser that tries an alternative and gives it up restores with this: the
+-- position returns, the expectations do not. Rebuilding the saved cursor by
+-- hand instead is the classic way to report the expectations of the position
+-- the parse retreated to rather than of the position it died at.
+--
+-- ```prism
+-- let c0 = cursor_of(Nil, 0)
+-- let c1 = cursor_note_name(c0, "ident")
+-- str_join(", ", cursor_expected(cursor_restore(c0, c1)))
+-- ```
+-- ```output
+-- ident
+-- ```
+pub fn cursor_restore(saved : Cursor, c : Cursor) : Cursor =
+  Cursor { ..saved, far = c.far, wanted = c.wanted }
+
+-- | The names recorded at the furthest position reached, in the order they were
+-- first recorded.
+--
+-- ```prism
+-- let c = cursor_note_name(cursor_of(Nil, 3), "ident")
+-- str_join(", ", cursor_expected(cursor_note_name(c, "int")))
+-- ```
+-- ```output
+-- ident, int
+-- ```
+pub fn cursor_expected(c : Cursor) : List(String) = c.wanted
+
+-- | The span the failure record points at: the token at the furthest position
+-- reached, or the end-of-input caret.
+pub fn cursor_far_span(c : Cursor) : Span = span_index(c, c.far)
+
+-- The wire name of the token the failure record points at, for a message.
+fn found_name(c : Cursor) : String =
+  if c.far >= cursor_count(c) then
+    end_of_input()
+  else
+    kind_name(array_get(c.toks, c.far).kind)
+
+-- | The rendered message of an unmet expectation: the merged expectation set
+-- and what stood there instead.
+pub fn cursor_message(c : Cursor) : String =
+  let found = found_name(c)
+  match c.wanted of
+    Nil => "unexpected {found}"
+    Cons(x, rest) =>
+      match rest of
+        Nil => "expected {x}, found {found}"
+        Cons(_, _) =>
+          let all = str_join(", ", c.wanted)
+          "expected one of {all}, found {found}"
+
+-- | The stable code an unmet expectation carries: the parser's end-of-input
+-- code when the furthest position reached is past the last token, and its
+-- general syntax code otherwise. Both match the compiler's own parse codes.
+pub fn cursor_code(c : Cursor) : String =
+  if c.far >= cursor_count(c) then
+    "E7101"
+  else
+    "E7100"
+
+-- | The refusal an unmet expectation produces: a parse-phase diagnostic at the
+-- furthest position reached, carrying the merged expectation set. A cursor
+-- failure is a diagnostic and never a bespoke error value, so a hand-written
+-- parser's refusals join the same document the compiler's own do.
+pub fn cursor_diagnostic(c : Cursor) : Diagnostic =
+  Diagnostic {
+    code = cursor_code(c),
+    phase = DPParse,
+    span = cursor_far_span(c),
+    message = cursor_message(c),
+    expected = c.wanted,
+    related = Nil
+  }
+
+-- -------------------------------------------------------------------------
+-- The Pratt driver
+-- -------------------------------------------------------------------------
+
+-- | How an infix operator groups a chain of its own level. A non-associative
+-- operator declines a second application at its level, leaving the second
+-- operator unconsumed for the caller to refuse.
+pub type Assoc = ALeft | ARight | ANone deriving (Eq)
+
+-- | One infix operator: the token spelling, its level (higher binds tighter),
+-- and how it associates.
+pub type Infix = Infix { op: String, level: Int, assoc: Assoc }
+
+-- | One prefix operator: the token spelling and the level its operand is
+-- parsed at. An operator that binds tighter than that level is pulled into the
+-- operand; one that binds looser takes the prefix application as its left
+-- operand.
+pub type Prefix = Prefix { op: String, level: Int }
+
+-- | The power binding an infix operator's left operand.
+--
+-- Levels are doubled so each has a half step above it. A left-associative
+-- operator's right power sits in that half step, which stops a second operator
+-- of the same level from being pulled into the right operand; a right
+-- associative operator's left power sits there instead, which lets it be. A
+-- non-associative operator is left-shaped here and refuses the repeat outright.
+pub fn infix_left_bp(i : Infix) : Int =
+  match i.assoc of
+    ARight => i.level * 2 + 1
+    _ => i.level * 2
+
+-- | The power an infix operator's right operand is parsed at.
+pub fn infix_right_bp(i : Infix) : Int =
+  match i.assoc of
+    ARight => i.level * 2
+    _ => i.level * 2 + 1
+
+-- | The power a prefix operator's operand is parsed at.
+pub fn prefix_bp(p : Prefix) : Int = p.level * 2
+
+-- | The entry for an operator spelling in an infix table, or None when the
+-- spelling is not an infix operator.
+pub fn infix_lookup(tbl : List(Infix), op : String) : Option(Infix) =
+  match tbl of
+    Nil => None
+    Cons(i, rest) =>
+      if i.op == op then
+        Some(i)
+      else
+        infix_lookup(rest, op)
+
+-- | The entry for an operator spelling in a prefix table, or None when the
+-- spelling is not a prefix operator.
+pub fn prefix_lookup(tbl : List(Prefix), op : String) : Option(Prefix) =
+  match tbl of
+    Nil => None
+    Cons(p, rest) =>
+      if p.op == op then
+        Some(p)
+      else
+        prefix_lookup(rest, op)
+
+-- | Everything the driver needs that is not the cursor: the two operator
+-- tables, the leaf parser, and the two node builders. The leaf parser owns
+-- primaries, and so owns parentheses, and so owns the recursion back into the
+-- driver: the driver knows about operators and nothing else.
+pub type Pratt(a) = Pratt {
+  infixes: List(Infix),
+  prefixes: List(Prefix),
+  leaf: (Cursor) -> Reply(a),
+  bin: (String, a, a) -> a,
+  pre: (String, a) -> a
+}
+
+-- The fixed-token spelling of the token at the read position, or None when the
+-- next token is not a fixed token (a literal or an identifier is never an
+-- operator).
+fn spelling_at(c : Cursor) : Option(String) =
+  match cursor_peek(c) of
+    None => None
+    Some(t) =>
+      match t.kind of
+        TFixed(s) => Some(s)
+        _ => None
+
+fn prefix_at(sp : Pratt(a), c : Cursor) : Option(Prefix) =
+  match spelling_at(c) of
+    None => None
+    Some(s) => prefix_lookup(sp.prefixes, s)
+
+fn infix_at(sp : Pratt(a), c : Cursor) : Option(Infix) =
+  match spelling_at(c) of
+    None => None
+    Some(s) => infix_lookup(sp.infixes, s)
+
+-- One operand: a prefix operator applied to an operand parsed at the prefix's
+-- own power, or a leaf. The prefix table is consulted first because at operand
+-- position a spelling that is both prefix and infix (`-`) is the prefix one.
+fn pratt_operand(sp : Pratt(a), c : Cursor) : Reply(a) =
+  match prefix_at(sp, c) of
+    None => (sp.leaf)(c)
+    Some(p) =>
+      match pratt_expr(sp, cursor_advance(c), prefix_bp(p)) of
+        Stuck(c2) => Stuck(c2)
+        Took(x, c2) => Took((sp.pre)(p.op, x), c2)
+
+-- The operator loop. `blocked` is the level of the non-associative operator
+-- just reduced, or -1: a second operator of that level is declined rather than
+-- consumed, which is how `a == b == c` stops after `a == b`. Any other
+-- reduction clears the block, so `a == b || c == d` is unaffected.
+fn pratt_loop(
+  sp : Pratt(a),
+  lhs : a,
+  c : Cursor,
+  min_bp : Int,
+  blocked : Int
+) : Reply(a) =
+  match infix_at(sp, c) of
+    None => Took(lhs, c)
+    Some(ix) =>
+      let repeat = ix.assoc == ANone && ix.level == blocked
+      if infix_left_bp(ix) < min_bp || repeat then
+        Took(lhs, c)
+      else
+        match pratt_expr(sp, cursor_advance(c), infix_right_bp(ix)) of
+          Stuck(c2) => Stuck(c2)
+          Took(rhs, c2) =>
+            let next =
+              if ix.assoc == ANone then
+                ix.level
+              else
+                -1
+            pratt_loop(sp, (sp.bin)(ix.op, lhs, rhs), c2, min_bp, next)
+
+-- | Parse one expression whose operators all bind at least as tightly as
+-- `min_bp`: one operand, then every operator that outbinds the caller.
+pub fn pratt_expr(sp : Pratt(a), c : Cursor, min_bp : Int) : Reply(a) =
+  match pratt_operand(sp, c) of
+    Stuck(c2) => Stuck(c2)
+    Took(lhs, c2) => pratt_loop(sp, lhs, c2, min_bp, -1)
+
+-- | Parse one expression at the loosest binding power. Tokens after it are left
+-- for the caller, which is what makes this usable inside a larger grammar.
+pub fn pratt_parse(sp : Pratt(a), c : Cursor) : Reply(a) = pratt_expr(sp, c, 0)
+
+-- | Parse one expression and require the whole token stream to be consumed. A
+-- trailing operator the driver declined (a repeated non-associative one) is
+-- refused here, at the position it stands.
+pub fn pratt_all(sp : Pratt(a), c : Cursor) : Reply(a) =
+  match pratt_parse(sp, c) of
+    Stuck(c2) => Stuck(c2)
+    Took(x, c2) =>
+      match cursor_expect_end(c2) of
+        Stuck(c3) => Stuck(c3)
+        Took(_, c3) => Took(x, c3)
+
+-- | The infix table of Prism's own expression grammar, loosest first. Levels
+-- are relative: only their order and each operator's associativity carry
+-- meaning, and both are pinned against the compiler's parser by a differential
+-- test rather than by this comment.
+pub fn expr_infix_table() : List(Infix) =
+  [
+      Infix { op = "??", level = 1, assoc = ARight },
+      Infix { op = "|>", level = 2, assoc = ALeft },
+      Infix { op = ">>", level = 3, assoc = ALeft },
+      Infix { op = "<<", level = 3, assoc = ALeft },
+      Infix { op = "||", level = 4, assoc = ALeft },
+      Infix { op = "&&", level = 5, assoc = ALeft },
+      Infix { op = "==", level = 6, assoc = ANone },
+      Infix { op = "/=", level = 6, assoc = ANone },
+      Infix { op = "<", level = 6, assoc = ANone },
+      Infix { op = "<=", level = 6, assoc = ANone },
+      Infix { op = ">", level = 6, assoc = ANone },
+      Infix { op = ">=", level = 6, assoc = ANone },
+      Infix { op = "+", level = 7, assoc = ALeft },
+      Infix { op = "-", level = 7, assoc = ALeft },
+      Infix { op = "*", level = 8, assoc = ALeft },
+      Infix { op = "/", level = 8, assoc = ALeft },
+      Infix { op = "%", level = 8, assoc = ALeft },
+      Infix { op = "^", level = 10, assoc = ARight },
+    ]
+
+-- | The prefix table of Prism's own expression grammar: unary minus, sitting
+-- between multiplication and exponentiation. `-x * y` is `(-x) * y` and, by the
+-- mathematical convention, `-x ^ y` is `-(x ^ y)`.
+pub fn expr_prefix_table() : List(Prefix) = [Prefix { op = "-", level = 9 }]

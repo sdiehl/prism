@@ -1,0 +1,3 @@
+-- An interpolation hole with no expression: the lexer refuses this file at the
+-- opening brace, the compiler's `LexError::EmptyHole` (E7001).
+fn main() = println("value = {}")

@@ -1,0 +1,170 @@
+-- | Analysis walks over the surface syntax tree.
+--
+-- Every function here is a few lines over `Control.Layer`'s generic queries at
+-- `expr_layer()`, and that is the point: a pass asks for "every variable
+-- occurrence" or "every call site" instead of writing its own recursion, and
+-- the answer comes back in source order every time. Nothing here decides what a
+-- name means; that is the resolver's job and `Syntax.Rename` queries it.
+
+import Control.Layer (..)
+
+import Data.Foldable (elem, length)
+
+import Data.List (concat_map, filter, map)
+
+import Syntax.Ast (..)
+
+import Syntax.Source (..)
+
+import Syntax.Walk (..)
+
+-- | Every node of an expression, root first, in source order.
+pub fn an_nodes(e : Sp(Expr)) : List(Sp(Expr)) = lay_universe(expr_layer(), e)
+
+-- | Every node satisfying a predicate, in source order.
+pub fn an_where(
+  q : (Sp(Expr)) -> Bool ! {| f},
+  e : Sp(Expr)
+) : List(Sp(Expr)) ! { | f} =
+  lay_collect(expr_layer(), q, e)
+
+-- | The number of nodes in an expression.
+pub fn an_size(e : Sp(Expr)) : Int = lay_size(expr_layer(), e)
+
+-- | The height of an expression: `1` at a leaf.
+pub fn an_depth(e : Sp(Expr)) : Int = lay_depth(expr_layer(), e)
+
+-- | The span of every node, root first, in source order.
+pub fn an_spans(e : Sp(Expr)) : List(Span) = map(span_of, an_nodes(e))
+
+-- | Every variable occurrence: the identifier and the exact span it covers.
+-- This is the occurrence table an editor tool wants, and the one place a
+-- purely syntactic tool should stop: it says where a name is written, never
+-- what it refers to.
+pub fn an_var_uses(e : Sp(Expr)) : List((String, Span)) =
+  concat_map(an_var_use, an_nodes(e))
+
+fn an_var_use(n : Sp(Expr)) : List((String, Span)) =
+  match node_of(n) of
+    EVar(name) => [(name, span_of(n))]
+    _ => []
+
+-- | Every name written as a variable, in first-occurrence order and without
+-- repeats.
+pub fn an_var_names(e : Sp(Expr)) : List(String) =
+  an_dedup(map(an_use_name, an_var_uses(e)), Nil)
+
+fn an_use_name(u : (String, Span)) : String =
+  match u of
+    (name, _) => name
+
+-- | How many times a name is written as a variable.
+pub fn an_uses_of(name : String, e : Sp(Expr)) : Int =
+  length(filter(\(u) -> an_use_name(u) == name, an_var_uses(e)))
+
+-- | Every call site, in source order.
+pub fn an_calls(e : Sp(Expr)) : List(Sp(Expr)) = filter(an_is_call, an_nodes(e))
+
+-- | Whether a node is an application. The predicate `an_calls` filters on, made
+-- public so a rewrite can scope a rule to call sites without restating it.
+pub fn an_is_call(n : Sp(Expr)) : Bool =
+  match node_of(n) of
+    ECall(_, _) => true
+    _ => false
+
+-- | The name of every directly called function, in source order. A call whose
+-- head is not a plain variable (a field access, a lambda, a computed callee)
+-- contributes nothing rather than a guess.
+pub fn an_call_targets(e : Sp(Expr)) : List(String) =
+  concat_map(an_call_target, an_nodes(e))
+
+fn an_call_target(n : Sp(Expr)) : List(String) =
+  match node_of(n) of
+    ECall(f, _) =>
+      match node_of(f) of
+        EVar(name) => [name]
+        _ => []
+    _ => []
+
+-- | The span of every typed hole, in source order: what a completion tool asks
+-- for first.
+pub fn an_holes(e : Sp(Expr)) : List(Span) = concat_map(an_hole, an_nodes(e))
+
+fn an_hole(n : Sp(Expr)) : List(Span) =
+  match node_of(n) of
+    EHole(_) => [span_of(n)]
+    _ => []
+
+-- | Whether any node satisfies the predicate, short-circuiting on the first
+-- hit.
+pub fn an_any(q : (Sp(Expr)) -> Bool ! {| f}, e : Sp(Expr)) : Bool ! { | f} =
+  lay_any(expr_layer(), q, e)
+
+-- | A shape census of one expression: the counts a size heuristic, a lint
+-- threshold, or a complexity report is built from. `nodes` is every node,
+-- `vars` every variable occurrence, `calls` every application, `holes` every
+-- typed hole, and `binds` every form that introduces a name (a let, a mutable
+-- declaration, a lambda, a match, a for loop, a comprehension), counted once per
+-- form rather than once per name it binds.
+pub type ExprCensus = ExprCensus {
+  nodes: Int,
+  vars: Int,
+  calls: Int,
+  binds: Int,
+  holes: Int
+}
+
+-- | Count every shape in one walk. The combining operation is field-wise
+-- addition, which is what `lay_summarize` was shaped for: one pass, one
+-- caller-supplied monoid, no repeated traversals.
+pub fn an_census(e : Sp(Expr)) : ExprCensus =
+  lay_summarize(expr_layer(), an_measure, an_add, an_zero(), e)
+
+fn an_zero() : ExprCensus =
+  ExprCensus {
+    nodes = 0,
+    vars = 0,
+    calls = 0,
+    binds = 0,
+    holes = 0
+  }
+
+fn an_one(vars : Int, calls : Int, binds : Int, holes : Int) : ExprCensus =
+  ExprCensus {
+    nodes = 1,
+    vars = vars,
+    calls = calls,
+    binds = binds,
+    holes = holes
+  }
+
+fn an_measure(n : Sp(Expr)) : ExprCensus =
+  match node_of(n) of
+    EVar(_) => an_one(1, 0, 0, 0)
+    ECall(_, _) => an_one(0, 1, 0, 0)
+    EHole(_) => an_one(0, 0, 0, 1)
+    ELet(_, _, _) => an_one(0, 0, 1, 0)
+    EVarDecl(_, _, _) => an_one(0, 0, 1, 0)
+    ELam(_, _) => an_one(0, 0, 1, 0)
+    EMatch(_, _) => an_one(0, 0, 1, 0)
+    EFor(_, _, _, _) => an_one(0, 0, 1, 0)
+    EComp(_, _, _, _) => an_one(0, 0, 1, 0)
+    _ => an_one(0, 0, 0, 0)
+
+fn an_add(a : ExprCensus, b : ExprCensus) : ExprCensus =
+  ExprCensus {
+    nodes = a.nodes + b.nodes,
+    vars = a.vars + b.vars,
+    calls = a.calls + b.calls,
+    binds = a.binds + b.binds,
+    holes = a.holes + b.holes
+  }
+
+fn an_dedup(xs : List(String), seen : List(String)) : List(String) =
+  match xs of
+    Nil => Nil
+    Cons(x, rest) =>
+      if elem(x, seen) then
+        an_dedup(rest, seen)
+      else
+        Cons(x, an_dedup(rest, Cons(x, seen)))

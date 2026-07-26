@@ -1,0 +1,40 @@
+-- A parameter may be written as a pattern rather than a name. The function
+-- means what it would mean with a named parameter matched around the body, so
+-- the pattern has to be irrefutable: there is no next arm to fall through to.
+type Wrap = Wrap(Int)
+
+type Pt = Pt { x: Int, y: Int }
+
+fn unwrap(Wrap(n)) : Int = n
+
+-- A record pattern may name the fields it needs and ignore the rest.
+fn abscissa(Pt { x = x, .. }) : Int = x
+
+fn sum_pair((a, b)) : Int = a + b
+
+-- The rest of a parameter's syntax still applies: an annotation, `borrow`, and
+-- a default all attach as usual.
+fn scaled(borrow Pt { x = x, y = y } : Pt, by : Int := 2) : Int = (x + y) * by
+
+-- Where several parameters are patterns, the leftmost one's match is the outer
+-- one, so a later pattern's bindings cannot capture an earlier one's.
+fn offset(Wrap(n), Pt { x = x, .. }) : Int = n + x
+
+-- Expected output:
+--   3
+--   4
+--   9
+--   14
+--   21
+--   12
+--   16
+fn main() =
+  println("{unwrap(Wrap(3))}")
+  println("{abscissa(Pt { x = 4, y = 5 })}")
+  println("{sum_pair((4, 5))}")
+  println("{scaled(Pt { x = 3, y = 4 })}")
+  println("{scaled(Pt { x = 3, y = 4 }, by := 3)}")
+  println("{offset(Wrap(2), Pt { x = 10, y = 0 })}")
+  -- A lambda parameter is a pattern in exactly the same way.
+  let double = \(Wrap(n)) -> n * 2
+  println("{double(Wrap(8))}")

@@ -1,0 +1,21 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/deriving_plate.pr
+---
+[Add(Lit(1), Lit(2)), Neg(Some(Lit(3))), Block([Lit(4), Lit(5)])]
+9
+[]
+[]
+[]
+[]
+2
+Some(Switch(Add(Lit(1), Lit(2)), [Arm { tag = 0, body = Neg(Some(Lit(3))) }, Arm { tag = 1, body = Block([Lit(4), Lit(5)]) }]))
+Some(Red)
+Some(Switch(Add(Lit(2), Lit(3)), [Arm { tag = 0, body = Neg(Some(Lit(4))) }, Arm { tag = 1, body = Block([Lit(5), Lit(6)]) }]))
+None
+None
+9
+3
+Switch(Add(Lit(2), Lit(3)), [Arm { tag = 0, body = Neg(Some(Lit(4))) }, Arm { tag = 1, body = Block([Lit(5), Lit(6)]) }])
+=> ()

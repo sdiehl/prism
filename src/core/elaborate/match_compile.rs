@@ -324,6 +324,13 @@ impl Elab<'_> {
                         "desugar_record_pat returned a record pattern".into(),
                     ))
                 }
+                // Desugaring splits every alternation into one arm per
+                // alternative, so a surviving or-pattern is a front-end bug.
+                Pattern::Or(_) => {
+                    return Err(Error::InternalInvariant(
+                        "or-pattern survived desugaring".into(),
+                    ))
+                }
             }
         }
         Ok(part)

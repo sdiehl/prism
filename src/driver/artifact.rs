@@ -5,9 +5,9 @@ use std::process::Command;
 // The C-toolchain seam lives in `codegen::rt`, which is `native`-only, so the
 // native-toolchain identity is gated on the same feature (not merely on a
 // non-wasm target: a non-native host build has no native backend either).
-#[cfg(feature = "native")]
-use crate::codegen::rt::{cc, cc_flags, cc_overridden};
 use crate::core::{CorePass, OptLevel, PassSpec, HASH_SCHEME};
+#[cfg(feature = "native")]
+use prism_native::rt::{cc, cc_flags, cc_overridden};
 
 use super::Config;
 
@@ -284,7 +284,7 @@ fn native_cc_version(cc: &str) -> String {
             if cc_overridden() {
                 "unavailable".to_string()
             } else {
-                env!("PRISM_BUILD_CC_VERSION").to_string()
+                prism_native::rt::build_cc_version().to_string()
             }
         })
 }

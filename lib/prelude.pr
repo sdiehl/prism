@@ -1272,6 +1272,51 @@ class Show(a)
 class Hash(a)
   hash : (a) -> String
 
+-- | One layer of a value's own structure, taken apart and put back. `children(x)`
+-- is the list of `x`'s immediate subvalues *of `x`'s own type*, in
+-- constructor-declaration and field order, and nothing else; `rebuild(x, ks)` is
+-- `x` with those same positions replaced, left to right, by the elements of `ks`.
+-- A whole-tree traversal (every subterm, a fold, a count, a rewrite) is written
+-- once against this one pair instead of once per constructor, so a
+-- fifty-constructor syntax tree costs the same to walk as a two-constructor one.
+-- `children` is pure and total: an empty effect row, and a list of structurally
+-- smaller values, so a recursion driven by `children` terminates on a finite
+-- value.
+--
+-- The law every combinator above these two relies on is that they are inverse on
+-- one layer: `rebuild(x, children(x))` is `x`, and the list handed to `rebuild`
+-- must have the same length and the same order as the one `children` returned.
+-- A list of any other length is a programming error, not an input to be repaired:
+-- `rebuild` raises `Fail` rather than padding the missing positions or dropping
+-- the extra ones, because either repair would hand back a value that is not the
+-- one asked for, and would do it silently. That is the whole content of the
+-- `Fail` in the row; on a correctly shaped list `rebuild` performs no effect.
+--
+-- `deriving (Plate)` generates both from the declaration, reaching through list,
+-- optional, tuple, and record fields, and through the other types declared in
+-- the program, to find the occurrences a field can lead to. That is what lets a
+-- traversal see through the carrier records a syntax tree holds its nodes in (a
+-- match arm, a spanned wrapper, a qualifier) without anyone writing a second
+-- match for them.
+--
+-- The derivation is structural rather than compositional, so it differs from
+-- the other derived classes in two visible ways. It puts no constraint on the
+-- type's parameters, because a `Plate(T(a))` yields `T` occurrences and never an
+-- `a`; and it asks nothing of a component's own instances, because it takes the
+-- component apart by its declaration rather than by dispatch. A field it cannot
+-- take apart, and that could still lead back to the derived type (a function, a
+-- container with no declaration in the program), is a compile error at the
+-- `deriving` clause naming the field, never a silently dropped subterm. Both
+-- methods come from one walk of the declaration, read forwards and backwards, so
+-- the derived pair satisfies the law by construction. Unlike `Wire.Stable`, whose
+-- method is a compiler-injected constant, nothing here is unforgeable: a
+-- hand-written instance is an ordinary instance and is accepted, which is the
+-- escape hatch for an abstract type whose children the compiler cannot see, and
+-- which is also where the law becomes the author's to keep.
+class Plate(a)
+  children : (a) -> List(a)
+  rebuild : (a, List(a)) -> a ! {Fail | e}
+
 -- | Exponentiation, the class `a ^ b` desugars to. `Int` and `Float` instances
 -- cover homogeneous powers; a mixed `Int ^ Float` is a type error.
 --

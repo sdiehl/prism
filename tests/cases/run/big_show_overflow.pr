@@ -1,0 +1,19 @@
+-- A base-10^19 chunking regression: showing a bignum wider than ~215 machine
+-- words once overflowed the digit-chunk buffer, whose allocation assumed at
+-- most n+2 chunks when the true count is ~64n/63 (10^19 > 2^63, so each
+-- division removes more than 63 bits). 2^20000 is 313 words / 6021 digits,
+-- producing 317 chunks against the old 315-word buffer: a 2-word heap
+-- overflow. Its exact decimal must agree on the interpreter (num-bigint) and
+-- the native runtime C path (prism_big_show).
+fn pow2(n : Int) : Int =
+  if n == 0 then
+    1
+  else
+    2 * pow2(n - 1)
+
+fn main() =
+  let half = pow2(10000)
+  let big = half * half
+  let s = show(big)
+  println(show(str_len(s)))
+  println(substring(s, str_len(s) - 40, 40))

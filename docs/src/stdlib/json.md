@@ -58,6 +58,10 @@ class ToJson(a)
 
 Convert a value to a `Json` tree.
 
+`deriving (ToJson)` writes the instance structurally, for a type whose schema is its own declaration. One constructor becomes one object: a record constructor's keys are its declared field names, a positional one's are its argument positions (`_0`, `_1`), and a sum additionally names the variant it holds under the key `$`, which no field name can spell. A document therefore names the constructor it holds rather than an index that quietly changes meaning when a constructor is inserted; a single-constructor type has nothing to discriminate and carries no tag. Constructor and field order are the declaration's, so one value has one tree, and `encode` sorts keys, so it has one string. Derive it in a pair with `FromJson`: a type that encodes but cannot decode is a document nobody can read back.
+
+This is not the wire codec. A `Wire.Serialize` byte format is frozen and versioned; a JSON document is read by something that was not compiled against this program, so the encoding is self-describing rather than compact, and nothing here promises stability across a change to the declaration.
+
 ```prism,mod=Json
 to_json([1, 2, 3])
 ```
@@ -74,6 +78,8 @@ class FromJson(a)
 ```
 
 Recover a value from a `Json` tree, failing (through `Fail`) on a structural mismatch. A decode of foreign data is one ordinary failure channel.
+
+`deriving (FromJson)` reads back exactly what the derived `ToJson` wrote, by the same keys: `from_json(to_json(x))` is `x`. A tree that is not an object, a sum whose `$` names no constructor of the type, a missing key, and a field that will not itself decode all leave through the same `Fail`. That failure carries no payload, so it reports that the document did not fit and not where: `Fail` is a nullary operation, and reporting a path would mean a different effect on this class's signature and so on every hand-written instance too. Catch it with `optional`, `default`, or `succeeds`, as with any other `Fail`.
 
 ```prism,mod=Json
 from_json(JInt(41)) + 1
@@ -235,6 +241,22 @@ encode(JObj([("b", JInt(2)), ("a", JInt(1))]))
 {"a":1,"b":2}
 ```
 
+### `json_field`
+
+```prism,sig,h-bb3033c4f3738ec88f98fdc73dbf420d616a4afc81507bd35d1ede547d18b30f
+json_field : (List((String, Json.Json)), String) -> Json.Json ! {Fail}
+```
+
+The member named `key` of an object's member list, or `fail()` when there is none. Members are kept in parse order and duplicates are preserved, so the first occurrence wins, which is what makes a decode a function of the document rather than of a hash order. `deriving (ToJson, FromJson)` reads every field through this, so a missing field and a mistyped one leave through the same channel.
+
+```prism,mod=Json
+json_field([("a", JInt(1)), ("b", JInt(2))], "b")
+```
+
+```output
+Json.JInt(2)
+```
+
 ### `to_json_string`
 
 ```prism,sig,h-24c511bbf533e34b787aa840538a0cb339035df220668d67190ad2f5a8a4d9f2
@@ -250,3 +272,27 @@ to_json_string((1, true))
 ```output
 [1,true]
 ```
+
+### `json_children`
+
+```prism,sig,h-7787c4c625c0b61a28374e14213a0025abe2b517ea32dcc6ccd56fe7ae50b9eb
+json_children : (Json.Json) -> List(Json.Json)
+```
+
+The immediate `Json` children of a value: an array's elements, an object's field values in field order, and nothing at a scalar.
+
+### `json_rebuild`
+
+```prism,sig,h-f1205ad4da23f1f9f236a4b02b6c48873e8f5e4c08438c946872c16763f7e447
+json_rebuild : (Json.Json, List(Json.Json)) -> Json.Json
+```
+
+Put a replacement child list back, in `json_children` order, keeping an object's field names. Fails closed: a list of the wrong length yields the value unchanged rather than a truncated or padded one.
+
+### `json_layer`
+
+```prism,sig,h-d1c700ee552d7ec57f7619063fcadea517c32f6c0b3af32f97e5ac41cba68b90
+json_layer : () -> Control.Layer.Layer(Json.Json)
+```
+
+The children-and-rebuild pair for JSON, so every strategy in `Control.Rewrite` and every query in `Control.Layer` works on a decoded document.

@@ -647,7 +647,7 @@ const nextBranchId = (): number => {
 // --------------------------- lineage export --------------------------------
 
 // The lineage graph vocabulary. Its one home is the Rust compiler,
-// src/lineage/graph.rs (the LINEAGE_GRAPH_FORMAT, Variant, NODE_WORLD_* and
+// crates/prism-lineage/src/graph.rs (the LINEAGE_GRAPH_FORMAT, Variant, NODE_WORLD_* and
 // EdgeKind consts); this emitter mirrors those exact spellings, and the Rust
 // decoder (`prism lineage show/why/verify`) rejects any drift. A timeline is
 // exported as the same request-less "world" graph the decoder reads: law nodes,

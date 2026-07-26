@@ -10,9 +10,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "native")]
-use crate::codegen::rt::{cc, write_libm_archive, write_runtime_for, RuntimeProfile};
+use prism_native::rt::{cc, write_libm_archive, write_runtime_for, RuntimeProfile};
 #[cfg(feature = "native")]
-use crate::codegen::MAIN_SYMBOL;
+use prism_native::MAIN_SYMBOL;
 
 #[cfg(feature = "native")]
 static ORACLE_SEQ: AtomicU64 = AtomicU64::new(0);

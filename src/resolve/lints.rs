@@ -18,7 +18,8 @@ use std::collections::BTreeMap;
 use marginalia::Span;
 
 use crate::syntax::ast::{
-    CatchArm, Decl, Expr, HandlerArm, Pattern, Program, Qualifier, Sugar, SugarArm, Surface, S,
+    CatchArm, Decl, Expr, HandlerArm, Param, Pattern, Program, Qualifier, Sugar, SugarArm, Surface,
+    S,
 };
 use crate::tc::{Warning, WarningOrigin};
 
@@ -141,7 +142,7 @@ impl Lints {
     fn decl(&mut self, d: &Decl) {
         let base = self.scope.len();
         for p in &d.params {
-            self.bind(&p.name, d.span, true);
+            self.param(p, d.span);
         }
         // `where` bindings are let*-style: each RHS sees the ones before it.
         for (name, rhs) in &d.wheres {
@@ -160,6 +161,16 @@ impl Lints {
         self.bind(name, span, !rebind);
     }
 
+    // A parameter written as a pattern binds the pattern's names. Its own name is
+    // the compiler's, synthesized from its position, and no source text can read
+    // it, so linting it as unused would report a binding the author never wrote.
+    fn param(&mut self, p: &Param, span: Span) {
+        match &p.pat {
+            Some(pat) => self.pat(pat),
+            None => self.bind(&p.name, span, true),
+        }
+    }
+
     fn pat(&mut self, p: &S<Pattern>) {
         match &p.node {
             Pattern::Var(x) => self.bind(x, p.span, true),
@@ -173,7 +184,18 @@ impl Lints {
                     self.pat(q);
                 }
             }
-            _ => {}
+            // Alternatives bind the same names; binding them once (from the
+            // first) keeps the unused/shadowed lints seeing one binder per name.
+            Pattern::Or(alts) => {
+                if let Some(first) = alts.first() {
+                    self.pat(first);
+                }
+            }
+            Pattern::Wild
+            | Pattern::Int(_)
+            | Pattern::Float(_)
+            | Pattern::Char(_)
+            | Pattern::Bool(_) => {}
         }
     }
 
@@ -310,7 +332,7 @@ impl Lints {
             Expr::Lam(ps, b) => {
                 let base = self.scope.len();
                 for p in ps {
-                    self.bind(&p.name, e.span, true);
+                    self.param(p, e.span);
                 }
                 self.expr(b);
                 self.pop_to(base);

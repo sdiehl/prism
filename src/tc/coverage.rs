@@ -174,6 +174,14 @@ impl Tc<'_> {
                     .collect();
                 Pat::Con(Head::Ctor(name.clone(), info.fields.len()), args)
             }),
+            // Desugaring splits an alternation into one arm per alternative
+            // before the checker runs, so this is unreachable. Reading only the
+            // first alternative keeps it fail-closed if it ever is reached: the
+            // matrix covers less, so the arm is reported unreachable or the
+            // match non-exhaustive rather than silently passing.
+            Pattern::Or(alts) => alts
+                .first()
+                .map_or(Pat::Any, |first| self.lower_pat(&first.node)),
         }
     }
 
@@ -263,17 +271,36 @@ impl Tc<'_> {
     // irrefutable guard (`| True`) always matches, so its arm covers like an
     // unguarded one. An arm is unreachable only when earlier covering rows
     // already subsume it.
+    //
+    // A run of `alt` arms is one source arm split by or-pattern expansion, so
+    // its rows are judged together: useful if any alternative is, and none of
+    // them enters the matrix until the run ends, which keeps one alternative
+    // from shadowing another inside the arm the user actually wrote.
     pub(super) fn check_coverage(&self, arms: &[Arm<Core>], span: Span) -> Result<(), TypeError> {
         let mut matrix: Vec<Row> = Vec::new();
+        let mut run: Vec<Row> = Vec::new();
+        // Vacuously true before the first arm opens a run.
+        let mut run_useful = true;
+        let mut run_span = span;
         for arm in arms {
-            let row = vec![self.lower_pat(&arm.pat.node)];
-            if !self.useful(&matrix, &row) {
-                return Err(ErrKind::UnreachableMatchArm.at(arm.pat.span));
+            if !arm.alt {
+                if !run_useful {
+                    return Err(ErrKind::UnreachableMatchArm.at(run_span));
+                }
+                matrix.append(&mut run);
+                run_useful = false;
+                run_span = arm.pat.span;
             }
+            let row = vec![self.lower_pat(&arm.pat.node)];
+            run_useful |= self.useful(&matrix, &row);
             if irrefutable_guard(arm.guard.as_ref()) {
-                matrix.push(row);
+                run.push(row);
             }
         }
+        if !run_useful {
+            return Err(ErrKind::UnreachableMatchArm.at(run_span));
+        }
+        matrix.append(&mut run);
         if let Some(w) = self.witness(&matrix, 1) {
             return Err(ErrKind::NonExhaustiveMatch {
                 witness: w[0].to_string(),

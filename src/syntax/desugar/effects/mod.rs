@@ -9,8 +9,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use marginalia::Span;
 
-use super::sugar::expand_interp;
-use super::{call, evar, lam1, sp, Cx};
+use super::expand_interp;
+use super::orpat::expand_arms;
+use super::{call, evar, lam1, sp, wrap_param_pats, Cx};
 use crate::error::{ErrKind, TypeError};
 use crate::names::{self, COMPOSE, RET, UNIT_ARG};
 use crate::syntax::ast::{
@@ -38,6 +39,7 @@ fn core_param(p: &Param) -> Param<Core> {
         name: p.name.clone(),
         ty: p.ty.clone(),
         borrow: p.borrow,
+        pat: None,
         default: None,
     }
 }
@@ -163,12 +165,26 @@ fn rw_inner(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, TypeE
                 env2.insert(p.name.clone(), Binding::Local);
             }
             let ps2 = ps.iter().map(core_param).collect();
-            Expr::Lam(ps2, Box::new(rw(b, &env2, cx)?))
+            // Cloning the body to wrap it is worth it only when there is a
+            // pattern to wrap it in.
+            let inner = if ps.iter().any(|p| p.pat.is_some()) {
+                rw(&wrap_param_pats(ps, (**b).clone()), &env2, cx)?
+            } else {
+                rw(b, &env2, cx)?
+            };
+            Expr::Lam(ps2, Box::new(inner))
         }
         Expr::Match(s, arms) => {
+            // Before expansion, so a view pattern written as one alternative of
+            // an alternation is refused as nested rather than silently promoted
+            // to a top-of-arm view by the split.
             for a in arms {
                 check_views(&a.pat, true, cx)?;
             }
+            // Alternation is gone from here on: the checker, the match compiler,
+            // and Core only ever see one pattern per arm.
+            let expanded = expand_arms(arms)?;
+            let arms: &[Arm] = &expanded;
             if let Some(idx) = arms.iter().position(
                 |a| matches!(&a.pat.node, Pattern::Ctor(n, _) if cx.patterns.contains_key(n)),
             ) {
@@ -191,6 +207,7 @@ fn rw_inner(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, TypeE
                     pat: a.pat.clone(),
                     guard,
                     body: rw(&a.body, &env2, cx)?,
+                    alt: a.alt,
                 });
             }
             Expr::Match(Box::new(s2), arms2)
@@ -673,6 +690,7 @@ fn rw_sugar(
                 name: COMPOSE.into(),
                 ty: None,
                 borrow: false,
+                pat: None,
                 default: None,
             };
             rw(&sp(Expr::Lam(vec![param], Box::new(body)), span), env, cx)

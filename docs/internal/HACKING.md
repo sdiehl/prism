@@ -33,4 +33,4 @@ Run every box on the exact tree being released, in order; never release a red tr
 - [ ] Run final cold `just gate` and `just ci` on the exact release tree.
 - [ ] Create and push the annotated version tag.
 - [ ] Run `just dist <version>`.
-- [ ] Publish and verify deb/rpm/apk/container artifacts.
+- [ ] Publish and verify deb/rpm/container artifacts.

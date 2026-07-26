@@ -1,10 +1,8 @@
--- | The surface abstract syntax of the `prism-surface-syntax-v1` artifact. The
--- compiler exports one parsed source file as an ordered item list, each node an
--- object tagged by a `kind` string; this module is the typed vocabulary that
--- list decodes into. Constructor prefixes name the family: `I` items, `E`
--- expressions, `P` patterns, `Ty` types. Every node that the parser spans wraps
--- in `Sp`; types and kinds carry no span. The shapes here mirror the exporter
--- exactly, so a decoded document re-encodes to the identical bytes.
+-- | The typed surface syntax that the `prism-surface-syntax-v1` artifact
+-- decodes into. Constructor prefixes name the family (`I` items, `E`
+-- expressions, `P` patterns, `Ty` types), and spanned nodes wrap in `Sp`. The
+-- shapes mirror the compiler's exporter exactly, so a decoded document
+-- re-encodes to identical bytes.
 
 import Syntax.Source (..)
 
@@ -166,7 +164,9 @@ pub type PathOp = POSet(Sp(Expr)) | POModify(Sp(Expr))
 pub type PathUpdate = PathUpdate { path: List(PathStep), op: PathOp }
 
 -- | A surface pattern: wildcards, variables, literals, constructor and tuple
--- patterns, and record patterns with an optional rest.
+-- patterns, record patterns with an optional rest, and alternations. An
+-- alternation is expanded into one match arm per alternative before the
+-- checker, so it appears only in the surface seam.
 pub type Pat
   = PWild
   | PVar(String)
@@ -177,14 +177,19 @@ pub type Pat
   | PCtor(String, List(Sp(Pat)))
   | PTuple(List(Sp(Pat)))
   | PRecord(String, List(PatField), Bool)
+  | POr(List(Sp(Pat)))
 
 -- | One field of a record pattern: the field name and the pattern bound to it.
 pub type PatField = PatField { name: String, pat: Sp(Pat) }
 
--- | A function parameter: its name, an optional type annotation, whether it is
--- taken by borrow, and an optional default expression.
+-- | A function parameter: its name, the pattern it was written as if it was
+-- written as one rather than named, an optional type annotation, whether it is
+-- taken by borrow, and an optional default expression. A pattern parameter's
+-- name is synthesized from its position, so the pattern is the half of it the
+-- source wrote.
 pub type Param = Param {
   name: String,
+  pat: Option(Sp(Pat)),
   ty: Option(Ty),
   is_borrow: Bool,
   dflt: Option(Sp(Expr))
@@ -291,11 +296,11 @@ pub type Item
   = IImport { path: List(String), mod_alias: Option(String), names: Option(List(String)), glob: Bool, reexport: Bool, span: Span }
   | IData { nt: Bool, name: String, params: List(String), param_kinds: List(Kind), ctors: List(Ctor), derivs: List(Deriving), span: Span, vis: Option(String), dep: Option(String) }
   | IEffect { name: String, params: List(String), ops: List(EffOp), span: Span, vis: Option(String), dep: Option(String) }
-  | IError { name: String, params: List(Ty), span: Span, vis: Option(String), dep: Option(String) }
+  | IError { name: String, arg_types: List(Ty), span: Span, vis: Option(String), dep: Option(String) }
   | IEffAlias { name: String, labels: List(EffLabel), span: Span, vis: Option(String), dep: Option(String) }
   | ISynonym { name: String, params: List(String), ty: Ty, span: Span, vis: Option(String), dep: Option(String) }
   | IClass { name: String, param: String, supers: List(String), methods: List(Method), span: Span, vis: Option(String), dep: Option(String) }
-  | IInstance { name: String, cls: String, head: Ty, context: List(Constraint), methods: List(Decl), span: Span }
+  | IInstance { name: String, cls: String, head: Ty, context: List(Constraint), decls: List(Decl), span: Span }
   | ICanonical { cls: String, head: Ty, name: String, span: Span }
   | IPattern { name: String, params: List(String), forty: String, viewfn: Sp(Expr), makefn: Option(Sp(Expr)), span: Span, vis: Option(String), dep: Option(String) }
   | IStable { name: String, rungs: List(Rung), converters: List(Converter), migrations: List(Migration), span: Span, vis: Option(String), dep: Option(String) }

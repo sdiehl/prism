@@ -8,13 +8,13 @@
 //! is identified by its schema tag plus ABI version, not an arbitrary user-visible
 //! name; a foreign tag or ABI is rejected rather than misread. The bytes follow
 //! the same discipline as the manifest codec
-//! (`crate::util::binary`: LEB128 lengths, bounded reads, a trailing-byte check).
+//! (`prism_common::binary`: LEB128 lengths, bounded reads, a trailing-byte check).
 //!
 //! The `site` field is optional diagnostic metadata for a caller node/location.
 //! It is not part of semantic identity and never enters a Core hash.
 
 use crate::store::CodecError;
-use crate::util::binary::{put_str, put_uvarint, Reader};
+use prism_common::binary::{put_str, put_uvarint, Reader};
 
 use super::TEST_FAILURE_SCHEMA;
 

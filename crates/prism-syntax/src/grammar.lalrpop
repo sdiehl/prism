@@ -1,0 +1,1470 @@
+use marginalia::Span;
+use crate::ast::{Item, Vis, Fip, Total, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, S, Spanned, NodeId, EffectDecl, EffOp, EffLabel, Grade, HandlerArm, HandlerMode, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier, StableDecl, Rung, RungField, Converter, ConvDir, Migration, MigrationRoute, VersionRoute, MigrationDir, CoeffectRow};
+use crate::sugar::{dot_call, param, params, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, lift_noalloc, decl_mods, grade_word_msg, dot_op_removed, mig_dir, IfTail, FLIP_CLASS, FLIP_INSTANCE, FLIP_EFFECT, DECLINE_DIM_ARITH, GRADE_MANY_CLAUSE, MIGRATE_RESUME, MIGRATE_RET_ORDER};
+use crate::lex::Token;
+use crate::names;
+use crate::kw::{self, DEPRECATED, VIEW, MAKE, DECREASES};
+
+grammar;
+
+extern {
+    type Location = usize;
+    type Error = (Span, String);
+
+    // The strings below are terminal aliases, not source spellings: the lexer
+    // (and so `src/kw.rs`) decides the actual text, and the grammar only consumes
+    // the mapped `Token` variant. Renaming a keyword therefore changes `kw`/the
+    // lexer, not these aliases (rename an alias only to keep it readable).
+    enum Token {
+        "fn"     => Token::Fn,
+        "fip"    => Token::Fip,
+        "fbip"   => Token::Fbip,
+        "replayable" => Token::Replayable,
+        "logic"    => Token::Logic,
+        "requires" => Token::Requires,
+        "ensures"  => Token::Ensures,
+        "pub"    => Token::Pub,
+        "import" => Token::Import,
+        "as"     => Token::As,
+        "type"   => Token::Type,
+        "newtype" => Token::Newtype,
+        "stable" => Token::Stable,
+        "opaque" => Token::Opaque,
+        "effect" => Token::Effect,
+        "error"  => Token::KwError,
+        "throw"  => Token::Throw,
+        "try"    => Token::Try,
+        "catch"  => Token::Catch,
+        "transact" => Token::Transact,
+        "probe"  => Token::Probe,
+        "alias"  => Token::Alias,
+        "class"  => Token::Class,
+        "instance" => Token::Instance,
+        "canonical" => Token::Canonical,
+        "pattern" => Token::Pattern,
+        "deriving" => Token::Deriving,
+        "where"  => Token::Where,
+        "given"  => Token::Given,
+        "handle" => Token::Handle,
+        "with"   => Token::With,
+        "handler" => Token::Handler,
+        "mask"   => Token::Mask,
+        "val"    => Token::Val,
+        "return" => Token::Return,
+        "let"    => Token::Let,
+        "var"    => Token::Var,
+        "borrow" => Token::Borrow,
+        "in"     => Token::In,
+        "for"    => Token::For,
+        "while"  => Token::While,
+        "loop"   => Token::Loop,
+        "break"  => Token::Break,
+        "continue" => Token::Continue,
+        "do"     => Token::Do,
+        "if"     => Token::If,
+        "then"   => Token::Then,
+        "else"   => Token::Else,
+        "elif"   => Token::Elif,
+        "match"  => Token::Match,
+        "of"     => Token::Of,
+        "each"   => Token::Each,
+        "forall" => Token::Forall,
+        "true"   => Token::True,
+        "false"  => Token::False,
+        "using"  => Token::Using,
+        "Int"    => Token::KwInt,
+        "Bool"   => Token::KwBool,
+        "Unit"   => Token::KwUnit,
+        "Float"  => Token::KwFloat,
+        "Char"   => Token::KwChar,
+        "String" => Token::KwString,
+        "I64"    => Token::KwI64,
+        "U64"    => Token::KwU64,
+        "str"    => Token::StringLit(<String>),
+        "istart" => Token::InterpStart(<String>),
+        "imid"   => Token::InterpMid(<String>),
+        "iend"   => Token::InterpEnd(<String>),
+        "->"    => Token::Arrow,
+        "<-"    => Token::LArrow,
+        "=>"    => Token::FatArrow,
+        "="     => Token::Eq,
+        "&&"    => Token::AmpAmp,
+        "||"    => Token::PipePipe,
+        "|>"    => Token::PipeRight,
+        ">>"    => Token::CompRight,
+        "<<"    => Token::CompLeft,
+        "|"     => Token::Bar,
+        "\\"    => Token::Lambda,
+        "+."    => Token::PlusDot,
+        "-."    => Token::MinusDot,
+        "+="    => Token::PlusEq,
+        "-="    => Token::MinusEq,
+        "*="    => Token::StarEq,
+        "%="    => Token::PercentEq,
+        "+"     => Token::Plus,
+        "-"     => Token::Minus,
+        "*."    => Token::StarDot,
+        "*"     => Token::Star,
+        "/."    => Token::SlashDot,
+        "/"     => Token::Slash,
+        "%"     => Token::Percent,
+        "^"     => Token::Caret,
+        "~"     => Token::Tilde,
+        "==."   => Token::EqDot,
+        "/=."   => Token::NeDot,
+        "<."    => Token::LtDot,
+        "<=."   => Token::LeDot,
+        ">."    => Token::GtDot,
+        ">=."   => Token::GeDot,
+        "=="    => Token::EqEq,
+        "/="    => Token::Ne,
+        "<"     => Token::Lt,
+        "<="    => Token::Le,
+        ">"     => Token::Gt,
+        ">="    => Token::Ge,
+        "("     => Token::LParen,
+        ")"     => Token::RParen,
+        "{"     => Token::LBrace,
+        "}"     => Token::RBrace,
+        "["     => Token::LBracket,
+        "]"     => Token::RBracket,
+        ","     => Token::Comma,
+        ":="    => Token::ColonEq,
+        ":"     => Token::Colon,
+        "!"     => Token::Bang,
+        "@"     => Token::At,
+        "#"     => Token::Hash,
+        ".."    => Token::DotDot,
+        "."     => Token::Dot,
+        "?"     => Token::Question,
+        "??"    => Token::QuestionQuestion,
+        "?."    => Token::QuestionDot,
+        "v{"    => Token::VOpen,
+        "v}"    => Token::VClose,
+        "v;"    => Token::VSemi,
+        "ident" => Token::Ident(<String>),
+        "uid"   => Token::UIdent(<String>),
+        "qual"  => Token::QualName(<String>),
+        "int"   => Token::Int(<IntLit>),
+        "float" => Token::Float(<f64>),
+        "char"  => Token::CharLit(<char>),
+    }
+}
+
+Comma<T>: Vec<T> = {
+    <mut v:(<T> ",")*> <e:T?> => { if let Some(x) = e { v.push(x); } v },
+};
+
+CommaPlus<T>: Vec<T> = {
+    <first:T> "," <rest:Comma<T>> => { let mut v = vec![first]; v.extend(rest); v },
+    <e:T> => vec![e],
+};
+
+pub Program: Vec<(Vis, Item)> = {
+    "v{" <items:Items> "v}" => items,
+};
+
+Items: Vec<(Vis, Item)> = {
+    <v:(<PubItem> "v;")*> <last:PubItem?> => { let mut v = v; if let Some(d) = last { v.push(d); } v },
+};
+
+// A leading `pub` exports the item transparently; `opaque` (types/newtypes only)
+// exports the name but hides constructors. Resolution reads the flag, the item
+// shape is unchanged.
+PubItem: (Vis, Item) = {
+    "opaque" <i:OpaqueItem> => (Vis::Opaque, i),
+    "pub" <i:Item> => (Vis::Pub, i),
+    <i:Item> => (Vis::Priv, i),
+};
+
+OpaqueItem: Item = {
+    <d:Data> => Item::Data(d),
+    <n:Newtype> => Item::Data(n),
+};
+
+Item: Item = {
+    <i:ImportD> => Item::Import(i),
+    <d:Data> => Item::Data(d),
+    <n:Newtype> => Item::Data(n),
+    <e:EffDecl> => Item::Effect(e),
+    <e:ErrorD> => Item::Error(e),
+    <a:AliasOrSynonym> => a,
+    <c:ClassD> => Item::Class(c),
+    <i:InstanceD> => Item::Instance(i),
+    <c:CanonicalD> => Item::Canonical(c),
+    <p:PatternD> => Item::Pattern(p),
+    <s:StableD> => Item::Stable(s),
+    <c:ConstD> => Item::Fn(c),
+    <f:Fn> => Item::Fn(f),
+    <f:LogicFn> => Item::LogicFn(f),
+    <d:DeprecatedD> => d,
+};
+
+// `deprecated "use X instead"`: a contextual annotation line preceding a
+// declaration. `deprecated` is an ident, not a reserved word (so a program may
+// still bind the name), matched here and attached to the next declaration by the
+// parse-time demultiplexer. The suggestion rides in the string literal.
+DeprecatedD: Item = {
+    <l:@L> <kw:"ident"> <s:"str"> <r:@R> =>? if kw == DEPRECATED {
+        Ok(Item::Deprecated(Span::new(l, r), s))
+    } else {
+        Err(lalrpop_util::ParseError::User {
+            error: (Span::new(l, r), format!("expected `{DEPRECATED}` before a string, found `{kw}`")),
+        })
+    },
+};
+
+ImportD: ImportDecl = {
+    <l:@L> "import" <p:ModPath> <a:("as" <"uid">)?> <ns:("(" <Comma<ImportName>> ")")?> <r:@R> =>
+        ImportDecl { path: p, alias: a, names: ns, glob: false, reexport: false, span: Span::new(l, r) },
+    <l:@L> "import" <p:ModPath> <a:("as" <"uid">)?> "(" ".." ")" <r:@R> =>
+        ImportDecl { path: p, alias: a, names: None, glob: true, reexport: false, span: Span::new(l, r) },
+};
+
+ModPath: Vec<String> = {
+    <u:"uid">  => vec![u],
+    <q:"qual"> => q.split('.').map(str::to_string).collect(),
+};
+
+ImportName: String = {
+    <n:"ident"> => n,
+    <n:"uid">   => n,
+};
+
+PatternD: PatternDecl = {
+    <l:@L> "pattern" <name:"uid"> "(" <params:Comma<"ident">> ")" "for" <ty:"uid"> "=" <cs:PatClauses> <r:@R> =>?
+        pattern_decl(name, params, ty, cs, Span::new(l, r))
+            .map_err(|error| lalrpop_util::ParseError::User { error }),
+};
+
+PatClauses: Vec<(String, S<Expr>, Span)> = {
+    <c:PatClause> => vec![c],
+    "v{" <v:(<PatClause> "v;")*> <e:PatClause?> "v}" => {
+        let mut v = v; if let Some(x) = e { v.push(x); } v
+    },
+};
+
+PatClause: (String, S<Expr>, Span) = {
+    <l:@L> <kw:"ident"> <e:Expr> <r:@R> =>? if kw == VIEW || kw == MAKE {
+        Ok((kw, e, Span::new(l, r)))
+    } else {
+        Err(lalrpop_util::ParseError::User {
+            error: (Span::new(l, r), "expected `view` or `make` in pattern declaration".to_string()),
+        })
+    },
+};
+
+// A `stable` block. Real braces, so entries are
+// comma-separated like a class body: the rungs first, then any hand-written
+// converters. `build_stable` partitions the interleaved list.
+StableD: StableDecl = {
+    <l:@L> "stable" <name:"uid"> "{" <items:Comma<StableItem>> "}" <r:@R> =>?
+        crate::sugar::build_stable(name, items, Span::new(l, r))
+            .map_err(|error| lalrpop_util::ParseError::User { error }),
+};
+
+StableItem: crate::sugar::StableItem = {
+    <r:Rung> => crate::sugar::StableItem::Rung(r),
+    <c:Converter> => crate::sugar::StableItem::Conv(c),
+    <m:Migrations> => crate::sugar::StableItem::Migrations(m),
+};
+
+// `migrations { V1 -> V2 = auto  V2 -> V3 = version(upgrade = e, downgrade = auto) }`.
+// `migrations` is contextual (an ident, not a reserved word); rows are newline
+// separated, needing no comma because each opens with a rung `uid`.
+Migrations: Vec<Migration> = {
+    <l:@L> <kw:"ident"> "{" <rows:MigrationRow*> "}" <r:@R> =>? if kw == kw::MIGRATIONS {
+        Ok(rows)
+    } else {
+        Err(lalrpop_util::ParseError::User {
+            error: (Span::new(l, r), format!("expected `migrations`, found `{kw}`")),
+        })
+    },
+};
+
+MigrationRow: Migration = {
+    <l:@L> <from:"uid"> "->" <to:"uid"> "=" <route:Route> <r:@R> =>
+        Migration { from, to, route, span: Span::new(l, r) },
+};
+
+// A route is the derived form `auto` or the explicit `version(...)`. Both open
+// with a contextual ident; the following `(` selects `version`.
+Route: MigrationRoute = {
+    <l:@L> <kw:"ident"> <r:@R> =>? if kw == kw::AUTO {
+        Ok(MigrationRoute::Auto)
+    } else {
+        Err(lalrpop_util::ParseError::User {
+            error: (Span::new(l, r), format!("expected `auto` or `version(...)`, found `{kw}`")),
+        })
+    },
+    <l:@L> <kw:"ident"> "(" <up:VersionArg> "," <down:VersionArg> ","? ")" <r:@R> =>? if kw == kw::VERSION {
+        if up.0 == kw::UPGRADE && down.0 == kw::DOWNGRADE {
+            Ok(MigrationRoute::Version(Box::new(VersionRoute { upgrade: up.1, downgrade: down.1 })))
+        } else {
+            Err(lalrpop_util::ParseError::User {
+                error: (Span::new(l, r), "`version(...)` takes `upgrade = ..., downgrade = ...`".to_string()),
+            })
+        }
+    } else {
+        Err(lalrpop_util::ParseError::User {
+            error: (Span::new(l, r), format!("expected `auto` or `version(...)`, found `{kw}`")),
+        })
+    },
+};
+
+// `upgrade = <e>` / `downgrade = <e>`: the field name is checked in `Route`, the
+// value is any expression, normalized so a bare `auto` becomes the derived form.
+VersionArg: (String, MigrationDir) = {
+    <name:"ident"> "=" <e:Expr> => (name, mig_dir(e)),
+};
+
+// `V2 = { ..V1, tif: TimeInForce = GoodTillCancel } frozen "<digest>"`.
+Rung: Rung = {
+    <l:@L> <name:"uid"> "=" "{" <body:RungBody> "}" <frozen:FrozenBadge?> <r:@R> => {
+        let (base, fields) = body;
+        Rung { name, base, fields, frozen, span: Span::new(l, r) }
+    },
+};
+
+RungBody: (Option<String>, Vec<RungField>) = {
+    ".." <base:"uid"> <fs:("," <RungField>)*> => (Some(base), fs),
+    <fs:Comma<RungField>> => (None, fs),
+};
+
+RungField: RungField = {
+    <name:"ident"> ":" <ty:Type> <default:("=" <Expr>)?> => RungField { name, ty, default },
+};
+
+// The committed per-rung shape golden. `frozen` is contextual (an ident, not a
+// reserved word); the digest rides in a string literal so a hex digest that
+// starts with a digit still lexes cleanly.
+FrozenBadge: String = {
+    <l:@L> <kw:"ident"> <h:"str"> <r:@R> =>? if kw == "frozen" {
+        Ok(h)
+    } else {
+        Err(lalrpop_util::ParseError::User {
+            error: (Span::new(l, r), format!("expected `frozen` after a rung, found `{kw}`")),
+        })
+    },
+};
+
+// `upgrade V2 -> V3 = { ..v2, qty = e }` / `downgrade V3 -> V2 = { ..v3, .. } drop_loss(qty)`.
+Converter: Converter = {
+    <l:@L> <dir:ConvKw> <from:"uid"> "->" <to:"uid"> "=" <body:ConvBody> <drop:DropLoss?> <r:@R> => {
+        let (base, overrides) = body;
+        Converter { dir, from, to, base, overrides, drop_loss: drop.unwrap_or_default(), span: Span::new(l, r) }
+    },
+};
+
+ConvKw: ConvDir = {
+    <l:@L> <kw:"ident"> <r:@R> =>? match kw.as_str() {
+        "upgrade" => Ok(ConvDir::Upgrade),
+        "downgrade" => Ok(ConvDir::Downgrade),
+        _ => Err(lalrpop_util::ParseError::User {
+            error: (Span::new(l, r), format!("expected `upgrade` or `downgrade`, found `{kw}`")),
+        }),
+    },
+};
+
+ConvBody: (S<Expr>, Vec<(String, S<Expr>)>) = {
+    "{" ".." <base:Expr> <rest:("," <ConvField>)*> "}" => (base, rest),
+};
+
+ConvField: (String, S<Expr>) = {
+    <name:"ident"> "=" <e:Expr> => (name, e),
+};
+
+DropLoss: Vec<String> = {
+    <l:@L> <kw:"ident"> "(" <ns:Comma<"ident">> ")" <r:@R> =>? if kw == "drop_loss" {
+        Ok(ns)
+    } else {
+        Err(lalrpop_util::ParseError::User {
+            error: (Span::new(l, r), format!("expected `drop_loss`, found `{kw}`")),
+        })
+    },
+};
+
+ClassD: ClassDecl = {
+    <l:@L> "class" <name:"uid"> "(" <param:"ident"> ")" <sup:GivenClause?> "v{" <methods:ClassSigs> "v}" <r:@R> =>
+        ClassDecl { name, param, supers: sup.unwrap_or_default().into_iter().map(|c| c.class).collect(), methods, span: Span::new(l, r) },
+    // A marker class with no methods is its bare head (no indented block follows).
+    <l:@L> "class" <name:"uid"> "(" <param:"ident"> ")" <sup:GivenClause?> <r:@R> =>
+        ClassDecl { name, param, supers: sup.unwrap_or_default().into_iter().map(|c| c.class).collect(), methods: vec![], span: Span::new(l, r) },
+    // Flip: the retired brace form is still recognized in full so the diagnostic
+    // points at the brace and names the layout rewrite, rather than degrading to a
+    // bare "unexpected token".
+    "class" "uid" "(" "ident" ")" GivenClause? <l:@L> "{" <r:@R> ClassSigs "}" =>?
+        Err(lalrpop_util::ParseError::User { error: (Span::new(l, r), FLIP_CLASS.to_string()) }),
+};
+
+ClassSigs: Vec<(String, Ty)> = {
+    <v:(<ClassSig> ArmSep)*> <e:ClassSig?> => { let mut v = v; if let Some(x) = e { v.push(x); } v },
+};
+
+ClassSig: (String, Ty) = {
+    <n:"ident"> ":" <t:Type> => (n, t),
+};
+
+InstanceD: InstanceDecl = {
+    <l:@L> "instance" <name:"ident"> ":" <class:"uid"> "(" <head:Type> ")" <ctx:GivenClause?>
+        "v{" <methods:InstFns> "v}" <r:@R> =>
+        InstanceDecl { name, class, head, context: ctx.unwrap_or_default(), methods, module: String::new(), span: Span::new(l, r) },
+    // The instance of a marker class carries no methods, so it is its bare head.
+    <l:@L> "instance" <name:"ident"> ":" <class:"uid"> "(" <head:Type> ")" <ctx:GivenClause?> <r:@R> =>
+        InstanceDecl { name, class, head, context: ctx.unwrap_or_default(), methods: vec![], module: String::new(), span: Span::new(l, r) },
+    // Flip: the retired brace form is recognized in full so the diagnostic points
+    // at the brace and names the layout rewrite.
+    "instance" "ident" ":" "uid" "(" Type ")" GivenClause? <l:@L> "{" <r:@R> InstFns "}" =>?
+        Err(lalrpop_util::ParseError::User { error: (Span::new(l, r), FLIP_INSTANCE.to_string()) }),
+};
+
+InstFns: Vec<Decl> = {
+    <v:(<Fn> ArmSep)*> <e:Fn?> => { let mut v = v; if let Some(x) = e { v.push(x); } v },
+};
+
+// Designate the canonical instance for a (class, type-head): the one implicit
+// resolution selects when several instances share a head. The named instance
+// stays a bare global symbol, like every instance reference.
+CanonicalD: CanonicalDecl = {
+    <l:@L> "canonical" <class:"uid"> "(" <head:Type> ")" "=" <name:"ident"> <r:@R> =>
+        CanonicalDecl { class, head, name, span: Span::new(l, r) },
+};
+
+// Constraint qualifier on a signature uses `given`; Haskell-style `where` is
+// reserved for trailing definition blocks (see WhereBlock).
+GivenClause: Vec<Constraint> = {
+    "given" <first:ConstraintP> <rest:("," <ConstraintP>)*> => {
+        let mut v = vec![first]; v.extend(rest); v
+    },
+};
+
+ConstraintP: Constraint = {
+    <l:@L> <class:"uid"> "(" <ty:Type> ")" <r:@R> =>
+        Constraint { class, ty, span: Span::new(l, r) },
+};
+
+Data: DataDecl = {
+    <l:@L> "type" <name:"uid"> <params:KindedTyParams?> "=" <body:CtorsRhs> <r:@R> => {
+        let (params, param_kinds) = params.unwrap_or_default();
+        DataDecl { name, params, param_kinds, ctors: body.0, deriving: body.1, newtype: false, span: Span::new(l, r) }
+    },
+};
+
+// A newtype is a single-constructor, single-field data type; lowering to a
+// `DataDecl` makes it nominally distinct and matchable with zero typechecker or
+// core change. (Boxed rather than zero-cost; the representation is one field.)
+Newtype: DataDecl = {
+    <l:@L> "newtype" <name:"uid"> <params:TyParams?> "=" <c:Ctor> <d:Derives?> <r:@R> =>? {
+        if c.args.len() != 1 {
+            return Err(lalrpop_util::ParseError::User {
+                error: (Span::new(l, r), format!("newtype `{name}` must have exactly one field")),
+            });
+        }
+        Ok(DataDecl { name, params: params.unwrap_or_default(), param_kinds: Vec::new(), ctors: vec![c], deriving: d.unwrap_or_default(), newtype: true, span: Span::new(l, r) })
+    },
+};
+
+CtorsRhs: (Vec<Ctor>, Vec<(String, Span)>) = {
+    <c:Ctors> <d:Derives?> => (c, d.unwrap_or_default()),
+    "v{" <c:Ctor> <rest:(("v;")? "|" <Ctor>)*> <d:(("v;")? <Derives>)?> "v}" => {
+        let mut v = vec![c]; v.extend(rest); (v, d.unwrap_or_default())
+    },
+};
+
+Derives: Vec<(String, Span)> = {
+    "deriving" "(" <cs:Comma<DeriveName>> ")" => cs,
+};
+
+DeriveName: (String, Span) = {
+    <l:@L> <n:"uid"> <r:@R> => (n, Span::new(l, r)),
+};
+
+TyParams: Vec<String> = { "(" <ps:Comma<"ident">> ")" => ps };
+
+// Type parameters that may carry a kind annotation, `(a, e : Row)`. An
+// unannotated parameter defaults to kind `Type`, so `(a, b)` parses exactly as
+// before. Returns the names and their kinds as parallel vectors.
+KindedTyParams: (Vec<String>, Vec<crate::kind::Kind>) = {
+    "(" <ps:Comma<KindedTyParam>> ")" => {
+        let mut names = Vec::with_capacity(ps.len());
+        let mut kinds = Vec::with_capacity(ps.len());
+        for (n, k) in ps { names.push(n); kinds.push(k); }
+        (names, kinds)
+    },
+};
+
+KindedTyParam: (String, crate::kind::Kind) = {
+    <s:"ident"> => (s, crate::kind::Kind::Type),
+    <l:@L> <s:"ident"> ":" <k:"uid"> <r:@R> =>? {
+        let kind = match k.as_str() {
+            "Row" => crate::kind::Kind::Row,
+            "Type" => crate::kind::Kind::Type,
+            "Nat" => crate::kind::Kind::Nat,
+            other => return Err(lalrpop_util::ParseError::User {
+                error: (Span::new(l, r), format!("unknown kind `{other}` (expected `Type`, `Row`, or `Nat`)")),
+            }),
+        };
+        Ok((s, kind))
+    },
+};
+
+Ctors: Vec<Ctor> = {
+    <c:Ctor> <rest:("|" <Ctor>)*> => { let mut v = vec![c]; v.extend(rest); v },
+};
+
+Ctor: Ctor = {
+    <name:"uid"> <args:CtorArgs?> => Ctor { name, args: args.unwrap_or_default(), fields: None },
+    <name:"uid"> "{" <fs:Comma<RecordField>> "}" => {
+        let args: Vec<Ty> = fs.iter().map(|(_, t)| t.clone()).collect();
+        Ctor { name, args, fields: Some(fs) }
+    },
+};
+
+CtorArgs: Vec<Ty> = { "(" <ts:Comma<TypeArg>> ")" => ts };
+
+// A type-constructor argument: a type, or a `{ E, .. | r }` effect-row literal
+// for a `Row`-kinded parameter (`Cmd(Int, {IO})`). The row literal is confined to
+// argument position, so `{` stays unambiguous elsewhere; the kind check rejects
+// it at a parameter that wants a type.
+TypeArg: Ty = {
+    Type,
+    "{" <ls:Comma<EffLabel>> <tl:("|" <"ident">)?> "}" => Ty::RowLit(Row::Cons(ls, tl)),
+    // A type-level natural literal in a dimension position (`Vec(Int, 3)`). A
+    // suffixed literal (`3i64`) is a value-level width and has no meaning as a
+    // dimension, so it is rejected here; the value must fit `u64`.
+    <l:@L> <n:"int"> <r:@R> =>? {
+        if n.suffix != crate::ast::Suffix::None {
+            return Err(lalrpop_util::ParseError::User {
+                error: (Span::new(l, r), "a dimension is a plain natural literal; drop the width suffix".to_string()),
+            });
+        }
+        match u64::try_from(n.value.clone()) {
+            Ok(v) => Ok(Ty::Nat(v)),
+            Err(_) => Err(lalrpop_util::ParseError::User {
+                error: (Span::new(l, r), "dimension literal is too large".to_string()),
+            }),
+        }
+    },
+    // Arithmetic on dimensions is declined: `+` in a dimension position (`Vec(a,
+    // n + 1)`) is caught here and rejected with a message naming what a dimension
+    // may be, instead of surfacing a bare "unexpected +". `+` never appears in a
+    // type otherwise, so this alternative is unambiguous.
+    <l:@L> DimTerm "+" DimTail <r:@R> =>? Err(lalrpop_util::ParseError::User {
+        error: (Span::new(l, r), DECLINE_DIM_ARITH.to_string()),
+    }),
+};
+
+// A single dimension operand, consumed only to locate the `+` of a declined
+// arithmetic expression; the parsed shape is discarded (the rule always errors).
+DimTerm: () = {
+    "int" => (),
+    "ident" => (),
+};
+DimTail: () = {
+    DimTerm => (),
+    DimTerm "+" DimTail => (),
+};
+
+RecordField: (String, Ty) = {
+    <n:"ident"> ":" <t:Type> => (n, t),
+};
+
+// One `alias` form covers both effect aliases (`alias N = { row }`) and type
+// synonyms (`alias N(a) = Ty`); the shared prefix avoids an LALR conflict, and
+// the RHS shape picks which decl it becomes.
+AliasOrSynonym: Item = {
+    <l:@L> "alias" <name:"uid"> <params:TyParams?> "=" <rhs:AliasRhs> <r:@R> =>
+        match rhs {
+            AliasRhs::Eff(labels) => Item::Alias(AliasDecl { name, labels, span: Span::new(l, r) }),
+            AliasRhs::Ty(ty) => Item::Synonym(SynonymDecl {
+                name, params: params.unwrap_or_default(), ty, span: Span::new(l, r),
+            }),
+        },
+};
+
+AliasRhs: AliasRhs = {
+    "{" <labels:Comma<EffLabel>> "}" => AliasRhs::Eff(labels),
+    <t:Type> => AliasRhs::Ty(t),
+};
+
+ErrorD: ErrorDecl = {
+    <l:@L> "error" <name:"uid"> <params:CtorArgs?> <r:@R> =>
+        ErrorDecl { name, params: params.unwrap_or_default(), span: Span::new(l, r) },
+};
+
+EffDecl: EffectDecl = {
+    <l:@L> "effect" <name:"uid"> <params:TyParams?> "v{" <ops:EffOpList> "v}" <r:@R> =>
+        EffectDecl { name, params: params.unwrap_or_default(), ops, span: Span::new(l, r) },
+    // Flip: the retired brace form is recognized in full so the diagnostic points
+    // at the brace and names the layout rewrite.
+    "effect" "uid" TyParams? <l:@L> "{" <r:@R> EffOpList "}" =>?
+        Err(lalrpop_util::ParseError::User { error: (Span::new(l, r), FLIP_EFFECT.to_string()) }),
+};
+
+EffOpSep: () = { "," => (), "v;" => () };
+
+EffOpList: Vec<EffOp> = {
+    <v:(<EffOp> <EffOpSep>)*> <e:EffOp?> => {
+        let mut result: Vec<EffOp> = v.into_iter().map(|(op, _)| op).collect();
+        if let Some(x) = e { result.push(x); }
+        result
+    },
+};
+
+// The op-declaration prefix carries the resumption grade, a contextual word:
+// unmarked is `many` (the default, multishot), `once` is tail-resumptive, and
+// `never` never resumes. The word is a plain identifier (so `many`/`once`/`never`
+// stay usable as ordinary names elsewhere), validated in the action.
+EffOp: EffOp = {
+    <name:"ident"> "(" <params:Comma<EffOpParam>> ")" ":" <ret:Type> =>
+        EffOp { name, params, ret, grade: Grade::Many },
+    <l:@L> <g:"ident"> <r:@R> <name:"ident"> "(" <params:Comma<EffOpParam>> ")" ":" <ret:Type> =>?
+        Grade::parse(&g)
+            .map(|grade| EffOp { name, params, ret, grade })
+            .ok_or_else(|| lalrpop_util::ParseError::User { error: (Span::new(l, r), grade_word_msg(&g)) }),
+};
+
+// An op parameter may carry a binder name (`v : a`); only the type is kept.
+EffOpParam: Ty = {
+    <t:Type> => t,
+    "ident" ":" <t:Type> => t,
+};
+
+Fn: Decl = {
+    <l:@L> <mods:DeclMods> <rep:"replayable"?> <fip:FipKw> "fn" <name:"ident"> "(" <params:Params> ")" <ann:RetAnn> <wh:GivenClause?> <reqs:Requires*> <ens:Ensures*> <dec:Decreases?> "=" <body:ExprOrBlock> <wb:WhereBlock?> <r:@R> => {
+        // A `@ noalloc` row at the root of the return annotation is the
+        // declaration's allocation certificate, not part of the type.
+        let (ret, no_alloc) = lift_noalloc(ann.2);
+        Decl { name, params, eff: ann.0, eff_tail: ann.1, ret, constraints: wh.unwrap_or_default(), body, wheres: wb.unwrap_or_default(), requires: reqs, ensures: ens, decreases: dec, konst: false, test: mods.0, total: mods.1, fip, replayable: rep.is_some(), no_alloc, span: Span::new(l, r) }
+    },
+};
+
+// The contextual leading declaration modifiers (Lanes K and T): `test`,
+// `total`/`assume total`, in that canonical order, before a `fn`'s reserved
+// modifiers. All three stay ordinary identifiers everywhere else; the run of
+// leading idents is classified by `decl_mods`, and a leading ident that is not
+// one of them is a pointed "not a declaration modifier" error rather than a bare
+// parse failure. The idents are distinguishable from the reserved modifiers
+// (`replayable`/`fip`/`fbip`) and `fn` that follow, so the run is unambiguous.
+DeclMods: (bool, Total) = {
+    <l:@L> <a:"ident"> <b:"ident"> <c:"ident"> <r:@R> =>? decl_mods(&[&a, &b, &c]).map_err(|msg| lalrpop_util::ParseError::User { error: (Span::new(l, r), msg) }),
+    <l:@L> <a:"ident"> <b:"ident"> <r:@R> =>? decl_mods(&[&a, &b]).map_err(|msg| lalrpop_util::ParseError::User { error: (Span::new(l, r), msg) }),
+    <l:@L> <a:"ident"> <r:@R> =>? decl_mods(&[&a]).map_err(|msg| lalrpop_util::ParseError::User { error: (Span::new(l, r), msg) }),
+    () => (false, Total::No),
+};
+
+// SMT contract clauses on a `fn`. A `requires` is a precondition
+// expression; an `ensures` binds a result name over its postcondition. Reserved
+// keywords delimit the clauses (a contextual spelling would fuse with the
+// clause's own expression via juxtaposition application). Their expressions are
+// left unresolved and unchecked in this phase and dropped before `Core`.
+Requires: S<Expr> = { "requires" <e:Expr> => e };
+Ensures: (String, S<Expr>) = { "ensures" "|" <name:"ident"> "|" <e:Expr> => (name, e) };
+
+// The ranking-measure clause on a `total fn`: `decreases <measure>`.
+// Contextual `decreases` (an ident, validated in the action) so the word stays an
+// ordinary identifier; it is the last clause before `=`, so a single measure
+// cannot fuse with a following clause the way a contextual `requires`/`ensures`
+// would. The measure is left unresolved and unchecked here and consumed only by
+// the termination checker; it never reaches `Core`.
+Decreases: S<Expr> = {
+    <l:@L> <kw:"ident"> <e:Expr> <r:@R> =>? if kw == DECREASES {
+        Ok(e)
+    } else {
+        Err(lalrpop_util::ParseError::User {
+            error: (Span::new(l, r), format!("expected `{DECREASES}` or `=`, found `{kw}`")),
+        })
+    },
+};
+
+// A `logic fn` proof-level declaration. It reuses the whole `Fn` body shape but
+// is a distinct item, never a runtime function.
+LogicFn: Decl = { "logic" <f:Fn> => f };
+
+// An optional `fip`/`fbip` keyword before `fn` requests the FP^2 in-place check.
+FipKw: Fip = {
+    "fip"  => Fip::Fip,
+    "fbip" => Fip::Fbip,
+    ()     => Fip::No,
+};
+
+// A top-level immutable constant: `let NAME = EXPR` or `let NAME : TYPE = EXPR`.
+// Modeled as a zero-param `Decl` flagged `konst`, so references inline the
+// value rather than push a call frame.
+ConstD: Decl = {
+    <l:@L> "let" <name:"ident"> <ann:(":" <Type>)?> "=" <body:ExprOrBlock> <r:@R> =>
+        Decl { name, params: vec![], eff: None, eff_tail: None, ret: ann, constraints: vec![], body, wheres: vec![], requires: vec![], ensures: vec![], decreases: None, konst: true, test: false, total: Total::No, fip: Fip::No, replayable: false, no_alloc: false, span: Span::new(l, r) },
+};
+
+// Haskell-style trailing definitions: `body where { x = e; y = e }`. Bindings
+// are non-recursive and let*-scoped (each sees the earlier ones); desugar folds
+// them into nested `let`s around the body.
+WhereBlock: Vec<(String, S<Expr>)> = {
+    "where" "v{" <v:(<WhereBind> "v;")*> <e:WhereBind?> "v}" => {
+        let mut v = v; if let Some(x) = e { v.push(x); } v
+    },
+};
+
+WhereBind: (String, S<Expr>) = {
+    <name:"ident"> "=" <e:Expr> => (name, e),
+    <name:"ident"> "=" <e:BlockExpr> => (name, e),
+};
+
+ExprOrBlock: S<Expr> = { Expr, BlockExpr };
+
+BlockExpr: S<Expr> = {
+    // Re-span the block to its braces but carry the sugar marker through, so the
+    // formatter can still restore `with` / statement `?` from the synth flag.
+    <l:@L> "v{" <b:Stmts> "v}" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: b.synth, node: b.node, span: Span::new(l, r) },
+};
+
+Stmts: S<Expr> = {
+    Expr,
+    <l:@L> <e:Expr> "v;" <rest:Stmts> <r:@R> => seq_stmt(e, rest, l, r),
+    <l:@L> "if" <c:Expr> "then" <t:ExprOrBlock> <tail:OpenIfTail> <r:@R> =>
+        open_if(c, t, tail, l, r),
+    <l:@L> "let" <x:"ident"> "=" <v:Expr> ("in")? "v;" <rest:Stmts> <r:@R> =>
+        let_stmt(x, v, rest, l, r),
+    <l:@L> "let" <x:"ident"> "=" <v:BlockExpr> "v;" <rest:Stmts> <r:@R> =>
+        let_stmt(x, v, rest, l, r),
+    <l:@L> "let" <p:LetPat> "=" <v:Expr> ("in")? "v;" <rest:Stmts> =>
+        let_pat(p, v, rest, l),
+    <l:@L> "let" <p:LetPat> "=" <v:BlockExpr> "v;" <rest:Stmts> =>
+        let_pat(p, v, rest, l),
+    <l:@L> "var" <x:"ident"> ":=" <v:Expr> "v;" <rest:Stmts> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::VarDecl(x, Box::new(v), Box::new(rest))), span: Span::new(l, r) },
+    // The `with` family. Each form takes an optional `; <Stmts>` continuation:
+    // present, it is the block the `with` wraps; absent (a trailing `with` with
+    // nothing after it), `with_rest` substitutes the rejection sentinel so a
+    // single desugar pass reports the one "nothing to wrap" diagnostic.
+    <l:@L> "with" <x:"ident"> "<-" "handler" <arms:HandleArms> <rest:("v;" <Stmts>)?> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::NamedHandle(x, Box::new(with_rest(rest, l, r)), arms)), span: Span::new(l, r) },
+    // The usage-row position on a handler instance (`with h <- handler @ {local}`)
+    // is reserved but deliberately has no production: the layout lexer opens the
+    // handler block keyed on the `handler` head, so a same-line row cannot parse
+    // and no program can give it a meaning. When the handler fact is
+    // implemented, the layout opener learns about `@` and the form gains its
+    // real grammar; until then old attempts fail as a plain parse error.
+    <l:@L> "with" <x:"ident"> "<-" <c:Call> <rest:("v;" <Stmts>)?> <r:@R> =>
+        with_stmt(Some(x), c, with_rest(rest, l, r), l, r),
+    <l:@L> "with" <c:Call> <rest:("v;" <Stmts>)?> <r:@R> =>
+        with_stmt(None, c, with_rest(rest, l, r), l, r),
+    <l:@L> "with" "handler" <arms:HandleArms> <rest:("v;" <Stmts>)?> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: true, node: Expr::Handle(Box::new(with_rest(rest, l, r)), arms, HandlerMode::Exhaustive), span: Span::empty(l) },
+};
+
+// A function's return annotation. The canonical order is result-first,
+// `: Result ! {Effects}`, matching a function type's own `-> cod ! {row}` so a
+// signature reads left to right with no declaration-only convention. The two
+// retired prefix forms (`: !{E} T`) are still recognized in full so the
+// diagnostic points at the whole annotation with the fix, rather than failing as
+// a bare parse error; both start `: !`, so they never conflict with the postfix
+// form, which starts `: <type>`.
+RetAnn: (Option<Vec<EffLabel>>, Option<String>, Option<Ty>) = {
+    ":" <rt:RetType>                                => rt,
+    ()                                              => (None, None, None),
+    <l:@L> ":" "!" "{" Comma<EffLabel> "}" Type <r:@R> =>? Err(lalrpop_util::ParseError::User {
+        error: (Span::new(l, r), MIGRATE_RET_ORDER.to_string()),
+    }),
+    <l:@L> ":" "!" Type <r:@R> =>? Err(lalrpop_util::ParseError::User {
+        error: (Span::new(l, r), MIGRATE_RET_ORDER.to_string()),
+    }),
+};
+
+// The postfix return annotation: a result type, then an optional declaration
+// effect. A trailing `! {row}` binds to the arrow when the result is itself a
+// function type (the returned closure's effect) and is the declaration's own
+// effect otherwise; a declaration effect must be a closed row. The empty
+// annotation `()` is handled by `RetAnn`, so this always yields a type.
+RetType: (Option<Vec<EffLabel>>, Option<String>, Option<Ty>) = {
+    "forall" <vs:(<"ident">)+> "." <rt:RetType> =>
+        (rt.0, rt.1, rt.2.map(|t| Ty::Forall(vs, Box::new(t)))),
+    <a:Arrow> <eff:ArrowEff?> => match eff {
+        None => (None, None, Some(a)),
+        Some(row) => match a {
+            Ty::Fun(ps, _, cod) => (None, None, Some(Ty::Fun(ps, row, cod))),
+            // A declaration effect row may be open: the tail names the row an
+            // effect-forwarding runner forwards (`: T ! {A | e}`). The row stays
+            // inferred (principal); the tail's soundness (a bound signature row
+            // variable) is checked in the typechecker, not here.
+            other => match row {
+                Row::Cons(labels, tail) => (Some(labels), tail, Some(other)),
+                Row::Empty => (Some(vec![]), None, Some(other)),
+            },
+        },
+    },
+};
+
+EffLabel: EffLabel = {
+    <s:"ident"> => EffLabel::bare(s),
+    <s:"uid"> <args:CtorArgs?> => EffLabel { name: s, args: args.unwrap_or_default() },
+    // Canonical checked-body and module-interface signatures qualify effects
+    // at package boundaries (`Spectra.DeckBuilder`). Rehydrating those
+    // signatures must accept the same resolved spelling that type names do.
+    <s:"qual"> <args:CtorArgs?> => EffLabel { name: s, args: args.unwrap_or_default() },
+};
+
+// A parameter is a pattern. A bare variable is the ordinary named parameter and
+// binds without testing; any other shape matches around the body and, like a
+// `let` pattern, must be irrefutable.
+Param: Param = {
+    <b:"borrow"?> <p:Pattern> <ty:Ann?> <default:(":=" <Expr>)?> => param(b.is_some(), p, ty, default),
+};
+
+// Every parameter list goes through here so pattern parameters are named by
+// position before anything downstream reads the list.
+Params: Vec<Param> = { <ps:Comma<Param>> => params(ps) };
+
+Ann: Ty = { ":" <t:Type> => t };
+
+Type: Ty = {
+    "forall" <vs:(<"ident">)+> "." <t:Type> => Ty::Forall(vs, Box::new(t)),
+    <l:@L> <a:Arrow> <eff:ArrowEff?> <r:@R> =>? match eff {
+        None => Ok(a),
+        Some(row) => match a {
+            Ty::Fun(ps, _, cod) => Ok(Ty::Fun(ps, row, cod)),
+            _ => Err(lalrpop_util::ParseError::User {
+                error: (
+                    Span::new(l, r),
+                    "effect row `! {..}` only applies to a function type".to_string(),
+                ),
+            }),
+        },
+    },
+    // A usage row binds tighter than `->` and attaches to atomic types only, so
+    // one written after a function type's effect row is refused with the fix
+    // spelled out rather than silently picking a precedence. The row itself is
+    // consumed so the reduction (and with it this pointed error) fires in every
+    // follow context, not only where a bare `@` happens to end the type.
+    <l:@L> Arrow ArrowEff "@" CoeffRowParts <r:@R> =>? Err(lalrpop_util::ParseError::User {
+        error: (
+            Span::new(l, r),
+            "parenthesize the function type before `@`: write `((a) -> b ! {E}) @ fact`".to_string(),
+        ),
+    }),
+};
+
+pub TypeSig: Ty = { Type };
+
+Arrow: Ty = {
+    "(" ")" "->" <cod:Arrow> => Ty::Fun(vec![], Row::Empty, Box::new(cod)),
+    <dom:UType> "->" <cod:Arrow> => match dom {
+        Ty::Tuple(ts) => Ty::Fun(ts, Row::Empty, Box::new(cod)),
+        d => Ty::Fun(vec![d], Row::Empty, Box::new(cod)),
+    },
+    UType,
+};
+
+ArrowEff: Row = {
+    "!" "{" <ls:Comma<EffLabel>> <tl:("|" <"ident">)?> "}" => Row::Cons(ls, tl),
+    "!" => Row::Cons(vec![], None),
+};
+
+// A usage row (internally: coeffect row) as a postfix on an atomic type:
+// `T @ fact` or `T @ {fact, fact}`. The row is a set validated here, where the
+// span is at hand: unknown facts, duplicates, same-axis contradictions, and the
+// empty row are all hard errors, and the reserved open tail `@ {fact | u}`
+// (usage-row polymorphism) is recognized and refused by name. Arrow types must
+// be parenthesized to take a row (see the pointed error under `Type`).
+UType: Ty = {
+    <l:@L> <t:AType> "@" <row:CoeffRowParts> <r:@R> =>? {
+        if row.1 {
+            Err(lalrpop_util::ParseError::User {
+                error: (
+                    Span::new(l, r),
+                    "usage-row polymorphism (`@ {fact | tail}`) is reserved but not implemented".to_string(),
+                ),
+            })
+        } else {
+            match CoeffectRow::new(&row.0) {
+                Ok(cr) => Ok(Ty::Coeffect(Box::new(t), cr)),
+                Err(e) => Err(lalrpop_util::ParseError::User {
+                    error: (Span::new(l, r), e.to_string()),
+                }),
+            }
+        }
+    },
+    AType,
+};
+
+// Raw usage-row spellings plus whether an open tail was written; the consuming
+// production validates against the canonical fact table in `src/coeffect.rs`.
+CoeffRowParts: (Vec<String>, bool) = {
+    "{" <fs:Comma<"ident">> <tl:("|" <"ident">)?> "}" => (fs, tl.is_some()),
+    <f:"ident"> => (vec![f], false),
+};
+
+AType: Ty = {
+    "Int"    => Ty::Int,
+    "I64"    => Ty::I64,
+    "U64"    => Ty::U64,
+    "Bool"   => Ty::Bool,
+    "Unit"   => Ty::Unit,
+    "Float"  => Ty::Float,
+    "Char"   => Ty::Char,
+    "String" => Ty::Str,
+    "[" <t:Type> "]" => Ty::Con("List".into(), vec![t]),
+    <v:"ident"> <args:CtorArgs> => Ty::App(v, args),
+    <v:"ident"> => Ty::Var(v),
+    <n:"uid"> <args:CtorArgs?> => Ty::Con(n, args.unwrap_or_default()),
+    <q:"qual"> <args:CtorArgs?> => Ty::Con(q, args.unwrap_or_default()),
+    "(" <t:Type> ")" => t,
+    "(" <first:Type> "," <rest:Comma<Type>> ")" => {
+        let mut ts = vec![first]; ts.extend(rest); Ty::Tuple(ts)
+    },
+    // Unboxed product types: `#(a, b)` and `#{ x : a, y : b }`.
+    "#" "(" <ts:Comma<Type>> ")" => Ty::UnboxedTuple(ts),
+    "#" "{" <fs:Comma<RecordField>> "}" => Ty::UnboxedRecord(fs),
+};
+
+pub Expr: S<Expr> = {
+    <l:@L> "if" <c:Expr> "then" <t:ExprOrBlock> <e:IfElse> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::If(Box::new(c), Box::new(t), Box::new(e)), span: Span::new(l, r) },
+    <l:@L> "let" <x:"ident"> "=" <v:Expr> "in" <b:Expr> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Let(x, Box::new(v), Box::new(b)), span: Span::new(l, r) },
+    <l:@L> "let" <p:LetPat> "=" <v:Expr> "in" <b:Expr> =>
+        let_pat(p, v, b, l),
+    <l:@L> "\\" "(" <ps:Params> ")" "->" <b:Expr> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Lam(ps, Box::new(b)), span: Span::new(l, r) },
+    <l:@L> "match" <s:Pipe> "of" <arms:MatchArms> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Match(Box::new(s), arms), span: Span::new(l, r) },
+    <l:@L> "handle" <body:Expr> "with" <marker:"ident"> <arms:HandleArms> <r:@R> =>?
+        if marker == "partial" {
+            Ok(Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Handle(Box::new(body), arms, HandlerMode::Partial), span: Span::new(l, r) })
+        } else {
+            Err(lalrpop_util::ParseError::User { error: (Span::new(l, r), format!("unknown handler mode `{marker}` (expected `partial`)")) })
+        },
+    <l:@L> "handle" <body:Expr> "with" <arms:HandleArms> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Handle(Box::new(body), arms, HandlerMode::Exhaustive), span: Span::new(l, r) },
+    <l:@L> "throw" <n:"uid"> <args:("(" <Comma<Expr>> ")")?> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Throw(n, args.unwrap_or_default())), span: Span::new(l, r) },
+    <l:@L> "try" <body:ExprOrBlock> ("v;")? "catch" <arms:CatchArms> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::TryCatch(Box::new(body), arms)), span: Span::new(l, r) },
+    <l:@L> "transact" <body:ExprOrBlock> ("v;")? "else" <fb:ExprOrBlock> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Transact(Box::new(body), Box::new(fb))), span: Span::new(l, r) },
+    <l:@L> "probe" <name:"str"> "do" <body:ExprOrBlock> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Probe(name, Box::new(body))), span: Span::new(l, r) },
+    <l:@L> "for" <x:"ident"> "in" <s:Pipe> <qs:("," <Qual>)*> "do" <body:ExprOrBlock> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::For(x, Box::new(s), qs, Box::new(body))), span: Span::new(l, r) },
+    <l:@L> "while" <c:Expr> "do" <body:ExprOrBlock> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::While(Some(Box::new(c)), Box::new(body))), span: Span::new(l, r) },
+    <l:@L> "loop" <body:ExprOrBlock> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::While(None, Box::new(body))), span: Span::new(l, r) },
+    <l:@L> "return" <e:Expr> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Return(Box::new(e))), span: Span::new(l, r) },
+    // The left side is parsed as a general `Call` so an index target `a[i]`
+    // (an `Expr::Index`) is accepted alongside a bare `var`; `assign_stmt`/
+    // `compound_stmt` dispatch on its shape and reject a non-assignable one.
+    <l:@L> <lhs:Call> ":=" <v:Expr> <r:@R> =>?
+        assign_stmt(lhs, v, l, r).map_err(|error| lalrpop_util::ParseError::User { error }),
+    <l:@L> <lhs:Call> <op:CompoundOp> <v:Expr> <r:@R> =>?
+        compound_stmt(lhs, op, v, l, r).map_err(|error| lalrpop_util::ParseError::User { error }),
+    Default,
+};
+
+// `x <op>= e` is sugar for `x := x <op> e` on a `var`. `/=` is omitted (it is
+// not-equal); float vars use the explicit `x := x +. e` form.
+CompoundOp: BinOp = {
+    "+=" => BinOp::Add,
+    "-=" => BinOp::Sub,
+    "*=" => BinOp::Mul,
+    "%=" => BinOp::Rem,
+};
+
+// `a ?? b`: failable fallback. Right-associative and looser than comparison so
+// `x.at_list(0) ?? -1` and `a ?? b ?? c` read naturally.
+Default: S<Expr> = {
+    <l:@L> <a:Pipe> "??" <b:Default> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Default(Box::new(a), Box::new(b))), span: Span::new(l, r) },
+    Pipe,
+};
+
+Qual: Qualifier = {
+    "let" <x:"ident"> "=" <e:Pipe> => Qualifier::Bind(x, e),
+    "if" <g:Pipe> => Qualifier::Guard(g),
+};
+
+IfElse: S<Expr> = {
+    ("v;")? "else" <e:ExprOrBlock> => e,
+    <l:@L> ("v;")? "elif" <c:Expr> "then" <t:ExprOrBlock> <e:IfElse> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::If(Box::new(c), Box::new(t), Box::new(e)), span: Span::new(l, r) },
+};
+
+OpenIfTail: IfTail = {
+    () => IfTail::End,
+    "v;" <rest:Stmts> => IfTail::Rest(rest),
+    ("v;")? "elif" <c:Expr> "then" <t:ExprOrBlock> <tail:OpenIfTail> =>
+        IfTail::Elif(c, t, Box::new(tail)),
+};
+
+LetPat: S<Pattern> = {
+    <l:@L> <n:"uid"> <args:PatArgs?> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Ctor(n, args.unwrap_or_default()), span: Span::new(l, r) },
+    <l:@L> <q:"qual"> <args:PatArgs?> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Ctor(q, args.unwrap_or_default()), span: Span::new(l, r) },
+    <l:@L> "(" <p:Pattern> "," <rest:Comma<Pattern>> ")" <r:@R> => {
+        let mut ps = vec![p]; ps.extend(rest);
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Tuple(ps), span: Span::new(l, r) }
+    },
+};
+
+MatchArms: Vec<Arm> = {
+    "{" <arms:Arms> "}" => arms,
+    "v{" <arms:Arms> "v}" => arms,
+};
+
+HandleArms: Vec<HandlerArm> = {
+    "{" <arms:Comma<HandlerArm>> "}" => arms,
+    "v{" <arms:HArms> "v}" => arms,
+};
+
+CatchArms: Vec<CatchArm> = {
+    "{" <arms:Comma<CatchArm>> "}" => arms,
+    "v{" <arms:CArms> "v}" => arms,
+};
+
+CArms: Vec<CatchArm> = {
+    <v:(<CatchArm> ArmSep)*> <e:CatchArm?> => { let mut v = v; if let Some(x) = e { v.push(x); } v },
+};
+
+CatchArm: CatchArm = {
+    <l:@L> <n:"uid"> <bs:("(" <Comma<"ident">> ")")?> "=>" <body:ExprOrBlock> <r:@R> =>
+        CatchArm { name: n, binders: bs.unwrap_or_default(), body, span: Span::new(l, r) },
+};
+
+HArms: Vec<HandlerArm> = {
+    <v:(<HandlerArm> ArmSep)*> <e:HandlerArm?> => { let mut v = v; if let Some(x) = e { v.push(x); } v },
+};
+
+// A clause is bare (`op(params, k) => ...`, the multishot form binding the
+// continuation explicitly), grade-prefixed (`once`/`never`), or `val`. The grade
+// word is a contextual identifier validated in the action; `many` is rejected
+// here because the multishot clause takes no keyword.
+HandlerArm: HandlerArm = {
+    "return" <x:"ident"> "=>" <body:ExprOrBlock> => HandlerArm::Return(x, body),
+    // Multishot clause. The canonical form names the continuation after `resume`
+    // (`op(params) resume k => ...`), giving it a visibly special position rather
+    // than a final parameter. The retired trailing-continuation form (`op(params,
+    // k) => ...`) is still accepted during migration: an empty `ResumeTail` takes
+    // the last parenthesized binder as the continuation.
+    <l:@L> <name:"ident"> "(" <all:Comma<"ident">> ")" <tail:ResumeTail> "=>" <body:ExprOrBlock> <r:@R> =>?
+        match tail {
+            Some(k) => Ok(HandlerArm::Op(name, all, k, body)),
+            // The retired trailing-continuation form parses structurally so the
+            // diagnostic points at the whole clause with the fix.
+            None => Err(lalrpop_util::ParseError::User {
+                error: (Span::new(l, r), MIGRATE_RESUME.to_string()),
+            }),
+        },
+    <l:@L> <g:"ident"> <r:@R> <name:"ident"> "(" <params:Comma<"ident">> ")" "=>" <body:ExprOrBlock> =>?
+        match Grade::parse(&g) {
+            Some(Grade::Once) => Ok(HandlerArm::Sugar(SugarArm::Once(name, params, body))),
+            Some(Grade::Never) => Ok(HandlerArm::Sugar(SugarArm::Never(name, params, body))),
+            Some(Grade::Many) => Err(lalrpop_util::ParseError::User { error: (Span::new(l, r), GRADE_MANY_CLAUSE.to_string()) }),
+            None => Err(lalrpop_util::ParseError::User { error: (Span::new(l, r), grade_word_msg(&g)) }),
+        },
+    "val" <name:"ident"> "=" <body:ExprOrBlock> => HandlerArm::Sugar(SugarArm::Val(name, body)),
+};
+
+// The continuation binder of a multishot clause. `resume k` names it explicitly
+// (the canonical form); the empty case is the retired trailing-continuation form,
+// accepted transitionally. The `resume` word is contextual, validated here so it
+// stays an ordinary identifier elsewhere; any other word is the pointed migration
+// error rather than a bare parse failure.
+ResumeTail: Option<String> = {
+    () => None,
+    <l:@L> <rw:"ident"> <k:"ident"> <r:@R> =>? {
+        if rw == kw::RESUME {
+            Ok(Some(k))
+        } else {
+            Err(lalrpop_util::ParseError::User {
+                error: (Span::new(l, r), MIGRATE_RESUME.to_string()),
+            })
+        }
+    },
+};
+
+Pipe: S<Expr> = {
+    <l:@L> <x:Pipe> "|>" <f:Compose> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Pipe(Box::new(x), Box::new(f)), span: Span::new(l, r) },
+    Compose,
+};
+
+Compose: S<Expr> = {
+    <l:@L> <f:Compose> ">>" <g:Or> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Compose(true, Box::new(f), Box::new(g))), span: Span::new(l, r) },
+    <l:@L> <f:Compose> "<<" <g:Or> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Compose(false, Box::new(f), Box::new(g))), span: Span::new(l, r) },
+    Or,
+};
+
+ArmSep: () = { "," => (), "v;" => () };
+
+Arms: Vec<Arm> = {
+    <v:(<Arm> ArmSep)*> <e:Arm?> => { let mut v = v; if let Some(x) = e { v.push(x); } v },
+};
+
+Arm: Arm = {
+    <p:Pattern> "=>" <b:ExprOrBlock> => Arm { pat: p, guard: None, body: b, alt: false },
+    <p:Pattern> "if" <g:Expr> "=>" <b:ExprOrBlock> => Arm { pat: p, guard: Some(g), body: b, alt: false },
+};
+
+// `A | B | C`: one pattern position matching any of several alternatives. Legal
+// wherever a pattern is, so it nests inside constructor arguments, tuples, lists,
+// and record fields.
+Pattern: S<Pattern> = {
+    <l:@L> <first:PatAlt> <rest:("|" <PatAlt>)+> <r:@R> => {
+        let mut ps = vec![first]; ps.extend(rest);
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Or(ps), span: Span::new(l, r) }
+    },
+    PatAlt,
+};
+
+PatAlt: S<Pattern> = {
+    <l:@L> <n:"uid"> <args:PatArgs?> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Ctor(n, args.unwrap_or_default()), span: Span::new(l, r) },
+    <l:@L> <q:"qual"> <args:PatArgs?> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Ctor(q, args.unwrap_or_default()), span: Span::new(l, r) },
+    <l:@L> <n:"uid"> "{" <fields:RecordPatFields> "}" <r:@R> => {
+        let (named, spread) = fields;
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Record(n, named, spread), span: Span::new(l, r) }
+    },
+    PatAtom,
+};
+
+RecordPatFields: (Vec<(String, S<Pattern>)>, bool) = {
+    <fields:(<RecordPatField> ",")*> ".." => (fields, true),
+    <fields:Comma<RecordPatField>> => (fields, false),
+};
+
+RecordPatField: (String, S<Pattern>) = {
+    <n:"ident"> "=" <p:Pattern> => (n, p),
+    <l:@L> <n:"ident"> <r:@R> => (n.clone(), Spanned { id: NodeId::DUMMY, synth: false,
+        node: Pattern::Var(n),
+        span: Span::new(l, r),
+    }),
+};
+
+PatAtom: S<Pattern> = {
+    <l:@L> <v:"ident"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: if v == names::WILD { Pattern::Wild } else { Pattern::Var(v) }, span: Span::new(l, r) },
+    <l:@L> <n:"int"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Int(n), span: Span::new(l, r) },
+    <l:@L> <f:"float"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Float(f), span: Span::new(l, r) },
+    // A leading minus folds into the literal: patterns have no general negation,
+    // only negative constants, so `match n { -1 => .. }` matches the value -1.
+    <l:@L> "-" <n:"int"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Int(IntLit { value: -n.value, suffix: n.suffix }), span: Span::new(l, r) },
+    <l:@L> "-" <f:"float"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Float(-f), span: Span::new(l, r) },
+    <l:@L> <c:"char"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Char(c), span: Span::new(l, r) },
+    <l:@L> "true" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Bool(true), span: Span::new(l, r) },
+    <l:@L> "false" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Bool(false), span: Span::new(l, r) },
+    <l:@L> "[" "]" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Ctor("Nil".into(), vec![]), span: Span::new(l, r) },
+    <l:@L> "[" <ps:CommaPlus<Pattern>> "]" <r:@R> => {
+        let nil_span = Span::new(r, r);
+        let nil = Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Ctor("Nil".into(), vec![]), span: nil_span };
+        let result = ps.into_iter().rev().fold(nil, |rest, p| {
+            let s = p.span;
+            Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Ctor("Cons".into(), vec![p, rest]), span: s }
+        });
+        Spanned { id: NodeId::DUMMY, synth: false, node: result.node, span: Span::new(l, r) }
+    },
+    <l:@L> "(" <p:Pattern> "," <rest:Comma<Pattern>> ")" <r:@R> => {
+        let mut pats = vec![p]; pats.extend(rest);
+        Spanned { id: NodeId::DUMMY, synth: false, node: Pattern::Tuple(pats), span: Span::new(l, r) }
+    },
+};
+
+PatArgs: Vec<S<Pattern>> = { "(" <ps:Comma<Pattern>> ")" => ps };
+
+Or: S<Expr> = {
+    <l:@L> <a:Or> "||" <b:And> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Or, Box::new(a), Box::new(b)), span: Span::new(l, r) },
+    And,
+};
+
+And: S<Expr> = {
+    <l:@L> <a:And> "&&" <b:Cmp> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::And, Box::new(a), Box::new(b)), span: Span::new(l, r) },
+    Cmp,
+};
+
+Cmp: S<Expr> = {
+    <l:@L> <la:Add> <op:CmpOp> <ra:Add> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(op, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    // The retired float dot-comparisons parse structurally so the diagnostic points
+    // at the whole comparison with the plain operator that now covers Float.
+    <l:@L> Add <d:DotCmpOp> Add <r:@R> =>? Err(lalrpop_util::ParseError::User {
+        error: (Span::new(l, r), dot_op_removed(d.0, d.1)),
+    }),
+    Add,
+};
+
+CmpOp: BinOp = {
+    "=="  => BinOp::Eq,
+    "/="  => BinOp::Ne,
+    "<"   => BinOp::Lt,
+    "<="  => BinOp::Le,
+    ">"   => BinOp::Gt,
+    ">="  => BinOp::Ge,
+};
+
+// The retired float dot-operators, each paired with the plain operator that now
+// covers Float. They parse structurally (their tokens are still lexed) only so the
+// action can emit a pointed removal diagnostic instead of a bare parse error.
+DotCmpOp: (&'static str, &'static str) = {
+    "==." => (kw::EQ_DOT, kw::EQ_EQ),
+    "/=." => (kw::NE_DOT, kw::NE),
+    "<."  => (kw::LT_DOT, kw::LT),
+    "<=." => (kw::LE_DOT, kw::LE),
+    ">."  => (kw::GT_DOT, kw::GT),
+    ">=." => (kw::GE_DOT, kw::GE),
+};
+
+DotAddOp: (&'static str, &'static str) = {
+    "+." => (kw::PLUS_DOT, kw::PLUS),
+    "-." => (kw::MINUS_DOT, kw::MINUS),
+};
+
+DotMulOp: (&'static str, &'static str) = {
+    "*." => (kw::STAR_DOT, kw::STAR),
+    "/." => (kw::SLASH_DOT, kw::SLASH),
+};
+
+Add: S<Expr> = {
+    <l:@L> <la:Add> "+" <ra:Mul> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Add, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    <l:@L> <la:Add> "-" <ra:Mul> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Sub, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    <l:@L> Add <d:DotAddOp> Mul <r:@R> =>? Err(lalrpop_util::ParseError::User {
+        error: (Span::new(l, r), dot_op_removed(d.0, d.1)),
+    }),
+    Mul,
+};
+
+Mul: S<Expr> = {
+    <l:@L> <la:Mul> "*" <ra:Neg> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Mul, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    <l:@L> <la:Mul> "/" <ra:Neg> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Div, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    <l:@L> <la:Mul> "%" <ra:Neg> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Rem, Box::new(la), Box::new(ra)), span: Span::new(l, r) },
+    <l:@L> Mul <d:DotMulOp> Neg <r:@R> =>? Err(lalrpop_util::ParseError::User {
+        error: (Span::new(l, r), dot_op_removed(d.0, d.1)),
+    }),
+    Neg,
+};
+
+// Unary minus, the pinned "tight prefix": looser than application, projection,
+// and postfix (all at `Call` and below) and looser than exponentiation (`^`),
+// but tighter than every other binary operator (all at `Mul` and above). So
+// `-f(x)` is `-(f(x))`, `-x * y` is `(-x) * y`, and, following the mathematical
+// convention, `-x ^ y` is `-(x ^ y)` (`-2 ^ 2` is -4); a negative base needs
+// explicit parentheses, `(-2) ^ 2`. A leading `f -x` is the binary `f - x`
+// (there is no juxtaposition application, so `-` after a value is always
+// subtraction). Right-recursive so `- -x` (double negation) parses; the lexer
+// keeps the two minus signs separate tokens, and the formatter re-emits them
+// spaced so the output never collides with the `--` line-comment lexeme.
+Neg: S<Expr> = {
+    <l:@L> "-" <e:Neg> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Neg(Box::new(e)), span: Span::new(l, r) },
+    Pow,
+};
+
+// Exponentiation binds tighter than unary minus and multiplication, and is
+// right-associative, so `2 ^ 3 ^ 2` parses as `2 ^ (3 ^ 2)`. The base is a
+// postfix expression (no leading minus: `-2 ^ 2` is `-(2 ^ 2)`), but the
+// exponent admits unary minus, so `2 ^ -3` is `2 ^ (-3)`. One operator spans
+// Int and Float (and mixed, which promotes to Float); the type-directed
+// lowering in elaboration picks integer or floating power and coerces an Int
+// operand when the result is Float.
+Pow: S<Expr> = {
+    <l:@L> <base:Call> "^" <exp:Neg> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bin(BinOp::Pow, Box::new(base), Box::new(exp)), span: Span::new(l, r) },
+    Call,
+};
+
+// Bare `.name` is record field access; `.name(` and `.name fn` are UFCS calls.
+// Field accesses are not directly callable, which keeps the split LR(1):
+// call an accessed closure via parentheses or a let binding.
+Call: S<Expr> = {
+    <l:@L> <e:Call> "." <field:"ident"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::FieldAccess(Box::new(e), field), span: Span::new(l, r) },
+    // `e.#field`: project a field of an unboxed record.
+    <l:@L> <e:Call> "." "#" <field:"ident"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::UnboxedField(Box::new(e), field), span: Span::new(l, r) },
+    // `e.[ path ]`: read the foci a path selects into a list.
+    <l:@L> <e:Call> "." "[" <p:PathSteps> "]" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::ReadPath(Box::new(e), p)), span: Span::new(l, r) },
+    <l:@L> <e:Call> "?." <field:"ident"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::OptChain(Box::new(e), field)), span: Span::new(l, r) },
+    <l:@L> <e:Call> "?" <r:@R> => try_mark(e, l, r),
+    CallTight,
+};
+
+CallTight: S<Expr> = {
+    // An optional trailing `using name, ...` clause selects explicit instances
+    // for the call, wrapping the callee in `Expr::Inst` (the same node the old
+    // `f[name]` form produced, so everything downstream is unchanged).
+    <l:@L> <f:CallTight> "(" <a:Comma<Expr>> <inst:("using" <CommaPlus<"ident">>)?> ")" <r:@R> => {
+        let span = Span::new(l, r);
+        let callee = match inst {
+            Some(names) => Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Inst(Box::new(f), names), span },
+            None => f,
+        };
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Call(Box::new(callee), a), span }
+    },
+    <l:@L> <f:CallTight> "(" <mut a:Comma<Expr>> ")" "fn" <ps:TrailerParams> <b:BlockExpr> <r:@R> => {
+        let span = Span::new(l, r);
+        a.push(Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Lam(ps, Box::new(b)), span });
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Call(Box::new(f), a), span }
+    },
+    // Indexed read `recv[key]` (a single index expression). Nested indexing is
+    // `a[i][j]`; multiple comma-separated indices are not a form.
+    <l:@L> <f:CallTight> "[" <k:Expr> "]" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Index(Box::new(f), Box::new(k)), span: Span::new(l, r) },
+    // Multi-index read `recv[i, j, ...]` (two or more indices): the indices form
+    // an index list, so the key is a synthetic list literal. Used for strided
+    // tensor access; a single index stays the form above.
+    <l:@L> <f:CallTight> "[" <k1:Expr> "," <ks:CommaPlus<Expr>> "]" <r:@R> => {
+        let span = Span::new(l, r);
+        let mut elems = vec![k1];
+        elems.extend(ks);
+        let key = Spanned { id: NodeId::DUMMY, synth: true, node: Expr::List(elems), span };
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Index(Box::new(f), Box::new(key)), span }
+    },
+    <l:@L> <e:Call> "." <m:"ident"> "(" <a:Comma<Expr>> ")" <r:@R> =>
+        dot_call(e, m, a, l, r),
+    <l:@L> <e:Call> "." <m:"ident"> "(" <mut a:Comma<Expr>> ")" "fn" <ps:TrailerParams> <b:BlockExpr> <r:@R> => {
+        a.push(Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Lam(ps, Box::new(b)), span: Span::new(l, r) });
+        dot_call(e, m, a, l, r)
+    },
+    <l:@L> <e:Call> "." <m:"ident"> "fn" <ps:TrailerParams> <b:BlockExpr> <r:@R> => {
+        let lam = Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Lam(ps, Box::new(b)), span: Span::new(l, r) };
+        dot_call(e, m, vec![lam], l, r)
+    },
+    Atom,
+};
+
+TrailerParams: Vec<Param> = {
+    () => vec![],
+    "(" <first:Param> <rest:("," <Param>)*> ")" => {
+        let mut v = vec![first]; v.extend(rest); params(v)
+    },
+};
+
+Atom: S<Expr> = {
+    <l:@L> "mask" "<" <eff:"uid"> ">" "(" <e:Expr> ")" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Mask(eff, Box::new(e)), span: Span::new(l, r) },
+    // `error` is a keyword now, so spell out the call to keep the panic builtin callable.
+    <l:@L> "error" "(" <a:Comma<Expr>> ")" <r:@R> => {
+        let f = Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Var("error".into()), span: Span::new(l, l + "error".len()) };
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Call(Box::new(f), a), span: Span::new(l, r) }
+    },
+    <l:@L> <n:"int"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Int(n), span: Span::new(l, r) },
+    <l:@L> <f:"float"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Float(f), span: Span::new(l, r) },
+    <l:@L> <c:"char"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Char(c), span: Span::new(l, r) },
+    <l:@L> <s:"str"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Str(s), span: Span::new(l, r) },
+    <l:@L> <first:"istart"> <h:Expr> <parts:(<"imid"> <Expr>)*> <last:"iend"> <r:@R> =>
+        interp_lit(first, h, parts, last, l, r),
+    <l:@L> "true" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bool(true), span: Span::new(l, r) },
+    <l:@L> "false" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Bool(false), span: Span::new(l, r) },
+    <l:@L> "break" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Break), span: Span::new(l, r) },
+    <l:@L> "continue" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Continue), span: Span::new(l, r) },
+    <l:@L> "(" ")" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Unit, span: Span::new(l, r) },
+    <l:@L> "?" <name:"ident"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Hole(name), span: Span::new(l, r) },
+    <l:@L> <id:"ident"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Var(id), span: Span::new(l, r) },
+    <l:@L> <c:"uid"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Var(c), span: Span::new(l, r) },
+    <l:@L> <q:"qual"> <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Var(q), span: Span::new(l, r) },
+    <l:@L> "(" <e:Expr> ")" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: e.synth, node: e.node, span: Span::new(l, r) },
+    <l:@L> "(" <e:Expr> ":" <t:Type> ")" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Ann(Box::new(e), t), span: Span::new(l, r) },
+    <l:@L> "(" <e:Expr> "," <rest:Comma<Expr>> ")" <r:@R> => {
+        let mut elems = vec![e]; elems.extend(rest);
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Tuple(elems), span: Span::new(l, r) }
+    },
+    // Unboxed product values: `#(a, b)` an unboxed tuple, `#{ x = a }` an unboxed record.
+    <l:@L> "#" "(" <elems:Comma<Expr>> ")" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::UnboxedTuple(elems), span: Span::new(l, r) },
+    <l:@L> "#" "{" <fields:Comma<RecordExprField>> "}" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::UnboxedRecord(fields), span: Span::new(l, r) },
+    <l:@L> "[" "]" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::List(vec![]), span: Span::new(l, r) },
+    <l:@L> "[" <elems:CommaPlus<Expr>> "]" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::List(elems), span: Span::new(l, r) },
+    // Haskell-style arithmetic sequences: [a..z] steps by 1, [a,b..z] (or any
+    // prefix) steps by b-a.
+    <l:@L> "[" <pre:CommaPlus<Expr>> ".." <hi:Expr> "]" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Range(pre, Box::new(hi))), span: Span::new(l, r) },
+    <l:@L> "[" <head:Pipe> "for" <x:"ident"> "in" <s:Pipe> <qs:("," <Qual>)*> "]" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::Sugar(Sugar::Comp(Box::new(head), x, Box::new(s), qs)), span: Span::new(l, r) },
+    <l:@L> <n:"uid"> "{" <fields:Comma<RecordExprField>> "}" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::RecordCreate(n, fields), span: Span::new(l, r) },
+    <l:@L> <n:"uid"> "{" ".." <base:Expr> <rest:("," <RecordExprField>)*> "}" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::RecordUpdate(Box::new(base), n, rest), span: Span::new(l, r) },
+    <l:@L> "{" <base:Expr> "|" <ups:CommaPlus<PathUpdate>> "}" <r:@R> =>
+        Spanned { id: NodeId::DUMMY, synth: false, node: Expr::RecordUpdatePath(Box::new(base), ups), span: Span::new(l, r) },
+};
+
+// `[i]` indexes the focus postfix (no dot), so it attaches to a segment or
+// leads a path. `Box`ing the index keeps the step lightweight.
+PathIndex: PathStep = "[" <e:Expr> "]" => PathStep::Index(e);
+
+// A segment yields one or more steps, with optional trailing `[i]` indices.
+// `?Ctor.field` lexes as `?` + a single qualified-name token (`Circle.radius`),
+// so that form is split here into the prism step plus its field steps.
+PathSeg: Vec<PathStep> = {
+    <id:"ident"> <ix:PathIndex*> => { let mut p = vec![PathStep::Field(id)]; p.extend(ix); p },
+    "each" <ix:PathIndex*>        => { let mut p = vec![PathStep::Each]; p.extend(ix); p },
+    "?" <c:"uid"> <ix:PathIndex*> => { let mut p = vec![PathStep::Case(c)]; p.extend(ix); p },
+    "?" <q:"qual"> <ix:PathIndex*> => {
+        let mut parts = q.split('.');
+        let ctor = parts.next().unwrap_or_default().to_string();
+        let mut p = vec![PathStep::Case(ctor)];
+        p.extend(parts.map(|f| PathStep::Field(f.to_string())));
+        p.extend(ix);
+        p
+    },
+    // `(steps where p)`: a filtered traversal. The predicate trails the steps it
+    // guards as a `Where` step.
+    "(" <inner:PathSteps> "where" <pred:Expr> ")" <ix:PathIndex*> => {
+        let mut p = inner; p.push(PathStep::Where(pred)); p.extend(ix); p
+    },
+    <ix:PathIndex+> => ix,
+};
+
+PathSteps: Vec<PathStep> = {
+    <first:PathSeg> <rest:("." <PathSeg>)*> => {
+        let mut p = first; for r in rest { p.extend(r); } p
+    },
+};
+
+PathUpdate: (Vec<PathStep>, PathOp) = {
+    <p:PathSteps> "=" <e:Expr> => (p, PathOp::Set(e)),
+    <p:PathSteps> "~" <e:Expr> => (p, PathOp::Modify(e)),
+};
+
+RecordExprField: (String, S<Expr>) = {
+    <n:"ident"> "=" <e:Expr> => (n, e),
+};

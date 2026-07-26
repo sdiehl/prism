@@ -155,6 +155,7 @@ tests/cases/run/annot.pr	pure
 tests/cases/run/arena_mixed.pr	evidence
 tests/cases/run/array_value_semantics.pr	pure
 tests/cases/run/big_drop.pr	pure
+tests/cases/run/big_show_overflow.pr	pure
 tests/cases/run/bignum.pr	pure
 tests/cases/run/blit_seq.pr	pure
 tests/cases/run/block_ifelse.pr	pure
@@ -190,6 +191,8 @@ tests/cases/run/deep_effect_recursion.pr	state-fusion
 tests/cases/run/default_args.pr	pure
 tests/cases/run/default_or.pr	selective-free-monad
 tests/cases/run/deriving.pr	pure
+tests/cases/run/deriving_json.pr	whole-program-free-monad
+tests/cases/run/deriving_plate.pr	whole-program-free-monad
 tests/cases/run/dot_chains.pr	pure
 tests/cases/run/dot_records.pr	pure
 tests/cases/run/dot_strings.pr	pure
@@ -239,6 +242,7 @@ tests/cases/run/interp_basic.pr	pure
 tests/cases/run/interp_effects.pr	evidence
 tests/cases/run/interp_show.pr	evidence
 tests/cases/run/interp_string.pr	pure
+tests/cases/run/intmap.pr	whole-program-free-monad
 tests/cases/run/law_checked.pr	pure
 tests/cases/run/law_fail.pr	whole-program-free-monad
 tests/cases/run/law_reader.pr	whole-program-free-monad
@@ -285,6 +289,7 @@ tests/cases/run/or_null_layout.pr	pure
 tests/cases/run/ord_dispatch.pr	pure
 tests/cases/run/ordered_wire_stopgap.pr	whole-program-free-monad
 tests/cases/run/param_eff.pr	evidence
+tests/cases/run/param_patterns.pr	pure
 tests/cases/run/parse_float.pr	pure
 tests/cases/run/pattern_views.pr	pure
 tests/cases/run/poly_print.pr	pure
@@ -296,6 +301,7 @@ tests/cases/run/ranges.pr	pure
 tests/cases/run/reified_under_world.pr	whole-program-free-monad
 tests/cases/run/repeat_block.pr	pure
 tests/cases/run/replayable_ok.pr	evidence
+tests/cases/run/rewrite_strategies.pr	whole-program-free-monad
 tests/cases/run/rollback.pr	selective-free-monad
 tests/cases/run/scc_effect_row.pr	evidence
 tests/cases/run/scientific.pr	pure
@@ -316,6 +322,8 @@ tests/cases/run/strings_lib.pr	pure
 tests/cases/run/sugar_if.pr	evidence
 tests/cases/run/sugar_letpat.pr	pure
 tests/cases/run/sugar_try.pr	pure
+tests/cases/run/syntax_hostile.pr	whole-program-free-monad
+tests/cases/run/syntax_walk.pr	evidence
 tests/cases/run/tbuf.pr	pure
 tests/cases/run/teleport.pr	pure
 tests/cases/run/tensor.pr	selective-free-monad

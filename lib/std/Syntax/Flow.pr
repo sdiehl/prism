@@ -1,0 +1,144 @@
+-- | Call-graph flow over a resolved document: occurrence analysis and liveness
+-- as one fixpoint.
+--
+-- The questions a compiler asks about a call graph (what does this function
+-- transitively reach, which functions are reachable from the entry points, which
+-- ones recurse) are one program with three settings of the same three knobs:
+-- a per-node contribution, a join, and a dependency relation. `Data.Fixpoint`
+-- solves that program; this module supplies the three knobs from the
+-- `prism-resolved-syntax-v1` document, so the analysis runs over a real resolved
+-- tree rather than a hand-built graph. Transitive reach propagates along the
+-- calls relation; liveness is the identical solve with the relation reversed and
+-- a Boolean carrier.
+--
+-- The edges come from the same seam `Syntax.Rename` queries, with the same
+-- limit. A `var` node's span covers exactly its identifier, so every reference
+-- is readable, but no reference carries the identity of the binder it resolved
+-- to. A local binder spelled like a top-level function is therefore read as a
+-- call to that function, which adds edges that are not there. Every answer here
+-- is that over-approximation: `fl_dead` names only functions that really are
+-- unreachable, and `fl_transitive` may list a callee a run never makes. When the
+-- seam grows a binder-identity fact the approximation tightens without an
+-- interface change. Opt-in: not in Base.
+
+import Data.Fixpoint (fix_at, fix_propagate)
+
+import Data.Foldable (elem)
+
+import Data.Graph (graph_add_edge, graph_add_node, graph_empty, graph_reverse, graph_successors)
+
+import Data.List (concat_map, filter, foldl, map)
+
+import Data.Map (map_empty, map_insert, map_keys, map_to_list)
+
+import Data.Set (set_from_list, set_member, set_to_list)
+
+import Syntax.Edit (ed_span_text)
+
+import Syntax.Resolved (..)
+
+import Syntax.Source (..)
+
+-- | The names the document defines, as a set.
+pub fn fl_defined(doc : ResolvedDoc) : Map(String, Unit) =
+  set_from_list(map(fl_fn_name, doc.functions))
+
+fn fl_fn_name(f : RFunction) : String = f.name
+
+-- | Every identifier one function's body references, in source order, sliced
+-- from the embedded source. A reference the source cannot address is dropped,
+-- which `Syntax.Rename`'s `rn_unaddressed` is how to detect before trusting any
+-- answer here.
+pub fn fl_references(src : SourceFile, f : RFunction) : List(String) =
+  concat_map(\(n) -> fl_reference(src, n), rnode_universe(f.body))
+
+fn fl_reference(src : SourceFile, n : RNode) : List(String) =
+  if n.kind == rkind_var() then
+    match ed_span_text(src.text, n.span) of
+      Some(name) => [name]
+      None => []
+  else
+    []
+
+-- | The call graph: an edge from each function to every function of this
+-- document it references. Every defined function is a node, so one that calls
+-- nothing still gets an answer, and successor lists are ascending and
+-- duplicate-free, so the iteration order below is a function of the document
+-- alone.
+pub fn fl_calls(doc : ResolvedDoc) : Map(String, List(String)) =
+  let defined = fl_defined(doc)
+  foldl(
+      \(g, f) -> fl_edges(g, doc.source, defined, f),
+      graph_empty,
+      doc.functions,
+    )
+
+fn fl_edges(
+  g : Map(String, List(String)),
+  src : SourceFile,
+  defined : Map(String, Unit),
+  f : RFunction
+) : Map(String, List(String)) =
+  foldl(
+      \(a, name) -> graph_add_edge(a, f.name, name),
+      graph_add_node(g, f.name),
+      filter(\(name) -> set_member(name, defined), fl_references(src, f)),
+    )
+
+-- | The immediate successors of a graph as a set per node: the per-node
+-- contribution a propagation starts from.
+--
+-- ```prism
+-- # import Data.Graph (..)
+-- map(\(p) -> (fst(p), set_to_list(snd(p))), map_to_list(fl_direct(graph_from_edges([("f", "g")]))))
+-- ```
+-- ```output
+-- [(f, [g])]
+-- ```
+pub fn fl_direct(g : Map(k, List(k))) : Map(k, Map(k, Unit)) given Ord(k) =
+  foldl(
+      \(acc, key) -> map_insert(key, set_from_list(graph_successors(g, key)), acc),
+      map_empty,
+      map_keys(g),
+    )
+
+-- | Every function each function transitively calls: the least assignment with
+-- `x[f]` the union of `direct[f]` and every `x[g]` for `g` in `direct[f]`. The
+-- members of one cycle share one answer, and a function on a cycle lists itself.
+pub fn fl_transitive(doc : ResolvedDoc) : Map(String, Map(String, Unit)) ! {Fail | e} =
+  let calls = fl_calls(doc)
+  fix_propagate(fl_direct(calls), calls)
+
+-- | The functions reachable from `roots`: the same solve with the calls relation
+-- reversed, so reachability flows from a caller to its callees, over the Boolean
+-- lattice. A root the document does not define contributes nothing.
+pub fn fl_live(
+  doc : ResolvedDoc,
+  roots : List(String)
+) : Map(String, Unit) ! {Fail | e} =
+  let calls = fl_calls(doc)
+  let seeds = foldl(
+      \(acc, key) -> map_insert(key, elem(key, roots), acc),
+      map_empty,
+      map_keys(calls),
+    )
+  fl_reached(fix_propagate(seeds, graph_reverse(calls)))
+
+fn fl_reached(x : Map(String, Bool)) : Map(String, Unit) =
+  set_from_list(map(fst, filter(\(p) -> snd(p), map_to_list(x))))
+
+-- | The functions no root reaches, ascending: what a dead-code report is, once
+-- the document's entry points are named.
+pub fn fl_dead(
+  doc : ResolvedDoc,
+  roots : List(String)
+) : List(String) ! {Fail | e} =
+  let live = fl_live(doc, roots)
+  filter(\(name) -> not(set_member(name, live)), set_to_list(fl_defined(doc)))
+
+-- | The functions that call themselves, directly or through a cycle, ascending.
+-- This is the question a plain traversal answers wrongly and the fixpoint
+-- answers by construction: mutual recursion is a cycle, not a self-edge.
+pub fn fl_recursive(doc : ResolvedDoc) : List(String) ! {Fail | e} =
+  let reach = fl_transitive(doc)
+  filter(\(name) -> set_member(name, fix_at(reach, name)), map_keys(reach))

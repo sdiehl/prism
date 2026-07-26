@@ -1,0 +1,233 @@
+-- | Rename as a join against the resolver, not as a tree walk.
+--
+-- The resolver has already decided what every name in a program means. A rename
+-- tool that walks the syntax and works scoping out again is a second, weaker
+-- answer to a question already answered, and the two disagree at exactly the
+-- cases that matter. So nothing here computes scope: it queries the
+-- `prism-resolved-syntax-v1` document, which carries a node id, a form kind, and
+-- an exact byte span for every node, and emits span-addressed edits for
+-- `Syntax.Edit` to apply.
+--
+-- What that seam supports, and what it does not, decides this module's shape.
+-- Every variable *reference* is a `var` node whose span covers exactly its
+-- identifier, so references are addressable and countable. No *binding*
+-- occurrence is: a `let` node's span starts at the `let` keyword, a parameter is
+-- a bare name with no span at all, and there is no edge from a reference to the
+-- binder it resolved to. A use-only rewrite of a name whose binder lives in the
+-- same file therefore produces a file where the uses no longer name their
+-- binder, which is a corrupt program dressed up as a refactor.
+--
+-- Rather than guess, `rn_plan` refuses whenever the seam cannot prove the
+-- rewrite is complete. The proof it demands is cheap and exact: lex the source,
+-- take every identifier token spelling the old name, and require that each one
+-- is a `var` occurrence the resolver recorded. If some mention is not (a binder,
+-- a declaration head, a parameter list, an import), the plan is refused. What
+-- survives is the case the seam really does cover: renaming every reference to a
+-- name bound outside this document.
+--
+-- The refusals are the useful part of the result, and they are the gap to
+-- report: when the seam grows a binder-identity fact, this module tightens
+-- without an interface change.
+
+import Data.Foldable (length)
+
+import Data.List (concat_map, filter, map)
+
+import Syntax.Edit (..)
+
+import Syntax.Lex (..)
+
+import Syntax.Resolved (..)
+
+import Syntax.Source (..)
+
+import Syntax.Token (..)
+
+-- | One variable reference: the node id the checker facts join on, the exact
+-- span of the identifier, and the identifier text sliced from the embedded
+-- source.
+pub type RnUse = RnUse { id: Int, span: Span, name: String }
+
+-- | Why a rename was refused. Every case is a fact about the document, not a
+-- guess about the programmer's intent.
+pub type RenameRefusal
+  = RnNotAnIdent(String)
+  | RnTaken(String)
+  | RnUnknown(String)
+  | RnUnaddressed(Span)
+  | RnBinderInDocument(String, Span)
+  | RnSourceUnreadable(LexError)
+  deriving (Eq, Show)
+
+-- | A human-readable account of a refusal.
+pub fn rn_message(r : RenameRefusal) : String =
+  match r of
+    RnNotAnIdent(to) => "`{to}` is not a single identifier"
+    RnTaken(to) => "`{to}` is already used in this document"
+    RnUnknown(from) => "`{from}` is not referenced in this document"
+    RnUnaddressed(s) =>
+      "a reference at {show(s.lo)}..{show(s.hi)} is not addressable in the embedded source"
+    RnBinderInDocument(from, s) =>
+      "`{from}` is mentioned at {show(s.lo)}..{show(s.hi)} outside any recorded reference, so its binder is in this document and the seam cannot address it"
+    RnSourceUnreadable(e) =>
+      "the embedded source does not lex: {lex_message(e)}"
+
+-- | Every variable reference in the document, in source order: the occurrence
+-- table an editor's find-references is, and the join key column a checker uses
+-- to pull `prism-tc-facts-v1` rows.
+pub fn rn_occurrences(doc : ResolvedDoc) : List(RnUse) =
+  concat_map(\(f) -> rn_fn_uses(doc.source, f), doc.functions)
+
+fn rn_fn_uses(src : SourceFile, f : RFunction) : List(RnUse) =
+  concat_map(\(n) -> rn_use(src, n), rnode_universe(f.body))
+
+fn rn_use(src : SourceFile, n : RNode) : List(RnUse) =
+  if n.kind == rkind_var() then
+    match ed_span_text(src.text, n.span) of
+      Some(name) => [RnUse { id = n.id, span = n.span, name = name }]
+      None => []
+  else
+    []
+
+-- | Every reference the embedded source cannot address. Non-empty means the
+-- document and its source disagree, and every query here should be distrusted.
+pub fn rn_unaddressed(doc : ResolvedDoc) : List(Span) =
+  concat_map(\(f) -> rn_fn_unaddressed(doc.source, f), doc.functions)
+
+fn rn_fn_unaddressed(src : SourceFile, f : RFunction) : List(Span) =
+  concat_map(\(n) -> rn_bad_span(src, n), rnode_universe(f.body))
+
+fn rn_bad_span(src : SourceFile, n : RNode) : List(Span) =
+  if n.kind == rkind_var() then
+    match ed_span_text(src.text, n.span) of
+      Some(_) => []
+      None => [n.span]
+  else
+    []
+
+-- | Every reference to one name, in source order.
+pub fn rn_uses_of(doc : ResolvedDoc, name : String) : List(RnUse) =
+  filter(\(u) -> u.name == name, rn_occurrences(doc))
+
+-- | How many times a name is referenced.
+pub fn rn_use_count(doc : ResolvedDoc, name : String) : Int =
+  length(rn_uses_of(doc, name))
+
+-- | Whether a string is a single identifier, decided by the real lexer rather
+-- than a hand-rolled character predicate. A keyword is not an identifier, so a
+-- rename to one is refused here rather than discovered after the edit.
+pub fn rn_is_ident(s : String) : Bool =
+  match lex_raw(s) of
+    Err(_) => false
+    Ok(raw) =>
+      match raw.tokens of
+        Cons(t, Nil) => t.kind == TIdent
+        _ => false
+
+-- | The span of every identifier token spelling `name`, anywhere in the text.
+-- This is the completeness check: a mention the resolver did not record as a
+-- reference is a binder, a declaration head, or a parameter, and any of those
+-- makes a use-only rewrite wrong.
+pub fn rn_mentions(text : String, name : String) : Result(List(Span), LexError) =
+  match lex_raw(text) of
+    Err(e) => Err(e)
+    Ok(raw) =>
+      Ok(map(token_span, filter(\(t) -> rn_names(t, name), raw.tokens)))
+
+fn token_span(t : Token) : Span = t.span
+
+fn rn_names(t : Token, name : String) : Bool =
+  match t.value of
+    Some(v) => t.kind == TIdent && v == name
+    None => false
+
+-- | The edit set that renames every reference to `from` into `to`, or the
+-- reason the seam cannot prove that rewrite is complete.
+--
+-- The checks run in a fixed order, so the refusal a caller sees is always the
+-- first thing wrong: the source must lex, every reference must be addressable,
+-- `to` must be a single identifier that occurs nowhere in the document, `from`
+-- must be referenced at least once, and every mention of `from` must be one of
+-- those references.
+pub fn rn_plan(
+  doc : ResolvedDoc,
+  from : String,
+  to : String
+) : Result(List(Edit), RenameRefusal) =
+  match rn_unaddressed(doc) of
+    Cons(s, _) => Err(RnUnaddressed(s))
+    Nil =>
+      if not(rn_is_ident(to)) then
+        Err(RnNotAnIdent(to))
+      else
+        rn_plan_checked(doc, from, to)
+
+fn rn_plan_checked(
+  doc : ResolvedDoc,
+  from : String,
+  to : String
+) : Result(List(Edit), RenameRefusal) =
+  match rn_mentions(doc.source.text, to) of
+    Err(e) => Err(RnSourceUnreadable(e))
+    Ok(Cons(_, _)) => Err(RnTaken(to))
+    Ok(Nil) =>
+      match rn_mentions(doc.source.text, from) of
+        Err(e) => Err(RnSourceUnreadable(e))
+        Ok(Nil) => Err(RnUnknown(from))
+        Ok(mentions) =>
+          rn_plan_complete(rn_uses_of(doc, from), mentions, from, to)
+
+fn rn_plan_complete(
+  uses : List(RnUse),
+  mentions : List(Span),
+  from : String,
+  to : String
+) : Result(List(Edit), RenameRefusal) =
+  match uses of
+    Nil => Err(RnUnknown(from))
+    Cons(_, _) =>
+      match rn_stray(map(use_span, uses), mentions) of
+        Some(s) => Err(RnBinderInDocument(from, s))
+        None => Ok(map(\(u) -> ed_replace(u.span, to), uses))
+
+fn use_span(u : RnUse) : Span = u.span
+
+-- The first mention that is not one of the recorded reference spans.
+fn rn_stray(refs : List(Span), mentions : List(Span)) : Option(Span) =
+  match mentions of
+    Nil => None
+    Cons(m, rest) =>
+      if rn_covers(refs, m) then
+        rn_stray(refs, rest)
+      else
+        Some(m)
+
+fn rn_covers(refs : List(Span), m : Span) : Bool =
+  match refs of
+    Nil => false
+    Cons(r, rest) =>
+      if r.lo == m.lo && r.hi == m.hi then
+        true
+      else
+        rn_covers(rest, m)
+
+-- | Rename and apply, in one step: the plan, then the edits, then the re-lex
+-- `Syntax.Edit` insists on. Either refusal comes back as itself.
+pub fn rn_rename(
+  doc : ResolvedDoc,
+  from : String,
+  to : String
+) : Result(String, RenameError) =
+  match rn_plan(doc, from, to) of
+    Err(r) => Err(RnRefused(r))
+    Ok(edits) =>
+      match ed_apply(doc.source.text, edits) of
+        Err(e) => Err(RnEdit(e))
+        Ok(out) => Ok(out)
+
+-- | The two ways a rename can fail: the seam refused to prove it, or the edits
+-- did not survive being applied.
+pub type RenameError
+  = RnRefused(RenameRefusal)
+  | RnEdit(EditError)
+  deriving (Eq, Show)

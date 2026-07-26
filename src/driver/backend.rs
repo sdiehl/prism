@@ -3,11 +3,6 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::codegen::{
-    emit_llvm_closure_plan_shard_bc, emit_llvm_native_kont_plan_bc, emit_llvm_scc_bc,
-    llvm_scc_closure_summary, native_kont_state_map, plan_llvm_closures_from_summaries,
-    ClosurePlanShard, ClosureSummary, SccBitcodeError,
-};
 use crate::core::traverse::Visit;
 use crate::core::{
     reachable_fns, shallow_hashes, Comp, Core, CorePat, DepGraph, LoweredCore, Value,
@@ -17,6 +12,11 @@ use crate::lineage::{FactOutcome, QueryKind};
 use crate::store::disk::{resolve_store_path, Store};
 use crate::sym::Sym;
 use crate::types::CtorInfo;
+use prism_native::{
+    emit_llvm_closure_plan_shard_bc, emit_llvm_native_kont_plan_bc, emit_llvm_scc_bc,
+    llvm_scc_closure_summary, native_kont_state_map, plan_llvm_closures_from_summaries,
+    ClosurePlanShard, ClosureSummary, SccBitcodeError,
+};
 
 use super::identity::compiler_binary_fingerprint;
 use super::input::field;

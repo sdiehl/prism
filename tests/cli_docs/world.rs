@@ -8,7 +8,7 @@
 
 use std::fs;
 
-// Mirrors the sentinel in examples/world.pr and src/wasm.rs: the pure kernel the
+// Mirrors the sentinel in examples/world.pr and src/wasm/mod.rs: the pure kernel the
 // browser reuses is everything above it.
 const MAIN_SPLIT: &str = "-- @world:main-below";
 const WIDTH: usize = 16;

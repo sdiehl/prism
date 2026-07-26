@@ -1,8 +1,18 @@
 -- The round-trip gate for the versioned syntax artifacts: read one artifact
 -- file, decode it into the typed Syntax vocabulary, re-encode, and print the
 -- exact bytes. arg(0) is the artifact path; arg(1) selects the family
--- ("tokens" or "surface"). A refusal prints one structured error line.
+-- ("tokens", "surface", "diagnostics", or "resolved"). The "resolved-nodes"
+-- mode instead decodes the resolved document and prints the id of every node
+-- reached by traversing each function body with `rnode_universe`, one per
+-- line: the Prism-side traversal the checker join is diffed against, reading
+-- only the artifact bytes. A refusal prints one structured error line.
+import Data.Foldable (length)
+
+import Data.List (concat_map)
+
 import Syntax.Codec (..)
+
+import Syntax.Resolved (..)
 
 fn main() =
   let text = read_file(arg(0))
@@ -10,7 +20,40 @@ fn main() =
     match decode_tokens(text) of
       Err(e) => println("decode error: {codec_error_message(e)}")
       Ok(d) => println(encode_tokens(d))
+  elif arg(1) == "diagnostics" then
+    match decode_diagnostics(text) of
+      Err(e) => println("decode error: {codec_error_message(e)}")
+      Ok(d) => println(encode_diagnostics(d))
+  elif arg(1) == "resolved" then
+    match decode_resolved(text) of
+      Err(e) => println("decode error: {codec_error_message(e)}")
+      Ok(d) => println(encode_resolved(d))
+  elif arg(1) == "resolved-nodes" then
+    match decode_resolved(text) of
+      Err(e) => println("decode error: {codec_error_message(e)}")
+      Ok(d) => print_resolved_ids(d)
   else
     match decode_surface(text) of
       Err(e) => println("decode error: {codec_error_message(e)}")
       Ok(d) => println(encode_surface(d))
+
+-- Every node id reached by walking each function body with the Prism-side
+-- `rnode_universe`, sorted ascending, one per line under a `count` header. A
+-- pure function of the decoded document: no source file or compiler state is
+-- consulted.
+fn print_resolved_ids(d : ResolvedDoc) =
+  let ids = sort(
+      concat_map(
+          \(f) -> map(\(n) -> n.id, rnode_universe(f.body)),
+          d.functions,
+        ),
+    )
+  println("count {length(ids)}")
+  print_ids(ids)
+
+fn print_ids(ids : List(Int)) : Unit ! {IO} =
+  match ids of
+    Nil => ()
+    Cons(i, rest) =>
+      println("{i}")
+      print_ids(rest)

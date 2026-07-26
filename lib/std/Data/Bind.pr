@@ -1,0 +1,279 @@
+-- | Binders, the two nameless coordinate systems, and the canonical rendering
+-- that makes alpha-equivalent terms identical.
+--
+-- Names are for working, indices are for identity. A checker, an interpreter and
+-- an error message all want the name the programmer wrote; only a hash and a
+-- wire format want the name gone. This module keeps both and puts the boundary
+-- between them in one place.
+--
+-- The two coordinate systems are branded so they cannot be mixed up. An `Index`
+-- is the outward distance from a use site to its binder, so it survives adding
+-- binders at the root and it is what a nameless rendering emits. A `Level` is
+-- the inward distance from the root to a binder, so it survives going deeper and
+-- it is what an environment addresses. `bind_index_at` and `bind_level_at` are
+-- the only conversions between them, and at a fixed depth each is the other's
+-- inverse. Nothing here accepts a bare `Int` where one of the two is meant.
+-- Opt-in: not in Base.
+
+import Data.List (map, drop, reverse)
+
+import Data.Foldable (length)
+
+import Data.String (str_join)
+
+-- | The outward distance from a use site to the binder it refers to:
+-- `bind_index(0)` is the nearest enclosing binder.
+--
+-- The constructor is spelled `MkIndex` rather than `Index` on purpose:
+-- constructors share one flat namespace with every module in the program, so a
+-- constructor named for its type would rebind any other `Index` in scope and the
+-- failure would surface far from the declaration.
+pub type Index = MkIndex(Int) deriving (Eq, Ord, Show)
+
+-- | The inward distance from the root to a binder: `bind_level(0)` is the
+-- outermost binder in scope. Constructor named `MkLevel` for the same reason
+-- `Index` uses `MkIndex`.
+pub type Level = MkLevel(Int) deriving (Eq, Ord, Show)
+
+-- | Brand a raw outward distance as an `Index`. One of the two ways in.
+pub fn bind_index(n : Int) : Index = MkIndex(n)
+
+-- | Brand a raw inward distance as a `Level`. One of the two ways in.
+pub fn bind_level(n : Int) : Level = MkLevel(n)
+
+-- | The raw distance carried by an `Index`. One of the two ways out.
+pub fn bind_index_int(i : Index) : Int =
+  match i of
+    MkIndex(n) => n
+
+-- | The raw distance carried by a `Level`. One of the two ways out.
+pub fn bind_level_int(l : Level) : Int =
+  match l of
+    MkLevel(n) => n
+
+-- | The index a use site under `depth` binders must write to reach level `l`.
+--
+-- This and `bind_level_at` are the module's only conversions, and they are the
+-- same reflection, so at a fixed depth each undoes the other. Both are undefined
+-- outside `0 <= distance < depth`; a caller that might be out of scope should
+-- ask the environment instead.
+--
+-- ```prism
+-- bind_index_int(bind_index_at(3, bind_level(0)))
+-- ```
+-- ```output
+-- 2
+-- ```
+pub fn bind_index_at(depth : Int, l : Level) : Index =
+  MkIndex(depth - 1 - bind_level_int(l))
+
+-- | The level that a use site under `depth` binders reaches by writing index `i`.
+--
+-- ```prism
+-- bind_level_int(bind_level_at(3, bind_index_at(3, bind_level(2))))
+-- ```
+-- ```output
+-- 2
+-- ```
+pub fn bind_level_at(depth : Int, i : Index) : Level =
+  MkLevel(depth - 1 - bind_index_int(i))
+
+-- | The binders in scope, innermost first, each with a name and a payload.
+--
+-- Shadowing is by position, not by rewriting: pushing a name that is already in
+-- scope hides the older slot from `bind_index_of` while leaving it reachable by
+-- its own index, which is what an interpreter walking a closure environment
+-- needs.
+pub type BindEnv(a) = BindEnv { slots: List((String, a)) }
+
+-- | No binders in scope.
+pub let bind_empty : BindEnv(a) = BindEnv { slots = Nil }
+
+-- | Push one binder, which becomes index `0`.
+pub fn bind_push(env : BindEnv(a), name : String, payload : a) : BindEnv(a) =
+  BindEnv { slots = Cons((name, payload), env.slots) }
+
+-- | Push several binders at once, leftmost outermost, the way a multi-parameter
+-- binder brings its parameters into scope.
+--
+-- ```prism
+-- bind_name_at(bind_push_all(bind_empty, [("x", 1), ("y", 2)]), bind_index(1))
+-- ```
+-- ```output
+-- Some(x)
+-- ```
+pub fn bind_push_all(env : BindEnv(a), entries : List((String, a))) : BindEnv(a) =
+  match entries of
+    Nil => env
+    Cons(e, rest) => bind_push_all(bind_push(env, fst(e), snd(e)), rest)
+
+-- | Push binders that carry no payload beyond their own name.
+pub fn bind_push_names(
+  env : BindEnv(String),
+  names : List(String)
+) : BindEnv(String) =
+  bind_push_all(env, map(\(n) -> (n, n), names))
+
+-- | How many binders are in scope. A use site here writes indices below this and
+-- levels below this.
+pub fn bind_depth(env : BindEnv(a)) : Int = length(env.slots)
+
+-- | Every name in scope, innermost first, with shadowed names still listed at
+-- their own index.
+pub fn bind_names(env : BindEnv(a)) : List(String) = map(fst, env.slots)
+
+-- | Drop the `n` innermost binders, leaving what was in scope before them.
+pub fn bind_drop(env : BindEnv(a), n : Int) : BindEnv(a) =
+  BindEnv { slots = drop(n, env.slots) }
+
+fn bind_scan(
+  slots : List((String, a)),
+  name : String,
+  k : Int
+) : Option(Index) =
+  match slots of
+    Nil => None
+    Cons(e, rest) =>
+      if fst(e) == name then
+        Some(MkIndex(k))
+      else
+        bind_scan(rest, name, k + 1)
+
+-- | The index of the innermost binder named `name`, or `None` when the name is
+-- free here.
+pub fn bind_index_of(env : BindEnv(a), name : String) : Option(Index) =
+  bind_scan(env.slots, name, 0)
+
+-- | The level of the innermost binder named `name`, or `None` when the name is
+-- free here.
+pub fn bind_level_of(env : BindEnv(a), name : String) : Option(Level) =
+  match bind_index_of(env, name) of
+    None => None
+    Some(i) => Some(bind_level_at(bind_depth(env), i))
+
+fn bind_nth(slots : List((String, a)), k : Int) : Option((String, a)) =
+  if k < 0 then
+    None
+  else
+    match slots of
+      Nil => None
+      Cons(e, rest) =>
+        if k == 0 then
+          Some(e)
+        else
+          bind_nth(rest, k - 1)
+
+-- | The binder an index points at, name and payload, or `None` when the index
+-- escapes the environment.
+pub fn bind_slot_at(env : BindEnv(a), i : Index) : Option((String, a)) =
+  bind_nth(env.slots, bind_index_int(i))
+
+-- | The payload an index points at.
+pub fn bind_at(env : BindEnv(a), i : Index) : Option(a) =
+  match bind_slot_at(env, i) of
+    None => None
+    Some(e) => Some(snd(e))
+
+-- | The name an index points at, which is what an error message wants back.
+pub fn bind_name_at(env : BindEnv(a), i : Index) : Option(String) =
+  match bind_slot_at(env, i) of
+    None => None
+    Some(e) => Some(fst(e))
+
+-- | The payload a level points at.
+pub fn bind_at_level(env : BindEnv(a), l : Level) : Option(a) =
+  bind_at(env, bind_index_at(bind_depth(env), l))
+
+-- | The name a level points at.
+pub fn bind_name_at_level(env : BindEnv(a), l : Level) : Option(String) =
+  bind_name_at(env, bind_index_at(bind_depth(env), l))
+
+-- | A rendering skeleton that knows where the binders are.
+--
+-- The fold over it is the whole point: a term's own traversal decides which
+-- tokens to emit and which names it binds, and this decides how a reference is
+-- spelled. Because a bound reference is spelled by outward distance, two terms
+-- that differ only in the names of their binders render to the same bytes.
+pub type Nameless
+  = NTok(String)
+  | NLit(String)
+  | NRef(String)
+  | NScope(List(String), Nameless)
+  | NSeq(List(Nameless))
+  deriving (Eq, Show)
+
+-- | A token committed with its byte length, so no token can be confused with the
+-- concatenation of its neighbours.
+--
+-- ```prism
+-- bind_token("add")
+-- ```
+-- ```output
+-- 3:add
+-- ```
+pub fn bind_token(s : String) : String =
+  concat(show_int(byte_len(s)), concat(":", s))
+
+fn bind_nl_seq(
+  free : (String) -> String,
+  env : BindEnv(String),
+  ts : List(Nameless),
+  acc : List(String)
+) : List(String) =
+  match ts of
+    Nil => acc
+    Cons(t, rest) => bind_nl_seq(free, env, rest, bind_nl_go(free, env, t, acc))
+
+fn bind_nl_go(
+  free : (String) -> String,
+  env : BindEnv(String),
+  t : Nameless,
+  acc : List(String)
+) : List(String) =
+  match t of
+    NTok(s) => Cons(bind_token(s), acc)
+    NLit(s) => Cons(s, acc)
+    NRef(x) =>
+      match bind_index_of(env, x) of
+        Some(i) => Cons(concat("b", show_int(bind_index_int(i))), acc)
+        None => Cons(free(x), acc)
+    NScope(xs, body) => bind_nl_go(free, bind_push_names(env, xs), body, acc)
+    NSeq(ts) => bind_nl_seq(free, env, ts, acc)
+
+-- | Render a skeleton with binder references as outward distance and free names
+-- spelled by `free`.
+--
+-- A bound reference becomes `b` followed by its index. A free name is handed to
+-- `free`, which is where a caller substitutes whatever identity it has for a
+-- name it does not own: a content hash, a slot in the recursive group being
+-- hashed, or the name itself.
+--
+-- ```prism
+-- bind_nameless(\(x) -> x, NScope(["a"], NSeq([NTok("lam"), NRef("a")])))
+-- ```
+-- ```output
+-- 3:lamb0
+-- ```
+pub fn bind_nameless(free : (String) -> String, t : Nameless) : String =
+  str_join("", reverse(bind_nl_go(free, bind_empty, t, Nil)))
+
+-- | Render with free names spelled as length-prefixed tokens under an `f` tag.
+--
+-- This is the rendering to compare two terms with when nothing outside them
+-- matters, which is exactly alpha-equivalence.
+pub fn bind_nameless_show(t : Nameless) : String =
+  bind_nameless(\(x) -> concat("f", bind_token(x)), t)
+
+-- | True when two skeletons differ only in the names of their bound variables.
+--
+-- ```prism
+-- bind_alpha_eq(
+--   NScope(["a"], NRef("a")),
+--   NScope(["b"], NRef("b")),
+-- )
+-- ```
+-- ```output
+-- true
+-- ```
+pub fn bind_alpha_eq(s : Nameless, t : Nameless) : Bool =
+  bind_nameless_show(s) == bind_nameless_show(t)

@@ -1,0 +1,373 @@
+-- | Caret rendering for `Syntax.Diagnostic`: the plain-text report the compiler
+-- prints for a refused source, rebuilt in Prism from the diagnostic and the
+-- source text alone.
+--
+-- The target is exact bytes, not a lookalike, so the layout below is an
+-- executable specification of the compiler's renderer: the header line, the
+-- location line, the gutter, the source line with tabs expanded to four-column
+-- stops, the underline row, the arrow row carrying the label, and the closing
+-- rule. `Syntax.Diagnostic` supplies the data; this module is the only thing in
+-- Prism that can draw it.
+--
+-- The shape reproduced is one primary span drawn as a caret under one source
+-- line, which is every diagnostic the syntax boundary raises: a lexical fault is
+-- a zero-width caret at its offset, and a parse fault is the offending token's
+-- span or a caret at end of input. `rp_exact` is the predicate for that shape
+-- and `rp_report` answers `None` outside it rather than guessing. Three things
+-- fall outside.
+--
+-- A span crossing a line boundary, reachable through a multi-line string
+-- literal, draws the compiler's multi-line form instead: an arrow down the
+-- margin from the opening line to the closing one. That form is not implemented.
+--
+-- Several labels on one report, and the help and note trailers, belong to the
+-- structured type-error path rather than the syntax boundary. `related` is a
+-- reserved surface on `Diagnostic` and nothing populates it yet, so a second
+-- label has no source here to draw from.
+--
+-- A non-ASCII byte at or before the end of the diagnostic's own line changes the
+-- answer, and there the compiler's output is the right one: it draws one cell
+-- per character, while every column here is counted in bytes, so a two-byte
+-- character before the caret pulls this module's caret one cell further right.
+-- Counting characters would mean carrying a decoder the rest of the module has
+-- no use for, so the predicate below declines those lines instead.
+
+import Data.String (pad_left, slice_bytes, str_repeat)
+
+import Syntax.Diagnostic (..)
+
+import Syntax.Source (..)
+
+-- The line table entry the compiler's renderer works from: a zero-based line
+-- index and the half-open byte range the line covers, its terminator included.
+type RpLine = RpLine { idx: Int, lo: Int, hi: Int }
+
+-- A tab advances to the next four-column stop, the renderer's fixed tab width.
+fn rp_tab_width() : Int = 4
+
+-- The byte length of the line separator starting at `i`, or zero when none
+-- starts there. The set is the renderer's seven: carriage return, line feed,
+-- vertical tab, form feed, next line, line separator, paragraph separator. A
+-- carriage return followed by a line feed is one terminator, not two.
+fn rp_sep(text : String, i : Int) : Int =
+  let b = byte_at(text, i)
+  if b == 13 then
+    if byte_at(text, i + 1) == 10 then
+      2
+    else
+      1
+  elif b == 10 || b == 11 || b == 12 then
+    1
+  elif b == 194 && byte_at(text, i + 1) == 133 then
+    2
+  elif b == 226 && byte_at(text, i + 1) == 128 then
+    rp_sep_u2028(byte_at(text, i + 2))
+  else
+    0
+
+-- The third byte of U+2028 and U+2029, the two separators spelled `e2 80 a8`
+-- and `e2 80 a9`.
+fn rp_sep_u2028(c : Int) : Int =
+  if c == 168 || c == 169 then
+    3
+  else
+    0
+
+-- The byte just past the line starting at `lo`: past its terminator, or the end
+-- of the text when the line runs to the end unterminated.
+fn rp_line_end(text : String, lo : Int) : Int =
+  let n = byte_len(text)
+  var i := lo
+  var e := -1
+  while i < n && e < 0 do
+    if rp_sep(text, i) > 0 then
+      e := i + rp_sep(text, i)
+    else
+      i += 1
+  if e < 0 then
+    n
+  else
+    e
+
+-- The line containing a byte offset: the last line whose start is at or before
+-- it, so an offset at the very end of the text lands on the final line and an
+-- empty text is one empty line.
+fn rp_line_at(text : String, off : Int) : RpLine =
+  let n = byte_len(text)
+  var idx := 0
+  var lo := 0
+  var hi := rp_line_end(text, 0)
+  while hi < n && hi <= off do
+    idx += 1
+    lo := hi
+    hi := rp_line_end(text, lo)
+  RpLine { idx = idx, lo = lo, hi = hi }
+
+-- The number of characters in the byte range `[lo, hi)`: every byte that is not
+-- a UTF-8 continuation byte starts one.
+fn rp_chars(text : String, lo : Int, hi : Int) : Int =
+  var i := lo
+  var k := 0
+  while i < hi do
+    if byte_at(text, i) < 128 || byte_at(text, i) >= 192 then
+      k += 1
+    i += 1
+  k
+
+-- The byte range `[lo, hi)` of `text` as a string.
+fn rp_bytes(text : String, lo : Int, hi : Int) : String =
+  if lo >= hi then
+    ""
+  else
+    string_of_buf(slice_bytes(text, lo, hi, buf_empty()))
+
+-- The ASCII whitespace the renderer collapses to a single space: space, tab,
+-- line feed, vertical tab, form feed, carriage return.
+fn rp_ws(b : Int) : Bool =
+  b == 32 || b == 9 || b == 10 || b == 11 || b == 12 || b == 13
+
+-- A line with its trailing whitespace dropped, terminator included.
+fn rp_trim_end(s : String) : String =
+  var e := byte_len(s)
+  while e > 0 && rp_ws(byte_at(s, e - 1)) do
+    e -= 1
+  rp_bytes(s, 0, e)
+
+-- The columns the character at char index `i` of a trimmed line occupies. Past
+-- the end of the line every column is one wide, which is what keeps the arrow
+-- rows aligned once they run past the source text.
+fn rp_width(line : String, i : Int) : Int =
+  if i >= str_len(line) then
+    1
+  elif char_at(line, i) == 9 then
+    (i / rp_tab_width() + 1) * rp_tab_width() - i
+  else
+    1
+
+-- The source line as the renderer prints it: tabs expanded to the next stop,
+-- every other whitespace character one space, everything else itself.
+fn rp_body(line : String) : String =
+  let n = str_len(line)
+  var out := ""
+  var i := 0
+  while i < n do
+    if rp_ws(char_at(line, i)) then
+      out := concat(out, str_repeat(" ", rp_width(line, i)))
+    else
+      out := concat(out, substring(line, i, 1))
+    i += 1
+  out
+
+-- The underline row: a rule under the span itself and a stem at the column the
+-- label attaches to, each cell widened over the tab it sits on.
+fn rp_under(line : String, arrow : Int, m : Int, lo : Int, hi : Int) : String =
+  var out := ""
+  var col := 0
+  while col < arrow do
+    out := concat(
+        out,
+        rp_cell(
+            rp_under_head(col, m, lo, hi),
+            rp_under_tail(col, m, lo, hi),
+            rp_width(line, col),
+          ),
+      )
+    col += 1
+  out
+
+-- The first cell character of the underline row at a column.
+fn rp_under_head(col : Int, m : Int, lo : Int, hi : Int) : String =
+  if col == m && lo <= col && col < hi then
+    "┬"
+  elif col == m then
+    "│"
+  elif lo <= col && col < hi then
+    "─"
+  else
+    " "
+
+-- The fill the underline row repeats across the rest of a wide cell.
+fn rp_under_tail(col : Int, m : Int, lo : Int, hi : Int) : String =
+  if col == m && lo <= col && col < hi then
+    "─"
+  elif col == m then
+    " "
+  elif lo <= col && col < hi then
+    "─"
+  else
+    " "
+
+-- The arrow row: a corner at the attach column and a rule running right from it
+-- to the label.
+fn rp_arrow(line : String, arrow : Int, m : Int) : String =
+  var out := ""
+  var col := 0
+  while col < arrow do
+    out := concat(
+        out,
+        rp_cell(
+            rp_arrow_head(col, m),
+            rp_arrow_tail(col, m),
+            rp_width(line, col),
+          ),
+      )
+    col += 1
+  out
+
+-- The first cell character of the arrow row at a column.
+fn rp_arrow_head(col : Int, m : Int) : String =
+  if col == m then
+    "╰"
+  elif col > m then
+    "─"
+  else
+    " "
+
+-- The fill the arrow row repeats across the rest of a wide cell.
+fn rp_arrow_tail(col : Int, m : Int) : String =
+  if col >= m then
+    "─"
+  else
+    " "
+
+-- One cell of an arrow row: the head once, then the fill for the remaining
+-- columns the underlying character occupies.
+fn rp_cell(head : String, tail : String, w : Int) : String =
+  concat(head, str_repeat(tail, w - 1))
+
+-- | The report-kind label the compiler stamps in the header for a phase.
+--
+-- ```prism
+-- # import Syntax.Diagnostic (..)
+-- rp_kind(DPLex)
+-- ```
+-- ```output
+-- Lexical Error
+-- ```
+pub fn rp_kind(p : DiagPhase) : String =
+  match p of
+    DPLex => "Lexical Error"
+    DPParse => "Parse Error"
+
+-- | The text on the caret's label. The end-of-input parse fault asks for more
+-- input; every other diagnostic points `here`.
+pub fn rp_label(d : Diagnostic) : String =
+  if d.code == "E7101" then
+    "expected more input here"
+  else
+    "here"
+
+-- | The message on the header line. A parse fault's message already carries its
+-- own position; a lexical fault's is followed by the line and column of its
+-- caret.
+pub fn rp_message(text : String, d : Diagnostic) : String =
+  match d.phase of
+    DPParse => d.message
+    DPLex =>
+      let lc = line_col(text, d.span.lo)
+      "{d.message} at line {show_int(fst(lc))}:{show_int(snd(lc))}"
+
+-- | Whether the compiler draws this diagnostic as one caret under one source
+-- line, the shape this module reproduces byte for byte. False for a span that
+-- crosses a line boundary, a span running past the end of the text, and a
+-- source carrying a non-ASCII byte at or before the end of the caret's line.
+pub fn rp_exact(text : String, d : Diagnostic) : Bool =
+  span_valid(d.span)
+    && d.span.hi <= byte_len(text)
+    && rp_one_line(text, d.span)
+    && rp_ascii(text, rp_line_at(text, d.span.lo).hi)
+
+-- Whether a span begins and ends on the same line. The end is the last byte the
+-- span covers, so a span ending exactly at a line break stays on that line.
+fn rp_one_line(text : String, s : Span) : Bool =
+  rp_line_at(text, s.lo).idx == rp_line_at(text, max(s.hi - 1, s.lo)).idx
+
+-- Whether every byte below `upto` is ASCII, which is where byte columns and
+-- character columns agree. Past that point the source may hold anything: a
+-- character beyond the caret's line shifts neither the column nor the width of
+-- anything drawn.
+fn rp_ascii(text : String, upto : Int) : Bool =
+  var i := 0
+  var ok := true
+  while i < upto && ok do
+    if byte_at(text, i) >= 128 then
+      ok := false
+    i += 1
+  ok
+
+-- | The compiler's plain-text report for one diagnostic, or `None` when the
+-- diagnostic falls outside the shape this module draws (see `rp_exact`). `name`
+-- is the source name in the location line; the compiler passes `<source>` when
+-- reporting on a single file. The result ends with a newline.
+--
+-- ```prism
+-- # import Data.Maybe (unwrap_or)
+-- # import Syntax.Diagnostic (..)
+-- # import Syntax.Source (..)
+-- let d = Diagnostic {
+--   code = "E7100",
+--   phase = DPParse,
+--   span = Span { lo = 12, hi = 13 },
+--   message = "unexpected ')'",
+--   expected = Nil,
+--   related = Nil
+-- }
+-- print(unwrap_or("", rp_report("<source>", "fn main() = )\n", d)))
+-- ```
+-- ```output
+-- [E7100] Parse Error: unexpected ')'
+--    ╭─[ <source>:1:13 ]
+--    │
+--  1 │ fn main() = )
+--    │             ┬
+--    │             ╰── here
+-- ───╯
+-- ```
+pub fn rp_report(name : String, text : String, d : Diagnostic) : Option(String) =
+  if rp_exact(text, d) then
+    Some(rp_draw(name, text, d))
+  else
+    None
+
+-- | Every diagnostic in a document rendered in order and concatenated, or
+-- `None` when any one of them falls outside the shape this module draws. The
+-- compiler stops at its first refusal, so a document carrying more than one
+-- diagnostic has no single compiler report to compare against.
+pub fn rp_report_doc(name : String, doc : DiagnosticsDoc) : Option(String) =
+  rp_report_all(name, doc.source.text, doc.diagnostics, "")
+
+fn rp_report_all(
+  name : String,
+  text : String,
+  ds : List(Diagnostic),
+  acc : String
+) : Option(String) =
+  match ds of
+    Nil => Some(acc)
+    Cons(d, rest) =>
+      match rp_report(name, text, d) of
+        None => None
+        Some(s) => rp_report_all(name, text, rest, concat(acc, s))
+
+-- Draw the six-part report. Every measurement is in characters relative to the
+-- caret's line: `clo` and `chi` are the span's columns, `m` is the column the
+-- label attaches to (the span's midpoint, never before its start), and the
+-- arrow rows run two columns past the span's end.
+fn rp_draw(name : String, text : String, d : Diagnostic) : String =
+  let ln = rp_line_at(text, d.span.lo)
+  let no = show_int(ln.idx + 1)
+  let w = str_len(no)
+  let line = rp_trim_end(rp_bytes(text, ln.lo, ln.hi))
+  let clo = rp_chars(text, ln.lo, d.span.lo)
+  let chi = rp_chars(text, ln.lo, d.span.hi)
+  let m = max((clo + chi) / 2, clo)
+  let arrow = chi + 2
+  let gutter = str_repeat(" ", w + 2)
+  let margin = concat(" ", concat(str_repeat(" ", w + 1), "│ "))
+  let rule = str_repeat("─", w + 2)
+  let head = "[{d.code}] {rp_kind(d.phase)}: {rp_message(text, d)}\n"
+  let loc = "{gutter}╭─[ {name}:{no}:{show_int(clo + 1)} ]\n{gutter}│\n"
+  let src = " {pad_left(no, w)} │ {rp_body(line)}\n"
+  let bar = "{margin}{rp_under(line, arrow, m, clo, chi)}\n"
+  let tip = "{margin}{rp_arrow(line, arrow, m)} {rp_label(d)}\n"
+  concat(head, concat(loc, concat(src, concat(bar, concat(tip, "{rule}╯\n")))))

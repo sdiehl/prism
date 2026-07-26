@@ -1,0 +1,27 @@
+import Syntax.Source (..)
+
+import Syntax.Walk (..)
+
+import Syntax.Ast (..)
+
+fn is_call(n : Sp(Expr)) : Bool =
+  match node_of(n) of
+    ECall(_, _) => true
+    _ => false
+
+fn main() =
+  let inner =
+    Sp {
+      node = ECall(lit_probe(2), [lit_probe(3), lit_probe(4)]),
+      span = Span { lo = 0, hi = 0 },
+      synth = false
+    }
+  let e =
+    Sp {
+      node = EIf(lit_probe(1), inner, lit_probe(5)),
+      span = Span { lo = 0, hi = 9 },
+      synth = false
+    }
+  println(show(expr_count(e)))
+  println(show(expr_any(is_call, e)))
+  println(show(expr_fold(\(acc, _) -> acc + 1, 0, e)))

@@ -1,0 +1,469 @@
+-- | The Prism-language reimplementation of the compiler's layout pass: the
+-- offside rule that turns the raw token stream into the post-layout `parse`
+-- stream by splicing the virtual block delimiters `VOpen`/`VClose`/`VSemi` and
+-- by opening a bare-indent body after each `class`/`instance`/`effect` head. The
+-- Rust `lex` pipeline stays the authoritative oracle; this module reproduces its
+-- output so the two can be diffed, never used as a silent fallback.
+--
+-- The pipeline mirrors the compiler exactly: `lex_raw` (Syntax.Lex) yields the
+-- decoded raw tokens; `inject` splices a zero-width head opener after every
+-- declaration head (the head runs to the last token on the keyword's line); the
+-- offside driver walks the injected stream with an indent stack, a bracket
+-- depth, and a carried-opener flag, emitting the virtual delimiters at zero-width
+-- spans; and the synthetic head openers are dropped from the result. The whole
+-- file is one Eager top-level block, opened at the first token and closed at end
+-- of input, and a block only opens after an opener that begins a deeper new line
+-- (the Conditional opener rule), so a one-line `let x = e` stays flat.
+
+import Data.List (..)
+
+import Data.Maybe (..)
+
+import Data.Result (..)
+
+import Syntax.Source (..)
+
+import Syntax.Token (..)
+
+import Syntax.Lex (..)
+
+-- The offside driver's state: the indent stack (top = head), whether the last
+-- opener is still pending a block, whether an opener is being carried across a
+-- bracket group, the open-bracket depth, the line of the previous token, and the
+-- end offset of the previous token (where a virtual close or separator anchors).
+type LState = LState {
+  stack: List(Int),
+  pending_opener: Bool,
+  carrying: Bool,
+  bracket_depth: Int,
+  prev_line: Option(Int),
+  prev_off: Int,
+  last_hi: Int
+}
+
+-- One entry of the injected stream: a real token, or a synthetic head opener at
+-- a zero-width offset (the elided `where` of a declaration body).
+type LEntry = LTok(Token) | LHead(Int)
+
+-- The result of one driver step: the new state and the reversed output so far.
+type StepR = StepR(LState, List(Token))
+
+-- The result of the virtual-emission phase: the new stack and reversed output,
+-- and the recomputed opener and carry flags.
+type Ph1R = Ph1R { stack: List(Int), out: List(Token), po: Bool, carry: Bool }
+
+-- The result of the bracket-depth phase: the new depth and the opener and carry
+-- flags after a carried opener may have re-armed on a closing bracket.
+type Ph2R = Ph2R { depth: Int, po: Bool, carry: Bool }
+
+-- The result of collapsing the indent stack down to a column: the trimmed stack
+-- and the reversed output with any closes or separator appended.
+type CloseR = CloseR { stack: List(Int), out: List(Token) }
+
+-- One indent-stack action at a fresh line: pop a deeper frame, separate a
+-- sibling at the same column, or do nothing.
+type Close3 = CPop | CSep | CNone
+
+-- The result of scanning a declaration head: the tokens after the head, the
+-- head's end offset, and the reversed entries with the head tokens appended.
+type HeadR = HeadR { rest: List(Token), endoff: Int, acc: List(LEntry) }
+
+-- The offset of the first byte of the line containing `off`: scan left to the
+-- byte after the previous newline, or the start of input.
+fn ly_line_start(text : String, off : Int) : Int =
+  var j := off
+  while j > 0 && byte_at(text, j - 1) /= 10 do
+    j -= 1
+  j
+
+-- The column of `off`: its byte distance from the line start. Tabs count as one
+-- column and every other byte counts as one, matching the compiler's ordinal
+-- (non-display) column used for layout decisions.
+fn ly_col(text : String, off : Int) : Int = off - ly_line_start(text, off)
+
+-- The newlines in [a, b): the line increment from `a` to `b`. Entries are
+-- scanned in offset order, so the driver advances the line number by the gap it
+-- just crossed. Recounting from byte zero at each entry would instead cost
+-- entries times bytes.
+fn ly_count_nl(text : String, a : Int, b : Int) : Int =
+  var i := a
+  var c := 0
+  while i < b do
+    if byte_at(text, i) == 10 then
+      c += 1
+    i += 1
+  c
+
+-- The line `prev_off` sits on: zero before any entry has been seen, which is
+-- the line byte zero sits on.
+fn ly_prev_line(st : LState) : Int =
+  match st.prev_line of
+    Some(l) => l
+    None => 0
+
+-- The head of an indent stack, or None when empty.
+fn ly_top(xs : List(Int)) : Option(Int) =
+  match xs of
+    Nil => None
+    Cons(h, _) => Some(h)
+
+-- The tail of an indent stack.
+fn ly_pop(xs : List(Int)) : List(Int) =
+  match xs of
+    Nil => Nil
+    Cons(_, t) => t
+
+-- The number of frames on an indent stack.
+fn ly_depth(xs : List(Int)) : Int =
+  match xs of
+    Nil => 0
+    Cons(_, t) => 1 + ly_depth(t)
+
+-- A zero-width virtual token of the given kind at `off`.
+fn ly_virt(k : TokenKind, off : Int) : Token =
+  Token {
+    kind = k,
+    span = Span { lo = off, hi = off },
+    value = None
+  }
+
+fn ly_vopen(off : Int) : Token = ly_virt(TVOpen, off)
+
+fn ly_vclose(off : Int) : Token = ly_virt(TVClose, off)
+
+fn ly_vsep(off : Int) : Token = ly_virt(TVSemi, off)
+
+-- Membership in a list of fixed-token spellings.
+fn ly_mem(s : String, xs : List(String)) : Bool =
+  match xs of
+    Nil => false
+    Cons(h, t) => s == h || ly_mem(s, t)
+
+-- The fixed tokens that open a layout block: their following indented line is
+-- the block. Matches the compiler's `opens_block` set (the synthetic head opener
+-- is handled separately as `LHead`).
+fn ly_opener_words() : List(String) =
+  [
+      "=",
+      "then",
+      "else",
+      "=>",
+      "of",
+      "with",
+      "handler",
+      "fn",
+      "try",
+      "catch",
+      "transact",
+      "do",
+      "where",
+      "loop",
+    ]
+
+fn ly_opens_block(k : TokenKind) : Bool =
+  match k of
+    TFixed(s) => ly_mem(s, ly_opener_words())
+    _ => false
+
+-- Whether a fixed token opens a bracket group that suppresses layout.
+fn ly_is_bopen(k : TokenKind) : Bool =
+  match k of
+    TFixed(s) => s == "(" || s == "[" || s == "\{"
+    _ => false
+
+-- Whether a fixed token closes a bracket group.
+fn ly_is_bclose(k : TokenKind) : Bool =
+  match k of
+    TFixed(s) => s == ")" || s == "]" || s == "\}"
+    _ => false
+
+-- Whether a fixed token keeps its opener status across an immediately following
+-- bracket group on the same line: `fn`, giving trailing-block-argument syntax.
+fn ly_is_carry(k : TokenKind) : Bool =
+  match k of
+    TFixed(s) => s == "fn"
+    _ => false
+
+-- Whether a fixed token is a declaration head whose body is a bare-indent block.
+fn ly_opens_decl(k : TokenKind) : Bool =
+  match k of
+    TFixed(s) => s == "class" || s == "instance" || s == "effect"
+    _ => false
+
+-- The start offset of an entry.
+fn ly_e_lo(e : LEntry) : Int =
+  match e of
+    LTok(t) => t.span.lo
+    LHead(o) => o
+
+-- The end offset of an entry.
+fn ly_e_hi(e : LEntry) : Int =
+  match e of
+    LTok(t) => t.span.hi
+    LHead(o) => o
+
+-- Whether the entry opens a block: a real opener, or a head opener.
+fn ly_e_opener(e : LEntry) : Bool =
+  match e of
+    LTok(t) => ly_opens_block(t.kind)
+    LHead(_) => true
+
+fn ly_e_bopen(e : LEntry) : Bool =
+  match e of
+    LTok(t) => ly_is_bopen(t.kind)
+    LHead(_) => false
+
+fn ly_e_bclose(e : LEntry) : Bool =
+  match e of
+    LTok(t) => ly_is_bclose(t.kind)
+    LHead(_) => false
+
+fn ly_e_carry(e : LEntry) : Bool =
+  match e of
+    LTok(t) => ly_is_carry(t.kind)
+    LHead(_) => false
+
+-- Whether text[lo, hi) contains a newline.
+fn ly_has_nl(text : String, lo : Int, hi : Int) : Bool =
+  if lo >= hi then
+    false
+  elif byte_at(text, lo) == 10 then
+    true
+  else
+    ly_has_nl(text, lo + 1, hi)
+
+-- Whether two adjacent tokens stay on one line.
+fn ly_same_line(text : String, prev_hi : Int, next_lo : Int) : Bool =
+  if ly_has_nl(text, prev_hi, next_lo) then
+    false
+  else
+    true
+
+-- Splice a synthetic head opener after each declaration head. The head runs to
+-- the last token sharing the keyword's line; the opener is a zero-width entry at
+-- the head's end. In brace form the `{` is the head's last token, so the opener
+-- lands inside the bracket group where the driver ignores it.
+fn ly_inject(text : String, toks : List(Token)) : List(LEntry) =
+  reverse(ly_inject_go(text, toks, Nil))
+
+fn ly_inject_go(
+  text : String,
+  toks : List(Token),
+  acc : List(LEntry)
+) : List(LEntry) =
+  match toks of
+    Nil => acc
+    Cons(t, rest) =>
+      if ly_opens_decl(t.kind) then
+        match ly_head_run(text, rest, t.span.hi, Cons(LTok(t), acc)) of
+          HeadR { rest = rest2, endoff = endoff, acc = acc2 } =>
+            ly_inject_go(text, rest2, Cons(LHead(endoff), acc2))
+      else
+        ly_inject_go(text, rest, Cons(LTok(t), acc))
+
+fn ly_head_run(
+  text : String,
+  toks : List(Token),
+  endoff : Int,
+  acc : List(LEntry)
+) : HeadR =
+  match toks of
+    Nil => HeadR { rest = Nil, endoff = endoff, acc = acc }
+    Cons(t, rest) =>
+      if ly_same_line(text, endoff, t.span.lo) then
+        ly_head_run(text, rest, t.span.hi, Cons(LTok(t), acc))
+      else
+        HeadR { rest = toks, endoff = endoff, acc = acc }
+
+-- The indent-stack action at column `col`: pop a deeper frame above the floor,
+-- separate a sibling at the same column, else nothing. The floor frames are
+-- never popped by a line break (Eager keeps the top-level block open).
+fn ly_stack_step(stack : List(Int), col : Int, floor : Int) : Close3 =
+  match ly_top(stack) of
+    None => CNone
+    Some(top) =>
+      if top > col && ly_depth(stack) > floor then
+        CPop
+      elif top == col then
+        CSep
+      else
+        CNone
+
+-- Collapse the stack down to `col`, emitting a virtual close per popped frame
+-- (anchored at the previous token's end) and a virtual separator for a sibling.
+fn ly_close_loop(
+  stack : List(Int),
+  col : Int,
+  last_hi : Int,
+  out : List(Token)
+) : CloseR =
+  match ly_stack_step(stack, col, 1) of
+    CPop =>
+      ly_close_loop(ly_pop(stack), col, last_hi, Cons(ly_vclose(last_hi), out))
+    CSep => CloseR { stack = stack, out = Cons(ly_vsep(last_hi), out) }
+    CNone => CloseR { stack = stack, out = out }
+
+-- Whether this token begins a fresh line relative to the previous token.
+fn ly_is_newline(prev : Option(Int), cur : Int) : Bool =
+  match prev of
+    None => true
+    Some(pl) => cur > pl
+
+-- Whether no token has been seen yet (the Eager top-level block is still unopen).
+fn ly_first(prev : Option(Int)) : Bool =
+  match prev of
+    None => true
+    Some(_) => false
+
+-- The virtual-emission phase: while not inside brackets, open a block for a
+-- pending opener that begins a deeper new line (or the very first token), else
+-- collapse the stack at a new line; then recompute the opener and carry flags.
+-- Inside brackets nothing is emitted and both flags are preserved.
+fn ly_phase1(
+  e : LEntry,
+  st : LState,
+  lo : Int,
+  col : Int,
+  new_line : Bool,
+  in_brackets : Bool,
+  bopen : Bool,
+  out : List(Token)
+) : Ph1R =
+  if in_brackets then
+    Ph1R {
+      stack = st.stack,
+      out = out,
+      po = st.pending_opener,
+      carry = st.carrying
+    }
+  else
+    let top_deeper =
+      match ly_top(st.stack) of
+        None => true
+        Some(t) => col > t
+    let opens = st.pending_opener && new_line && top_deeper
+    let po1 = ly_e_opener(e)
+    let carry1 = ly_e_carry(e) || st.carrying && ly_not(new_line) && bopen
+    if opens || ly_first(st.prev_line) then
+      Ph1R {
+        stack = Cons(col, st.stack),
+        out = Cons(ly_vopen(lo), out),
+        po = po1,
+        carry = carry1
+      }
+    elif new_line then
+      match ly_close_loop(st.stack, col, st.last_hi, out) of
+        CloseR { stack = stack2, out = out2 } =>
+          Ph1R { stack = stack2, out = out2, po = po1, carry = carry1 }
+    else
+      Ph1R { stack = st.stack, out = out, po = po1, carry = carry1 }
+
+-- Boolean negation, spelled locally to keep call sites terse.
+fn ly_not(b : Bool) : Bool =
+  if b then
+    false
+  else
+    true
+
+-- The bracket-depth phase: a bracket open deepens the group; a bracket close
+-- shallows it and, when the outermost group closes while a carried opener is
+-- live, re-arms the pending opener so a following indented line opens a block.
+fn ly_phase2(
+  bopen : Bool,
+  bclose : Bool,
+  depth : Int,
+  po : Bool,
+  carry : Bool
+) : Ph2R =
+  if bopen then
+    Ph2R { depth = depth + 1, po = po, carry = carry }
+  elif bclose then
+    let d2 =
+      if depth > 0 then
+        depth - 1
+      else
+        0
+    if d2 == 0 && carry then
+      Ph2R { depth = d2, po = true, carry = false }
+    else
+      Ph2R { depth = d2, po = po, carry = carry }
+  else
+    Ph2R { depth = depth, po = po, carry = carry }
+
+-- One driver step over an entry: run the virtual-emission and bracket phases,
+-- emit the real token (a head opener is dropped), and advance the previous-line
+-- and previous-end bookkeeping.
+fn ly_step(text : String, e : LEntry, st : LState, out : List(Token)) : StepR =
+  let lo = ly_e_lo(e)
+  let hi = ly_e_hi(e)
+  let col = ly_col(text, lo)
+  let cur_line = ly_prev_line(st) + ly_count_nl(text, st.prev_off, lo)
+  let new_line = ly_is_newline(st.prev_line, cur_line)
+  let in_brackets = st.bracket_depth > 0
+  let bopen = ly_e_bopen(e)
+  let bclose = ly_e_bclose(e)
+  match ly_phase1(e, st, lo, col, new_line, in_brackets, bopen, out) of
+    Ph1R { stack = stack1, out = out1, po = po1, carry = carry1 } =>
+      match ly_phase2(bopen, bclose, st.bracket_depth, po1, carry1) of
+        Ph2R { depth = depth2, po = po2, carry = carry2 } =>
+          let out3 =
+            match e of
+              LHead(_) => out1
+              LTok(t) => Cons(t, out1)
+          let ploff =
+            if hi > lo then
+              hi - 1
+            else
+              lo
+          let st2 =
+            LState {
+              stack = stack1,
+              pending_opener = po2,
+              carrying = carry2,
+              bracket_depth = depth2,
+              prev_line = Some(cur_line + ly_count_nl(text, lo, ploff)),
+              prev_off = ploff,
+              last_hi = hi
+            }
+          StepR(st2, out3)
+
+-- Close every open block at end of input, emitting a virtual close per frame.
+fn ly_drain(stack : List(Int), last_hi : Int, out : List(Token)) : List(Token) =
+  match stack of
+    Nil => reverse(out)
+    Cons(_, rest) => ly_drain(rest, last_hi, Cons(ly_vclose(last_hi), out))
+
+fn ly_run(
+  text : String,
+  entries : List(LEntry),
+  st : LState,
+  out : List(Token)
+) : List(Token) =
+  match entries of
+    Nil => ly_drain(st.stack, st.last_hi, out)
+    Cons(e, rest) =>
+      match ly_step(text, e, st, out) of
+        StepR(st2, out2) => ly_run(text, rest, st2, out2)
+
+-- Run the offside driver over the injected entries from a clean initial state.
+fn ly_layout(text : String, toks : List(Token)) : List(Token) =
+  let entries = ly_inject(text, toks)
+  let st0 =
+    LState {
+      stack = Nil,
+      pending_opener = false,
+      carrying = false,
+      bracket_depth = 0,
+      prev_line = None,
+      prev_off = 0,
+      last_hi = 0
+    }
+  ly_run(text, entries, st0, Nil)
+
+-- | Tokenize and lay out `text`, reproducing the compiler's post-layout `parse`
+-- stream: the raw tokens with the virtual block delimiters spliced in and the
+-- synthetic head openers stripped. A lexing failure is propagated unchanged.
+pub fn layout(text : String) : Result(List(Token), LexError) =
+  match lex_raw(text) of
+    Err(e) => Err(e)
+    Ok(r) => Ok(ly_layout(text, r.tokens))

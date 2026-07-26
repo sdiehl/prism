@@ -11,6 +11,7 @@ class Hash
 class Monad
 class Num
 class Ord
+class Plate
 class Pow
 class Show
 class Traversable

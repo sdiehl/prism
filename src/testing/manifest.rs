@@ -3,13 +3,13 @@
 //! A manifest is the deterministic discovery artifact: sorted by logical ID,
 //! carrying enough per-test identity to rebuild and execute a harness without
 //! rediscovering declarations. It follows the byte discipline in
-//! `crate::util::binary` (LEB128 lengths, bounded reads, a trailing-byte check),
+//! `prism_common::binary` (LEB128 lengths, bounded reads, a trailing-byte check),
 //! the same substrate the Core codec rides. Diagnostic locations are side
 //! metadata and never enter these bytes, so the manifest is byte-identical
 //! across checkout roots.
 
 use crate::store::CodecError;
-use crate::util::binary::{put_str, put_uvarint, Reader};
+use prism_common::binary::{put_str, put_uvarint, Reader};
 
 use super::discovery::TestDescriptor;
 use super::TEST_MANIFEST_SCHEMA;

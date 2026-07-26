@@ -3,9 +3,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::codegen::rt::{cc, cc_flags, write_libm_archive, write_runtime_for, RuntimeProfile};
 use crate::error::Error;
 use crate::lineage::FactOutcome;
+use prism_native::rt::{cc, cc_flags, write_libm_archive, write_runtime_for, RuntimeProfile};
 
 use super::cache::NativeArtifactCache;
 use super::{Config, NATIVE_KONT_FRAME_FLAGS};
@@ -39,7 +39,7 @@ fn cc_args(cfg: &Config) -> Vec<String> {
         NO_FP_CONTRACT_FLAG.to_string(),
         NO_OVERRIDE_MODULE_WARNING_FLAG.to_string(),
     ];
-    let macos_min = env!("PRISM_MACOSX_DEPLOYMENT_TARGET");
+    let macos_min = prism_native::rt::macos_deployment_target();
     if !macos_min.is_empty() {
         args.push(format!("-mmacosx-version-min={macos_min}"));
     }

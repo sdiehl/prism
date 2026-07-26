@@ -3,18 +3,6 @@
 version = 4
 
 [[package]]
-name = "ahash"
-version = "0.8.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
-dependencies = [
- "cfg-if",
- "once_cell",
- "version_check",
- "zerocopy",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -31,12 +19,6 @@ checksum = "e5a7d05ea6aea7e9e64d25b9156ba2fee3fdd659e34e41063cd2fc7cd020d7f4"
 dependencies = [
  "cc",
 ]
-
-[[package]]
-name = "allocator-api2"
-version = "0.2.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "anes"
@@ -641,16 +623,6 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.14.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
-dependencies = [
- "ahash",
- "allocator-api2",
-]
-
-[[package]]
-name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
@@ -837,15 +809,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "884f3e747ed2dcee867cda1b0c31a048f9e20de2d916a248949319921a2e666e"
 dependencies = [
  "regex-automata",
-]
-
-[[package]]
-name = "lasso"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e14eda50a3494b3bf7b9ce51c52434a761e383d7238ce1dd5dcec2fbc13e9fb"
-dependencies = [
- "hashbrown 0.14.5",
 ]
 
 [[package]]
@@ -1151,27 +1114,27 @@ dependencies = [
 
 [[package]]
 name = "prism"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "anstyle",
  "ariadne",
  "blake3",
- "cc",
  "clap",
  "criterion",
  "glob",
  "im",
- "inkwell",
  "insta",
- "lalrpop",
- "lalrpop-util",
- "lasso",
  "libm",
  "libmimalloc-sys",
  "logos",
  "marginalia",
  "num-bigint",
- "offsides",
+ "prism-common",
+ "prism-core",
+ "prism-lineage",
+ "prism-native",
+ "prism-store",
+ "prism-syntax",
  "rstest",
  "rustix",
  "rustyline",
@@ -1184,6 +1147,85 @@ dependencies = [
  "toml",
  "wasm-bindgen",
  "wasm-bindgen-test",
+]
+
+[[package]]
+name = "prism-common"
+version = "0.15.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "prism-core"
+version = "0.15.0"
+dependencies = [
+ "blake3",
+ "im",
+ "num-bigint",
+ "prism-common",
+ "prism-syntax",
+ "serde",
+ "serde_json",
+ "serde_stacker",
+ "stacker",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
+name = "prism-lineage"
+version = "0.15.0"
+dependencies = [
+ "blake3",
+ "prism-common",
+ "prism-store",
+ "prism-syntax",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "prism-native"
+version = "0.15.0"
+dependencies = [
+ "blake3",
+ "cc",
+ "inkwell",
+ "prism-common",
+ "prism-core",
+ "prism-syntax",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "prism-store"
+version = "0.15.0"
+dependencies = [
+ "blake3",
+ "prism-common",
+ "rustix",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "prism-syntax"
+version = "0.15.0"
+dependencies = [
+ "anstyle",
+ "ariadne",
+ "lalrpop",
+ "lalrpop-util",
+ "logos",
+ "marginalia",
+ "num-bigint",
+ "offsides",
+ "prism-common",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]

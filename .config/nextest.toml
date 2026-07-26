@@ -23,6 +23,17 @@ filter = 'binary(compiler) & test(core_lint_clean_on_corpus)'
 test-group = 'corpus-compilers'
 slow-timeout = { period = "120s", terminate-after = 16 }
 
+# Nine of this binary's modules compile a program and then interpret a Prism
+# consumer over the resulting artifact, so their cost is measured in minutes and
+# swings widely with how much of the suite is competing for the machine. The
+# timeout is here to catch a genuine hang, not to bound how long honest work may
+# take, and the same allowance is already given to every other binary carrying
+# tests of this weight; performance itself is pinned by the perf gate instead.
+# It follows the narrower compiler rules above so those keep their test groups.
+[[profile.default.overrides]]
+filter = 'binary(compiler)'
+slow-timeout = { period = "120s", terminate-after = 16 }
+
 [[profile.default.overrides]]
 filter = 'binary(native_parity)'
 test-group = 'native-oracles'
@@ -71,6 +82,10 @@ slow-timeout = { period = "120s", terminate-after = 16 }
 [[profile.ci.overrides]]
 filter = 'binary(compiler) & test(core_lint_clean_on_corpus)'
 test-group = 'corpus-compilers'
+slow-timeout = { period = "120s", terminate-after = 16 }
+
+[[profile.ci.overrides]]
+filter = 'binary(compiler)'
 slow-timeout = { period = "120s", terminate-after = 16 }
 
 [[profile.ci.overrides]]

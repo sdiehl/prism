@@ -25,7 +25,7 @@ use crate::syntax::ast::{Core as CorePhase, Fip, Program};
 use crate::types::{Checked, Type};
 
 #[cfg(feature = "native")]
-use crate::codegen::{native_kont_table, NativeKontIdentityRow};
+use prism_native::{native_kont_table, NativeKontIdentityRow};
 
 use super::{elaborated, hash_meta, with_prelude, WireKind, NAMESPACE_ARTIFACT_KIND};
 #[cfg(feature = "native")]

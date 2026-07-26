@@ -1,0 +1,5 @@
+-- A keyword where a declaration must begin: the span covers the whole
+-- token, so the stem of the caret sits at its midpoint rather than its
+-- first column.
+fn main() = 1
+where = 2

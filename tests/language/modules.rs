@@ -45,6 +45,9 @@ enum RunCase {
     PubImportSelectivelyImportable,
     PubImportAllReexportsEverything,
     ReexportsChain,
+    ImportOutranksPreludeGlob,
+    SiblingsShareShortNameQualified,
+    SiblingsShareShortNameUnusedOk,
 }
 
 impl RunCase {
@@ -92,6 +95,23 @@ fn main() =
                 "import FacadeAll\nfn main() = print(FacadeAll.bump(3))"
             }
             Self::ReexportsChain => "import Facade2\nfn main() = print(Facade2.square(7))",
+            // A module may export short names the prelude also opens; the
+            // importer's own import outranks the prelude's glob, so `map` here is
+            // Walk's one-argument one, not `Data.List.map`.
+            Self::ImportOutranksPreludeGlob => {
+                "import Walk (..)\nfn main() = print(apply(fresh, 7) + children(1) + map(10))"
+            }
+            // Two sibling modules exporting the same short name coexist. Only the
+            // uses that need it have to say which module they mean.
+            Self::SiblingsShareShortNameQualified => {
+                r"import Walk (..)
+import Rename (..)
+fn main() = print(Walk.children(1) + Rename.children(1) + rename(0) + fresh(1))"
+            }
+            // The overlap alone is not an error: nothing refers to `children` bare.
+            Self::SiblingsShareShortNameUnusedOk => {
+                "import Walk (..)\nimport Rename (..)\nfn main() = print(rename(fresh(0)))"
+            }
         }
     }
 
@@ -108,6 +128,9 @@ fn main() =
             Self::SharedNamesQualified => "3\n",
             Self::RootDefinitionShadowsImport => "5\n",
             Self::ReexportsChain => "49\n",
+            Self::ImportOutranksPreludeGlob => "19\n",
+            Self::SiblingsShareShortNameQualified => "114\n",
+            Self::SiblingsShareShortNameUnusedOk => "101\n",
         }
     }
 }
@@ -131,7 +154,10 @@ fn module_programs_resolve_and_run(
         RunCase::PubImportReexportsQualified,
         RunCase::PubImportSelectivelyImportable,
         RunCase::PubImportAllReexportsEverything,
-        RunCase::ReexportsChain
+        RunCase::ReexportsChain,
+        RunCase::ImportOutranksPreludeGlob,
+        RunCase::SiblingsShareShortNameQualified,
+        RunCase::SiblingsShareShortNameUnusedOk
     )]
     case: RunCase,
 ) {
@@ -151,6 +177,7 @@ enum RejectCase {
     SelectiveImportMissingName,
     UnknownQualifier,
     UnimportedModule,
+    SiblingAmbiguityNamesOwners,
 }
 
 impl RejectCase {
@@ -176,6 +203,11 @@ fn main() = match Stack.empty() of { Stack.Empty => print(0), _ => print(1) }"
             Self::SelectiveImportMissingName => "import Math (nope)\nfn main() = print(0)",
             Self::UnknownQualifier => "import Math\nfn main() = print(Nope.square(1))",
             Self::UnimportedModule => "import Missing\nfn main() = print(0)",
+            // The overlap is only an error where it is used bare, and the report
+            // names the modules offering it.
+            Self::SiblingAmbiguityNamesOwners => {
+                "import Walk (..)\nimport Rename (..)\nfn main() = print(children(1))"
+            }
         }
     }
 
@@ -191,6 +223,9 @@ fn main() = match Stack.empty() of { Stack.Empty => print(0), _ => print(1) }"
             Self::SelectiveImportMissingName => "does not export `nope`",
             Self::UnknownQualifier => "Nope",
             Self::UnimportedModule => "Missing",
+            Self::SiblingAmbiguityNamesOwners => {
+                "`children` is ambiguous: exported by Walk and Rename; qualify the reference"
+            }
         }
     }
 }
@@ -208,7 +243,8 @@ fn module_programs_reject_with_expected_surface(
         RejectCase::PlainImportDoesNotReexport,
         RejectCase::SelectiveImportMissingName,
         RejectCase::UnknownQualifier,
-        RejectCase::UnimportedModule
+        RejectCase::UnimportedModule,
+        RejectCase::SiblingAmbiguityNamesOwners
     )]
     case: RejectCase,
 ) {
@@ -252,6 +288,31 @@ fn overlap_across_modules_is_coherence_error() {
         e.contains("instances for") && e.contains("canonical"),
         "{e}"
     );
+}
+
+#[test]
+fn user_definition_shadows_the_prelude_instead_of_replacing_it() {
+    // The prelude's `even` is `mod(n, 2) == 0`. A user `mod` used to be the same
+    // symbol as the prelude's and captured that call, so `even(4)` answered
+    // `false`. The user's definition now shadows rather than replaces: the
+    // prelude keeps calling its own.
+    assert_eq!(
+        out("fn mod(a, b) = 999\nfn main() = print(even(4))"),
+        "true\n"
+    );
+}
+
+#[test]
+fn a_shadowing_definition_still_wins_at_the_users_own_use_sites() {
+    assert_eq!(
+        out("fn mod(a, b) = 999\nfn main() = print(mod(7, 2))"),
+        "999\n"
+    );
+}
+
+#[test]
+fn an_unshadowed_prelude_name_is_reachable_unqualified() {
+    assert_eq!(out("fn main() = print(mod(7, 2))"), "1\n");
 }
 
 #[test]

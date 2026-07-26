@@ -197,7 +197,7 @@ enum Cmd {
     /// Print one pipeline phase artifact
     ///
     /// PHASE is one of: tokens, syntax-tokens, surface-syntax, ast, types, typespans, hir,
-    /// interface, module-graph, core, core-json, core-hash, tc-input, tc-facts,
+    /// interface, module-graph, core, core-json, core-identity, core-hash, tc-input, tc-facts,
     /// elab-input, native-kont-table, native-kont-state-map, shape, dupes,
     /// namespace, stdlib-hash, fbip, lowered, tier, captures, usage-summary,
     /// usage-summary-md, usage-summary-json, llvm, mlir, verify, smt, totality.

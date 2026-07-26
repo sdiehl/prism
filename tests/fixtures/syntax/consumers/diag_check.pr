@@ -1,0 +1,69 @@
+-- The differential gate for the Prism-side lexer's refusal behavior. arg(0) is a
+-- `prism-syntax-diagnostics-v1` artifact whose source has exactly one lexical
+-- fault. The artifact embeds both the exact source text and the compiler's own
+-- diagnostic: the stable append-only code, the caret byte offset, and the
+-- rendered message. This harness decodes it, re-lexes the embedded text with
+-- `Syntax.Lex.lex_raw`, and reports whether the Prism lexer refuses at the same
+-- code, offset, and message. It also cross-checks `lex_incomplete`: the compiler
+-- classifies exactly the unterminated-string and unterminated-hole faults as
+-- incomplete (keep reading), so the Prism verdict must agree. The Rust lexer
+-- stays authoritative: the Prism result is compared and reported, never
+-- substituted.
+import Syntax.Source (..)
+
+import Syntax.Diagnostic (..)
+
+import Syntax.Codec (..)
+
+import Syntax.Lex (..)
+
+-- The compiler classifies a fault as incomplete (an interactive reader should
+-- keep reading) exactly when a string literal or interpolation hole ran off the
+-- end: codes E7002 and E7003.
+fn expect_incomplete(code : String) : Bool = code == "E7002" || code == "E7003"
+
+fn yn(b : Bool) : String =
+  if b then
+    "true"
+  else
+    "false"
+
+-- Compare the Prism lexer's refusal against the artifact's single diagnostic,
+-- returning "ok ..." or the first field that diverged.
+fn agree(le : LexError, d : Diagnostic, text : String) : String =
+  if lex_code(le) /= d.code then
+    "mismatch code got={lex_code(le)} want={d.code}"
+  elif lex_offset(le) /= d.span.lo then
+    "mismatch offset got={show_int(lex_offset(le))} want={show_int(d.span.lo)}"
+  elif d.span.lo /= d.span.hi then
+    "mismatch caret span=[{show_int(d.span.lo)}, {show_int(d.span.hi)}]"
+  elif lex_message(le) /= d.message then
+    "mismatch message got=[{lex_message(le)}] want=[{d.message}]"
+  elif yn(lex_incomplete(text)) /= yn(expect_incomplete(d.code)) then
+    "mismatch incomplete got={yn(lex_incomplete(text))} want={yn(expect_incomplete(d.code))}"
+  else
+    "ok {d.code} off={show_int(d.span.lo)} inc={yn(lex_incomplete(text))}"
+
+-- Match the artifact's single lex diagnostic against the Prism lexer's refusal
+-- of the same source.
+fn check_one(d : Diagnostic, text : String) : String =
+  match d.phase of
+    DPParse => "mismatch phase: a parse fault, not a lex fault"
+    DPLex =>
+      match lex_raw(text) of
+        Ok(_) => "mismatch: prism lexer accepted a source the compiler refused"
+        Err(le) => agree(le, d, text)
+
+fn report(doc : DiagnosticsDoc) : String =
+  match doc.diagnostics of
+    Nil => "mismatch: artifact carries no diagnostic"
+    Cons(d, rest) =>
+      match rest of
+        Cons(_, _) => "mismatch: artifact carries more than one diagnostic"
+        Nil => check_one(d, doc.source.text)
+
+fn main() =
+  let text = read_file(arg(0))
+  match decode_diagnostics(text) of
+    Err(e) => println("decode error: {codec_error_message(e)}")
+    Ok(doc) => println(report(doc))

@@ -4,23 +4,27 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use marginalia::Span;
 
+use super::synonyms::subst_ty;
 use super::{call, eint, evar, lam1, sp, spat};
 use crate::core::builtins::Builtin;
 use crate::core::contract_digest;
 use crate::error::{ErrKind, TypeError};
 use crate::fmt::decl::fmt_ty;
 use crate::names::{
-    self, ARBITRARY_METHOD, DECODE_METHOD, ENCODE_METHOD, EQ_METHOD, FAIL_OP, HASH_METHOD, INT_CMP,
-    ORD_METHOD, QC_ARB_GEN, QC_GEN_BIND, QC_GEN_CHOOSE, QC_GEN_CONST, QC_GEN_RESIZE, QC_GEN_RUN,
-    SHAPE_DIGEST_METHOD, SHOW_METHOD, WIRE_CAT, WIRE_EMPTY, WIRE_GET_TAG, WIRE_TAG,
+    self, ARBITRARY_METHOD, CHILDREN_METHOD, DECODE_METHOD, ENCODE_METHOD, EQ_METHOD, FAIL_OP,
+    FROM_JSON_METHOD, HASH_METHOD, INT_CMP, JSON_FIELD_FN, JSON_OBJ, JSON_POS_KEY, JSON_STR,
+    JSON_TAG_KEY, ORD_METHOD, QC_ARB_GEN, QC_GEN_BIND, QC_GEN_CHOOSE, QC_GEN_CONST, QC_GEN_RESIZE,
+    QC_GEN_RUN, REBUILD_METHOD, SHAPE_DIGEST_METHOD, SHOW_METHOD, TO_JSON_METHOD, WIRE_CAT,
+    WIRE_EMPTY, WIRE_GET_TAG, WIRE_TAG,
 };
 use crate::syntax::ast::{
     Arm, BigInt, BinOp, Constraint, Ctor, CtorShape, DataDecl, Decl, Expr, Fip, InstanceDecl,
     IntLit, Param, PathOp, PathStep, Pattern, Program, Suffix, Total, Ty, S,
 };
 use crate::types::{
-    ARBITRARY_CLASS, EQ_CLASS, HASH_CLASS, IDENTIFIABLE, IDENTIFIABLE_BUNDLE, LENS, ORD_CLASS,
-    SERIALIZE_CLASS, SHOW_CLASS, STABLE_CLASS,
+    ARBITRARY_CLASS, CONS, EQ_CLASS, FROM_JSON_CLASS, HASH_CLASS, IDENTIFIABLE,
+    IDENTIFIABLE_BUNDLE, LENS, LIST, NIL, NONE, OPTION, ORD_CLASS, PLATE_CLASS, SERIALIZE_CLASS,
+    SHOW_CLASS, SOME, STABLE_CLASS, TO_JSON_CLASS,
 };
 
 // `deriving (Eq, Ord, Show)` synthesizes ordinary named instances here, so the
@@ -29,6 +33,13 @@ use crate::types::{
 // `NodeId` (assigned after desugar), so a method callee no longer needs a
 // distinct span to key its dictionary.
 const Z: Span = Span::empty(0);
+
+// The binders every derived method's arm patterns use: the value being taken
+// apart, and the prefix its fields are bound under (`_f0`, `_f1`). One home, so
+// two derivations in this file cannot drift into meaning different things by the
+// same name.
+const SELF_BINDER: &str = "_x";
+const FIELD_BINDER: &str = "_f";
 
 // Expand the `deriving (Identifiable)` sugar and drop duplicate class names.
 // `Identifiable` is not a class: it stands for the identity starter pack
@@ -101,6 +112,17 @@ pub(super) fn derive_instances(
             function.name.clone(),
         )
     }));
+    // Library constructors too, not just functions: a derived JSON encoder names
+    // `JObj`/`JStr`, which are constructors of an opt-in module. In module mode
+    // `external_values` already carries them; in whole-program mode every library
+    // declaration is merged into `prog.types`, so they must be picked up here or
+    // the emitted reference stays bare and resolves to nothing.
+    value_canon.extend(
+        prog.types
+            .iter()
+            .flat_map(|d| &d.ctors)
+            .map(|c| (names::bare_name(&c.name).to_string(), c.name.clone())),
+    );
     let lib = |name: &str| {
         value_canon
             .get(name)
@@ -111,6 +133,13 @@ pub(super) fn derive_instances(
     // derive (or hand-write) a `Stable` instance. Read once so a `deriving
     // (Stable)` can check its fields structurally at the derive site.
     let stable_types = stable_type_set(prog);
+    // Every data declaration in the merged program, by canonical name. A derived
+    // `Plate` reads the whole set, not just the derived type: seeing through the
+    // carrier records an AST holds its nodes in (a match arm, a spanned wrapper)
+    // is the difference between one derived traversal and one hand-written match
+    // per carrier.
+    let decls: BTreeMap<&str, &DataDecl> =
+        prog.types.iter().map(|d| (d.name.as_str(), d)).collect();
     let mut out = Vec::new();
     let mut fns = Vec::new();
     for d in &prog.types {
@@ -136,6 +165,13 @@ pub(super) fn derive_instances(
                 SERIALIZE_CLASS => derive_serialize(d, canon, &lib),
                 STABLE_CLASS => derive_stable(d, canon, *cspan, &stable_types)?,
                 ARBITRARY_CLASS => derive_arbitrary(d, canon, &lib),
+                TO_JSON_CLASS => derive_to_json(d, canon, &lib),
+                FROM_JSON_CLASS => derive_from_json(d, canon, &lib),
+                PLATE_CLASS => {
+                    let (inst, helpers) = derive_plate(d, canon, &decls, *cspan)?;
+                    fns.extend(helpers);
+                    inst
+                }
                 other => {
                     return Err(ErrKind::NotDerivable {
                         class: other.to_string(),
@@ -205,6 +241,22 @@ fn fvars(pre: &str, n: usize, z: Span) -> Vec<S<Pattern>> {
 // requires the same class of each type argument, so a derived instance for
 // `T(a)` reads `given C(a)`. `prefix` disambiguates the instance's own name.
 fn inst_skel(d: &DataDecl, class: &str, prefix: &str, methods: Vec<Decl>, z: Span) -> InstanceDecl {
+    inst_with_ctx(d, class, prefix, methods, z, Some(class))
+}
+
+// As `inst_skel`, with the per-parameter context named separately. A derived
+// method that only ever touches values of the derived type itself (rather than
+// of its arguments) needs no context at all: `Plate(T(a))` finds `T(a)` subvalues
+// structurally and never traverses an `a`, so requiring `given Plate(a)` would
+// reject `T(Int)` for no reason.
+fn inst_with_ctx(
+    d: &DataDecl,
+    class: &str,
+    prefix: &str,
+    methods: Vec<Decl>,
+    z: Span,
+    ctx: Option<&str>,
+) -> InstanceDecl {
     InstanceDecl {
         name: format!("{prefix}{}", d.name),
         class: class.into(),
@@ -212,13 +264,14 @@ fn inst_skel(d: &DataDecl, class: &str, prefix: &str, methods: Vec<Decl>, z: Spa
             d.name.clone(),
             d.params.iter().map(|p| Ty::Var(p.clone())).collect(),
         ),
-        context: d
-            .params
-            .iter()
-            .map(|p| Constraint {
-                class: class.into(),
-                ty: Ty::Var(p.clone()),
-                span: z,
+        context: ctx
+            .into_iter()
+            .flat_map(|c| {
+                d.params.iter().map(move |p| Constraint {
+                    class: c.into(),
+                    ty: Ty::Var(p.clone()),
+                    span: z,
+                })
             })
             .collect(),
         methods,
@@ -238,6 +291,7 @@ fn mdecl(name: &str, params: &[&str], body: S<Expr>, z: Span) -> Decl {
                 name: (*p).into(),
                 ty: None,
                 borrow: false,
+                pat: None,
                 default: None,
             })
             .collect(),
@@ -279,6 +333,7 @@ fn pair_match(d: &DataDecl, z: Span, mut arm_body: impl FnMut(&str, usize) -> S<
             ),
             guard: None,
             body: arm_body(&c.name, c.args.len()),
+            alt: false,
         })
         .collect()
 }
@@ -306,15 +361,16 @@ fn derive_eq(d: &DataDecl, class: &str) -> InstanceDecl {
             pat: spat(Pattern::Wild, z),
             guard: None,
             body: sp(Expr::Bool(false), z),
+            alt: false,
         });
     }
-    let scrut = sp(Expr::Tuple(vec![evar("_x", z), evar("_y", z)]), z);
+    let scrut = sp(Expr::Tuple(vec![evar(SELF_BINDER, z), evar("_y", z)]), z);
     let body = sp(Expr::Match(Box::new(scrut), arms), z);
     inst_skel(
         d,
         class,
         "eq",
-        vec![mdecl(EQ_METHOD, &["_x", "_y"], body, z)],
+        vec![mdecl(EQ_METHOD, &[SELF_BINDER, "_y"], body, z)],
         z,
     )
 }
@@ -350,11 +406,13 @@ fn derive_ord(d: &DataDecl, class: &str) -> InstanceDecl {
                                 ),
                                 guard: None,
                                 body,
+                                alt: false,
                             },
                             Arm {
                                 pat: spat(Pattern::Var("_c".into()), z),
                                 guard: None,
                                 body: evar("_c", z),
+                                alt: false,
                             },
                         ],
                     ),
@@ -379,6 +437,7 @@ fn derive_ord(d: &DataDecl, class: &str) -> InstanceDecl {
                 ),
                 guard: None,
                 body: eint(i, z),
+                alt: false,
             })
             .collect();
         sp(Expr::Match(Box::new(evar(v, z)), tarms), z)
@@ -387,16 +446,17 @@ fn derive_ord(d: &DataDecl, class: &str) -> InstanceDecl {
         arms.push(Arm {
             pat: spat(Pattern::Wild, z),
             guard: None,
-            body: call(evar(INT_CMP, z), vec![tag("_x"), tag("_y")], z),
+            body: call(evar(INT_CMP, z), vec![tag(SELF_BINDER), tag("_y")], z),
+            alt: false,
         });
     }
-    let scrut = sp(Expr::Tuple(vec![evar("_x", z), evar("_y", z)]), z);
+    let scrut = sp(Expr::Tuple(vec![evar(SELF_BINDER, z), evar("_y", z)]), z);
     let body = sp(Expr::Match(Box::new(scrut), arms), z);
     inst_skel(
         d,
         class,
         "ord",
-        vec![mdecl(ORD_METHOD, &["_x", "_y"], body, z)],
+        vec![mdecl(ORD_METHOD, &[SELF_BINDER, "_y"], body, z)],
         z,
     )
 }
@@ -410,7 +470,13 @@ fn derive_ord(d: &DataDecl, class: &str) -> InstanceDecl {
 fn derive_show(d: &DataDecl, class: &str) -> InstanceDecl {
     let z = Z;
     let concat = |a: S<Expr>, b: S<Expr>| call(evar(Builtin::Concat.name(), z), vec![a, b], z);
-    let shown = |i: usize| call(evar(SHOW_METHOD, Z), vec![evar(&format!("_f{i}"), z)], z);
+    let shown = |i: usize| {
+        call(
+            evar(SHOW_METHOD, Z),
+            vec![evar(&format!("{FIELD_BINDER}{i}"), z)],
+            z,
+        )
+    };
     let arms = d
         .ctors
         .iter()
@@ -445,18 +511,19 @@ fn derive_show(d: &DataDecl, class: &str) -> InstanceDecl {
                 }
             };
             Arm {
-                pat: spat(Pattern::Ctor(c.name.clone(), fvars("_f", n, z)), z),
+                pat: spat(Pattern::Ctor(c.name.clone(), fvars(FIELD_BINDER, n, z)), z),
                 guard: None,
                 body,
+                alt: false,
             }
         })
         .collect();
-    let body = sp(Expr::Match(Box::new(evar("_x", z)), arms), z);
+    let body = sp(Expr::Match(Box::new(evar(SELF_BINDER, z)), arms), z);
     inst_skel(
         d,
         class,
         "show",
-        vec![mdecl(SHOW_METHOD, &["_x"], body, z)],
+        vec![mdecl(SHOW_METHOD, &[SELF_BINDER], body, z)],
         z,
     )
 }
@@ -478,7 +545,13 @@ fn ctor_token(name: &str, tag: usize) -> String {
 fn derive_hash(d: &DataDecl, class: &str) -> InstanceDecl {
     let z = Z;
     let cat = |a: S<Expr>, b: S<Expr>| call(evar(Builtin::Concat.name(), z), vec![a, b], z);
-    let hashed = |i: usize| call(evar(HASH_METHOD, z), vec![evar(&format!("_f{i}"), z)], z);
+    let hashed = |i: usize| {
+        call(
+            evar(HASH_METHOD, z),
+            vec![evar(&format!("{FIELD_BINDER}{i}"), z)],
+            z,
+        )
+    };
     let arms = d
         .ctors
         .iter()
@@ -496,18 +569,19 @@ fn derive_hash(d: &DataDecl, class: &str) -> InstanceDecl {
                 cat(token, rest)
             };
             Arm {
-                pat: spat(Pattern::Ctor(c.name.clone(), fvars("_f", n, z)), z),
+                pat: spat(Pattern::Ctor(c.name.clone(), fvars(FIELD_BINDER, n, z)), z),
                 guard: None,
                 body: call(evar(Builtin::Blake3.name(), z), vec![enc], z),
+                alt: false,
             }
         })
         .collect();
-    let body = sp(Expr::Match(Box::new(evar("_x", z)), arms), z);
+    let body = sp(Expr::Match(Box::new(evar(SELF_BINDER, z)), arms), z);
     inst_skel(
         d,
         class,
         "hash",
-        vec![mdecl(HASH_METHOD, &["_x"], body, z)],
+        vec![mdecl(HASH_METHOD, &[SELF_BINDER], body, z)],
         z,
     )
 }
@@ -519,7 +593,11 @@ fn derive_hash(d: &DataDecl, class: &str) -> InstanceDecl {
 fn encode_fields(n: usize, lib: &impl Fn(&str) -> String, z: Span) -> S<Expr> {
     let mut acc = evar(&lib(WIRE_EMPTY), z);
     for i in (0..n).rev() {
-        let enc = call(evar(ENCODE_METHOD, z), vec![evar(&format!("_f{i}"), z)], z);
+        let enc = call(
+            evar(ENCODE_METHOD, z),
+            vec![evar(&format!("{FIELD_BINDER}{i}"), z)],
+            z,
+        );
         acc = call(evar(&lib(WIRE_CAT), z), vec![enc, acc], z);
     }
     acc
@@ -558,6 +636,7 @@ fn decode_read(c: &Ctor, i: usize, cur: &str, z: Span) -> S<Expr> {
         ),
         guard: None,
         body: decode_read(c, i + 1, &next, z),
+        alt: false,
     };
     sp(Expr::Match(Box::new(dec), vec![arm]), z)
 }
@@ -583,16 +662,17 @@ fn derive_serialize(d: &DataDecl, class: &str, lib: &impl Fn(&str) -> String) ->
             };
             Arm {
                 pat: spat(
-                    Pattern::Ctor(c.name.clone(), fvars("_f", c.args.len(), z)),
+                    Pattern::Ctor(c.name.clone(), fvars(FIELD_BINDER, c.args.len(), z)),
                     z,
                 ),
                 guard: None,
                 body,
+                alt: false,
             }
         })
         .collect();
-    let enc_body = sp(Expr::Match(Box::new(evar("_x", z)), enc_arms), z);
-    let encode = mdecl(ENCODE_METHOD, &["_x"], enc_body, z);
+    let enc_body = sp(Expr::Match(Box::new(evar(SELF_BINDER, z)), enc_arms), z);
+    let encode = mdecl(ENCODE_METHOD, &[SELF_BINDER], enc_body, z);
 
     let dec_body = if multi {
         let mut tag_arms: Vec<Arm> = d
@@ -609,12 +689,14 @@ fn derive_serialize(d: &DataDecl, class: &str, lib: &impl Fn(&str) -> String) ->
                 ),
                 guard: None,
                 body: decode_read(c, 0, "_r0", z),
+                alt: false,
             })
             .collect();
         tag_arms.push(Arm {
             pat: spat(Pattern::Wild, z),
             guard: None,
             body: call(evar(FAIL_OP, z), vec![], z),
+            alt: false,
         });
         let inner = sp(Expr::Match(Box::new(evar("_t", z)), tag_arms), z);
         let outer = Arm {
@@ -627,6 +709,7 @@ fn derive_serialize(d: &DataDecl, class: &str, lib: &impl Fn(&str) -> String) ->
             ),
             guard: None,
             body: inner,
+            alt: false,
         };
         let gettag = call(evar(&lib(WIRE_GET_TAG), z), vec![evar("_bs", z)], z);
         sp(Expr::Match(Box::new(gettag), vec![outer]), z)
@@ -639,6 +722,225 @@ fn derive_serialize(d: &DataDecl, class: &str, lib: &impl Fn(&str) -> String) ->
     };
     let decode = mdecl(DECODE_METHOD, &["_bs"], dec_body, z);
     inst_skel(d, class, "serialize", vec![encode, decode], z)
+}
+
+// `deriving (ToJson, FromJson)` maps a declaration onto the dynamic JSON tree,
+// for a type whose schema is the declaration itself. It is not the wire codec: a
+// `Serialize` byte format is frozen and versioned, while a JSON document is read
+// by something that was not compiled against this program, so the encoding is
+// self-describing rather than compact.
+//
+// One constructor becomes one object. A record constructor's keys are its
+// declared field names; a positional one's are its argument positions (`_0`,
+// `_1`), which is the only name the declaration offers. A sum additionally
+// carries its constructor's bare name under `$`, a key no field name can spell,
+// so a document names the variant it holds rather than an index that quietly
+// changes meaning when a constructor is inserted. A single-constructor type has
+// nothing to discriminate and carries no tag.
+//
+// Order is the declaration's throughout, so one value has one tree; the canonical
+// encoder sorts keys on the way out, so it also has one string.
+
+// Binders of a derived JSON conversion: the tree being read, an object's
+// members, and a decoded tag. The value being encoded uses `SELF_BINDER`, as
+// every other derivation's arms do.
+const JSON_TREE: &str = "_j";
+const JSON_MEMBERS: &str = "_kvs";
+const JSON_TAG: &str = "_tag";
+
+// The key one constructor argument is carried under: its declared field name, or
+// its position when the constructor is positional.
+fn json_key(c: &Ctor, i: usize) -> String {
+    match c.shape() {
+        CtorShape::Record(fs) => fs[i].0.clone(),
+        CtorShape::Positional(_) => format!("{JSON_POS_KEY}{i}"),
+    }
+}
+
+// `("key", value)`, one member of a JSON object.
+fn json_member(key: &str, value: S<Expr>, z: Span) -> S<Expr> {
+    sp(Expr::Tuple(vec![sp(Expr::Str(key.into()), z), value]), z)
+}
+
+// A list literal, built from the prelude constructors as the other derivations do.
+fn json_list(items: Vec<S<Expr>>, z: Span) -> S<Expr> {
+    items.into_iter().rev().fold(evar(NIL, z), |tail, item| {
+        call(evar(CONS, z), vec![item, tail], z)
+    })
+}
+
+// `to_json`: one constructor to one object, tagged only when there is a choice.
+fn derive_to_json(d: &DataDecl, class: &str, lib: &impl Fn(&str) -> String) -> InstanceDecl {
+    let z = Z;
+    let tagged = d.ctors.len() > 1;
+    let arms = d
+        .ctors
+        .iter()
+        .map(|c| {
+            let tag = tagged.then(|| {
+                json_member(
+                    JSON_TAG_KEY,
+                    call(
+                        evar(&lib(JSON_STR), z),
+                        vec![sp(Expr::Str(names::bare_name(&c.name).into()), z)],
+                        z,
+                    ),
+                    z,
+                )
+            });
+            let fields = (0..c.args.len()).map(|i| {
+                json_member(
+                    &json_key(c, i),
+                    call(
+                        evar(TO_JSON_METHOD, z),
+                        vec![evar(&format!("{FIELD_BINDER}{i}"), z)],
+                        z,
+                    ),
+                    z,
+                )
+            });
+            Arm {
+                pat: spat(
+                    Pattern::Ctor(c.name.clone(), fvars(FIELD_BINDER, c.args.len(), z)),
+                    z,
+                ),
+                guard: None,
+                body: call(
+                    evar(&lib(JSON_OBJ), z),
+                    vec![json_list(tag.into_iter().chain(fields).collect(), z)],
+                    z,
+                ),
+                alt: false,
+            }
+        })
+        .collect();
+    let body = sp(Expr::Match(Box::new(evar(SELF_BINDER, z)), arms), z);
+    inst_skel(
+        d,
+        class,
+        "toJson",
+        vec![mdecl(TO_JSON_METHOD, &[SELF_BINDER], body, z)],
+        z,
+    )
+}
+
+// One constructor rebuilt from the members bound to `_kvs`: each argument is the
+// decoding of its own key's member, so a missing key, a key of the wrong shape,
+// and a nested field that will not decode all leave through the same `Fail`.
+fn json_read(c: &Ctor, lib: &impl Fn(&str) -> String, z: Span) -> S<Expr> {
+    let args = (0..c.args.len())
+        .map(|i| {
+            let member = call(
+                evar(&lib(JSON_FIELD_FN), z),
+                vec![evar(JSON_MEMBERS, z), sp(Expr::Str(json_key(c, i)), z)],
+                z,
+            );
+            call(evar(FROM_JSON_METHOD, z), vec![member], z)
+        })
+        .collect::<Vec<_>>();
+    if args.is_empty() {
+        evar(&c.name, z)
+    } else {
+        call(evar(&c.name, z), args, z)
+    }
+}
+
+// `from_json`: an object, read by the same keys the encoder wrote. A sum reads
+// its tag first and compares it against each constructor's name in declaration
+// order; anything that is not an object, carries no tag, or names a constructor
+// this type does not have is one `Fail`.
+fn derive_from_json(d: &DataDecl, class: &str, lib: &impl Fn(&str) -> String) -> InstanceDecl {
+    let z = Z;
+    let failed = || call(evar(FAIL_OP, z), vec![], z);
+    let obj = if d.ctors.len() > 1 {
+        let dispatch = d.ctors.iter().rev().fold(failed(), |otherwise, c| {
+            let hit = sp(
+                Expr::Bin(
+                    BinOp::Eq,
+                    Box::new(evar(JSON_TAG, z)),
+                    Box::new(sp(Expr::Str(names::bare_name(&c.name).into()), z)),
+                ),
+                z,
+            );
+            sp(
+                Expr::If(
+                    Box::new(hit),
+                    Box::new(json_read(c, lib, z)),
+                    Box::new(otherwise),
+                ),
+                z,
+            )
+        });
+        let read_tag = call(
+            evar(&lib(JSON_FIELD_FN), z),
+            vec![evar(JSON_MEMBERS, z), sp(Expr::Str(JSON_TAG_KEY.into()), z)],
+            z,
+        );
+        sp(
+            Expr::Match(
+                Box::new(read_tag),
+                vec![
+                    Arm {
+                        pat: spat(
+                            Pattern::Ctor(
+                                lib(JSON_STR),
+                                vec![spat(Pattern::Var(JSON_TAG.into()), z)],
+                            ),
+                            z,
+                        ),
+                        guard: None,
+                        body: dispatch,
+                        alt: false,
+                    },
+                    Arm {
+                        pat: spat(Pattern::Wild, z),
+                        guard: None,
+                        body: failed(),
+                        alt: false,
+                    },
+                ],
+            ),
+            z,
+        )
+    } else if let Some(c0) = d.ctors.first() {
+        json_read(c0, lib, z)
+    } else {
+        // An uninhabited type has no value to decode, so no document names one.
+        failed()
+    };
+    let body = sp(
+        Expr::Match(
+            Box::new(evar(JSON_TREE, z)),
+            vec![
+                Arm {
+                    pat: spat(
+                        Pattern::Ctor(
+                            lib(JSON_OBJ),
+                            vec![spat(Pattern::Var(JSON_MEMBERS.into()), z)],
+                        ),
+                        z,
+                    ),
+                    guard: None,
+                    body: obj,
+                    alt: false,
+                },
+                Arm {
+                    pat: spat(Pattern::Wild, z),
+                    guard: None,
+                    body: failed(),
+                    alt: false,
+                },
+            ],
+        ),
+        z,
+    );
+    inst_skel(
+        d,
+        class,
+        "fromJson",
+        vec![mdecl(FROM_JSON_METHOD, &[JSON_TREE], body, z)],
+        z,
+    )
 }
 
 // The set of types whose format is provably frozen-serializable: those that
@@ -707,15 +1009,9 @@ fn derive_stable(
     for c in &d.ctors {
         for (i, arg) in c.args.iter().enumerate() {
             if !is_stable(arg, set) {
-                let field = match c.shape() {
-                    CtorShape::Record(fs) => format!("field `{}`", fs[i].0),
-                    CtorShape::Positional(_) => {
-                        format!("argument {} of `{}`", i + 1, names::bare_name(&c.name))
-                    }
-                };
                 return Err(ErrKind::StableFieldNotStable {
                     ty: names::bare_name(&d.name).to_string(),
-                    field,
+                    field: field_label(c, i),
                     field_ty: fmt_ty(arg),
                 }
                 .at(cspan));
@@ -725,8 +1021,19 @@ fn derive_stable(
     // The method ignores its argument (the digest is a compile-time constant of the
     // type); the argument exists only so dispatch resolves the instance by value.
     let digest = sp(Expr::Str(contract_digest(d)), Z);
-    let method = mdecl(SHAPE_DIGEST_METHOD, &["_x"], digest, Z);
+    let method = mdecl(SHAPE_DIGEST_METHOD, &[SELF_BINDER], digest, Z);
     Ok(inst_skel(d, class, "stable", vec![method], Z))
+}
+
+// How a diagnostic names one constructor argument: by field name on a record
+// constructor, by position on a positional one.
+fn field_label(c: &Ctor, i: usize) -> String {
+    match c.shape() {
+        CtorShape::Record(fs) => format!("field `{}`", fs[i].0),
+        CtorShape::Positional(_) => {
+            format!("argument {} of `{}`", i + 1, names::bare_name(&c.name))
+        }
+    }
 }
 
 // Whether a type expression mentions the type being derived, so a recursive
@@ -838,4 +1145,629 @@ fn derive_arbitrary(d: &DataDecl, class: &str, lib: &impl Fn(&str) -> String) ->
         vec![mdecl(ARBITRARY_METHOD, &["size"], body, z)],
         z,
     )
+}
+
+// `deriving (Plate)` writes, once, the match that every hand-written "children of
+// this node" traversal writes by hand: `children(x)` is the list of `x`'s
+// immediate subvalues *of the derived type itself*, in constructor-declaration
+// order and then field order. That order is a function of the declaration alone,
+// so the derived Core is the same every run, and every whole-tree traversal
+// (universe, fold, count, rewrite) is written once against `children` rather than
+// once per constructor.
+//
+// Whether a field contributes is decided structurally, and it cannot be decided
+// from the field type alone: `List(Arm)` never names the derived type, yet an
+// `Arm` may hold one. So the derivation takes every field apart as far as it can
+// (the derived type itself is a child; a list, optional, or tuple yields its
+// components; a data type declared in this program yields its own fields), then
+// takes the least fixpoint of "holds a child" over the resulting graph. That is
+// what lets the traversal see through the carrier records an AST holds its nodes
+// in (a match arm, a spanned wrapper, a qualifier) without anyone writing a
+// second match for them. Each distinct shape becomes one accumulator-threading
+// helper, shared by every field that walks it, so the emitted code is linear in
+// the shapes rather than in the fields.
+//
+// Anything the derivation cannot look inside is rejected rather than silently
+// skipped: a traversal that quietly drops a subterm is a wrong answer, not a
+// smaller one. That covers function types, containers with no declaration in this
+// program, and a recursive occurrence at different type arguments (whose children
+// would not have the type the instance head promises). "Could it have held a
+// child" is asked of the whole reachable set, not of the printed type, so an
+// opaque container is rejected when it is applied to anything that leads back to
+// the derived type, not only when it spells that type out.
+//
+// `rebuild` is the same walk read backwards, and the two are derived from one
+// shape graph so they cannot drift: every position `children` yields is a
+// position `rebuild` fills, in the same order. Each shape gets a second helper
+// taking the replacements it needs off the front of the list and handing back
+// what is left, exactly as the wire codec's decoder threads its remaining bytes,
+// so a replacement list of the wrong length is a `Fail` at the end rather than a
+// silently padded or truncated value.
+
+// The number of distinct field shapes one derivation may walk into. Only a
+// non-regular recursion (a `T(a)` reached through `C(T(List(a)))`) can expand
+// without bound; the cap turns that into a diagnostic instead of a hang.
+const PLATE_MAX_SHAPES: usize = 512;
+// Binders of a derived traversal: the children accumulated so far, and a list
+// tail.
+const PLATE_ACC: &str = "_acc";
+const PLATE_TAIL: &str = "_t";
+// Binders of a derived rebuild: the replacements not yet consumed, a component
+// put back from them, and the finished value.
+const PLATE_REST: &str = "_r";
+const PLATE_HOLE: &str = "_g";
+const PLATE_OUT: &str = "_y";
+
+// What one component of a walked shape contributes to the children list.
+#[derive(Clone, Copy)]
+enum Comp {
+    // The component is a child of the derived type.
+    Node,
+    // The component is another walked shape, by index.
+    Shape(usize),
+}
+
+// How a walked shape is taken apart, which fixes the pattern its helper matches.
+enum Form {
+    // `List(u)`, walked head first so children come out in element order.
+    List,
+    // `Option(u)`.
+    Opt,
+    // A tuple: one component group.
+    Tuple,
+    // A data type declared in this program, named canonically: one group per
+    // constructor, in declaration order.
+    Data(String),
+}
+
+// One type the traversal walks into. `kids` holds one group per constructor for
+// `Form::Data` and exactly one group otherwise; a `None` component contributes
+// nothing.
+struct Shape {
+    ty: Ty,
+    form: Form,
+    kids: Vec<Vec<Option<Comp>>>,
+}
+
+// The shape graph of one derivation: which types the traversal walks into, and
+// what each of them holds.
+struct Plate<'a> {
+    // Canonical name of the type being derived.
+    target: &'a str,
+    // Its own parameters as arguments: the only self-occurrence shape accepted.
+    self_args: Vec<Ty>,
+    decls: &'a BTreeMap<&'a str, &'a DataDecl>,
+    // Every declared type that can lead back to the target, target included.
+    reaching: BTreeSet<String>,
+    // Printed type to shape index, so one shape is walked by one helper.
+    index: BTreeMap<String, usize>,
+    shapes: Vec<Shape>,
+}
+
+// The declared types from which the target is reachable: the target itself, and
+// any type one of whose fields names a type already known to reach it. Purely
+// syntactic and therefore conservative, which is the direction that fails
+// closed: it is the guard on shapes the traversal cannot take apart, where the
+// question is not "does this hold a child" but "could it".
+fn reaching_set(target: &str, decls: &BTreeMap<&str, &DataDecl>) -> BTreeSet<String> {
+    let mut set = BTreeSet::from([target.to_string()]);
+    let mut grew = true;
+    while grew {
+        grew = false;
+        for (n, d) in decls {
+            let holds = d
+                .ctors
+                .iter()
+                .flat_map(|c| &c.args)
+                .any(|a| set.iter().any(|m| ty_mentions(a, m)));
+            if holds && set.insert((*n).to_string()) {
+                grew = true;
+            }
+        }
+    }
+    set
+}
+
+// The head of a type application, whether written as a saturated constructor or
+// as a higher-kinded application.
+const fn ty_head(t: &Ty) -> Option<(&str, &[Ty])> {
+    match t {
+        Ty::Con(n, args) | Ty::App(n, args) => Some((n.as_str(), args.as_slice())),
+        _ => None,
+    }
+}
+
+impl Plate<'_> {
+    // An occurrence of the derived type at its own parameters, which is what the
+    // instance head promises the children are.
+    fn is_self(&self, t: &Ty) -> bool {
+        ty_head(t).is_some_and(|(n, args)| n == self.target && args == self.self_args)
+    }
+
+    // Classify one field or component type, interning any new shape it walks
+    // into. `Err` carries the printed type that could not be traversed, which the
+    // caller reports against the field the descent started from.
+    fn intern(&mut self, t: &Ty) -> Result<Option<Comp>, String> {
+        if self.is_self(t) {
+            return Ok(Some(Comp::Node));
+        }
+        let key = fmt_ty(t);
+        if let Some(&i) = self.index.get(&key) {
+            return Ok(Some(Comp::Shape(i)));
+        }
+        // A recursive occurrence at different arguments: its children would not
+        // have the type this instance's `children` returns.
+        if ty_head(t).is_some_and(|(n, _)| n == self.target) {
+            return Err(key);
+        }
+        // A type the derivation cannot take apart contributes nothing, unless
+        // something it is applied to leads back to the derived type, in which
+        // case it may be holding a subterm the traversal would silently lose.
+        // Asking only whether it names the derived type is not enough: a `Set`
+        // the compiler has no declaration for, holding a carrier that holds a
+        // node, names neither.
+        let opaque = |key: String| {
+            if self.reaching.iter().any(|n| ty_mentions(t, n)) {
+                Err(key)
+            } else {
+                Ok(None)
+            }
+        };
+        let (form, groups) = match t {
+            Ty::Tuple(ts) => (Form::Tuple, vec![ts.clone()]),
+            _ => match ty_head(t) {
+                Some((LIST, [u])) => (Form::List, vec![vec![u.clone()]]),
+                Some((OPTION, [u])) => (Form::Opt, vec![vec![u.clone()]]),
+                Some((n, args)) => {
+                    let Some(d) = self
+                        .decls
+                        .get(n)
+                        .copied()
+                        .filter(|d| d.params.len() == args.len())
+                    else {
+                        return opaque(key);
+                    };
+                    let sub: BTreeMap<String, Ty> =
+                        d.params.iter().cloned().zip(args.iter().cloned()).collect();
+                    let groups = d
+                        .ctors
+                        .iter()
+                        .map(|c| c.args.iter().map(|a| subst_ty(a, &sub)).collect())
+                        .collect();
+                    (Form::Data(n.to_string()), groups)
+                }
+                None => return opaque(key),
+            },
+        };
+        let i = self.shapes.len();
+        if i >= PLATE_MAX_SHAPES {
+            return Err(key);
+        }
+        // Reserved before its components are classified, so a shape that contains
+        // itself (directly, or through another shape) terminates.
+        self.index.insert(key, i);
+        self.shapes.push(Shape {
+            ty: t.clone(),
+            form,
+            kids: Vec::new(),
+        });
+        let mut kids: Vec<Vec<Option<Comp>>> = Vec::with_capacity(groups.len());
+        for g in &groups {
+            let mut row = Vec::with_capacity(g.len());
+            for c in g {
+                row.push(self.intern(c)?);
+            }
+            kids.push(row);
+        }
+        self.shapes[i].kids = kids;
+        Ok(Some(Comp::Shape(i)))
+    }
+
+    // Which shapes actually hold a child, as the least fixpoint of "holds a node,
+    // or holds a shape that does". A cycle of shapes that never reaches the
+    // derived type is correctly excluded, and a shape whose only route to the
+    // derived type runs through such a cycle is correctly included; a single
+    // memoized descent would get one of those wrong depending on visit order.
+    fn reachable(&self) -> Vec<bool> {
+        let mut r = vec![false; self.shapes.len()];
+        loop {
+            let mut changed = false;
+            for (i, s) in self.shapes.iter().enumerate() {
+                if r[i] {
+                    continue;
+                }
+                let holds = s.kids.iter().flatten().any(|k| match k {
+                    Some(Comp::Node) => true,
+                    Some(Comp::Shape(j)) => r[*j],
+                    None => false,
+                });
+                if holds {
+                    r[i] = true;
+                    changed = true;
+                }
+            }
+            if !changed {
+                return r;
+            }
+        }
+    }
+
+    // One component's contribution, in front of what the rest of the value
+    // contributes. A component that holds nothing leaves the accumulator alone.
+    fn contrib(&self, k: Option<Comp>, r: &[bool], val: S<Expr>, tail: S<Expr>) -> S<Expr> {
+        match k {
+            Some(Comp::Node) => call(evar(CONS, Z), vec![val, tail], Z),
+            Some(Comp::Shape(i)) if r[i] => call(
+                evar(&names::plate_helper(self.target, i), Z),
+                vec![val, tail],
+                Z,
+            ),
+            _ => tail,
+        }
+    }
+
+    // One group of components bound to `_f0..`, folded right to left so the
+    // accumulator is threaded through exactly once and children come out in field
+    // order.
+    fn group(&self, ks: &[Option<Comp>], r: &[bool], tail: S<Expr>) -> S<Expr> {
+        let mut acc = tail;
+        for (i, k) in ks.iter().enumerate().rev() {
+            acc = self.contrib(*k, r, evar(&format!("{FIELD_BINDER}{i}"), Z), acc);
+        }
+        acc
+    }
+
+    // The arms of a match over a data type's constructors, in declaration order.
+    fn data_arms(
+        &self,
+        ctors: &[Ctor],
+        kids: &[Vec<Option<Comp>>],
+        r: &[bool],
+        tail: &S<Expr>,
+    ) -> Vec<Arm> {
+        ctors
+            .iter()
+            .zip(kids)
+            .map(|(c, ks)| Arm {
+                pat: spat(
+                    Pattern::Ctor(c.name.clone(), fvars(FIELD_BINDER, c.args.len(), Z)),
+                    Z,
+                ),
+                guard: None,
+                body: self.group(ks, r, tail.clone()),
+                alt: false,
+            })
+            .collect()
+    }
+
+    // One shape's helper: `(shape, children so far) -> children`. Accumulator
+    // passing keeps the children in order without an append, and keeps the
+    // accumulator expression from being duplicated once per nested shape.
+    fn helper(&self, i: usize, r: &[bool], list_ty: &Ty) -> Decl {
+        let s = &self.shapes[i];
+        let acc = evar(PLATE_ACC, Z);
+        let ctor_arm = |name: &str, binders: Vec<S<Pattern>>, body: S<Expr>| Arm {
+            pat: spat(Pattern::Ctor(name.into(), binders), Z),
+            guard: None,
+            body,
+            alt: false,
+        };
+        let head = || evar(&format!("{FIELD_BINDER}0"), Z);
+        let arms = match &s.form {
+            Form::List => {
+                let rest = call(
+                    evar(&names::plate_helper(self.target, i), Z),
+                    vec![evar(PLATE_TAIL, Z), acc.clone()],
+                    Z,
+                );
+                vec![
+                    ctor_arm(NIL, Vec::new(), acc),
+                    ctor_arm(
+                        CONS,
+                        vec![
+                            spat(Pattern::Var(format!("{FIELD_BINDER}0")), Z),
+                            spat(Pattern::Var(PLATE_TAIL.into()), Z),
+                        ],
+                        self.contrib(s.kids[0][0], r, head(), rest),
+                    ),
+                ]
+            }
+            Form::Opt => vec![
+                ctor_arm(NONE, Vec::new(), acc.clone()),
+                ctor_arm(
+                    SOME,
+                    fvars(FIELD_BINDER, 1, Z),
+                    self.contrib(s.kids[0][0], r, head(), acc),
+                ),
+            ],
+            Form::Tuple => vec![Arm {
+                pat: spat(Pattern::Tuple(fvars(FIELD_BINDER, s.kids[0].len(), Z)), Z),
+                guard: None,
+                body: self.group(&s.kids[0], r, acc),
+                alt: false,
+            }],
+            Form::Data(n) => {
+                let d = self.decls[n.as_str()];
+                self.data_arms(&d.ctors, &s.kids, r, &acc)
+            }
+        };
+        let body = sp(Expr::Match(Box::new(evar(SELF_BINDER, Z)), arms), Z);
+        let mut f = mdecl(
+            &names::plate_helper(self.target, i),
+            &[SELF_BINDER, PLATE_ACC],
+            body,
+            Z,
+        );
+        f.params[0].ty = Some(s.ty.clone());
+        f.params[1].ty = Some(list_ty.clone());
+        f.ret = Some(list_ty.clone());
+        f
+    }
+
+    // One group of components bound to `_f0..`, put back together left to right.
+    // A component that can hold a child takes its replacements off the front of
+    // the list, binding the component `_g{j}` it becomes and the shorter list the
+    // next position reads from; a component that holds none is carried through
+    // untouched. The result pairs the shape `make` names with whatever list is
+    // left, which is what lets the helpers compose in field order and lets the
+    // caller see that the list ran out even and only when it should have.
+    fn regroup(
+        &self,
+        ks: &[Option<Comp>],
+        r: &[bool],
+        make: impl Fn(&[S<Expr>]) -> S<Expr>,
+    ) -> S<Expr> {
+        let mut outs: Vec<S<Expr>> = Vec::with_capacity(ks.len());
+        // The consuming positions, each with the list index it reads from.
+        let mut steps: Vec<(usize, Comp, usize)> = Vec::new();
+        for (j, k) in ks.iter().enumerate() {
+            let takes = match *k {
+                Some(Comp::Node) => Some(Comp::Node),
+                Some(Comp::Shape(i)) if r[i] => Some(Comp::Shape(i)),
+                _ => None,
+            };
+            if let Some(c) = takes {
+                outs.push(evar(&format!("{PLATE_HOLE}{j}"), Z));
+                steps.push((j, c, steps.len()));
+            } else {
+                outs.push(evar(&format!("{FIELD_BINDER}{j}"), Z));
+            }
+        }
+        let mut body = sp(Expr::Tuple(vec![make(&outs), rest_var(steps.len())]), Z);
+        for (j, c, at) in steps.into_iter().rev() {
+            let pair = vec![
+                spat(Pattern::Var(format!("{PLATE_HOLE}{j}")), Z),
+                spat(Pattern::Var(rest_name(at + 1)), Z),
+            ];
+            body = match c {
+                // A child position: the next replacement comes off the front of
+                // the list, and a list too short for this value's shape is one
+                // ordinary `Fail`, never a half-filled value and never a panic.
+                Comp::Node => sp(
+                    Expr::Match(
+                        Box::new(rest_var(at)),
+                        vec![
+                            Arm {
+                                pat: spat(Pattern::Ctor(CONS.into(), pair), Z),
+                                guard: None,
+                                body,
+                                alt: false,
+                            },
+                            Arm {
+                                pat: spat(Pattern::Wild, Z),
+                                guard: None,
+                                body: call(evar(FAIL_OP, Z), vec![], Z),
+                                alt: false,
+                            },
+                        ],
+                    ),
+                    Z,
+                ),
+                Comp::Shape(i) => {
+                    let go = call(
+                        evar(&names::plate_rebuilder(self.target, i), Z),
+                        vec![evar(&format!("{FIELD_BINDER}{j}"), Z), rest_var(at)],
+                        Z,
+                    );
+                    let arm = Arm {
+                        pat: spat(Pattern::Tuple(pair), Z),
+                        guard: None,
+                        body,
+                        alt: false,
+                    };
+                    sp(Expr::Match(Box::new(go), vec![arm]), Z)
+                }
+            };
+        }
+        body
+    }
+
+    // The arms of a rebuild over a data type's constructors: the same shapes
+    // `data_arms` took apart, in the same declaration order, put back positionally.
+    fn rebuild_arms(&self, ctors: &[Ctor], kids: &[Vec<Option<Comp>>], r: &[bool]) -> Vec<Arm> {
+        ctors
+            .iter()
+            .zip(kids)
+            .map(|(c, ks)| Arm {
+                pat: spat(
+                    Pattern::Ctor(c.name.clone(), fvars(FIELD_BINDER, c.args.len(), Z)),
+                    Z,
+                ),
+                guard: None,
+                body: self.regroup(ks, r, |outs| apply(&c.name, outs)),
+                alt: false,
+            })
+            .collect()
+    }
+
+    // One shape's rebuilder: `(shape, replacements) -> (shape, replacements left
+    // over)`. Threading the leftovers is what keeps the two directions in step,
+    // since each rebuilder consumes exactly what the matching traversal helper
+    // produced, in the same order.
+    fn rebuilder(&self, i: usize, r: &[bool], list_ty: &Ty) -> Decl {
+        let s = &self.shapes[i];
+        let empty = |name: &'static str| Arm {
+            pat: spat(Pattern::Ctor(name.into(), Vec::new()), Z),
+            guard: None,
+            body: self.regroup(&[], r, |_| evar(name, Z)),
+            alt: false,
+        };
+        let arms = match &s.form {
+            Form::List => vec![
+                empty(NIL),
+                Arm {
+                    pat: spat(Pattern::Ctor(CONS.into(), fvars(FIELD_BINDER, 2, Z)), Z),
+                    guard: None,
+                    // The tail is the same shape, so this helper rebuilds the
+                    // rest of the list itself, head first as the traversal read it.
+                    body: self
+                        .regroup(&[s.kids[0][0], Some(Comp::Shape(i))], r, |o| apply(CONS, o)),
+                    alt: false,
+                },
+            ],
+            Form::Opt => vec![
+                empty(NONE),
+                Arm {
+                    pat: spat(Pattern::Ctor(SOME.into(), fvars(FIELD_BINDER, 1, Z)), Z),
+                    guard: None,
+                    body: self.regroup(&s.kids[0], r, |o| apply(SOME, o)),
+                    alt: false,
+                },
+            ],
+            Form::Tuple => vec![Arm {
+                pat: spat(Pattern::Tuple(fvars(FIELD_BINDER, s.kids[0].len(), Z)), Z),
+                guard: None,
+                body: self.regroup(&s.kids[0], r, |o| sp(Expr::Tuple(o.to_vec()), Z)),
+                alt: false,
+            }],
+            Form::Data(n) => {
+                let d = self.decls[n.as_str()];
+                self.rebuild_arms(&d.ctors, &s.kids, r)
+            }
+        };
+        let body = sp(Expr::Match(Box::new(evar(SELF_BINDER, Z)), arms), Z);
+        let rest0 = rest_name(0);
+        let mut f = mdecl(
+            &names::plate_rebuilder(self.target, i),
+            &[SELF_BINDER, &rest0],
+            body,
+            Z,
+        );
+        f.params[0].ty = Some(s.ty.clone());
+        f.params[1].ty = Some(list_ty.clone());
+        f.ret = Some(Ty::Tuple(vec![s.ty.clone(), list_ty.clone()]));
+        f
+    }
+}
+
+// The replacements a rebuild has not consumed yet, at one point in a group:
+// index 0 is the argument, and each consuming position names the next.
+fn rest_name(i: usize) -> String {
+    format!("{PLATE_REST}{i}")
+}
+
+fn rest_var(i: usize) -> S<Expr> {
+    evar(&rest_name(i), Z)
+}
+
+// Apply a constructor to already-rebuilt components.
+fn apply(name: &str, args: &[S<Expr>]) -> S<Expr> {
+    let head = evar(name, Z);
+    if args.is_empty() {
+        head
+    } else {
+        call(head, args.to_vec(), Z)
+    }
+}
+
+// The `Plate` instance for one type, plus the traversal helpers its method calls.
+fn derive_plate<'a>(
+    d: &'a DataDecl,
+    class: &str,
+    decls: &'a BTreeMap<&'a str, &'a DataDecl>,
+    cspan: Span,
+) -> Result<(InstanceDecl, Vec<Decl>), TypeError> {
+    let self_args: Vec<Ty> = d.params.iter().cloned().map(Ty::Var).collect();
+    let mut plate = Plate {
+        target: &d.name,
+        self_args,
+        decls,
+        reaching: reaching_set(&d.name, decls),
+        index: BTreeMap::new(),
+        shapes: Vec::new(),
+    };
+    let mut kids: Vec<Vec<Option<Comp>>> = Vec::with_capacity(d.ctors.len());
+    for c in &d.ctors {
+        let mut row = Vec::with_capacity(c.args.len());
+        for (i, a) in c.args.iter().enumerate() {
+            row.push(plate.intern(a).map_err(|reached| {
+                ErrKind::PlateNotTraversable {
+                    ty: names::bare_name(&d.name).to_string(),
+                    field: field_label(c, i),
+                    reached,
+                }
+                .at(cspan)
+            })?);
+        }
+        kids.push(row);
+    }
+    let r = plate.reachable();
+    let list_ty = Ty::Con(
+        LIST.into(),
+        vec![Ty::Con(d.name.clone(), plate.self_args.clone())],
+    );
+    let arms = plate.data_arms(&d.ctors, &kids, &r, &evar(NIL, Z));
+    let body = sp(Expr::Match(Box::new(evar(SELF_BINDER, Z)), arms), Z);
+    let children = mdecl(CHILDREN_METHOD, &[SELF_BINDER], body, Z);
+    // Putting the value back consumes the replacements the traversal would have
+    // produced. Anything left over means the list was not the one `children`
+    // returned, which is the caller's error and is reported as one `Fail`: padding
+    // or truncating here would put back a value that is not the one asked for.
+    let put = sp(
+        Expr::Match(
+            Box::new(evar(SELF_BINDER, Z)),
+            plate.rebuild_arms(&d.ctors, &kids, &r),
+        ),
+        Z,
+    );
+    let done = Arm {
+        pat: spat(
+            Pattern::Tuple(vec![
+                spat(Pattern::Var(PLATE_OUT.into()), Z),
+                spat(Pattern::Ctor(NIL.into(), Vec::new()), Z),
+            ]),
+            Z,
+        ),
+        guard: None,
+        body: evar(PLATE_OUT, Z),
+        alt: false,
+    };
+    let over = Arm {
+        pat: spat(Pattern::Wild, Z),
+        guard: None,
+        body: call(evar(FAIL_OP, Z), vec![], Z),
+        alt: false,
+    };
+    let rest0 = rest_name(0);
+    let rebuild = mdecl(
+        REBUILD_METHOD,
+        &[SELF_BINDER, &rest0],
+        sp(Expr::Match(Box::new(put), vec![done, over]), Z),
+        Z,
+    );
+    let helpers: Vec<Decl> = (0..plate.shapes.len())
+        .filter(|i| r[*i])
+        .flat_map(|i| {
+            [
+                plate.helper(i, &r, &list_ty),
+                plate.rebuilder(i, &r, &list_ty),
+            ]
+        })
+        .collect();
+    // No per-parameter context: the traversal finds values of the derived type
+    // structurally and never touches a type argument.
+    Ok((
+        inst_with_ctx(d, class, "plate", vec![children, rebuild], Z, None),
+        helpers,
+    ))
 }

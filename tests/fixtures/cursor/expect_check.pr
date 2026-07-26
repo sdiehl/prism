@@ -1,0 +1,112 @@
+-- The expectation-merging report. arg(0) is a corpus of one input per line;
+-- each is lexed and parsed with a deliberately alternative-shaped grammar, and
+-- every refusal prints the record `Syntax.Cursor` kept: the code, the span, the
+-- merged expectation set, and the rendered message.
+--
+-- At operand position the grammar tries a parenthesized group, then a bracketed
+-- group, then a bare atom, rewinding with `cursor_restore` between attempts.
+-- The attempts reach different depths on purpose. An alternative that consumes
+-- four tokens before failing has said something about the input that an
+-- alternative refused at the first token has not, so the refusal must be
+-- reported where the parse died, carrying only what was wanted there. When
+-- several alternatives die at the same position the report carries all of
+-- them, in the order they were tried.
+--
+-- Nothing here is a combinator: `xp_leaf` is an ordinary function that calls
+-- three other ordinary functions and rewinds by hand. The cursor supplies the
+-- rewind that keeps the record, and nothing else.
+import Data.List (..)
+
+import Data.Maybe (..)
+
+import Data.String (..)
+
+import Syntax.Source (..)
+
+import Syntax.Token (..)
+
+import Syntax.Lex (..)
+
+import Syntax.Cursor (..)
+
+-- The text a literal or identifier token carries.
+fn xp_text(t : Token) : String =
+  match t.value of
+    None => "<valueless>"
+    Some(s) => s
+
+-- A bracketed group: the opener, an expression, the closer. The closer is the
+-- deep expectation, recorded however many tokens into the stream the expression
+-- ran.
+fn xp_group(c : Cursor, open : String, close : String) : Reply(String) =
+  match cursor_expect_fixed(c, open) of
+    Stuck(c1) => Stuck(c1)
+    Took(_, c1) =>
+      match pratt_parse(xp_spec(), c1) of
+        Stuck(c2) => Stuck(c2)
+        Took(x, c2) =>
+          match cursor_expect_fixed(c2, close) of
+            Stuck(c3) => Stuck(c3)
+            Took(_, c3) => Took("{open}{x}{close}", c3)
+
+fn xp_paren(c : Cursor) : Reply(String) = xp_group(c, "(", ")")
+
+fn xp_bracket(c : Cursor) : Reply(String) = xp_group(c, "[", "]")
+
+-- An integer or an identifier. `cursor_expect` consumes nothing when it
+-- refuses, so the second attempt runs from the cursor the first one recorded
+-- into and the two expectations land at one position.
+fn xp_atom(c : Cursor) : Reply(String) =
+  match cursor_expect(c, TInt) of
+    Took(t, c1) => Took(xp_text(t), c1)
+    Stuck(c1) =>
+      match cursor_expect(c1, TIdent) of
+        Took(t, c2) => Took(xp_text(t), c2)
+        Stuck(c2) => Stuck(c2)
+
+-- The three alternatives, tried in order from the same position. Each failed
+-- attempt rewinds with `cursor_restore`, which returns the position and keeps
+-- the record of how far the attempt got.
+fn xp_leaf(c : Cursor) : Reply(String) =
+  match xp_paren(c) of
+    Took(x, c1) => Took(x, c1)
+    Stuck(c1) =>
+      match xp_bracket(cursor_restore(c, c1)) of
+        Took(x, c2) => Took(x, c2)
+        Stuck(c2) => xp_atom(cursor_restore(c, c2))
+
+fn xp_spec() : Pratt(String) =
+  Pratt {
+    infixes = expr_infix_table(),
+    prefixes = expr_prefix_table(),
+    leaf = xp_leaf,
+    bin = \(op, l, r) -> "({l} {op} {r})",
+    pre = \(op, x) -> "({op} {x})"
+  }
+
+-- One report line: the input, then the parse it produced or the refusal record.
+fn xp_line(text : String) : String =
+  match lex_raw(text) of
+    Err(e) => "{text} => lex error: {lex_message(e)}"
+    Ok(r) =>
+      match pratt_all(xp_spec(), cursor_of(r.tokens, byte_len(text))) of
+        Took(x, _) => "{text} => ok {x}"
+        Stuck(c) => "{text} => {xp_refusal(c)}"
+
+-- The refusal record, spelled out: the code, the span it points at, the
+-- message, and the merged expectation set. The set is printed last, and
+-- labelled, so a reader of these lines can lift it back out whatever it holds.
+fn xp_refusal(c : Cursor) : String =
+  let d = cursor_diagnostic(c)
+  let want = str_join(", ", d.expected)
+  "{d.code} {show_int(d.span.lo)}:{show_int(d.span.hi)} {d.message} want={want}"
+
+-- A corpus line carrying an input: neither blank nor a comment.
+fn xp_input(line : String) : Bool =
+  let t = trim(line)
+  byte_len(t) > 0 && not(starts_with("--", t))
+
+fn main() =
+  let corpus = read_file(arg(0))
+  let ls = filter(xp_input, split(char_at("\n", 0), corpus))
+  println(lines_of(map(xp_line, ls)))

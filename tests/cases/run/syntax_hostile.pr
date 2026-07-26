@@ -1,0 +1,95 @@
+-- Hostile syntax artifacts. Every one must be refused with a structured error
+-- naming what failed, never accepted, never decoded into a partial document,
+-- and never a trap or a hang. Covers a wrong schema tag, a truncated document,
+-- a missing stream, a span whose ends invert, a span reaching past the embedded
+-- source, an offset far past any real file, and JSON nested past the reader's
+-- depth limit. Each hostile case is paired with a control that must be
+-- accepted, so a refusal is never vacuous: a reader that refused everything
+-- would pass every negative and fail the controls.
+--
+-- These limits are structural, meaning they are functions of the input alone.
+-- The file runs under the parity and snapshot oracles, so the interpreter and
+-- the native binary must classify every case identically: the depth limit is
+-- part of what the reader promises, not an accident of one host's stack.
+--
+-- Sibling coverage: the byte-exact codec inverse is pinned on the committed
+-- artifact goldens, and the resolved-artifact faults (a duplicate node id, a
+-- node span past the source) have their own committed fixtures.
+
+import Data.String (contains, str_repeat)
+
+import Json (Json, JsonError, decode)
+
+import Syntax.Codec (..)
+
+-- A minimal well-formed token document over the one-byte source `x`, with the
+-- schema tag and the single raw span as parameters: a hostile document differs
+-- from the control by exactly the field under test.
+fn tokens_doc(schema : String, lo : Int, hi : Int) : String =
+  "\{\"schema\": \"{schema}\", \"compiler\": \"0.0.0\", \"source\": \{\"digest\": \"00\", \"text\": \"x\"\}, \"raw\": [\{\"kind\": \"ident\", \"span\": [{lo}, {hi}]\}], \"parse\": [], \"trivia\": []\}"
+
+-- The control document: the one every hostile case is a single edit away from.
+fn good() : String = tokens_doc(tokens_schema(), 0, 1)
+
+-- A JSON value nested `n` deep, for probing the reader's depth limit from
+-- either side.
+fn deep(n : Int) : String = "{str_repeat("[", n)}0{str_repeat("]", n)}"
+
+-- Comfortably inside and comfortably past the JSON reader's nesting limit.
+fn shallow_depth() : Int = 400
+
+fn hostile_depth() : Int = 600
+
+-- An offset no source file can support, to show the bound is a comparison
+-- against the embedded text rather than a plausibility guess.
+fn absurd_offset() : Int = 1000000000000000000
+
+fn accepted(r : Result(TokensDoc, CodecError)) : String =
+  match r of
+    Ok(_) => "OK"
+    Err(e) => "FAIL (refused at {e.path}: {e.reason})"
+
+fn json_accepted(r : Result(Json, JsonError)) : String =
+  match r of
+    Ok(_) => "OK"
+    Err(_) => "FAIL (refused)"
+
+-- A refusal whose reason names the cause under test, so a document rejected for
+-- an unrelated reason does not read as coverage.
+fn rejected_by(r : Result(TokensDoc, CodecError), cause : String) : String =
+  match r of
+    Ok(_) => "FAIL (accepted)"
+    Err(e) =>
+      if contains(cause, e.reason) then
+        "OK"
+      else
+        "FAIL (refused for {e.reason})"
+
+fn main() : Unit ! {IO} =
+  println(
+      "control decodes a well-formed document: {accepted(decode_tokens(good()))}",
+    )
+  println(
+      "control accepts nesting under the limit: {json_accepted(decode(deep(shallow_depth())))}",
+    )
+  println(
+      "wrong schema tag rejected: {rejected_by(decode_tokens(tokens_doc("prism-syntax-tokens-v2", 0, 1)), "unsupported schema")}",
+    )
+  println(
+      "truncated document rejected: {rejected_by(decode_tokens("\{\"schema\": \"prism-syntax-tokens-v1\", \"compiler\""), "line")}",
+    )
+  println(
+      "missing stream rejected: {rejected_by(decode_tokens("\{\"schema\": \"prism-syntax-tokens-v1\", \"compiler\": \"0.0.0\", \"source\": \{\"digest\": \"00\", \"text\": \"x\"\}, \"parse\": [], \"trivia\": []\}"), "missing field")}",
+    )
+  println(
+      "inverted span rejected: {rejected_by(decode_tokens(tokens_doc(tokens_schema(), 1, 0)), "inverted or negative span")}",
+    )
+  println(
+      "span past the source rejected: {rejected_by(decode_tokens(tokens_doc(tokens_schema(), 0, 99)), "past source length")}",
+    )
+  println(
+      "absurd offset rejected: {rejected_by(decode_tokens(tokens_doc(tokens_schema(), 0, absurd_offset())), "past source length")}",
+    )
+  println(
+      "nesting past the limit rejected: {rejected_by(decode_tokens(deep(hostile_depth())), "nesting depth")}",
+    )

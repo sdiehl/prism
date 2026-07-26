@@ -1,140 +1,15 @@
 {
   "schema": "prism-syntax-tokens-v1",
-  "compiler": "0.14.0",
+  "compiler": "0.15.0",
   "source": {
-    "digest": "2b66dac5bef5e8c3bfecd323a13d1343a743f3657a0d9cafebbdd794b87577d0",
-    "text": "-- Pattern forms: constructors, tuples, records, literals, guards, views.\ntype Point = Point { x: Int, y: Int }\n\ntype Shape = Dot | Line(Point, Point) | Poly(List(Point))\n\npattern Diag(n) for Point =\n  view \\(p) -> if p.x == p.y then Some(p.x) else None\n  make \\(n) -> Point { x = n, y = n }\n\nfn classify(s : Shape) : Int =\n  match s of\n    Dot => 0\n    Line(Point { x = 0, y = 0 }, _) => 1\n    Line(a, b) if a.x == b.x => 2\n    Poly(Nil) => 3\n    Poly(Cons(p, Nil)) => p.x\n    _ => 9\n\nfn literals(v : Int, c : Char, f : Float, b : Bool) : Int =\n  match (v, c, f, b) of\n    (0, 'a', 1.5, true) => 1\n    (n, _, _, false) => n\n    _ => 2\n\nfn record_rest(p : Point) : Int =\n  match p of\n    Point { x = 0, .. } => 0\n    Point { x = x, y = y } => x + y\n\nfn views(p : Point) : Int =\n  match p of\n    Diag(n) if n > 3 => n * 2\n    Diag(n) => n\n    _ => 0\n"
+    "digest": "4af039e91ba99d57a978bb8d61f6cb3a8193a72f0c1e18d29d2a910e9c10dff8",
+    "text": "-- Pattern forms: constructors, tuples, records, literals, guards, views,\n-- alternations, and parameters written as patterns.\ntype Point = Point { x: Int, y: Int }\n\ntype Shape = Dot | Line(Point, Point) | Poly(List(Point))\n\npattern Diag(n) for Point =\n  view \\(p) -> if p.x == p.y then Some(p.x) else None\n  make \\(n) -> Point { x = n, y = n }\n\nfn classify(s : Shape) : Int =\n  match s of\n    Dot => 0\n    Line(Point { x = 0, y = 0 }, _) => 1\n    Line(a, b) if a.x == b.x => 2\n    Poly(Nil) => 3\n    Poly(Cons(p, Nil)) => p.x\n    _ => 9\n\nfn literals(v : Int, c : Char, f : Float, b : Bool) : Int =\n  match (v, c, f, b) of\n    (0, 'a', 1.5, true) => 1\n    (n, _, _, false) => n\n    _ => 2\n\nfn record_rest(p : Point) : Int =\n  match p of\n    Point { x = 0, .. } => 0\n    Point { x = x, y = y } => x + y\n\nfn views(p : Point) : Int =\n  match p of\n    Diag(n) if n > 3 => n * 2\n    Diag(n) => n\n    _ => 0\n\nfn alternation(s : Shape) : Int =\n  match s of\n    Dot | Poly(Nil) => 0\n    Line(Point { x = 0, y = 0 } | Point { x = 1, y = 1 }, _) => 1\n    Line(p, _) | Poly(Cons(p, _)) => p.x\n\nfn alt_literals(c : Char, n : Int) : Int =\n  match (c, n) of\n    ('a' | 'b' | 'c', 0 | 1) => 1\n    (_, _) => 2\n\nfn param_pats(Point { x = x, .. }, (a, b), borrow q : Point) : Int =\n  let f = \\(Point { x = u, y = v }) -> u + v\n  x + a + b + q.y + f(q)\n"
   },
   "raw": [
     {
       "kind": "type",
       "span": [
-        74,
-        78
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        79,
-        84
-      ],
-      "value": "Point"
-    },
-    {
-      "kind": "=",
-      "span": [
-        85,
-        86
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        87,
-        92
-      ],
-      "value": "Point"
-    },
-    {
-      "kind": "{",
-      "span": [
-        93,
-        94
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        95,
-        96
-      ],
-      "value": "x"
-    },
-    {
-      "kind": ":",
-      "span": [
-        96,
-        97
-      ]
-    },
-    {
-      "kind": "Int",
-      "span": [
-        98,
-        101
-      ]
-    },
-    {
-      "kind": ",",
-      "span": [
-        101,
-        102
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        103,
-        104
-      ],
-      "value": "y"
-    },
-    {
-      "kind": ":",
-      "span": [
-        104,
-        105
-      ]
-    },
-    {
-      "kind": "Int",
-      "span": [
-        106,
-        109
-      ]
-    },
-    {
-      "kind": "}",
-      "span": [
-        110,
-        111
-      ]
-    },
-    {
-      "kind": "type",
-      "span": [
-        113,
-        117
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        118,
-        123
-      ],
-      "value": "Shape"
-    },
-    {
-      "kind": "=",
-      "span": [
-        124,
-        125
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        126,
-        129
-      ],
-      "value": "Dot"
-    },
-    {
-      "kind": "|",
-      "span": [
-        130,
+        127,
         131
       ]
     },
@@ -142,405 +17,381 @@
       "kind": "uid",
       "span": [
         132,
-        136
-      ],
-      "value": "Line"
-    },
-    {
-      "kind": "(",
-      "span": [
-        136,
         137
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        137,
-        142
-      ],
-      "value": "Point"
-    },
-    {
-      "kind": ",",
-      "span": [
-        142,
-        143
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        144,
-        149
-      ],
-      "value": "Point"
-    },
-    {
-      "kind": ")",
-      "span": [
-        149,
-        150
-      ]
-    },
-    {
-      "kind": "|",
-      "span": [
-        151,
-        152
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        153,
-        157
-      ],
-      "value": "Poly"
-    },
-    {
-      "kind": "(",
-      "span": [
-        157,
-        158
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        158,
-        162
-      ],
-      "value": "List"
-    },
-    {
-      "kind": "(",
-      "span": [
-        162,
-        163
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        163,
-        168
-      ],
-      "value": "Point"
-    },
-    {
-      "kind": ")",
-      "span": [
-        168,
-        169
-      ]
-    },
-    {
-      "kind": ")",
-      "span": [
-        169,
-        170
-      ]
-    },
-    {
-      "kind": "pattern",
-      "span": [
-        172,
-        179
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        180,
-        184
-      ],
-      "value": "Diag"
-    },
-    {
-      "kind": "(",
-      "span": [
-        184,
-        185
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        185,
-        186
-      ],
-      "value": "n"
-    },
-    {
-      "kind": ")",
-      "span": [
-        186,
-        187
-      ]
-    },
-    {
-      "kind": "for",
-      "span": [
-        188,
-        191
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        192,
-        197
       ],
       "value": "Point"
     },
     {
       "kind": "=",
       "span": [
-        198,
-        199
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        202,
-        206
-      ],
-      "value": "view"
-    },
-    {
-      "kind": "\\",
-      "span": [
-        207,
-        208
-      ]
-    },
-    {
-      "kind": "(",
-      "span": [
-        208,
-        209
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        209,
-        210
-      ],
-      "value": "p"
-    },
-    {
-      "kind": ")",
-      "span": [
-        210,
-        211
-      ]
-    },
-    {
-      "kind": "->",
-      "span": [
-        212,
-        214
-      ]
-    },
-    {
-      "kind": "if",
-      "span": [
-        215,
-        217
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        218,
-        219
-      ],
-      "value": "p"
-    },
-    {
-      "kind": ".",
-      "span": [
-        219,
-        220
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        220,
-        221
-      ],
-      "value": "x"
-    },
-    {
-      "kind": "==",
-      "span": [
-        222,
-        224
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        225,
-        226
-      ],
-      "value": "p"
-    },
-    {
-      "kind": ".",
-      "span": [
-        226,
-        227
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        227,
-        228
-      ],
-      "value": "y"
-    },
-    {
-      "kind": "then",
-      "span": [
-        229,
-        233
+        138,
+        139
       ]
     },
     {
       "kind": "uid",
       "span": [
-        234,
-        238
-      ],
-      "value": "Some"
-    },
-    {
-      "kind": "(",
-      "span": [
-        238,
-        239
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        239,
-        240
-      ],
-      "value": "p"
-    },
-    {
-      "kind": ".",
-      "span": [
-        240,
-        241
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        241,
-        242
-      ],
-      "value": "x"
-    },
-    {
-      "kind": ")",
-      "span": [
-        242,
-        243
-      ]
-    },
-    {
-      "kind": "else",
-      "span": [
-        244,
-        248
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        249,
-        253
-      ],
-      "value": "None"
-    },
-    {
-      "kind": "ident",
-      "span": [
-        256,
-        260
-      ],
-      "value": "make"
-    },
-    {
-      "kind": "\\",
-      "span": [
-        261,
-        262
-      ]
-    },
-    {
-      "kind": "(",
-      "span": [
-        262,
-        263
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        263,
-        264
-      ],
-      "value": "n"
-    },
-    {
-      "kind": ")",
-      "span": [
-        264,
-        265
-      ]
-    },
-    {
-      "kind": "->",
-      "span": [
-        266,
-        268
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        269,
-        274
+        140,
+        145
       ],
       "value": "Point"
     },
     {
       "kind": "{",
       "span": [
-        275,
-        276
+        146,
+        147
       ]
     },
     {
       "kind": "ident",
       "span": [
-        277,
-        278
+        148,
+        149
       ],
       "value": "x"
     },
     {
+      "kind": ":",
+      "span": [
+        149,
+        150
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        151,
+        154
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        154,
+        155
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        156,
+        157
+      ],
+      "value": "y"
+    },
+    {
+      "kind": ":",
+      "span": [
+        157,
+        158
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        159,
+        162
+      ]
+    },
+    {
+      "kind": "}",
+      "span": [
+        163,
+        164
+      ]
+    },
+    {
+      "kind": "type",
+      "span": [
+        166,
+        170
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        171,
+        176
+      ],
+      "value": "Shape"
+    },
+    {
       "kind": "=",
+      "span": [
+        177,
+        178
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        179,
+        182
+      ],
+      "value": "Dot"
+    },
+    {
+      "kind": "|",
+      "span": [
+        183,
+        184
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        185,
+        189
+      ],
+      "value": "Line"
+    },
+    {
+      "kind": "(",
+      "span": [
+        189,
+        190
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        190,
+        195
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": ",",
+      "span": [
+        195,
+        196
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        197,
+        202
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": ")",
+      "span": [
+        202,
+        203
+      ]
+    },
+    {
+      "kind": "|",
+      "span": [
+        204,
+        205
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        206,
+        210
+      ],
+      "value": "Poly"
+    },
+    {
+      "kind": "(",
+      "span": [
+        210,
+        211
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        211,
+        215
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        215,
+        216
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        216,
+        221
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": ")",
+      "span": [
+        221,
+        222
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        222,
+        223
+      ]
+    },
+    {
+      "kind": "pattern",
+      "span": [
+        225,
+        232
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        233,
+        237
+      ],
+      "value": "Diag"
+    },
+    {
+      "kind": "(",
+      "span": [
+        237,
+        238
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        238,
+        239
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ")",
+      "span": [
+        239,
+        240
+      ]
+    },
+    {
+      "kind": "for",
+      "span": [
+        241,
+        244
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        245,
+        250
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "=",
+      "span": [
+        251,
+        252
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        255,
+        259
+      ],
+      "value": "view"
+    },
+    {
+      "kind": "\\",
+      "span": [
+        260,
+        261
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        261,
+        262
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        262,
+        263
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ")",
+      "span": [
+        263,
+        264
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        265,
+        267
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        268,
+        270
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        271,
+        272
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ".",
+      "span": [
+        272,
+        273
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        273,
+        274
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "==",
+      "span": [
+        275,
+        277
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        278,
+        279
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ".",
       "span": [
         279,
         280
@@ -549,435 +400,419 @@
     {
       "kind": "ident",
       "span": [
-        281,
-        282
-      ],
-      "value": "n"
-    },
-    {
-      "kind": ",",
-      "span": [
-        282,
-        283
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        284,
-        285
+        280,
+        281
       ],
       "value": "y"
     },
     {
-      "kind": "=",
+      "kind": "then",
       "span": [
-        286,
-        287
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        288,
-        289
-      ],
-      "value": "n"
-    },
-    {
-      "kind": "}",
-      "span": [
-        290,
-        291
-      ]
-    },
-    {
-      "kind": "fn",
-      "span": [
-        293,
-        295
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        296,
-        304
-      ],
-      "value": "classify"
-    },
-    {
-      "kind": "(",
-      "span": [
-        304,
-        305
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        305,
-        306
-      ],
-      "value": "s"
-    },
-    {
-      "kind": ":",
-      "span": [
-        307,
-        308
+        282,
+        286
       ]
     },
     {
       "kind": "uid",
       "span": [
-        309,
-        314
+        287,
+        291
       ],
-      "value": "Shape"
+      "value": "Some"
+    },
+    {
+      "kind": "(",
+      "span": [
+        291,
+        292
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        292,
+        293
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ".",
+      "span": [
+        293,
+        294
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        294,
+        295
+      ],
+      "value": "x"
     },
     {
       "kind": ")",
+      "span": [
+        295,
+        296
+      ]
+    },
+    {
+      "kind": "else",
+      "span": [
+        297,
+        301
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        302,
+        306
+      ],
+      "value": "None"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        309,
+        313
+      ],
+      "value": "make"
+    },
+    {
+      "kind": "\\",
       "span": [
         314,
         315
       ]
     },
     {
-      "kind": ":",
+      "kind": "(",
       "span": [
-        316,
-        317
-      ]
-    },
-    {
-      "kind": "Int",
-      "span": [
-        318,
-        321
-      ]
-    },
-    {
-      "kind": "=",
-      "span": [
-        322,
-        323
-      ]
-    },
-    {
-      "kind": "match",
-      "span": [
-        326,
-        331
+        315,
+        316
       ]
     },
     {
       "kind": "ident",
       "span": [
-        332,
-        333
+        316,
+        317
       ],
-      "value": "s"
+      "value": "n"
     },
     {
-      "kind": "of",
+      "kind": ")",
       "span": [
-        334,
-        336
+        317,
+        318
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        319,
+        321
       ]
     },
     {
       "kind": "uid",
       "span": [
-        341,
-        344
-      ],
-      "value": "Dot"
-    },
-    {
-      "kind": "=>",
-      "span": [
-        345,
-        347
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        348,
-        349
-      ],
-      "value": "0"
-    },
-    {
-      "kind": "uid",
-      "span": [
-        354,
-        358
-      ],
-      "value": "Line"
-    },
-    {
-      "kind": "(",
-      "span": [
-        358,
-        359
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        359,
-        364
+        322,
+        327
       ],
       "value": "Point"
     },
     {
       "kind": "{",
       "span": [
-        365,
-        366
+        328,
+        329
       ]
     },
     {
       "kind": "ident",
       "span": [
-        367,
-        368
+        330,
+        331
       ],
       "value": "x"
     },
     {
       "kind": "=",
       "span": [
-        369,
-        370
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        371,
-        372
-      ],
-      "value": "0"
-    },
-    {
-      "kind": ",",
-      "span": [
-        372,
-        373
+        332,
+        333
       ]
     },
     {
       "kind": "ident",
       "span": [
-        374,
-        375
+        334,
+        335
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ",",
+      "span": [
+        335,
+        336
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        337,
+        338
       ],
       "value": "y"
     },
     {
       "kind": "=",
       "span": [
-        376,
-        377
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        378,
-        379
-      ],
-      "value": "0"
-    },
-    {
-      "kind": "}",
-      "span": [
-        380,
-        381
-      ]
-    },
-    {
-      "kind": ",",
-      "span": [
-        381,
-        382
+        339,
+        340
       ]
     },
     {
       "kind": "ident",
       "span": [
-        383,
-        384
+        341,
+        342
       ],
-      "value": "_"
+      "value": "n"
+    },
+    {
+      "kind": "}",
+      "span": [
+        343,
+        344
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        346,
+        348
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        349,
+        357
+      ],
+      "value": "classify"
+    },
+    {
+      "kind": "(",
+      "span": [
+        357,
+        358
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        358,
+        359
+      ],
+      "value": "s"
+    },
+    {
+      "kind": ":",
+      "span": [
+        360,
+        361
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        362,
+        367
+      ],
+      "value": "Shape"
     },
     {
       "kind": ")",
       "span": [
-        384,
-        385
+        367,
+        368
       ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        369,
+        370
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        371,
+        374
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        375,
+        376
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        379,
+        384
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        385,
+        386
+      ],
+      "value": "s"
+    },
+    {
+      "kind": "of",
+      "span": [
+        387,
+        389
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        394,
+        397
+      ],
+      "value": "Dot"
     },
     {
       "kind": "=>",
       "span": [
-        386,
-        388
+        398,
+        400
       ]
     },
     {
       "kind": "int",
       "span": [
-        389,
-        390
+        401,
+        402
       ],
-      "value": "1"
+      "value": "0"
     },
     {
       "kind": "uid",
       "span": [
-        395,
-        399
+        407,
+        411
       ],
       "value": "Line"
     },
     {
       "kind": "(",
       "span": [
-        399,
-        400
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        400,
-        401
-      ],
-      "value": "a"
-    },
-    {
-      "kind": ",",
-      "span": [
-        401,
-        402
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        403,
-        404
-      ],
-      "value": "b"
-    },
-    {
-      "kind": ")",
-      "span": [
-        404,
-        405
-      ]
-    },
-    {
-      "kind": "if",
-      "span": [
-        406,
-        408
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        409,
-        410
-      ],
-      "value": "a"
-    },
-    {
-      "kind": ".",
-      "span": [
-        410,
-        411
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
         411,
         412
-      ],
-      "value": "x"
-    },
-    {
-      "kind": "==",
-      "span": [
-        413,
-        415
       ]
     },
     {
-      "kind": "ident",
+      "kind": "uid",
       "span": [
-        416,
+        412,
         417
       ],
-      "value": "b"
+      "value": "Point"
     },
     {
-      "kind": ".",
-      "span": [
-        417,
-        418
-      ]
-    },
-    {
-      "kind": "ident",
+      "kind": "{",
       "span": [
         418,
         419
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        420,
+        421
       ],
       "value": "x"
     },
     {
-      "kind": "=>",
+      "kind": "=",
       "span": [
-        420,
-        422
+        422,
+        423
       ]
     },
     {
       "kind": "int",
       "span": [
-        423,
-        424
+        424,
+        425
       ],
-      "value": "2"
+      "value": "0"
     },
     {
-      "kind": "uid",
+      "kind": ",",
+      "span": [
+        425,
+        426
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        427,
+        428
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "=",
       "span": [
         429,
-        433
-      ],
-      "value": "Poly"
+        430
+      ]
     },
     {
-      "kind": "(",
+      "kind": "int",
+      "span": [
+        431,
+        432
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "}",
       "span": [
         433,
         434
       ]
     },
     {
-      "kind": "uid",
+      "kind": ",",
       "span": [
         434,
+        435
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        436,
         437
       ],
-      "value": "Nil"
+      "value": "_"
     },
     {
       "kind": ")",
@@ -999,7 +834,7 @@
         442,
         443
       ],
-      "value": "3"
+      "value": "1"
     },
     {
       "kind": "uid",
@@ -1007,7 +842,7 @@
         448,
         452
       ],
-      "value": "Poly"
+      "value": "Line"
     },
     {
       "kind": "(",
@@ -1017,489 +852,500 @@
       ]
     },
     {
-      "kind": "uid",
+      "kind": "ident",
       "span": [
         453,
-        457
-      ],
-      "value": "Cons"
-    },
-    {
-      "kind": "(",
-      "span": [
-        457,
-        458
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        458,
-        459
-      ],
-      "value": "p"
-    },
-    {
-      "kind": ",",
-      "span": [
-        459,
-        460
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        461,
-        464
-      ],
-      "value": "Nil"
-    },
-    {
-      "kind": ")",
-      "span": [
-        464,
-        465
-      ]
-    },
-    {
-      "kind": ")",
-      "span": [
-        465,
-        466
-      ]
-    },
-    {
-      "kind": "=>",
-      "span": [
-        467,
-        469
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        470,
-        471
-      ],
-      "value": "p"
-    },
-    {
-      "kind": ".",
-      "span": [
-        471,
-        472
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        472,
-        473
-      ],
-      "value": "x"
-    },
-    {
-      "kind": "ident",
-      "span": [
-        478,
-        479
-      ],
-      "value": "_"
-    },
-    {
-      "kind": "=>",
-      "span": [
-        480,
-        482
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        483,
-        484
-      ],
-      "value": "9"
-    },
-    {
-      "kind": "fn",
-      "span": [
-        486,
-        488
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        489,
-        497
-      ],
-      "value": "literals"
-    },
-    {
-      "kind": "(",
-      "span": [
-        497,
-        498
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        498,
-        499
-      ],
-      "value": "v"
-    },
-    {
-      "kind": ":",
-      "span": [
-        500,
-        501
-      ]
-    },
-    {
-      "kind": "Int",
-      "span": [
-        502,
-        505
-      ]
-    },
-    {
-      "kind": ",",
-      "span": [
-        505,
-        506
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        507,
-        508
-      ],
-      "value": "c"
-    },
-    {
-      "kind": ":",
-      "span": [
-        509,
-        510
-      ]
-    },
-    {
-      "kind": "Char",
-      "span": [
-        511,
-        515
-      ]
-    },
-    {
-      "kind": ",",
-      "span": [
-        515,
-        516
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        517,
-        518
-      ],
-      "value": "f"
-    },
-    {
-      "kind": ":",
-      "span": [
-        519,
-        520
-      ]
-    },
-    {
-      "kind": "Float",
-      "span": [
-        521,
-        526
-      ]
-    },
-    {
-      "kind": ",",
-      "span": [
-        526,
-        527
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        528,
-        529
-      ],
-      "value": "b"
-    },
-    {
-      "kind": ":",
-      "span": [
-        530,
-        531
-      ]
-    },
-    {
-      "kind": "Bool",
-      "span": [
-        532,
-        536
-      ]
-    },
-    {
-      "kind": ")",
-      "span": [
-        536,
-        537
-      ]
-    },
-    {
-      "kind": ":",
-      "span": [
-        538,
-        539
-      ]
-    },
-    {
-      "kind": "Int",
-      "span": [
-        540,
-        543
-      ]
-    },
-    {
-      "kind": "=",
-      "span": [
-        544,
-        545
-      ]
-    },
-    {
-      "kind": "match",
-      "span": [
-        548,
-        553
-      ]
-    },
-    {
-      "kind": "(",
-      "span": [
-        554,
-        555
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        555,
-        556
-      ],
-      "value": "v"
-    },
-    {
-      "kind": ",",
-      "span": [
-        556,
-        557
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        558,
-        559
-      ],
-      "value": "c"
-    },
-    {
-      "kind": ",",
-      "span": [
-        559,
-        560
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        561,
-        562
-      ],
-      "value": "f"
-    },
-    {
-      "kind": ",",
-      "span": [
-        562,
-        563
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        564,
-        565
-      ],
-      "value": "b"
-    },
-    {
-      "kind": ")",
-      "span": [
-        565,
-        566
-      ]
-    },
-    {
-      "kind": "of",
-      "span": [
-        567,
-        569
-      ]
-    },
-    {
-      "kind": "(",
-      "span": [
-        574,
-        575
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        575,
-        576
-      ],
-      "value": "0"
-    },
-    {
-      "kind": ",",
-      "span": [
-        576,
-        577
-      ]
-    },
-    {
-      "kind": "char",
-      "span": [
-        578,
-        581
+        454
       ],
       "value": "a"
     },
     {
       "kind": ",",
       "span": [
-        581,
-        582
+        454,
+        455
       ]
     },
     {
-      "kind": "float",
+      "kind": "ident",
       "span": [
-        583,
-        586
+        456,
+        457
       ],
-      "value": "1.5"
-    },
-    {
-      "kind": ",",
-      "span": [
-        586,
-        587
-      ]
-    },
-    {
-      "kind": "true",
-      "span": [
-        588,
-        592
-      ]
+      "value": "b"
     },
     {
       "kind": ")",
       "span": [
-        592,
-        593
+        457,
+        458
       ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        459,
+        461
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        462,
+        463
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ".",
+      "span": [
+        463,
+        464
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        464,
+        465
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "==",
+      "span": [
+        466,
+        468
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        469,
+        470
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ".",
+      "span": [
+        470,
+        471
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        471,
+        472
+      ],
+      "value": "x"
     },
     {
       "kind": "=>",
       "span": [
-        594,
-        596
+        473,
+        475
       ]
     },
     {
       "kind": "int",
       "span": [
-        597,
-        598
+        476,
+        477
       ],
-      "value": "1"
+      "value": "2"
+    },
+    {
+      "kind": "uid",
+      "span": [
+        482,
+        486
+      ],
+      "value": "Poly"
     },
     {
       "kind": "(",
       "span": [
-        603,
-        604
+        486,
+        487
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        487,
+        490
+      ],
+      "value": "Nil"
+    },
+    {
+      "kind": ")",
+      "span": [
+        490,
+        491
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        492,
+        494
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        495,
+        496
+      ],
+      "value": "3"
+    },
+    {
+      "kind": "uid",
+      "span": [
+        501,
+        505
+      ],
+      "value": "Poly"
+    },
+    {
+      "kind": "(",
+      "span": [
+        505,
+        506
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        506,
+        510
+      ],
+      "value": "Cons"
+    },
+    {
+      "kind": "(",
+      "span": [
+        510,
+        511
       ]
     },
     {
       "kind": "ident",
       "span": [
-        604,
-        605
+        511,
+        512
       ],
-      "value": "n"
+      "value": "p"
     },
     {
       "kind": ",",
       "span": [
-        605,
+        512,
+        513
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        514,
+        517
+      ],
+      "value": "Nil"
+    },
+    {
+      "kind": ")",
+      "span": [
+        517,
+        518
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        518,
+        519
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        520,
+        522
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        523,
+        524
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ".",
+      "span": [
+        524,
+        525
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        525,
+        526
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        531,
+        532
+      ],
+      "value": "_"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        533,
+        535
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        536,
+        537
+      ],
+      "value": "9"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        539,
+        541
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        542,
+        550
+      ],
+      "value": "literals"
+    },
+    {
+      "kind": "(",
+      "span": [
+        550,
+        551
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        551,
+        552
+      ],
+      "value": "v"
+    },
+    {
+      "kind": ":",
+      "span": [
+        553,
+        554
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        555,
+        558
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        558,
+        559
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        560,
+        561
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ":",
+      "span": [
+        562,
+        563
+      ]
+    },
+    {
+      "kind": "Char",
+      "span": [
+        564,
+        568
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        568,
+        569
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        570,
+        571
+      ],
+      "value": "f"
+    },
+    {
+      "kind": ":",
+      "span": [
+        572,
+        573
+      ]
+    },
+    {
+      "kind": "Float",
+      "span": [
+        574,
+        579
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        579,
+        580
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        581,
+        582
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ":",
+      "span": [
+        583,
+        584
+      ]
+    },
+    {
+      "kind": "Bool",
+      "span": [
+        585,
+        589
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        589,
+        590
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        591,
+        592
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        593,
+        596
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        597,
+        598
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        601,
         606
       ]
     },
     {
-      "kind": "ident",
+      "kind": "(",
       "span": [
         607,
         608
-      ],
-      "value": "_"
-    },
-    {
-      "kind": ",",
-      "span": [
-        608,
-        609
       ]
     },
     {
       "kind": "ident",
       "span": [
-        610,
-        611
+        608,
+        609
       ],
-      "value": "_"
+      "value": "v"
     },
     {
       "kind": ",",
       "span": [
-        611,
-        612
+        609,
+        610
       ]
     },
     {
-      "kind": "false",
+      "kind": "ident",
       "span": [
-        613,
-        618
+        611,
+        612
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ",",
+      "span": [
+        612,
+        613
       ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        614,
+        615
+      ],
+      "value": "f"
+    },
+    {
+      "kind": ",",
+      "span": [
+        615,
+        616
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        617,
+        618
+      ],
+      "value": "b"
     },
     {
       "kind": ")",
@@ -1509,254 +1355,274 @@
       ]
     },
     {
-      "kind": "=>",
+      "kind": "of",
       "span": [
         620,
         622
       ]
     },
     {
-      "kind": "ident",
+      "kind": "(",
       "span": [
-        623,
-        624
-      ],
-      "value": "n"
-    },
-    {
-      "kind": "ident",
-      "span": [
-        629,
-        630
-      ],
-      "value": "_"
-    },
-    {
-      "kind": "=>",
-      "span": [
-        631,
-        633
+        627,
+        628
       ]
     },
     {
       "kind": "int",
       "span": [
-        634,
-        635
+        628,
+        629
       ],
-      "value": "2"
+      "value": "0"
     },
     {
-      "kind": "fn",
+      "kind": ",",
       "span": [
-        637,
-        639
+        629,
+        630
       ]
     },
     {
-      "kind": "ident",
+      "kind": "char",
       "span": [
-        640,
+        631,
+        634
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        634,
+        635
+      ]
+    },
+    {
+      "kind": "float",
+      "span": [
+        636,
+        639
+      ],
+      "value": "1.5"
+    },
+    {
+      "kind": ",",
+      "span": [
+        639,
+        640
+      ]
+    },
+    {
+      "kind": "true",
+      "span": [
+        641,
+        645
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        645,
+        646
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        647,
+        649
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        650,
         651
       ],
-      "value": "record_rest"
+      "value": "1"
     },
     {
       "kind": "(",
       "span": [
-        651,
-        652
+        656,
+        657
       ]
     },
     {
       "kind": "ident",
       "span": [
-        652,
-        653
+        657,
+        658
       ],
-      "value": "p"
+      "value": "n"
     },
     {
-      "kind": ":",
+      "kind": ",",
       "span": [
-        654,
-        655
+        658,
+        659
       ]
     },
     {
-      "kind": "uid",
+      "kind": "ident",
       "span": [
-        656,
+        660,
         661
       ],
-      "value": "Point"
+      "value": "_"
     },
     {
-      "kind": ")",
+      "kind": ",",
       "span": [
         661,
         662
       ]
     },
     {
-      "kind": ":",
+      "kind": "ident",
       "span": [
         663,
         664
-      ]
-    },
-    {
-      "kind": "Int",
-      "span": [
-        665,
-        668
-      ]
-    },
-    {
-      "kind": "=",
-      "span": [
-        669,
-        670
-      ]
-    },
-    {
-      "kind": "match",
-      "span": [
-        673,
-        678
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        679,
-        680
       ],
-      "value": "p"
-    },
-    {
-      "kind": "of",
-      "span": [
-        681,
-        683
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        688,
-        693
-      ],
-      "value": "Point"
-    },
-    {
-      "kind": "{",
-      "span": [
-        694,
-        695
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        696,
-        697
-      ],
-      "value": "x"
-    },
-    {
-      "kind": "=",
-      "span": [
-        698,
-        699
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        700,
-        701
-      ],
-      "value": "0"
+      "value": "_"
     },
     {
       "kind": ",",
       "span": [
-        701,
-        702
+        664,
+        665
       ]
     },
     {
-      "kind": "..",
+      "kind": "false",
       "span": [
-        703,
-        705
+        666,
+        671
       ]
     },
     {
-      "kind": "}",
+      "kind": ")",
       "span": [
-        706,
-        707
+        671,
+        672
       ]
     },
     {
       "kind": "=>",
       "span": [
-        708,
-        710
+        673,
+        675
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        676,
+        677
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        682,
+        683
+      ],
+      "value": "_"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        684,
+        686
       ]
     },
     {
       "kind": "int",
       "span": [
-        711,
-        712
+        687,
+        688
       ],
-      "value": "0"
+      "value": "2"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        690,
+        692
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        693,
+        704
+      ],
+      "value": "record_rest"
+    },
+    {
+      "kind": "(",
+      "span": [
+        704,
+        705
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        705,
+        706
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ":",
+      "span": [
+        707,
+        708
+      ]
     },
     {
       "kind": "uid",
       "span": [
-        717,
-        722
+        709,
+        714
       ],
       "value": "Point"
     },
     {
-      "kind": "{",
+      "kind": ")",
       "span": [
-        723,
-        724
+        714,
+        715
       ]
     },
     {
-      "kind": "ident",
+      "kind": ":",
       "span": [
-        725,
-        726
-      ],
-      "value": "x"
+        716,
+        717
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        718,
+        721
+      ]
     },
     {
       "kind": "=",
       "span": [
-        727,
-        728
+        722,
+        723
       ]
     },
     {
-      "kind": "ident",
+      "kind": "match",
       "span": [
-        729,
-        730
-      ],
-      "value": "x"
-    },
-    {
-      "kind": ",",
-      "span": [
-        730,
+        726,
         731
       ]
     },
@@ -1766,168 +1632,184 @@
         732,
         733
       ],
-      "value": "y"
-    },
-    {
-      "kind": "=",
-      "span": [
-        734,
-        735
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        736,
-        737
-      ],
-      "value": "y"
-    },
-    {
-      "kind": "}",
-      "span": [
-        738,
-        739
-      ]
-    },
-    {
-      "kind": "=>",
-      "span": [
-        740,
-        742
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        743,
-        744
-      ],
-      "value": "x"
-    },
-    {
-      "kind": "+",
-      "span": [
-        745,
-        746
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        747,
-        748
-      ],
-      "value": "y"
-    },
-    {
-      "kind": "fn",
-      "span": [
-        750,
-        752
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        753,
-        758
-      ],
-      "value": "views"
-    },
-    {
-      "kind": "(",
-      "span": [
-        758,
-        759
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        759,
-        760
-      ],
       "value": "p"
     },
     {
-      "kind": ":",
+      "kind": "of",
       "span": [
-        761,
-        762
+        734,
+        736
       ]
     },
     {
       "kind": "uid",
       "span": [
-        763,
-        768
+        741,
+        746
       ],
       "value": "Point"
     },
     {
-      "kind": ")",
+      "kind": "{",
       "span": [
-        768,
-        769
+        747,
+        748
       ]
     },
     {
-      "kind": ":",
+      "kind": "ident",
       "span": [
-        770,
-        771
-      ]
-    },
-    {
-      "kind": "Int",
-      "span": [
-        772,
-        775
-      ]
+        749,
+        750
+      ],
+      "value": "x"
     },
     {
       "kind": "=",
+      "span": [
+        751,
+        752
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        753,
+        754
+      ],
+      "value": "0"
+    },
+    {
+      "kind": ",",
+      "span": [
+        754,
+        755
+      ]
+    },
+    {
+      "kind": "..",
+      "span": [
+        756,
+        758
+      ]
+    },
+    {
+      "kind": "}",
+      "span": [
+        759,
+        760
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        761,
+        763
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        764,
+        765
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "uid",
+      "span": [
+        770,
+        775
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "{",
       "span": [
         776,
         777
       ]
     },
     {
-      "kind": "match",
+      "kind": "ident",
+      "span": [
+        778,
+        779
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "=",
       "span": [
         780,
-        785
+        781
       ]
     },
     {
       "kind": "ident",
       "span": [
-        786,
-        787
+        782,
+        783
       ],
-      "value": "p"
+      "value": "x"
     },
     {
-      "kind": "of",
+      "kind": ",",
       "span": [
-        788,
-        790
+        783,
+        784
       ]
     },
     {
-      "kind": "uid",
+      "kind": "ident",
       "span": [
-        795,
-        799
+        785,
+        786
       ],
-      "value": "Diag"
+      "value": "y"
     },
     {
-      "kind": "(",
+      "kind": "=",
       "span": [
-        799,
-        800
+        787,
+        788
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        789,
+        790
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "}",
+      "span": [
+        791,
+        792
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        793,
+        795
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        796,
+        797
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "+",
+      "span": [
+        798,
+        799
       ]
     },
     {
@@ -1936,17 +1818,10 @@
         800,
         801
       ],
-      "value": "n"
+      "value": "y"
     },
     {
-      "kind": ")",
-      "span": [
-        801,
-        802
-      ]
-    },
-    {
-      "kind": "if",
+      "kind": "fn",
       "span": [
         803,
         805
@@ -1956,268 +1831,1518 @@
       "kind": "ident",
       "span": [
         806,
-        807
-      ],
-      "value": "n"
-    },
-    {
-      "kind": ">",
-      "span": [
-        808,
-        809
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        810,
         811
       ],
-      "value": "3"
+      "value": "views"
     },
     {
-      "kind": "=>",
+      "kind": "(",
       "span": [
-        812,
-        814
+        811,
+        812
       ]
     },
     {
       "kind": "ident",
       "span": [
-        815,
-        816
+        812,
+        813
       ],
-      "value": "n"
+      "value": "p"
     },
     {
-      "kind": "*",
+      "kind": ":",
       "span": [
-        817,
-        818
+        814,
+        815
       ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        819,
-        820
-      ],
-      "value": "2"
     },
     {
       "kind": "uid",
       "span": [
-        825,
-        829
+        816,
+        821
       ],
-      "value": "Diag"
+      "value": "Point"
     },
     {
-      "kind": "(",
+      "kind": ")",
+      "span": [
+        821,
+        822
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        823,
+        824
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        825,
+        828
+      ]
+    },
+    {
+      "kind": "=",
       "span": [
         829,
         830
       ]
     },
     {
+      "kind": "match",
+      "span": [
+        833,
+        838
+      ]
+    },
+    {
       "kind": "ident",
       "span": [
-        830,
-        831
+        839,
+        840
+      ],
+      "value": "p"
+    },
+    {
+      "kind": "of",
+      "span": [
+        841,
+        843
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        848,
+        852
+      ],
+      "value": "Diag"
+    },
+    {
+      "kind": "(",
+      "span": [
+        852,
+        853
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        853,
+        854
       ],
       "value": "n"
     },
     {
       "kind": ")",
       "span": [
-        831,
-        832
+        854,
+        855
       ]
     },
     {
-      "kind": "=>",
+      "kind": "if",
       "span": [
-        833,
-        835
+        856,
+        858
       ]
     },
     {
       "kind": "ident",
       "span": [
-        836,
-        837
+        859,
+        860
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ">",
+      "span": [
+        861,
+        862
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        863,
+        864
+      ],
+      "value": "3"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        865,
+        867
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        868,
+        869
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "*",
+      "span": [
+        870,
+        871
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        872,
+        873
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "uid",
+      "span": [
+        878,
+        882
+      ],
+      "value": "Diag"
+    },
+    {
+      "kind": "(",
+      "span": [
+        882,
+        883
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        883,
+        884
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ")",
+      "span": [
+        884,
+        885
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        886,
+        888
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        889,
+        890
       ],
       "value": "n"
     },
     {
       "kind": "ident",
       "span": [
-        842,
-        843
+        895,
+        896
       ],
       "value": "_"
     },
     {
       "kind": "=>",
       "span": [
-        844,
-        846
+        897,
+        899
       ]
     },
     {
       "kind": "int",
       "span": [
-        847,
-        848
+        900,
+        901
       ],
       "value": "0"
-    }
-  ],
-  "parse": [
-    {
-      "kind": "v{",
-      "span": [
-        74,
-        74
-      ]
     },
     {
-      "kind": "type",
+      "kind": "fn",
       "span": [
-        74,
-        78
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        79,
-        84
-      ],
-      "value": "Point"
-    },
-    {
-      "kind": "=",
-      "span": [
-        85,
-        86
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        87,
-        92
-      ],
-      "value": "Point"
-    },
-    {
-      "kind": "{",
-      "span": [
-        93,
-        94
+        903,
+        905
       ]
     },
     {
       "kind": "ident",
       "span": [
-        95,
-        96
+        906,
+        917
       ],
-      "value": "x"
+      "value": "alternation"
     },
     {
-      "kind": ":",
+      "kind": "(",
       "span": [
-        96,
-        97
-      ]
-    },
-    {
-      "kind": "Int",
-      "span": [
-        98,
-        101
-      ]
-    },
-    {
-      "kind": ",",
-      "span": [
-        101,
-        102
+        917,
+        918
       ]
     },
     {
       "kind": "ident",
       "span": [
-        103,
-        104
+        918,
+        919
       ],
-      "value": "y"
+      "value": "s"
     },
     {
       "kind": ":",
       "span": [
-        104,
-        105
-      ]
-    },
-    {
-      "kind": "Int",
-      "span": [
-        106,
-        109
-      ]
-    },
-    {
-      "kind": "}",
-      "span": [
-        110,
-        111
-      ]
-    },
-    {
-      "kind": "v;",
-      "span": [
-        111,
-        111
-      ]
-    },
-    {
-      "kind": "type",
-      "span": [
-        113,
-        117
+        920,
+        921
       ]
     },
     {
       "kind": "uid",
       "span": [
-        118,
-        123
+        922,
+        927
       ],
       "value": "Shape"
     },
     {
+      "kind": ")",
+      "span": [
+        927,
+        928
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        929,
+        930
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        931,
+        934
+      ]
+    },
+    {
       "kind": "=",
       "span": [
-        124,
-        125
+        935,
+        936
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        939,
+        944
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        945,
+        946
+      ],
+      "value": "s"
+    },
+    {
+      "kind": "of",
+      "span": [
+        947,
+        949
       ]
     },
     {
       "kind": "uid",
       "span": [
-        126,
-        129
+        954,
+        957
       ],
       "value": "Dot"
     },
     {
       "kind": "|",
       "span": [
-        130,
+        958,
+        959
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        960,
+        964
+      ],
+      "value": "Poly"
+    },
+    {
+      "kind": "(",
+      "span": [
+        964,
+        965
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        965,
+        968
+      ],
+      "value": "Nil"
+    },
+    {
+      "kind": ")",
+      "span": [
+        968,
+        969
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        970,
+        972
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        973,
+        974
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "uid",
+      "span": [
+        979,
+        983
+      ],
+      "value": "Line"
+    },
+    {
+      "kind": "(",
+      "span": [
+        983,
+        984
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        984,
+        989
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "{",
+      "span": [
+        990,
+        991
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        992,
+        993
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "=",
+      "span": [
+        994,
+        995
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        996,
+        997
+      ],
+      "value": "0"
+    },
+    {
+      "kind": ",",
+      "span": [
+        997,
+        998
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        999,
+        1000
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1001,
+        1002
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1003,
+        1004
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "}",
+      "span": [
+        1005,
+        1006
+      ]
+    },
+    {
+      "kind": "|",
+      "span": [
+        1007,
+        1008
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1009,
+        1014
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "{",
+      "span": [
+        1015,
+        1016
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1017,
+        1018
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1019,
+        1020
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1021,
+        1022
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1022,
+        1023
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1024,
+        1025
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1026,
+        1027
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1028,
+        1029
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "}",
+      "span": [
+        1030,
+        1031
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        1031,
+        1032
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1033,
+        1034
+      ],
+      "value": "_"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1034,
+        1035
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1036,
+        1038
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1039,
+        1040
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1045,
+        1049
+      ],
+      "value": "Line"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1049,
+        1050
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1050,
+        1051
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1051,
+        1052
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1053,
+        1054
+      ],
+      "value": "_"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1054,
+        1055
+      ]
+    },
+    {
+      "kind": "|",
+      "span": [
+        1056,
+        1057
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1058,
+        1062
+      ],
+      "value": "Poly"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1062,
+        1063
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1063,
+        1067
+      ],
+      "value": "Cons"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1067,
+        1068
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1068,
+        1069
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1069,
+        1070
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1071,
+        1072
+      ],
+      "value": "_"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1072,
+        1073
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1073,
+        1074
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1075,
+        1077
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1078,
+        1079
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ".",
+      "span": [
+        1079,
+        1080
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1080,
+        1081
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1083,
+        1085
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1086,
+        1098
+      ],
+      "value": "alt_literals"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1098,
+        1099
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1099,
+        1100
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1101,
+        1102
+      ]
+    },
+    {
+      "kind": "Char",
+      "span": [
+        1103,
+        1107
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        1107,
+        1108
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1109,
+        1110
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1111,
+        1112
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1113,
+        1116
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1116,
+        1117
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1118,
+        1119
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1120,
+        1123
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1124,
+        1125
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        1128,
+        1133
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        1134,
+        1135
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1135,
+        1136
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1136,
+        1137
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1138,
+        1139
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1139,
+        1140
+      ]
+    },
+    {
+      "kind": "of",
+      "span": [
+        1141,
+        1143
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        1148,
+        1149
+      ]
+    },
+    {
+      "kind": "char",
+      "span": [
+        1149,
+        1152
+      ],
+      "value": "a"
+    },
+    {
+      "kind": "|",
+      "span": [
+        1153,
+        1154
+      ]
+    },
+    {
+      "kind": "char",
+      "span": [
+        1155,
+        1158
+      ],
+      "value": "b"
+    },
+    {
+      "kind": "|",
+      "span": [
+        1159,
+        1160
+      ]
+    },
+    {
+      "kind": "char",
+      "span": [
+        1161,
+        1164
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1164,
+        1165
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1166,
+        1167
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "|",
+      "span": [
+        1168,
+        1169
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1170,
+        1171
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1171,
+        1172
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1173,
+        1175
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1176,
+        1177
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1182,
+        1183
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1183,
+        1184
+      ],
+      "value": "_"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1184,
+        1185
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1186,
+        1187
+      ],
+      "value": "_"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1187,
+        1188
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1189,
+        1191
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1192,
+        1193
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1195,
+        1197
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1198,
+        1208
+      ],
+      "value": "param_pats"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1208,
+        1209
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1209,
+        1214
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "{",
+      "span": [
+        1215,
+        1216
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1217,
+        1218
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1219,
+        1220
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1221,
+        1222
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1222,
+        1223
+      ]
+    },
+    {
+      "kind": "..",
+      "span": [
+        1224,
+        1226
+      ]
+    },
+    {
+      "kind": "}",
+      "span": [
+        1227,
+        1228
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        1228,
+        1229
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        1230,
+        1231
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1231,
+        1232
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1232,
+        1233
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1234,
+        1235
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1235,
+        1236
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        1236,
+        1237
+      ]
+    },
+    {
+      "kind": "borrow",
+      "span": [
+        1238,
+        1244
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1245,
+        1246
+      ],
+      "value": "q"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1247,
+        1248
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1249,
+        1254
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1254,
+        1255
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1256,
+        1257
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1258,
+        1261
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1262,
+        1263
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        1266,
+        1269
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1270,
+        1271
+      ],
+      "value": "f"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1272,
+        1273
+      ]
+    },
+    {
+      "kind": "\\",
+      "span": [
+        1274,
+        1275
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        1275,
+        1276
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1276,
+        1281
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "{",
+      "span": [
+        1282,
+        1283
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1284,
+        1285
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1286,
+        1287
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1288,
+        1289
+      ],
+      "value": "u"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1289,
+        1290
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1291,
+        1292
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1293,
+        1294
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1295,
+        1296
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "}",
+      "span": [
+        1297,
+        1298
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1298,
+        1299
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        1300,
+        1302
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1303,
+        1304
+      ],
+      "value": "u"
+    },
+    {
+      "kind": "+",
+      "span": [
+        1305,
+        1306
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1307,
+        1308
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1311,
+        1312
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "+",
+      "span": [
+        1313,
+        1314
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1315,
+        1316
+      ],
+      "value": "a"
+    },
+    {
+      "kind": "+",
+      "span": [
+        1317,
+        1318
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1319,
+        1320
+      ],
+      "value": "b"
+    },
+    {
+      "kind": "+",
+      "span": [
+        1321,
+        1322
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1323,
+        1324
+      ],
+      "value": "q"
+    },
+    {
+      "kind": ".",
+      "span": [
+        1324,
+        1325
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1325,
+        1326
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "+",
+      "span": [
+        1327,
+        1328
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1329,
+        1330
+      ],
+      "value": "f"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1330,
+        1331
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1331,
+        1332
+      ],
+      "value": "q"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1332,
+        1333
+      ]
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        127,
+        127
+      ]
+    },
+    {
+      "kind": "type",
+      "span": [
+        127,
         131
       ]
     },
@@ -2225,426 +3350,402 @@
       "kind": "uid",
       "span": [
         132,
-        136
-      ],
-      "value": "Line"
-    },
-    {
-      "kind": "(",
-      "span": [
-        136,
         137
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        137,
-        142
-      ],
-      "value": "Point"
-    },
-    {
-      "kind": ",",
-      "span": [
-        142,
-        143
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        144,
-        149
-      ],
-      "value": "Point"
-    },
-    {
-      "kind": ")",
-      "span": [
-        149,
-        150
-      ]
-    },
-    {
-      "kind": "|",
-      "span": [
-        151,
-        152
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        153,
-        157
-      ],
-      "value": "Poly"
-    },
-    {
-      "kind": "(",
-      "span": [
-        157,
-        158
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        158,
-        162
-      ],
-      "value": "List"
-    },
-    {
-      "kind": "(",
-      "span": [
-        162,
-        163
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        163,
-        168
-      ],
-      "value": "Point"
-    },
-    {
-      "kind": ")",
-      "span": [
-        168,
-        169
-      ]
-    },
-    {
-      "kind": ")",
-      "span": [
-        169,
-        170
-      ]
-    },
-    {
-      "kind": "v;",
-      "span": [
-        170,
-        170
-      ]
-    },
-    {
-      "kind": "pattern",
-      "span": [
-        172,
-        179
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        180,
-        184
-      ],
-      "value": "Diag"
-    },
-    {
-      "kind": "(",
-      "span": [
-        184,
-        185
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        185,
-        186
-      ],
-      "value": "n"
-    },
-    {
-      "kind": ")",
-      "span": [
-        186,
-        187
-      ]
-    },
-    {
-      "kind": "for",
-      "span": [
-        188,
-        191
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        192,
-        197
       ],
       "value": "Point"
     },
     {
       "kind": "=",
       "span": [
-        198,
-        199
-      ]
-    },
-    {
-      "kind": "v{",
-      "span": [
-        202,
-        202
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        202,
-        206
-      ],
-      "value": "view"
-    },
-    {
-      "kind": "\\",
-      "span": [
-        207,
-        208
-      ]
-    },
-    {
-      "kind": "(",
-      "span": [
-        208,
-        209
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        209,
-        210
-      ],
-      "value": "p"
-    },
-    {
-      "kind": ")",
-      "span": [
-        210,
-        211
-      ]
-    },
-    {
-      "kind": "->",
-      "span": [
-        212,
-        214
-      ]
-    },
-    {
-      "kind": "if",
-      "span": [
-        215,
-        217
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        218,
-        219
-      ],
-      "value": "p"
-    },
-    {
-      "kind": ".",
-      "span": [
-        219,
-        220
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        220,
-        221
-      ],
-      "value": "x"
-    },
-    {
-      "kind": "==",
-      "span": [
-        222,
-        224
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        225,
-        226
-      ],
-      "value": "p"
-    },
-    {
-      "kind": ".",
-      "span": [
-        226,
-        227
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        227,
-        228
-      ],
-      "value": "y"
-    },
-    {
-      "kind": "then",
-      "span": [
-        229,
-        233
+        138,
+        139
       ]
     },
     {
       "kind": "uid",
       "span": [
-        234,
-        238
-      ],
-      "value": "Some"
-    },
-    {
-      "kind": "(",
-      "span": [
-        238,
-        239
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        239,
-        240
-      ],
-      "value": "p"
-    },
-    {
-      "kind": ".",
-      "span": [
-        240,
-        241
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        241,
-        242
-      ],
-      "value": "x"
-    },
-    {
-      "kind": ")",
-      "span": [
-        242,
-        243
-      ]
-    },
-    {
-      "kind": "else",
-      "span": [
-        244,
-        248
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        249,
-        253
-      ],
-      "value": "None"
-    },
-    {
-      "kind": "v;",
-      "span": [
-        253,
-        253
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        256,
-        260
-      ],
-      "value": "make"
-    },
-    {
-      "kind": "\\",
-      "span": [
-        261,
-        262
-      ]
-    },
-    {
-      "kind": "(",
-      "span": [
-        262,
-        263
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        263,
-        264
-      ],
-      "value": "n"
-    },
-    {
-      "kind": ")",
-      "span": [
-        264,
-        265
-      ]
-    },
-    {
-      "kind": "->",
-      "span": [
-        266,
-        268
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        269,
-        274
+        140,
+        145
       ],
       "value": "Point"
     },
     {
       "kind": "{",
       "span": [
-        275,
-        276
+        146,
+        147
       ]
     },
     {
       "kind": "ident",
       "span": [
-        277,
-        278
+        148,
+        149
       ],
       "value": "x"
     },
     {
+      "kind": ":",
+      "span": [
+        149,
+        150
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        151,
+        154
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        154,
+        155
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        156,
+        157
+      ],
+      "value": "y"
+    },
+    {
+      "kind": ":",
+      "span": [
+        157,
+        158
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        159,
+        162
+      ]
+    },
+    {
+      "kind": "}",
+      "span": [
+        163,
+        164
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        164,
+        164
+      ]
+    },
+    {
+      "kind": "type",
+      "span": [
+        166,
+        170
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        171,
+        176
+      ],
+      "value": "Shape"
+    },
+    {
       "kind": "=",
+      "span": [
+        177,
+        178
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        179,
+        182
+      ],
+      "value": "Dot"
+    },
+    {
+      "kind": "|",
+      "span": [
+        183,
+        184
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        185,
+        189
+      ],
+      "value": "Line"
+    },
+    {
+      "kind": "(",
+      "span": [
+        189,
+        190
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        190,
+        195
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": ",",
+      "span": [
+        195,
+        196
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        197,
+        202
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": ")",
+      "span": [
+        202,
+        203
+      ]
+    },
+    {
+      "kind": "|",
+      "span": [
+        204,
+        205
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        206,
+        210
+      ],
+      "value": "Poly"
+    },
+    {
+      "kind": "(",
+      "span": [
+        210,
+        211
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        211,
+        215
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        215,
+        216
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        216,
+        221
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": ")",
+      "span": [
+        221,
+        222
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        222,
+        223
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        223,
+        223
+      ]
+    },
+    {
+      "kind": "pattern",
+      "span": [
+        225,
+        232
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        233,
+        237
+      ],
+      "value": "Diag"
+    },
+    {
+      "kind": "(",
+      "span": [
+        237,
+        238
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        238,
+        239
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ")",
+      "span": [
+        239,
+        240
+      ]
+    },
+    {
+      "kind": "for",
+      "span": [
+        241,
+        244
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        245,
+        250
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "=",
+      "span": [
+        251,
+        252
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        255,
+        255
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        255,
+        259
+      ],
+      "value": "view"
+    },
+    {
+      "kind": "\\",
+      "span": [
+        260,
+        261
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        261,
+        262
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        262,
+        263
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ")",
+      "span": [
+        263,
+        264
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        265,
+        267
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        268,
+        270
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        271,
+        272
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ".",
+      "span": [
+        272,
+        273
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        273,
+        274
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "==",
+      "span": [
+        275,
+        277
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        278,
+        279
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ".",
       "span": [
         279,
         280
@@ -2653,484 +3754,461 @@
     {
       "kind": "ident",
       "span": [
-        281,
-        282
-      ],
-      "value": "n"
-    },
-    {
-      "kind": ",",
-      "span": [
-        282,
-        283
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        284,
-        285
+        280,
+        281
       ],
       "value": "y"
     },
     {
-      "kind": "=",
+      "kind": "then",
       "span": [
-        286,
-        287
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        288,
-        289
-      ],
-      "value": "n"
-    },
-    {
-      "kind": "}",
-      "span": [
-        290,
-        291
-      ]
-    },
-    {
-      "kind": "v}",
-      "span": [
-        291,
-        291
-      ]
-    },
-    {
-      "kind": "v;",
-      "span": [
-        291,
-        291
-      ]
-    },
-    {
-      "kind": "fn",
-      "span": [
-        293,
-        295
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        296,
-        304
-      ],
-      "value": "classify"
-    },
-    {
-      "kind": "(",
-      "span": [
-        304,
-        305
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        305,
-        306
-      ],
-      "value": "s"
-    },
-    {
-      "kind": ":",
-      "span": [
-        307,
-        308
+        282,
+        286
       ]
     },
     {
       "kind": "uid",
       "span": [
-        309,
-        314
+        287,
+        291
       ],
-      "value": "Shape"
+      "value": "Some"
+    },
+    {
+      "kind": "(",
+      "span": [
+        291,
+        292
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        292,
+        293
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ".",
+      "span": [
+        293,
+        294
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        294,
+        295
+      ],
+      "value": "x"
     },
     {
       "kind": ")",
+      "span": [
+        295,
+        296
+      ]
+    },
+    {
+      "kind": "else",
+      "span": [
+        297,
+        301
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        302,
+        306
+      ],
+      "value": "None"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        306,
+        306
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        309,
+        313
+      ],
+      "value": "make"
+    },
+    {
+      "kind": "\\",
       "span": [
         314,
         315
       ]
     },
     {
-      "kind": ":",
+      "kind": "(",
       "span": [
-        316,
-        317
-      ]
-    },
-    {
-      "kind": "Int",
-      "span": [
-        318,
-        321
-      ]
-    },
-    {
-      "kind": "=",
-      "span": [
-        322,
-        323
-      ]
-    },
-    {
-      "kind": "v{",
-      "span": [
-        326,
-        326
-      ]
-    },
-    {
-      "kind": "match",
-      "span": [
-        326,
-        331
+        315,
+        316
       ]
     },
     {
       "kind": "ident",
       "span": [
-        332,
-        333
+        316,
+        317
       ],
-      "value": "s"
+      "value": "n"
     },
     {
-      "kind": "of",
+      "kind": ")",
       "span": [
-        334,
-        336
+        317,
+        318
       ]
     },
     {
-      "kind": "v{",
+      "kind": "->",
       "span": [
-        341,
-        341
+        319,
+        321
       ]
     },
     {
       "kind": "uid",
       "span": [
-        341,
-        344
-      ],
-      "value": "Dot"
-    },
-    {
-      "kind": "=>",
-      "span": [
-        345,
-        347
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        348,
-        349
-      ],
-      "value": "0"
-    },
-    {
-      "kind": "v;",
-      "span": [
-        349,
-        349
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        354,
-        358
-      ],
-      "value": "Line"
-    },
-    {
-      "kind": "(",
-      "span": [
-        358,
-        359
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        359,
-        364
+        322,
+        327
       ],
       "value": "Point"
     },
     {
       "kind": "{",
       "span": [
-        365,
-        366
+        328,
+        329
       ]
     },
     {
       "kind": "ident",
       "span": [
-        367,
-        368
+        330,
+        331
       ],
       "value": "x"
     },
     {
       "kind": "=",
       "span": [
-        369,
-        370
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        371,
-        372
-      ],
-      "value": "0"
-    },
-    {
-      "kind": ",",
-      "span": [
-        372,
-        373
+        332,
+        333
       ]
     },
     {
       "kind": "ident",
       "span": [
-        374,
-        375
+        334,
+        335
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ",",
+      "span": [
+        335,
+        336
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        337,
+        338
       ],
       "value": "y"
     },
     {
       "kind": "=",
       "span": [
-        376,
-        377
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        378,
-        379
-      ],
-      "value": "0"
-    },
-    {
-      "kind": "}",
-      "span": [
-        380,
-        381
-      ]
-    },
-    {
-      "kind": ",",
-      "span": [
-        381,
-        382
+        339,
+        340
       ]
     },
     {
       "kind": "ident",
       "span": [
-        383,
-        384
+        341,
+        342
       ],
-      "value": "_"
+      "value": "n"
     },
     {
-      "kind": ")",
+      "kind": "}",
       "span": [
-        384,
-        385
+        343,
+        344
       ]
     },
     {
-      "kind": "=>",
+      "kind": "v}",
       "span": [
-        386,
-        388
+        344,
+        344
       ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        389,
-        390
-      ],
-      "value": "1"
     },
     {
       "kind": "v;",
       "span": [
-        390,
-        390
+        344,
+        344
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        346,
+        348
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        349,
+        357
+      ],
+      "value": "classify"
+    },
+    {
+      "kind": "(",
+      "span": [
+        357,
+        358
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        358,
+        359
+      ],
+      "value": "s"
+    },
+    {
+      "kind": ":",
+      "span": [
+        360,
+        361
       ]
     },
     {
       "kind": "uid",
       "span": [
-        395,
-        399
+        362,
+        367
+      ],
+      "value": "Shape"
+    },
+    {
+      "kind": ")",
+      "span": [
+        367,
+        368
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        369,
+        370
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        371,
+        374
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        375,
+        376
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        379,
+        379
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        379,
+        384
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        385,
+        386
+      ],
+      "value": "s"
+    },
+    {
+      "kind": "of",
+      "span": [
+        387,
+        389
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        394,
+        394
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        394,
+        397
+      ],
+      "value": "Dot"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        398,
+        400
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        401,
+        402
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        402,
+        402
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        407,
+        411
       ],
       "value": "Line"
     },
     {
       "kind": "(",
       "span": [
-        399,
-        400
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        400,
-        401
-      ],
-      "value": "a"
-    },
-    {
-      "kind": ",",
-      "span": [
-        401,
-        402
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        403,
-        404
-      ],
-      "value": "b"
-    },
-    {
-      "kind": ")",
-      "span": [
-        404,
-        405
-      ]
-    },
-    {
-      "kind": "if",
-      "span": [
-        406,
-        408
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        409,
-        410
-      ],
-      "value": "a"
-    },
-    {
-      "kind": ".",
-      "span": [
-        410,
-        411
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
         411,
         412
-      ],
-      "value": "x"
-    },
-    {
-      "kind": "==",
-      "span": [
-        413,
-        415
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        416,
-        417
-      ],
-      "value": "b"
-    },
-    {
-      "kind": ".",
-      "span": [
-        417,
-        418
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        418,
-        419
-      ],
-      "value": "x"
-    },
-    {
-      "kind": "=>",
-      "span": [
-        420,
-        422
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        423,
-        424
-      ],
-      "value": "2"
-    },
-    {
-      "kind": "v;",
-      "span": [
-        424,
-        424
       ]
     },
     {
       "kind": "uid",
       "span": [
-        429,
-        433
+        412,
+        417
       ],
-      "value": "Poly"
+      "value": "Point"
     },
     {
-      "kind": "(",
+      "kind": "{",
+      "span": [
+        418,
+        419
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        420,
+        421
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "=",
+      "span": [
+        422,
+        423
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        424,
+        425
+      ],
+      "value": "0"
+    },
+    {
+      "kind": ",",
+      "span": [
+        425,
+        426
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        427,
+        428
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "=",
+      "span": [
+        429,
+        430
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        431,
+        432
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "}",
       "span": [
         433,
         434
       ]
     },
     {
-      "kind": "uid",
+      "kind": ",",
       "span": [
         434,
+        435
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        436,
         437
       ],
-      "value": "Nil"
+      "value": "_"
     },
     {
       "kind": ")",
@@ -3152,7 +4230,7 @@
         442,
         443
       ],
-      "value": "3"
+      "value": "1"
     },
     {
       "kind": "v;",
@@ -3167,7 +4245,7 @@
         448,
         452
       ],
-      "value": "Poly"
+      "value": "Line"
     },
     {
       "kind": "(",
@@ -3177,538 +4255,549 @@
       ]
     },
     {
-      "kind": "uid",
+      "kind": "ident",
       "span": [
         453,
-        457
-      ],
-      "value": "Cons"
-    },
-    {
-      "kind": "(",
-      "span": [
-        457,
-        458
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        458,
-        459
-      ],
-      "value": "p"
-    },
-    {
-      "kind": ",",
-      "span": [
-        459,
-        460
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        461,
-        464
-      ],
-      "value": "Nil"
-    },
-    {
-      "kind": ")",
-      "span": [
-        464,
-        465
-      ]
-    },
-    {
-      "kind": ")",
-      "span": [
-        465,
-        466
-      ]
-    },
-    {
-      "kind": "=>",
-      "span": [
-        467,
-        469
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        470,
-        471
-      ],
-      "value": "p"
-    },
-    {
-      "kind": ".",
-      "span": [
-        471,
-        472
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        472,
-        473
-      ],
-      "value": "x"
-    },
-    {
-      "kind": "v;",
-      "span": [
-        473,
-        473
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        478,
-        479
-      ],
-      "value": "_"
-    },
-    {
-      "kind": "=>",
-      "span": [
-        480,
-        482
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        483,
-        484
-      ],
-      "value": "9"
-    },
-    {
-      "kind": "v}",
-      "span": [
-        484,
-        484
-      ]
-    },
-    {
-      "kind": "v}",
-      "span": [
-        484,
-        484
-      ]
-    },
-    {
-      "kind": "v;",
-      "span": [
-        484,
-        484
-      ]
-    },
-    {
-      "kind": "fn",
-      "span": [
-        486,
-        488
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        489,
-        497
-      ],
-      "value": "literals"
-    },
-    {
-      "kind": "(",
-      "span": [
-        497,
-        498
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        498,
-        499
-      ],
-      "value": "v"
-    },
-    {
-      "kind": ":",
-      "span": [
-        500,
-        501
-      ]
-    },
-    {
-      "kind": "Int",
-      "span": [
-        502,
-        505
-      ]
-    },
-    {
-      "kind": ",",
-      "span": [
-        505,
-        506
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        507,
-        508
-      ],
-      "value": "c"
-    },
-    {
-      "kind": ":",
-      "span": [
-        509,
-        510
-      ]
-    },
-    {
-      "kind": "Char",
-      "span": [
-        511,
-        515
-      ]
-    },
-    {
-      "kind": ",",
-      "span": [
-        515,
-        516
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        517,
-        518
-      ],
-      "value": "f"
-    },
-    {
-      "kind": ":",
-      "span": [
-        519,
-        520
-      ]
-    },
-    {
-      "kind": "Float",
-      "span": [
-        521,
-        526
-      ]
-    },
-    {
-      "kind": ",",
-      "span": [
-        526,
-        527
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        528,
-        529
-      ],
-      "value": "b"
-    },
-    {
-      "kind": ":",
-      "span": [
-        530,
-        531
-      ]
-    },
-    {
-      "kind": "Bool",
-      "span": [
-        532,
-        536
-      ]
-    },
-    {
-      "kind": ")",
-      "span": [
-        536,
-        537
-      ]
-    },
-    {
-      "kind": ":",
-      "span": [
-        538,
-        539
-      ]
-    },
-    {
-      "kind": "Int",
-      "span": [
-        540,
-        543
-      ]
-    },
-    {
-      "kind": "=",
-      "span": [
-        544,
-        545
-      ]
-    },
-    {
-      "kind": "v{",
-      "span": [
-        548,
-        548
-      ]
-    },
-    {
-      "kind": "match",
-      "span": [
-        548,
-        553
-      ]
-    },
-    {
-      "kind": "(",
-      "span": [
-        554,
-        555
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        555,
-        556
-      ],
-      "value": "v"
-    },
-    {
-      "kind": ",",
-      "span": [
-        556,
-        557
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        558,
-        559
-      ],
-      "value": "c"
-    },
-    {
-      "kind": ",",
-      "span": [
-        559,
-        560
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        561,
-        562
-      ],
-      "value": "f"
-    },
-    {
-      "kind": ",",
-      "span": [
-        562,
-        563
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        564,
-        565
-      ],
-      "value": "b"
-    },
-    {
-      "kind": ")",
-      "span": [
-        565,
-        566
-      ]
-    },
-    {
-      "kind": "of",
-      "span": [
-        567,
-        569
-      ]
-    },
-    {
-      "kind": "v{",
-      "span": [
-        574,
-        574
-      ]
-    },
-    {
-      "kind": "(",
-      "span": [
-        574,
-        575
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        575,
-        576
-      ],
-      "value": "0"
-    },
-    {
-      "kind": ",",
-      "span": [
-        576,
-        577
-      ]
-    },
-    {
-      "kind": "char",
-      "span": [
-        578,
-        581
+        454
       ],
       "value": "a"
     },
     {
       "kind": ",",
       "span": [
-        581,
-        582
+        454,
+        455
       ]
     },
     {
-      "kind": "float",
+      "kind": "ident",
       "span": [
-        583,
-        586
+        456,
+        457
       ],
-      "value": "1.5"
-    },
-    {
-      "kind": ",",
-      "span": [
-        586,
-        587
-      ]
-    },
-    {
-      "kind": "true",
-      "span": [
-        588,
-        592
-      ]
+      "value": "b"
     },
     {
       "kind": ")",
       "span": [
-        592,
-        593
+        457,
+        458
       ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        459,
+        461
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        462,
+        463
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ".",
+      "span": [
+        463,
+        464
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        464,
+        465
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "==",
+      "span": [
+        466,
+        468
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        469,
+        470
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ".",
+      "span": [
+        470,
+        471
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        471,
+        472
+      ],
+      "value": "x"
     },
     {
       "kind": "=>",
       "span": [
-        594,
-        596
+        473,
+        475
       ]
     },
     {
       "kind": "int",
       "span": [
-        597,
-        598
+        476,
+        477
       ],
-      "value": "1"
+      "value": "2"
     },
     {
       "kind": "v;",
       "span": [
-        598,
+        477,
+        477
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        482,
+        486
+      ],
+      "value": "Poly"
+    },
+    {
+      "kind": "(",
+      "span": [
+        486,
+        487
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        487,
+        490
+      ],
+      "value": "Nil"
+    },
+    {
+      "kind": ")",
+      "span": [
+        490,
+        491
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        492,
+        494
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        495,
+        496
+      ],
+      "value": "3"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        496,
+        496
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        501,
+        505
+      ],
+      "value": "Poly"
+    },
+    {
+      "kind": "(",
+      "span": [
+        505,
+        506
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        506,
+        510
+      ],
+      "value": "Cons"
+    },
+    {
+      "kind": "(",
+      "span": [
+        510,
+        511
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        511,
+        512
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ",",
+      "span": [
+        512,
+        513
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        514,
+        517
+      ],
+      "value": "Nil"
+    },
+    {
+      "kind": ")",
+      "span": [
+        517,
+        518
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        518,
+        519
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        520,
+        522
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        523,
+        524
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ".",
+      "span": [
+        524,
+        525
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        525,
+        526
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        526,
+        526
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        531,
+        532
+      ],
+      "value": "_"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        533,
+        535
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        536,
+        537
+      ],
+      "value": "9"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        537,
+        537
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        537,
+        537
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        537,
+        537
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        539,
+        541
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        542,
+        550
+      ],
+      "value": "literals"
+    },
+    {
+      "kind": "(",
+      "span": [
+        550,
+        551
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        551,
+        552
+      ],
+      "value": "v"
+    },
+    {
+      "kind": ":",
+      "span": [
+        553,
+        554
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        555,
+        558
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        558,
+        559
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        560,
+        561
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ":",
+      "span": [
+        562,
+        563
+      ]
+    },
+    {
+      "kind": "Char",
+      "span": [
+        564,
+        568
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        568,
+        569
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        570,
+        571
+      ],
+      "value": "f"
+    },
+    {
+      "kind": ":",
+      "span": [
+        572,
+        573
+      ]
+    },
+    {
+      "kind": "Float",
+      "span": [
+        574,
+        579
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        579,
+        580
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        581,
+        582
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ":",
+      "span": [
+        583,
+        584
+      ]
+    },
+    {
+      "kind": "Bool",
+      "span": [
+        585,
+        589
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        589,
+        590
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        591,
+        592
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        593,
+        596
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        597,
         598
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        601,
+        601
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        601,
+        606
       ]
     },
     {
       "kind": "(",
       "span": [
-        603,
-        604
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        604,
-        605
-      ],
-      "value": "n"
-    },
-    {
-      "kind": ",",
-      "span": [
-        605,
-        606
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
         607,
         608
-      ],
-      "value": "_"
+      ]
     },
     {
-      "kind": ",",
+      "kind": "ident",
       "span": [
         608,
         609
+      ],
+      "value": "v"
+    },
+    {
+      "kind": ",",
+      "span": [
+        609,
+        610
       ]
     },
     {
       "kind": "ident",
       "span": [
-        610,
-        611
+        611,
+        612
       ],
-      "value": "_"
+      "value": "c"
     },
     {
       "kind": ",",
       "span": [
-        611,
-        612
+        612,
+        613
       ]
     },
     {
-      "kind": "false",
+      "kind": "ident",
       "span": [
-        613,
-        618
+        614,
+        615
+      ],
+      "value": "f"
+    },
+    {
+      "kind": ",",
+      "span": [
+        615,
+        616
       ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        617,
+        618
+      ],
+      "value": "b"
     },
     {
       "kind": ")",
@@ -3718,303 +4807,323 @@
       ]
     },
     {
-      "kind": "=>",
+      "kind": "of",
       "span": [
         620,
         622
       ]
     },
     {
-      "kind": "ident",
+      "kind": "v{",
       "span": [
-        623,
-        624
-      ],
-      "value": "n"
-    },
-    {
-      "kind": "v;",
-      "span": [
-        624,
-        624
+        627,
+        627
       ]
     },
     {
-      "kind": "ident",
+      "kind": "(",
       "span": [
-        629,
-        630
-      ],
-      "value": "_"
-    },
-    {
-      "kind": "=>",
-      "span": [
-        631,
-        633
+        627,
+        628
       ]
     },
     {
       "kind": "int",
       "span": [
+        628,
+        629
+      ],
+      "value": "0"
+    },
+    {
+      "kind": ",",
+      "span": [
+        629,
+        630
+      ]
+    },
+    {
+      "kind": "char",
+      "span": [
+        631,
+        634
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
         634,
         635
+      ]
+    },
+    {
+      "kind": "float",
+      "span": [
+        636,
+        639
       ],
-      "value": "2"
+      "value": "1.5"
     },
     {
-      "kind": "v}",
+      "kind": ",",
       "span": [
-        635,
-        635
+        639,
+        640
       ]
     },
     {
-      "kind": "v}",
+      "kind": "true",
       "span": [
-        635,
-        635
+        641,
+        645
       ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        645,
+        646
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        647,
+        649
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        650,
+        651
+      ],
+      "value": "1"
     },
     {
       "kind": "v;",
       "span": [
-        635,
-        635
-      ]
-    },
-    {
-      "kind": "fn",
-      "span": [
-        637,
-        639
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        640,
+        651,
         651
-      ],
-      "value": "record_rest"
+      ]
     },
     {
       "kind": "(",
       "span": [
-        651,
-        652
+        656,
+        657
       ]
     },
     {
       "kind": "ident",
       "span": [
-        652,
-        653
+        657,
+        658
       ],
-      "value": "p"
+      "value": "n"
     },
     {
-      "kind": ":",
+      "kind": ",",
       "span": [
-        654,
-        655
+        658,
+        659
       ]
     },
     {
-      "kind": "uid",
+      "kind": "ident",
       "span": [
-        656,
+        660,
         661
       ],
-      "value": "Point"
+      "value": "_"
     },
     {
-      "kind": ")",
+      "kind": ",",
       "span": [
         661,
         662
       ]
     },
     {
-      "kind": ":",
+      "kind": "ident",
       "span": [
         663,
         664
-      ]
+      ],
+      "value": "_"
     },
     {
-      "kind": "Int",
+      "kind": ",",
       "span": [
-        665,
-        668
+        664,
+        665
       ]
     },
     {
-      "kind": "=",
+      "kind": "false",
       "span": [
-        669,
-        670
+        666,
+        671
       ]
     },
     {
-      "kind": "v{",
+      "kind": ")",
+      "span": [
+        671,
+        672
+      ]
+    },
+    {
+      "kind": "=>",
       "span": [
         673,
-        673
-      ]
-    },
-    {
-      "kind": "match",
-      "span": [
-        673,
-        678
+        675
       ]
     },
     {
       "kind": "ident",
       "span": [
-        679,
-        680
+        676,
+        677
       ],
-      "value": "p"
+      "value": "n"
     },
     {
-      "kind": "of",
+      "kind": "v;",
       "span": [
-        681,
-        683
+        677,
+        677
       ]
     },
     {
-      "kind": "v{",
+      "kind": "ident",
+      "span": [
+        682,
+        683
+      ],
+      "value": "_"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        684,
+        686
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        687,
+        688
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "v}",
       "span": [
         688,
         688
       ]
     },
     {
-      "kind": "uid",
+      "kind": "v}",
       "span": [
         688,
-        693
-      ],
-      "value": "Point"
-    },
-    {
-      "kind": "{",
-      "span": [
-        694,
-        695
+        688
       ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        696,
-        697
-      ],
-      "value": "x"
-    },
-    {
-      "kind": "=",
-      "span": [
-        698,
-        699
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        700,
-        701
-      ],
-      "value": "0"
-    },
-    {
-      "kind": ",",
-      "span": [
-        701,
-        702
-      ]
-    },
-    {
-      "kind": "..",
-      "span": [
-        703,
-        705
-      ]
-    },
-    {
-      "kind": "}",
-      "span": [
-        706,
-        707
-      ]
-    },
-    {
-      "kind": "=>",
-      "span": [
-        708,
-        710
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        711,
-        712
-      ],
-      "value": "0"
     },
     {
       "kind": "v;",
       "span": [
-        712,
-        712
+        688,
+        688
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        690,
+        692
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        693,
+        704
+      ],
+      "value": "record_rest"
+    },
+    {
+      "kind": "(",
+      "span": [
+        704,
+        705
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        705,
+        706
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ":",
+      "span": [
+        707,
+        708
       ]
     },
     {
       "kind": "uid",
       "span": [
-        717,
-        722
+        709,
+        714
       ],
       "value": "Point"
     },
     {
-      "kind": "{",
+      "kind": ")",
       "span": [
-        723,
-        724
+        714,
+        715
       ]
     },
     {
-      "kind": "ident",
+      "kind": ":",
       "span": [
-        725,
-        726
-      ],
-      "value": "x"
+        716,
+        717
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        718,
+        721
+      ]
     },
     {
       "kind": "=",
       "span": [
-        727,
-        728
+        722,
+        723
       ]
     },
     {
-      "kind": "ident",
+      "kind": "v{",
       "span": [
-        729,
-        730
-      ],
-      "value": "x"
+        726,
+        726
+      ]
     },
     {
-      "kind": ",",
+      "kind": "match",
       "span": [
-        730,
+        726,
         731
       ]
     },
@@ -4024,203 +5133,198 @@
         732,
         733
       ],
-      "value": "y"
-    },
-    {
-      "kind": "=",
-      "span": [
-        734,
-        735
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        736,
-        737
-      ],
-      "value": "y"
-    },
-    {
-      "kind": "}",
-      "span": [
-        738,
-        739
-      ]
-    },
-    {
-      "kind": "=>",
-      "span": [
-        740,
-        742
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        743,
-        744
-      ],
-      "value": "x"
-    },
-    {
-      "kind": "+",
-      "span": [
-        745,
-        746
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        747,
-        748
-      ],
-      "value": "y"
-    },
-    {
-      "kind": "v}",
-      "span": [
-        748,
-        748
-      ]
-    },
-    {
-      "kind": "v}",
-      "span": [
-        748,
-        748
-      ]
-    },
-    {
-      "kind": "v;",
-      "span": [
-        748,
-        748
-      ]
-    },
-    {
-      "kind": "fn",
-      "span": [
-        750,
-        752
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        753,
-        758
-      ],
-      "value": "views"
-    },
-    {
-      "kind": "(",
-      "span": [
-        758,
-        759
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        759,
-        760
-      ],
       "value": "p"
     },
     {
-      "kind": ":",
+      "kind": "of",
       "span": [
-        761,
-        762
+        734,
+        736
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        741,
+        741
       ]
     },
     {
       "kind": "uid",
       "span": [
-        763,
-        768
+        741,
+        746
       ],
       "value": "Point"
     },
     {
-      "kind": ")",
+      "kind": "{",
       "span": [
-        768,
-        769
+        747,
+        748
       ]
     },
     {
-      "kind": ":",
+      "kind": "ident",
       "span": [
-        770,
-        771
-      ]
-    },
-    {
-      "kind": "Int",
-      "span": [
-        772,
-        775
-      ]
+        749,
+        750
+      ],
+      "value": "x"
     },
     {
       "kind": "=",
+      "span": [
+        751,
+        752
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        753,
+        754
+      ],
+      "value": "0"
+    },
+    {
+      "kind": ",",
+      "span": [
+        754,
+        755
+      ]
+    },
+    {
+      "kind": "..",
+      "span": [
+        756,
+        758
+      ]
+    },
+    {
+      "kind": "}",
+      "span": [
+        759,
+        760
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        761,
+        763
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        764,
+        765
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        765,
+        765
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        770,
+        775
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "{",
       "span": [
         776,
         777
       ]
     },
     {
-      "kind": "v{",
+      "kind": "ident",
       "span": [
-        780,
-        780
-      ]
+        778,
+        779
+      ],
+      "value": "x"
     },
     {
-      "kind": "match",
+      "kind": "=",
       "span": [
         780,
-        785
+        781
       ]
     },
     {
       "kind": "ident",
       "span": [
-        786,
-        787
+        782,
+        783
       ],
-      "value": "p"
+      "value": "x"
     },
     {
-      "kind": "of",
+      "kind": ",",
       "span": [
-        788,
-        790
+        783,
+        784
       ]
     },
     {
-      "kind": "v{",
+      "kind": "ident",
       "span": [
-        795,
+        785,
+        786
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "=",
+      "span": [
+        787,
+        788
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        789,
+        790
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "}",
+      "span": [
+        791,
+        792
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        793,
         795
       ]
     },
     {
-      "kind": "uid",
+      "kind": "ident",
       "span": [
-        795,
-        799
+        796,
+        797
       ],
-      "value": "Diag"
+      "value": "x"
     },
     {
-      "kind": "(",
+      "kind": "+",
       "span": [
-        799,
-        800
+        798,
+        799
       ]
     },
     {
@@ -4229,17 +5333,31 @@
         800,
         801
       ],
-      "value": "n"
+      "value": "y"
     },
     {
-      "kind": ")",
+      "kind": "v}",
       "span": [
         801,
-        802
+        801
       ]
     },
     {
-      "kind": "if",
+      "kind": "v}",
+      "span": [
+        801,
+        801
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        801,
+        801
+      ]
+    },
+    {
+      "kind": "fn",
       "span": [
         803,
         805
@@ -4249,156 +5367,1671 @@
       "kind": "ident",
       "span": [
         806,
-        807
-      ],
-      "value": "n"
-    },
-    {
-      "kind": ">",
-      "span": [
-        808,
-        809
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        810,
         811
       ],
-      "value": "3"
+      "value": "views"
     },
     {
-      "kind": "=>",
+      "kind": "(",
       "span": [
-        812,
-        814
+        811,
+        812
       ]
     },
     {
       "kind": "ident",
       "span": [
-        815,
-        816
+        812,
+        813
       ],
-      "value": "n"
+      "value": "p"
     },
     {
-      "kind": "*",
+      "kind": ":",
       "span": [
-        817,
-        818
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        819,
-        820
-      ],
-      "value": "2"
-    },
-    {
-      "kind": "v;",
-      "span": [
-        820,
-        820
+        814,
+        815
       ]
     },
     {
       "kind": "uid",
       "span": [
-        825,
-        829
+        816,
+        821
       ],
-      "value": "Diag"
+      "value": "Point"
     },
     {
-      "kind": "(",
+      "kind": ")",
+      "span": [
+        821,
+        822
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        823,
+        824
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        825,
+        828
+      ]
+    },
+    {
+      "kind": "=",
       "span": [
         829,
         830
       ]
     },
     {
+      "kind": "v{",
+      "span": [
+        833,
+        833
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        833,
+        838
+      ]
+    },
+    {
       "kind": "ident",
       "span": [
-        830,
-        831
+        839,
+        840
+      ],
+      "value": "p"
+    },
+    {
+      "kind": "of",
+      "span": [
+        841,
+        843
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        848,
+        848
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        848,
+        852
+      ],
+      "value": "Diag"
+    },
+    {
+      "kind": "(",
+      "span": [
+        852,
+        853
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        853,
+        854
       ],
       "value": "n"
     },
     {
       "kind": ")",
       "span": [
-        831,
-        832
+        854,
+        855
       ]
     },
     {
-      "kind": "=>",
+      "kind": "if",
       "span": [
-        833,
-        835
+        856,
+        858
       ]
     },
     {
       "kind": "ident",
       "span": [
-        836,
-        837
+        859,
+        860
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ">",
+      "span": [
+        861,
+        862
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        863,
+        864
+      ],
+      "value": "3"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        865,
+        867
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        868,
+        869
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "*",
+      "span": [
+        870,
+        871
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        872,
+        873
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        873,
+        873
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        878,
+        882
+      ],
+      "value": "Diag"
+    },
+    {
+      "kind": "(",
+      "span": [
+        882,
+        883
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        883,
+        884
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ")",
+      "span": [
+        884,
+        885
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        886,
+        888
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        889,
+        890
       ],
       "value": "n"
     },
     {
       "kind": "v;",
       "span": [
-        837,
-        837
+        890,
+        890
       ]
     },
     {
       "kind": "ident",
       "span": [
-        842,
-        843
+        895,
+        896
       ],
       "value": "_"
     },
     {
       "kind": "=>",
       "span": [
-        844,
-        846
+        897,
+        899
       ]
     },
     {
       "kind": "int",
       "span": [
-        847,
-        848
+        900,
+        901
       ],
       "value": "0"
     },
     {
       "kind": "v}",
       "span": [
-        848,
-        848
+        901,
+        901
       ]
     },
     {
       "kind": "v}",
       "span": [
-        848,
-        848
+        901,
+        901
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        901,
+        901
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        903,
+        905
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        906,
+        917
+      ],
+      "value": "alternation"
+    },
+    {
+      "kind": "(",
+      "span": [
+        917,
+        918
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        918,
+        919
+      ],
+      "value": "s"
+    },
+    {
+      "kind": ":",
+      "span": [
+        920,
+        921
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        922,
+        927
+      ],
+      "value": "Shape"
+    },
+    {
+      "kind": ")",
+      "span": [
+        927,
+        928
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        929,
+        930
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        931,
+        934
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        935,
+        936
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        939,
+        939
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        939,
+        944
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        945,
+        946
+      ],
+      "value": "s"
+    },
+    {
+      "kind": "of",
+      "span": [
+        947,
+        949
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        954,
+        954
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        954,
+        957
+      ],
+      "value": "Dot"
+    },
+    {
+      "kind": "|",
+      "span": [
+        958,
+        959
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        960,
+        964
+      ],
+      "value": "Poly"
+    },
+    {
+      "kind": "(",
+      "span": [
+        964,
+        965
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        965,
+        968
+      ],
+      "value": "Nil"
+    },
+    {
+      "kind": ")",
+      "span": [
+        968,
+        969
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        970,
+        972
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        973,
+        974
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        974,
+        974
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        979,
+        983
+      ],
+      "value": "Line"
+    },
+    {
+      "kind": "(",
+      "span": [
+        983,
+        984
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        984,
+        989
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "{",
+      "span": [
+        990,
+        991
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        992,
+        993
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "=",
+      "span": [
+        994,
+        995
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        996,
+        997
+      ],
+      "value": "0"
+    },
+    {
+      "kind": ",",
+      "span": [
+        997,
+        998
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        999,
+        1000
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1001,
+        1002
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1003,
+        1004
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "}",
+      "span": [
+        1005,
+        1006
+      ]
+    },
+    {
+      "kind": "|",
+      "span": [
+        1007,
+        1008
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1009,
+        1014
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "{",
+      "span": [
+        1015,
+        1016
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1017,
+        1018
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1019,
+        1020
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1021,
+        1022
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1022,
+        1023
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1024,
+        1025
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1026,
+        1027
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1028,
+        1029
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "}",
+      "span": [
+        1030,
+        1031
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        1031,
+        1032
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1033,
+        1034
+      ],
+      "value": "_"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1034,
+        1035
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1036,
+        1038
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1039,
+        1040
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1040,
+        1040
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1045,
+        1049
+      ],
+      "value": "Line"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1049,
+        1050
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1050,
+        1051
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1051,
+        1052
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1053,
+        1054
+      ],
+      "value": "_"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1054,
+        1055
+      ]
+    },
+    {
+      "kind": "|",
+      "span": [
+        1056,
+        1057
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1058,
+        1062
+      ],
+      "value": "Poly"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1062,
+        1063
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1063,
+        1067
+      ],
+      "value": "Cons"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1067,
+        1068
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1068,
+        1069
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1069,
+        1070
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1071,
+        1072
+      ],
+      "value": "_"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1072,
+        1073
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1073,
+        1074
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1075,
+        1077
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1078,
+        1079
+      ],
+      "value": "p"
+    },
+    {
+      "kind": ".",
+      "span": [
+        1079,
+        1080
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1080,
+        1081
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1081,
+        1081
       ]
     },
     {
       "kind": "v}",
       "span": [
-        848,
-        848
+        1081,
+        1081
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1081,
+        1081
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1083,
+        1085
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1086,
+        1098
+      ],
+      "value": "alt_literals"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1098,
+        1099
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1099,
+        1100
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1101,
+        1102
+      ]
+    },
+    {
+      "kind": "Char",
+      "span": [
+        1103,
+        1107
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        1107,
+        1108
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1109,
+        1110
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1111,
+        1112
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1113,
+        1116
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1116,
+        1117
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1118,
+        1119
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1120,
+        1123
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1124,
+        1125
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1128,
+        1128
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        1128,
+        1133
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        1134,
+        1135
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1135,
+        1136
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1136,
+        1137
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1138,
+        1139
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1139,
+        1140
+      ]
+    },
+    {
+      "kind": "of",
+      "span": [
+        1141,
+        1143
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1148,
+        1148
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        1148,
+        1149
+      ]
+    },
+    {
+      "kind": "char",
+      "span": [
+        1149,
+        1152
+      ],
+      "value": "a"
+    },
+    {
+      "kind": "|",
+      "span": [
+        1153,
+        1154
+      ]
+    },
+    {
+      "kind": "char",
+      "span": [
+        1155,
+        1158
+      ],
+      "value": "b"
+    },
+    {
+      "kind": "|",
+      "span": [
+        1159,
+        1160
+      ]
+    },
+    {
+      "kind": "char",
+      "span": [
+        1161,
+        1164
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1164,
+        1165
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1166,
+        1167
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "|",
+      "span": [
+        1168,
+        1169
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1170,
+        1171
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1171,
+        1172
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1173,
+        1175
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1176,
+        1177
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1177,
+        1177
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        1182,
+        1183
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1183,
+        1184
+      ],
+      "value": "_"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1184,
+        1185
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1186,
+        1187
+      ],
+      "value": "_"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1187,
+        1188
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1189,
+        1191
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1192,
+        1193
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1193,
+        1193
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1193,
+        1193
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1193,
+        1193
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1195,
+        1197
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1198,
+        1208
+      ],
+      "value": "param_pats"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1208,
+        1209
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1209,
+        1214
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "{",
+      "span": [
+        1215,
+        1216
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1217,
+        1218
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1219,
+        1220
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1221,
+        1222
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1222,
+        1223
+      ]
+    },
+    {
+      "kind": "..",
+      "span": [
+        1224,
+        1226
+      ]
+    },
+    {
+      "kind": "}",
+      "span": [
+        1227,
+        1228
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        1228,
+        1229
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        1230,
+        1231
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1231,
+        1232
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1232,
+        1233
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1234,
+        1235
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1235,
+        1236
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        1236,
+        1237
+      ]
+    },
+    {
+      "kind": "borrow",
+      "span": [
+        1238,
+        1244
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1245,
+        1246
+      ],
+      "value": "q"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1247,
+        1248
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1249,
+        1254
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1254,
+        1255
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1256,
+        1257
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1258,
+        1261
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1262,
+        1263
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1266,
+        1266
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        1266,
+        1269
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1270,
+        1271
+      ],
+      "value": "f"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1272,
+        1273
+      ]
+    },
+    {
+      "kind": "\\",
+      "span": [
+        1274,
+        1275
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        1275,
+        1276
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1276,
+        1281
+      ],
+      "value": "Point"
+    },
+    {
+      "kind": "{",
+      "span": [
+        1282,
+        1283
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1284,
+        1285
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1286,
+        1287
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1288,
+        1289
+      ],
+      "value": "u"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1289,
+        1290
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1291,
+        1292
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1293,
+        1294
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1295,
+        1296
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "}",
+      "span": [
+        1297,
+        1298
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1298,
+        1299
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        1300,
+        1302
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1303,
+        1304
+      ],
+      "value": "u"
+    },
+    {
+      "kind": "+",
+      "span": [
+        1305,
+        1306
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1307,
+        1308
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1308,
+        1308
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1311,
+        1312
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "+",
+      "span": [
+        1313,
+        1314
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1315,
+        1316
+      ],
+      "value": "a"
+    },
+    {
+      "kind": "+",
+      "span": [
+        1317,
+        1318
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1319,
+        1320
+      ],
+      "value": "b"
+    },
+    {
+      "kind": "+",
+      "span": [
+        1321,
+        1322
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1323,
+        1324
+      ],
+      "value": "q"
+    },
+    {
+      "kind": ".",
+      "span": [
+        1324,
+        1325
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1325,
+        1326
+      ],
+      "value": "y"
+    },
+    {
+      "kind": "+",
+      "span": [
+        1327,
+        1328
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1329,
+        1330
+      ],
+      "value": "f"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1330,
+        1331
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1331,
+        1332
+      ],
+      "value": "q"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1332,
+        1333
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1333,
+        1333
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1333,
+        1333
       ]
     }
   ],
@@ -4411,45 +7044,73 @@
       ]
     },
     {
-      "kind": "blank",
+      "kind": "comment",
       "span": [
-        111,
-        113
+        74,
+        126
       ]
     },
     {
       "kind": "blank",
       "span": [
-        170,
-        172
+        164,
+        166
       ]
     },
     {
       "kind": "blank",
       "span": [
-        291,
-        293
+        223,
+        225
       ]
     },
     {
       "kind": "blank",
       "span": [
-        484,
-        486
+        344,
+        346
       ]
     },
     {
       "kind": "blank",
       "span": [
-        635,
-        637
+        537,
+        539
       ]
     },
     {
       "kind": "blank",
       "span": [
-        748,
-        750
+        688,
+        690
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        801,
+        803
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        901,
+        903
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        1081,
+        1083
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        1193,
+        1195
       ]
     }
   ]

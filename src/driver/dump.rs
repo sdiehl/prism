@@ -7,14 +7,16 @@
 //! `crate::dump`, `dump_on`) resolves through the re-export in `mod.rs`, so the
 //! split is invisible to callers.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt::Write as _;
 use std::path::Path;
 
+use crate::core::cbpv::calls_in;
 use crate::core::fbip::borrow_sigs;
+use crate::core::fv::comp as fv_comp;
 use crate::core::{
-    captures, fip_annots, hash_program, insert_rc, pp_core_pretty, reuse, CoreFn, DepGraph, Digest,
-    HASH_SCHEME,
+    captures, core_identity_json, fip_annots, hash_program, insert_rc, pp_core_pretty, reuse,
+    scc_groups, Core, CoreFn, DepGraph, Digest, HASH_SCHEME,
 };
 use crate::error::{Error, SourceMap};
 use crate::hir::{HandlerResidual, NodeRes};
@@ -22,14 +24,14 @@ use crate::lex::lex;
 use crate::parse::parse;
 use crate::resolve::{default_roots, Root};
 use crate::sym::Sym;
-use crate::syntax::ast::{Core as CorePhase, Program, Span};
+use crate::syntax::ast::{Core as CorePhase, Expr, Program, Span, S};
 use crate::types::{show_effects, Checked, Dict, Type};
 use serde::Serialize;
 
 #[cfg(feature = "mlir")]
-use crate::codegen::emit_mlir;
+use prism_native::emit_mlir;
 #[cfg(feature = "native")]
-use crate::codegen::{emit_llvm_with_native_kont_table, native_kont_state_map};
+use prism_native::{emit_llvm_with_native_kont_table, native_kont_state_map};
 
 #[cfg(feature = "native")]
 use super::build::compiled;
@@ -96,6 +98,10 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // against. Deterministic, self-contained JSON, refusing malformed input.
         "syntax-tokens" => super::dump_syntax::syntax_tokens(src),
         "surface-syntax" => super::dump_syntax::surface_syntax(src),
+        // The syntax-boundary diagnostics export: every lex/parse refusal (or
+        // the empty list on acceptance) as a versioned artifact a Prism-written
+        // front end is diffed against. Never fails: refusal IS the payload.
+        "syntax-diagnostics" => Ok(super::dump_syntax::dump_syntax_diagnostics(src)),
         "types" => Ok(types_section(&check_on(src, roots)?)),
         "typespans" => {
             let (program, checked) = tooltip_checked_on(src, roots, cfg)?;
@@ -132,6 +138,26 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                 schema: TC_INPUT_SCHEMA,
                 compiler: COMPILER_VERSION,
                 body: tc_input_body(&program, &checked, src),
+            };
+            Ok(serde_json::to_string_pretty(&doc).unwrap_or_default())
+        }
+        // The traversable-body seam a Prism-written checker walks: each user
+        // function's resolved Core-phase body as a node-id-carrying tree. Every
+        // node's id is the `tc-facts` join key, so structure comes from here and
+        // type/resolution facts from there. Complements the declaration index
+        // (`tc-input`) and the node facts (`tc-facts`) without folding the tree
+        // into either.
+        "resolved-syntax" => {
+            let (program, _checked) = tooltip_checked_on(src, roots, cfg)?;
+            let user = SourceMap::new(src).user();
+            let doc = ResolvedSyntax {
+                schema: RESOLVED_SYNTAX_SCHEMA,
+                compiler: COMPILER_VERSION,
+                source: ResolvedSource {
+                    digest: crate::core::hash::hex(user).to_string(),
+                    text: user.to_string(),
+                },
+                functions: resolved_syntax_body(&program, src),
             };
             Ok(serde_json::to_string_pretty(&doc).unwrap_or_default())
         }
@@ -198,6 +224,20 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         "core-json" => {
             let (_, _, core) = frontend(src, roots, cfg)?;
             Ok(crate::core::core_to_json(&core))
+        }
+        // The identity inputs of the entry file's own definitions: pre-optimizer
+        // Core tagged by the identifiers the content hash commits to, each
+        // definition's dictionary arity and elaboration metadata, and the content
+        // hashes of everything it depends on. `core-json` cannot serve this: it
+        // renders optimized Core in the Lean model's vocabulary and carries
+        // neither the dictionary arity nor the metadata, so a reader of it cannot
+        // reproduce a hash. This artifact is exactly what `hash_group` consumes,
+        // so a program that reads it can recompute the same digests.
+        "core-identity" => {
+            let (program, checked, core) = elaborated(src, roots)?;
+            let metas = hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program));
+            let hashes = hash_program(&core, &metas);
+            Ok(core_identity(&core, &metas, &hashes, &prelude_fn_names()?))
         }
         "core-hash" => {
             let (program, checked, core) = elaborated(src, roots)?;
@@ -712,6 +752,61 @@ const ELAB_INPUT_SCHEMA: &str = "prism-elab-input-v1";
 // version so the front-end and syntax seams (and any future one) never re-type
 // the `env!`.
 pub(super) const COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+// Render the identity export for the entry file's own definitions.
+//
+// The prelude is elided the way `dump core` elides it, so the artifact stays the
+// size of the user's program rather than the size of the standard library.
+//
+// What the elided definitions contribute to identity is not dropped, only
+// summarized: every symbol a kept body references but does not define is
+// exported with its content hash, which is precisely the substituted form the
+// encoder writes for it. A reader therefore reproduces the kept definitions'
+// hashes from this artifact alone, the same way `hash_group` reproduces a stored
+// group's hashes from its members plus its dependency hashes.
+fn core_identity(
+    core: &Core,
+    metas: &BTreeMap<Sym, String>,
+    hashes: &crate::core::Hashes,
+    prelude: &HashSet<Sym>,
+) -> String {
+    let defs: Vec<&CoreFn> = core
+        .fns
+        .iter()
+        .filter(|f| !prelude.contains(&f.name))
+        .collect();
+    let kept: BTreeSet<Sym> = defs.iter().map(|f| f.name).collect();
+    // Every symbol a kept body can hand to the encoder's reference resolver: a
+    // call head or a first-class occurrence, gathered exactly as the hash's own
+    // dependency scan gathers them.
+    let mut referenced = BTreeSet::new();
+    for f in &defs {
+        let mut calls = Vec::new();
+        calls_in(&f.body, &mut calls);
+        referenced.extend(calls);
+        referenced.extend(fv_comp(&f.body));
+    }
+    let external: Vec<(Sym, Digest)> = referenced
+        .into_iter()
+        .filter(|s| !kept.contains(s))
+        .filter_map(|s| hashes.get(&s).map(|h| (s, h.clone())))
+        .collect();
+    // The recursive-group partition, callee-first, restricted to the kept
+    // definitions. A component never straddles the boundary: the prelude does not
+    // call into the entry file, so filtering keeps whole components.
+    let groups: Vec<Vec<Sym>> = scc_groups(core)
+        .into_iter()
+        .map(|g| g.into_iter().filter(|s| kept.contains(s)).collect())
+        .filter(|g: &Vec<Sym>| !g.is_empty())
+        .collect();
+    core_identity_json(
+        &defs,
+        |s| metas.get(&s).cloned().unwrap_or_default(),
+        &groups,
+        &external,
+        COMPILER_VERSION,
+    )
+}
 
 // The versioned checked-HIR fixture document: the schema tag, the checked
 // declarations in source order, and every node the checker recorded a fact for,
@@ -1294,6 +1389,146 @@ fn tc_input_body(program: &Program<CorePhase>, checked: &Checked, src: &str) -> 
         instances,
         functions,
     }
+}
+
+const RESOLVED_SYNTAX_SCHEMA: &str = "prism-resolved-syntax-v1";
+
+// The embedded source identity every node span indexes into: the exact
+// user-relative text and its digest. Provenance, not required external state:
+// a persisted artifact decodes without reading any file.
+#[derive(Serialize)]
+struct ResolvedSource {
+    digest: String,
+    text: String,
+}
+
+// The resolved-syntax envelope: the embedded source and each user function's
+// body as a node-id-carrying tree. Every node's `id` is the same NodeId the
+// `tc-facts` table keys on, so a Prism consumer traverses the structure here
+// and joins the checker facts (type, resolution) there by id, without reading
+// source files or Rust state.
+#[derive(Serialize)]
+struct ResolvedSyntax {
+    schema: &'static str,
+    compiler: &'static str,
+    source: ResolvedSource,
+    functions: Vec<ResolvedFunction>,
+}
+
+#[derive(Serialize)]
+struct ResolvedFunction {
+    name: String,
+    params: Vec<TcParam>,
+    body: ResolvedNode,
+}
+
+// One node of a resolved expression tree: its NodeId (the join key into
+// `tc-facts`), its expression-form kind, its user-relative span, and its
+// immediate children in source order. The tree is the resolved Core-phase
+// program (post-resolution, so references are resolved; pre-elaboration, so it
+// is still surface-shaped and traversable), which the surface sugar forms have
+// already been desugared out of.
+#[derive(Serialize)]
+struct ResolvedNode {
+    id: u32,
+    kind: &'static str,
+    // A `[start, end]` array span, matching the syntax-family artifacts
+    // (tokens/surface/diagnostics) and the Prism `Syntax.Source` span codec,
+    // not the `{start, end}` object form the tc-* seams use.
+    span: [usize; 2],
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    children: Vec<Self>,
+}
+
+// The resolved Core-phase expression forms, as the stable kind strings a Prism
+// consumer matches on. Sugar and Marker are `Never` in the Core phase (desugar
+// removed them), so their arms are vacuous.
+const fn resolved_kind(e: &Expr<CorePhase>) -> &'static str {
+    match e {
+        Expr::Int(_) => "int",
+        Expr::Float(_) => "float",
+        Expr::Char(_) => "char",
+        Expr::Bool(_) => "bool",
+        Expr::Unit => "unit",
+        Expr::Str(_) => "str",
+        Expr::Var(_) => "var",
+        Expr::Hole(_) => "hole",
+        Expr::Bin(..) => "bin",
+        Expr::Neg(_) => "neg",
+        Expr::If(..) => "if",
+        Expr::Let(..) => "let",
+        Expr::Lam(..) => "lam",
+        Expr::Call(..) => "call",
+        Expr::Pipe(..) => "pipe",
+        Expr::Match(..) => "match",
+        Expr::List(_) => "list",
+        Expr::Tuple(_) => "tuple",
+        Expr::FieldAccess(..) => "field",
+        Expr::UnboxedTuple(_) => "unboxed-tuple",
+        Expr::UnboxedRecord(_) => "unboxed-record",
+        Expr::UnboxedField(..) => "unboxed-field",
+        Expr::RecordCreate(..) => "record",
+        Expr::RecordUpdate(..) => "record-update",
+        Expr::RecordUpdatePath(..) => "record-update-path",
+        Expr::Handle(..) => "handle",
+        Expr::Mask(..) => "mask",
+        Expr::Inst(..) => "inst",
+        Expr::Index(..) => "index",
+        Expr::IndexSet(..) => "index-set",
+        Expr::Ann(..) => "ann",
+        // Vacuous in the Core phase: desugar removed every sugar and marker.
+        #[expect(
+            clippy::uninhabited_references,
+            reason = "Never is uninhabited in Core; arm is unreachable"
+        )]
+        Expr::Marker(never) | Expr::Sugar(never) => match *never {},
+    }
+}
+
+// Walk one resolved expression node into its serializable tree, recursively.
+// Children come from the AST's own child enumeration, so a new expression form
+// is reached automatically without a second traversal to maintain.
+fn resolved_node(e: &S<Expr<CorePhase>>, user_start: usize) -> ResolvedNode {
+    let mut children = Vec::new();
+    e.node
+        .each_child(&mut |child| children.push(resolved_node(child, user_start)));
+    ResolvedNode {
+        id: e.id.0,
+        kind: resolved_kind(&e.node),
+        span: [
+            e.span.start.saturating_sub(user_start),
+            e.span.end.saturating_sub(user_start),
+        ],
+        children,
+    }
+}
+
+fn resolved_syntax_body(program: &Program<CorePhase>, src: &str) -> Vec<ResolvedFunction> {
+    let user_start = SourceMap::new(src).prelude_len();
+    program
+        .fns
+        .iter()
+        // The entry program's own functions. The prepended prelude's definitions
+        // sit below `user_start` in the same source buffer and are dropped here;
+        // this is the whole-program resolved view its join companions `tc-input`
+        // and `tc-facts` share, so an entry file that imports modules whose
+        // definitions survive optimization surfaces those too (a self-contained
+        // module, the common case, resolves to exactly the user's functions).
+        .filter(|decl| decl.span.start >= user_start)
+        .filter(|decl| !crate::names::is_synthesized(&decl.name))
+        .map(|decl| ResolvedFunction {
+            name: decl.name.clone(),
+            params: decl
+                .params
+                .iter()
+                .map(|p| TcParam {
+                    name: p.name.clone(),
+                    borrow: p.borrow,
+                })
+                .collect(),
+            body: resolved_node(&decl.body, user_start),
+        })
+        .collect()
 }
 
 // Build the checker facts: the shared HIR declaration and node renderings under

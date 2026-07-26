@@ -10,21 +10,21 @@ use std::collections::{BTreeMap, BTreeSet};
 use marginalia::Span;
 
 use super::ast::{
-    BigInt, Constraint, Core, Decl, EffOp, EffectDecl, Expr, Fip, Grade, InstanceDecl, IntLit,
+    Arm, BigInt, Constraint, Core, Decl, EffOp, EffectDecl, Expr, Fip, Grade, InstanceDecl, IntLit,
     NodeId, Param, Pattern, Phase, Program, Row, Spanned, Suffix, Total, Ty, S,
 };
 use crate::error::{ErrKind, TypeError};
 use crate::kw;
 use crate::names;
 use crate::types::coeffect::CoeffectFact;
-use crate::util::fresh::Fresh;
+use prism_common::fresh::Fresh;
 
 mod aliases;
 mod derive;
 mod effects;
 mod ids;
+mod orpat;
 mod stable;
-mod sugar;
 mod synonyms;
 
 use aliases::expand_aliases;
@@ -35,7 +35,7 @@ use stable::expand_stable;
 pub(crate) use stable::{family_lock, routes_to_current, stable_rung_digests};
 use synonyms::expand_synonyms;
 
-pub use sugar::{
+pub use prism_syntax::sugar::{
     assign_stmt, build_stable, compound_assign, compound_stmt, decl_mods, dot_call, dot_op_removed,
     grade_word_msg, interp_lit, let_pat, let_stmt, lift_noalloc, mig_dir, open_if, pattern_decl,
     seq_stmt, try_mark, with_rest, with_stmt, IfTail, StableItem, DECLINE_DIM_ARITH, FLIP_CLASS,
@@ -691,6 +691,12 @@ fn pat_binds(p: &S<Pattern>, out: &mut Vec<String>) {
                 pat_binds(s, out);
             }
         }
+        // Alternatives bind the same names, so the first one names them all.
+        Pattern::Or(alts) => {
+            if let Some(first) = alts.first() {
+                pat_binds(first, out);
+            }
+        }
         _ => {}
     }
 }
@@ -1058,6 +1064,7 @@ pub fn desugar_with_scope(
         exports: prog.exports,
         opaques: prog.opaques,
         deprecated: prog.deprecated,
+        prelude_end: prog.prelude_end,
     };
     assign_ids(&mut out);
     check_noescape_contracts(&out)?;
@@ -1148,7 +1155,7 @@ pub fn retarget_cooperative(prog: &mut Program<Core>, target: &str) {
 fn core_decl(d: Decl, cx: &mut Cx) -> Result<Decl<Core>, TypeError> {
     // A `return` in the body desugars to a perform discharged by a handler wrapped
     // here, at the function boundary, so the early exit cannot leak past the fn.
-    let src = wrap_return(d.body, cx);
+    let src = wrap_param_pats(&d.params, wrap_return(d.body, cx));
     let body = rw(&src, &seed(&d.params), cx)?;
     let params = d
         .params
@@ -1157,6 +1164,7 @@ fn core_decl(d: Decl, cx: &mut Cx) -> Result<Decl<Core>, TypeError> {
             name: p.name,
             ty: p.ty,
             borrow: p.borrow,
+            pat: None,
             default: None,
         })
         .collect();
@@ -1208,6 +1216,28 @@ pub fn desugar_expr(e: &S<Expr>) -> Result<S<Expr<Core>>, TypeError> {
     Ok(out)
 }
 
+// A parameter written as a pattern is matched against its own binder around the
+// body: `fn area(Circle(r)) = e` becomes `fn area(arg@0) = match arg@0 of
+// Circle(r) => e`. The leftmost parameter's match is outermost, so a later
+// pattern's binders cannot capture an earlier one's. The wrapper is an ordinary
+// surface match, so alternation and nesting inside a parameter pattern are
+// expanded by the same path as any other pattern and nothing new reaches Core.
+// The argument is already a value when the body runs, so introducing the match
+// forces nothing that was not forced before.
+pub(super) fn wrap_param_pats(params: &[Param], body: S<Expr>) -> S<Expr> {
+    params.iter().rev().fold(body, |acc, p| {
+        let Some(pat) = &p.pat else { return acc };
+        let span = pat.span;
+        let arm = Arm {
+            pat: pat.clone(),
+            guard: None,
+            body: acc,
+            alt: false,
+        };
+        sp(Expr::Match(Box::new(evar(&p.name, span)), vec![arm]), span)
+    })
+}
+
 // A function body's initial scope: its parameters, so a call of a global fn
 // they shadow bypasses the named/default-argument rewrite.
 fn seed(params: &[Param]) -> Vars {
@@ -1236,39 +1266,57 @@ pub(super) fn eint<P: Phase>(i: usize, span: Span) -> S<Expr<P>> {
     )
 }
 
-pub(super) const fn sp<P: Phase>(node: Expr<P>, span: Span) -> S<Expr<P>> {
-    Spanned {
-        id: NodeId::DUMMY,
-        synth: false,
-        node,
-        span,
-    }
-}
-
-// Sugar nodes the formatter restores to surface syntax (pattern lets, `?`).
-pub(super) const fn sp_sugar(node: Expr, span: Span) -> S<Expr> {
-    Spanned {
-        id: NodeId::DUMMY,
-        synth: true,
-        node,
-        span,
-    }
-}
-
-pub(super) fn evar<P: Phase>(name: &str, span: Span) -> S<Expr<P>> {
-    sp(Expr::Var(name.into()), span)
-}
-
-pub(super) fn call<P: Phase>(f: S<Expr<P>>, args: Vec<S<Expr<P>>>, span: Span) -> S<Expr<P>> {
-    sp(Expr::Call(Box::new(f), args), span)
-}
+pub(crate) use prism_syntax::ast::{call, evar, sp};
 
 pub(super) fn lam1<P: Phase>(p: &str, body: S<Expr<P>>, span: Span) -> S<Expr<P>> {
     let param = Param {
         name: p.into(),
         ty: None,
         borrow: false,
+        pat: None,
         default: None,
     };
     sp(Expr::Lam(vec![param], Box::new(body)), span)
+}
+
+// Even args are segments, odd args are holes: each hole renders through the
+// type-directed `show` (identity on String) and the pieces fold into
+// right-nested concat, so holes evaluate left to right.
+pub(in crate::syntax::desugar) fn expand_interp(
+    args: &[S<Expr>],
+    span: Span,
+    env: &Vars,
+    cx: &mut Cx,
+) -> Result<S<Expr<Core>>, TypeError> {
+    let mut pieces = Vec::new();
+    for (i, a) in args.iter().enumerate() {
+        if i % 2 == 0 {
+            if !matches!(&a.node, Expr::Str(s) if s.is_empty()) {
+                pieces.push(rw(a, env, cx)?);
+            }
+        } else {
+            let h = rw(a, env, cx)?;
+            let z = Span::new(h.span.end, h.span.end);
+            // An interpolated hole displays its value (raw for a string), so it
+            // lowers to the internal display printer, not the quoting `show`.
+            let display = evar(names::DISPLAY_FN, z);
+            pieces.push(call(display, vec![h], z));
+        }
+    }
+    // `interp_lit` always emits at least one hole, so `pieces` is non-empty by
+    // construction; surface a structured error rather than panic if a malformed
+    // `Interp` slice ever reaches here.
+    let Some(last) = pieces.pop() else {
+        return Err(ErrKind::EmptyInterpolation.at(span));
+    };
+    // Zero-width concat machinery, then stamp the literal's span on the
+    // outermost node alone: the whole interpolation hovers as one String (or,
+    // for a lone hole, its display call does), and each hole keeps its own
+    // honest range.
+    let anchor = Span::empty(span.start);
+    let mut out = pieces.into_iter().rev().fold(last, |acc, p| {
+        call(evar("concat", anchor), vec![p, acc], anchor)
+    });
+    out.span = span;
+    Ok(out)
 }

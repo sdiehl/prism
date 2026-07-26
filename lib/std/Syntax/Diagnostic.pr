@@ -1,0 +1,43 @@
+-- | The typed vocabulary of the `prism-syntax-diagnostics-v1` artifact.
+--
+-- One document per source file: the embedded source identity and every
+-- syntax-boundary diagnostic the lexer or parser produced for it, in source
+-- order. An accepted file carries the empty list, so acceptance and refusal
+-- share one shape. `expected` and `related` are reserved surfaces: always
+-- present, possibly empty, so a reader written today survives their arrival.
+
+import Syntax.Source (..)
+
+-- | The phase that raised a diagnostic.
+pub type DiagPhase = DPLex | DPParse
+
+-- | One diagnostic: the stable append-only code, the raising phase, the
+-- primary half-open byte span (a lex fault is a caret, `lo == hi`), the
+-- rendered message, the parser's canonical expectation set when it has one,
+-- and related spans.
+pub type Diagnostic = Diagnostic {
+  code: String,
+  phase: DiagPhase,
+  span: Span,
+  message: String,
+  expected: List(String),
+  related: List(Span)
+}
+
+-- | A decoded diagnostics document: the envelope identity, the embedded
+-- source every span indexes into, and the diagnostics in source order.
+pub type DiagnosticsDoc = DiagnosticsDoc {
+  schema: String,
+  compiler: String,
+  source: SourceFile,
+  diagnostics: List(Diagnostic)
+}
+
+-- | The schema tag this vocabulary decodes.
+pub fn diagnostics_schema() : String = "prism-syntax-diagnostics-v1"
+
+-- | Whether the document accepted its source (no diagnostics).
+pub fn doc_accepted(d : DiagnosticsDoc) : Bool =
+  match d.diagnostics of
+    Nil => true
+    Cons(_, _) => false

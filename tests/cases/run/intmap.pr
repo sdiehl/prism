@@ -1,0 +1,186 @@
+-- Patricia-trie containers: iteration order is a function of the key set alone,
+-- negative keys included, and every operation agrees with the comparison-based
+-- `Data.Map`/`Data.Set` on a generated key sequence.
+
+import Data.IntMap (..)
+
+import Data.IntSet (..)
+
+import Quickcheck (Config, Cfg, check_with, show_outcome, gen_list, gen_pair, gen_i64, gen_int)
+
+-- Rotate a list left by `n`, a cheap way to spell a different insertion order.
+fn rotate_by(n, xs) = append(drop(n, xs), take(n, xs))
+
+-- Pair each key with a value derived from it, so the bindings, and not just the
+-- keys, are independent of the order they are inserted in.
+fn key_pairs(ks) = map(\(k) -> (k, k * 10i64), ks)
+
+-- The ten keys the determinism check inserts, straddling zero and several
+-- branch-bit boundaries (63/64, 127/128) so the trie actually branches deep.
+let det_keys : List(I64) =
+  [
+      5i64,
+      0i64 - 3i64,
+      17i64,
+      0i64,
+      1i64,
+      0i64 - 100i64,
+      64i64,
+      63i64,
+      0i64 - 1i64,
+      128i64,
+    ]
+
+-- The extremes of the key lane, where the sign bit is the branch bit.
+let i64_min : I64 = to_i64(0 - 9223372036854775808)
+
+let i64_max : I64 = to_i64(9223372036854775807)
+
+let neg_keys : List(I64) =
+  [i64_max, 0i64 - 1i64, 0i64, i64_min, 1i64, 0i64 - 1000000i64, 1000000i64]
+
+-- Keys probed on every generated case, present or not, so lookup and membership
+-- are exercised off the generated set as well as on it.
+let probes : List(I64) = [0i64, 1i64, 0i64 - 1i64, 7i64, i64_min, i64_max]
+
+-- A small budget: this program is in the parity corpus, so the point is
+-- agreement on many shapes on every run, not a long soak.
+let diff_config : Config = Cfg { seed = 20260725u64, count = 60, max_size = 16 }
+
+-- Every differential property compares rendered output, so a disagreement in
+-- either the elements or their order fails the same way.
+fn prop_to_list(ps : List((I64, Int))) : Bool =
+  show(intmap_to_list(intmap_from_list(ps)))
+    == show(map_to_list(map_from_list(ps)))
+
+fn prop_size(ps : List((I64, Int))) : Bool =
+  intmap_size(intmap_from_list(ps)) == map_size(map_from_list(ps))
+
+fn prop_lookup(ps : List((I64, Int))) : Bool =
+  let im = intmap_from_list(ps)
+  let am = map_from_list(ps)
+  let ks = append(map(fst, ps), probes)
+  all(
+      \(k) -> show(intmap_lookup(k, im)) == show(map_lookup(k, am)) && intmap_member(k, im) == map_member(k, am),
+      ks,
+    )
+
+fn prop_delete(ps : List((I64, Int))) : Bool =
+  let im = intmap_from_list(ps)
+  let am = map_from_list(ps)
+  let ks = append(map(fst, ps), probes)
+  all(
+      \(k) -> show(intmap_to_list(intmap_delete(k, im))) == show(map_to_list(map_delete(k, am))),
+      ks,
+    )
+
+-- The obvious slow union: fold the right map's bindings into the left one. The
+-- fast merge walks both tries together, so pinning it against this is the same
+-- kind of oracle the parity corpus is, one implementation against another.
+fn union_ref(f, t1 : IntMap(v), t2 : IntMap(v)) : IntMap(v) =
+  intmap_fold(
+      \(acc, k, v) -> intmap_insert_with(\(new, old) -> f(old, new), k, v, acc),
+      t1,
+      t2,
+    )
+
+fn combine(l : Int, r : Int) : Int = l * 100 + r
+
+fn prop_union(pp : (List((I64, Int)), List((I64, Int)))) : Bool =
+  match pp of
+    (xs, ys) =>
+      let a = intmap_from_list(xs)
+      let b = intmap_from_list(ys)
+      intmap_union_with(combine, a, b) == union_ref(combine, a, b)
+        && intmap_union(a, b) == union_ref(\(l, _r) -> l, a, b)
+
+-- Canonicity: a tree reached by any structural operation is the same tree the
+-- surviving bindings would have built from scratch. This is what makes iteration
+-- order a function of the key set rather than of the path taken to it.
+fn prop_canonical(pp : (List((I64, Int)), List((I64, Int)))) : Bool =
+  match pp of
+    (xs, ys) =>
+      let a = intmap_from_list(xs)
+      let b = intmap_from_list(ys)
+      let u = intmap_union(a, b)
+      let i = intmap_intersection(a, b)
+      let d = intmap_difference(a, b)
+      let g = intmap_fold(\(acc, k, _v) -> intmap_delete(k, acc), a, b)
+      u == rebuilt(u) && i == rebuilt(i) && d == rebuilt(d) && g == rebuilt(g)
+
+fn rebuilt(t : IntMap(v)) : IntMap(v) = intmap_from_list(intmap_to_list(t))
+
+fn prop_algebra(kk : (List(I64), List(I64))) : Bool =
+  match kk of
+    (xs, ys) =>
+      let a = intset_from_list(xs)
+      let b = intset_from_list(ys)
+      let sa = set_from_list(xs)
+      let sb = set_from_list(ys)
+      show(intset_to_list(intset_union(a, b)))
+        == show(set_to_list(set_union(sa, sb)))
+        && show(intset_to_list(intset_intersection(a, b)))
+          == show(set_to_list(set_intersection(sa, sb)))
+        && show(intset_to_list(intset_difference(a, b)))
+          == show(set_to_list(set_difference(sa, sb)))
+
+-- Building the same bindings in five different orders must land on one tree, not
+-- merely on one iteration order: the five `to_list` lines below are byte
+-- identical, and the tries themselves compare equal under the derived `Eq`,
+-- which compares stored prefixes and masks too.
+fn determinism() =
+  let o0 = det_keys
+  let o1 = reverse(det_keys)
+  let o2 = rotate_by(1, det_keys)
+  let o3 = rotate_by(4, det_keys)
+  let o4 = reverse(rotate_by(6, det_keys))
+  let t0 = intmap_from_list(key_pairs(o0))
+  let t1 = intmap_from_list(key_pairs(o1))
+  let t2 = intmap_from_list(key_pairs(o2))
+  let t3 = intmap_from_list(key_pairs(o3))
+  let t4 = intmap_from_list(key_pairs(o4))
+  println("-- determinism")
+  println(show(set_size(set_from_list([
+      show(o0),
+      show(o1),
+      show(o2),
+      show(o3),
+      show(o4),
+    ]))))
+  println(show(intmap_to_list(t0)))
+  println(show(intmap_to_list(t1)))
+  println(show(intmap_to_list(t2)))
+  println(show(intmap_to_list(t3)))
+  println(show(intmap_to_list(t4)))
+  println(show(t0 == t1 && t1 == t2 && t2 == t3 && t3 == t4))
+
+fn negatives() =
+  let s = intset_from_list(neg_keys)
+  println("-- negative keys")
+  println(show(intset_to_list(s)))
+  println(show(intset_to_list(intset_from_list(reverse(neg_keys)))))
+  println(show(set_to_list(set_from_list(neg_keys))))
+  println(show(intset_member(i64_min, s)))
+  println(show(intset_member(i64_max, s)))
+  println(show(intset_to_list(intset_delete(i64_min, s))))
+  println(show(intmap_to_list(intmap_from_list(map(\(k) -> (k, k), neg_keys)))))
+
+fn differential() =
+  let pairs = gen_list(gen_pair(gen_i64, gen_int))
+  let keys = gen_pair(gen_list(gen_i64), gen_list(gen_i64))
+  let two = gen_pair(pairs, pairs)
+  println("-- differential against Data.Map / Data.Set")
+  println(show_outcome("to_list", check_with(diff_config, pairs, prop_to_list)))
+  println(show_outcome("size", check_with(diff_config, pairs, prop_size)))
+  println(show_outcome("lookup", check_with(diff_config, pairs, prop_lookup)))
+  println(show_outcome("delete", check_with(diff_config, pairs, prop_delete)))
+  println(show_outcome("algebra", check_with(diff_config, keys, prop_algebra)))
+  println(show_outcome("union", check_with(diff_config, two, prop_union)))
+  println(
+      show_outcome("canonical", check_with(diff_config, two, prop_canonical)),
+    )
+
+fn main() =
+  determinism()
+  negatives()
+  differential()

@@ -1,697 +1,2414 @@
 {
   "schema": "prism-syntax-tokens-v1",
-  "compiler": "0.14.0",
+  "compiler": "0.15.0",
   "source": {
-    "digest": "2f5871b80671dd5530849665ad73a00d54b4fcf92e51934c8d025aa73769ec4e",
-    "text": "-- The round-trip gate for the versioned syntax artifacts: read one artifact\n-- file, decode it into the typed Syntax vocabulary, re-encode, and print the\n-- exact bytes. arg(0) is the artifact path; arg(1) selects the family\n-- (\"tokens\" or \"surface\"). A refusal prints one structured error line.\nimport Syntax.Codec (..)\n\nfn main() =\n  let text = read_file(arg(0))\n  if arg(1) == \"tokens\" then\n    match decode_tokens(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_tokens(d))\n  else\n    match decode_surface(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_surface(d))\n"
+    "digest": "824285947cca6219db9c0dc018a3aa859659730b55bf122b8fc3abc77867ab16",
+    "text": "-- The round-trip gate for the versioned syntax artifacts: read one artifact\n-- file, decode it into the typed Syntax vocabulary, re-encode, and print the\n-- exact bytes. arg(0) is the artifact path; arg(1) selects the family\n-- (\"tokens\", \"surface\", \"diagnostics\", or \"resolved\"). The \"resolved-nodes\"\n-- mode instead decodes the resolved document and prints the id of every node\n-- reached by traversing each function body with `rnode_universe`, one per\n-- line: the Prism-side traversal the checker join is diffed against, reading\n-- only the artifact bytes. A refusal prints one structured error line.\nimport Data.Foldable (length)\n\nimport Data.List (concat_map)\n\nimport Syntax.Codec (..)\n\nimport Syntax.Resolved (..)\n\nfn main() =\n  let text = read_file(arg(0))\n  if arg(1) == \"tokens\" then\n    match decode_tokens(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_tokens(d))\n  elif arg(1) == \"diagnostics\" then\n    match decode_diagnostics(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_diagnostics(d))\n  elif arg(1) == \"resolved\" then\n    match decode_resolved(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_resolved(d))\n  elif arg(1) == \"resolved-nodes\" then\n    match decode_resolved(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => print_resolved_ids(d)\n  else\n    match decode_surface(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_surface(d))\n\n-- Every node id reached by walking each function body with the Prism-side\n-- `rnode_universe`, sorted ascending, one per line under a `count` header. A\n-- pure function of the decoded document: no source file or compiler state is\n-- consulted.\nfn print_resolved_ids(d : ResolvedDoc) =\n  let ids = sort(\n      concat_map(\n          \\(f) -> map(\\(n) -> n.id, rnode_universe(f.body)),\n          d.functions,\n        ),\n    )\n  println(\"count {length(ids)}\")\n  print_ids(ids)\n\nfn print_ids(ids : List(Int)) : Unit ! {IO} =\n  match ids of\n    Nil => ()\n    Cons(i, rest) =>\n      println(\"{i}\")\n      print_ids(rest)\n"
   },
   "raw": [
     {
       "kind": "import",
       "span": [
-        298,
-        304
+        606,
+        612
       ]
     },
     {
       "kind": "qual",
       "span": [
-        305,
-        317
+        613,
+        626
       ],
-      "value": "Syntax.Codec"
+      "value": "Data.Foldable"
     },
     {
       "kind": "(",
       "span": [
-        318,
-        319
+        627,
+        628
       ]
     },
     {
-      "kind": "..",
+      "kind": "ident",
       "span": [
-        319,
-        321
-      ]
+        628,
+        634
+      ],
+      "value": "length"
     },
     {
       "kind": ")",
       "span": [
-        321,
-        322
+        634,
+        635
       ]
     },
     {
-      "kind": "fn",
-      "span": [
-        324,
-        326
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        327,
-        331
-      ],
-      "value": "main"
-    },
-    {
-      "kind": "(",
-      "span": [
-        331,
-        332
-      ]
-    },
-    {
-      "kind": ")",
-      "span": [
-        332,
-        333
-      ]
-    },
-    {
-      "kind": "=",
-      "span": [
-        334,
-        335
-      ]
-    },
-    {
-      "kind": "let",
-      "span": [
-        338,
-        341
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        342,
-        346
-      ],
-      "value": "text"
-    },
-    {
-      "kind": "=",
-      "span": [
-        347,
-        348
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        349,
-        358
-      ],
-      "value": "read_file"
-    },
-    {
-      "kind": "(",
-      "span": [
-        358,
-        359
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        359,
-        362
-      ],
-      "value": "arg"
-    },
-    {
-      "kind": "(",
-      "span": [
-        362,
-        363
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        363,
-        364
-      ],
-      "value": "0"
-    },
-    {
-      "kind": ")",
-      "span": [
-        364,
-        365
-      ]
-    },
-    {
-      "kind": ")",
-      "span": [
-        365,
-        366
-      ]
-    },
-    {
-      "kind": "if",
-      "span": [
-        369,
-        371
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        372,
-        375
-      ],
-      "value": "arg"
-    },
-    {
-      "kind": "(",
-      "span": [
-        375,
-        376
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        376,
-        377
-      ],
-      "value": "1"
-    },
-    {
-      "kind": ")",
-      "span": [
-        377,
-        378
-      ]
-    },
-    {
-      "kind": "==",
-      "span": [
-        379,
-        381
-      ]
-    },
-    {
-      "kind": "str",
-      "span": [
-        382,
-        390
-      ],
-      "value": "tokens"
-    },
-    {
-      "kind": "then",
-      "span": [
-        391,
-        395
-      ]
-    },
-    {
-      "kind": "match",
-      "span": [
-        400,
-        405
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        406,
-        419
-      ],
-      "value": "decode_tokens"
-    },
-    {
-      "kind": "(",
-      "span": [
-        419,
-        420
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        420,
-        424
-      ],
-      "value": "text"
-    },
-    {
-      "kind": ")",
-      "span": [
-        424,
-        425
-      ]
-    },
-    {
-      "kind": "of",
-      "span": [
-        426,
-        428
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        435,
-        438
-      ],
-      "value": "Err"
-    },
-    {
-      "kind": "(",
-      "span": [
-        438,
-        439
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        439,
-        440
-      ],
-      "value": "e"
-    },
-    {
-      "kind": ")",
-      "span": [
-        440,
-        441
-      ]
-    },
-    {
-      "kind": "=>",
-      "span": [
-        442,
-        444
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        445,
-        452
-      ],
-      "value": "println"
-    },
-    {
-      "kind": "(",
-      "span": [
-        452,
-        453
-      ]
-    },
-    {
-      "kind": "istart",
-      "span": [
-        453,
-        469
-      ],
-      "value": "decode error: "
-    },
-    {
-      "kind": "ident",
-      "span": [
-        469,
-        488
-      ],
-      "value": "codec_error_message"
-    },
-    {
-      "kind": "(",
-      "span": [
-        488,
-        489
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        489,
-        490
-      ],
-      "value": "e"
-    },
-    {
-      "kind": ")",
-      "span": [
-        490,
-        491
-      ]
-    },
-    {
-      "kind": "iend",
-      "span": [
-        491,
-        493
-      ],
-      "value": ""
-    },
-    {
-      "kind": ")",
-      "span": [
-        493,
-        494
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        501,
-        503
-      ],
-      "value": "Ok"
-    },
-    {
-      "kind": "(",
-      "span": [
-        503,
-        504
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        504,
-        505
-      ],
-      "value": "d"
-    },
-    {
-      "kind": ")",
-      "span": [
-        505,
-        506
-      ]
-    },
-    {
-      "kind": "=>",
-      "span": [
-        507,
-        509
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        510,
-        517
-      ],
-      "value": "println"
-    },
-    {
-      "kind": "(",
-      "span": [
-        517,
-        518
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        518,
-        531
-      ],
-      "value": "encode_tokens"
-    },
-    {
-      "kind": "(",
-      "span": [
-        531,
-        532
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        532,
-        533
-      ],
-      "value": "d"
-    },
-    {
-      "kind": ")",
-      "span": [
-        533,
-        534
-      ]
-    },
-    {
-      "kind": ")",
-      "span": [
-        534,
-        535
-      ]
-    },
-    {
-      "kind": "else",
-      "span": [
-        538,
-        542
-      ]
-    },
-    {
-      "kind": "match",
-      "span": [
-        547,
-        552
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        553,
-        567
-      ],
-      "value": "decode_surface"
-    },
-    {
-      "kind": "(",
-      "span": [
-        567,
-        568
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        568,
-        572
-      ],
-      "value": "text"
-    },
-    {
-      "kind": ")",
-      "span": [
-        572,
-        573
-      ]
-    },
-    {
-      "kind": "of",
-      "span": [
-        574,
-        576
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        583,
-        586
-      ],
-      "value": "Err"
-    },
-    {
-      "kind": "(",
-      "span": [
-        586,
-        587
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        587,
-        588
-      ],
-      "value": "e"
-    },
-    {
-      "kind": ")",
-      "span": [
-        588,
-        589
-      ]
-    },
-    {
-      "kind": "=>",
-      "span": [
-        590,
-        592
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        593,
-        600
-      ],
-      "value": "println"
-    },
-    {
-      "kind": "(",
-      "span": [
-        600,
-        601
-      ]
-    },
-    {
-      "kind": "istart",
-      "span": [
-        601,
-        617
-      ],
-      "value": "decode error: "
-    },
-    {
-      "kind": "ident",
-      "span": [
-        617,
-        636
-      ],
-      "value": "codec_error_message"
-    },
-    {
-      "kind": "(",
-      "span": [
-        636,
-        637
-      ]
-    },
-    {
-      "kind": "ident",
+      "kind": "import",
       "span": [
         637,
-        638
-      ],
-      "value": "e"
-    },
-    {
-      "kind": ")",
-      "span": [
-        638,
-        639
+        643
       ]
     },
     {
-      "kind": "iend",
+      "kind": "qual",
       "span": [
-        639,
-        641
-      ],
-      "value": ""
-    },
-    {
-      "kind": ")",
-      "span": [
-        641,
-        642
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        649,
-        651
-      ],
-      "value": "Ok"
-    },
-    {
-      "kind": "(",
-      "span": [
-        651,
-        652
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        652,
+        644,
         653
       ],
-      "value": "d"
+      "value": "Data.List"
     },
     {
-      "kind": ")",
+      "kind": "(",
       "span": [
-        653,
-        654
-      ]
-    },
-    {
-      "kind": "=>",
-      "span": [
-        655,
-        657
+        654,
+        655
       ]
     },
     {
       "kind": "ident",
       "span": [
-        658,
+        655,
         665
       ],
-      "value": "println"
+      "value": "concat_map"
     },
     {
-      "kind": "(",
+      "kind": ")",
       "span": [
         665,
         666
       ]
     },
     {
-      "kind": "ident",
+      "kind": "import",
       "span": [
-        666,
-        680
+        668,
+        674
+      ]
+    },
+    {
+      "kind": "qual",
+      "span": [
+        675,
+        687
       ],
-      "value": "encode_surface"
+      "value": "Syntax.Codec"
     },
     {
       "kind": "(",
       "span": [
-        680,
-        681
+        688,
+        689
+      ]
+    },
+    {
+      "kind": "..",
+      "span": [
+        689,
+        691
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        691,
+        692
+      ]
+    },
+    {
+      "kind": "import",
+      "span": [
+        694,
+        700
+      ]
+    },
+    {
+      "kind": "qual",
+      "span": [
+        701,
+        716
+      ],
+      "value": "Syntax.Resolved"
+    },
+    {
+      "kind": "(",
+      "span": [
+        717,
+        718
+      ]
+    },
+    {
+      "kind": "..",
+      "span": [
+        718,
+        720
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        720,
+        721
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        723,
+        725
       ]
     },
     {
       "kind": "ident",
       "span": [
-        681,
-        682
+        726,
+        730
+      ],
+      "value": "main"
+    },
+    {
+      "kind": "(",
+      "span": [
+        730,
+        731
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        731,
+        732
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        733,
+        734
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        737,
+        740
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        741,
+        745
+      ],
+      "value": "text"
+    },
+    {
+      "kind": "=",
+      "span": [
+        746,
+        747
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        748,
+        757
+      ],
+      "value": "read_file"
+    },
+    {
+      "kind": "(",
+      "span": [
+        757,
+        758
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        758,
+        761
+      ],
+      "value": "arg"
+    },
+    {
+      "kind": "(",
+      "span": [
+        761,
+        762
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        762,
+        763
+      ],
+      "value": "0"
+    },
+    {
+      "kind": ")",
+      "span": [
+        763,
+        764
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        764,
+        765
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        768,
+        770
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        771,
+        774
+      ],
+      "value": "arg"
+    },
+    {
+      "kind": "(",
+      "span": [
+        774,
+        775
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        775,
+        776
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        776,
+        777
+      ]
+    },
+    {
+      "kind": "==",
+      "span": [
+        778,
+        780
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        781,
+        789
+      ],
+      "value": "tokens"
+    },
+    {
+      "kind": "then",
+      "span": [
+        790,
+        794
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        799,
+        804
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        805,
+        818
+      ],
+      "value": "decode_tokens"
+    },
+    {
+      "kind": "(",
+      "span": [
+        818,
+        819
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        819,
+        823
+      ],
+      "value": "text"
+    },
+    {
+      "kind": ")",
+      "span": [
+        823,
+        824
+      ]
+    },
+    {
+      "kind": "of",
+      "span": [
+        825,
+        827
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        834,
+        837
+      ],
+      "value": "Err"
+    },
+    {
+      "kind": "(",
+      "span": [
+        837,
+        838
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        838,
+        839
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        839,
+        840
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        841,
+        843
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        844,
+        851
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        851,
+        852
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        852,
+        868
+      ],
+      "value": "decode error: "
+    },
+    {
+      "kind": "ident",
+      "span": [
+        868,
+        887
+      ],
+      "value": "codec_error_message"
+    },
+    {
+      "kind": "(",
+      "span": [
+        887,
+        888
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        888,
+        889
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        889,
+        890
+      ]
+    },
+    {
+      "kind": "iend",
+      "span": [
+        890,
+        892
+      ],
+      "value": ""
+    },
+    {
+      "kind": ")",
+      "span": [
+        892,
+        893
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        900,
+        902
+      ],
+      "value": "Ok"
+    },
+    {
+      "kind": "(",
+      "span": [
+        902,
+        903
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        903,
+        904
       ],
       "value": "d"
     },
     {
       "kind": ")",
       "span": [
-        682,
-        683
+        904,
+        905
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        906,
+        908
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        909,
+        916
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        916,
+        917
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        917,
+        930
+      ],
+      "value": "encode_tokens"
+    },
+    {
+      "kind": "(",
+      "span": [
+        930,
+        931
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        931,
+        932
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ")",
+      "span": [
+        932,
+        933
       ]
     },
     {
       "kind": ")",
       "span": [
-        683,
-        684
+        933,
+        934
+      ]
+    },
+    {
+      "kind": "elif",
+      "span": [
+        937,
+        941
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        942,
+        945
+      ],
+      "value": "arg"
+    },
+    {
+      "kind": "(",
+      "span": [
+        945,
+        946
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        946,
+        947
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        947,
+        948
+      ]
+    },
+    {
+      "kind": "==",
+      "span": [
+        949,
+        951
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        952,
+        965
+      ],
+      "value": "diagnostics"
+    },
+    {
+      "kind": "then",
+      "span": [
+        966,
+        970
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        975,
+        980
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        981,
+        999
+      ],
+      "value": "decode_diagnostics"
+    },
+    {
+      "kind": "(",
+      "span": [
+        999,
+        1000
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1000,
+        1004
+      ],
+      "value": "text"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1004,
+        1005
+      ]
+    },
+    {
+      "kind": "of",
+      "span": [
+        1006,
+        1008
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1015,
+        1018
+      ],
+      "value": "Err"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1018,
+        1019
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1019,
+        1020
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1020,
+        1021
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1022,
+        1024
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1025,
+        1032
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1032,
+        1033
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        1033,
+        1049
+      ],
+      "value": "decode error: "
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1049,
+        1068
+      ],
+      "value": "codec_error_message"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1068,
+        1069
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1069,
+        1070
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1070,
+        1071
+      ]
+    },
+    {
+      "kind": "iend",
+      "span": [
+        1071,
+        1073
+      ],
+      "value": ""
+    },
+    {
+      "kind": ")",
+      "span": [
+        1073,
+        1074
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1081,
+        1083
+      ],
+      "value": "Ok"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1083,
+        1084
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1084,
+        1085
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1085,
+        1086
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1087,
+        1089
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1090,
+        1097
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1097,
+        1098
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1098,
+        1116
+      ],
+      "value": "encode_diagnostics"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1116,
+        1117
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1117,
+        1118
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1118,
+        1119
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1119,
+        1120
+      ]
+    },
+    {
+      "kind": "elif",
+      "span": [
+        1123,
+        1127
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1128,
+        1131
+      ],
+      "value": "arg"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1131,
+        1132
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1132,
+        1133
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1133,
+        1134
+      ]
+    },
+    {
+      "kind": "==",
+      "span": [
+        1135,
+        1137
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        1138,
+        1148
+      ],
+      "value": "resolved"
+    },
+    {
+      "kind": "then",
+      "span": [
+        1149,
+        1153
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        1158,
+        1163
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1164,
+        1179
+      ],
+      "value": "decode_resolved"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1179,
+        1180
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1180,
+        1184
+      ],
+      "value": "text"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1184,
+        1185
+      ]
+    },
+    {
+      "kind": "of",
+      "span": [
+        1186,
+        1188
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1195,
+        1198
+      ],
+      "value": "Err"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1198,
+        1199
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1199,
+        1200
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1200,
+        1201
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1202,
+        1204
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1205,
+        1212
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1212,
+        1213
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        1213,
+        1229
+      ],
+      "value": "decode error: "
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1229,
+        1248
+      ],
+      "value": "codec_error_message"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1248,
+        1249
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1249,
+        1250
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1250,
+        1251
+      ]
+    },
+    {
+      "kind": "iend",
+      "span": [
+        1251,
+        1253
+      ],
+      "value": ""
+    },
+    {
+      "kind": ")",
+      "span": [
+        1253,
+        1254
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1261,
+        1263
+      ],
+      "value": "Ok"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1263,
+        1264
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1264,
+        1265
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1265,
+        1266
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1267,
+        1269
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1270,
+        1277
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1277,
+        1278
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1278,
+        1293
+      ],
+      "value": "encode_resolved"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1293,
+        1294
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1294,
+        1295
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1295,
+        1296
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1296,
+        1297
+      ]
+    },
+    {
+      "kind": "elif",
+      "span": [
+        1300,
+        1304
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1305,
+        1308
+      ],
+      "value": "arg"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1308,
+        1309
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1309,
+        1310
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1310,
+        1311
+      ]
+    },
+    {
+      "kind": "==",
+      "span": [
+        1312,
+        1314
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        1315,
+        1331
+      ],
+      "value": "resolved-nodes"
+    },
+    {
+      "kind": "then",
+      "span": [
+        1332,
+        1336
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        1341,
+        1346
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1347,
+        1362
+      ],
+      "value": "decode_resolved"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1362,
+        1363
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1363,
+        1367
+      ],
+      "value": "text"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1367,
+        1368
+      ]
+    },
+    {
+      "kind": "of",
+      "span": [
+        1369,
+        1371
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1378,
+        1381
+      ],
+      "value": "Err"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1381,
+        1382
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1382,
+        1383
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1383,
+        1384
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1385,
+        1387
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1388,
+        1395
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1395,
+        1396
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        1396,
+        1412
+      ],
+      "value": "decode error: "
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1412,
+        1431
+      ],
+      "value": "codec_error_message"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1431,
+        1432
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1432,
+        1433
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1433,
+        1434
+      ]
+    },
+    {
+      "kind": "iend",
+      "span": [
+        1434,
+        1436
+      ],
+      "value": ""
+    },
+    {
+      "kind": ")",
+      "span": [
+        1436,
+        1437
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1444,
+        1446
+      ],
+      "value": "Ok"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1446,
+        1447
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1447,
+        1448
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1448,
+        1449
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1450,
+        1452
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1453,
+        1471
+      ],
+      "value": "print_resolved_ids"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1471,
+        1472
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1472,
+        1473
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1473,
+        1474
+      ]
+    },
+    {
+      "kind": "else",
+      "span": [
+        1477,
+        1481
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        1486,
+        1491
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1492,
+        1506
+      ],
+      "value": "decode_surface"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1506,
+        1507
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1507,
+        1511
+      ],
+      "value": "text"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1511,
+        1512
+      ]
+    },
+    {
+      "kind": "of",
+      "span": [
+        1513,
+        1515
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1522,
+        1525
+      ],
+      "value": "Err"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1525,
+        1526
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1526,
+        1527
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1527,
+        1528
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1529,
+        1531
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1532,
+        1539
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1539,
+        1540
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        1540,
+        1556
+      ],
+      "value": "decode error: "
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1556,
+        1575
+      ],
+      "value": "codec_error_message"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1575,
+        1576
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1576,
+        1577
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1577,
+        1578
+      ]
+    },
+    {
+      "kind": "iend",
+      "span": [
+        1578,
+        1580
+      ],
+      "value": ""
+    },
+    {
+      "kind": ")",
+      "span": [
+        1580,
+        1581
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1588,
+        1590
+      ],
+      "value": "Ok"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1590,
+        1591
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1591,
+        1592
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1592,
+        1593
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1594,
+        1596
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1597,
+        1604
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1604,
+        1605
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1605,
+        1619
+      ],
+      "value": "encode_surface"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1619,
+        1620
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1620,
+        1621
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1621,
+        1622
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1622,
+        1623
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1870,
+        1872
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1873,
+        1891
+      ],
+      "value": "print_resolved_ids"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1891,
+        1892
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1892,
+        1893
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1894,
+        1895
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1896,
+        1907
+      ],
+      "value": "ResolvedDoc"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1907,
+        1908
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1909,
+        1910
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        1913,
+        1916
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1917,
+        1920
+      ],
+      "value": "ids"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1921,
+        1922
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1923,
+        1927
+      ],
+      "value": "sort"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1927,
+        1928
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1935,
+        1945
+      ],
+      "value": "concat_map"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1945,
+        1946
+      ]
+    },
+    {
+      "kind": "\\",
+      "span": [
+        1957,
+        1958
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        1958,
+        1959
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1959,
+        1960
+      ],
+      "value": "f"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1960,
+        1961
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        1962,
+        1964
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1965,
+        1968
+      ],
+      "value": "map"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1968,
+        1969
+      ]
+    },
+    {
+      "kind": "\\",
+      "span": [
+        1969,
+        1970
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        1970,
+        1971
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1971,
+        1972
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1972,
+        1973
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        1974,
+        1976
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1977,
+        1978
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ".",
+      "span": [
+        1978,
+        1979
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1979,
+        1981
+      ],
+      "value": "id"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1981,
+        1982
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1983,
+        1997
+      ],
+      "value": "rnode_universe"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1997,
+        1998
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1998,
+        1999
+      ],
+      "value": "f"
+    },
+    {
+      "kind": ".",
+      "span": [
+        1999,
+        2000
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2000,
+        2004
+      ],
+      "value": "body"
+    },
+    {
+      "kind": ")",
+      "span": [
+        2004,
+        2005
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        2005,
+        2006
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        2006,
+        2007
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2018,
+        2019
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ".",
+      "span": [
+        2019,
+        2020
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2020,
+        2029
+      ],
+      "value": "functions"
+    },
+    {
+      "kind": ",",
+      "span": [
+        2029,
+        2030
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        2039,
+        2040
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        2040,
+        2041
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        2046,
+        2047
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2050,
+        2057
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        2057,
+        2058
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        2058,
+        2066
+      ],
+      "value": "count "
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2066,
+        2072
+      ],
+      "value": "length"
+    },
+    {
+      "kind": "(",
+      "span": [
+        2072,
+        2073
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2073,
+        2076
+      ],
+      "value": "ids"
+    },
+    {
+      "kind": ")",
+      "span": [
+        2076,
+        2077
+      ]
+    },
+    {
+      "kind": "iend",
+      "span": [
+        2077,
+        2079
+      ],
+      "value": ""
+    },
+    {
+      "kind": ")",
+      "span": [
+        2079,
+        2080
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2083,
+        2092
+      ],
+      "value": "print_ids"
+    },
+    {
+      "kind": "(",
+      "span": [
+        2092,
+        2093
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2093,
+        2096
+      ],
+      "value": "ids"
+    },
+    {
+      "kind": ")",
+      "span": [
+        2096,
+        2097
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        2099,
+        2101
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2102,
+        2111
+      ],
+      "value": "print_ids"
+    },
+    {
+      "kind": "(",
+      "span": [
+        2111,
+        2112
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2112,
+        2115
+      ],
+      "value": "ids"
+    },
+    {
+      "kind": ":",
+      "span": [
+        2116,
+        2117
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        2118,
+        2122
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        2122,
+        2123
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        2123,
+        2126
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        2126,
+        2127
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        2127,
+        2128
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        2129,
+        2130
+      ]
+    },
+    {
+      "kind": "Unit",
+      "span": [
+        2131,
+        2135
+      ]
+    },
+    {
+      "kind": "!",
+      "span": [
+        2136,
+        2137
+      ]
+    },
+    {
+      "kind": "{",
+      "span": [
+        2138,
+        2139
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        2139,
+        2141
+      ],
+      "value": "IO"
+    },
+    {
+      "kind": "}",
+      "span": [
+        2141,
+        2142
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        2143,
+        2144
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        2147,
+        2152
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2153,
+        2156
+      ],
+      "value": "ids"
+    },
+    {
+      "kind": "of",
+      "span": [
+        2157,
+        2159
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        2164,
+        2167
+      ],
+      "value": "Nil"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        2168,
+        2170
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        2171,
+        2172
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        2172,
+        2173
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        2178,
+        2182
+      ],
+      "value": "Cons"
+    },
+    {
+      "kind": "(",
+      "span": [
+        2182,
+        2183
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2183,
+        2184
+      ],
+      "value": "i"
+    },
+    {
+      "kind": ",",
+      "span": [
+        2184,
+        2185
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2186,
+        2190
+      ],
+      "value": "rest"
+    },
+    {
+      "kind": ")",
+      "span": [
+        2190,
+        2191
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        2192,
+        2194
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2201,
+        2208
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        2208,
+        2209
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        2209,
+        2211
+      ],
+      "value": ""
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2211,
+        2212
+      ],
+      "value": "i"
+    },
+    {
+      "kind": "iend",
+      "span": [
+        2212,
+        2214
+      ],
+      "value": ""
+    },
+    {
+      "kind": ")",
+      "span": [
+        2214,
+        2215
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2222,
+        2231
+      ],
+      "value": "print_ids"
+    },
+    {
+      "kind": "(",
+      "span": [
+        2231,
+        2232
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2232,
+        2236
+      ],
+      "value": "rest"
+    },
+    {
+      "kind": ")",
+      "span": [
+        2236,
+        2237
       ]
     }
   ],
@@ -699,808 +2416,2770 @@
     {
       "kind": "v{",
       "span": [
-        298,
-        298
+        606,
+        606
       ]
     },
     {
       "kind": "import",
       "span": [
-        298,
-        304
+        606,
+        612
       ]
     },
     {
       "kind": "qual",
       "span": [
-        305,
-        317
+        613,
+        626
       ],
-      "value": "Syntax.Codec"
+      "value": "Data.Foldable"
     },
     {
       "kind": "(",
       "span": [
-        318,
-        319
+        627,
+        628
       ]
     },
     {
-      "kind": "..",
+      "kind": "ident",
       "span": [
-        319,
-        321
-      ]
+        628,
+        634
+      ],
+      "value": "length"
     },
     {
       "kind": ")",
       "span": [
-        321,
-        322
+        634,
+        635
       ]
     },
     {
       "kind": "v;",
       "span": [
-        322,
-        322
+        635,
+        635
       ]
     },
     {
-      "kind": "fn",
-      "span": [
-        324,
-        326
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        327,
-        331
-      ],
-      "value": "main"
-    },
-    {
-      "kind": "(",
-      "span": [
-        331,
-        332
-      ]
-    },
-    {
-      "kind": ")",
-      "span": [
-        332,
-        333
-      ]
-    },
-    {
-      "kind": "=",
-      "span": [
-        334,
-        335
-      ]
-    },
-    {
-      "kind": "v{",
-      "span": [
-        338,
-        338
-      ]
-    },
-    {
-      "kind": "let",
-      "span": [
-        338,
-        341
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        342,
-        346
-      ],
-      "value": "text"
-    },
-    {
-      "kind": "=",
-      "span": [
-        347,
-        348
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        349,
-        358
-      ],
-      "value": "read_file"
-    },
-    {
-      "kind": "(",
-      "span": [
-        358,
-        359
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        359,
-        362
-      ],
-      "value": "arg"
-    },
-    {
-      "kind": "(",
-      "span": [
-        362,
-        363
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        363,
-        364
-      ],
-      "value": "0"
-    },
-    {
-      "kind": ")",
-      "span": [
-        364,
-        365
-      ]
-    },
-    {
-      "kind": ")",
-      "span": [
-        365,
-        366
-      ]
-    },
-    {
-      "kind": "v;",
-      "span": [
-        366,
-        366
-      ]
-    },
-    {
-      "kind": "if",
-      "span": [
-        369,
-        371
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        372,
-        375
-      ],
-      "value": "arg"
-    },
-    {
-      "kind": "(",
-      "span": [
-        375,
-        376
-      ]
-    },
-    {
-      "kind": "int",
-      "span": [
-        376,
-        377
-      ],
-      "value": "1"
-    },
-    {
-      "kind": ")",
-      "span": [
-        377,
-        378
-      ]
-    },
-    {
-      "kind": "==",
-      "span": [
-        379,
-        381
-      ]
-    },
-    {
-      "kind": "str",
-      "span": [
-        382,
-        390
-      ],
-      "value": "tokens"
-    },
-    {
-      "kind": "then",
-      "span": [
-        391,
-        395
-      ]
-    },
-    {
-      "kind": "v{",
-      "span": [
-        400,
-        400
-      ]
-    },
-    {
-      "kind": "match",
-      "span": [
-        400,
-        405
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        406,
-        419
-      ],
-      "value": "decode_tokens"
-    },
-    {
-      "kind": "(",
-      "span": [
-        419,
-        420
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        420,
-        424
-      ],
-      "value": "text"
-    },
-    {
-      "kind": ")",
-      "span": [
-        424,
-        425
-      ]
-    },
-    {
-      "kind": "of",
-      "span": [
-        426,
-        428
-      ]
-    },
-    {
-      "kind": "v{",
-      "span": [
-        435,
-        435
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        435,
-        438
-      ],
-      "value": "Err"
-    },
-    {
-      "kind": "(",
-      "span": [
-        438,
-        439
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        439,
-        440
-      ],
-      "value": "e"
-    },
-    {
-      "kind": ")",
-      "span": [
-        440,
-        441
-      ]
-    },
-    {
-      "kind": "=>",
-      "span": [
-        442,
-        444
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        445,
-        452
-      ],
-      "value": "println"
-    },
-    {
-      "kind": "(",
-      "span": [
-        452,
-        453
-      ]
-    },
-    {
-      "kind": "istart",
-      "span": [
-        453,
-        469
-      ],
-      "value": "decode error: "
-    },
-    {
-      "kind": "ident",
-      "span": [
-        469,
-        488
-      ],
-      "value": "codec_error_message"
-    },
-    {
-      "kind": "(",
-      "span": [
-        488,
-        489
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        489,
-        490
-      ],
-      "value": "e"
-    },
-    {
-      "kind": ")",
-      "span": [
-        490,
-        491
-      ]
-    },
-    {
-      "kind": "iend",
-      "span": [
-        491,
-        493
-      ],
-      "value": ""
-    },
-    {
-      "kind": ")",
-      "span": [
-        493,
-        494
-      ]
-    },
-    {
-      "kind": "v;",
-      "span": [
-        494,
-        494
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        501,
-        503
-      ],
-      "value": "Ok"
-    },
-    {
-      "kind": "(",
-      "span": [
-        503,
-        504
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        504,
-        505
-      ],
-      "value": "d"
-    },
-    {
-      "kind": ")",
-      "span": [
-        505,
-        506
-      ]
-    },
-    {
-      "kind": "=>",
-      "span": [
-        507,
-        509
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        510,
-        517
-      ],
-      "value": "println"
-    },
-    {
-      "kind": "(",
-      "span": [
-        517,
-        518
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        518,
-        531
-      ],
-      "value": "encode_tokens"
-    },
-    {
-      "kind": "(",
-      "span": [
-        531,
-        532
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        532,
-        533
-      ],
-      "value": "d"
-    },
-    {
-      "kind": ")",
-      "span": [
-        533,
-        534
-      ]
-    },
-    {
-      "kind": ")",
-      "span": [
-        534,
-        535
-      ]
-    },
-    {
-      "kind": "v}",
-      "span": [
-        535,
-        535
-      ]
-    },
-    {
-      "kind": "v}",
-      "span": [
-        535,
-        535
-      ]
-    },
-    {
-      "kind": "v;",
-      "span": [
-        535,
-        535
-      ]
-    },
-    {
-      "kind": "else",
-      "span": [
-        538,
-        542
-      ]
-    },
-    {
-      "kind": "v{",
-      "span": [
-        547,
-        547
-      ]
-    },
-    {
-      "kind": "match",
-      "span": [
-        547,
-        552
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        553,
-        567
-      ],
-      "value": "decode_surface"
-    },
-    {
-      "kind": "(",
-      "span": [
-        567,
-        568
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        568,
-        572
-      ],
-      "value": "text"
-    },
-    {
-      "kind": ")",
-      "span": [
-        572,
-        573
-      ]
-    },
-    {
-      "kind": "of",
-      "span": [
-        574,
-        576
-      ]
-    },
-    {
-      "kind": "v{",
-      "span": [
-        583,
-        583
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        583,
-        586
-      ],
-      "value": "Err"
-    },
-    {
-      "kind": "(",
-      "span": [
-        586,
-        587
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        587,
-        588
-      ],
-      "value": "e"
-    },
-    {
-      "kind": ")",
-      "span": [
-        588,
-        589
-      ]
-    },
-    {
-      "kind": "=>",
-      "span": [
-        590,
-        592
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        593,
-        600
-      ],
-      "value": "println"
-    },
-    {
-      "kind": "(",
-      "span": [
-        600,
-        601
-      ]
-    },
-    {
-      "kind": "istart",
-      "span": [
-        601,
-        617
-      ],
-      "value": "decode error: "
-    },
-    {
-      "kind": "ident",
-      "span": [
-        617,
-        636
-      ],
-      "value": "codec_error_message"
-    },
-    {
-      "kind": "(",
-      "span": [
-        636,
-        637
-      ]
-    },
-    {
-      "kind": "ident",
+      "kind": "import",
       "span": [
         637,
-        638
-      ],
-      "value": "e"
-    },
-    {
-      "kind": ")",
-      "span": [
-        638,
-        639
+        643
       ]
     },
     {
-      "kind": "iend",
+      "kind": "qual",
       "span": [
-        639,
-        641
-      ],
-      "value": ""
-    },
-    {
-      "kind": ")",
-      "span": [
-        641,
-        642
-      ]
-    },
-    {
-      "kind": "v;",
-      "span": [
-        642,
-        642
-      ]
-    },
-    {
-      "kind": "uid",
-      "span": [
-        649,
-        651
-      ],
-      "value": "Ok"
-    },
-    {
-      "kind": "(",
-      "span": [
-        651,
-        652
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        652,
+        644,
         653
       ],
-      "value": "d"
+      "value": "Data.List"
     },
     {
-      "kind": ")",
+      "kind": "(",
       "span": [
-        653,
-        654
-      ]
-    },
-    {
-      "kind": "=>",
-      "span": [
-        655,
-        657
+        654,
+        655
       ]
     },
     {
       "kind": "ident",
       "span": [
-        658,
+        655,
         665
       ],
-      "value": "println"
+      "value": "concat_map"
     },
     {
-      "kind": "(",
+      "kind": ")",
       "span": [
         665,
         666
       ]
     },
     {
-      "kind": "ident",
+      "kind": "v;",
       "span": [
         666,
-        680
+        666
+      ]
+    },
+    {
+      "kind": "import",
+      "span": [
+        668,
+        674
+      ]
+    },
+    {
+      "kind": "qual",
+      "span": [
+        675,
+        687
       ],
-      "value": "encode_surface"
+      "value": "Syntax.Codec"
     },
     {
       "kind": "(",
       "span": [
-        680,
-        681
+        688,
+        689
+      ]
+    },
+    {
+      "kind": "..",
+      "span": [
+        689,
+        691
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        691,
+        692
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        692,
+        692
+      ]
+    },
+    {
+      "kind": "import",
+      "span": [
+        694,
+        700
+      ]
+    },
+    {
+      "kind": "qual",
+      "span": [
+        701,
+        716
+      ],
+      "value": "Syntax.Resolved"
+    },
+    {
+      "kind": "(",
+      "span": [
+        717,
+        718
+      ]
+    },
+    {
+      "kind": "..",
+      "span": [
+        718,
+        720
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        720,
+        721
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        721,
+        721
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        723,
+        725
       ]
     },
     {
       "kind": "ident",
       "span": [
-        681,
-        682
+        726,
+        730
+      ],
+      "value": "main"
+    },
+    {
+      "kind": "(",
+      "span": [
+        730,
+        731
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        731,
+        732
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        733,
+        734
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        737,
+        737
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        737,
+        740
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        741,
+        745
+      ],
+      "value": "text"
+    },
+    {
+      "kind": "=",
+      "span": [
+        746,
+        747
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        748,
+        757
+      ],
+      "value": "read_file"
+    },
+    {
+      "kind": "(",
+      "span": [
+        757,
+        758
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        758,
+        761
+      ],
+      "value": "arg"
+    },
+    {
+      "kind": "(",
+      "span": [
+        761,
+        762
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        762,
+        763
+      ],
+      "value": "0"
+    },
+    {
+      "kind": ")",
+      "span": [
+        763,
+        764
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        764,
+        765
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        765,
+        765
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        768,
+        770
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        771,
+        774
+      ],
+      "value": "arg"
+    },
+    {
+      "kind": "(",
+      "span": [
+        774,
+        775
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        775,
+        776
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        776,
+        777
+      ]
+    },
+    {
+      "kind": "==",
+      "span": [
+        778,
+        780
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        781,
+        789
+      ],
+      "value": "tokens"
+    },
+    {
+      "kind": "then",
+      "span": [
+        790,
+        794
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        799,
+        799
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        799,
+        804
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        805,
+        818
+      ],
+      "value": "decode_tokens"
+    },
+    {
+      "kind": "(",
+      "span": [
+        818,
+        819
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        819,
+        823
+      ],
+      "value": "text"
+    },
+    {
+      "kind": ")",
+      "span": [
+        823,
+        824
+      ]
+    },
+    {
+      "kind": "of",
+      "span": [
+        825,
+        827
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        834,
+        834
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        834,
+        837
+      ],
+      "value": "Err"
+    },
+    {
+      "kind": "(",
+      "span": [
+        837,
+        838
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        838,
+        839
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        839,
+        840
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        841,
+        843
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        844,
+        851
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        851,
+        852
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        852,
+        868
+      ],
+      "value": "decode error: "
+    },
+    {
+      "kind": "ident",
+      "span": [
+        868,
+        887
+      ],
+      "value": "codec_error_message"
+    },
+    {
+      "kind": "(",
+      "span": [
+        887,
+        888
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        888,
+        889
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        889,
+        890
+      ]
+    },
+    {
+      "kind": "iend",
+      "span": [
+        890,
+        892
+      ],
+      "value": ""
+    },
+    {
+      "kind": ")",
+      "span": [
+        892,
+        893
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        893,
+        893
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        900,
+        902
+      ],
+      "value": "Ok"
+    },
+    {
+      "kind": "(",
+      "span": [
+        902,
+        903
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        903,
+        904
       ],
       "value": "d"
     },
     {
       "kind": ")",
       "span": [
-        682,
-        683
+        904,
+        905
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        906,
+        908
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        909,
+        916
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        916,
+        917
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        917,
+        930
+      ],
+      "value": "encode_tokens"
+    },
+    {
+      "kind": "(",
+      "span": [
+        930,
+        931
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        931,
+        932
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ")",
+      "span": [
+        932,
+        933
       ]
     },
     {
       "kind": ")",
       "span": [
-        683,
-        684
+        933,
+        934
       ]
     },
     {
       "kind": "v}",
       "span": [
-        684,
-        684
+        934,
+        934
       ]
     },
     {
       "kind": "v}",
       "span": [
-        684,
-        684
+        934,
+        934
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        934,
+        934
+      ]
+    },
+    {
+      "kind": "elif",
+      "span": [
+        937,
+        941
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        942,
+        945
+      ],
+      "value": "arg"
+    },
+    {
+      "kind": "(",
+      "span": [
+        945,
+        946
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        946,
+        947
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        947,
+        948
+      ]
+    },
+    {
+      "kind": "==",
+      "span": [
+        949,
+        951
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        952,
+        965
+      ],
+      "value": "diagnostics"
+    },
+    {
+      "kind": "then",
+      "span": [
+        966,
+        970
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        975,
+        975
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        975,
+        980
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        981,
+        999
+      ],
+      "value": "decode_diagnostics"
+    },
+    {
+      "kind": "(",
+      "span": [
+        999,
+        1000
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1000,
+        1004
+      ],
+      "value": "text"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1004,
+        1005
+      ]
+    },
+    {
+      "kind": "of",
+      "span": [
+        1006,
+        1008
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1015,
+        1015
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1015,
+        1018
+      ],
+      "value": "Err"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1018,
+        1019
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1019,
+        1020
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1020,
+        1021
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1022,
+        1024
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1025,
+        1032
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1032,
+        1033
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        1033,
+        1049
+      ],
+      "value": "decode error: "
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1049,
+        1068
+      ],
+      "value": "codec_error_message"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1068,
+        1069
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1069,
+        1070
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1070,
+        1071
+      ]
+    },
+    {
+      "kind": "iend",
+      "span": [
+        1071,
+        1073
+      ],
+      "value": ""
+    },
+    {
+      "kind": ")",
+      "span": [
+        1073,
+        1074
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1074,
+        1074
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1081,
+        1083
+      ],
+      "value": "Ok"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1083,
+        1084
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1084,
+        1085
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1085,
+        1086
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1087,
+        1089
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1090,
+        1097
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1097,
+        1098
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1098,
+        1116
+      ],
+      "value": "encode_diagnostics"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1116,
+        1117
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1117,
+        1118
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1118,
+        1119
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1119,
+        1120
       ]
     },
     {
       "kind": "v}",
       "span": [
-        684,
-        684
+        1120,
+        1120
       ]
     },
     {
       "kind": "v}",
       "span": [
-        684,
-        684
+        1120,
+        1120
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1120,
+        1120
+      ]
+    },
+    {
+      "kind": "elif",
+      "span": [
+        1123,
+        1127
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1128,
+        1131
+      ],
+      "value": "arg"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1131,
+        1132
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1132,
+        1133
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1133,
+        1134
+      ]
+    },
+    {
+      "kind": "==",
+      "span": [
+        1135,
+        1137
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        1138,
+        1148
+      ],
+      "value": "resolved"
+    },
+    {
+      "kind": "then",
+      "span": [
+        1149,
+        1153
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1158,
+        1158
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        1158,
+        1163
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1164,
+        1179
+      ],
+      "value": "decode_resolved"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1179,
+        1180
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1180,
+        1184
+      ],
+      "value": "text"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1184,
+        1185
+      ]
+    },
+    {
+      "kind": "of",
+      "span": [
+        1186,
+        1188
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1195,
+        1195
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1195,
+        1198
+      ],
+      "value": "Err"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1198,
+        1199
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1199,
+        1200
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1200,
+        1201
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1202,
+        1204
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1205,
+        1212
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1212,
+        1213
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        1213,
+        1229
+      ],
+      "value": "decode error: "
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1229,
+        1248
+      ],
+      "value": "codec_error_message"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1248,
+        1249
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1249,
+        1250
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1250,
+        1251
+      ]
+    },
+    {
+      "kind": "iend",
+      "span": [
+        1251,
+        1253
+      ],
+      "value": ""
+    },
+    {
+      "kind": ")",
+      "span": [
+        1253,
+        1254
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1254,
+        1254
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1261,
+        1263
+      ],
+      "value": "Ok"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1263,
+        1264
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1264,
+        1265
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1265,
+        1266
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1267,
+        1269
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1270,
+        1277
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1277,
+        1278
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1278,
+        1293
+      ],
+      "value": "encode_resolved"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1293,
+        1294
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1294,
+        1295
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1295,
+        1296
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1296,
+        1297
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1297,
+        1297
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1297,
+        1297
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1297,
+        1297
+      ]
+    },
+    {
+      "kind": "elif",
+      "span": [
+        1300,
+        1304
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1305,
+        1308
+      ],
+      "value": "arg"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1308,
+        1309
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1309,
+        1310
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1310,
+        1311
+      ]
+    },
+    {
+      "kind": "==",
+      "span": [
+        1312,
+        1314
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        1315,
+        1331
+      ],
+      "value": "resolved-nodes"
+    },
+    {
+      "kind": "then",
+      "span": [
+        1332,
+        1336
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1341,
+        1341
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        1341,
+        1346
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1347,
+        1362
+      ],
+      "value": "decode_resolved"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1362,
+        1363
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1363,
+        1367
+      ],
+      "value": "text"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1367,
+        1368
+      ]
+    },
+    {
+      "kind": "of",
+      "span": [
+        1369,
+        1371
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1378,
+        1378
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1378,
+        1381
+      ],
+      "value": "Err"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1381,
+        1382
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1382,
+        1383
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1383,
+        1384
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1385,
+        1387
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1388,
+        1395
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1395,
+        1396
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        1396,
+        1412
+      ],
+      "value": "decode error: "
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1412,
+        1431
+      ],
+      "value": "codec_error_message"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1431,
+        1432
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1432,
+        1433
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1433,
+        1434
+      ]
+    },
+    {
+      "kind": "iend",
+      "span": [
+        1434,
+        1436
+      ],
+      "value": ""
+    },
+    {
+      "kind": ")",
+      "span": [
+        1436,
+        1437
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1437,
+        1437
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1444,
+        1446
+      ],
+      "value": "Ok"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1446,
+        1447
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1447,
+        1448
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1448,
+        1449
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1450,
+        1452
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1453,
+        1471
+      ],
+      "value": "print_resolved_ids"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1471,
+        1472
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1472,
+        1473
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1473,
+        1474
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1474,
+        1474
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1474,
+        1474
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1474,
+        1474
+      ]
+    },
+    {
+      "kind": "else",
+      "span": [
+        1477,
+        1481
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1486,
+        1486
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        1486,
+        1491
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1492,
+        1506
+      ],
+      "value": "decode_surface"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1506,
+        1507
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1507,
+        1511
+      ],
+      "value": "text"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1511,
+        1512
+      ]
+    },
+    {
+      "kind": "of",
+      "span": [
+        1513,
+        1515
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1522,
+        1522
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1522,
+        1525
+      ],
+      "value": "Err"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1525,
+        1526
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1526,
+        1527
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1527,
+        1528
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1529,
+        1531
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1532,
+        1539
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1539,
+        1540
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        1540,
+        1556
+      ],
+      "value": "decode error: "
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1556,
+        1575
+      ],
+      "value": "codec_error_message"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1575,
+        1576
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1576,
+        1577
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1577,
+        1578
+      ]
+    },
+    {
+      "kind": "iend",
+      "span": [
+        1578,
+        1580
+      ],
+      "value": ""
+    },
+    {
+      "kind": ")",
+      "span": [
+        1580,
+        1581
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1581,
+        1581
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1588,
+        1590
+      ],
+      "value": "Ok"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1590,
+        1591
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1591,
+        1592
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1592,
+        1593
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        1594,
+        1596
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1597,
+        1604
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1604,
+        1605
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1605,
+        1619
+      ],
+      "value": "encode_surface"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1619,
+        1620
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1620,
+        1621
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1621,
+        1622
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1622,
+        1623
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1623,
+        1623
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1623,
+        1623
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1623,
+        1623
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1623,
+        1623
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1870,
+        1872
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1873,
+        1891
+      ],
+      "value": "print_resolved_ids"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1891,
+        1892
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1892,
+        1893
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1894,
+        1895
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1896,
+        1907
+      ],
+      "value": "ResolvedDoc"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1907,
+        1908
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1909,
+        1910
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1913,
+        1913
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        1913,
+        1916
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1917,
+        1920
+      ],
+      "value": "ids"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1921,
+        1922
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1923,
+        1927
+      ],
+      "value": "sort"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1927,
+        1928
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1935,
+        1945
+      ],
+      "value": "concat_map"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1945,
+        1946
+      ]
+    },
+    {
+      "kind": "\\",
+      "span": [
+        1957,
+        1958
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        1958,
+        1959
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1959,
+        1960
+      ],
+      "value": "f"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1960,
+        1961
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        1962,
+        1964
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1965,
+        1968
+      ],
+      "value": "map"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1968,
+        1969
+      ]
+    },
+    {
+      "kind": "\\",
+      "span": [
+        1969,
+        1970
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        1970,
+        1971
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1971,
+        1972
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1972,
+        1973
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        1974,
+        1976
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1977,
+        1978
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ".",
+      "span": [
+        1978,
+        1979
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1979,
+        1981
+      ],
+      "value": "id"
+    },
+    {
+      "kind": ",",
+      "span": [
+        1981,
+        1982
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1983,
+        1997
+      ],
+      "value": "rnode_universe"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1997,
+        1998
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1998,
+        1999
+      ],
+      "value": "f"
+    },
+    {
+      "kind": ".",
+      "span": [
+        1999,
+        2000
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2000,
+        2004
+      ],
+      "value": "body"
+    },
+    {
+      "kind": ")",
+      "span": [
+        2004,
+        2005
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        2005,
+        2006
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        2006,
+        2007
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2018,
+        2019
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ".",
+      "span": [
+        2019,
+        2020
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2020,
+        2029
+      ],
+      "value": "functions"
+    },
+    {
+      "kind": ",",
+      "span": [
+        2029,
+        2030
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        2039,
+        2040
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        2040,
+        2041
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        2046,
+        2047
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        2047,
+        2047
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2050,
+        2057
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        2057,
+        2058
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        2058,
+        2066
+      ],
+      "value": "count "
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2066,
+        2072
+      ],
+      "value": "length"
+    },
+    {
+      "kind": "(",
+      "span": [
+        2072,
+        2073
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2073,
+        2076
+      ],
+      "value": "ids"
+    },
+    {
+      "kind": ")",
+      "span": [
+        2076,
+        2077
+      ]
+    },
+    {
+      "kind": "iend",
+      "span": [
+        2077,
+        2079
+      ],
+      "value": ""
+    },
+    {
+      "kind": ")",
+      "span": [
+        2079,
+        2080
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        2080,
+        2080
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2083,
+        2092
+      ],
+      "value": "print_ids"
+    },
+    {
+      "kind": "(",
+      "span": [
+        2092,
+        2093
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2093,
+        2096
+      ],
+      "value": "ids"
+    },
+    {
+      "kind": ")",
+      "span": [
+        2096,
+        2097
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        2097,
+        2097
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        2097,
+        2097
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        2099,
+        2101
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2102,
+        2111
+      ],
+      "value": "print_ids"
+    },
+    {
+      "kind": "(",
+      "span": [
+        2111,
+        2112
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2112,
+        2115
+      ],
+      "value": "ids"
+    },
+    {
+      "kind": ":",
+      "span": [
+        2116,
+        2117
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        2118,
+        2122
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        2122,
+        2123
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        2123,
+        2126
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        2126,
+        2127
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        2127,
+        2128
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        2129,
+        2130
+      ]
+    },
+    {
+      "kind": "Unit",
+      "span": [
+        2131,
+        2135
+      ]
+    },
+    {
+      "kind": "!",
+      "span": [
+        2136,
+        2137
+      ]
+    },
+    {
+      "kind": "{",
+      "span": [
+        2138,
+        2139
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        2139,
+        2141
+      ],
+      "value": "IO"
+    },
+    {
+      "kind": "}",
+      "span": [
+        2141,
+        2142
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        2143,
+        2144
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        2147,
+        2147
+      ]
+    },
+    {
+      "kind": "match",
+      "span": [
+        2147,
+        2152
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2153,
+        2156
+      ],
+      "value": "ids"
+    },
+    {
+      "kind": "of",
+      "span": [
+        2157,
+        2159
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        2164,
+        2164
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        2164,
+        2167
+      ],
+      "value": "Nil"
+    },
+    {
+      "kind": "=>",
+      "span": [
+        2168,
+        2170
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        2171,
+        2172
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        2172,
+        2173
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        2173,
+        2173
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        2178,
+        2182
+      ],
+      "value": "Cons"
+    },
+    {
+      "kind": "(",
+      "span": [
+        2182,
+        2183
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2183,
+        2184
+      ],
+      "value": "i"
+    },
+    {
+      "kind": ",",
+      "span": [
+        2184,
+        2185
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2186,
+        2190
+      ],
+      "value": "rest"
+    },
+    {
+      "kind": ")",
+      "span": [
+        2190,
+        2191
+      ]
+    },
+    {
+      "kind": "=>",
+      "span": [
+        2192,
+        2194
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        2201,
+        2201
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2201,
+        2208
+      ],
+      "value": "println"
+    },
+    {
+      "kind": "(",
+      "span": [
+        2208,
+        2209
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        2209,
+        2211
+      ],
+      "value": ""
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2211,
+        2212
+      ],
+      "value": "i"
+    },
+    {
+      "kind": "iend",
+      "span": [
+        2212,
+        2214
+      ],
+      "value": ""
+    },
+    {
+      "kind": ")",
+      "span": [
+        2214,
+        2215
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        2215,
+        2215
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2222,
+        2231
+      ],
+      "value": "print_ids"
+    },
+    {
+      "kind": "(",
+      "span": [
+        2231,
+        2232
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        2232,
+        2236
+      ],
+      "value": "rest"
+    },
+    {
+      "kind": ")",
+      "span": [
+        2236,
+        2237
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        2237,
+        2237
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        2237,
+        2237
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        2237,
+        2237
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        2237,
+        2237
       ]
     }
   ],
@@ -1530,14 +5209,105 @@
       "kind": "comment",
       "span": [
         226,
-        297
+        302
+      ]
+    },
+    {
+      "kind": "comment",
+      "span": [
+        303,
+        380
+      ]
+    },
+    {
+      "kind": "comment",
+      "span": [
+        381,
+        455
+      ]
+    },
+    {
+      "kind": "comment",
+      "span": [
+        456,
+        533
+      ]
+    },
+    {
+      "kind": "comment",
+      "span": [
+        534,
+        605
       ]
     },
     {
       "kind": "blank",
       "span": [
-        322,
-        324
+        635,
+        637
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        666,
+        668
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        692,
+        694
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        721,
+        723
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        1623,
+        1625
+      ]
+    },
+    {
+      "kind": "comment",
+      "span": [
+        1625,
+        1699
+      ]
+    },
+    {
+      "kind": "comment",
+      "span": [
+        1700,
+        1777
+      ]
+    },
+    {
+      "kind": "comment",
+      "span": [
+        1778,
+        1855
+      ]
+    },
+    {
+      "kind": "comment",
+      "span": [
+        1856,
+        1869
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        2097,
+        2099
       ]
     }
   ]

@@ -2,7 +2,10 @@
 // Each is the deterministic boundary a Prism-written lexer, layout pass, or
 // parser is diffed against, mirroring the front-end fixture seams. Coverage:
 //
-// 1. Determinism. Every phase dumps byte-identically across two runs.
+// 1. Determinism. Every phase dumps byte-identically across two runs. The seams
+//    are lex/parse only and never consult the content-addressed query cache, so
+//    cache state cannot reach these bytes; the consumer that reads them runs the
+//    checker and does, and its cold-versus-warm equality is pinned separately.
 // 2. Committed goldens. Each positive corpus file pairs with one golden per
 //    phase holding the exact bytes; any drift is a reviewed boundary change.
 //    Regenerate with PRISM_ACCEPT_SYNTAX_FIXTURES=1.
@@ -30,9 +33,10 @@ const ACCEPT: &str = "PRISM_ACCEPT_SYNTAX_FIXTURES";
 
 // The two seams and their schema tags, re-typed independently of the compiler
 // so an emitter schema drift cannot re-pin the value it is checked against.
-const PHASES: [(&str, &str); 2] = [
+const PHASES: [(&str, &str); 3] = [
     ("syntax-tokens", "prism-syntax-tokens-v1"),
     ("surface-syntax", "prism-surface-syntax-v1"),
+    ("syntax-diagnostics", "prism-syntax-diagnostics-v1"),
 ];
 
 // The corpus-wide walk must actually visit a corpus; a floor guards against a
@@ -126,6 +130,12 @@ fn syntax_seam_goldens_hold() {
             match phase {
                 "syntax-tokens" => assert_tokens_doc(&stem, &doc),
                 "surface-syntax" => assert_surface_doc(&stem, &doc),
+                // The positive corpus lexes and parses, so its diagnostics
+                // export is the committed empty list: acceptance as bytes.
+                "syntax-diagnostics" => assert!(
+                    doc["diagnostics"].as_array().is_some_and(Vec::is_empty),
+                    "{stem}.{phase}: a positive fixture must export no diagnostics"
+                ),
                 other => panic!("unknown seam {other}"),
             }
         }
@@ -363,6 +373,17 @@ fn syntax_seam_refuses_malformed() {
     let dir = fixture_dir();
     let lex_bad = read(&dir.join("malformed_lex.pr"));
     for (phase, _) in PHASES {
+        // The diagnostics seam never refuses: a refusal IS its payload. The
+        // malformed corpus must therefore export a non-empty diagnostic list.
+        if phase == "syntax-diagnostics" {
+            let out = prism::dump(phase, &lex_bad)
+                .unwrap_or_else(|e| panic!("{phase}: must accept a lex error as payload: {e}"));
+            assert!(
+                out.contains("\"phase\": \"lex\""),
+                "{phase}: a lex fault must export a lex diagnostic"
+            );
+            continue;
+        }
         assert!(
             prism::dump(phase, &lex_bad).is_err(),
             "{phase}: must refuse a lex error"

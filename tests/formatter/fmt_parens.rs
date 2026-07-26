@@ -199,3 +199,79 @@ fn typed_hole_restores_and_roundtrips() {
     assert!(out.contains("?todo"), "typed hole spelling lost: {out:?}");
     roundtrips(src);
 }
+
+// The three loosest levels of the grammar, tightest last: `??` (right
+// associative), `|>` (left associative), and `>>`/`<<` (left associative), each
+// admitting only the next tighter level as an operand. Idempotence and reparsing
+// cannot see a mistake here, because dropping a required paren yields output that
+// still parses and still formats to itself; it just parses to a different tree.
+// So each case pins the exact text, and the pairs are chosen so that one member
+// must keep its parens and the other must drop them.
+#[derive(Clone, Copy, Debug)]
+enum PrecCase {
+    DefaultLeftNested,
+    DefaultRightNested,
+    PipeLeftNested,
+    PipeRightNested,
+    ComposeLeftNested,
+    ComposeRightNested,
+    DefaultUnderPipe,
+    DefaultInPipeStage,
+    ComposeUnderDefault,
+    ComposeInPipeStage,
+}
+
+impl PrecCase {
+    const fn src(self) -> &'static str {
+        match self {
+            Self::DefaultLeftNested => "fn f(a, b, c) = (a ?? b) ?? c\n",
+            Self::DefaultRightNested => "fn f(a, b, c) = a ?? (b ?? c)\n",
+            Self::PipeLeftNested => "fn f(x, k, m) = (x |> k) |> m\n",
+            Self::PipeRightNested => "fn f(x, k, m) = x |> (k |> m)\n",
+            Self::ComposeLeftNested => "fn f(p, q, r) = (p >> q) >> r\n",
+            Self::ComposeRightNested => "fn f(p, q, r) = p >> (q >> r)\n",
+            Self::DefaultUnderPipe => "fn f(a, b, k) = (a ?? b) |> k\n",
+            Self::DefaultInPipeStage => "fn f(a, b, k) = a |> (b ?? k)\n",
+            Self::ComposeUnderDefault => "fn f(p, q, r) = (p >> q) ?? r\n",
+            Self::ComposeInPipeStage => "fn f(x, k, m) = x |> (k >> m)\n",
+        }
+    }
+
+    // The parens the meaning depends on stay; the ones associativity already
+    // implies go away.
+    const fn expect(self) -> &'static str {
+        match self {
+            Self::DefaultLeftNested => "fn f(a, b, c) = (a ?? b) ?? c\n",
+            Self::DefaultRightNested => "fn f(a, b, c) = a ?? b ?? c\n",
+            Self::PipeLeftNested => "fn f(x, k, m) = x |> k |> m\n",
+            Self::PipeRightNested => "fn f(x, k, m) = x |> (k |> m)\n",
+            Self::ComposeLeftNested => "fn f(p, q, r) = p >> q >> r\n",
+            Self::ComposeRightNested => "fn f(p, q, r) = p >> (q >> r)\n",
+            Self::DefaultUnderPipe => "fn f(a, b, k) = (a ?? b) |> k\n",
+            Self::DefaultInPipeStage => "fn f(a, b, k) = a |> (b ?? k)\n",
+            Self::ComposeUnderDefault => "fn f(p, q, r) = p >> q ?? r\n",
+            Self::ComposeInPipeStage => "fn f(x, k, m) = x |> k >> m\n",
+        }
+    }
+}
+
+#[rstest]
+fn low_precedence_operands_keep_their_meaning(
+    #[values(
+        PrecCase::DefaultLeftNested,
+        PrecCase::DefaultRightNested,
+        PrecCase::PipeLeftNested,
+        PrecCase::PipeRightNested,
+        PrecCase::ComposeLeftNested,
+        PrecCase::ComposeRightNested,
+        PrecCase::DefaultUnderPipe,
+        PrecCase::DefaultInPipeStage,
+        PrecCase::ComposeUnderDefault,
+        PrecCase::ComposeInPipeStage
+    )]
+    case: PrecCase,
+) {
+    let out = prism::format(case.src()).expect("input must parse");
+    assert_eq!(out, case.expect(), "from {:?}", case.src());
+    roundtrips(case.src());
+}

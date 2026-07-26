@@ -226,7 +226,11 @@ fn world_export_mirrors_the_lineage_graph_vocabulary() {
 
     assert_contains(&page, "id=\"export\"", "prism-world.html");
     // The shared-vocabulary comment must point at graph.rs as the one home.
-    assert_contains(&script, "src/lineage/graph.rs", "prism-world.ts");
+    assert_contains(
+        &script,
+        "crates/prism-lineage/src/graph.rs",
+        "prism-world.ts",
+    );
     // The exact node-kind, edge-kind, and envelope spellings the decoder reads.
     for needle in [
         "prism-lineage-graph-v1",

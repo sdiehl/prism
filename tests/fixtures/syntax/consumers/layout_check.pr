@@ -1,0 +1,73 @@
+-- The differential gate for the Prism-side layout pass. arg(0) is a
+-- `prism-syntax-tokens-v1` artifact. The artifact embeds both the exact source
+-- text and the compiler's own post-layout token stream (`parse`): the raw tokens
+-- with the virtual block delimiters spliced in and the synthetic head openers
+-- stripped. This harness re-lays the embedded text with `Syntax.Layout.layout`
+-- and reports whether the Prism pass reproduces every token of that stream (wire
+-- kind, byte span, and decoded value). The Rust layout pass stays authoritative:
+-- the Prism result is compared and reported, never substituted.
+--
+-- Float values are compared numerically, both sides renormalized through
+-- `parse_float`/`show_float`; every other value is compared byte for byte.
+import Data.Foldable (length)
+
+import Syntax.Source (..)
+
+import Syntax.Token (..)
+
+import Syntax.Codec (..)
+
+import Syntax.Lex (..)
+
+import Syntax.Layout (..)
+
+-- Renormalize a float spelling to the runtime's canonical form so two spellings
+-- of the same double compare equal.
+fn float_norm(s : String) : String = show_float(parse_float(s))
+
+-- The canonical key of a token's decoded value: absent, a normalized float, or
+-- the verbatim string. Virtual delimiters carry no value.
+fn val_key(k : TokenKind, v : Option(String)) : String =
+  match v of
+    None => "-"
+    Some(s) =>
+      match k of
+        TFloat => "={float_norm(s)}"
+        _ => "={s}"
+
+-- The canonical one-line key of a token: wire kind, half-open span, and value.
+fn tok_key(t : Token) : String =
+  "{kind_name(t.kind)} {show_int(t.span.lo)} {show_int(t.span.hi)} {val_key(t.kind, t.value)}"
+
+-- Compare the Prism token stream against the artifact's, returning "ok" or the
+-- first divergence.
+fn cmp_toks(got : List(Token), want : List(Token), idx : Int) : String =
+  match got of
+    Nil =>
+      match want of
+        Nil => "ok"
+        Cons(_, _) => "mismatch parse-count got=fewer at idx={show_int(idx)}"
+    Cons(g, gr) =>
+      match want of
+        Nil => "mismatch parse-count got=more at idx={show_int(idx)}"
+        Cons(w, wr) =>
+          if tok_key(g) == tok_key(w) then
+            cmp_toks(gr, wr, idx + 1)
+          else
+            "mismatch parse idx={show_int(idx)} got=[{tok_key(g)}] want=[{tok_key(w)}]"
+
+fn report(d : TokensDoc) : String =
+  match layout(d.source.text) of
+    Err(le) => "error offset={show_int(lex_offset(le))} {lex_message(le)}"
+    Ok(ts) =>
+      let rv = cmp_toks(ts, d.parse, 0)
+      if rv == "ok" then
+        "ok parse={show_int(length(ts))}"
+      else
+        rv
+
+fn main() =
+  let text = read_file(arg(0))
+  match decode_tokens(text) of
+    Err(e) => println("decode error: {codec_error_message(e)}")
+    Ok(d) => println(report(d))

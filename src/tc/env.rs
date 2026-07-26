@@ -1,3 +1,5 @@
+pub(super) use crate::types::sig::{convert_data, convert_data_rp, parse_sig, wrap_forall};
+pub(super) use crate::types::{collect_row_vars, for_each_row_tail};
 use std::collections::{BTreeMap, BTreeSet};
 
 use marginalia::Span;
@@ -7,11 +9,9 @@ use crate::core::builtins::{Builtin, FloatOp, OUTPUT_BUILTINS};
 use crate::error::suggest;
 use crate::error::{ErrKind, TypeError};
 use crate::kw;
-use crate::lex::lex_raw;
 use crate::names;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core, Decl, Program};
-use crate::syntax::TypeSigParser;
 use crate::types::ty::{EffRow, Kind, Label, Type, CANONICAL, FLOAT_BUF, INT_BUF};
 
 // Effects the compiler knows without an `effect` declaration: the IO/Exn
@@ -486,40 +486,6 @@ fn ty_row_vars(t: &ast::Ty, out: &mut BTreeSet<String>) {
     t.each_child(&mut |c| ty_row_vars(c, out));
 }
 
-// Lower a data-field row, given the current declaration's `Row`-kinded
-// parameters. A label whose name is one of those parameters is not a concrete
-// effect but the row variable itself, so it moves to the tail: both `! {e}` and
-// `! {IO | e}` yield a row ending in `Var(e)`. Concrete labels stay in the
-// prefix, their args lowered with the same row-parameter awareness.
-fn data_row_rp(row: &ast::Row, rp: &BTreeSet<Sym>) -> EffRow {
-    let ast::Row::Cons(ls, tl) = row else {
-        return EffRow::Empty;
-    };
-    let mut base = tl
-        .as_ref()
-        .map_or(EffRow::Empty, |v| EffRow::Var(Sym::from(v)));
-    let mut concrete = Vec::new();
-    for l in ls {
-        let name = Sym::from(&l.name);
-        if rp.contains(&name) {
-            // A row parameter mentioned bare acts as the row tail.
-            if base == EffRow::Empty {
-                base = EffRow::Var(name);
-            }
-        } else {
-            concrete.push(Label {
-                name,
-                args: l.args.iter().map(|t| convert_data_rp(t, rp)).collect(),
-            });
-        }
-    }
-    EffRow::canonical(concrete, base)
-}
-
-pub(super) fn convert_data(t: &ast::Ty) -> Type {
-    convert_data_rp(t, &BTreeSet::new())
-}
-
 // Saturate an under-applied constructor spine: `Map(k, v)` names the arity-3
 // `Map(k, v, ord)`, filling each omitted trailing parameter of its declared
 // kind. `fill` supplies each omitted `Type`-kinded parameter (the phantom
@@ -585,69 +551,6 @@ fn saturate_field(t: Type, data: &BTreeMap<String, super::DataInfo>) -> Type {
     saturate_fill(t, data, &|| Type::Con(Sym::from(CANONICAL), vec![]))
 }
 
-// The core of `convert_data`, aware of the current declaration's `Row`-kinded
-// parameters `rp`. A variable named in `rp` is an effect row, so it lowers to
-// `Type::Row(Var(..))` wherever it appears (notably as the argument at a
-// `Row`-kinded position of a `Con`, `Cmd(a, e)`); every other name is a type
-// variable, exactly as before. `rp` is empty for all non-data-field callers.
-pub(super) fn convert_data_rp(t: &ast::Ty, rp: &BTreeSet<Sym>) -> Type {
-    match t {
-        ast::Ty::Int => Type::Int,
-        ast::Ty::I64 => Type::I64,
-        ast::Ty::U64 => Type::U64,
-        ast::Ty::Bool => Type::Bool,
-        ast::Ty::Unit => Type::Unit,
-        ast::Ty::Float => Type::Float,
-        ast::Ty::Char => Type::Char,
-        ast::Ty::Str => Type::Str,
-        ast::Ty::Var(n) => {
-            let s = Sym::from(n);
-            if rp.contains(&s) {
-                Type::Row(EffRow::Var(s))
-            } else {
-                Type::Var(s)
-            }
-        }
-        // A `var` state cell reuses the pinned existential id it was desugared to;
-        // see the canonical note on `ast::Ty::State`.
-        ast::Ty::State(n) => Type::Exist(*n),
-        // Usage rows are rejected in desugar before any annotation reaches
-        // conversion; convert through the underlying type defensively.
-        ast::Ty::Coeffect(inner, _) => convert_data_rp(inner, rp),
-        ast::Ty::Forall(names, body) => wrap_forall(
-            &names.iter().map(Sym::from).collect::<Vec<_>>(),
-            convert_data_rp(body, rp),
-        ),
-        ast::Ty::Fun(ps, row, r) => Type::fun_eff(
-            ps.iter().map(|p| convert_data_rp(p, rp)).collect(),
-            data_row_rp(row, rp),
-            convert_data_rp(r, rp),
-        ),
-        ast::Ty::Con(n, args) if n == kw::TY_OR_NULL && args.len() == 1 => {
-            Type::OrNull(Box::new(convert_data_rp(&args[0], rp)))
-        }
-        ast::Ty::Con(n, args) => Type::Con(
-            Sym::from(n),
-            args.iter().map(|x| convert_data_rp(x, rp)).collect(),
-        ),
-        ast::Ty::App(v, args) => Type::apps(
-            Type::Var(Sym::from(v)),
-            args.iter().map(|x| convert_data_rp(x, rp)).collect(),
-        ),
-        ast::Ty::Tuple(ts) => Type::Tuple(ts.iter().map(|x| convert_data_rp(x, rp)).collect()),
-        ast::Ty::UnboxedTuple(ts) => {
-            Type::UnboxedTuple(ts.iter().map(|x| convert_data_rp(x, rp)).collect())
-        }
-        ast::Ty::UnboxedRecord(fs) => Type::UnboxedRecord(
-            fs.iter()
-                .map(|(n, x)| (Sym::from(n.as_str()), convert_data_rp(x, rp)))
-                .collect(),
-        ),
-        ast::Ty::RowLit(row) => Type::Row(data_row_rp(row, rp)),
-        ast::Ty::Nat(v) => Type::Nat(*v),
-    }
-}
-
 // Normalize a declaration's parallel `param_kinds` to a full-length vector: an
 // empty annotation means every parameter has kind `Type` (the common case).
 fn normalize_kinds(params: &[String], kinds: &[Kind]) -> Vec<Kind> {
@@ -656,14 +559,6 @@ fn normalize_kinds(params: &[String], kinds: &[Kind]) -> Vec<Kind> {
     } else {
         vec![Kind::Type; params.len()]
     }
-}
-
-pub(super) fn wrap_forall(params: &[Sym], body: Type) -> Type {
-    let mut out = body;
-    for p in params.iter().rev() {
-        out = Type::Forall(*p, Box::new(out));
-    }
-    out
 }
 
 // Quantify a constructor scheme over its parameters, each with the right binder
@@ -837,54 +732,6 @@ pub(super) fn demand_var_kinds(
         ast::Ty::RowLit(r) => row_demands(r, data, vars, span),
         _ => Ok(()),
     }
-}
-
-// Visit the tail of every effect row reachable in a type (function rows and
-// row-kinded arguments, through every type former), recursing into row label
-// arguments. The one traversal behind every "which rows flow through this
-// interface" question; callers filter the tails they care about.
-pub(super) fn for_each_row_tail(t: &Type, f: &mut impl FnMut(&EffRow)) {
-    match t {
-        Type::Fun(ps, row, r) => {
-            for p in ps {
-                for_each_row_tail(p, f);
-            }
-            f(row.tail());
-            row.for_each_arg(&mut |a| for_each_row_tail(a, f));
-            for_each_row_tail(r, f);
-        }
-        Type::Con(_, ps) | Type::Tuple(ps) | Type::UnboxedTuple(ps) => {
-            for p in ps {
-                for_each_row_tail(p, f);
-            }
-        }
-        Type::UnboxedRecord(fs) => {
-            for (_, t) in fs {
-                for_each_row_tail(t, f);
-            }
-        }
-        Type::App(h, a) => {
-            for_each_row_tail(h, f);
-            for_each_row_tail(a, f);
-        }
-        Type::OrNull(a) => for_each_row_tail(a, f),
-        Type::Forall(_, b) | Type::RowForall(_, b) => for_each_row_tail(b, f),
-        Type::Row(r) => {
-            f(r.tail());
-            r.for_each_arg(&mut |a| for_each_row_tail(a, f));
-        }
-        _ => {}
-    }
-}
-
-// Free effect-row variables in a type, so a class method's signature can be
-// generalized over its row variables (an effect-polymorphic method like `fmap`).
-pub(super) fn collect_row_vars(t: &Type, out: &mut BTreeSet<Sym>) {
-    for_each_row_tail(t, &mut |tail| {
-        if let EffRow::Var(v) = tail {
-            out.insert(*v);
-        }
-    });
 }
 
 // True when a declaration carries a full type signature (every parameter and
@@ -1100,31 +947,6 @@ const NON_ENUM_SIGS: &[(&str, &str)] = &[
     ("chr", "(Int) -> Char"),
 ];
 
-// A builtin signature carries its latent effects on the arrow, and the env type
-// keeps that row: a builtin is a function whose effects inference must attribute
-// at every call site, exactly like a surface function's inferred row. The
-// returned label list is the parsed row, checked by the signature-parsing tests.
-pub(super) fn parse_sig(name: &str, sig: &str) -> Result<(Type, Vec<String>), TypeError> {
-    let (tokens, _) = lex_raw(sig).map_err(|e| TypeError::InternalInvariant {
-        msg: format!("builtin `{name}` signature `{sig}`: {e}"),
-    })?;
-    let ty = TypeSigParser::new()
-        .parse(tokens)
-        .map_err(|e| TypeError::InternalInvariant {
-            msg: format!("builtin `{name}` signature `{sig}`: {e:?}"),
-        })?;
-    let effs = sig_row(&ty);
-    Ok((convert_data(&ty), effs))
-}
-
-fn sig_row(t: &ast::Ty) -> Vec<String> {
-    match t {
-        ast::Ty::Forall(_, b) => sig_row(b),
-        ast::Ty::Fun(_, ast::Row::Cons(ls, _), _) => ls.iter().map(|l| l.name.clone()).collect(),
-        _ => vec![],
-    }
-}
-
 /// Every builtin's `(name, signature)`: the non-enum surface builtins, the
 /// signature each runtime-call `Builtin` carries on its registry row, and the
 /// signature each inline `FloatOp` carries on its registry row. `base_env` seeds
@@ -1313,6 +1135,38 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
                 Type::fun(args, result)
             };
             env.insert(Sym::from(&c.name), wrap_scheme(&dd.params, &kinds, body));
+        }
+        // Fails-closed guard: a field read `x.field` on a sum type resolves the
+        // field type from whichever constructor `find_field` visits first, so a
+        // field name shared across this datatype's constructors with DIFFERING
+        // types is unsound (a `Square { size: String }` read as the `Circle {
+        // size: Int }` field reinterprets a string pointer as an integer).
+        // Reject that at the declaration rather than let it typecheck and fault
+        // at runtime. Identical types across constructors are the sound
+        // common-field case and stay allowed.
+        let mut seen: BTreeMap<String, Type> = BTreeMap::new();
+        for c in &dd.ctors {
+            let Some(fs) = c.fields.as_ref() else {
+                continue;
+            };
+            for ((n, _), arg) in fs.iter().zip(&c.args) {
+                let arg_ty = saturate_field(convert_data_rp(arg, &row_params), &data);
+                match seen.get(n) {
+                    Some(prev) if prev != &arg_ty => {
+                        return Err(ErrKind::ConflictingFieldType {
+                            type_name: dd.name.clone(),
+                            field: n.clone(),
+                            first: prev.show(),
+                            second: arg_ty.show(),
+                        }
+                        .at(dd.span));
+                    }
+                    Some(_) => {}
+                    None => {
+                        seen.insert(n.clone(), arg_ty);
+                    }
+                }
+            }
         }
     }
     let mut eff_ops = BTreeMap::new();

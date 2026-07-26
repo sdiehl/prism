@@ -1,0 +1,2 @@
+-- A doubled separator in a numeric literal.
+fn main() = 1__0

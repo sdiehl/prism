@@ -4,7 +4,7 @@
 
 use std::fs;
 
-// Mirrors the sentinel in examples/boids.pr and src/wasm.rs: everything above it
+// Mirrors the sentinel in examples/boids.pr and src/wasm/mod.rs: everything above it
 // is the pure kernel the browser reuses, and only the example's own `main` is
 // below it. The browser and these tests both append their own entry point.
 const MAIN_SPLIT: &str = "-- @scrubber:main-below";

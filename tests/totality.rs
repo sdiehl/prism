@@ -40,7 +40,7 @@ fn totality_classifies_every_claim_honestly() {
         out.contains("needs_helper: pending:") && out.contains("helper"),
         "{out}"
     );
-    // Partial primitive, and non-decreasing self-recursion, stay pending — never
+    // Partial primitive, and non-decreasing self-recursion, stay pending, never
     // reported as "non-total".
     assert!(out.contains("divides: pending:"), "{out}");
     assert!(out.contains("bad_rec: pending:"), "{out}");

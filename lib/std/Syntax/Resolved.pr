@@ -1,0 +1,214 @@
+-- | The typed vocabulary of the `prism-resolved-syntax-v1` artifact.
+--
+-- One document per source file: the embedded source identity and every user
+-- function's resolved body as a node-id-carrying tree. Each node's `id` is the
+-- same identity the `prism-tc-facts-v1` table keys on, so a Prism consumer
+-- traverses the structure here and joins the checker facts (type, resolution)
+-- there by id. The tree is the resolved Core-phase program: references are
+-- resolved and the surface sugar forms have been desugared away, so it is a
+-- traversable subset of the surface expression vocabulary.
+
+import Control.Layer (..)
+
+import Data.Foldable (elem, length)
+
+import Syntax.Source (..)
+
+-- | One resolved expression node: its NodeId (the join key), its
+-- expression-form kind, its byte span, and its immediate children in source
+-- order. A leaf carries the empty child list.
+pub type RNode = RNode { id: Int, kind: String, span: Span, children: List(RNode) }
+
+-- | One parameter of a resolved function: the binder its body's references
+-- resolve to, and whether it is borrowed. A pattern parameter's name is the
+-- synthesized binder the resolver assigned, because that is the name the body
+-- actually mentions.
+pub type RParam = RParam { name: String, is_borrow: Bool }
+
+-- | One user function's resolved body tree, with its name and parameters.
+pub type RFunction = RFunction { name: String, params: List(RParam), body: RNode }
+
+-- | A decoded resolved-syntax document: the envelope identity, the embedded
+-- source every span indexes into, and the user functions in source order.
+pub type ResolvedDoc = ResolvedDoc {
+  schema: String,
+  compiler: String,
+  source: SourceFile,
+  functions: List(RFunction)
+}
+
+-- | The schema tag this vocabulary decodes.
+pub fn resolved_schema() : String = "prism-resolved-syntax-v1"
+
+-- | The node kinds the artifact spells, one function per form, so a consumer
+-- matches on a named kind rather than retyping a bare string at each use site.
+-- The list is the artifact's whole vocabulary: a kind outside it is a document
+-- this version does not understand, which `rkind_known` is how to ask.
+pub fn rkinds() : List(String) =
+  [
+      rkind_int(),
+      rkind_float(),
+      rkind_char(),
+      rkind_bool(),
+      rkind_unit(),
+      rkind_str(),
+      rkind_var(),
+      rkind_hole(),
+      rkind_bin(),
+      rkind_neg(),
+      rkind_if(),
+      rkind_let(),
+      rkind_lam(),
+      rkind_call(),
+      rkind_pipe(),
+      rkind_match(),
+      rkind_list(),
+      rkind_tuple(),
+      rkind_field(),
+      rkind_unboxed_tuple(),
+      rkind_unboxed_record(),
+      rkind_unboxed_field(),
+      rkind_record(),
+      rkind_record_update(),
+      rkind_record_update_path(),
+      rkind_handle(),
+      rkind_mask(),
+      rkind_inst(),
+      rkind_index(),
+      rkind_index_set(),
+      rkind_ann(),
+    ]
+
+-- | Whether a kind string is one this vocabulary names.
+pub fn rkind_known(k : String) : Bool = elem(k, rkinds())
+
+-- | An integer literal.
+pub fn rkind_int() : String = "int"
+
+-- | A float literal.
+pub fn rkind_float() : String = "float"
+
+-- | A character literal.
+pub fn rkind_char() : String = "char"
+
+-- | A boolean literal.
+pub fn rkind_bool() : String = "bool"
+
+-- | The unit value.
+pub fn rkind_unit() : String = "unit"
+
+-- | A string literal.
+pub fn rkind_str() : String = "str"
+
+-- | A variable reference. Its span covers exactly the identifier, which is what
+-- makes references, and only references, addressable in the source.
+pub fn rkind_var() : String = "var"
+
+-- | A typed hole.
+pub fn rkind_hole() : String = "hole"
+
+-- | A binary operator application.
+pub fn rkind_bin() : String = "bin"
+
+-- | An arithmetic negation.
+pub fn rkind_neg() : String = "neg"
+
+-- | A conditional.
+pub fn rkind_if() : String = "if"
+
+-- | A let binding. Its span starts at the `let` keyword, so the bound name it
+-- introduces is not separately addressable.
+pub fn rkind_let() : String = "let"
+
+-- | A lambda.
+pub fn rkind_lam() : String = "lam"
+
+-- | A function application.
+pub fn rkind_call() : String = "call"
+
+-- | A pipeline application.
+pub fn rkind_pipe() : String = "pipe"
+
+-- | A match expression.
+pub fn rkind_match() : String = "match"
+
+-- | A list literal.
+pub fn rkind_list() : String = "list"
+
+-- | A tuple literal.
+pub fn rkind_tuple() : String = "tuple"
+
+-- | A record field access.
+pub fn rkind_field() : String = "field"
+
+-- | An unboxed tuple literal.
+pub fn rkind_unboxed_tuple() : String = "unboxed-tuple"
+
+-- | An unboxed record literal.
+pub fn rkind_unboxed_record() : String = "unboxed-record"
+
+-- | An unboxed record field access.
+pub fn rkind_unboxed_field() : String = "unboxed-field"
+
+-- | A record construction.
+pub fn rkind_record() : String = "record"
+
+-- | A record update.
+pub fn rkind_record_update() : String = "record-update"
+
+-- | A nested-path record update.
+pub fn rkind_record_update_path() : String = "record-update-path"
+
+-- | An effect handler installation.
+pub fn rkind_handle() : String = "handle"
+
+-- | An effect mask.
+pub fn rkind_mask() : String = "mask"
+
+-- | An explicit instantiation.
+pub fn rkind_inst() : String = "inst"
+
+-- | An index read.
+pub fn rkind_index() : String = "index"
+
+-- | An index write.
+pub fn rkind_index_set() : String = "index-set"
+
+-- | A type annotation.
+pub fn rkind_ann() : String = "ann"
+
+-- | The immediate children of one resolved node, in source order. The one
+-- constructor-naming site for `RNode` traversal; every generic walk derives
+-- from it, so a consumer never re-matches the node shape.
+pub fn rnode_children(n : RNode) : List(RNode) = n.children
+
+-- | Put a replacement child list back into a resolved node, keeping its id,
+-- kind, and span. Fails closed: a list of the wrong length yields the node
+-- unchanged.
+pub fn rnode_rebuild(n : RNode, cs : List(RNode)) : RNode =
+  if length(cs) == length(n.children) then
+    RNode { id = n.id, kind = n.kind, span = n.span, children = cs }
+  else
+    n
+
+-- | The children-and-rebuild pair for resolved nodes, so every strategy in
+-- `Control.Rewrite` and every query in `Control.Layer` works on a resolved
+-- body.
+pub fn rnode_layer() : Layer(RNode) =
+  Layer { kids = rnode_children, rebuild = rnode_rebuild }
+
+-- | Every node of a resolved body, root first, depth-first. The uniplate
+-- `universe` over `RNode`, the traversal a Prism-written checker walks a body
+-- with.
+pub fn rnode_universe(n : RNode) : List(RNode) = lay_universe(rnode_layer(), n)
+
+-- | The number of nodes in a resolved body.
+--
+-- ```prism
+-- # import Syntax.Source (Span)
+-- rnode_count(RNode { id = 0, kind = "unit", span = Span { lo = 0, hi = 0 }, children = [] })
+-- ```
+-- ```output
+-- 1
+-- ```
+pub fn rnode_count(n : RNode) : Int = lay_size(rnode_layer(), n)

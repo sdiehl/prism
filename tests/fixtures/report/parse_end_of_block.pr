@@ -1,0 +1,2 @@
+-- A trailing operator: the caret lands on the line terminator itself.
+fn main() = 1 +

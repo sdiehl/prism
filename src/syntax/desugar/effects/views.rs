@@ -33,6 +33,10 @@ pub(super) fn check_views(p: &S<Pattern>, top: bool, cx: &Cx) -> Result<(), Type
         }
         Pattern::Tuple(ps) => ps.iter().try_for_each(|q| check_views(q, false, cx)),
         Pattern::Record(_, fs, _) => fs.iter().try_for_each(|(_, q)| check_views(q, false, cx)),
+        // A view pattern runs user code and rewrites the whole match, so it
+        // cannot be one alternative among several: alternatives are checked as
+        // nested, which refuses a view pattern inside them.
+        Pattern::Or(alts) => alts.iter().try_for_each(|q| check_views(q, false, cx)),
         _ => Ok(()),
     }
 }
@@ -90,11 +94,13 @@ pub(super) fn rw_view_match(
                     pat: spat(Pattern::Ctor("Some".into(), vec![sub]), vspan),
                     guard: a.guard.clone(),
                     body: a.body.clone(),
+                    alt: false,
                 },
                 Arm {
                     pat: spat(Pattern::Wild, Span::empty(vspan.end)),
                     guard: None,
                     body: fallback,
+                    alt: false,
                 },
             ],
         ),
@@ -105,6 +111,7 @@ pub(super) fn rw_view_match(
         pat: spat(Pattern::Var(tmp), vspan),
         guard: None,
         body: inner,
+        alt: false,
     });
     rw(&sp(Expr::Match(Box::new(s.clone()), outer), span), env, cx)
 }
@@ -122,6 +129,12 @@ pub(super) fn pat_vars(p: &S<Pattern>, out: &mut BTreeSet<String>) {
         Pattern::Record(_, fs, _) => {
             for (_, q) in fs {
                 pat_vars(q, out);
+            }
+        }
+        // Alternatives bind the same names, so the first one names them all.
+        Pattern::Or(alts) => {
+            if let Some(first) = alts.first() {
+                pat_vars(first, out);
             }
         }
         _ => {}

@@ -1,0 +1,462 @@
+-- | Persistent integer-keyed map: a big-endian patricia trie over 64-bit keys.
+--
+-- Keys are `I64`, the fixed-width signed integer, because a radix trie branches
+-- by testing one bit of a machine word. `Int` is arbitrary-precision and has no
+-- highest set bit, so a trie cannot branch on it and no 64-bit branch word can
+-- order it; `Data.Map` serves `Int` keys through comparison chains.
+-- Convert with `to_i64` at the boundary, which wraps to the low 64 bits exactly
+-- as it does everywhere else.
+--
+-- The branch word of a key is its two's-complement bit pattern with the sign bit
+-- flipped. That transform is a bijection, and it turns signed key order into
+-- unsigned branch-word order, so branching is a plain bit test with no sign
+-- special case and an in-order walk yields ascending keys, negatives first.
+--
+-- A branch node carries the prefix its keys agree on, the single-bit mask of the
+-- position where they split, and the subtrees whose branch bit is zero and one.
+-- Every branch keeps two non-empty children, so a node's mask is exactly the
+-- highest bit on which two of its keys differ and a key set determines the tree
+-- uniquely. Iteration order therefore depends on the key set alone and never on
+-- insertion order, and the stronger statement holds too: maps built from the
+-- same bindings in different orders are structurally equal, so `intmap_to_list`,
+-- `intmap_fold`, and the derived `Eq` and `Show` all agree across orders.
+--
+-- Opt-in: not in Base.
+
+import Data.List (foldl, map)
+
+-- The two branch-word constants, named once. `int_sign` is the sign bit whose
+-- flip carries signed order into unsigned order; `int_ones` is the all-ones
+-- word, the only way to complement a `U64` given the builtin set.
+let int_sign : U64 = 9223372036854775808u64
+
+let int_ones : U64 = 18446744073709551615u64
+
+-- | A map from `I64` keys to values of type `v`.
+--
+-- `IMEmpty` is the empty map, `IMLeaf(key, value)` a single binding, and
+-- `IMBranch(prefix, mask, zeros, ones)` a split: every key below it agrees with
+-- `prefix` above the single set bit of `mask`, `zeros` holds those whose branch
+-- bit is clear and `ones` those whose branch bit is set. Both subtrees of a
+-- branch are non-empty.
+pub type IntMap(v)
+  = IMEmpty
+  | IMLeaf(I64, v)
+  | IMBranch(U64, U64, IntMap(v), IntMap(v))
+  deriving (Eq, Show)
+
+-- The order-preserving branch word of a key: the two's-complement bits with the
+-- sign bit flipped, so `x < y` on `I64` iff `im_word(x) < im_word(y)` on `U64`.
+fn im_word(k : I64) : U64 = u64_xor(to_u64(int_of_i64(k)), int_sign)
+
+-- The bitwise complement, spelled as an exclusive or against the all-ones word.
+fn im_not(x : U64) : U64 = u64_xor(x, int_ones)
+
+-- The bits of `w` strictly above the branch bit `m`. At `m = 2^63` the shift
+-- wraps to zero, the complement is zero, and the prefix is empty, which is right
+-- because no bit sits above the sign bit.
+fn im_prefix(w : U64, m : U64) : U64 =
+  u64_and(w, im_not(u64_shl(m, 1u64) - 1u64))
+
+-- True when `w` takes the zero side of the branch bit `m`.
+fn im_zero(w : U64, m : U64) : Bool = u64_and(w, m) == 0u64
+
+-- True when `w` does not belong under the branch `(p, m)` at all.
+fn im_nomatch(w : U64, p : U64, m : U64) : Bool = not(im_prefix(w, m) == p)
+
+-- The highest set bit of `x`, or zero when `x` is zero. Smearing every set bit
+-- downward leaves a run of ones from the top bit, and subtracting that run
+-- shifted right isolates the top bit. `u64_shr` is the logical shift, so the
+-- smear is unaffected by the sign bit.
+fn im_high_bit(x : U64) : U64 =
+  let a = u64_or(x, u64_shr(x, 1u64))
+  let b = u64_or(a, u64_shr(a, 2u64))
+  let c = u64_or(b, u64_shr(b, 4u64))
+  let d = u64_or(c, u64_shr(c, 8u64))
+  let e = u64_or(d, u64_shr(d, 16u64))
+  let f = u64_or(e, u64_shr(e, 32u64))
+  f - u64_shr(f, 1u64)
+
+-- Join two tries with disjoint prefixes `w1` and `w2` under a fresh branch at
+-- their highest differing bit.
+fn im_link(w1 : U64, t1 : IntMap(v), w2 : U64, t2 : IntMap(v)) : IntMap(v) =
+  let m = im_high_bit(u64_xor(w1, w2))
+  let p = im_prefix(w1, m)
+  if im_zero(w1, m) then
+    IMBranch(p, m, t1, t2)
+  else
+    IMBranch(p, m, t2, t1)
+
+-- Rebuild a branch, collapsing it when a side went empty. Every constructor of a
+-- branch outside `im_link` goes through here, which is what keeps the invariant
+-- that both children are non-empty, and with it the canonical shape.
+fn im_bin(p : U64, m : U64, l : IntMap(v), r : IntMap(v)) : IntMap(v) =
+  match l of
+    IMEmpty => r
+    _ =>
+      match r of
+        IMEmpty => l
+        _ => IMBranch(p, m, l, r)
+
+-- Insert `(key, value)`, resolving a collision as `g(value, existing)`.
+fn im_ins(g, w : U64, key : I64, value : v, t : IntMap(v)) : IntMap(v) =
+  match t of
+    IMEmpty => IMLeaf(key, value)
+    IMLeaf(k2, v2) =>
+      if k2 == key then
+        IMLeaf(key, g(value, v2))
+      else
+        im_link(w, IMLeaf(key, value), im_word(k2), t)
+    IMBranch(p, m, l, r) =>
+      if im_nomatch(w, p, m) then
+        im_link(w, IMLeaf(key, value), p, t)
+      elif im_zero(w, m) then
+        IMBranch(p, m, im_ins(g, w, key, value, l), r)
+      else
+        IMBranch(p, m, l, im_ins(g, w, key, value, r))
+
+-- | The empty map.
+pub let intmap_empty : IntMap(v) = IMEmpty
+
+-- | The map binding `key` to `value` and nothing else.
+--
+-- ```prism
+-- intmap_to_list(intmap_singleton(7i64, "a"))
+-- ```
+-- ```output
+-- [(7, a)]
+-- ```
+pub fn intmap_singleton(key : I64, value : v) : IntMap(v) = IMLeaf(key, value)
+
+-- | Insert `key` with `value`, overwriting any existing binding.
+--
+-- ```prism
+-- intmap_lookup(1i64, intmap_insert(1i64, "a", intmap_empty))
+-- ```
+-- ```output
+-- Some(a)
+-- ```
+pub fn intmap_insert(key : I64, value : v, t : IntMap(v)) : IntMap(v) =
+  im_ins(\(new, _old) -> new, im_word(key), key, value, t)
+
+-- | Insert `key` with `value`, combining a clash as `f(new, old)`.
+--
+-- ```prism
+-- intmap_to_list(
+--   intmap_insert_with(\(a, b) -> a + b, 1i64, 10, intmap_singleton(1i64, 5)),
+-- )
+-- ```
+-- ```output
+-- [(1, 15)]
+-- ```
+pub fn intmap_insert_with(f, key : I64, value : v, t : IntMap(v)) : IntMap(v) =
+  im_ins(f, im_word(key), key, value, t)
+
+-- | The value bound to `key` as `Some`, or `None` when absent.
+--
+-- ```prism
+-- intmap_lookup(2i64, intmap_from_list([(1i64, "a"), (2i64, "b")]))
+-- ```
+-- ```output
+-- Some(b)
+-- ```
+pub fn intmap_lookup(key : I64, t : IntMap(v)) : Option(v) =
+  im_look(im_word(key), key, t)
+
+fn im_look(w : U64, key : I64, t : IntMap(v)) : Option(v) =
+  match t of
+    IMEmpty => None
+    IMLeaf(k2, v2) =>
+      if k2 == key then
+        Some(v2)
+      else
+        None
+    IMBranch(p, m, l, r) =>
+      if im_nomatch(w, p, m) then
+        None
+      elif im_zero(w, m) then
+        im_look(w, key, l)
+      else
+        im_look(w, key, r)
+
+-- | True when `key` is bound.
+--
+-- ```prism
+-- intmap_member(2i64, intmap_from_list([(1i64, "a"), (2i64, "b")]))
+-- ```
+-- ```output
+-- true
+-- ```
+pub fn intmap_member(key : I64, t : IntMap(v)) : Bool =
+  match intmap_lookup(key, t) of
+    None => false
+    Some(_) => true
+
+-- | Remove `key` (a no-op when absent).
+--
+-- ```prism
+-- intmap_to_list(intmap_delete(1i64, intmap_from_list([(1i64, "a"), (2i64, "b")])))
+-- ```
+-- ```output
+-- [(2, b)]
+-- ```
+pub fn intmap_delete(key : I64, t : IntMap(v)) : IntMap(v) =
+  im_del(im_word(key), key, t)
+
+fn im_del(w : U64, key : I64, t : IntMap(v)) : IntMap(v) =
+  match t of
+    IMEmpty => IMEmpty
+    IMLeaf(k2, _v2) =>
+      if k2 == key then
+        IMEmpty
+      else
+        t
+    IMBranch(p, m, l, r) =>
+      if im_nomatch(w, p, m) then
+        t
+      elif im_zero(w, m) then
+        im_bin(p, m, im_del(w, key, l), r)
+      else
+        im_bin(p, m, l, im_del(w, key, r))
+
+-- | The number of bindings.
+--
+-- ```prism
+-- intmap_size(intmap_from_list([(1i64, "a"), (2i64, "b")]))
+-- ```
+-- ```output
+-- 2
+-- ```
+pub fn intmap_size(t : IntMap(v)) : Int =
+  match t of
+    IMEmpty => 0
+    IMLeaf(_k, _v) => 1
+    IMBranch(_p, _m, l, r) => intmap_size(l) + intmap_size(r)
+
+-- | True when the map has no bindings.
+--
+-- ```prism
+-- intmap_is_empty(intmap_empty)
+-- ```
+-- ```output
+-- true
+-- ```
+pub fn intmap_is_empty(t : IntMap(v)) : Bool =
+  match t of
+    IMEmpty => true
+    _ => false
+
+-- | The union of two maps, keeping the left value where a key is in both.
+--
+-- ```prism
+-- intmap_to_list(
+--   intmap_union(
+--     intmap_from_list([(1i64, "a"), (2i64, "b")]),
+--     intmap_from_list([(2i64, "z"), (3i64, "c")]),
+--   ),
+-- )
+-- ```
+-- ```output
+-- [(1, a), (2, b), (3, c)]
+-- ```
+pub fn intmap_union(t1 : IntMap(v), t2 : IntMap(v)) : IntMap(v) =
+  intmap_union_with(\(a, _b) -> a, t1, t2)
+
+-- | The union of two maps, combining a key present in both as `f(left, right)`.
+--
+-- The two branch nodes are walked together: the shallower one is descended into
+-- until the masks meet, so the merge costs the shape of the two tries rather
+-- than a re-insertion of every binding.
+--
+-- ```prism
+-- intmap_to_list(
+--   intmap_union_with(
+--     \(a, b) -> a + b,
+--     intmap_from_list([(1i64, 10), (2i64, 20)]),
+--     intmap_from_list([(2i64, 2), (3i64, 3)]),
+--   ),
+-- )
+-- ```
+-- ```output
+-- [(1, 10), (2, 22), (3, 3)]
+-- ```
+pub fn intmap_union_with(f, t1 : IntMap(v), t2 : IntMap(v)) : IntMap(v) =
+  match t1 of
+    IMEmpty => t2
+    IMLeaf(k1, v1) => im_ins(f, im_word(k1), k1, v1, t2)
+    IMBranch(p1, m1, l1, r1) =>
+      match t2 of
+        IMEmpty => t1
+        IMLeaf(k2, v2) =>
+          im_ins(\(new, old) -> f(old, new), im_word(k2), k2, v2, t1)
+        IMBranch(p2, m2, l2, r2) =>
+          if m1 > m2 then
+            if im_nomatch(p2, p1, m1) then
+              im_link(p1, t1, p2, t2)
+            elif im_zero(p2, m1) then
+              IMBranch(p1, m1, intmap_union_with(f, l1, t2), r1)
+            else
+              IMBranch(p1, m1, l1, intmap_union_with(f, r1, t2))
+          elif m2 > m1 then
+            if im_nomatch(p1, p2, m2) then
+              im_link(p1, t1, p2, t2)
+            elif im_zero(p1, m2) then
+              IMBranch(p2, m2, intmap_union_with(f, t1, l2), r2)
+            else
+              IMBranch(p2, m2, l2, intmap_union_with(f, t1, r2))
+          elif p1 == p2 then
+            IMBranch(
+                p1,
+                m1,
+                intmap_union_with(f, l1, l2),
+                intmap_union_with(f, r1, r2),
+              )
+          else
+            im_link(p1, t1, p2, t2)
+
+-- | The bindings of `t1` whose key is also in `t2`, with `t1`'s values.
+--
+-- ```prism
+-- intmap_to_list(
+--   intmap_intersection(
+--     intmap_from_list([(1i64, "a"), (2i64, "b"), (3i64, "c")]),
+--     intmap_from_list([(2i64, "z"), (3i64, "y"), (4i64, "x")]),
+--   ),
+-- )
+-- ```
+-- ```output
+-- [(2, b), (3, c)]
+-- ```
+pub fn intmap_intersection(t1 : IntMap(v), t2 : IntMap(w)) : IntMap(v) =
+  intmap_filter(\(k, _v) -> intmap_member(k, t2), t1)
+
+-- | The bindings of `t1` whose key is not in `t2`.
+--
+-- ```prism
+-- intmap_to_list(
+--   intmap_difference(
+--     intmap_from_list([(1i64, "a"), (2i64, "b"), (3i64, "c")]),
+--     intmap_from_list([(2i64, "z"), (3i64, "y")]),
+--   ),
+-- )
+-- ```
+-- ```output
+-- [(1, a)]
+-- ```
+pub fn intmap_difference(t1 : IntMap(v), t2 : IntMap(w)) : IntMap(v) =
+  intmap_filter(\(k, _v) -> not(intmap_member(k, t2)), t1)
+
+-- | The bindings satisfying `keep(key, value)`.
+--
+-- A surviving branch still splits on the highest bit two of its remaining keys
+-- differ on, because a branch whose child empties collapses, so filtering lands
+-- on the same tree the survivors would have built from scratch.
+--
+-- ```prism
+-- intmap_to_list(
+--   intmap_filter(
+--     \(_k, v) -> v > 1,
+--     intmap_from_list([(1i64, 1), (2i64, 2), (3i64, 3)]),
+--   ),
+-- )
+-- ```
+-- ```output
+-- [(2, 2), (3, 3)]
+-- ```
+pub fn intmap_filter(keep, t : IntMap(v)) : IntMap(v) =
+  match t of
+    IMEmpty => IMEmpty
+    IMLeaf(k, v) =>
+      if keep(k, v) then
+        t
+      else
+        IMEmpty
+    IMBranch(p, m, l, r) =>
+      im_bin(p, m, intmap_filter(keep, l), intmap_filter(keep, r))
+
+-- | Apply `f` to every value, keeping keys and tree shape.
+--
+-- ```prism
+-- intmap_values(
+--   intmap_map_values(\(v) -> v + 1, intmap_from_list([(1i64, 10), (2i64, 20)])),
+-- )
+-- ```
+-- ```output
+-- [11, 21]
+-- ```
+pub fn intmap_map_values(f, t : IntMap(v)) : IntMap(w) =
+  match t of
+    IMEmpty => IMEmpty
+    IMLeaf(k, v) => IMLeaf(k, f(v))
+    IMBranch(p, m, l, r) =>
+      IMBranch(p, m, intmap_map_values(f, l), intmap_map_values(f, r))
+
+-- | Fold `f(acc, key, value)` over the bindings in ascending key order.
+--
+-- The zero subtree of a branch holds the smaller branch words and branch-word
+-- order is key order, so a left-to-right walk is ascending with no sign case.
+--
+-- ```prism
+-- intmap_fold(\(acc, k, _v) -> acc + k, 0i64, intmap_from_list([(1i64, "a"), (2i64, "b")]))
+-- ```
+-- ```output
+-- 3
+-- ```
+pub fn intmap_fold(f, z : b, t : IntMap(v)) : b =
+  match t of
+    IMEmpty => z
+    IMLeaf(k, v) => f(z, k, v)
+    IMBranch(_p, _m, l, r) => intmap_fold(f, intmap_fold(f, z, l), r)
+
+-- | The `(key, value)` pairs in ascending key order, negative keys first.
+--
+-- ```prism
+-- intmap_to_list(intmap_from_list([(2i64, "b"), (0i64, "z"), (1i64, "a")]))
+-- ```
+-- ```output
+-- [(0, z), (1, a), (2, b)]
+-- ```
+pub fn intmap_to_list(t : IntMap(v)) : List((I64, v)) = im_list(t, Nil)
+
+fn im_list(t : IntMap(v), acc : List((I64, v))) : List((I64, v)) =
+  match t of
+    IMEmpty => acc
+    IMLeaf(k, v) => Cons((k, v), acc)
+    IMBranch(_p, _m, l, r) => im_list(l, im_list(r, acc))
+
+-- | The keys in ascending order.
+--
+-- ```prism
+-- intmap_keys(intmap_from_list([(2i64, "b"), (1i64, "a")]))
+-- ```
+-- ```output
+-- [1, 2]
+-- ```
+pub fn intmap_keys(t : IntMap(v)) : List(I64) = map(fst, intmap_to_list(t))
+
+-- | The values in ascending key order.
+--
+-- ```prism
+-- intmap_values(intmap_from_list([(1i64, "a"), (2i64, "b")]))
+-- ```
+-- ```output
+-- [a, b]
+-- ```
+pub fn intmap_values(t : IntMap(v)) : List(v) = map(snd, intmap_to_list(t))
+
+-- | Build a map from `(key, value)` pairs; a later pair overwrites an earlier one
+-- with the same key. The result depends only on the surviving bindings, so any
+-- ordering of the same list of distinct keys builds the identical tree.
+--
+-- ```prism
+-- intmap_to_list(intmap_from_list([(2i64, "b"), (1i64, "a")]))
+-- ```
+-- ```output
+-- [(1, a), (2, b)]
+-- ```
+pub fn intmap_from_list(xs : List((I64, v))) : IntMap(v) =
+  foldl(
+      \(acc, p) -> match p of { (k, v) => intmap_insert(k, v, acc) },
+      intmap_empty,
+      xs,
+    )

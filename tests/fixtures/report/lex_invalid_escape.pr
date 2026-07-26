@@ -1,0 +1,2 @@
+-- An unknown backslash escape: the lexer refuses at the opening quote.
+fn main() = println("\y")

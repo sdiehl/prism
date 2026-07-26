@@ -40,6 +40,7 @@ use super::dump::COMPILER_VERSION;
 // versioned like the front-end seams; bump on any incompatible shape change.
 pub(super) const SYNTAX_TOKENS_SCHEMA: &str = "prism-syntax-tokens-v1";
 pub(super) const SURFACE_SYNTAX_SCHEMA: &str = "prism-surface-syntax-v1";
+pub(super) const SYNTAX_DIAGNOSTICS_SCHEMA: &str = "prism-syntax-diagnostics-v1";
 
 // The token-stream envelope: the embedded source, the raw and post-layout
 // streams, and the trivia events, in stream order.
@@ -632,6 +633,11 @@ fn decl_value(d: &Decl, kind: &str) -> Value {
 fn param_value(p: &crate::syntax::ast::Param) -> Value {
     let mut m = Map::new();
     put(&mut m, "name", json!(p.name));
+    // A pattern parameter's name is synthesized, so the pattern rides alongside
+    // it; a consumer reconstructing the source reads the pattern when present.
+    if let Some(pat) = &p.pat {
+        put(&mut m, "pat", pattern_value(pat));
+    }
     if let Some(t) = &p.ty {
         put(&mut m, "ty", ty_value(t));
     }
@@ -1141,5 +1147,84 @@ fn pattern_node(p: &Pattern) -> Value {
             put_flag(&mut m, "rest", *rest);
             Value::Object(m)
         }
+        Pattern::Or(alts) => json!({
+            "kind": "or",
+            "alts": alts.iter().map(pattern_value).collect::<Vec<_>>(),
+        }),
     }
+}
+
+// The diagnostics envelope: the embedded source and every syntax-boundary
+// diagnostic the lexer or parser produced for it, in source order. An accepted
+// file exports an empty list, so acceptance and refusal share one schema.
+#[derive(Serialize)]
+struct SyntaxDiagnostics {
+    schema: &'static str,
+    compiler: &'static str,
+    source: SourceInfo,
+    diagnostics: Vec<DiagnosticRow>,
+}
+
+// One diagnostic: the stable append-only code, the phase that raised it, the
+// primary half-open byte span (a lex fault is a caret, `lo == hi`), and the
+// rendered message. `expected` carries the parser's canonical expectation set
+// when it has one; related spans are reserved (always present, possibly empty)
+// so a reader written today survives their arrival.
+#[derive(Serialize)]
+struct DiagnosticRow {
+    code: &'static str,
+    phase: &'static str,
+    span: [usize; 2],
+    message: String,
+    expected: Vec<String>,
+    related: Vec<[usize; 2]>,
+}
+
+const DIAG_PHASE_LEX: &str = "lex";
+const DIAG_PHASE_PARSE: &str = "parse";
+
+/// Render the `syntax-diagnostics` seam for one source file: lex, then parse,
+/// and report every syntax-boundary refusal against the user-relative source.
+/// A file that lexes and parses cleanly exports the empty diagnostic list.
+#[must_use]
+pub(super) fn dump_syntax_diagnostics(full: &str) -> String {
+    let base = SourceMap::new(full).prelude_len();
+    let user = &full[base..];
+    let mut diagnostics = Vec::new();
+    match lex(user) {
+        Err(e) => {
+            let at = e.offset();
+            diagnostics.push(DiagnosticRow {
+                code: e.code(),
+                phase: DIAG_PHASE_LEX,
+                span: [at, at],
+                message: e.to_string(),
+                expected: Vec::new(),
+                related: Vec::new(),
+            });
+        }
+        Ok(_) => {
+            if let Err(e) = parse(user) {
+                let (span, expected) = match &e {
+                    ParseError::Syntax { span, .. } => ([span.start, span.end], Vec::new()),
+                    ParseError::UnexpectedEof => ([user.len(), user.len()], Vec::new()),
+                };
+                diagnostics.push(DiagnosticRow {
+                    code: e.code(),
+                    phase: DIAG_PHASE_PARSE,
+                    span,
+                    message: e.to_string(),
+                    expected,
+                    related: Vec::new(),
+                });
+            }
+        }
+    }
+    let doc = SyntaxDiagnostics {
+        schema: SYNTAX_DIAGNOSTICS_SCHEMA,
+        compiler: COMPILER_VERSION,
+        source: source_info(user),
+        diagnostics,
+    };
+    serde_json::to_string_pretty(&doc).unwrap_or_default()
 }

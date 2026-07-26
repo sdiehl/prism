@@ -96,18 +96,95 @@ pub fn imported_paths(root: &Program, roots: &[Root]) -> Result<Vec<String>, Err
         .collect())
 }
 
-/// Bare names a selective import binds in unqualified scope, each mapped to the
-/// canonical symbol it resolves to.
-type Unqualified = BTreeMap<String, CanonicalName>;
+/// A module's own top-level names, each mapped to the canonical symbol its
+/// definition takes.
+type Own = BTreeMap<String, CanonicalName>;
+
+/// Bare names an import list opens, each mapped to every canonical symbol
+/// offered for it.
+///
+/// More than one candidate arises when distinct modules open the same short name
+/// into the same tier. That makes a *use* of the name ambiguous, never the import
+/// itself: a module is free to export a name another module in scope also
+/// exports, as long as nothing refers to it bare. Deciding this at the import
+/// instead would mean every importable module has to avoid every short name any
+/// module a program might also import already uses, which is what manual
+/// prefixing of a module's whole surface buys back.
+type Candidates = BTreeMap<String, Vec<CanonicalName>>;
 
 /// A qualifier (alias, else last path component) mapped to the loaded modules it
 /// names; an entry has more than one index only when imports share a qualifier.
 type Quals = BTreeMap<String, Vec<usize>>;
 
+/// One tier of import scope: what an import list opens into unqualified scope,
+/// and the qualifiers it registers.
+#[derive(Default)]
+struct Scope {
+    opened: Candidates,
+    quals: Quals,
+}
+
+/// Everything one module's references resolve against, in precedence order.
+///
+/// `own`/`scope` are the region's own definitions and imports. `prelude_own`/
+/// `prelude_scope` are a prepended prelude's, and are empty for every module
+/// that is not a root program. A declaration below `prelude_end` is the
+/// prelude's and resolves against the prelude halves alone; the user's file is
+/// not in the prelude's scope, which is what stops a user definition from
+/// capturing a prelude one.
+///
+/// `moved_prelude` holds only those prelude names a user definition displaced,
+/// and is consulted last, after imports. A library module cannot import the
+/// prelude's classes and types, so its references to them fall through as bare
+/// names and would otherwise miss the displaced definition entirely; the table
+/// is empty whenever nothing was displaced, so an unshadowed program resolves
+/// byte-identically.
+struct ScopeSet<'a> {
+    own: &'a Own,
+    scope: &'a Scope,
+    prelude_own: &'a Own,
+    prelude_scope: &'a Scope,
+    prelude_end: usize,
+    moved_prelude: &'a Own,
+}
+
 /// A module's exported names mapped to the canonical symbol each resolves to.
 /// For an own definition that is `Module.name`; for a `pub import` re-export it
 /// is the original definition's canonical symbol.
 type Exports = BTreeMap<String, CanonicalName>;
+
+/// Visit every top-level binder with the byte offset of the declaration that
+/// introduces it. A constructor takes its data declaration's offset, since it is
+/// introduced by that declaration and shares its region.
+fn each_binder(p: &Program, mut f: impl FnMut(usize, &str)) {
+    for d in &p.types {
+        f(d.span.start, &d.name);
+        for c in &d.ctors {
+            f(d.span.start, &c.name);
+        }
+    }
+    for e in &p.effects {
+        f(e.span.start, &e.name);
+    }
+    for e in &p.errors {
+        f(e.span.start, &e.name);
+    }
+    for a in &p.aliases {
+        f(a.span.start, &a.name);
+    }
+    for s in &p.synonyms {
+        f(s.span.start, &s.name);
+    }
+    for c in &p.classes {
+        f(c.span.start, &c.name);
+    }
+    for pat in &p.patterns {
+        f(pat.span.start, &pat.name);
+    }
+    for d in &p.fns {
+        f(d.span.start, &d.name);
+    }
+}
 
 /// Every name a program binds at the top level: the universe a `pub` export or
 /// an importer may refer to (type and constructor names, effects, errors,
@@ -115,18 +192,23 @@ type Exports = BTreeMap<String, CanonicalName>;
 #[must_use]
 pub fn binders(p: &Program) -> BTreeSet<String> {
     let mut s = BTreeSet::new();
-    for d in &p.types {
-        s.insert(d.name.clone());
-        s.extend(d.ctors.iter().map(|c| c.name.clone()));
-    }
-    s.extend(p.effects.iter().map(|e| e.name.clone()));
-    s.extend(p.errors.iter().map(|e| e.name.clone()));
-    s.extend(p.aliases.iter().map(|a| a.name.clone()));
-    s.extend(p.synonyms.iter().map(|s| s.name.clone()));
-    s.extend(p.classes.iter().map(|c| c.name.clone()));
-    s.extend(p.patterns.iter().map(|p| p.name.clone()));
-    s.extend(p.fns.iter().map(|f| f.name.clone()));
+    each_binder(p, |_, n| {
+        s.insert(n.to_string());
+    });
     s
+}
+
+/// The top-level names a prepended prelude defines, and the ones the user's own
+/// file defines, split at [`Program::prelude_end`]. With no prelude prefix the
+/// first set is empty and every name belongs to the user.
+fn binders_by_region(p: &Program) -> (BTreeSet<String>, BTreeSet<String>) {
+    let (mut prelude, mut user) = (BTreeSet::new(), BTreeSet::new());
+    let end = p.prelude_end;
+    each_binder(p, |start, n| {
+        let side = if start < end { &mut prelude } else { &mut user };
+        side.insert(n.to_string());
+    });
+    (prelude, user)
 }
 
 /// The names a module makes visible to importers: every `pub` item, plus the
@@ -189,11 +271,19 @@ pub fn resolve_modules(root: Program, base: &Path) -> Result<Program, Error> {
 /// Fails on a missing or unparseable module, a cross-module name clash, an
 /// undefined export, or an unresolved/ambiguous qualified reference.
 pub fn resolve_modules_in(root: Program, roots: &[Root]) -> Result<Program, Error> {
-    if root.imports.is_empty() {
+    if is_single_region(&root) {
         return Ok(resolve(root)?);
     }
     let modules = load(&root, roots)?;
     resolve_loaded_modules(root, modules)
+}
+
+/// Whether resolution is the identity on `root`'s names: no imports to rewrite
+/// against, and one source region, so no prelude definition can be shadowed.
+/// A prepended prelude makes the program two regions even with no imports, since
+/// a user definition of a prelude name must shadow it rather than replace it.
+const fn is_single_region(root: &Program) -> bool {
+    root.imports.is_empty() && root.prelude_end == 0
 }
 
 /// Resolve a root against an already parsed and loaded module closure.
@@ -218,23 +308,51 @@ pub(crate) fn resolve_loaded_module_units(
     root: Program,
     mut modules: Vec<Module>,
 ) -> Result<(Program, Vec<Module>), Error> {
-    if root.imports.is_empty() {
+    if is_single_region(&root) {
         return Ok((resolve(root)?, modules));
     }
     let (mods, by_path) = module_infos(&modules)?;
 
-    // The root is the empty-path module: its own names (and the prelude prepended
-    // to it) stay bare, so `main` and the prelude keep their global symbols.
-    let root_own = canon_of(&root, None);
-    let (root_unqual, root_quals) = build_scope(&root.imports, &by_path, &mods)?;
+    // The root is the empty-path module: its own names stay bare, so `main` and
+    // every unshadowed prelude definition keep their global symbols. The prelude
+    // prepended to it is a region of its own, with its own definitions and its
+    // own imports, so the two cannot capture each other.
+    let (root_prelude_own, root_own) = root_owns(&root);
+    let moved_prelude = moved_prelude(&root_prelude_own);
+    let (prelude_imports, user_imports): (Vec<ImportDecl>, Vec<ImportDecl>) = root
+        .imports
+        .iter()
+        .cloned()
+        .partition(|i| i.span.start < root.prelude_end);
+    let root_prelude_scope = build_scope(&prelude_imports, &by_path, &mods)?;
+    let root_scope = build_scope(&user_imports, &by_path, &mods)?;
+    let root_scopes = ScopeSet {
+        own: &root_own,
+        scope: &root_scope,
+        prelude_own: &root_prelude_own,
+        prelude_scope: &root_prelude_scope,
+        prelude_end: root.prelude_end,
+        moved_prelude: &moved_prelude,
+    };
     let mut root = root;
-    Rw::new("", &root_own, &root_unqual, &root_quals, &mods).program(&mut root)?;
+    Rw::new("", &root_scopes, &mods).program(&mut root)?;
 
+    // An imported module carries no prelude of its own, so its prelude halves
+    // stay empty and every one of its declarations resolves in the user region.
+    let (no_own, no_scope) = (Own::new(), Scope::default());
     for m in &mut modules {
         let path = m.path.join(".");
-        let own = canon_of(&m.prog, Some(&path));
-        let (unqual, quals) = build_scope(&m.prog.imports, &by_path, &mods)?;
-        Rw::new(&path, &own, &unqual, &quals, &mods).program(&mut m.prog)?;
+        let own = own_of(&m.prog, &path, binders(&m.prog));
+        let scope = build_scope(&m.prog.imports, &by_path, &mods)?;
+        let scopes = ScopeSet {
+            own: &own,
+            scope: &scope,
+            prelude_own: &no_own,
+            prelude_scope: &no_scope,
+            prelude_end: 0,
+            moved_prelude: &moved_prelude,
+        };
+        Rw::new(&path, &scopes, &mods).program(&mut m.prog)?;
     }
 
     Ok((root, modules))
@@ -245,7 +363,9 @@ pub(crate) fn resolve_loaded_module_units(
 /// Each maps to its canonical symbol, with the program's own definitions removed
 /// (a local definition shadows an import of the same name). The REPL applies this
 /// to interactively typed expressions so a bare `map` resolves through the
-/// prelude's glob imports exactly as it does inside a file body.
+/// prelude's glob imports exactly as it does inside a file body. A name two
+/// modules offer is dropped rather than picked between: no bare reference to it
+/// resolves, which is the same answer the file-body resolver gives.
 ///
 /// # Errors
 /// Fails on a missing or unparseable imported module.
@@ -258,13 +378,17 @@ pub fn import_bindings(
     }
     let modules = load(program, roots)?;
     let (mods, by_path) = module_infos(&modules)?;
-    let (mut unqual, _) = build_scope(&program.imports, &by_path, &mods)?;
+    let mut scope = build_scope(&program.imports, &by_path, &mods)?;
     for own in binders(program) {
-        unqual.remove(&own);
+        scope.opened.remove(&own);
     }
-    Ok(unqual
+    Ok(scope
+        .opened
         .into_iter()
-        .map(|(name, canonical)| (name, canonical.as_str().to_string()))
+        .filter_map(|(name, candidates)| match candidates.as_slice() {
+            [only] => Some((name, only.as_str().to_string())),
+            _ => None,
+        })
         .collect())
 }
 
@@ -283,50 +407,115 @@ pub fn resolve_expr(expr: &mut S<Expr>, imports: &BTreeMap<String, String>) -> R
     if imports.is_empty() {
         return Ok(());
     }
-    let own = BTreeMap::new();
-    let imports: Unqualified = imports
-        .iter()
-        .map(|(name, canonical)| (name.clone(), CanonicalName::new(canonical.clone())))
-        .collect();
-    let quals = BTreeMap::new();
+    let (no_own, no_scope) = (Own::new(), Scope::default());
+    let scope = Scope {
+        opened: imports
+            .iter()
+            .map(|(name, canonical)| (name.clone(), vec![CanonicalName::new(canonical.clone())]))
+            .collect(),
+        quals: Quals::new(),
+    };
+    let scopes = ScopeSet {
+        own: &no_own,
+        scope: &scope,
+        prelude_own: &no_own,
+        prelude_scope: &no_scope,
+        prelude_end: 0,
+        moved_prelude: &no_own,
+    };
     let mods: &[ModInfo] = &[];
-    let mut rw = Rw::new("", &own, &imports, &quals, mods);
+    let mut rw = Rw::new("", &scopes, mods);
     rw.expr(expr);
     rw.err.take().map_or(Ok(()), |e| Err(Error::Type(e)))
 }
 
-/// Map every top-level name a module binds to its canonical form. An exported
-/// name becomes `Data.Map.insert` (dotted, the symbol an importer reaches); a
-/// private name becomes `Data.Map@helper` (the `@` is unforgeable in source and
-/// native codegen encodes it distinctly from `.`). The root module
-/// (`path == None`) is the empty-path module: its names stay bare.
-fn canon_of(p: &Program, path: Option<&str>) -> BTreeMap<String, CanonicalName> {
+/// Map each of `names` to its canonical form under `path`. An exported name
+/// becomes `Data.Map.insert` (dotted, the symbol an importer reaches); a private
+/// name becomes `Data.Map@helper` (the `@` is unforgeable in source and native
+/// codegen encodes it distinctly from `.`).
+fn own_of(p: &Program, path: &str, names: BTreeSet<String>) -> Own {
     let exports = exports_of(p);
-    binders(p)
+    names
         .into_iter()
         .map(|n| {
-            let canon = match path {
-                None => n.clone(),
-                Some(path) if exports.contains(&n) => format!("{path}.{n}"),
-                Some(path) => crate::names::private(path, &n),
+            let canon = if exports.contains(&n) {
+                format!("{path}.{n}")
+            } else {
+                names::private(path, &n)
             };
             (n, CanonicalName::new(canon))
         })
         .collect()
 }
 
-/// Build a module's import scope: the unqualified bindings a selective import
-/// brings into bare scope (each mapped to its canonical symbol), and the
-/// qualifier table mapping a qualifier (alias, else last path component) to the
-/// modules it names. A selective import also registers its qualifier, so
+/// The root module's two definition tiers, the prelude's first.
+///
+/// The root is the empty-path module, so its names stay bare. A prelude
+/// definition keeps its bare name too, unless the user's own file defines that
+/// name as well: then the prelude's moves to the module-private
+/// `@prelude@name`, so the user's definition can take the bare name without
+/// capturing the prelude's own references to it. Materializing the private
+/// symbol only where a collision makes it observable is what leaves every
+/// program that shadows nothing byte-identical, symbols and content hash alike.
+///
+/// A prelude class is the one exception and never moves. Operator elaboration
+/// and `deriving` name those classes directly, so moving one would leave `==`
+/// resolving to a class the program no longer spells, and a user constructor
+/// that merely happens to share the name would break arithmetic it never
+/// mentions. A user definition of a prelude class name therefore collides with
+/// it rather than shadowing it.
+fn root_owns(p: &Program) -> (Own, Own) {
+    let (prelude, user) = binders_by_region(p);
+    let prelude_classes: BTreeSet<&str> = p
+        .classes
+        .iter()
+        .filter(|c| c.span.start < p.prelude_end)
+        .map(|c| c.name.as_str())
+        .collect();
+    let own_user = user
+        .iter()
+        .map(|n| (n.clone(), CanonicalName::new(n.clone())))
+        .collect();
+    let own_prelude = prelude
+        .into_iter()
+        .map(|n| {
+            let canon = if user.contains(&n) && !prelude_classes.contains(n.as_str()) {
+                names::prelude_private(&n)
+            } else {
+                n.clone()
+            };
+            (n, CanonicalName::new(canon))
+        })
+        .collect();
+    (own_prelude, own_user)
+}
+
+/// The prelude definitions a user definition displaced, keyed by their bare
+/// name. Empty when the user's file shadows nothing, which is every program
+/// that does not reuse a prelude name.
+fn moved_prelude(prelude_own: &Own) -> Own {
+    prelude_own
+        .iter()
+        .filter(|(name, canon)| canon.as_str() != name.as_str())
+        .map(|(name, canon)| (name.clone(), canon.clone()))
+        .collect()
+}
+
+/// Build a module's import scope: the unqualified bindings its imports bring
+/// into bare scope (each mapped to every canonical symbol offered for it), and
+/// the qualifier table mapping a qualifier (alias, else last path component) to
+/// the modules it names. A selective import also registers its qualifier, so
 /// `import M (a)` admits both bare `a` and `M.a`.
+///
+/// Two modules opening the same short name is recorded, not rejected: the
+/// ambiguity belongs to a bare reference that has to choose between them, and
+/// [`Rw::pick`] reports it there.
 fn build_scope(
     imports: &[ImportDecl],
     by_path: &BTreeMap<String, usize>,
     mods: &[ModInfo],
-) -> Result<(Unqualified, Quals), Error> {
-    let mut unqualified: Unqualified = BTreeMap::new();
-    let mut quals: Quals = BTreeMap::new();
+) -> Result<Scope, Error> {
+    let mut scope = Scope::default();
     for imp in imports {
         let path = imp.path.join(".");
         let idx = *by_path.get(path.as_str()).ok_or_else(|| {
@@ -355,12 +544,9 @@ fn build_scope(
             Vec::new()
         };
         for (n, canon) in opened {
-            if let Some(prev) = unqualified.insert(n.clone(), canon.clone()) {
-                if prev != canon {
-                    return Err(Error::ResolveModule(format!(
-                        "`{n}` is ambiguous: brought unqualified by `{prev}` and `{canon}`"
-                    )));
-                }
+            let candidates = scope.opened.entry(n).or_default();
+            if !candidates.contains(&canon) {
+                candidates.push(canon);
             }
         }
         // The full module path is always a valid qualifier (`Geo.Util.one`); the
@@ -374,12 +560,12 @@ fn build_scope(
         // prelude already opened and the user imports again names one module, not
         // two, so it must not read as ambiguous. Distinct modules sharing a short
         // name still each get an entry, which is the genuine ambiguity.
-        push_unique(quals.entry(path.clone()).or_default(), idx);
+        push_unique(scope.quals.entry(path.clone()).or_default(), idx);
         if short != path {
-            push_unique(quals.entry(short).or_default(), idx);
+            push_unique(scope.quals.entry(short).or_default(), idx);
         }
     }
-    Ok((unqualified, quals))
+    Ok(scope)
 }
 
 fn push_unique(v: &mut Vec<usize>, idx: usize) {
@@ -493,10 +679,13 @@ fn merge(mut root: Program, modules: Vec<Module>) -> Program {
 /// names, and prelude names flow through untouched.
 struct Rw<'a> {
     module: &'a str,
-    own: &'a BTreeMap<String, CanonicalName>,
-    unqualified: &'a BTreeMap<String, CanonicalName>,
-    quals: &'a BTreeMap<String, Vec<usize>>,
+    s: &'a ScopeSet<'a>,
     mods: &'a [ModInfo],
+    // Whether the declaration being rewritten sits in the prepended prelude's
+    // region. Set from the declaration's own span before each top-level item, so
+    // the prelude's bodies resolve in the prelude's scope and the user's in the
+    // user's. Always false for a module with no prelude prefix.
+    in_prelude: bool,
     locals: Vec<String>,
     // Each locally declared `stable` family mapped to the predecessor rungs whose
     // route to the current rung the migration table promises. A family-qualified
@@ -507,23 +696,21 @@ struct Rw<'a> {
 }
 
 impl<'a> Rw<'a> {
-    const fn new(
-        module: &'a str,
-        own: &'a BTreeMap<String, CanonicalName>,
-        unqualified: &'a BTreeMap<String, CanonicalName>,
-        quals: &'a BTreeMap<String, Vec<usize>>,
-        mods: &'a [ModInfo],
-    ) -> Self {
+    const fn new(module: &'a str, s: &'a ScopeSet<'a>, mods: &'a [ModInfo]) -> Self {
         Self {
             module,
-            own,
-            unqualified,
-            quals,
+            s,
             mods,
+            in_prelude: false,
             locals: Vec::new(),
             family_routes: BTreeMap::new(),
             err: None,
         }
+    }
+
+    // Enter the region the declaration at `span` belongs to.
+    const fn at(&mut self, span: Span) {
+        self.in_prelude = span.start < self.s.prelude_end;
     }
 
     fn program(mut self, p: &mut Program) -> Result<(), Error> {
@@ -540,6 +727,7 @@ impl<'a> Rw<'a> {
             })
             .collect();
         for d in &mut p.types {
+            self.at(d.span);
             d.name = self.canon(&d.name);
             for c in &mut d.ctors {
                 c.name = self.canon(&c.name);
@@ -554,6 +742,7 @@ impl<'a> Rw<'a> {
             }
         }
         for e in &mut p.effects {
+            self.at(e.span);
             e.name = self.canon(&e.name);
             for op in &mut e.ops {
                 for t in &mut op.params {
@@ -563,28 +752,39 @@ impl<'a> Rw<'a> {
             }
         }
         for er in &mut p.errors {
+            self.at(er.span);
             er.name = self.canon(&er.name);
             for t in &mut er.params {
                 self.ty(t);
             }
         }
         for a in &mut p.aliases {
+            self.at(a.span);
             a.name = self.canon(&a.name);
             for l in &mut a.labels {
                 self.efflabel(l);
             }
         }
         for s in &mut p.synonyms {
+            self.at(s.span);
             s.name = self.canon(&s.name);
             self.ty(&mut s.ty);
         }
         for c in &mut p.classes {
+            self.at(c.span);
             c.name = self.canon(&c.name);
+            // A superclass names another class, so it resolves like any other
+            // reference. Leaving it bare breaks a class whose superclass moved
+            // to its module-private symbol because the user shadowed the name.
+            for s in &mut c.supers {
+                *s = self.value(s, c.span);
+            }
             for (_, t) in &mut c.methods {
                 self.ty(t);
             }
         }
         for inst in &mut p.instances {
+            self.at(inst.span);
             inst.module = self.module.to_string();
             inst.class = self.value(&inst.class, inst.span);
             self.ty(&mut inst.head);
@@ -600,10 +800,12 @@ impl<'a> Rw<'a> {
             // symbols so the designation keys on the same `(class, head)` the
             // instance store does. `name` is a global instance reference, left
             // bare exactly like the names in `inst_keys`.
+            self.at(c.span);
             c.class = self.value(&c.class, c.span);
             self.ty(&mut c.head);
         }
         for pat in &mut p.patterns {
+            self.at(pat.span);
             pat.name = self.canon(&pat.name);
             pat.for_ty = self.value(&pat.for_ty, pat.span);
             let base = self.locals.len();
@@ -615,6 +817,7 @@ impl<'a> Rw<'a> {
             self.locals.truncate(base);
         }
         for f in &mut p.fns {
+            self.at(f.span);
             self.decl(f, true);
         }
         // Resolve names inside `stable` blocks (field types, additive defaults,
@@ -622,6 +825,7 @@ impl<'a> Rw<'a> {
         // types/fns. A converter's `{ ..vN, .. }` body binds its source rung as a
         // local, so push that before resolving the body.
         for sd in &mut p.stable {
+            self.at(sd.span);
             for rung in &mut sd.rungs {
                 for field in &mut rung.fields {
                     self.ty(&mut field.ty);
@@ -1011,16 +1215,100 @@ impl<'a> Rw<'a> {
                     self.pat(it);
                 }
             }
-            _ => {}
+            // Constructor names inside every alternative need qualifying. The
+            // alternatives bind the same names, so the repeated `locals` pushes
+            // are duplicates of one set, which the scope walk tolerates.
+            Pattern::Or(alts) => {
+                for alt in alts {
+                    self.pat(alt);
+                }
+            }
+            Pattern::Wild
+            | Pattern::Int(_)
+            | Pattern::Float(_)
+            | Pattern::Char(_)
+            | Pattern::Bool(_) => {}
         }
     }
 
-    /// Canonicalize a top-level definition name to its module-qualified form.
+    /// Canonicalize a top-level definition name to its module-qualified form,
+    /// against the definition tier of the region the declaration sits in.
     fn canon(&self, name: &str) -> String {
-        self.own
+        let own = if self.in_prelude {
+            self.s.prelude_own
+        } else {
+            self.s.own
+        };
+        own.get(name)
+            .map_or_else(|| name.to_string(), |c| c.as_str().to_string())
+    }
+
+    /// The import tiers a reference in the current region searches, in
+    /// precedence order. A prelude declaration sees only the prelude's imports;
+    /// the user's region sees its own first, then the prelude's, so a name the
+    /// file explicitly imported is never lost to one the prelude happened to
+    /// open under the same short name.
+    const fn scopes(&self) -> [Option<&'a Scope>; 2] {
+        if self.in_prelude {
+            [Some(self.s.prelude_scope), None]
+        } else {
+            [Some(self.s.scope), Some(self.s.prelude_scope)]
+        }
+    }
+
+    /// The canonical symbol `scope` offers for `name`, reporting the ambiguity
+    /// at the use site when it offers more than one.
+    ///
+    /// Ambiguity is a property of the reference, not of the imports: two modules
+    /// in scope may export the same short name freely, and only a bare reference
+    /// that would have to choose between them is an error. The first candidate
+    /// is returned anyway so one reference yields one diagnostic rather than a
+    /// cascade from downstream phases.
+    fn pick(&mut self, scope: &Scope, name: &str, span: Span) -> Option<String> {
+        match scope.opened.get(name)?.as_slice() {
+            [] => None,
+            [only] => Some(only.as_str().to_string()),
+            many => {
+                let owners: Vec<&str> = many.iter().map(|c| names::module_of(c.as_str())).collect();
+                let first = many[0].as_str().to_string();
+                self.record(
+                    span,
+                    format!(
+                        "`{name}` is ambiguous: exported by {}; qualify the reference",
+                        owners.join(" and ")
+                    ),
+                );
+                Some(first)
+            }
+        }
+    }
+
+    /// Resolve a bare name through the tiers visible to the region being
+    /// rewritten: the region's own definitions, then the prelude's, then the
+    /// region's imports, then the prelude's. The first tier that binds the name
+    /// wins outright; a lower tier never contributes a candidate to it.
+    fn lookup(&mut self, name: &str, span: Span) -> Option<String> {
+        if !self.in_prelude {
+            if let Some(c) = self.s.own.get(name) {
+                return Some(c.as_str().to_string());
+            }
+        }
+        if let Some(c) = self.s.prelude_own.get(name) {
+            return Some(c.as_str().to_string());
+        }
+        for scope in self.scopes() {
+            let Some(scope) = scope else { continue };
+            if let Some(hit) = self.pick(scope, name, span) {
+                return Some(hit);
+            }
+        }
+        // Last: a prelude name the user displaced. A library module reaches its
+        // classes and types this way, having no import that could name them, and
+        // imports still win so an explicit one is never lost to the prelude.
+        self.s
+            .moved_prelude
             .get(name)
-            .cloned()
-            .map_or_else(|| name.to_string(), |name| name.as_str().to_string())
+            .map(|c| c.as_str().to_string())
     }
 
     /// Map a family-qualified route path (`T.Vk.upgrade` / `T.Vk.downgrade`) to
@@ -1061,40 +1349,47 @@ impl<'a> Rw<'a> {
         if let Some((q, n)) = name.rsplit_once('.') {
             return self.qualified(q, n, name, span);
         }
-        if let Some(canon) = self.own.get(name).or_else(|| self.unqualified.get(name)) {
-            return canon.as_str().to_string();
-        }
-        name.to_string()
+        self.lookup(name, span).unwrap_or_else(|| name.to_string())
     }
 
+    /// Resolve `Q.n` through the qualifier tables visible to the current region,
+    /// nearest tier first. A tier that names `Q` and exports `n` answers; a tier
+    /// that names `Q` without exporting `n` falls through to the next, so a
+    /// qualifier the prelude opened still serves a name the user's own import of
+    /// the same qualifier does not carry.
     fn qualified(&mut self, q: &str, n: &str, full: &str, span: Span) -> String {
-        let Some(idxs) = self.quals.get(q) else {
-            self.record(
-                span,
-                format!("`{full}`: no imported module qualified `{q}`"),
-            );
-            return full.to_string();
-        };
-        let hits: Vec<&ModInfo> = idxs
-            .iter()
-            .filter(|&&i| self.mods[i].exports.contains_key(n))
-            .map(|&i| &self.mods[i])
-            .collect();
-        match hits.as_slice() {
-            [] => {
-                self.record(span, format!("module `{q}` does not export `{n}`"));
-                full.to_string()
-            }
-            [m] => m.exports[n].as_str().to_string(),
-            many => {
-                let paths: Vec<&str> = many.iter().map(|m| m.path.as_str()).collect();
-                self.record(
-                    span,
-                    format!("`{full}` is ambiguous: exported by {}", paths.join(", ")),
-                );
-                full.to_string()
+        let mods = self.mods;
+        let mut qualifier_known = false;
+        for scope in self.scopes() {
+            let Some(idxs) = scope.and_then(|s| s.quals.get(q)) else {
+                continue;
+            };
+            qualifier_known = true;
+            let hits: Vec<&ModInfo> = idxs
+                .iter()
+                .filter(|&&i| mods[i].exports.contains_key(n))
+                .map(|&i| &mods[i])
+                .collect();
+            match hits.as_slice() {
+                [] => {}
+                [m] => return m.exports[n].as_str().to_string(),
+                many => {
+                    let paths: Vec<&str> = many.iter().map(|m| m.path.as_str()).collect();
+                    self.record(
+                        span,
+                        format!("`{full}` is ambiguous: exported by {}", paths.join(", ")),
+                    );
+                    return full.to_string();
+                }
             }
         }
+        let msg = if qualifier_known {
+            format!("module `{q}` does not export `{n}`")
+        } else {
+            format!("`{full}`: no imported module qualified `{q}`")
+        };
+        self.record(span, msg);
+        full.to_string()
     }
 
     fn record(&mut self, span: Span, msg: String) {

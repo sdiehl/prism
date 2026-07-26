@@ -1,0 +1,1042 @@
+-- | A Prism-language reimplementation of the compiler's raw token layer: exact
+-- UTF-8 tokenization, literal payload decoding, and interpolation splitting,
+-- expressed as ordinary Prism. The Rust `lex_raw` pipeline remains the
+-- authoritative oracle; this module produces the same raw token stream (kind,
+-- byte span, and decoded value) and the same interleaved trivia (line comments
+-- and blank-line runs) so the two can be diffed. It is compared and reported,
+-- never used as a silent fallback.
+--
+-- Scope of this layer: the fixed-token vocabulary, identifiers, uppercase names,
+-- qualified paths, numbers, char and string literals, line comments, and
+-- blank-line trivia; the decoded value each token carries (identifier text,
+-- separator-stripped integers, normalized floats, unescaped chars and strings);
+-- and the interpolation split of a `"a {x} b"` literal into `istart`/`imid`/
+-- `iend` segment tokens with the hole expressions re-lexed at their absolute
+-- source offsets. A nested string literal inside a hole is scanned with a
+-- brace-depth stack, so its own quotes and braces never end the outer token
+-- early. Bracket tracking and the offside layout virtuals are later layers; no
+-- layout virtual is synthesized here.
+
+import Data.List (..)
+
+import Data.Maybe (..)
+
+import Data.Result (..)
+
+import Data.Char (..)
+
+import Syntax.Source (..)
+
+import Syntax.Token (..)
+
+-- | The raw token layer: the semantic token stream and the trivia interleaved
+-- between them, each keyed by absolute byte span into the lexed text.
+pub type LexRaw = LexRaw { tokens: List(Token), trivia: List(Trivia) }
+
+-- | A lexing failure, mirroring the compiler's five `LexError` variants one for
+-- one: an invalid token, an empty interpolation hole, an unterminated hole, an
+-- unterminated string, and a misplaced numeric separator. Each carries the byte
+-- offset where scanning stuck. The variant, its stable code, and its rendered
+-- message travel as data (see `lex_offset`/`lex_code`/`lex_message`), never
+-- encoded into a message string.
+pub type LexError
+  = LxInvalid(Int)
+  | LxEmptyHole(Int)
+  | LxUntermHole(Int)
+  | LxUntermStr(Int)
+  | LxNumberSep(Int)
+  deriving (Eq, Show)
+
+-- | The byte offset where a lexing failure stuck.
+pub fn lex_offset(e : LexError) : Int =
+  match e of
+    LxInvalid(o) => o
+    LxEmptyHole(o) => o
+    LxUntermHole(o) => o
+    LxUntermStr(o) => o
+    LxNumberSep(o) => o
+
+-- | The stable, append-only diagnostic code a lexing failure carries, matching
+-- the compiler's `LexError::code` (E7000 through E7004).
+pub fn lex_code(e : LexError) : String =
+  match e of
+    LxInvalid(_) => "E7000"
+    LxEmptyHole(_) => "E7001"
+    LxUntermHole(_) => "E7002"
+    LxUntermStr(_) => "E7003"
+    LxNumberSep(_) => "E7004"
+
+-- | The rendered message, matching the compiler's `LexError` `Display` strings
+-- byte for byte so a decoded diagnostic compares equal.
+pub fn lex_message(e : LexError) : String =
+  match e of
+    LxInvalid(_) => "unexpected token"
+    LxEmptyHole(_) => "empty interpolation hole `\{\}`"
+    LxUntermHole(_) => "unterminated interpolation hole"
+    LxUntermStr(_) => "unterminated string literal"
+    LxNumberSep(_) =>
+      "malformed numeric literal: `_` separators must sit between two digits"
+
+-- One classification step: a comment ending at the given offset, a real token of
+-- a kind ending at the given offset, or a hard error.
+type LxStep = LxComment(Int) | LxTok(TokenKind, Int) | LxErr(LexError)
+
+-- The sentinel returned by `lx_at` past end of input: outside the 0..255 byte
+-- range so every byte comparison against it is false.
+fn lx_eof() : Int = 256
+
+-- Byte at `i`, or the end sentinel when `i` is at or past the end.
+fn lx_at(text : String, i : Int) : Int =
+  if i < byte_len(text) then
+    byte_at(text, i)
+  else
+    lx_eof()
+
+-- The single byte of a one-byte ASCII string, for naming punctuation.
+fn lx_b(s : String) : Int = byte_at(s, 0)
+
+-- Whitespace bytes logos skips between tokens: space, tab, form feed, CR, LF.
+-- Form feed (12) matters here because logos skips it but `Data.Char.is_space`
+-- omits it.
+fn lx_ws(c : Int) : Bool = c == 32 || c == 9 || c == 12 || c == 13 || c == 10
+
+-- A word-continuation byte: [A-Za-z0-9_].
+fn lx_word(c : Int) : Bool = is_alnum(c) || c == lx_b("_")
+
+-- A segment-start byte for a qualified path component: [A-Za-z_].
+fn lx_seg_start(c : Int) : Bool = is_alpha(c) || c == lx_b("_")
+
+-- A digit-or-separator byte inside a number run: [0-9_].
+fn lx_digit_us(c : Int) : Bool = is_digit(c) || c == lx_b("_")
+
+-- Skip a run of whitespace from `i`, returning the first non-whitespace offset.
+fn lx_skip_ws(text : String, i : Int, n : Int) : Int =
+  var j := i
+  while j < n && lx_ws(byte_at(text, j)) do
+    j += 1
+  j
+
+-- Scan a [A-Za-z0-9_]* run from `i`, returning the offset just past it.
+fn lx_scan_word(text : String, i : Int, n : Int) : Int =
+  var j := i
+  while j < n && lx_word(byte_at(text, j)) do
+    j += 1
+  j
+
+-- Scan a [0-9_]* run from `i`, returning the offset just past it.
+fn lx_scan_digits(text : String, i : Int, n : Int) : Int =
+  var j := i
+  while j < n && lx_digit_us(byte_at(text, j)) do
+    j += 1
+  j
+
+-- Scan a line comment body from `i` (at the `--`), returning the offset of the
+-- terminating newline or end of input. The span is [i, result).
+fn lx_scan_comment(text : String, i : Int, n : Int) : Int =
+  var j := i
+  while j < n && byte_at(text, j) /= 10 do
+    j += 1
+  j
+
+-- Scan an optional exponent `[eE][+-]?[0-9_]+` starting at `k`. Returns the
+-- offset past a well-formed exponent, or `k` unchanged when there is none.
+fn lx_scan_exp(text : String, k : Int, n : Int) : Int =
+  let c = lx_at(text, k)
+  if c == lx_b("e") || c == lx_b("E") then
+    let m0 = k + 1
+    let s = lx_at(text, m0)
+    let m1 =
+      if s == lx_b("+") || s == lx_b("-") then
+        m0 + 1
+      else
+        m0
+    if lx_digit_us(lx_at(text, m1)) then
+      lx_scan_digits(text, m1, n)
+    else
+      k
+  else
+    k
+
+-- Scan a qualified-path tail `(\.[A-Za-z_][A-Za-z0-9_]*)+` starting at `j` (a
+-- `.` whose next byte is a segment start), returning the offset past the path.
+fn lx_scan_qual(text : String, j : Int, n : Int) : Int =
+  var k := j
+  while (lx_at(text, k) == lx_b(".") && lx_seg_start(lx_at(text, k + 1))) do
+    k := k + 2
+    while k < n && lx_word(byte_at(text, k)) do
+      k += 1
+  k
+
+-- The byte length of the UTF-8 codepoint led by byte `b`.
+fn lx_cp_len(b : Int) : Int =
+  if b < 128 then
+    1
+  elif b >= 240 then
+    4
+  elif b >= 224 then
+    3
+  elif b >= 192 then
+    2
+  else
+    1
+
+-- Skip one UTF-8 codepoint starting at `p`, returning the offset past it.
+fn lx_skip_cp(text : String, p : Int, n : Int) : Int =
+  let b = lx_at(text, p)
+  if b == lx_eof() then
+    p
+  else
+    p + lx_cp_len(b)
+
+-- Whether text[i ..] begins with the exact bytes of `s`.
+fn lx_matches(text : String, i : Int, s : String) : Bool =
+  lx_matches_go(text, i, s, 0, byte_len(s))
+
+fn lx_matches_go(text : String, i : Int, s : String, k : Int, m : Int) : Bool =
+  if k >= m then
+    true
+  elif lx_at(text, i + k) == byte_at(s, k) then
+    lx_matches_go(text, i, s, k + 1, m)
+  else
+    false
+
+-- Whether the run [lo, hi) equals `s` exactly (same length, same bytes).
+fn lx_run_eq(text : String, lo : Int, hi : Int, s : String) : Bool =
+  hi - lo == byte_len(s) && lx_matches(text, lo, s)
+
+-- The fixed spelling tables, built once per lex and threaded down the token
+-- path. Each table below is a list literal, and evaluating one allocates every
+-- string in it, so a table rebuilt per token costs more than the comparison it
+-- feeds. Each is held bucketed by first byte rather than flat, so a token
+-- compares itself only against the spellings that could possibly match it: an
+-- identifier beginning with a letter that starts no keyword meets an empty
+-- bucket instead of walking the whole table.
+type LxTabs = LxTabs {
+  lower: Array(List(String)),
+  upper: Array(List(String)),
+  ops: Array(List(String))
+}
+
+fn lx_tabs() : LxTabs =
+  LxTabs {
+    lower = lx_by_first(lx_lower_keywords()),
+    upper = lx_by_first(lx_upper_keywords()),
+    ops = lx_by_first(lx_operators())
+  }
+
+-- The number of distinct byte values, and so the width of a first-byte index.
+-- Every byte the classifier can hand to a lookup is a real byte of the input
+-- (`byte_at` only returns -1 past the end, and no classifier branch is reached
+-- there), so an index this wide is always in bounds.
+fn lx_byte_span() : Int = 256
+
+-- A spelling table indexed by its entries' first byte. Buckets are derived from
+-- the table rather than written out beside it, so the table above stays the one
+-- place a spelling is named, and each bucket keeps the table's own order, so
+-- maximal munch still reaches the longer spelling before its prefix.
+fn lx_by_first(tbl : List(String)) : Array(List(String)) =
+  lx_by_first_go(reverse(tbl), array_new(lx_byte_span(), Nil))
+
+-- Entries are consumed back to front and pushed onto their bucket, which
+-- restores the table's order within each bucket.
+fn lx_by_first_go(
+  xs : List(String),
+  acc : Array(List(String))
+) : Array(List(String)) =
+  match xs of
+    Nil => acc
+    Cons(s, rest) =>
+      let b = byte_at(s, 0)
+      lx_by_first_go(rest, array_set(acc, b, Cons(s, array_get(acc, b))))
+
+-- The first keyword spelling whose bytes equal the run [lo, hi), if any.
+fn lx_find_kw(
+  text : String,
+  lo : Int,
+  hi : Int,
+  kws : List(String)
+) : Option(String) =
+  match kws of
+    Nil => None
+    Cons(k, rest) =>
+      if lx_run_eq(text, lo, hi, k) then
+        Some(k)
+      else
+        lx_find_kw(text, lo, hi, rest)
+
+-- The lowercase-led keyword spellings, matching the compiler's fixed-token set.
+fn lx_lower_keywords() : List(String) =
+  [
+      "fn",
+      "fip",
+      "fbip",
+      "replayable",
+      "logic",
+      "requires",
+      "ensures",
+      "pub",
+      "import",
+      "as",
+      "type",
+      "newtype",
+      "stable",
+      "opaque",
+      "effect",
+      "error",
+      "throw",
+      "try",
+      "catch",
+      "transact",
+      "probe",
+      "alias",
+      "class",
+      "instance",
+      "canonical",
+      "pattern",
+      "deriving",
+      "where",
+      "given",
+      "handle",
+      "with",
+      "handler",
+      "mask",
+      "val",
+      "return",
+      "let",
+      "var",
+      "borrow",
+      "in",
+      "for",
+      "while",
+      "loop",
+      "break",
+      "continue",
+      "do",
+      "if",
+      "then",
+      "else",
+      "elif",
+      "match",
+      "of",
+      "each",
+      "forall",
+      "true",
+      "false",
+      "using",
+    ]
+
+-- The uppercase-led type keywords, matching the compiler's fixed-token set.
+fn lx_upper_keywords() : List(String) =
+  ["Int", "Bool", "Unit", "Float", "Char", "String", "I64", "U64"]
+
+-- The operator and punctuation spellings, longest first so maximal munch tries
+-- the three-byte forms before their two-byte prefixes and those before their
+-- one-byte prefixes.
+fn lx_operators() : List(String) =
+  [
+      "==.",
+      "/=.",
+      "<=.",
+      ">=.",
+      "->",
+      "<-",
+      "=>",
+      "<.",
+      ">.",
+      "==",
+      "/=",
+      "<=",
+      ">=",
+      "&&",
+      "||",
+      "|>",
+      ">>",
+      "<<",
+      "+.",
+      "-.",
+      "+=",
+      "-=",
+      "*=",
+      "%=",
+      "*.",
+      "/.",
+      ":=",
+      "..",
+      "??",
+      "?.",
+      "<",
+      ">",
+      "=",
+      "|",
+      "\\",
+      "+",
+      "-",
+      "*",
+      "/",
+      "%",
+      "^",
+      "~",
+      "(",
+      ")",
+      "\{",
+      "\}",
+      "[",
+      "]",
+      ",",
+      ":",
+      "!",
+      "@",
+      "#",
+      ".",
+      "?",
+    ]
+
+-- Classify a lowercase-led word run as a keyword token or an identifier, given
+-- the keyword bucket for the byte the run starts with.
+fn lx_lower(text : String, i : Int, n : Int, kws : List(String)) : LxStep =
+  let j = lx_scan_word(text, i, n)
+  match lx_find_kw(text, i, j, kws) of
+    Some(kw) => LxTok(TFixed(kw), j)
+    None => LxTok(TIdent, j)
+
+-- Classify an uppercase-led run: a qualified path if a dotted segment follows,
+-- else a type keyword, else an uppercase identifier.
+fn lx_upper(text : String, i : Int, n : Int, kws : List(String)) : LxStep =
+  let j = lx_scan_word(text, i, n)
+  if (lx_at(text, j) == lx_b(".") && lx_seg_start(lx_at(text, j + 1))) then
+    LxTok(TQual, lx_scan_qual(text, j, n))
+  else
+    match lx_find_kw(text, i, j, kws) of
+      Some(kw) => LxTok(TFixed(kw), j)
+      None => LxTok(TUid, j)
+
+-- An integer token, consuming an optional `i64` or `u64` suffix.
+fn lx_int_suffix(text : String, j : Int) : LxStep =
+  if lx_matches(text, j, "i64") || lx_matches(text, j, "u64") then
+    LxTok(TInt, j + 3)
+  else
+    LxTok(TInt, j)
+
+-- The byte offset of the first misplaced `_` in the numeric run text[lo, hi), or
+-- None when every separator sits between two digits. Mirrors the compiler's
+-- `bad_separator`: a `_` is admissible only flanked by an ASCII digit on each
+-- side, catching the leading, trailing, doubled, and adjacent-to-`.`/`e`/sign
+-- cases in one rule. The `i64`/`u64` suffix holds no `_`, so scanning the whole
+-- run rather than the digits-only slice reports the same first offset.
+fn lx_bad_sep(text : String, lo : Int, hi : Int) : Option(Int) =
+  lx_bad_sep_go(text, lo, lo, hi)
+
+-- Whether the `_` at `k` is flanked by an ASCII digit on each side within
+-- [lo, hi): the sole admissibility rule for a separator.
+fn lx_sep_flanked(text : String, k : Int, lo : Int, hi : Int) : Bool =
+  let left = k > lo && is_digit(byte_at(text, k - 1))
+  let right = k + 1 < hi && is_digit(byte_at(text, k + 1))
+  left && right
+
+fn lx_bad_sep_go(text : String, k : Int, lo : Int, hi : Int) : Option(Int) =
+  if k >= hi then
+    None
+  elif byte_at(text, k) == lx_b("_") then
+    if lx_sep_flanked(text, k, lo, hi) then
+      lx_bad_sep_go(text, k + 1, lo, hi)
+    else
+      Some(k)
+  else
+    lx_bad_sep_go(text, k + 1, lo, hi)
+
+-- Classify a number: a float when a `.[0-9_]+` fraction or a bare exponent
+-- follows the integer part, otherwise an integer. A separator out of place is a
+-- hard error at its offset, validated over the whole run once the extent is
+-- known.
+fn lx_number(text : String, i : Int, n : Int) : LxStep =
+  match lx_number_raw(text, i, n) of
+    LxTok(k, end) =>
+      match lx_bad_sep(text, i, end) of
+        Some(off) => LxErr(LxNumberSep(off))
+        None => LxTok(k, end)
+    other => other
+
+fn lx_number_raw(text : String, i : Int, n : Int) : LxStep =
+  let j = lx_scan_digits(text, i, n)
+  if lx_at(text, j) == lx_b(".") && lx_digit_us(lx_at(text, j + 1)) then
+    let k = lx_scan_digits(text, j + 1, n)
+    LxTok(TFloat, lx_scan_exp(text, k, n))
+  else
+    let e = lx_scan_exp(text, j, n)
+    if e > j then
+      LxTok(TFloat, e)
+    else
+      lx_int_suffix(text, j)
+
+-- A char literal: `'` then one escaped or plain codepoint then `'`.
+fn lx_char(text : String, i : Int, n : Int) : LxStep =
+  let p = i + 1
+  let c = lx_at(text, p)
+  if c == lx_eof() then
+    LxErr(LxInvalid(i))
+  else
+    let e =
+      if c == lx_b("\\") then
+        lx_skip_cp(text, p + 1, n)
+      else
+        lx_skip_cp(text, p, n)
+    if lx_at(text, e) == lx_b("'") then
+      LxTok(TChar, e + 1)
+    else
+      LxErr(LxInvalid(i))
+
+-- Copy the raw bytes of [p, e) onto `buf`, byte for byte. Since token spans and
+-- codepoint boundaries always agree, the copied run is well-formed UTF-8.
+fn lx_push_bytes(text : String, p : Int, e : Int, buf : Buf) : Buf =
+  if p >= e then
+    buf
+  else
+    lx_push_bytes(text, p + 1, e, buf_push(buf, byte_at(text, p)))
+
+-- Push the single UTF-8 codepoint at `p` onto `buf`, advancing past all its
+-- bytes.
+fn lx_push_cp(text : String, p : Int, buf : Buf) : Buf =
+  lx_push_bytes(text, p, p + lx_cp_len(byte_at(text, p)), buf)
+
+-- The byte-exact slice text[lo, hi) as a string. Byte-based rather than
+-- codepoint-based so the offsets match the compiler's byte spans directly.
+fn lx_slice(text : String, lo : Int, hi : Int) : String =
+  string_of_buf(lx_push_bytes(text, lo, hi, buf_empty()))
+
+-- The decoded byte of a backslash escape, matching the compiler's fixed escape
+-- set: `n t r " \ { }`. Numeric and unicode escapes are deliberately absent, so
+-- the map stays one-to-one and the formatter round-trips. Any other escape is a
+-- lexing error.
+fn lx_esc_byte(e : Int) : Option(Int) =
+  if e == lx_b("n") then
+    Some(10)
+  elif e == lx_b("t") then
+    Some(9)
+  elif e == lx_b("r") then
+    Some(13)
+  elif e == lx_b("\"") then
+    Some(34)
+  elif e == lx_b("\\") then
+    Some(92)
+  elif e == lx_b("\{") then
+    Some(123)
+  elif e == lx_b("\}") then
+    Some(125)
+  else
+    None
+
+-- The head of an `Int` stack, or 0 for the empty stack (the scanners keep the
+-- stack non-empty for the whole scan, so this only degrades on malformed
+-- re-entry).
+fn lx_head0(xs : List(Int)) : Int =
+  match xs of
+    Nil => 0
+    Cons(h, _) => h
+
+-- The tail of an `Int` stack.
+fn lx_tail(xs : List(Int)) : List(Int) =
+  match xs of
+    Nil => Nil
+    Cons(_, t) => t
+
+-- Whether the stack is exactly the singleton [0]: the closing condition for a
+-- hole scan (the hole's own brace depth returned to zero, no nested string
+-- frames open).
+fn lx_zero_one(xs : List(Int)) : Bool =
+  match xs of
+    Nil => false
+    Cons(h, t) =>
+      match t of
+        Nil => h == 0
+        Cons(_, _) => false
+
+-- Find the end of a string literal opened at `oq`, returning the offset just
+-- past the closing quote. A `{` opens a hole and a nested `"` inside it opens
+-- another string frame, tracked with a stack of brace depths (one per string
+-- nesting level), so an inner literal's quotes and braces never end the outer
+-- token early. The outer quote closes only when the base frame is reached again.
+fn lx_str_end(text : String, oq : Int, n : Int) : Result(Int, LexError) =
+  lx_scan_str(text, oq + 1, n, Cons(0, Nil), Cons(oq, Nil), Nil, false)
+
+-- Classify an unterminated string or hole exactly as the compiler's
+-- `Scanner::unterminated`: an open brace depth points at the innermost `{` (an
+-- unterminated hole), otherwise the innermost open `"` (an unterminated string),
+-- each falling back to the other marker stack and finally offset 0 so a
+-- malformed re-entry still yields a diagnostic rather than diverging.
+fn lx_unterminated(
+  depth : List(Int),
+  quotes : List(Int),
+  braces : List(Int)
+) : LexError =
+  if lx_head0(depth) > 0 then
+    match braces of
+      Cons(bo, _) => LxUntermHole(bo)
+      Nil => LxUntermStr(lx_head0(quotes))
+  else
+    match quotes of
+      Cons(qo, _) => LxUntermStr(qo)
+      Nil => LxUntermHole(lx_head0(braces))
+
+fn lx_scan_str(
+  text : String,
+  p : Int,
+  n : Int,
+  depth : List(Int),
+  quotes : List(Int),
+  braces : List(Int),
+  esc : Bool
+) : Result(Int, LexError) =
+  if p >= n then
+    Err(lx_unterminated(depth, quotes, braces))
+  elif esc then
+    lx_scan_str(
+        text,
+        p + lx_cp_len(byte_at(text, p)),
+        n,
+        depth,
+        quotes,
+        braces,
+        false,
+      )
+  else
+    let b = byte_at(text, p)
+    let top = lx_head0(depth)
+    if b == lx_b("\\") then
+      lx_scan_str(text, p + 1, n, depth, quotes, braces, true)
+    elif b == lx_b("\"") && top == 0 then
+      let d2 = lx_tail(depth)
+      let q2 = lx_tail(quotes)
+      match d2 of
+        Nil => Ok(p + 1)
+        Cons(_, _) => lx_scan_str(text, p + 1, n, d2, q2, braces, false)
+    elif b == lx_b("\"") then
+      lx_scan_str(
+          text,
+          p + 1,
+          n,
+          Cons(0, depth),
+          Cons(p, quotes),
+          braces,
+          false,
+        )
+    elif b == lx_b("\{") then
+      lx_scan_str(
+          text,
+          p + 1,
+          n,
+          Cons(top + 1, lx_tail(depth)),
+          quotes,
+          Cons(p, braces),
+          false,
+        )
+    elif b == lx_b("\}") && top > 0 then
+      lx_scan_str(
+          text,
+          p + 1,
+          n,
+          Cons(top - 1, lx_tail(depth)),
+          quotes,
+          lx_tail(braces),
+          false,
+        )
+    else
+      lx_scan_str(text, p + lx_cp_len(b), n, depth, quotes, braces, false)
+
+-- Find the `}` that closes a hole whose text starts at `from`, returning its
+-- byte offset. Drives the same brace-depth stack as `lx_scan_str` but in hole
+-- mode: the scan starts one brace deep and closes when that depth returns to
+-- zero with no nested string frame open. None when the hole never closes.
+fn lx_scan_hole(text : String, from : Int, n : Int) : Option(Int) =
+  lx_hole_go(text, from, n, Cons(1, Nil), false)
+
+fn lx_hole_go(
+  text : String,
+  p : Int,
+  n : Int,
+  depth : List(Int),
+  esc : Bool
+) : Option(Int) =
+  if p >= n then
+    None
+  elif esc then
+    lx_hole_go(text, p + lx_cp_len(byte_at(text, p)), n, depth, false)
+  else
+    let b = byte_at(text, p)
+    let top = lx_head0(depth)
+    if b == lx_b("\\") then
+      lx_hole_go(text, p + 1, n, depth, true)
+    elif b == lx_b("\"") && top == 0 then
+      lx_hole_go(text, p + 1, n, lx_tail(depth), false)
+    elif b == lx_b("\"") then
+      lx_hole_go(text, p + 1, n, Cons(0, depth), false)
+    elif b == lx_b("\{") then
+      lx_hole_go(text, p + 1, n, Cons(top + 1, lx_tail(depth)), false)
+    elif b == lx_b("\}") && top > 0 then
+      let d2 = Cons(top - 1, lx_tail(depth))
+      if lx_zero_one(d2) then
+        Some(p)
+      else
+        lx_hole_go(text, p + 1, n, d2, false)
+    else
+      lx_hole_go(text, p + lx_cp_len(b), n, depth, false)
+
+-- Whether text[lo, hi) has an unescaped `{`, marking an interpolated literal.
+-- Escapes are skipped so a `\{` alone is a plain (cookable) string.
+fn lx_has_hole(text : String, lo : Int, hi : Int) : Bool =
+  if lo >= hi then
+    false
+  else
+    let b = byte_at(text, lo)
+    if b == lx_b("\\") then
+      lx_has_hole(text, lo + 1 + lx_cp_len(lx_at(text, lo + 1)), hi)
+    elif b == lx_b("\{") then
+      true
+    else
+      lx_has_hole(text, lo + lx_cp_len(b), hi)
+
+-- Cook a hole-free string body text[lo, hi): resolve every backslash escape and
+-- copy the rest verbatim. A trailing lone backslash or an unknown escape is an
+-- invalid token; the compiler's `cook` reports no inner offset, so the fault
+-- lifts to the opening quote `oq`.
+fn lx_cook(
+  text : String,
+  oq : Int,
+  lo : Int,
+  hi : Int
+) : Result(String, LexError) =
+  lx_cook_go(text, oq, lo, hi, buf_empty())
+
+fn lx_cook_go(
+  text : String,
+  oq : Int,
+  p : Int,
+  hi : Int,
+  buf : Buf
+) : Result(String, LexError) =
+  if p >= hi then
+    Ok(string_of_buf(buf))
+  else
+    let b = byte_at(text, p)
+    if b == lx_b("\\") then
+      if p + 1 >= hi then
+        Err(LxInvalid(oq))
+      else
+        match lx_esc_byte(byte_at(text, p + 1)) of
+          Some(db) => lx_cook_go(text, oq, p + 2, hi, buf_push(buf, db))
+          None => Err(LxInvalid(oq))
+    else
+      lx_cook_go(text, oq, p + lx_cp_len(b), hi, lx_push_cp(text, p, buf))
+
+-- Whether text[lo, hi) is empty or entirely whitespace: an interpolation hole
+-- with no expression is an error.
+fn lx_blank_range(text : String, lo : Int, hi : Int) : Bool =
+  if lo >= hi then
+    true
+  elif lx_ws(byte_at(text, lo)) then
+    lx_blank_range(text, lo + 1, hi)
+  else
+    false
+
+-- An operator or punctuation token by maximal munch over the bucket for the
+-- byte it starts with, which is still longest first; a byte whose bucket holds
+-- no match, including any byte that starts no operator at all, is a hard error.
+fn lx_op(text : String, i : Int, ops : List(String)) : LxStep =
+  match ops of
+    Nil => LxErr(LxInvalid(i))
+    Cons(s, rest) =>
+      if lx_matches(text, i, s) then
+        LxTok(TFixed(s), i + byte_len(s))
+      else
+        lx_op(text, i, rest)
+
+-- Classify the token starting at `i` (guaranteed non-whitespace, i < n). The
+-- leading byte both selects the branch and indexes that branch's table, so the
+-- one `byte_at` here is the whole cost of narrowing the spellings to try.
+fn lx_classify(text : String, i : Int, n : Int, tb : LxTabs) : LxStep =
+  let c = byte_at(text, i)
+  if c == lx_b("-") && lx_at(text, i + 1) == lx_b("-") then
+    LxComment(lx_scan_comment(text, i, n))
+  elif is_lower(c) || c == lx_b("_") then
+    lx_lower(text, i, n, array_get(tb.lower, c))
+  elif is_upper(c) then
+    lx_upper(text, i, n, array_get(tb.upper, c))
+  elif is_digit(c) then
+    lx_number(text, i, n)
+  elif c == lx_b("'") then
+    lx_char(text, i, n)
+  else
+    lx_op(text, i, array_get(tb.ops, c))
+
+-- Whether the gap [lo, hi) holds a blank line: two or more newlines. Bounded by
+-- an early exit at the second newline.
+fn lx_has_blank(text : String, lo : Int, hi : Int) : Bool =
+  var i := lo
+  var seen := 0
+  while i < hi && seen < 2 do
+    if byte_at(text, i) == 10 then
+      seen += 1
+    i += 1
+  seen >= 2
+
+-- Prepend a blank-line trivium spanning [cursor, lo) when that gap is blank.
+fn lx_add_blank(
+  trivs : List(Trivia),
+  text : String,
+  cursor : Int,
+  lo : Int
+) : List(Trivia) =
+  if lx_has_blank(text, cursor, lo) then
+    Cons(TBlank(Span { lo = cursor, hi = lo }), trivs)
+  else
+    trivs
+
+-- Push the non-separator bytes of text[lo, hi) onto `buf`, dropping the `_`
+-- digit separators so a numeric run parses. Suffix bytes (`i64`/`u64`) hold no
+-- separators, so this leaves them intact.
+fn lx_push_nonus(text : String, p : Int, hi : Int, buf : Buf) : Buf =
+  if p >= hi then
+    buf
+  else
+    let b = byte_at(text, p)
+    if b == lx_b("_") then
+      lx_push_nonus(text, p + 1, hi, buf)
+    else
+      lx_push_nonus(text, p + 1, hi, buf_push(buf, b))
+
+-- The decoded value of an integer literal: its digits with separators removed,
+-- keeping any `i64`/`u64` suffix, matching the compiler's `IntLit` rendering.
+fn lx_int_value(text : String, lo : Int, hi : Int) : String =
+  string_of_buf(lx_push_nonus(text, lo, hi, buf_empty()))
+
+-- The decoded value of a float literal: separators stripped, then normalized
+-- through the runtime's own parse and show so the byte spelling is canonical.
+-- The differential gate compares floats numerically, not by spelling.
+fn lx_float_value(text : String, lo : Int, hi : Int) : String =
+  show_float(
+      parse_float(string_of_buf(lx_push_nonus(text, lo, hi, buf_empty()))),
+    )
+
+-- The decoded value of a char literal text[lo, hi): the single inner codepoint,
+-- or the resolved escape. A char admits one escape a string does not, `\'`.
+fn lx_char_value(text : String, lo : Int, hi : Int) : String =
+  let p = lo + 1
+  let b = byte_at(text, p)
+  if b == lx_b("\\") then
+    let e = byte_at(text, p + 1)
+    if e == lx_b("'") then
+      string_of_buf(buf_push(buf_empty(), 39))
+    else
+      match lx_esc_byte(e) of
+        Some(db) => string_of_buf(buf_push(buf_empty(), db))
+        None => lx_slice(text, p, p + lx_cp_len(b))
+  else
+    lx_slice(text, p, p + lx_cp_len(b))
+
+-- The decoded value a token of kind `k` carries over span [lo, hi), or None for
+-- a value-free kind (fixed tokens and layout virtuals). Strings are decoded on
+-- the string path in `lx_loop`, not here.
+fn lx_value(text : String, k : TokenKind, lo : Int, hi : Int) : Option(String) =
+  match k of
+    TIdent => Some(lx_slice(text, lo, hi))
+    TUid => Some(lx_slice(text, lo, hi))
+    TQual => Some(lx_slice(text, lo, hi))
+    TInt => Some(lx_int_value(text, lo, hi))
+    TFloat => Some(lx_float_value(text, lo, hi))
+    TChar => Some(lx_char_value(text, lo, hi))
+    _ => None
+
+-- Reverse `xs` onto `acc`: append the reversed list, used to splice a
+-- forward-order token run onto the reversed accumulator.
+fn lx_rev_append(xs : List(Token), acc : List(Token)) : List(Token) =
+  match xs of
+    Nil => acc
+    Cons(x, rest) => lx_rev_append(rest, Cons(x, acc))
+
+-- Re-lex the hole expression text[lo, hi) at its absolute source offsets. The
+-- range is bounded at `hi`, so lookahead never reads past the closing brace; a
+-- nested interpolated string inside recurses through the same driver.
+fn lx_hole_tokens(
+  text : String,
+  lo : Int,
+  hi : Int
+) : Result(List(Token), LexError) =
+  match lx_loop(text, hi, lo, lo, Nil, Nil, lx_tabs()) of
+    Err(e) => Err(e)
+    Ok(r) => Ok(r.tokens)
+
+-- Split an interpolated literal opened at `oq` and closed just before `endq`
+-- into segment and hole tokens: `istart`/`imid`/`iend` carry the recooked
+-- literal segments and each hole's expression is re-lexed between them. Segment
+-- spans run delimiter to delimiter (quote or brace); hole spans point at real
+-- source. Mirrors the compiler's `split_interp`.
+fn lx_interp(
+  text : String,
+  oq : Int,
+  endq : Int
+) : Result(List(Token), LexError) =
+  lx_interp_go(text, oq + 1, endq - 1, endq, buf_empty(), oq, true, Nil)
+
+fn lx_interp_go(
+  text : String,
+  p : Int,
+  hi : Int,
+  endq : Int,
+  seg : Buf,
+  seg_from : Int,
+  first : Bool,
+  acc : List(Token)
+) : Result(List(Token), LexError) =
+  if p >= hi then
+    let iend =
+      Token {
+        kind = TIEnd,
+        span = Span { lo = seg_from, hi = endq },
+        value = Some(string_of_buf(seg))
+      }
+    Ok(reverse(Cons(iend, acc)))
+  else
+    let b = byte_at(text, p)
+    if b == lx_b("\\") then
+      if p + 1 >= hi then
+        Err(LxInvalid(p))
+      else
+        match lx_esc_byte(byte_at(text, p + 1)) of
+          Some(db) =>
+            lx_interp_go(
+                text,
+                p + 2,
+                hi,
+                endq,
+                buf_push(seg, db),
+                seg_from,
+                first,
+                acc,
+              )
+          None => Err(LxInvalid(p + 1))
+    elif b == lx_b("\{") then
+      match lx_scan_hole(text, p + 1, hi) of
+        None => Err(LxUntermHole(p))
+        Some(close) =>
+          if lx_blank_range(text, p + 1, close) then
+            Err(LxEmptyHole(p))
+          else
+            let sk =
+              if first then
+                TIStart
+              else
+                TIMid
+            let segtok =
+              Token {
+                kind = sk,
+                span = Span { lo = seg_from, hi = p + 1 },
+                value = Some(string_of_buf(seg))
+              }
+            match lx_hole_tokens(text, p + 1, close) of
+              Err(e) => Err(e)
+              Ok(htoks) =>
+                let acc2 = lx_rev_append(htoks, Cons(segtok, acc))
+                lx_interp_go(
+                    text,
+                    close + 1,
+                    hi,
+                    endq,
+                    buf_empty(),
+                    close,
+                    false,
+                    acc2,
+                  )
+    else
+      lx_interp_go(
+          text,
+          p + lx_cp_len(b),
+          hi,
+          endq,
+          lx_push_cp(text, p, seg),
+          seg_from,
+          first,
+          acc,
+        )
+
+-- | Tokenize `text` into the raw token stream and its interleaved trivia,
+-- reproducing the compiler's `lex_raw` layer: kinds, byte spans, decoded values,
+-- interpolation splitting, comments, and blank-line runs. No layout virtuals.
+pub fn lex_raw(text : String) : Result(LexRaw, LexError) =
+  lx_loop(text, byte_len(text), 0, 0, Nil, Nil, lx_tabs())
+
+-- | Whether `text` fails to lex only because a string literal or interpolation
+-- hole runs off the end: the lexer-observable half of the compiler's
+-- `incomplete` classification, telling an interactive reader to keep reading
+-- rather than to reject. Any other lexing failure, or a clean lex, is complete.
+pub fn lex_incomplete(text : String) : Bool =
+  match lex_raw(text) of
+    Err(LxUntermStr(_)) => true
+    Err(LxUntermHole(_)) => true
+    Err(_) => false
+    Ok(_) => false
+
+-- The driver, threading the scan offset `i`, the trivia cursor (the previous
+-- token or comment's end), and the reversed token and trivia accumulators. A
+-- string is handled here rather than in `lx_classify`: its extent is found with
+-- the brace-aware scanner and, when interpolated, it expands to several tokens.
+fn lx_loop(
+  text : String,
+  n : Int,
+  i : Int,
+  cursor : Int,
+  toks : List(Token),
+  trivs : List(Trivia),
+  tb : LxTabs
+) : Result(LexRaw, LexError) =
+  if i >= n then
+    Ok(LexRaw { tokens = reverse(toks), trivia = reverse(trivs) })
+  else
+    let c = byte_at(text, i)
+    if lx_ws(c) then
+      lx_loop(text, n, lx_skip_ws(text, i, n), cursor, toks, trivs, tb)
+    elif c == lx_b("\"") then
+      match lx_str_end(text, i, n) of
+        Err(e) => Err(e)
+        Ok(endq) =>
+          let trivs2 = lx_add_blank(trivs, text, cursor, i)
+          if lx_has_hole(text, i + 1, endq - 1) then
+            match lx_interp(text, i, endq) of
+              Err(e) => Err(e)
+              Ok(itoks) =>
+                lx_loop(
+                    text,
+                    n,
+                    endq,
+                    endq,
+                    lx_rev_append(itoks, toks),
+                    trivs2,
+                    tb,
+                  )
+          else
+            match lx_cook(text, i, i + 1, endq - 1) of
+              Err(e) => Err(e)
+              Ok(v) =>
+                let tok =
+                  Token {
+                    kind = TStr,
+                    span = Span { lo = i, hi = endq },
+                    value = Some(v)
+                  }
+                lx_loop(text, n, endq, endq, Cons(tok, toks), trivs2, tb)
+    else
+      match lx_classify(text, i, n, tb) of
+        LxErr(e) => Err(e)
+        LxComment(j) =>
+          let trivs2 = Cons(
+              TComment(Span { lo = i, hi = j }),
+              lx_add_blank(trivs, text, cursor, i),
+            )
+          lx_loop(text, n, j, j, toks, trivs2, tb)
+        LxTok(k, j) =>
+          let tok =
+            Token {
+              kind = k,
+              span = Span { lo = i, hi = j },
+              value = lx_value(text, k, i, j)
+            }
+          let trivs2 = lx_add_blank(trivs, text, cursor, i)
+          lx_loop(text, n, j, j, Cons(tok, toks), trivs2, tb)

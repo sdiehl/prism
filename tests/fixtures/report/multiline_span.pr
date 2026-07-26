@@ -1,0 +1,5 @@
+-- A string literal spanning two lines, used where an operator must
+-- follow: the offending token's span crosses a line boundary, which the
+-- compiler draws in its multi-line form.
+fn main() = 1 "a
+b"

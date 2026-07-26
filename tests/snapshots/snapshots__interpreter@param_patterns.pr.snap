@@ -1,0 +1,20 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/param_patterns.pr
+---
+42
+7
+9
+21
+8
+11
+42
+1
+0
+12
+12
+0
+0
+2
+=> ()

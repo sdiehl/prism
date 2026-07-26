@@ -18,8 +18,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::syntax::ast::{BinOp, Expr, Pattern, Program, Total, S};
-use crate::util::scc::tarjan_scc;
 use crate::verify::ranking::{self, RankStatus};
+use prism_common::scc::tarjan_scc;
 
 /// The totality verdict for one claimed function.
 pub(crate) enum Status {
@@ -455,6 +455,22 @@ fn add_pattern_subterms(pat: &S<Pattern>, out: &mut BTreeSet<String>) {
                 add_binders(f, out);
             }
         }
+        // A name is a strict subterm of the scrutinee only if it is one under
+        // every alternative: `Cons(x, xs) | y` binds `xs` under a constructor in
+        // one alternative and not at all in the other, so trusting it would
+        // certify a non-descending recursion. Intersecting keeps that sound.
+        Pattern::Or(alts) => {
+            let mut common: Option<BTreeSet<String>> = None;
+            for alt in alts {
+                let mut here = BTreeSet::new();
+                add_pattern_subterms(alt, &mut here);
+                common = Some(match common {
+                    None => here,
+                    Some(prev) => prev.intersection(&here).cloned().collect(),
+                });
+            }
+            out.extend(common.unwrap_or_default());
+        }
         _ => {}
     }
 }
@@ -477,6 +493,13 @@ fn remove_pattern_binders(pat: &S<Pattern>, out: &mut BTreeSet<String>) {
                 remove_pattern_binders(f, out);
             }
         }
+        // Untrusting is the conservative direction, so take every alternative's
+        // binders.
+        Pattern::Or(alts) => {
+            for alt in alts {
+                remove_pattern_binders(alt, out);
+            }
+        }
         _ => {}
     }
 }
@@ -496,6 +519,13 @@ fn add_binders(pat: &S<Pattern>, out: &mut BTreeSet<String>) {
         Pattern::Record(_, fields, _) => {
             for (_, f) in fields {
                 add_binders(f, out);
+            }
+        }
+        // Already under a constructor, so every alternative's binders are strict
+        // subterms; the alternatives bind the same names, so the first suffices.
+        Pattern::Or(alts) => {
+            if let Some(first) = alts.first() {
+                add_binders(first, out);
             }
         }
         _ => {}

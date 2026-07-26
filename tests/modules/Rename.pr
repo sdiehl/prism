@@ -1,0 +1,6 @@
+-- A sibling of `Walk` with its own notion of `children`. Importing both is
+-- fine; only a bare use of the shared name has to say which it means.
+
+pub fn children(n : Int) : Int = n * 10
+
+pub fn rename(n : Int) : Int = n + 100

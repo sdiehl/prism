@@ -1,6 +1,6 @@
 {
   "schema": "prism-surface-syntax-v1",
-  "compiler": "0.14.0",
+  "compiler": "0.15.0",
   "source": {
     "digest": "91aaf0fef720c662e99baebd264ddf09f2fc3e91feab725bc4a16544f8a48b2a",
     "text": "-- Classes, instances, canonical designations, constrained functions.\nclass Same(a)\n  same : (a, a) -> Bool\n\nclass Bigger(a) given Same(a)\n  bigger : (a, a) -> Bool\n\ninstance sameInt : Same(Int)\n  fn same(x, y) = x == y\n\ninstance samePair : Same((a, b)) given Same(a), Same(b)\n  fn same(p, q) =\n    match (p, q) of\n      ((a1, b1), (a2, b2)) => same(a1, a2) && same(b1, b2)\n\ncanonical Same(Int) = sameInt\n\nfn alike(x : a, y : a) : Bool given Same(a) = same(x, y)\n\nfn where_helper(n : Int) : Int =\n    double + offset\n  where\n    double = n * 2\n    offset = 10\n"

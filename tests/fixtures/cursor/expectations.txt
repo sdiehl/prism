@@ -1,0 +1,30 @@
+-- The expectation-merging corpus. One input per line; a blank line or a line
+-- starting with a double dash is skipped.
+--
+-- The grammar the harness runs over these is deliberately alternative-shaped:
+-- at operand position it tries a parenthesized group, then a bracketed group,
+-- then a bare atom, restoring the cursor between attempts. So each of these
+-- inputs sends at least one alternative some distance into the stream before it
+-- fails and the parse rewinds, which is exactly the situation where a refusal
+-- gets reported at the wrong position.
+--
+-- One alternative goes deep and later ones fail immediately: the report must
+-- name the deep position and only the expectation recorded there.
+[1 + 2
+(1 + 2
+1 + [2
+[1 + 2)
+(1 + 2]
+-- Every alternative fails at the same position: the report must name all of
+-- them, in the order they were tried.
+*
+1 +
+-
+[)
+-- The driver declines a repeated non-associative operator, and the leftover
+-- operator is refused where it stands.
+1 == 2 == 3
+1 2
+-- Accepted, for contrast.
+1 + 2 * (3 - 4)
+[1 + 2] ?? -3

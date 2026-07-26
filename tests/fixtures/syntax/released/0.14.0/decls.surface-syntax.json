@@ -1,0 +1,272 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.14.0",
+  "source": {
+    "digest": "f8ee1e543384e46f4ba1a050c3697b7a7280750acc419a266d278f32eac64a20",
+    "text": "-- Declaration families: imports, datatypes, aliases, constants, visibility.\nimport Data.List (map, filter)\n\nimport Json as J\n\nimport Data.Map (..)\n\npub type Color = Red | Green | Blue deriving (Eq, Show)\n\nopaque type Token = MkToken(Int)\n\nnewtype Meters = Meters(Float) deriving (Eq)\n\ntype Point = Point { x: Int, y: Int }\n\nalias Pair(a) = (a, a)\n\nerror NotFound(String)\n\nlet limit = 512\n\ndeprecated \"use limit\"\nlet old_limit = 256\n\npub fn origin() : Point = Point { x = 0, y = 0 }\n"
+  },
+  "items": [
+    {
+      "kind": "import",
+      "names": [
+        "map",
+        "filter"
+      ],
+      "path": [
+        "Data",
+        "List"
+      ],
+      "span": [
+        77,
+        107
+      ]
+    },
+    {
+      "alias": "J",
+      "kind": "import",
+      "path": [
+        "Json"
+      ],
+      "span": [
+        109,
+        125
+      ]
+    },
+    {
+      "glob": true,
+      "kind": "import",
+      "path": [
+        "Data",
+        "Map"
+      ],
+      "span": [
+        127,
+        147
+      ]
+    },
+    {
+      "ctors": [
+        {
+          "name": "Red"
+        },
+        {
+          "name": "Green"
+        },
+        {
+          "name": "Blue"
+        }
+      ],
+      "deriving": [
+        {
+          "name": "Eq",
+          "span": [
+            195,
+            197
+          ]
+        },
+        {
+          "name": "Show",
+          "span": [
+            199,
+            203
+          ]
+        }
+      ],
+      "kind": "data",
+      "name": "Color",
+      "span": [
+        153,
+        204
+      ],
+      "vis": "pub"
+    },
+    {
+      "ctors": [
+        {
+          "args": [
+            {
+              "kind": "int"
+            }
+          ],
+          "name": "MkToken"
+        }
+      ],
+      "kind": "data",
+      "name": "Token",
+      "span": [
+        213,
+        238
+      ],
+      "vis": "opaque"
+    },
+    {
+      "ctors": [
+        {
+          "args": [
+            {
+              "kind": "float"
+            }
+          ],
+          "name": "Meters"
+        }
+      ],
+      "deriving": [
+        {
+          "name": "Eq",
+          "span": [
+            281,
+            283
+          ]
+        }
+      ],
+      "kind": "newtype",
+      "name": "Meters",
+      "span": [
+        240,
+        284
+      ]
+    },
+    {
+      "ctors": [
+        {
+          "fields": [
+            {
+              "name": "x",
+              "ty": {
+                "kind": "int"
+              }
+            },
+            {
+              "name": "y",
+              "ty": {
+                "kind": "int"
+              }
+            }
+          ],
+          "name": "Point"
+        }
+      ],
+      "kind": "data",
+      "name": "Point",
+      "span": [
+        286,
+        323
+      ]
+    },
+    {
+      "kind": "type-synonym",
+      "name": "Pair",
+      "params": [
+        "a"
+      ],
+      "span": [
+        325,
+        347
+      ],
+      "ty": {
+        "items": [
+          {
+            "kind": "var",
+            "name": "a"
+          },
+          {
+            "kind": "var",
+            "name": "a"
+          }
+        ],
+        "kind": "tuple"
+      }
+    },
+    {
+      "kind": "error",
+      "name": "NotFound",
+      "params": [
+        {
+          "kind": "str"
+        }
+      ],
+      "span": [
+        349,
+        371
+      ]
+    },
+    {
+      "body": {
+        "kind": "int",
+        "span": [
+          385,
+          388
+        ],
+        "value": "512"
+      },
+      "kind": "const",
+      "name": "limit",
+      "span": [
+        373,
+        388
+      ]
+    },
+    {
+      "body": {
+        "kind": "int",
+        "span": [
+          429,
+          432
+        ],
+        "value": "256"
+      },
+      "deprecated": "use limit",
+      "kind": "const",
+      "name": "old_limit",
+      "span": [
+        413,
+        432
+      ]
+    },
+    {
+      "body": {
+        "fields": [
+          {
+            "name": "x",
+            "value": {
+              "kind": "int",
+              "span": [
+                472,
+                473
+              ],
+              "value": "0"
+            }
+          },
+          {
+            "name": "y",
+            "value": {
+              "kind": "int",
+              "span": [
+                479,
+                480
+              ],
+              "value": "0"
+            }
+          }
+        ],
+        "kind": "record",
+        "name": "Point",
+        "span": [
+          460,
+          482
+        ]
+      },
+      "kind": "fn",
+      "name": "origin",
+      "ret": {
+        "kind": "con",
+        "name": "Point"
+      },
+      "span": [
+        438,
+        482
+      ],
+      "vis": "pub"
+    }
+  ]
+}

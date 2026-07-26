@@ -1,0 +1,137 @@
+-- The binding-power differential. arg(0) is a `prism-surface-syntax-v1`
+-- artifact. The artifact embeds both the exact source text and the compiler's
+-- own parse of it, so this harness can put the two parsers side by side on one
+-- input: it re-lexes the embedded text, slices the tokens of each declaration
+-- body, runs `Syntax.Cursor`'s Pratt driver over that slice with the tables the
+-- module publishes, and renders both trees fully parenthesized.
+--
+-- Rendering to a fully parenthesized string is the whole comparison. Grouping
+-- is the only fact the two parsers can disagree about here, and it is exactly
+-- what the parentheses record, so equal strings mean equal binding powers and
+-- equal associativity, for that input, against the compiler rather than against
+-- a table copied out of the grammar.
+--
+-- The Pratt driver builds strings directly instead of a tree: it takes its node
+-- builders from the caller, and for this comparison the caller's node is the
+-- rendering.
+import Data.List (..)
+
+import Data.Maybe (..)
+
+import Data.String (..)
+
+import Syntax.Source (..)
+
+import Syntax.Token (..)
+
+import Syntax.Ast (..)
+
+import Syntax.Codec (..)
+
+import Syntax.Lex (..)
+
+import Syntax.Cursor (..)
+
+-- The spelling of a composition direction as it was written.
+fn pc_compose_op(dir : String) : String =
+  if dir == "forward" then
+    ">>"
+  else
+    "<<"
+
+-- The compiler's parse, fully parenthesized. Only the operator forms the corpus
+-- uses are rendered; anything else names itself, so a corpus entry that drifts
+-- outside the comparable fragment shows up as a mismatch rather than as a
+-- silently equal string.
+fn pc_shape(e : Sp(Expr)) : String =
+  match node_of(e) of
+    EVar(n) => n
+    EInt(v, _) => v
+    EBin(op, l, r) => "({pc_shape(l)} {op} {pc_shape(r)})"
+    ENeg(x) => "(- {pc_shape(x)})"
+    EPipe(l, r) => "({pc_shape(l)} |> {pc_shape(r)})"
+    EDefault(l, r) => "({pc_shape(l)} ?? {pc_shape(r)})"
+    ECompose(dir, l, r) => "({pc_shape(l)} {pc_compose_op(dir)} {pc_shape(r)})"
+    _ => "<outside the comparable fragment>"
+
+-- The text a literal or identifier token carries.
+fn pc_text(t : Token) : String =
+  match t.value of
+    None => "<valueless>"
+    Some(s) => s
+
+-- The grammar the driver is given: primaries are integers, identifiers, and a
+-- parenthesized expression, which is where the recursion back into the driver
+-- lives.
+fn pc_leaf(c : Cursor) : Reply(String) =
+  match cursor_peek(c) of
+    None => pc_miss(c)
+    Some(t) =>
+      match t.kind of
+        TInt => Took(pc_text(t), cursor_advance(c))
+        TIdent => Took(pc_text(t), cursor_advance(c))
+        TFixed(s) =>
+          if s == "(" then
+            pc_paren(cursor_advance(c))
+          else
+            pc_miss(c)
+        _ => pc_miss(c)
+
+-- No primary here: everything a primary can start with is recorded at this
+-- position.
+fn pc_miss(c : Cursor) : Reply(String) =
+  Stuck(cursor_note(cursor_note(cursor_note(c, TInt), TIdent), TFixed("(")))
+
+fn pc_paren(c : Cursor) : Reply(String) =
+  match pratt_parse(pc_spec(), c) of
+    Stuck(c2) => Stuck(c2)
+    Took(x, c2) =>
+      match cursor_expect_fixed(c2, ")") of
+        Stuck(c3) => Stuck(c3)
+        Took(_, c3) => Took(x, c3)
+
+fn pc_spec() : Pratt(String) =
+  Pratt {
+    infixes = expr_infix_table(),
+    prefixes = expr_prefix_table(),
+    leaf = pc_leaf,
+    bin = \(op, l, r) -> "({l} {op} {r})",
+    pre = \(op, x) -> "({op} {x})"
+  }
+
+-- The tokens lying inside a span: a declaration body's own tokens, cut out of
+-- the file's stream by the span the compiler gave the body.
+fn pc_slice(ts : List(Token), s : Span) : List(Token) =
+  filter(\(t) -> t.span.lo >= s.lo && t.span.hi <= s.hi, ts)
+
+-- One verdict line: the declaration's name, then agreement and the shape both
+-- parsers produced, or the two shapes that differ.
+fn pc_line(ts : List(Token), name : String, body : Sp(Expr)) : String =
+  let want = pc_shape(body)
+  let s = span_of(body)
+  match pratt_all(pc_spec(), cursor_of(pc_slice(ts, s), s.hi)) of
+    Stuck(c) => "{name} stuck {cursor_message(c)}"
+    Took(got, _) =>
+      if got == want then
+        "{name} ok {want}"
+      else
+        "{name} mismatch compiler={want} pratt={got}"
+
+-- The verdict for one item: a line per function declaration, nothing for any
+-- other item.
+fn pc_item(ts : List(Token), i : Item) : List(String) =
+  match i of
+    IDecl { decl = d, declkind = _, vis = _, dep = _ } =>
+      [pc_line(ts, d.name, d.body)]
+    _ => Nil
+
+fn pc_report(d : SurfaceDoc) : String =
+  match lex_raw(d.source.text) of
+    Err(e) => "lex error: {lex_message(e)}"
+    Ok(r) => lines_of(concat_map(\(i) -> pc_item(r.tokens, i), d.items))
+
+fn main() =
+  let text = read_file(arg(0))
+  match decode_surface(text) of
+    Err(e) => println("decode error: {codec_error_message(e)}")
+    Ok(d) => println(pc_report(d))

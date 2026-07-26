@@ -1,0 +1,927 @@
+{
+  "schema": "prism-resolved-syntax-v1",
+  "compiler": "0.14.0",
+  "source": {
+    "digest": "4af039e91ba99d57a978bb8d61f6cb3a8193a72f0c1e18d29d2a910e9c10dff8",
+    "text": "-- Pattern forms: constructors, tuples, records, literals, guards, views,\n-- alternations, and parameters written as patterns.\ntype Point = Point { x: Int, y: Int }\n\ntype Shape = Dot | Line(Point, Point) | Poly(List(Point))\n\npattern Diag(n) for Point =\n  view \\(p) -> if p.x == p.y then Some(p.x) else None\n  make \\(n) -> Point { x = n, y = n }\n\nfn classify(s : Shape) : Int =\n  match s of\n    Dot => 0\n    Line(Point { x = 0, y = 0 }, _) => 1\n    Line(a, b) if a.x == b.x => 2\n    Poly(Nil) => 3\n    Poly(Cons(p, Nil)) => p.x\n    _ => 9\n\nfn literals(v : Int, c : Char, f : Float, b : Bool) : Int =\n  match (v, c, f, b) of\n    (0, 'a', 1.5, true) => 1\n    (n, _, _, false) => n\n    _ => 2\n\nfn record_rest(p : Point) : Int =\n  match p of\n    Point { x = 0, .. } => 0\n    Point { x = x, y = y } => x + y\n\nfn views(p : Point) : Int =\n  match p of\n    Diag(n) if n > 3 => n * 2\n    Diag(n) => n\n    _ => 0\n\nfn alternation(s : Shape) : Int =\n  match s of\n    Dot | Poly(Nil) => 0\n    Line(Point { x = 0, y = 0 } | Point { x = 1, y = 1 }, _) => 1\n    Line(p, _) | Poly(Cons(p, _)) => p.x\n\nfn alt_literals(c : Char, n : Int) : Int =\n  match (c, n) of\n    ('a' | 'b' | 'c', 0 | 1) => 1\n    (_, _) => 2\n\nfn param_pats(Point { x = x, .. }, (a, b), borrow q : Point) : Int =\n  let f = \\(Point { x = u, y = v }) -> u + v\n  x + a + b + q.y + f(q)\n"
+  },
+  "functions": [
+    {
+      "name": "classify",
+      "params": [
+        {
+          "name": "s",
+          "borrow": false
+        }
+      ],
+      "body": {
+        "id": 1311,
+        "kind": "match",
+        "span": [
+          379,
+          537
+        ],
+        "children": [
+          {
+            "id": 1312,
+            "kind": "var",
+            "span": [
+              385,
+              386
+            ]
+          },
+          {
+            "id": 1313,
+            "kind": "int",
+            "span": [
+              401,
+              402
+            ]
+          },
+          {
+            "id": 1314,
+            "kind": "int",
+            "span": [
+              442,
+              443
+            ]
+          },
+          {
+            "id": 1315,
+            "kind": "bin",
+            "span": [
+              462,
+              472
+            ],
+            "children": [
+              {
+                "id": 1316,
+                "kind": "field",
+                "span": [
+                  462,
+                  465
+                ],
+                "children": [
+                  {
+                    "id": 1317,
+                    "kind": "var",
+                    "span": [
+                      462,
+                      463
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": 1318,
+                "kind": "field",
+                "span": [
+                  469,
+                  472
+                ],
+                "children": [
+                  {
+                    "id": 1319,
+                    "kind": "var",
+                    "span": [
+                      469,
+                      470
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": 1320,
+            "kind": "int",
+            "span": [
+              476,
+              477
+            ]
+          },
+          {
+            "id": 1321,
+            "kind": "int",
+            "span": [
+              495,
+              496
+            ]
+          },
+          {
+            "id": 1322,
+            "kind": "field",
+            "span": [
+              523,
+              526
+            ],
+            "children": [
+              {
+                "id": 1323,
+                "kind": "var",
+                "span": [
+                  523,
+                  524
+                ]
+              }
+            ]
+          },
+          {
+            "id": 1324,
+            "kind": "int",
+            "span": [
+              536,
+              537
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "literals",
+      "params": [
+        {
+          "name": "v",
+          "borrow": false
+        },
+        {
+          "name": "c",
+          "borrow": false
+        },
+        {
+          "name": "f",
+          "borrow": false
+        },
+        {
+          "name": "b",
+          "borrow": false
+        }
+      ],
+      "body": {
+        "id": 1325,
+        "kind": "match",
+        "span": [
+          601,
+          688
+        ],
+        "children": [
+          {
+            "id": 1326,
+            "kind": "tuple",
+            "span": [
+              607,
+              619
+            ],
+            "children": [
+              {
+                "id": 1327,
+                "kind": "var",
+                "span": [
+                  608,
+                  609
+                ]
+              },
+              {
+                "id": 1328,
+                "kind": "var",
+                "span": [
+                  611,
+                  612
+                ]
+              },
+              {
+                "id": 1329,
+                "kind": "var",
+                "span": [
+                  614,
+                  615
+                ]
+              },
+              {
+                "id": 1330,
+                "kind": "var",
+                "span": [
+                  617,
+                  618
+                ]
+              }
+            ]
+          },
+          {
+            "id": 1331,
+            "kind": "int",
+            "span": [
+              650,
+              651
+            ]
+          },
+          {
+            "id": 1332,
+            "kind": "var",
+            "span": [
+              676,
+              677
+            ]
+          },
+          {
+            "id": 1333,
+            "kind": "int",
+            "span": [
+              687,
+              688
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "record_rest",
+      "params": [
+        {
+          "name": "p",
+          "borrow": false
+        }
+      ],
+      "body": {
+        "id": 1334,
+        "kind": "match",
+        "span": [
+          726,
+          801
+        ],
+        "children": [
+          {
+            "id": 1335,
+            "kind": "var",
+            "span": [
+              732,
+              733
+            ]
+          },
+          {
+            "id": 1336,
+            "kind": "int",
+            "span": [
+              764,
+              765
+            ]
+          },
+          {
+            "id": 1337,
+            "kind": "bin",
+            "span": [
+              796,
+              801
+            ],
+            "children": [
+              {
+                "id": 1338,
+                "kind": "var",
+                "span": [
+                  796,
+                  797
+                ]
+              },
+              {
+                "id": 1339,
+                "kind": "var",
+                "span": [
+                  800,
+                  801
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "views",
+      "params": [
+        {
+          "name": "p",
+          "borrow": false
+        }
+      ],
+      "body": {
+        "id": 1340,
+        "kind": "match",
+        "span": [
+          833,
+          901
+        ],
+        "children": [
+          {
+            "id": 1341,
+            "kind": "var",
+            "span": [
+              839,
+              840
+            ]
+          },
+          {
+            "id": 1342,
+            "kind": "match",
+            "span": [
+              848,
+              848
+            ],
+            "children": [
+              {
+                "id": 1343,
+                "kind": "call",
+                "span": [
+                  848,
+                  855
+                ],
+                "children": [
+                  {
+                    "id": 1344,
+                    "kind": "var",
+                    "span": [
+                      848,
+                      848
+                    ]
+                  },
+                  {
+                    "id": 1345,
+                    "kind": "var",
+                    "span": [
+                      848,
+                      855
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": 1346,
+                "kind": "bin",
+                "span": [
+                  859,
+                  864
+                ],
+                "children": [
+                  {
+                    "id": 1347,
+                    "kind": "var",
+                    "span": [
+                      859,
+                      860
+                    ]
+                  },
+                  {
+                    "id": 1348,
+                    "kind": "int",
+                    "span": [
+                      863,
+                      864
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": 1349,
+                "kind": "bin",
+                "span": [
+                  868,
+                  873
+                ],
+                "children": [
+                  {
+                    "id": 1350,
+                    "kind": "var",
+                    "span": [
+                      868,
+                      869
+                    ]
+                  },
+                  {
+                    "id": 1351,
+                    "kind": "int",
+                    "span": [
+                      872,
+                      873
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": 1352,
+                "kind": "match",
+                "span": [
+                  848,
+                  848
+                ],
+                "children": [
+                  {
+                    "id": 1353,
+                    "kind": "var",
+                    "span": [
+                      848,
+                      855
+                    ]
+                  },
+                  {
+                    "id": 1354,
+                    "kind": "match",
+                    "span": [
+                      878,
+                      878
+                    ],
+                    "children": [
+                      {
+                        "id": 1355,
+                        "kind": "call",
+                        "span": [
+                          878,
+                          885
+                        ],
+                        "children": [
+                          {
+                            "id": 1356,
+                            "kind": "var",
+                            "span": [
+                              878,
+                              878
+                            ]
+                          },
+                          {
+                            "id": 1357,
+                            "kind": "var",
+                            "span": [
+                              878,
+                              885
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "id": 1358,
+                        "kind": "var",
+                        "span": [
+                          889,
+                          890
+                        ]
+                      },
+                      {
+                        "id": 1359,
+                        "kind": "match",
+                        "span": [
+                          878,
+                          878
+                        ],
+                        "children": [
+                          {
+                            "id": 1360,
+                            "kind": "var",
+                            "span": [
+                              878,
+                              885
+                            ]
+                          },
+                          {
+                            "id": 1361,
+                            "kind": "int",
+                            "span": [
+                              900,
+                              901
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "alternation",
+      "params": [
+        {
+          "name": "s",
+          "borrow": false
+        }
+      ],
+      "body": {
+        "id": 1362,
+        "kind": "match",
+        "span": [
+          939,
+          1081
+        ],
+        "children": [
+          {
+            "id": 1363,
+            "kind": "var",
+            "span": [
+              945,
+              946
+            ]
+          },
+          {
+            "id": 1364,
+            "kind": "int",
+            "span": [
+              973,
+              974
+            ]
+          },
+          {
+            "id": 1365,
+            "kind": "int",
+            "span": [
+              973,
+              974
+            ]
+          },
+          {
+            "id": 1366,
+            "kind": "int",
+            "span": [
+              1039,
+              1040
+            ]
+          },
+          {
+            "id": 1367,
+            "kind": "int",
+            "span": [
+              1039,
+              1040
+            ]
+          },
+          {
+            "id": 1368,
+            "kind": "field",
+            "span": [
+              1078,
+              1081
+            ],
+            "children": [
+              {
+                "id": 1369,
+                "kind": "var",
+                "span": [
+                  1078,
+                  1079
+                ]
+              }
+            ]
+          },
+          {
+            "id": 1370,
+            "kind": "field",
+            "span": [
+              1078,
+              1081
+            ],
+            "children": [
+              {
+                "id": 1371,
+                "kind": "var",
+                "span": [
+                  1078,
+                  1079
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "alt_literals",
+      "params": [
+        {
+          "name": "c",
+          "borrow": false
+        },
+        {
+          "name": "n",
+          "borrow": false
+        }
+      ],
+      "body": {
+        "id": 1372,
+        "kind": "match",
+        "span": [
+          1128,
+          1193
+        ],
+        "children": [
+          {
+            "id": 1373,
+            "kind": "tuple",
+            "span": [
+              1134,
+              1140
+            ],
+            "children": [
+              {
+                "id": 1374,
+                "kind": "var",
+                "span": [
+                  1135,
+                  1136
+                ]
+              },
+              {
+                "id": 1375,
+                "kind": "var",
+                "span": [
+                  1138,
+                  1139
+                ]
+              }
+            ]
+          },
+          {
+            "id": 1376,
+            "kind": "int",
+            "span": [
+              1176,
+              1177
+            ]
+          },
+          {
+            "id": 1377,
+            "kind": "int",
+            "span": [
+              1176,
+              1177
+            ]
+          },
+          {
+            "id": 1378,
+            "kind": "int",
+            "span": [
+              1176,
+              1177
+            ]
+          },
+          {
+            "id": 1379,
+            "kind": "int",
+            "span": [
+              1176,
+              1177
+            ]
+          },
+          {
+            "id": 1380,
+            "kind": "int",
+            "span": [
+              1176,
+              1177
+            ]
+          },
+          {
+            "id": 1381,
+            "kind": "int",
+            "span": [
+              1176,
+              1177
+            ]
+          },
+          {
+            "id": 1382,
+            "kind": "int",
+            "span": [
+              1192,
+              1193
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "param_pats",
+      "params": [
+        {
+          "name": "arg@0",
+          "borrow": false
+        },
+        {
+          "name": "arg@1",
+          "borrow": false
+        },
+        {
+          "name": "q",
+          "borrow": true
+        }
+      ],
+      "body": {
+        "id": 1383,
+        "kind": "match",
+        "span": [
+          1209,
+          1228
+        ],
+        "children": [
+          {
+            "id": 1384,
+            "kind": "var",
+            "span": [
+              1209,
+              1228
+            ]
+          },
+          {
+            "id": 1385,
+            "kind": "match",
+            "span": [
+              1230,
+              1236
+            ],
+            "children": [
+              {
+                "id": 1386,
+                "kind": "var",
+                "span": [
+                  1230,
+                  1236
+                ]
+              },
+              {
+                "id": 1387,
+                "kind": "let",
+                "span": [
+                  1266,
+                  1333
+                ],
+                "children": [
+                  {
+                    "id": 1388,
+                    "kind": "lam",
+                    "span": [
+                      1274,
+                      1308
+                    ],
+                    "children": [
+                      {
+                        "id": 1389,
+                        "kind": "match",
+                        "span": [
+                          1276,
+                          1298
+                        ],
+                        "children": [
+                          {
+                            "id": 1390,
+                            "kind": "var",
+                            "span": [
+                              1276,
+                              1298
+                            ]
+                          },
+                          {
+                            "id": 1391,
+                            "kind": "bin",
+                            "span": [
+                              1303,
+                              1308
+                            ],
+                            "children": [
+                              {
+                                "id": 1392,
+                                "kind": "var",
+                                "span": [
+                                  1303,
+                                  1304
+                                ]
+                              },
+                              {
+                                "id": 1393,
+                                "kind": "var",
+                                "span": [
+                                  1307,
+                                  1308
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": 1394,
+                    "kind": "bin",
+                    "span": [
+                      1311,
+                      1333
+                    ],
+                    "children": [
+                      {
+                        "id": 1395,
+                        "kind": "bin",
+                        "span": [
+                          1311,
+                          1326
+                        ],
+                        "children": [
+                          {
+                            "id": 1396,
+                            "kind": "bin",
+                            "span": [
+                              1311,
+                              1320
+                            ],
+                            "children": [
+                              {
+                                "id": 1397,
+                                "kind": "bin",
+                                "span": [
+                                  1311,
+                                  1316
+                                ],
+                                "children": [
+                                  {
+                                    "id": 1398,
+                                    "kind": "var",
+                                    "span": [
+                                      1311,
+                                      1312
+                                    ]
+                                  },
+                                  {
+                                    "id": 1399,
+                                    "kind": "var",
+                                    "span": [
+                                      1315,
+                                      1316
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "id": 1400,
+                                "kind": "var",
+                                "span": [
+                                  1319,
+                                  1320
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "id": 1401,
+                            "kind": "field",
+                            "span": [
+                              1323,
+                              1326
+                            ],
+                            "children": [
+                              {
+                                "id": 1402,
+                                "kind": "var",
+                                "span": [
+                                  1323,
+                                  1324
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "id": 1403,
+                        "kind": "call",
+                        "span": [
+                          1329,
+                          1333
+                        ],
+                        "children": [
+                          {
+                            "id": 1404,
+                            "kind": "var",
+                            "span": [
+                              1329,
+                              1330
+                            ]
+                          },
+                          {
+                            "id": 1405,
+                            "kind": "var",
+                            "span": [
+                              1331,
+                              1332
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

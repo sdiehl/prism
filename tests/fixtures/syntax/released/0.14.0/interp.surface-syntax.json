@@ -1,0 +1,346 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.14.0",
+  "source": {
+    "digest": "d916367af5ed0ae848f8847fade024e1809a5b1aa1650bec6ef1ef6ffb3f8f73",
+    "text": "-- Interpolation and layout edges: nested holes, bare-indent bodies, blanks.\neffect Env\n  read(String) : String\n\nclass Render(a)\n  render : (a) -> String\n\ninstance renderInt : Render(Int)\n  fn render(v) = \"v={v}\"\n\nfn nested(name : String) : String =\n  \"outer {concat(\"inner {name} deep\", read(\"home\"))} tail\"\n\nfn multiline() : Int =\n  let a = let b = 1 in let c = 2 in b + c\n  a\n"
+  },
+  "items": [
+    {
+      "kind": "effect",
+      "name": "Env",
+      "ops": [
+        {
+          "name": "read",
+          "params": [
+            {
+              "kind": "str"
+            }
+          ],
+          "ret": {
+            "kind": "str"
+          }
+        }
+      ],
+      "span": [
+        77,
+        111
+      ]
+    },
+    {
+      "kind": "class",
+      "methods": [
+        {
+          "name": "render",
+          "ty": {
+            "effects": {
+              "labels": []
+            },
+            "kind": "fun",
+            "params": [
+              {
+                "kind": "var",
+                "name": "a"
+              }
+            ],
+            "ret": {
+              "kind": "str"
+            }
+          }
+        }
+      ],
+      "name": "Render",
+      "param": "a",
+      "span": [
+        113,
+        153
+      ]
+    },
+    {
+      "class": "Render",
+      "head": {
+        "kind": "int"
+      },
+      "kind": "instance",
+      "methods": [
+        {
+          "body": {
+            "args": [
+              {
+                "kind": "str",
+                "span": [
+                  205,
+                  205
+                ],
+                "value": "v="
+              },
+              {
+                "kind": "var",
+                "name": "v",
+                "span": [
+                  209,
+                  210
+                ]
+              },
+              {
+                "kind": "str",
+                "span": [
+                  205,
+                  205
+                ],
+                "value": ""
+              }
+            ],
+            "head": {
+              "kind": "marker",
+              "marker": "interp",
+              "span": [
+                205,
+                205
+              ]
+            },
+            "kind": "call",
+            "span": [
+              205,
+              212
+            ]
+          },
+          "kind": "fn",
+          "name": "render",
+          "params": [
+            {
+              "name": "v"
+            }
+          ],
+          "span": [
+            190,
+            212
+          ]
+        }
+      ],
+      "name": "renderInt",
+      "span": [
+        155,
+        212
+      ]
+    },
+    {
+      "body": {
+        "args": [
+          {
+            "kind": "str",
+            "span": [
+              252,
+              252
+            ],
+            "value": "outer "
+          },
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "kind": "str",
+                    "span": [
+                      267,
+                      267
+                    ],
+                    "value": "inner "
+                  },
+                  {
+                    "kind": "var",
+                    "name": "name",
+                    "span": [
+                      275,
+                      279
+                    ]
+                  },
+                  {
+                    "kind": "str",
+                    "span": [
+                      267,
+                      267
+                    ],
+                    "value": " deep"
+                  }
+                ],
+                "head": {
+                  "kind": "marker",
+                  "marker": "interp",
+                  "span": [
+                    267,
+                    267
+                  ]
+                },
+                "kind": "call",
+                "span": [
+                  267,
+                  286
+                ]
+              },
+              {
+                "args": [
+                  {
+                    "kind": "str",
+                    "span": [
+                      293,
+                      299
+                    ],
+                    "value": "home"
+                  }
+                ],
+                "head": {
+                  "kind": "var",
+                  "name": "read",
+                  "span": [
+                    288,
+                    292
+                  ]
+                },
+                "kind": "call",
+                "span": [
+                  288,
+                  300
+                ]
+              }
+            ],
+            "head": {
+              "kind": "var",
+              "name": "concat",
+              "span": [
+                260,
+                266
+              ]
+            },
+            "kind": "call",
+            "span": [
+              260,
+              301
+            ]
+          },
+          {
+            "kind": "str",
+            "span": [
+              252,
+              252
+            ],
+            "value": " tail"
+          }
+        ],
+        "head": {
+          "kind": "marker",
+          "marker": "interp",
+          "span": [
+            252,
+            252
+          ]
+        },
+        "kind": "call",
+        "span": [
+          252,
+          308
+        ]
+      },
+      "kind": "fn",
+      "name": "nested",
+      "params": [
+        {
+          "name": "name",
+          "ty": {
+            "kind": "str"
+          }
+        }
+      ],
+      "ret": {
+        "kind": "str"
+      },
+      "span": [
+        214,
+        308
+      ]
+    },
+    {
+      "body": {
+        "body": {
+          "kind": "var",
+          "name": "a",
+          "span": [
+            377,
+            378
+          ]
+        },
+        "kind": "let",
+        "name": "a",
+        "span": [
+          335,
+          378
+        ],
+        "value": {
+          "body": {
+            "body": {
+              "kind": "bin",
+              "lhs": {
+                "kind": "var",
+                "name": "b",
+                "span": [
+                  369,
+                  370
+                ]
+              },
+              "op": "+",
+              "rhs": {
+                "kind": "var",
+                "name": "c",
+                "span": [
+                  373,
+                  374
+                ]
+              },
+              "span": [
+                369,
+                374
+              ]
+            },
+            "kind": "let",
+            "name": "c",
+            "span": [
+              356,
+              374
+            ],
+            "value": {
+              "kind": "int",
+              "span": [
+                364,
+                365
+              ],
+              "value": "2"
+            }
+          },
+          "kind": "let",
+          "name": "b",
+          "span": [
+            343,
+            374
+          ],
+          "value": {
+            "kind": "int",
+            "span": [
+              351,
+              352
+            ],
+            "value": "1"
+          }
+        }
+      },
+      "kind": "fn",
+      "name": "multiline",
+      "ret": {
+        "kind": "int"
+      },
+      "span": [
+        310,
+        378
+      ]
+    }
+  ]
+}

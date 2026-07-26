@@ -559,69 +559,11 @@ pub struct DataInfo {
     pub ctors: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CtorInfo {
-    pub type_name: Sym,
-    pub params: Vec<Sym>,
-    // Kind of each parameter, parallel to `params`. Lets pattern matching open a
-    // `Row`-kinded parameter with a fresh row existential (substituted into the
-    // field types with `subst_row_var`) rather than a type existential.
-    pub param_kinds: Vec<Kind>,
-    pub args: Vec<Type>,
-    pub tag: usize,
-    pub fields: Vec<Sym>,
-}
+pub(crate) use crate::types::CtorInfo;
 
-#[derive(Clone, Debug)]
-pub struct DeclInfo {
-    pub name: String,
-    pub params: Vec<String>,
-    pub ty: Type,
-    pub effects: Effects,
-}
+pub(crate) use crate::types::DeclInfo;
 
-#[derive(Clone, Debug)]
-pub struct EffOpInfo {
-    pub effect_name: Sym,
-    pub eff_params: Vec<Sym>,
-    pub params: Vec<Type>,
-    pub ret: Type,
-    // Declared resumption multiplicity of the op (see `ast::Grade`). Consumed by
-    // effect lowering to decide which handlers may disable var-erasure; a
-    // handler clause more general than this grade is rejected at desugar.
-    pub grade: Grade,
-}
-
-impl EffOpInfo {
-    // True when the op signature carries a free effect-row variable (a thunk
-    // parameter whose row has an open tail, e.g. `() -> a ! {Eff | e}`). Such an
-    // op must tie that variable to the ambient row at each perform site so the
-    // thunk's extra effects flow out; see `Tc::bind_op_rows_to_ambient`.
-    #[must_use]
-    pub fn has_free_row_vars(&self) -> bool {
-        let mut rows = BTreeSet::new();
-        for p in &self.params {
-            env::collect_row_vars(p, &mut rows);
-        }
-        env::collect_row_vars(&self.ret, &mut rows);
-        !rows.is_empty()
-    }
-
-    // Instantiate the op's param/return types with the effect's type arguments,
-    // substituting each declared effect parameter for the supplied argument.
-    #[must_use]
-    pub fn instantiate(&self, args: &[Type]) -> (Vec<Type>, Type) {
-        let mut params = self.params.clone();
-        let mut ret = self.ret.clone();
-        for (p, t) in self.eff_params.iter().zip(args) {
-            for q in &mut params {
-                *q = q.subst_var(*p, t);
-            }
-            ret = ret.subst_var(*p, t);
-        }
-        (params, ret)
-    }
-}
+pub(crate) use crate::types::EffOpInfo;
 
 // Instance dispatch key: the head constructor of an instance head type.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -1593,9 +1535,7 @@ pub fn infer_expr_allow_holes(
 }
 
 // Parse the canonical signature carried by a checked module interface.
-pub(crate) fn parse_checked_signature(name: &str, signature: &str) -> Result<Type, TypeError> {
-    env::parse_sig(name, signature).map(|(ty, _)| ty)
-}
+pub(crate) use crate::types::sig::parse_checked_signature;
 
 pub(crate) const fn instance_head_key(ty: &Type) -> Option<HeadKey> {
     classes::head_name(ty)

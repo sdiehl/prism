@@ -1,0 +1,14 @@
+[package]
+name = "prism-common"
+version.workspace = true
+authors.workspace = true
+categories = ["compilers"]
+edition.workspace = true
+keywords = ["compiler", "cbpv", "effects", "llvm", "mlir"]
+license.workspace = true
+readme = "../../README.md"
+repository.workspace = true
+description = "Prism compiler workspace member: common"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

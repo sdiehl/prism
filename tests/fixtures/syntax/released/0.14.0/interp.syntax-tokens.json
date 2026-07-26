@@ -1,0 +1,1394 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.14.0",
+  "source": {
+    "digest": "d916367af5ed0ae848f8847fade024e1809a5b1aa1650bec6ef1ef6ffb3f8f73",
+    "text": "-- Interpolation and layout edges: nested holes, bare-indent bodies, blanks.\neffect Env\n  read(String) : String\n\nclass Render(a)\n  render : (a) -> String\n\ninstance renderInt : Render(Int)\n  fn render(v) = \"v={v}\"\n\nfn nested(name : String) : String =\n  \"outer {concat(\"inner {name} deep\", read(\"home\"))} tail\"\n\nfn multiline() : Int =\n  let a = let b = 1 in let c = 2 in b + c\n  a\n"
+  },
+  "raw": [
+    {
+      "kind": "effect",
+      "span": [
+        77,
+        83
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        84,
+        87
+      ],
+      "value": "Env"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        90,
+        94
+      ],
+      "value": "read"
+    },
+    {
+      "kind": "(",
+      "span": [
+        94,
+        95
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        95,
+        101
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        101,
+        102
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        103,
+        104
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        105,
+        111
+      ]
+    },
+    {
+      "kind": "class",
+      "span": [
+        113,
+        118
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        119,
+        125
+      ],
+      "value": "Render"
+    },
+    {
+      "kind": "(",
+      "span": [
+        125,
+        126
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        126,
+        127
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        127,
+        128
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        131,
+        137
+      ],
+      "value": "render"
+    },
+    {
+      "kind": ":",
+      "span": [
+        138,
+        139
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        140,
+        141
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        141,
+        142
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        142,
+        143
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        144,
+        146
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        147,
+        153
+      ]
+    },
+    {
+      "kind": "instance",
+      "span": [
+        155,
+        163
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        164,
+        173
+      ],
+      "value": "renderInt"
+    },
+    {
+      "kind": ":",
+      "span": [
+        174,
+        175
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        176,
+        182
+      ],
+      "value": "Render"
+    },
+    {
+      "kind": "(",
+      "span": [
+        182,
+        183
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        183,
+        186
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        186,
+        187
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        190,
+        192
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        193,
+        199
+      ],
+      "value": "render"
+    },
+    {
+      "kind": "(",
+      "span": [
+        199,
+        200
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        200,
+        201
+      ],
+      "value": "v"
+    },
+    {
+      "kind": ")",
+      "span": [
+        201,
+        202
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        203,
+        204
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        205,
+        209
+      ],
+      "value": "v="
+    },
+    {
+      "kind": "ident",
+      "span": [
+        209,
+        210
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "iend",
+      "span": [
+        210,
+        212
+      ],
+      "value": ""
+    },
+    {
+      "kind": "fn",
+      "span": [
+        214,
+        216
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        217,
+        223
+      ],
+      "value": "nested"
+    },
+    {
+      "kind": "(",
+      "span": [
+        223,
+        224
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        224,
+        228
+      ],
+      "value": "name"
+    },
+    {
+      "kind": ":",
+      "span": [
+        229,
+        230
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        231,
+        237
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        237,
+        238
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        239,
+        240
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        241,
+        247
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        248,
+        249
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        252,
+        260
+      ],
+      "value": "outer "
+    },
+    {
+      "kind": "ident",
+      "span": [
+        260,
+        266
+      ],
+      "value": "concat"
+    },
+    {
+      "kind": "(",
+      "span": [
+        266,
+        267
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        267,
+        275
+      ],
+      "value": "inner "
+    },
+    {
+      "kind": "ident",
+      "span": [
+        275,
+        279
+      ],
+      "value": "name"
+    },
+    {
+      "kind": "iend",
+      "span": [
+        279,
+        286
+      ],
+      "value": " deep"
+    },
+    {
+      "kind": ",",
+      "span": [
+        286,
+        287
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        288,
+        292
+      ],
+      "value": "read"
+    },
+    {
+      "kind": "(",
+      "span": [
+        292,
+        293
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        293,
+        299
+      ],
+      "value": "home"
+    },
+    {
+      "kind": ")",
+      "span": [
+        299,
+        300
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        300,
+        301
+      ]
+    },
+    {
+      "kind": "iend",
+      "span": [
+        301,
+        308
+      ],
+      "value": " tail"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        310,
+        312
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        313,
+        322
+      ],
+      "value": "multiline"
+    },
+    {
+      "kind": "(",
+      "span": [
+        322,
+        323
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        323,
+        324
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        325,
+        326
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        327,
+        330
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        331,
+        332
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        335,
+        338
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        339,
+        340
+      ],
+      "value": "a"
+    },
+    {
+      "kind": "=",
+      "span": [
+        341,
+        342
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        343,
+        346
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        347,
+        348
+      ],
+      "value": "b"
+    },
+    {
+      "kind": "=",
+      "span": [
+        349,
+        350
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        351,
+        352
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "in",
+      "span": [
+        353,
+        355
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        356,
+        359
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        360,
+        361
+      ],
+      "value": "c"
+    },
+    {
+      "kind": "=",
+      "span": [
+        362,
+        363
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        364,
+        365
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "in",
+      "span": [
+        366,
+        368
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        369,
+        370
+      ],
+      "value": "b"
+    },
+    {
+      "kind": "+",
+      "span": [
+        371,
+        372
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        373,
+        374
+      ],
+      "value": "c"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        377,
+        378
+      ],
+      "value": "a"
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        77,
+        77
+      ]
+    },
+    {
+      "kind": "effect",
+      "span": [
+        77,
+        83
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        84,
+        87
+      ],
+      "value": "Env"
+    },
+    {
+      "kind": "v{",
+      "span": [
+        90,
+        90
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        90,
+        94
+      ],
+      "value": "read"
+    },
+    {
+      "kind": "(",
+      "span": [
+        94,
+        95
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        95,
+        101
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        101,
+        102
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        103,
+        104
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        105,
+        111
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        111,
+        111
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        111,
+        111
+      ]
+    },
+    {
+      "kind": "class",
+      "span": [
+        113,
+        118
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        119,
+        125
+      ],
+      "value": "Render"
+    },
+    {
+      "kind": "(",
+      "span": [
+        125,
+        126
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        126,
+        127
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        127,
+        128
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        131,
+        131
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        131,
+        137
+      ],
+      "value": "render"
+    },
+    {
+      "kind": ":",
+      "span": [
+        138,
+        139
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        140,
+        141
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        141,
+        142
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        142,
+        143
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        144,
+        146
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        147,
+        153
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        153,
+        153
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        153,
+        153
+      ]
+    },
+    {
+      "kind": "instance",
+      "span": [
+        155,
+        163
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        164,
+        173
+      ],
+      "value": "renderInt"
+    },
+    {
+      "kind": ":",
+      "span": [
+        174,
+        175
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        176,
+        182
+      ],
+      "value": "Render"
+    },
+    {
+      "kind": "(",
+      "span": [
+        182,
+        183
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        183,
+        186
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        186,
+        187
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        190,
+        190
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        190,
+        192
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        193,
+        199
+      ],
+      "value": "render"
+    },
+    {
+      "kind": "(",
+      "span": [
+        199,
+        200
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        200,
+        201
+      ],
+      "value": "v"
+    },
+    {
+      "kind": ")",
+      "span": [
+        201,
+        202
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        203,
+        204
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        205,
+        209
+      ],
+      "value": "v="
+    },
+    {
+      "kind": "ident",
+      "span": [
+        209,
+        210
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "iend",
+      "span": [
+        210,
+        212
+      ],
+      "value": ""
+    },
+    {
+      "kind": "v}",
+      "span": [
+        212,
+        212
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        212,
+        212
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        214,
+        216
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        217,
+        223
+      ],
+      "value": "nested"
+    },
+    {
+      "kind": "(",
+      "span": [
+        223,
+        224
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        224,
+        228
+      ],
+      "value": "name"
+    },
+    {
+      "kind": ":",
+      "span": [
+        229,
+        230
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        231,
+        237
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        237,
+        238
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        239,
+        240
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        241,
+        247
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        248,
+        249
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        252,
+        252
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        252,
+        260
+      ],
+      "value": "outer "
+    },
+    {
+      "kind": "ident",
+      "span": [
+        260,
+        266
+      ],
+      "value": "concat"
+    },
+    {
+      "kind": "(",
+      "span": [
+        266,
+        267
+      ]
+    },
+    {
+      "kind": "istart",
+      "span": [
+        267,
+        275
+      ],
+      "value": "inner "
+    },
+    {
+      "kind": "ident",
+      "span": [
+        275,
+        279
+      ],
+      "value": "name"
+    },
+    {
+      "kind": "iend",
+      "span": [
+        279,
+        286
+      ],
+      "value": " deep"
+    },
+    {
+      "kind": ",",
+      "span": [
+        286,
+        287
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        288,
+        292
+      ],
+      "value": "read"
+    },
+    {
+      "kind": "(",
+      "span": [
+        292,
+        293
+      ]
+    },
+    {
+      "kind": "str",
+      "span": [
+        293,
+        299
+      ],
+      "value": "home"
+    },
+    {
+      "kind": ")",
+      "span": [
+        299,
+        300
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        300,
+        301
+      ]
+    },
+    {
+      "kind": "iend",
+      "span": [
+        301,
+        308
+      ],
+      "value": " tail"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        308,
+        308
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        308,
+        308
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        310,
+        312
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        313,
+        322
+      ],
+      "value": "multiline"
+    },
+    {
+      "kind": "(",
+      "span": [
+        322,
+        323
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        323,
+        324
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        325,
+        326
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        327,
+        330
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        331,
+        332
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        335,
+        335
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        335,
+        338
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        339,
+        340
+      ],
+      "value": "a"
+    },
+    {
+      "kind": "=",
+      "span": [
+        341,
+        342
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        343,
+        346
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        347,
+        348
+      ],
+      "value": "b"
+    },
+    {
+      "kind": "=",
+      "span": [
+        349,
+        350
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        351,
+        352
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "in",
+      "span": [
+        353,
+        355
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        356,
+        359
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        360,
+        361
+      ],
+      "value": "c"
+    },
+    {
+      "kind": "=",
+      "span": [
+        362,
+        363
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        364,
+        365
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "in",
+      "span": [
+        366,
+        368
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        369,
+        370
+      ],
+      "value": "b"
+    },
+    {
+      "kind": "+",
+      "span": [
+        371,
+        372
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        373,
+        374
+      ],
+      "value": "c"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        374,
+        374
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        377,
+        378
+      ],
+      "value": "a"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        378,
+        378
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        378,
+        378
+      ]
+    }
+  ],
+  "trivia": [
+    {
+      "kind": "comment",
+      "span": [
+        0,
+        76
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        111,
+        113
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        153,
+        155
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        212,
+        214
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        308,
+        310
+      ]
+    }
+  ]
+}

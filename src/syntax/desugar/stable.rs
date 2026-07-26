@@ -337,6 +337,7 @@ fn mdecl(name: String, param: &str, param_ty: Ty, ret: Ty, body: S<Expr>, span: 
             name: param.to_string(),
             ty: Some(param_ty),
             borrow: false,
+            pat: None,
             default: None,
         }],
         ret: Some(ret),
@@ -825,6 +826,7 @@ fn decode_ladder_fn(
         ),
         guard: None,
         body: chain,
+        alt: false,
     };
     let body = sp(Expr::Match(Box::new(open), vec![arm]), z);
     mdecl(
@@ -872,6 +874,7 @@ fn ladder_arm(
         ),
         guard: None,
         body: ok,
+        alt: false,
     };
     sp(Expr::Match(Box::new(dec), vec![arm]), z)
 }

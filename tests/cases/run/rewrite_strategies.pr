@@ -1,0 +1,94 @@
+import Control.Fresh (..)
+
+import Control.Layer (..)
+
+import Control.Rewrite (..)
+
+import Data.Foldable (length)
+
+import Data.List (map)
+
+import Data.String (str_join)
+
+import Syntax.Analysis (an_is_call)
+
+import Syntax.Ast (..)
+
+import Syntax.Source (..)
+
+import Syntax.Walk (..)
+
+fn zero_span() : Span = Span { lo = 0, hi = 0 }
+
+fn call(f : Sp(Expr), args : List(Sp(Expr))) : Sp(Expr) =
+  Sp { node = ECall(f, args), span = zero_span(), synth = false }
+
+fn int_of(e : Sp(Expr)) : Option(String) =
+  match node_of(e) of
+    EInt(s, _) => Some(s)
+    _ => None
+
+fn with_int(e : Sp(Expr), s : String) : Sp(Expr) =
+  Sp { node = EInt(s, SufNone), span = e.span, synth = e.synth }
+
+fn parens(inner : String) : String = "({inner})"
+
+fn sh(e : Sp(Expr)) : String =
+  match node_of(e) of
+    EInt(s, _) => s
+    ECall(f, args) => parens(str_join(" ", map(sh, Cons(f, args))))
+    _ => "?"
+
+-- Rewrite `1` to `2`, decline everywhere else.
+fn to2(e : Sp(Expr)) : Option(Sp(Expr)) =
+  match int_of(e) of
+    Some(s) =>
+      if s == "1" then
+        Some(with_int(e, "2"))
+      else
+        None
+    None => None
+
+-- Mark any integer, decline on everything else.
+fn bang(e : Sp(Expr)) : Option(Sp(Expr)) =
+  match int_of(e) of
+    Some(s) => Some(with_int(e, "{s}!"))
+    None => None
+
+-- Always accepts on an integer, so it never reaches a normal form.
+fn grow(e : Sp(Expr)) : Option(Sp(Expr)) =
+  match int_of(e) of
+    Some(s) => Some(with_int(e, "{s}{s}"))
+    None => None
+
+-- Number every integer from the `Fresh` supply: one rewrite, effectful.
+fn label(e : Sp(Expr)) : Option(Sp(Expr)) ! {Fresh} =
+  match int_of(e) of
+    Some(s) => Some(with_int(e, "{s}@{show(fresh())}"))
+    None => None
+
+fn main() =
+  let p = expr_layer()
+  let t = call(lit_probe(1), [call(lit_probe(1), [lit_probe(3)]), lit_probe(1)])
+  println(sh(t))
+  -- Every node, then only the leftmost match.
+  println(sh(rw_apply(rw_bottom_up(p, rw_try(to2)), t)))
+  println(sh(rw_apply(rw_once_bottom_up(p, to2), t)))
+  println(sh(rw_apply(rw_once_top_down(p, to2), t)))
+  -- Left-biased choice: the first rule that accepts wins.
+  println(sh(rw_everywhere(p, rw_or_else(to2, bang), t)))
+  -- `rw_all` declines unless every child accepts, and `rw_one` needs just one.
+  println(sh(rw_apply(rw_all(p, to2), t)))
+  println(sh(rw_apply(rw_one(p, to2), t)))
+  -- A rewrite that declines leaves the tree alone.
+  println(sh(rw_apply(rw_at(an_is_call, to2), t)))
+  -- The fixpoint closer reports convergence instead of assuming it.
+  let fix1 = rw_innermost(p, to2, 8, t)
+  println("{sh(fix1.tree)} {show(fix1.steps)} {show(fix1.converged)}")
+  let fix2 = rw_repeat(grow, 3, lit_probe(7))
+  println("{sh(fix2.tree)} {show(fix2.steps)} {show(fix2.converged)}")
+  -- Every single-step neighbour, one per node that accepted.
+  println(show(map(sh, rw_steps(p, to2, t))))
+  println(show(length(rw_steps(p, bang, t))))
+  -- The same combinators, now with an effect in the rule.
+  println(sh(run_fresh(\() -> rw_everywhere(p, label, t))))

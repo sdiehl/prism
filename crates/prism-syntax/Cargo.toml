@@ -1,0 +1,29 @@
+[package]
+name = "prism-syntax"
+version.workspace = true
+authors.workspace = true
+categories = ["compilers"]
+edition.workspace = true
+keywords = ["compiler", "cbpv", "effects", "llvm", "mlir"]
+license.workspace = true
+readme = "../../README.md"
+repository.workspace = true
+description = "Prism compiler workspace member: syntax"
+
+[dependencies]
+anstyle = "1"
+ariadne = "0.6"
+lalrpop-util = { version = "0.23", features = ["lexer"] }
+logos = "0.16"
+marginalia = "0.2.1"
+num-bigint = "0.5.0"
+offsides = "0.2"
+prism-common = { path = "../prism-common" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2.0"
+
+[build-dependencies]
+lalrpop = "0.23"
+
+[features]
+wasm = []

@@ -1,7 +1,7 @@
 // Static typed tooltips. `prism mdbook` embeds the canonical
 // prism-typespans-v1 payload and nested spans; this tiny consumer only handles
 // interaction. A future wasm analyzer can hand the same schema to `bind` after
-// rendering an editable block—there is deliberately no second browser format.
+// rendering an editable block; there is deliberately no second browser format.
 (function () {
   "use strict";
 

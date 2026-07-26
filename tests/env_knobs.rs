@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 
 // The single home for compile-time behavior knobs. Any `PRISM_*` read here is a
 // `DynFlags` field and is accepted without a per-var entry below.
-const DYNFLAGS_HOME: &str = "src/flags.rs";
+const DYNFLAGS_HOME: &str = "crates/prism-core/src/flags.rs";
 
 // Every `PRISM_*` knob read outside `flags.rs`, mapped to the file(s) allowed to
 // read it. Keep this table in sync with the three families above; a new read from
@@ -51,12 +51,21 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("PRISM_EFFOP_STATS", &["runtime/prism_mem.c"]),
     ("PRISM_DRIVE_STATS", &["runtime/prism_mem.c"]),
     // Family 3a: the C-toolchain seam, centralized in one module.
-    ("PRISM_CC", &["src/codegen/rt.rs"]),
-    ("PRISM_CC_FLAGS", &["src/codegen/rt.rs"]),
+    (
+        "PRISM_CC",
+        &[
+            "crates/prism-native/src/codegen/rt.rs",
+            "crates/prism-native/build.rs",
+        ],
+    ),
+    ("PRISM_CC_FLAGS", &["crates/prism-native/src/codegen/rt.rs"]),
     // Family 3b: test-only knobs (golden-file blessing, external solvers).
     ("PRISM_BLESS_REPLAY", &["src/debug/durable/tests.rs"]),
     ("PRISM_BLESS_SMT", &["src/verify/tests.rs"]),
-    ("PRISM_BLESS_WORLD_FIXTURE", &["src/lineage/tests.rs"]),
+    (
+        "PRISM_BLESS_WORLD_FIXTURE",
+        &["crates/prism-lineage/src/tests.rs"],
+    ),
     ("PRISM_Z3", &["src/verify/tests.rs"]),
     ("PRISM_CVC5", &["src/verify/tests.rs"]),
 ];
@@ -72,7 +81,11 @@ const READ_MARKERS: &[&str] = &["env::var(\"", "env::var_os(\"", "getenv(\""];
 fn scan_reads() -> BTreeSet<(String, String)> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut found = BTreeSet::new();
-    for (dir, exts) in [("src", &["rs"][..]), ("runtime", &["c", "h"][..])] {
+    for (dir, exts) in [
+        ("src", &["rs"][..]),
+        ("crates", &["rs"][..]),
+        ("runtime", &["c", "h"][..]),
+    ] {
         collect(&root.join(dir), &root, exts, &mut found);
     }
     found

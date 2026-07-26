@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.15.0
+
+- Self-hosted front end: the lexer, interpolation, and layout are also Prism modules, differentially checked against the compiler's.
+- Lexical faults: the Prism lexer refuses bad escapes, holes, strings, and digit separators at byte-exact offsets.
+- Patterns: added alternation at any depth, and constructor, record, and tuple patterns in parameter position.
+- Deriving: added ToJson and FromJson over the new Json module, and Plate for one-layer children and rebuild.
+- Modules: a user definition now shadows a prelude name rather than replacing it, and an ambiguous name errors only where used bare.
+- Syntax artifacts: added the `syntax-diagnostics` and `resolved-syntax` dumps, the latter joining checker facts by node identity.
+- Content addressing: added a `core-identity` dump of a definition's hash inputs, with a Prism consumer that reproduces the hash.
+- Standard library: added `Syntax.{Lex, Layout, Query, Diagnostic, Resolved, Identity, Walk, Analysis, Rename, Edit, Report, Cursor, Flow}`, `Control.{Layer, Rewrite}`, `Json`, and `Data.{Bind, IntMap, IntSet, Fixpoint}`.
+- Traversal: an analysis or rewrite pass is now a local rule and a strategy over one children-and-rebuild interface, which a derived Plate instance supplies directly.
+- Diagnostics: a Prism renderer draws the caret report, pinned byte-for-byte against the compiler's own on the refusal corpus.
+- Identity: a file's bytes, its canonical tree, and a binder's name and index are each separately addressable.
+- Types: added diagnostics for a field shared across constructors at conflicting types and for a record pattern omitting fields.
+- Tier invariance: effect lowering declines a rung it cannot express instead of panicking, and no longer rejects a stored handler reached through a row-polymorphic call.
+- Front-end performance: made the layout pass linear in input size and stopped the token layer rebuilding its tables per token.
+- Robustness: the syntax codecs refuse hostile depths, bad spans, and duplicate node identities with a structured error.
+- Compatibility: the previous release's syntax artifacts still decode and re-encode byte-identically.
+- Runtime: fixed a print-buffer overflow for very large big integers.
+- Caret rendering: fixed carets drifting or vanishing on lines containing non-ASCII text.
+- Formatter: fixed dropped parentheses around the default, pipe, and composition operators, which could change how output reparsed.
+- Packaging: dropped the Alpine `.apk`, which was glibc-linked and could not run on musl; the container image serves that platform.
+- Internals: reorganized the compiler into a bottom-up Cargo workspace beneath the driver, preserving the former module paths.
+
 ## 0.14.0
 
 - Determinism: centralized compiler inputs and made parallel builds hash-stable.

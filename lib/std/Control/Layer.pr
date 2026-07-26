@@ -1,0 +1,206 @@
+-- | The children-and-rebuild interface a generic traversal runs on, and the
+-- collecting queries that ride it.
+--
+-- A `Layer(a)` is one node sort's one-layer view: `kids` lists a node's
+-- immediate same-sort children in a fixed order, and `rebuild` puts a new child
+-- list back in that same order. Everything generic (`Control.Rewrite`'s
+-- strategies, the queries here) is written against the pair, so a sort joins the
+-- library by supplying two functions and nothing else.
+--
+-- Both halves are pure structure, never effectful: the effects of a traversal
+-- belong to the rewrite being applied, so a layer stays a plain record and the
+-- row polymorphism lives one layer up.
+--
+-- Traversal order is fixed and documented everywhere it matters. Every walk here
+-- is root first, then children in `kids` order, and nothing consults a hash map,
+-- so the node sequence a query sees is a pure function of the tree.
+--
+-- Every query here terminates on a finite tree: each is structurally recursive
+-- through `kids`, and none of them looks at anything `rebuild` produced. That
+-- puts the one termination obligation on the layer itself, where it is checkable
+-- by reading two functions: `kids` must return strict subterms of its argument
+-- and must not manufacture nodes. The fueled combinators in `Control.Rewrite`
+-- exist for the loops that this discipline cannot rule out, the ones a rewrite
+-- rule creates by feeding its own output back in.
+
+import Data.Foldable (length)
+
+import Data.List (append, concat_map, filter, foldl, map, nth)
+
+-- | One node sort's one-layer view: its immediate children and the inverse that
+-- replaces them. `rebuild(x, kids(x))` must return a node equal to `x`, and
+-- `rebuild` must fail closed (return `x` unchanged) when the replacement list
+-- does not match the node's shape.
+pub type Layer(a) = Layer { kids: (a) -> List(a), rebuild: (a, List(a)) -> a }
+
+-- | The layer a `Plate` instance supplies, so a sort that derived `Plate` joins
+-- every traversal here and in `Control.Rewrite` without a hand-written pair.
+--
+-- The two interfaces agree on the shape and disagree only on how they report a
+-- violation of it, and that disagreement is the whole of the translation:
+-- `rebuild` raises `Fail` on a replacement list that does not match the node,
+-- and a layer says the same thing by returning the node unchanged. Nothing else
+-- is adapted, because `children` is already the order `kids` promises.
+pub fn plate_layer() : Layer(a) given Plate(a) =
+  Layer { kids = children, rebuild = plate_rebuild }
+
+-- The `Fail` a `Plate` instance raises on a mis-shaped replacement list,
+-- discharged to the node unchanged. Discharging it here is what makes the
+-- adapted `rebuild` pure, which is what the record field asks for.
+fn plate_rebuild(x : a, cs : List(a)) : a given Plate(a) =
+  handle rebuild(x, cs) with
+    never fail() => x
+    return r => r
+
+-- | The immediate children of `x`, in the layer's fixed order.
+pub fn lay_kids(p : Layer(a), x : a) : List(a) = (p.kids)(x)
+
+-- | `x` with its immediate children replaced by `cs`, in the layer's order.
+pub fn lay_rebuild(p : Layer(a), x : a, cs : List(a)) : a = (p.rebuild)(x, cs)
+
+-- | Apply `f` to each immediate child of `x` and rebuild. The one-layer map:
+-- it never recurses, so a traversal scheme built on it controls its own depth.
+pub fn lay_descend(p : Layer(a), f : (a) -> a ! {| e}, x : a) : a ! { | e} =
+  lay_rebuild(p, x, map(f, lay_kids(p, x)))
+
+-- | Every node of the tree, root first, depth first in `kids` order.
+pub fn lay_universe(p : Layer(a), x : a) : List(a) =
+  Cons(x, concat_map(\(c) -> lay_universe(p, c), lay_kids(p, x)))
+
+-- | The number of nodes in the tree.
+pub fn lay_size(p : Layer(a), x : a) : Int = length(lay_universe(p, x))
+
+-- | The height of the tree: `1` at a leaf.
+pub fn lay_depth(p : Layer(a), x : a) : Int =
+  1 + foldl(\(acc, c) -> max(acc, lay_depth(p, c)), 0, lay_kids(p, x))
+
+-- | Every node satisfying `q`, root first, depth first. The gather half of an
+-- analysis pass: one predicate replaces a hand-written collecting recursion.
+pub fn lay_collect(
+  p : Layer(a),
+  q : (a) -> Bool ! {| e},
+  x : a
+) : List(a) ! { | e} =
+  filter(q, lay_universe(p, x))
+
+-- | How many nodes satisfy `q`.
+pub fn lay_count_where(
+  p : Layer(a),
+  q : (a) -> Bool ! {| e},
+  x : a
+) : Int ! { | e} =
+  length(lay_collect(p, q, x))
+
+-- | Whether any node satisfies `q`. Short-circuits: the first accepting node
+-- ends the walk, so a hit near the root costs nothing.
+pub fn lay_any(p : Layer(a), q : (a) -> Bool ! {| e}, x : a) : Bool ! { | e} =
+  if q(x) then
+    true
+  else
+    lay_any_list(p, q, lay_kids(p, x))
+
+fn lay_any_list(
+  p : Layer(a),
+  q : (a) -> Bool ! {| e},
+  xs : List(a)
+) : Bool ! { | e} =
+  match xs of
+    Nil => false
+    Cons(c, rest) =>
+      if lay_any(p, q, c) then
+        true
+      else
+        lay_any_list(p, q, rest)
+
+-- | Fold a per-node summary over the whole tree: `measure` scores one node and
+-- `combine` merges two summaries, starting from `unit`. The caller supplies the
+-- combining operation, so one walk serves counting, maximizing, and collecting
+-- alike.
+pub fn lay_summarize(
+  p : Layer(a),
+  measure : (a) -> b ! {| e},
+  combine : (b, b) -> b ! {| e},
+  unit : b,
+  x : a
+) : b ! { | e} =
+  foldl(\(acc, n) -> combine(acc, measure(n)), unit, lay_universe(p, x))
+
+-- | The preorder index of every node satisfying `q`. An index is a
+-- deterministic address into the tree: `0` is the root, and the numbering is
+-- fixed because `kids` is.
+pub fn lay_index_where(
+  p : Layer(a),
+  q : (a) -> Bool ! {| e},
+  x : a
+) : List(Int) ! { | e} =
+  lay_index_go(q, lay_universe(p, x), 0)
+
+fn lay_index_go(
+  q : (a) -> Bool ! {| e},
+  xs : List(a),
+  i : Int
+) : List(Int) ! { | e} =
+  match xs of
+    Nil => Nil
+    Cons(n, rest) =>
+      if q(n) then
+        Cons(i, lay_index_go(q, rest, i + 1))
+      else
+        lay_index_go(q, rest, i + 1)
+
+-- | The node at a preorder index, or `None` when the index is past the end.
+pub fn lay_at_index(p : Layer(a), i : Int, x : a) : Option(a) =
+  nth(i, lay_universe(p, x))
+
+-- | The preorder index path from the root to the node at index `i`: the index
+-- of each ancestor, root first, ending at `i` itself. `None` when the index is
+-- past the end. The path is what a pass reports when it must point at a node
+-- without carrying the node.
+pub fn lay_path_to(p : Layer(a), i : Int, x : a) : Option(List(Int)) =
+  lay_path_go(p, i, 0, x)
+
+fn lay_path_go(
+  p : Layer(a),
+  target : Int,
+  here : Int,
+  x : a
+) : Option(List(Int)) =
+  if here == target then
+    Some([here])
+  else
+    lay_path_kids(p, target, here + 1, lay_kids(p, x), here)
+
+fn lay_path_kids(
+  p : Layer(a),
+  target : Int,
+  base : Int,
+  cs : List(a),
+  parent : Int
+) : Option(List(Int)) =
+  match cs of
+    Nil => None
+    Cons(c, rest) =>
+      let span = lay_size(p, c)
+      if target < base + span then
+        match lay_path_go(p, target, base, c) of
+          Some(rest_path) => Some(Cons(parent, rest_path))
+          None => None
+      else
+        lay_path_kids(p, target, base + span, rest, parent)
+
+-- | Every node's preorder index paired with the node, root first. The indexed
+-- walk an occurrence table is built from.
+pub fn lay_indexed(p : Layer(a), x : a) : List((Int, a)) =
+  lay_indexed_go(lay_universe(p, x), 0)
+
+fn lay_indexed_go(xs : List(a), i : Int) : List((Int, a)) =
+  match xs of
+    Nil => Nil
+    Cons(n, rest) => Cons((i, n), lay_indexed_go(rest, i + 1))
+
+-- | The immediate children of every node, flattened: the one-layer relation of
+-- the whole tree as parent-child pairs in preorder. A dependency or occurrence
+-- graph is one `map` off this.
+pub fn lay_edges(p : Layer(a), x : a) : List((a, a)) =
+  let cs = lay_kids(p, x)
+  append(map(\(c) -> (x, c), cs), concat_map(\(c) -> lay_edges(p, c), cs))

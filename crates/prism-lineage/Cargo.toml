@@ -1,0 +1,20 @@
+[package]
+name = "prism-lineage"
+version.workspace = true
+authors.workspace = true
+categories = ["compilers"]
+edition.workspace = true
+keywords = ["compiler", "cbpv", "effects", "llvm", "mlir"]
+license.workspace = true
+readme = "../../README.md"
+repository.workspace = true
+description = "Prism compiler workspace member: lineage"
+
+[dependencies]
+blake3 = "1"
+prism-common = { path = "../prism-common" }
+prism-store = { path = "../prism-store" }
+prism-syntax = { path = "../prism-syntax" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["unbounded_depth"] }
+sha2 = "0.11"

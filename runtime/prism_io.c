@@ -133,15 +133,20 @@ void prism_print_nl(void) {
 }
 
 /* SplitMix64. A single global stream, seeded to the same default constant the
- * interpreter uses so unseeded `rand` is reproducible across backends. */
-static unsigned long prism_rng = 0x9E3779B97F4A7C15UL;
+ * interpreter uses (`DEFAULT_SEED` in src/eval/mod.rs) so unseeded `rand` is
+ * reproducible across backends. The seed (initial state, a free choice) and the
+ * gamma (the fixed Weyl increment) are two distinct quantities that coincide in
+ * value; each is named so editing one never silently moves the other. */
+#define PRISM_RNG_SEED 0x9E3779B97F4A7C15UL
+#define PRISM_RNG_GAMMA 0x9E3779B97F4A7C15UL
+static unsigned long prism_rng = PRISM_RNG_SEED;
 
 void prism_srand(long seed) {
     prism_rng = (unsigned long)seed;
 }
 
 long prism_prim_rand(void) {
-    prism_rng += 0x9E3779B97F4A7C15UL;
+    prism_rng += PRISM_RNG_GAMMA;
     unsigned long z = prism_rng;
     z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL;
     z = (z ^ (z >> 27)) * 0x94D049BB133111EBUL;

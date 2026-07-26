@@ -1,0 +1,613 @@
+-- | Generic traversal over the surface syntax tree.
+--
+-- The design is uniplate-shaped: two hand-written total functions per sort
+-- give the immediate same-sort children of a node (`expr_children`) and put a
+-- replacement child list back (`expr_rebuild`), and every generic operation
+-- derives from that pair (`expr_universe`, `expr_count`, `expr_any`,
+-- `expr_fold`, and every strategy in `Control.Rewrite` applied to
+-- `expr_layer`). The one-layer functions are the only place that names
+-- constructors, so a new `Expr` constructor is one arm in each and every
+-- derived traversal follows; totality of the two matches is the drift guard.
+--
+-- The pair is written out rather than derived, and the reason is the span.
+-- `deriving (Plate)` walks *through* a carrier record, so a derived instance on
+-- `Expr` yields children of type `Expr` with the spanned wrappers already
+-- consumed: its `rebuild` puts the original spans back, but its `children` has
+-- dropped them, and a spanned child is what every query here returns. Deriving
+-- on the wrapper instead yields no children at all, because an `Sp(a)` holds no
+-- `Sp(a)`. The instance that would say the right thing is one at `Sp(Expr)`, and
+-- it cannot be written: a `deriving` clause names a declaration rather than an
+-- instantiation, and instance dispatch keys on the head constructor alone, so
+-- `Sp(Expr)` and `Sp(Pat)` would be a single instance.
+
+import Control.Layer (..)
+
+import Data.Foldable (any, length)
+
+import Data.List (append, concat_map, drop, foldl, map, reverse, take)
+
+import Syntax.Ast (..)
+
+import Syntax.Source (..)
+
+-- | The immediate `Expr` children of one node, in source order. Children held
+-- inside carrier records (match arms, handler arms, qualifiers, path steps and
+-- updates, parameter defaults, named fields) are included; a leaf yields the
+-- empty list.
+pub fn expr_children(e : Sp(Expr)) : List(Sp(Expr)) =
+  match node_of(e) of
+    EInt(_, _) => []
+    EFloat(_) => []
+    EChar(_) => []
+    EBool(_) => []
+    EUnit => []
+    EStr(_) => []
+    EVar(_) => []
+    EHole(_) => []
+    EBin(_, a, b) => [a, b]
+    ENeg(a) => [a]
+    EIf(c, t, f) => [c, t, f]
+    ELet(_, v, rest) => [v, rest]
+    ELam(ps, body) => append(concat_map(param_default, ps), [body])
+    ECall(f, args) => Cons(f, args)
+    EPipe(a, b) => [a, b]
+    EMatch(scrut, arms) => Cons(scrut, concat_map(arm_children, arms))
+    EList(xs) => xs
+    ETuple(xs) => xs
+    EField(r, _) => [r]
+    EUnboxedTuple(xs) => xs
+    EUnboxedRecord(fs) => map(named_value, fs)
+    EUnboxedField(r, _) => [r]
+    ERecord(_, fs) => map(named_value, fs)
+    ERecordUpdate(r, _, fs) => Cons(r, map(named_value, fs))
+    EPathUpdate(r, ups) => Cons(r, concat_map(update_children, ups))
+    EHandle(action, arms, _) => Cons(action, map(handler_body, arms))
+    EMask(_, a) => [a]
+    EInst(a, _) => [a]
+    EIndex(r, i) => [r, i]
+    EIndexSet(r, i, v) => [r, i, v]
+    EAnn(a, _) => [a]
+    EMarker(_) => []
+    ENamedHandle(_, action, arms) => Cons(action, map(handler_body, arms))
+    EVarDecl(_, v, rest) => [v, rest]
+    EAssign(_, v) => [v]
+    EIndexAssign(r, i, v) => [r, i, v]
+    EThrow(_, args) => args
+    ETryCatch(body, arms) => Cons(body, map(catch_body, arms))
+    EFor(_, src, quals, body) =>
+      Cons(src, append(concat_map(qual_children, quals), [body]))
+    EWhile(c, body) => [c, body]
+    ELoop(body) => [body]
+    EBreak => []
+    EContinue => []
+    EReturn(a) => [a]
+    EComp(out, _, src, quals) =>
+      Cons(out, Cons(src, concat_map(qual_children, quals)))
+    EDefault(a, d) => [a, d]
+    ETransact(a, b) => [a, b]
+    EProbe(_, a) => [a]
+    EOptChain(r, _) => [r]
+    ERange(parts, stop) => append(parts, [stop])
+    ECompose(_, a, b) => [a, b]
+    EReadPath(r, steps) => Cons(r, concat_map(step_children, steps))
+
+-- | The `Expr` children carried by one match arm: the guard when present,
+-- then the body.
+fn arm_children(a : Arm) : List(Sp(Expr)) =
+  match a.guard of
+    Some(g) => [g, a.body]
+    None => [a.body]
+
+fn named_value(f : NamedExpr) : Sp(Expr) = f.value
+
+fn update_value(u : PathUpdate) : Sp(Expr) =
+  match u.op of
+    POSet(v) => v
+    POModify(v) => v
+
+-- | The `Expr` children of one optic path step: the index or filter it
+-- carries, if any.
+fn step_children(s : PathStep) : List(Sp(Expr)) =
+  match s of
+    PSField(_) => []
+    PSEach => []
+    PSCase(_) => []
+    PSIndex(i) => [i]
+    PSWhere(g) => [g]
+
+-- | The `Expr` children of one path update: the expressions inside the path it
+-- walks, then the value written at its end.
+fn update_children(u : PathUpdate) : List(Sp(Expr)) =
+  append(concat_map(step_children, u.path), [update_value(u)])
+
+-- | The default expression of one parameter, if it has one.
+fn param_default(p : Param) : List(Sp(Expr)) =
+  match p.dflt of
+    Some(d) => [d]
+    None => []
+
+fn handler_body(h : HandlerArm) : Sp(Expr) =
+  match h of
+    HReturn(_, body) => body
+    HOp(_, _, _, body) => body
+    HOnce(_, _, body) => body
+    HVal(_, body) => body
+    HNever(_, _, body) => body
+
+fn catch_body(c : CatchArm) : Sp(Expr) = c.body
+
+fn qual_children(q : Qual) : List(Sp(Expr)) =
+  match q of
+    QGuard(g) => [g]
+    QBind(_, src) => [src]
+
+-- | Put a replacement child list back into one node, in `expr_children` order,
+-- keeping the node's span and its synthetic bit.
+--
+-- This is the inverse half of `expr_children`, and the pair is everything a
+-- generic strategy needs to descend a tree. It fails closed: a child list that
+-- does not match the node's shape (a different length, a carrier arity that
+-- does not line up) yields the node unchanged rather than a silently reshaped
+-- one, so `expr_rebuild(e, expr_children(e))` is the identity and a garbage
+-- child list cannot forge a node.
+pub fn expr_rebuild(e : Sp(Expr), cs : List(Sp(Expr))) : Sp(Expr) =
+  match wk_node(node_of(e), cs) of
+    Some(n) => Sp { node = n, span = e.span, synth = e.synth }
+    None => e
+
+-- | The children-and-rebuild pair for spanned expressions, which is what every
+-- strategy in `Control.Rewrite` and every query in `Control.Layer` takes.
+pub fn expr_layer() : Layer(Sp(Expr)) =
+  Layer { kids = expr_children, rebuild = expr_rebuild }
+
+fn wk_leaf(e : Expr, cs : List(Sp(Expr))) : Option(Expr) =
+  match cs of
+    Nil => Some(e)
+    _ => None
+
+fn wk_same_len(xs : List(a), cs : List(Sp(Expr))) : Bool =
+  length(xs) == length(cs)
+
+fn wk_node(e : Expr, cs : List(Sp(Expr))) : Option(Expr) =
+  match e of
+    EInt(_, _) => wk_leaf(e, cs)
+    EFloat(_) => wk_leaf(e, cs)
+    EChar(_) => wk_leaf(e, cs)
+    EBool(_) => wk_leaf(e, cs)
+    EUnit => wk_leaf(e, cs)
+    EStr(_) => wk_leaf(e, cs)
+    EVar(_) => wk_leaf(e, cs)
+    EHole(_) => wk_leaf(e, cs)
+    EBin(op, _, _) =>
+      match cs of
+        Cons(a, Cons(b, Nil)) => Some(EBin(op, a, b))
+        _ => None
+    ENeg(_) =>
+      match cs of
+        Cons(a, Nil) => Some(ENeg(a))
+        _ => None
+    EIf(_, _, _) =>
+      match cs of
+        Cons(c, Cons(t, Cons(f, Nil))) => Some(EIf(c, t, f))
+        _ => None
+    ELet(n, _, _) =>
+      match cs of
+        Cons(v, Cons(rest, Nil)) => Some(ELet(n, v, rest))
+        _ => None
+    ELam(ps, _) =>
+      let k = length(concat_map(param_default, ps))
+      match wk_params(ps, take(k, cs)) of
+        None => None
+        Some(ps2) =>
+          match drop(k, cs) of
+            Cons(body, Nil) => Some(ELam(ps2, body))
+            _ => None
+    ECall(_, args) =>
+      match cs of
+        Cons(f, rest) =>
+          if wk_same_len(args, rest) then
+            Some(ECall(f, rest))
+          else
+            None
+        _ => None
+    EPipe(_, _) =>
+      match cs of
+        Cons(a, Cons(b, Nil)) => Some(EPipe(a, b))
+        _ => None
+    EMatch(_, arms) =>
+      match cs of
+        Cons(scrut, rest) =>
+          match wk_arms(arms, rest) of
+            None => None
+            Some(arms2) => Some(EMatch(scrut, arms2))
+        _ => None
+    EList(xs) =>
+      if wk_same_len(xs, cs) then
+        Some(EList(cs))
+      else
+        None
+    ETuple(xs) =>
+      if wk_same_len(xs, cs) then
+        Some(ETuple(cs))
+      else
+        None
+    EField(_, n) =>
+      match cs of
+        Cons(r, Nil) => Some(EField(r, n))
+        _ => None
+    EUnboxedTuple(xs) =>
+      if wk_same_len(xs, cs) then
+        Some(EUnboxedTuple(cs))
+      else
+        None
+    EUnboxedRecord(fs) =>
+      match wk_fields(fs, cs) of
+        None => None
+        Some(fs2) => Some(EUnboxedRecord(fs2))
+    EUnboxedField(_, n) =>
+      match cs of
+        Cons(r, Nil) => Some(EUnboxedField(r, n))
+        _ => None
+    ERecord(n, fs) =>
+      match wk_fields(fs, cs) of
+        None => None
+        Some(fs2) => Some(ERecord(n, fs2))
+    ERecordUpdate(_, n, fs) =>
+      match cs of
+        Cons(r, rest) =>
+          match wk_fields(fs, rest) of
+            None => None
+            Some(fs2) => Some(ERecordUpdate(r, n, fs2))
+        _ => None
+    EPathUpdate(_, ups) =>
+      match cs of
+        Cons(r, rest) =>
+          match wk_updates(ups, rest) of
+            None => None
+            Some(ups2) => Some(EPathUpdate(r, ups2))
+        _ => None
+    EHandle(_, arms, m) =>
+      match cs of
+        Cons(action, rest) =>
+          match wk_handlers(arms, rest) of
+            None => None
+            Some(arms2) => Some(EHandle(action, arms2, m))
+        _ => None
+    EMask(n, _) =>
+      match cs of
+        Cons(a, Nil) => Some(EMask(n, a))
+        _ => None
+    EInst(_, ts) =>
+      match cs of
+        Cons(a, Nil) => Some(EInst(a, ts))
+        _ => None
+    EIndex(_, _) =>
+      match cs of
+        Cons(r, Cons(i, Nil)) => Some(EIndex(r, i))
+        _ => None
+    EIndexSet(_, _, _) =>
+      match cs of
+        Cons(r, Cons(i, Cons(v, Nil))) => Some(EIndexSet(r, i, v))
+        _ => None
+    EAnn(_, t) =>
+      match cs of
+        Cons(a, Nil) => Some(EAnn(a, t))
+        _ => None
+    EMarker(_) => wk_leaf(e, cs)
+    ENamedHandle(n, _, arms) =>
+      match cs of
+        Cons(action, rest) =>
+          match wk_handlers(arms, rest) of
+            None => None
+            Some(arms2) => Some(ENamedHandle(n, action, arms2))
+        _ => None
+    EVarDecl(n, _, _) =>
+      match cs of
+        Cons(v, Cons(rest, Nil)) => Some(EVarDecl(n, v, rest))
+        _ => None
+    EAssign(n, _) =>
+      match cs of
+        Cons(v, Nil) => Some(EAssign(n, v))
+        _ => None
+    EIndexAssign(_, _, _) =>
+      match cs of
+        Cons(r, Cons(i, Cons(v, Nil))) => Some(EIndexAssign(r, i, v))
+        _ => None
+    EThrow(n, args) =>
+      if wk_same_len(args, cs) then
+        Some(EThrow(n, cs))
+      else
+        None
+    ETryCatch(_, arms) =>
+      match cs of
+        Cons(body, rest) =>
+          match wk_catches(arms, rest) of
+            None => None
+            Some(arms2) => Some(ETryCatch(body, arms2))
+        _ => None
+    EFor(n, _, quals, _) =>
+      match cs of
+        Cons(src, rest) =>
+          match wk_quals(quals, take(length(quals), rest)) of
+            None => None
+            Some(qs) =>
+              match drop(length(quals), rest) of
+                Cons(body, Nil) => Some(EFor(n, src, qs, body))
+                _ => None
+        _ => None
+    EWhile(_, _) =>
+      match cs of
+        Cons(c, Cons(body, Nil)) => Some(EWhile(c, body))
+        _ => None
+    ELoop(_) =>
+      match cs of
+        Cons(body, Nil) => Some(ELoop(body))
+        _ => None
+    EBreak => wk_leaf(e, cs)
+    EContinue => wk_leaf(e, cs)
+    EReturn(_) =>
+      match cs of
+        Cons(a, Nil) => Some(EReturn(a))
+        _ => None
+    EComp(_, n, _, quals) =>
+      match cs of
+        Cons(out, Cons(src, rest)) =>
+          match wk_quals(quals, rest) of
+            None => None
+            Some(qs) => Some(EComp(out, n, src, qs))
+        _ => None
+    EDefault(_, _) =>
+      match cs of
+        Cons(a, Cons(d, Nil)) => Some(EDefault(a, d))
+        _ => None
+    ETransact(_, _) =>
+      match cs of
+        Cons(a, Cons(b, Nil)) => Some(ETransact(a, b))
+        _ => None
+    EProbe(n, _) =>
+      match cs of
+        Cons(a, Nil) => Some(EProbe(n, a))
+        _ => None
+    EOptChain(_, n) =>
+      match cs of
+        Cons(r, Nil) => Some(EOptChain(r, n))
+        _ => None
+    ERange(parts, _) =>
+      match reverse(cs) of
+        Cons(stop, rparts) =>
+          if wk_same_len(parts, rparts) then
+            Some(ERange(reverse(rparts), stop))
+          else
+            None
+        _ => None
+    ECompose(op, _, _) =>
+      match cs of
+        Cons(a, Cons(b, Nil)) => Some(ECompose(op, a, b))
+        _ => None
+    EReadPath(_, steps) =>
+      match cs of
+        Cons(r, rest) =>
+          match wk_steps(steps, rest) of
+            None => None
+            Some(steps2) => Some(EReadPath(r, steps2))
+        _ => None
+
+fn wk_arms(arms : List(Arm), cs : List(Sp(Expr))) : Option(List(Arm)) =
+  match arms of
+    Nil => wk_end(cs, Nil)
+    Cons(a, more) =>
+      match a.guard of
+        Some(_) =>
+          match cs of
+            Cons(g, Cons(b, rest)) =>
+              match wk_arms(more, rest) of
+                None => None
+                Some(tl) =>
+                  Some(Cons(Arm { pat = a.pat, guard = Some(g), body = b }, tl))
+            _ => None
+        None =>
+          match cs of
+            Cons(b, rest) =>
+              match wk_arms(more, rest) of
+                None => None
+                Some(tl) =>
+                  Some(Cons(Arm { pat = a.pat, guard = None, body = b }, tl))
+            _ => None
+
+fn wk_fields(
+  fs : List(NamedExpr),
+  cs : List(Sp(Expr))
+) : Option(List(NamedExpr)) =
+  match fs of
+    Nil => wk_end(cs, Nil)
+    Cons(f, more) =>
+      match cs of
+        Cons(v, rest) =>
+          match wk_fields(more, rest) of
+            None => None
+            Some(tl) => Some(Cons(NamedExpr { name = f.name, value = v }, tl))
+        _ => None
+
+fn wk_handlers(
+  arms : List(HandlerArm),
+  cs : List(Sp(Expr))
+) : Option(List(HandlerArm)) =
+  match arms of
+    Nil => wk_end(cs, Nil)
+    Cons(h, more) =>
+      match cs of
+        Cons(b, rest) =>
+          match wk_handlers(more, rest) of
+            None => None
+            Some(tl) => Some(Cons(wk_handler(h, b), tl))
+        _ => None
+
+fn wk_handler(h : HandlerArm, b : Sp(Expr)) : HandlerArm =
+  match h of
+    HReturn(n, _) => HReturn(n, b)
+    HOp(n, ps, k, _) => HOp(n, ps, k, b)
+    HOnce(n, ps, _) => HOnce(n, ps, b)
+    HVal(n, _) => HVal(n, b)
+    HNever(n, ps, _) => HNever(n, ps, b)
+
+fn wk_catches(
+  arms : List(CatchArm),
+  cs : List(Sp(Expr))
+) : Option(List(CatchArm)) =
+  match arms of
+    Nil => wk_end(cs, Nil)
+    Cons(c, more) =>
+      match cs of
+        Cons(b, rest) =>
+          match wk_catches(more, rest) of
+            None => None
+            Some(tl) =>
+              Some(
+                  Cons(
+                      CatchArm {
+                        name = c.name,
+                        binders = c.binders,
+                        body = b,
+                        span = c.span
+                      },
+                      tl,
+                    ),
+                )
+        _ => None
+
+fn wk_quals(quals : List(Qual), cs : List(Sp(Expr))) : Option(List(Qual)) =
+  match quals of
+    Nil => wk_end(cs, Nil)
+    Cons(q, more) =>
+      match cs of
+        Cons(v, rest) =>
+          match wk_quals(more, rest) of
+            None => None
+            Some(tl) => Some(Cons(wk_qual(q, v), tl))
+        _ => None
+
+fn wk_qual(q : Qual, v : Sp(Expr)) : Qual =
+  match q of
+    QGuard(_) => QGuard(v)
+    QBind(n, _) => QBind(n, v)
+
+fn wk_steps(
+  steps : List(PathStep),
+  cs : List(Sp(Expr))
+) : Option(List(PathStep)) =
+  match steps of
+    Nil => wk_end(cs, Nil)
+    Cons(s, more) =>
+      match step_children(s) of
+        Nil =>
+          match wk_steps(more, cs) of
+            None => None
+            Some(tl) => Some(Cons(s, tl))
+        _ =>
+          match cs of
+            Cons(v, rest) =>
+              match wk_steps(more, rest) of
+                None => None
+                Some(tl) => Some(Cons(wk_step(s, v), tl))
+            _ => None
+
+fn wk_step(s : PathStep, v : Sp(Expr)) : PathStep =
+  match s of
+    PSIndex(_) => PSIndex(v)
+    PSWhere(_) => PSWhere(v)
+    _ => s
+
+fn wk_updates(
+  ups : List(PathUpdate),
+  cs : List(Sp(Expr))
+) : Option(List(PathUpdate)) =
+  match ups of
+    Nil => wk_end(cs, Nil)
+    Cons(u, more) =>
+      let k = length(concat_map(step_children, u.path))
+      match wk_steps(u.path, take(k, cs)) of
+        None => None
+        Some(path2) =>
+          match drop(k, cs) of
+            Cons(v, rest) =>
+              match wk_updates(more, rest) of
+                None => None
+                Some(tl) =>
+                  Some(
+                      Cons(
+                          PathUpdate { path = path2, op = wk_op(u.op, v) },
+                          tl,
+                        ),
+                    )
+            _ => None
+
+fn wk_op(o : PathOp, v : Sp(Expr)) : PathOp =
+  match o of
+    POSet(_) => POSet(v)
+    POModify(_) => POModify(v)
+
+fn wk_params(ps : List(Param), cs : List(Sp(Expr))) : Option(List(Param)) =
+  match ps of
+    Nil => wk_end(cs, Nil)
+    Cons(p, more) =>
+      match p.dflt of
+        Some(_) =>
+          match cs of
+            Cons(v, rest) =>
+              match wk_params(more, rest) of
+                None => None
+                Some(tl) => Some(Cons(wk_param(p, v), tl))
+            _ => None
+        None =>
+          match wk_params(more, cs) of
+            None => None
+            Some(tl) => Some(Cons(p, tl))
+
+fn wk_param(p : Param, v : Sp(Expr)) : Param =
+  Param {
+    name = p.name,
+    pat = p.pat,
+    ty = p.ty,
+    is_borrow = p.is_borrow,
+    dflt = Some(v)
+  }
+
+-- | The base case every carrier rebuild shares: the child list must be spent
+-- exactly, so a longer one is a shape mismatch and not a silent truncation.
+fn wk_end(cs : List(Sp(Expr)), done : b) : Option(b) =
+  match cs of
+    Nil => Some(done)
+    _ => None
+
+-- | Every node of the tree, root first, in depth-first source order.
+--
+-- ```prism
+-- expr_count(lit_probe(7))
+-- ```
+-- ```output
+-- 1
+-- ```
+pub fn expr_universe(e : Sp(Expr)) : List(Sp(Expr)) =
+  Cons(e, concat_map(expr_universe, expr_children(e)))
+
+-- | A span-zero literal, a convenience for building test trees.
+pub fn lit_probe(n : Int) : Sp(Expr) =
+  Sp {
+    node = EInt(show(n), SufNone),
+    span = Span { lo = 0, hi = 0 },
+    synth = false
+  }
+
+-- | The number of nodes in the tree.
+pub fn expr_count(e : Sp(Expr)) : Int = length(expr_universe(e))
+
+-- | Whether any node satisfies the predicate.
+pub fn expr_any(p, e) =
+  if p(e) then
+    true
+  else
+    any(\(c) -> expr_any(p, c), expr_children(e))
+
+-- | Left-fold the accumulator through every node, root first.
+pub fn expr_fold(f, acc, e) =
+  foldl(\(a, c) -> expr_fold(f, a, c), f(acc, e), expr_children(e))

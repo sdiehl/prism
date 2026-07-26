@@ -3,6 +3,8 @@ use marginalia::Span;
 use super::{Env, Tc};
 use crate::error::{ErrKind, TypeError};
 use crate::kw;
+use std::collections::BTreeSet;
+
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Pattern, S};
 use crate::types::ty::{EffRow, Kind, Type};
@@ -78,13 +80,47 @@ impl Tc<'_> {
                 }
                 Ok(env2)
             }
-            Pattern::Record(ctor_name, field_pats, _spread) => {
+            // Unreachable after desugaring, which splits an alternation into one
+            // arm per alternative. Every alternative is checked against the same
+            // scrutinee type and binds the same names, so the first one's
+            // environment stands for all of them.
+            Pattern::Or(alts) => {
+                let mut out = None;
+                for alt in alts {
+                    let e2 = self.check_pat(env, alt, ty)?;
+                    out.get_or_insert(e2);
+                }
+                Ok(out.unwrap_or_else(|| env.clone()))
+            }
+            Pattern::Record(ctor_name, field_pats, spread) => {
                 let info = self.ctors.get(ctor_name).cloned().ok_or_else(|| {
                     ErrKind::UnknownRecordConstructor {
                         ctor_name: ctor_name.clone(),
                     }
                     .at(span)
                 })?;
+                // Without `..`, a record pattern must bind every field: the `..`
+                // spread is what licenses omitting the rest. Enforcing this
+                // makes the spread meaningful (it was previously parsed and
+                // dropped) and turns a forgotten field into a pointed error
+                // rather than a silent wildcard.
+                if !*spread {
+                    let mentioned: BTreeSet<&str> =
+                        field_pats.iter().map(|(f, _)| f.as_str()).collect();
+                    let missing: Vec<&str> = info
+                        .fields
+                        .iter()
+                        .map(|s| s.as_str())
+                        .filter(|f| !mentioned.contains(f))
+                        .collect();
+                    if !missing.is_empty() {
+                        return Err(ErrKind::IncompleteRecordPattern {
+                            ctor_name: ctor_name.clone(),
+                            missing: missing.join(", "),
+                        }
+                        .at(span));
+                    }
+                }
                 let (result, tsubs, rsubs) = self.open_ctor(&info);
                 self.equate(ty, &result).map_err(|e| e.at(span))?;
                 let mut env2 = env.clone();

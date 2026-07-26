@@ -71,12 +71,14 @@ The dump phases walk the pipeline in order:
 | `syntax-tokens`         | the versioned token/trivia/layout export as JSON              |
 | `ast`                   | the parsed syntax tree                                        |
 | `surface-syntax`        | the versioned ordered surface-AST export as JSON              |
+| `syntax-diagnostics`    | every lex or parse refusal as a versioned artifact            |
 | `types`                 | inferred types and effect rows                                |
 | `typespans`             | versioned typed source ranges for editor and docs tooling     |
 | `hir`                   | the checked-HIR fixture: per-node checker facts as JSON       |
 | `interface`             | the entry module's checked interface, the importer-cutoff key |
 | `module-graph`          | the versioned module dependency graph                         |
 | `tc-input`              | versioned declarations entering the checker                   |
+| `resolved-syntax`       | each user function's resolved body as a node-id-carrying tree |
 | `tc-facts`              | versioned facts produced by the checker                       |
 | `elab-input`            | the declarations and facts consumed by elaboration            |
 | `verify`                | the module's logical verification interface                   |
@@ -85,6 +87,7 @@ The dump phases walk the pipeline in order:
 | `core`                  | the elaborated core                                           |
 | `dupes`                 | definitions grouped by equal behavior hash                    |
 | `core-json`             | the core as a JSON tree the Lean model reads                  |
+| `core-identity`         | the exact surface the behavior hash is taken over             |
 | `core-hash`             | a content-addressed hash of each definition's elaborated core |
 | `native-kont-table`     | the native-symbol-to-definition-hash table                    |
 | `native-kont-state-map` | the entry ABI-word state map                                  |
@@ -141,6 +144,8 @@ One invariant sits under all of it: a program's observable output is a pure func
 
 The lexer produces a token stream and **trivia** (comments and spacing) that the formatter uses to reproduce source faithfully. An interpolated string is lexed by re-lexing each `{ ... }` hole at its absolute source offset, so spans inside holes remain accurate. A layout pass then rewrites the stream, inserting virtual block-open, block-close, and separator tokens according to the offside rule of the [layout](./spec.md#layout) specification, which the grammar consumes as ordinary terminals. One shape needs care: a `class`, `instance`, or `effect` body is bare-indented with no keyword (like `of` or `=`) for the offside rule to anchor on, so on the header the lexer emits a synthetic opener, `VHead`, that starts the block; this lets an empty body and an indented one share a single grammar rule, and it is why those bodies became layout-sensitive when braces were retired. Layout is suspended inside brackets, so a parenthesized expression spans lines freely. Both are the layout pass's concern, never the grammar's, which sees only the virtual tokens.
 
+Both layers also exist a second time, written in Prism, as `Syntax.Lex` and `Syntax.Layout`. They are diffed against this implementation rather than substituted for it, and the [open-compiler](#open-compiler) section describes what that buys and what it does not.
+
 Comments are one form only: `--` to the end of the line. There are no block comments. This is, on purpose, the least interesting decision in the language, because the lexical syntax of comments is by long observation the most bikeshed-prone corner of language design:
 
 > In any language design, the total time spent discussing a feature in this list is proportional to two raised to the power of its position:
@@ -159,6 +164,10 @@ The grammar is an LALR(1) grammar in LALRPOP, with two entry points: a whole pro
 ## 4. Name Resolution and Modules {#name-resolution-and-modules}
 
 Resolution loads every transitively imported module, rewrites each top-level definition to a globally unique canonical symbol (an export as `Data.Map.insert`, a private as `Data.Map@helper`), resolves qualified and re-exported references to those symbols, and records a versioned `ModuleGraph`. The canonical-symbol scheme makes the eventual merge sound, since two modules can export the same short name without collision.
+
+Resolution also fixes what a bare name means. The prelude is prepended to a root program as source text, so the root parses as one file holding two regions: the prelude's text and the user's. The byte offset of that boundary rides on the parsed program as data, not recovered later from a name or a naming convention, and the resolver keeps a separate set of top-level definitions and opened imports per region. A bare name in the user region is looked up in locals, then the user's own top-level definitions, then the prelude's, then the user's opens, then the prelude's; a bare name in the prelude region sees only locals, the prelude's own definitions, and the prelude's opens. That asymmetry is what makes a user definition shadow a prelude name instead of replacing it. When both regions define the same name, the prelude's definition is the one renamed, to a private canonical symbol under an unspellable module path, so the prelude's internal calls keep landing on it while the user's bare uses land on the user's, and post-resolution generated code that emits a bare wired-in hook name behaves exactly as before. No collision means no rename: a program that redefines nothing resolves to the same symbols it always did, and a module compiled as a module has no prelude region at all, so the stdlib's canonical symbols and content hashes are untouched.
+
+Opening a name is not the same as choosing it. Building an import scope records every candidate a short name has rather than rejecting the second one, and a name offered by two modules is reported only where a bare use forces the choice, with the diagnostic naming the owning modules and asking for a qualifier. An import that is never used ambiguously is never an error.
 
 For an acyclic graph, the driver checks independent modules in deterministic dependency layers. An importer is seeded from each dependency's rehydrated `ModuleInterface`, without reading that dependency's implementation body; successful interfaces and warning-free checked bodies (including checked-HIR facts) are durable query artifacts. Cyclic graphs use the merged checker fallback. After checking, modules still merge into one flat program. Whole-program typed effect lowering is always recomputed as the verified authority; durable queries begin again at the post-lowering optimizer boundary.
 
@@ -414,6 +423,64 @@ A bidirectional pattern synonym desugars to a `view` call in match position and 
 
 {{#endtabs }}
 
+Two pattern forms are eliminated here as well, and both are expansions rather than translations, so no Core node corresponds to either and nothing downstream of desugar meets one.
+
+An [alternation](./spec.md#pattern-alternation) is split into one arm per alternative, in the order a backtracking match would try them; a nested alternation enumerates the product of its positions with the rightmost varying fastest, so the leftmost alternation stays the outer loop and overlapping alternatives keep their source order. The arm's guard and body are copied to each alternative, and every expanded arm carries the source arm's span, so a diagnostic underlines the alternation the author wrote rather than one alternative of it. The product is bounded at 256 arms; past that the arm is refused rather than compiled into an unbounded arm list. Expansion precedes the checker, so exhaustiveness and reachability see exactly the arms the alternation denotes.
+
+{{#tabs }}
+
+{{#tab name="Surface" }}
+
+```prism,ignore
+match s of
+  Line(0 | 1, _) | Ring(0) => 1
+  _ => 0
+```
+
+{{#endtab }}
+
+{{#tab name="Desugared" }}
+
+```prism,ignore
+match s of
+  Line(0, _) => 1          -- one run of three arms from one source arm,
+  Line(1, _) => 1          -- enumerated leftmost alternative first, each
+  Ring(0) => 1             -- carrying the whole source arm's span
+  _ => 0
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
+A [parameter written as a pattern](./spec.md#pattern-parameters) is rewritten the same way. The parameter still binds one value, under a synthetic name taken from its position whose sigil keeps it unspellable in source and unreachable by keyword argument, and the body is wrapped in a one-arm `match` of that name against the pattern. The leftmost parameter's match is the outermost, so a later pattern's binders cannot capture an earlier one's. The wrapper is an ordinary surface `match`, so an alternation or a nested pattern inside a parameter travels the same expansion path as any other pattern, and the argument is already a value when the body runs, so introducing the match forces nothing that was not forced before. Irrefutability is not decided here: a pattern that fails to cover its type is reported by the coverage check as the non-exhaustive match it denotes, the same message the hand-written wrapper would produce, so one mistake has one diagnostic.
+
+{{#tabs }}
+
+{{#tab name="Surface" }}
+
+```prism,ignore
+fn offset(Wrap(n), Pt { x = x, .. }) : Int = n + x
+```
+
+{{#endtab }}
+
+{{#tab name="Desugared" }}
+
+```prism,ignore
+fn offset(arg@0, arg@1) : Int =
+  match arg@0 of
+    Wrap(n) =>
+      match arg@1 of
+        Pt { x = x, .. } => n + x
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
+Because both are gone before the checker runs, neither can be observed by tier selection, backend choice, or optimization level: a program written with an alternation and the same program written with its arms spelled out elaborate to the same Core and hash identically under `prism dump core-hash`.
+
 A nested path update rebuilds the single-constructor spine (the chain of nested constructor cells) along the path.
 
 {{#tabs }}
@@ -472,7 +539,17 @@ Type inference is the bidirectional, higher-rank algorithm of [Dunfield & Krishn
 
 Instances are global, but each records its defining module, so coherence is checked by provenance. Resolution is coherent: for each `(class, type-head)` there is exactly one canonical instance, and implicit resolution always selects it. A single instance for a head is canonical automatically. When two or more instances share a head, one must be designated with a top-level `canonical Class(Head) = name` declaration (see [coherence and resolution](./spec.md#coherence-and-resolution)). An undesignated overlap is a hard error reported at definition, naming the candidates and their modules, with a source caret when they point into the program being compiled. An orphan instance (defined apart from both its class and its head type) is reported as a warning. An explicit override is written at the use site as a trailing `using` argument, `f(args, using name)`, which changes nothing else's resolution.
 
-Indexing (`a[i]`, `a[i] := v`) is resolved the same way the `print`/interpolation display and `^` lowerings are, by type-directed dispatch at elaboration: the checker records each sub-expression's type in a span-keyed table, and the elaborator reads the receiver's head type back and emits the matching builtin or accessor through one wired classifier, the single home for the container names and their getter/setter functions: `Array` to `at_array`/`array_set`, `HashMap` to `at_hashmap`/`hm_insert`, `String` to `at_byte`, `List` to `at_list`, and `Tensor` to `at_tensor`/`tensor_set` (a bracket with two or more indices lowers to a list-keyed index for the tensor's strided lookup). A receiver whose type is still an unsolved existential when first synthesized (a `var` indexed before its initializer fixes its state type) defers to one pass at the end of the declaration, after the initializer has constrained it. Concrete indexing is a closed, wired dispatch rather than a class or type-system extension; the desugar targets are `index` and `index_set`.
+Indexing (`a[i]`, `a[i] := v`) is resolved the same way the `print`/interpolation display and `^` lowerings are, by type-directed dispatch at elaboration: the checker records each sub-expression's type in a span-keyed table, and the elaborator reads the receiver's head type back and emits the matching builtin or accessor through one wired classifier, the single home for the container names and their getter/setter functions:
+
+| Receiver  | Getter       | Setter       |
+| --------- | ------------ | ------------ |
+| `Array`   | `at_array`   | `array_set`  |
+| `HashMap` | `at_hashmap` | `hm_insert`  |
+| `String`  | `at_byte`    | read-only    |
+| `List`    | `at_list`    | `list_set`   |
+| `Tensor`  | `at_tensor`  | `tensor_set` |
+
+A bracket with two or more indices lowers to a list-keyed index for the tensor's strided lookup. A receiver whose type is still an unsolved existential when first synthesized (a `var` indexed before its initializer fixes its state type) defers to one pass at the end of the declaration, after the initializer has constrained it. Concrete indexing is a closed, wired dispatch rather than a class or type-system extension; the desugar targets are `index` and `index_set`.
 
 Effect-row inference is **principal**: each declaration infers its most general row from its body alone. The row unifier discovers every label on its own (a **row** is a function's effect set; see [types and kinds](./spec.md#types-and-kinds)) from direct performs, applied effect-carrying callees, builtin rows, and `mask`. At a call it adds the callee's row to the caller's **ambient row** (the effect set accumulated for the body so far), and a handler removes the operations it discharges. The row is the single source of truth: there is no separate set-pass seed and no subset reconciliation against one.
 
@@ -743,6 +820,14 @@ Folding the family under one node keeps each structural pass to a single arm; th
 
 This calculus is modeled in Lean 4 ([de Moura & Ullrich, 2021](bibliography.md#demoura-ullrich-2021)): the formal syntax mirrors the core one variant at a time with a substitution small-step relation, on top of which the model adds an executable abstract machine that mirrors the interpreter and is proved to agree with it. The chapter on [verification](#verification) describes the model and how it anchors the compiler's verification chain.
 
+### 7.1 The Identity Surface {#the-identity-surface}
+
+Core exists at two moments, and only one of them names a definition. **Pre-optimizer core**, straight out of elaboration, is the **identity surface**: every [content hash](#content-addressed-core), the stdlib Merkle root, and the store's commit path are taken there, so identity cannot move when a pass is retuned or an environment toggle flips one on. Post-optimizer core is what the backends and `dump core` show, and it is deliberately not an identity: specialization mints definitions that do not exist before it runs.
+
+`prism dump core-identity` publishes that surface. It renders the user program's pre-optimizer core as deterministic JSON, tagged with the same node names the hasher folds, and adds the three facts the tree alone does not carry: each definition's dictionary arity and its elaboration metadata (generalized type, principal effect row, `fip` keyword, borrow mask), the recursive-group partition the hasher works one component at a time, and the content hash of every definition outside the export that the export refers to. Those last two are what make it self-contained: a group's hashes are a function of its members plus its dependencies' hashes, so the artifact carries exactly that closure and nothing about the prelude it was compiled against.
+
+The export is an observation, never a participant. It introduces no core node, changes no encoding, and is computed only when asked, so dumping it cannot perturb a hash; the [differential gate](#verification) asserts that directly, alongside the property it exists for. A Prism program reads the artifact, re-encodes each definition in the `prism-core-hash-v1` byte scheme, re-derives the canonical order inside each recursive group, and recomputes every hash, which must equal what `prism dump core-hash` prints. Distinguish what that does and does not establish: the reader recomputes the encoding and the folding from structure, and no definition's own digest appears in the artifact, so it cannot echo an answer; but the metadata rendering, the group partition, and the dependency digests are consumed rather than re-derived, and the encoder's byte scheme was transcribed rather than independently specified. It is a drift gate on the scheme, and a completeness gate on the export, not a second proof that the scheme is the right one.
+
 ## 8. The High-Level Intermediate Representation {#the-checked-hir}
 
 Between type inference and elaboration sits one boundary artifact, the **checked HIR** (high-level intermediate representation): the type- and effect-checked surface tree paired with the facts checking decided about each of its nodes.
@@ -812,6 +897,8 @@ The output is `Expr<Core>`, the sugar-free phase in which the surface's sugar co
 
 A `match` is compiled to a decision tree. The arms form a matrix whose rows are arms and columns are argument positions. The compiler selects a column, partitions the arms by the head of that column's patterns, and emits a test: a `Case` on the constructor tag of the scrutinee (the value being matched) for a constructor column, or a chain of equality tests for a scalar column. Wildcard rows form a default sub-matrix shared by the branches that fall through. A guarded arm compiles to a conditional that re-enters the remaining arms when the guard fails. Exhaustiveness, proven by the checker (see [patterns](./spec.md#patterns)), guarantees every scrutinee reaches an arm.
 
+Every arm reaching the matrix is a single alternation-free pattern: alternations were expanded in [desugaring](#desugaring), and a parameter written as a pattern is by then an ordinary `match` around the body. So there is one arm shape to compile and one decision tree to build, whichever surface form produced it. The single residue of expansion is reachability, which needs to know which arms came from one source arm: a flag set on every arm after the first of an expansion marks the run, and the checker judges the run as a unit, calling it useful when any of its alternatives is and withholding all its rows from the matrix until the run ends. One alternative therefore cannot shadow another inside the arm the author wrote, and a genuinely dead arm is reported against the whole alternation.
+
 The splitting is easiest to see on a two-column match. Three rows, but the tree tests each component once: splitting on the first component partitions the rows, the wildcard row `(_, Nil)` falls through into the `Cons` branch as its default sub-matrix, and no pattern is ever examined twice:
 
 {{#tabs }}
@@ -858,7 +945,9 @@ The witness-carrying typed implementation is the sole lowering authority. The fo
 | selective free monad              | an entangled effectful component splits cleanly from the rest of the call graph | the component's continuations as heap-allocated `EPure`/`EOp` |
 | whole-program free monad          | the effect escapes static tracking or no sound selective split exists           | every effectful continuation as heap-allocated `EPure`/`EOp`  |
 
-They are six compilations of that one mechanism, differing in how much of `k` they make manifest, from nothing to heap-allocated trees. A check then confirms no effect construct survives. The chosen strategy is a pure cost decision, never observable in output, and it is pinned: `prism dump tier` prints a program's classification, and a committed manifest records the tier of every corpus program, so a refactor that silently defeats a fast path corpus-wide fails the perf gate by name rather than shipping as an invisible performance collapse. A tier change in either direction updates the manifest loudly, like a snapshot.
+They are six compilations of that one mechanism, differing in how much of `k` they make manifest, from nothing to heap-allocated trees. A check then confirms no effect construct survives. The chosen strategy is a pure cost decision[^cost], never observable in output, and it is pinned: `prism dump tier` prints a program's classification, and a committed manifest records the tier of every corpus program, so a refactor that silently defeats a fast path corpus-wide fails the perf gate by name rather than shipping as an invisible performance collapse. A tier change in either direction updates the manifest loudly, like a snapshot.
+
+[^cost]: The cost is time, the one tax physical execution pays that pure form escapes. Were an instruction free, the slowest pathway would be as good as the fastest and this ladder a curiosity; it has rungs at all only because the machine bills by the instruction, and everything above works to keep you from being charged for the bill's contents rather than its total.
 
 Two erasure pre-passes run before the strategy cascade, each recognizing a statically fixed handler shape and rewriting it to direct code, leaving everything else for the strategies. **Var erasure** rewrites an escape-checked local `var` (a closed two-operation `State` handler, see [local mutation](./spec.md#local-mutation)) to a mutable cell: `get` becomes a cell read, `set` a cell write, and the block is wrapped in a fresh-cell allocation. It is sound exactly because the escape analysis proved the var's continuation is never resumed more than once, so the shared cell and pure-state copies agree; a multishot use disables it. **Control erasure** rewrites the internal `break`/`continue`/`return` effects (see [imperative control flow](./spec.md#imperative-control-flow)), whose `never` handlers have fixed templates, back to direct control flow. It runs after var erasure, so a pure imperative loop has lost all of its effect operations by the time the cascade classifies it and falls into the trivial **pure** path (no effect constructs remain), compiling to a `musttail` loop with no per-iteration allocation.
 
@@ -1196,7 +1285,7 @@ This is the whole of Prism's "functional code, mutable performance": the emitter
 
 ## 14. The Runtime {#the-runtime}
 
-The C runtime—memory and reference counting, strings, bignums, floats and the vendored libm, effects, sorting, arrays, byte buffers, typed buffers, continuations, and IO—is linked with the code each backend emits. It assumes an LP64 target (64-bit pointers and `long`) and uses `mimalloc` when available. The data representation below is shared by the backends and the runtime.
+The C runtime (memory and reference counting, strings, bignums, floats and the vendored libm, effects, sorting, arrays, byte buffers, typed buffers, continuations, and IO) is linked with the code each backend emits. It assumes an LP64 target (64-bit pointers and `long`) and uses `mimalloc` when available. The data representation below is shared by the backends and the runtime.
 
 ### 14.1 Value Representation {#value-representation}
 
@@ -1330,7 +1419,7 @@ The reproducible fingerprint is what lets continuous integration cache safely ac
 
 ### 15.3 Function Contracts {#function-contracts}
 
-The two gates above verify the compiler. A separate machinery verifies a _program_: [function contracts](spec.md#function-contracts) let a definition declare `requires`/`ensures`, and Prism owns the logical question and its identity while an external solver merely searches for a counterexample to bytes Prism has already fixed. A small first-order logical IR—`LogicSort`, `LogicExpr`, `Contract`, and `Obligation`—is the only thing a solver sees; an independent well-formedness verifier proves every term well-sorted, a portable SMT-LIB encoder emits one standalone `check-sat` script per obligation, and an alpha-normalizer and structural digest make two obligations that differ only by binder numbering or an unused declaration hash identically. Because a solver never sees Core, an obligation's bytes are a pure function of its logical term, independent of the content hash.
+The two gates above verify the compiler. A separate machinery verifies a _program_: [function contracts](spec.md#function-contracts) let a definition declare `requires`/`ensures`, and Prism owns the logical question and its identity while an external solver merely searches for a counterexample to bytes Prism has already fixed. A small first-order logical IR (`LogicSort`, `LogicExpr`, `Contract`, and `Obligation`) is the only thing a solver sees; an independent well-formedness verifier proves every term well-sorted, a portable SMT-LIB encoder emits one standalone `check-sat` script per obligation, and an alpha-normalizer and structural digest make two obligations that differ only by binder numbering or an unused declaration hash identically. Because a solver never sees Core, an obligation's bytes are a pure function of its logical term, independent of the content hash.
 
 The logical checker runs on the resolved program before contracts are erased at the Core boundary. It resolves each logical name in its own scope, elaborates the supported `Bool`/`Int` fragment into `LogicExpr`, inlines calls to `logic fn` declarations (so a checked contract is a pure proposition with no uninterpreted applications), and proves the result well-sorted; a malformed contract is an ordinary source error (`E8000`-`E8005`) pointing at the smallest offending subexpression. Verification-condition generation elaborates a contracted function's body into one logical term, turning an `if` into an `ite` so branch conditions ride inside the term rather than splitting into path obligations, and emits one obligation per `ensures` clause by substituting that term for the result binder; a body outside the scalar fragment is reported pending rather than rejected. `prism dump smt` prints those obligations; because they are generated from the pre-optimizer surface, their bytes are invariant across optimizer configuration, backend, and effect-lowering tier.
 
@@ -1541,7 +1630,12 @@ The `-O`/`--opt` flag selects a level; the default is `-O1` and a bare `-O` is t
 
 `-O1`, the default, is the real optimization level. On top of `EraseNewtypes` it runs [`Specialize`](#pass-specialize) before effect lowering and, after it, the late pipeline [`Simplify`](#pass-simplify) -> [`Inline`](#pass-inline) -> [`Simplify`](#pass-simplify) -> [`Cse`](#pass-cse) -> [`Simplify`](#pass-simplify): dictionary specialization, then a gentle simplifier brought to a fixed point around a bounded inliner and scalar CSE. This is the GHC simplify/inline/simplify shape, and it is what the compiler runs unless told otherwise.
 
-`-O2`, the highest level, adds [`Fuse`](#pass-fuse) at the start of the pre-lowering stage and a second `Inline` -> `Simplify` round before `Cse`. Fusion collapses recognized pull-sequence pipelines before effect lowering changes their shape; the extra inlining round flattens two-hop wrapper chains exposed by the first. The exact pipeline is `Fuse` -> `EraseNewtypes` -> `Specialize`, then `Simplify` -> `Inline` -> `Simplify` -> `Inline` -> `Simplify` -> `Cse` -> `Simplify`.
+`-O2`, the highest level, adds [`Fuse`](#pass-fuse) at the start of the pre-lowering stage and a second `Inline` -> `Simplify` round before `Cse`. Fusion collapses recognized pull-sequence pipelines before effect lowering changes their shape; the extra inlining round flattens two-hop wrapper chains exposed by the first. The exact pipeline is:
+
+```text
+Fuse -> EraseNewtypes -> Specialize,
+then Simplify -> Inline -> Simplify -> Inline -> Simplify -> Cse -> Simplify
+```
 
 ### 16.8 Controlling the Pipeline {#explicit-pass-lists}
 
@@ -1831,6 +1925,21 @@ The field that matters is the bundle digest. It is not a checksum of the envelop
 
 A resumer recomputes the namespace root from its own copy of the program and refuses a snapshot whose digest differs. The kont envelope is therefore the content-addressed Merkle DAG applied to a live computation: because the code already has a canonical identity, a running computation over it can travel with a compact proof that the far side is the same program.
 
+### 21.5 Source, Surface, and Core Identity {#three-identities}
+
+A source file carries three identities, and keeping them apart is what lets a tool be honest about what it has actually proved. **Source identity** is the digest of the exact bytes, comments and formatting included, which the compiler embeds in every syntax artifact it emits. **Surface identity** is the canonical semantic surface tree with source positions erased: the identity of the tree the parser built, rather than of the text that produced it. **Core identity** is the content hash above, taken over the elaborated definition.
+
+The standard library computes the first two from a syntax artifact and cannot compute the third from one. `Syntax.Identity` reads the embedded digest for source identity and renders the schema tag and item tree with every span stripped for surface identity, both pure functions of the artifact bytes; Core identity is absent from that module because it is not recoverable from syntax, needing resolution and elaboration that no syntax artifact carries. Given the elaborated subject instead, published as the [identity surface](#the-identity-surface), the standard library does recompute it, which is the whole point of the separation: the third identity costs a different artifact, not a different hash function. Each edit below moves exactly the identities it should:
+
+| edit                                | source | surface | Core  |
+| ----------------------------------- | ------ | ------- | ----- |
+| rewriting a comment                 | moves  | holds   | holds |
+| reflowing the same tokens           | moves  | holds   | holds |
+| writing the same call as a pipeline | moves  | moves   | holds |
+| changing a literal                  | moves  | moves   | moves |
+
+The negative directions carry the weight. Equal Core identity does not require equal surface or source identity, so a tool that caches on a syntax digest is not caching on behavior. Equal source bytes do not imply equal Core identity either: the same text, under a different set of imported modules, elaborates to a different subject and computes a different answer. A syntax hash is evidence about text or about trees, never about what a program does.
+
 ## 22. The Package Manager {#package-manager}
 
 The package manager is deliberately a synthesis, not a clone. It takes the fast command surface of Bun-style package UX, the Nix idea that installed code lives in an immutable content-addressed store, and the git idea that distribution can be hash-addressed and cheaply mirrored.
@@ -1907,25 +2016,45 @@ The useful invariant across all of this is that any served artifact, a binary, a
 
 Prism has no macro system, and that is a considered omission rather than a gap waiting to be filled: I am, by temperament, allergic to metaprogramming, having been burned by Template Haskell and OCaml's metaprogramming fire and watched it trade a moment's convenience for code that no reader and no tool can follow. The honest status, in one sentence, is that doing it _well_ in a typed setting, weaving phase distinctions and Lisp-style hygienic macros into the type system so that generated code is as principled, type-safe, and legible as code written by hand, is still an open research problem rather than a solved one, and Prism is waiting for the right model instead of bolting on the wrong one. If anything, the [content-addressed core](#content-addressed-core) and the verified [differential oracle](#the-model-as-a-differential-oracle) are an unusually disciplined substrate to host such a thing once the design is clear. I am genuinely open to new ideas here: if you know a model that does this elegantly, [get in touch](https://www.stephendiehl.com/hire/). Until then it stays an open problem.
 
-## 25. Bootstrapping and Self-Hosting {#bootstrapping-and-self-hosting}
+## 25. Open Compiler {#open-compiler}
+
+Prism is becoming an **open compiler**: its syntax machinery is an ordinary, versioned Prism library rather than a facility available only behind the compiler executable.[^open-compiler] The `Syntax.*` modules already expose source files and byte spans, tokens and trivia, an ordered semantic surface AST, structured diagnostics, resolved bodies, generic traversal, and byte-idempotent codecs for each of those artifacts, plus a raw token layer and layout pass written in Prism. A Prism program can therefore decode, inspect, traverse, and re-emit Prism source under the same explicit-input determinism contract as the rest of the language. What is not yet exposed is the other half: a Prism-written parser, a printer, and checked source edits over a mutable snapshot.
+
+The lossless document and the semantic AST are deliberately separate. Source tools need declaration order, comments, punctuation, layout events, and exact literal spelling; resolution, checking, and elaboration need a smaller tree that omits semantically irrelevant spelling. Keeping both representations makes format-preserving refactors and documentation tools ordinary library clients without leaking formatting accidents into the semantic pipeline.
+
+The front end bootstraps through the same opening, and the first stage of it is built. A Prism-written lexer, interpolation scanner, and layout pass run beside the Rust/LALRPOP implementation and are diffed against its versioned artifacts across accepted, negative, generated, and hostile corpora, including the classification of lexical faults: unknown escapes, empty and unterminated interpolation holes, unterminated strings, and misplaced digit separators, each with the same continuable-or-fatal verdict the Rust lexer reaches. A disagreement is an explicit artifact, never a silent production fallback. The parser is the next piece and is not written yet, so parser authority has not moved: Rust/LALRPOP remains stage 0, and the reproduction loop that would make a Prism front end authoritative stays closed. The compiler selects the implementation from its pinned toolchain and standard-library root, so a project cannot change the language it is compiled with by shadowing a `Syntax` module.
+
+Speed is an acceptance condition for that front end rather than a later optimization, because a reimplementation that is asymptotically worse than the oracle it shadows cannot become the oracle. Both layers are measured against Rust on a doubling ladder of input sizes per corpus class, reporting throughput, peak resident set, and the fitted slope of time against bytes; a size-dependent divergence is a hard failure, while a constant factor is a recorded cost. The measurement earned its keep immediately by finding a quadratic layout pass, which recounted the line number from byte zero once per token, and a raw layer that rebuilt and linearly scanned its spelling tables per token. Both are now linear.
+
+The architecture has three explicit boundaries. The **base level** remains the fixed, verified pipeline described in this chapter. At the **meta level**, ordinary Prism modules play the useful role of metaobjects: they consume versioned source, AST, and eventually IR values and produce analyses, diagnostics, edits, or transformed values without privileged access to compiler state. **Intercession**, in which a metaobject intercepts a compiler decision, replaces a pass, or changes a target mapping, is deliberately absent from the initial design.
+
+This still provides white-box reuse: tools can reuse the real lexer, parser, representations, and printers, then add modular analyses and transformations without forking the compiler. It does not yet add macros, quasiquotation, user-defined syntax, or arbitrary compilation hooks. If intercession is later admitted, its modules must be explicitly selected and pinned, its inputs and outputs must cross versioned phase boundaries, and its results must pass the same verifiers as built-in transformations; that is a separate change to Prism's trust and determinism contract. A fully open Prism-in-Prism compiler is nevertheless the long horizon: rebuilding the floor while standing on it is hard enough; requiring every floorboard to be content-addressed and independently verified is ridiculous, and would be extremely cool.
+
+[^open-compiler]: The term comes from John Lamping, Gregor Kiczales, Luis H. Rodriguez Jr., and Erik Ruf, “An Architecture for an Open Compiler,” _Proceedings of the IMSA '92 Workshop on Reflection and Meta-level Architectures_, 1992, pp. 95–106.
+
+## 26. Bootstrapping and Self-Hosting {#bootstrapping-and-self-hosting}
 
 The compiler is written in Rust. A self-hosting Prism compiler would use the standard multi-stage bootstrap: the Rust compiler is **stage 0**, compiling the Prism-in-Prism source with stage 0 yields **stage 1**, and compiling that source with stage 1 yields **stage 2**. The bootstrap is sound exactly when stages 1 and 2 are byte-identical, the fixed point that proves the compiler reproduces itself. Prism's [differential oracle](#the-model-as-a-differential-oracle) and triple-backend [parity gate](#lint-telemetry-and-parity) already make "two builds agree byte-for-byte" a repository-wide invariant.
 
-That byte-identical fixed point is necessary but, as Ken Thompson observed, not sufficient. His Trusting Trust attack (Thompson, "Reflections on Trusting Trust", 1984) is a compiler backdoor that reinjects itself into any compiler it builds, so stage 1 and stage 2 come out byte-identical and both carry it: the fixed point passes cleanly while the binary lies. The countermeasure is to break the self-reproduction with a compiler of different lineage, diverse double-compiling (Wheeler, 2005), rebuilding the same source with an independent compiler and checking the artifact hashes still match, which a backdoor confined to stage 0 cannot survive. Prism is set up for this almost by accident: the determinism contract already makes compilation reproducible and content-addressed, so the check is a hash equality over Core artifacts rather than a fragile whole-binary diff, the precondition double-compiling needs and most compilers have to engineer. None of which, sadly, spares us from trusting rustc and LLVM at the bottom of it all, two compilers Prism did not write, in either of which a Thompson-style attack could be lurking (or... spooky both). Sleep well.
+Reproduction is necessary, not sufficient: Thompson's “Trusting Trust” backdoor reproduces too. Prism's deterministic, content-addressed Core makes diverse double-compilation a comparison of canonical hashes rather than fragile binaries. It checks independent lineages above the backend boundary, but LLVM or Clang could still harbor the ghost. Sleep well.
 
-Two pieces of the present design provide the necessary bootstrap seams. The first is the [shared emitter](#the-shared-emitter): codegen is one Core walk behind an `Isa` trait, and the textual LLVM and MLIR backends hand their output to external tools (`clang`, `mlir-translate`) rather than calling into a library. A Prism compiler therefore needs to emit text and invoke tools, not bind LLVM's C++ API, so the dependency on Rust's `inkwell` binding belongs to stage 0 rather than the language. Link orchestration remains in the Rust compiler behind the interface that assembles IR and links it against the runtime.
+The [open-compiler design](#open-compiler) supplies the first concrete bootstrap seam, and the seam is now partly occupied. Stage 0 compiles the Prism-written lexer and layout pass, which run beside the Rust front end and whose versioned token and trivia artifacts agree with it across the gated corpora. A Prism-written parser is the remaining piece; only when it too agrees, and can parse its own source, does a pinned Prism front end become authoritative. This closes the syntax-stage loop before the checker and code generator are self-hosted, so the compiler moves into Prism one verified representation boundary at a time instead of arriving as one heroic rewrite.
 
-The second is size. The whole front end already compiles to a [WebAssembly](#webassembly) bundle that runs in a browser and, gzipped, still fits on a 3.5-inch floppy disk. A self-hosted Prism is then the pleasing closure of that fact: a modern functional language with algebraic effects, typeclasses, and a formally verified core, shipped as a floppy-disk-sized binary of itself that compiles itself and can run on a microcontroller.
+A reader written in Prism is an ordinary program, so it has to say what it refuses and why. The syntax codecs bound themselves structurally: a schema tag is matched exactly rather than ordered, a span must not invert and must end inside the embedded source, node identities must be unique, and nesting is refused past a fixed depth. Each of those is a function of the document alone, so the classification is identical in the interpreter and in a native binary and can be pinned by a test. Exhausting physical memory, being killed, or overrunning a host timeout is a different kind of event: an infrastructure failure of the machine that happened to run the tool, never a rule of the language. Keeping the two apart is the same discipline as everywhere else here, since a limit expressed as "whatever this backend allocates first" would make a refusal depend on which tier ran, the one thing the [design](#design-principles) does not allow.
+
+The backend provides the matching seam: the [shared emitter](#the-shared-emitter) is one Core walk behind an `Isa` trait, and the textual LLVM and MLIR backends hand their output to external tools (`clang`, `mlir-translate`) rather than calling into a library. A Prism compiler therefore needs to emit text and invoke tools, not bind LLVM's C++ API, so the dependency on Rust's `inkwell` binding belongs to stage 0 rather than the language. Link orchestration remains in the Rust compiler behind the interface that assembles IR and links it against the runtime.
+
+The whole front end already compiles to a [WebAssembly](#webassembly) bundle that runs in a browser and, gzipped, still fits on a 3.5-inch floppy disk. A self-hosted Prism is then the pleasing closure of that fact: a modern functional language with algebraic effects, typeclasses, and a formally verified core, shipped as a floppy-disk-sized binary of itself that compiles itself and can run on a microcontroller.
 
 At which point, modulo an FFI, a full package ecosystem, and roughly every other thing a real language actually needs to be used in anger, I think Prism is "done", in the sense that it will never be used by anyone. But [that's fine](https://www.stephendiehl.com/posts/prism/)!
 
 There is, if you squint, a purity argument in that. Every functional language chases referential transparency and forfeits it the instant a program runs, because running is where the effects leak back into the world. Haskell, to its great misfortune, is actually used, so it prints, allocates, warms a CPU, and nudges the universe a hair closer to heat death. Prism does none of this. Never run, it adds not one joule to the universe, and so attains the nirvana every other language strives towards: complete purity through unuse. Haskell is pure and used in the real world; Prism is useless and unused, which is a stronger form of purity.
 
-## 26. Command-Line Interface {#command-line-interface}
+## 27. Command-Line Interface {#command-line-interface}
 
 The `prism` binary is one executable with a handful of subcommands. With no subcommand, a bare path argument compiles that file or project and no argument at all opens the [interactive shell](#the-interactive-shell). This section tabulates the public surface defined by the command-line parser.
 
-### 26.1 Commands {#commands}
+### 27.1 Commands {#commands}
 
 The surface is thirteen top-level commands plus five noun groups (`exec`, `lineage`, `patch`, `pkg`, `store`), each group collecting the verbs that share a subject.
 
@@ -2044,7 +2173,7 @@ Verbs over content-addressed code identity ([the store](#content-addressed-core)
 | `prism store query <kind> <name> PROGRAM` | Query callers, dependents, dependencies, or type uses in the definition graph.                            |
 | `prism store lock PROGRAM [--accept]`     | Check stable-migration behavior against its lock, or reseat the lock with `--accept`.                     |
 
-### 26.2 Flags {#flags}
+### 27.2 Flags {#flags}
 
 Optimizer, effect-lowering, query, and compiler-diagnostic controls are global because they affect multiple commands; output and operation-specific flags belong to the command shown. `-h`/`--help` works on the binary and every subcommand, and `-V`/`--version` on the binary.
 
@@ -2076,45 +2205,48 @@ Optimizer, effect-lowering, query, and compiler-diagnostic controls are global b
 
 The same compiler controls can be set in a project's `[flags]` table with kebab-case names. Built-in defaults are overlaid by `prism.toml`, then `PRISM_*` environment variables, then explicit CLI flags; unknown manifest keys and invalid values are rejected.
 
-### 26.3 Dump Phases {#dump-phases}
+### 27.3 Dump Phases {#dump-phases}
 
 `prism dump <phase> PROGRAM` prints one intermediate form. The optimizer flags above apply, so `dump core` reflects the selected `-O` level.
 
-| `<phase>`               | Output                                                                                                             |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `tokens`                | The token stream after lexing and layout.                                                                          |
-| `syntax-tokens`         | Versioned JSON containing source, raw and post-layout token streams, and trivia.                                   |
-| `ast`                   | The surface AST.                                                                                                   |
-| `surface-syntax`        | The ordered semantic surface AST as versioned, source-embedding JSON.                                              |
-| `types`                 | Each definition's inferred type and effect row.                                                                    |
-| `typespans`             | Versioned JSON ranges with each pointable subterm's canonical type and explicit effect row.                        |
-| `hir`                   | The [checked HIR](#the-checked-hir) fixture: per-declaration schemes and per-node checker facts as versioned JSON. |
-| `interface`             | The entry module's checked interface (exported schemes, digests) as JSON, the importer-cutoff artifact.            |
-| `module-graph`          | The module dependency graph as JSON, the shape the incremental query walks.                                        |
-| `tc-input`              | The resolved declaration interface consumed by the checker, as versioned JSON.                                     |
-| `tc-facts`              | The checker's principal schemes, effect rows, resolutions, evidence, and node facts, as versioned JSON.            |
-| `elab-input`            | One versioned envelope composing `tc-input` and `tc-facts` for elaboration.                                        |
-| `verify`                | The module's logical declarations and contract summaries, without invoking a solver.                               |
-| `smt`                   | Canonical SMT queries for postconditions and termination-ranking obligations.                                      |
-| `totality`              | Per-function checked, assumed, or pending totality status.                                                         |
-| `core`                  | The CBPV / ANF core after elaboration and the optimizer.                                                           |
-| `dupes`                 | Groups of distinct definitions sharing one behavior hash, one line per clone group.                                |
-| `core-json`             | The core as a JSON tree the Lean model reads (the [differential oracle](#the-model-as-a-differential-oracle)).     |
-| `core-hash`             | A [content-addressed hash](#content-addressed-core) of each definition's elaborated core.                          |
-| `native-kont-table`     | The deterministic native-symbol-to-definition-hash table embedded into native LLVM builds.                         |
-| `native-kont-state-map` | The versioned native state map for entry ABI-word slots embedded into native LLVM builds.                          |
-| `fbip`                  | Core after reference-count insertion and in-place reuse.                                                           |
-| `lowered`               | Core after [effect lowering](#effect-lowering) (handlers and operations removed).                                  |
-| `tier`                  | The [effect-lowering](#effect-lowering) strategy the program's handlers compile to.                                |
-| `captures`              | Closure-capture facts, each classified portable, nonportable, or unknown for a move across a suspend boundary.     |
-| `usage-summary`         | A per-definition table of allocation, `fip`/`fbip`, borrow, and effect-row facts, committable as a golden.         |
-| `usage-summary-md`      | The same usage facts as a markdown pipe table, the projection `prism pkg check-world`'s usage gate compares.       |
-| `usage-summary-json`    | The same usage facts as a JSON object, for tooling that consumes the summary programmatically.                     |
-| `shape`                 | The structural shape digest of each datatype, effect, and class.                                                   |
-| `stdlib-hash`           | The standard library's Merkle root ([content-addressed core](#content-addressed-core)).                            |
-| `namespace`             | The versioned definition-layer export, wrapped in the wire envelope header.                                        |
-| `llvm`                  | The emitted LLVM IR.                                                                                               |
-| `mlir`                  | The emitted textual MLIR (requires the `mlir` build feature).                                                      |
+| `<phase>`               | Output                                                                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `tokens`                | The token stream after lexing and layout.                                                                                 |
+| `syntax-tokens`         | Versioned JSON containing source, raw and post-layout token streams, and trivia.                                          |
+| `ast`                   | The surface AST.                                                                                                          |
+| `surface-syntax`        | The ordered semantic surface AST as versioned, source-embedding JSON.                                                     |
+| `syntax-diagnostics`    | Every lex or parse refusal as versioned JSON, or the empty list on acceptance; refusal is the payload, so it never fails. |
+| `types`                 | Each definition's inferred type and effect row.                                                                           |
+| `typespans`             | Versioned JSON ranges with each pointable subterm's canonical type and explicit effect row.                               |
+| `hir`                   | The [checked HIR](#the-checked-hir) fixture: per-declaration schemes and per-node checker facts as versioned JSON.        |
+| `interface`             | The entry module's checked interface (exported schemes, digests) as JSON, the importer-cutoff artifact.                   |
+| `module-graph`          | The module dependency graph as JSON, the shape the incremental query walks.                                               |
+| `tc-input`              | The resolved declaration interface consumed by the checker, as versioned JSON.                                            |
+| `resolved-syntax`       | Each user function's resolved Core-phase body as a node-id-carrying tree, the traversable companion to `tc-facts`.        |
+| `tc-facts`              | The checker's principal schemes, effect rows, resolutions, evidence, and node facts, as versioned JSON.                   |
+| `elab-input`            | One versioned envelope composing `tc-input` and `tc-facts` for elaboration.                                               |
+| `verify`                | The module's logical declarations and contract summaries, without invoking a solver.                                      |
+| `smt`                   | Canonical SMT queries for postconditions and termination-ranking obligations.                                             |
+| `totality`              | Per-function checked, assumed, or pending totality status.                                                                |
+| `core`                  | The CBPV / ANF core after elaboration and the optimizer.                                                                  |
+| `dupes`                 | Groups of distinct definitions sharing one behavior hash, one line per clone group.                                       |
+| `core-json`             | The core as a JSON tree the Lean model reads (the [differential oracle](#the-model-as-a-differential-oracle)).            |
+| `core-identity`         | The [identity surface](#the-identity-surface): the exact pre-optimizer core, metadata, groups, and dependency hashes.     |
+| `core-hash`             | A [content-addressed hash](#content-addressed-core) of each definition's elaborated core.                                 |
+| `native-kont-table`     | The deterministic native-symbol-to-definition-hash table embedded into native LLVM builds.                                |
+| `native-kont-state-map` | The versioned native state map for entry ABI-word slots embedded into native LLVM builds.                                 |
+| `fbip`                  | Core after reference-count insertion and in-place reuse.                                                                  |
+| `lowered`               | Core after [effect lowering](#effect-lowering) (handlers and operations removed).                                         |
+| `tier`                  | The [effect-lowering](#effect-lowering) strategy the program's handlers compile to.                                       |
+| `captures`              | Closure-capture facts, each classified portable, nonportable, or unknown for a move across a suspend boundary.            |
+| `usage-summary`         | A per-definition table of allocation, `fip`/`fbip`, borrow, and effect-row facts, committable as a golden.                |
+| `usage-summary-md`      | The same usage facts as a markdown pipe table, the projection `prism pkg check-world`'s usage gate compares.              |
+| `usage-summary-json`    | The same usage facts as a JSON object, for tooling that consumes the summary programmatically.                            |
+| `shape`                 | The structural shape digest of each datatype, effect, and class.                                                          |
+| `stdlib-hash`           | The standard library's Merkle root ([content-addressed core](#content-addressed-core)).                                   |
+| `namespace`             | The versioned definition-layer export, wrapped in the wire envelope header.                                               |
+| `llvm`                  | The emitted LLVM IR.                                                                                                      |
+| `mlir`                  | The emitted textual MLIR (requires the `mlir` build feature).                                                             |
 
 `dump captures` is a read-only analysis over the program's own elaborated core. For every lambda and thunk it lists what the closure closes over (a source value or a call to a top-level definition) and what scoped operations it performs (a `var` cell's get/set, a named handler instance's private op), and classifies each fact as **portable**, **nonportable**, or **unknown** for a hypothetical move across a suspend boundary. A value type defers to the suspend codec's own encodability judgment; a top-level definition is portable because it travels as a content-addressed code reference; a `var` cell and a named handler instance are nonportable because their backing scope ends before a moved computation could resume. The classification is conservative in one direction: nothing is called portable unless it provably is, so a false "unknown" only costs a diagnostic while a false "portable" is impossible. The dump is diagnostic and changes no compilation output.
 
@@ -2122,7 +2254,7 @@ The same compiler controls can be set in a project's `[flags]` table with kebab-
 
 The same facts project three ways: `usage-summary` is the tab-separated form above, `usage-summary-md` renders them as an aligned markdown pipe table (cells escape `|`, so a row-polymorphic tail like `{X | e}` cannot break the table, and the alignment matches the repository formatter so a committed file is stable under it), and `usage-summary-json` emits one JSON object for tooling. A package may commit the markdown projection as `usage-summary.md` at its root; `prism pkg check-world` regenerates it and reports drift as the `usage` gate, naming the first differing line. `prism pkg accept-usage <pkg>` writes that golden, creating it the first time and reseating a drifted one with the same byte-stable regeneration, the same accept discipline as the tier manifest and the wire rung goldens. The gate is report-only by default: drift is printed but excluded from `--strict` failure, so packages can adopt the golden incrementally, and a package that commits no summary reports the gate as missing rather than failing. `--strict-usage` opts a CI lane in, promoting usage drift to a strict failure while a missing summary stays non-fatal, since missing means not opted in rather than wrong. In the `--json` report the gate carries its evidence: `usage` (`missing`, `passed`, `failed`), `usage_drift` naming the first differing line with expected and actual, `usage_format` naming the artifact format the golden is compared under (`usage-summary-md`), and `usage_tier`, the whole-program lowering tier that heads the summary, present only when a summary was regenerated. The tier is deliberately a single whole-program scalar, the same fact the summary's header states; per-definition rows carry no tier, so the JSON claims none.
 
-### 26.4 Environment Variables {#environment-variables}
+### 27.4 Environment Variables {#environment-variables}
 
 These are read by the compiler at build time. They select toolchain inputs, cache policy, deterministic query scheduling, or diagnostic and opt-out behavior.
 
@@ -2174,11 +2306,11 @@ A second set is read at runtime by the generated program, for the instrumentatio
 
 The runtime also has two compile-time switches. `-DPRISM_RT_DEBUG` inserts a structural validity check at every cell dereference (non-null, aligned, positive refcount, in-bounds field), aborting with a diagnostic instead of corrupting memory; the canonical way to turn it on is `PRISM_RT_CHECKS` (which adds the define to the `cc` invocation), and `PRISM_CC_FLAGS=-DPRISM_RT_DEBUG` also works. It is off by default so release builds and the parity oracle stay byte-identical and zero-overhead; it is the always-available structural backstop for builds where ASan/UBSan are unavailable. The `mimalloc` cargo feature routes the runtime's allocations through mimalloc.
 
-### 26.5 REPL Commands {#repl-commands}
+### 27.5 REPL Commands {#repl-commands}
 
 Inside the shell, input beginning with `:` is a command; anything else is an expression or declaration to evaluate. The full command set, the `:set` toggles, and the multi-line block syntax are documented under [the interactive shell](#the-interactive-shell).
 
-## 27. Diagnostics {#diagnostics}
+## 28. Diagnostics {#diagnostics}
 
 A diagnostic is a value, not a string. Every error the compiler can produce is a variant of a structured catalogue, each variant owning one stable `E`-code; the rendered message is payload, never the discriminator a caller or renderer matches on. A code is permanent once assigned, so a diagnostic can be looked up years later, scripted against, and searched, and a message can be reworded freely without breaking anything that keyed on the code.
 
@@ -2204,9 +2336,11 @@ Codes are banded by the phase and domain that owns them, walking the pipeline in
 
 The `E1xxx` through `E6xxx` bands are the type checker's structured catalogue, keyed by what the user wrote; the `E7xxx` bands are the phase errors that cross the compiler's API boundary, keyed by which subsystem failed. `E9999` is the internal-invariant band: a condition the compiler believed impossible, rendered with an apology and a request to report it, because an internal error is a compiler bug by definition. Warnings ride the same channel with the same discipline (a deprecation names the definition, the suggestion, and the use site) but never stop a build: by the determinism contract a warning is a diagnostic, not a semantic.
 
-## 28. Prism as a Library {#prism-as-a-library}
+## 29. Prism as a Library {#prism-as-a-library}
 
 The `prism` crate is usable as a compiler library when you want the language machinery without the CLI wrapper. The high-level entry points are: `prism::check(src)` type-checks a Rust `&str` and returns the inferred declarations, `prism::interpret(src)` runs it in the tree-walking interpreter with output captured in the returned `eval::Run`, and `prism::build_at(src, base, out)` / `prism::build_on(src, roots, out, cfg)` compile native binaries when the `native` feature is enabled. For live IO, use `prism::interpret_io_on(src, roots, out_sink, input, cfg)` or `prism::interpret_io_on_with_args` so stdin, stdout, argv, scheduler, optimizer level, and effect-lowering flags are all explicit values rather than ambient CLI state. For inspection, `prism::dump_on(phase, src, roots, cfg)`, `prism::core_of(src)`, `prism::core_ir(src)`, `prism::emit_ir(src)`, `prism::namespace_root(src, roots)`, and `prism::shape_digests_of(src)` are the same surfaces the command line uses.
+
+Underneath that surface the tree is a Cargo workspace, split bottom-up so a consumer can depend on the layer it needs instead of the whole compiler. `prism-common` holds the substrate every other layer shares: interned symbols, digests, the byte primitives, and the SCC and fixpoint machinery. `prism-syntax` holds keywords, canonical names, diagnostics, the lexer, the grammar, the AST, and the formatter. `prism-core` holds `DynFlags`, the type language, CBPV Core, and the typed passes over it. `prism-native` holds LLVM and MLIR emission and the C runtime build. `prism-store` holds the content-addressed disk store and `prism-lineage` the provenance graph and its queries. The root `prism` crate keeps the driver, the checker, the elaboration bridges, the interpreter, the CLI, and the WebAssembly entry points, and re-exports every moved module at its former `crate::` path, so the split is invisible to code written against the paths named in this chapter.
 
 The smallest embedding is just a string:
 
@@ -2247,7 +2381,7 @@ A different backend should start from Core, not from the surface language. The e
 
 In other words: the library API is quite usable and the compiler internals are fairly modular, so it should be easy to hack on if you feel so inclined to do something weird.
 
-## 29. Warranty {#warranty}
+## 30. Warranty {#warranty}
 
 Prism is released under the vanilla [MIT License](https://github.com/sdiehl/prism/blob/main/LICENSE). Which in lawyer speak is essentially, do whatever the fuck you like. Fork it, sell it, embed it in a toaster, put it in a spaceship. Whatever.
 

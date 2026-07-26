@@ -244,7 +244,14 @@ long prism_big_show(long a) {
     long n = big_mag(a);
     if (n == 0) return prism_str_lit("0", 1);
     unsigned long *t = malloc(prism_ckd_words_bytes(n));
-    unsigned long *chunk = malloc(prism_ckd_words_bytes(prism_ckd_ladd(n, 2)));
+    /* The base-10^19 chunking emits k = ceil(digits/19) chunks. Because
+     * 10^19 > 2^63, each division removes MORE than 63 of the 64n magnitude
+     * bits, so k can exceed n: k < 64n/63 + 1. Sizing `chunk` at n+2 (as an
+     * earlier version did) overflows the heap for n > 143 words (~2750-digit
+     * numbers), where the extra n/63 chunks write past the buffer. Allocate the
+     * true upper bound n + n/63 + 2. */
+    long chunk_cap = prism_ckd_ladd(prism_ckd_ladd(n, n / 63), 2);
+    unsigned long *chunk = malloc(prism_ckd_words_bytes(chunk_cap));
     if (!t || !chunk) abort();
     memcpy(t, big_limbs(a), prism_ckd_words_bytes(n));
     long k = 0;

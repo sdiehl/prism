@@ -394,13 +394,18 @@ pub struct Run {
     pub exit: Option<i32>,
 }
 
-// SplitMix64 default seed, shared with the C runtime so the interpreter and
-// native backends produce identical streams from an unseeded `rand`.
+// SplitMix64 default seed, shared with the C runtime (`PRISM_RNG_SEED` in
+// `runtime/prism_io.c`) so the interpreter and native backends produce
+// identical streams from an unseeded `rand`. This is a free choice of initial
+// state; it coincidentally equals the gamma below but is a distinct quantity
+// and may be changed without touching the generator's increment.
 const DEFAULT_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 
-// SplitMix64's Weyl-sequence increment (the "gamma", 2^64 / golden ratio). This
-// happens to equal the default seed but plays a distinct role: it advances the
-// internal state on every draw.
+// SplitMix64's Weyl-sequence increment (the "gamma", 2^64 / golden ratio),
+// `PRISM_RNG_GAMMA` in the C runtime. A fixed generator parameter that advances
+// the internal state on every draw. Its value coincides with the default seed
+// but is a separate quantity: editing one must not silently move the other,
+// which is why they are not pinned equal by any test.
 const SPLITMIX_GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
 
 const fn splitmix64(state: &mut u64) -> u64 {
@@ -2089,7 +2094,6 @@ mod tests {
     use super::{
         fmt_g, run_observed_lowered_with_args, run_observed_with_args, run_traced,
         runtime_oracle::rt_oracle, splitmix64, Builtin, Obs, Sym, Tape, TracedRun, DEFAULT_SEED,
-        SPLITMIX_GAMMA,
     };
 
     // `fmt_g` renders the shortest decimal that round-trips back to the same
@@ -2375,7 +2379,6 @@ mod tests {
     // only in the end-to-end corpus.
     #[test]
     fn splitmix64_matches_runtime() {
-        assert_eq!(DEFAULT_SEED, SPLITMIX_GAMMA);
         let mut state = DEFAULT_SEED;
         let golden: Vec<u64> = (0..4).map(|_| splitmix64(&mut state)).collect();
         assert_eq!(

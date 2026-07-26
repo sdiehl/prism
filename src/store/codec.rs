@@ -64,8 +64,10 @@ use std::collections::{BTreeMap, HashMap};
 // below is local. `put_str`/`put_uvarint`/`Reader` are re-exported so `store::cert`
 // serializes its own small envelopes through the same discipline.
 use crate::core::builtins::{Builtin, FloatOp};
-use crate::util::binary::{from_wire, put_indices, put_svarint, to_wire, MAX_EXPANSION, MAX_NODES};
-pub(crate) use crate::util::binary::{put_str, put_uvarint, Reader};
+use prism_common::binary::{
+    from_wire, put_indices, put_svarint, to_wire, MAX_EXPANSION, MAX_NODES,
+};
+pub(crate) use prism_common::binary::{put_str, put_uvarint, Reader};
 // Builtins and float ops are numbered by their per-row wire index, defined once
 // in `crate::core::builtins`. Re-exported here so the kont codec
 // (`crate::eval::kont`) numbers the same operators from the codec's table set.
@@ -1506,6 +1508,39 @@ mod tests {
             assert_eq!(to_wire(TAGS, tag), wire, "a pinned tag moved on the wire");
         }
         assert_eq!(TAGS.len(), 38, "a tag was added without pinning its value");
+    }
+
+    // The encode/decode agreement for the three `as u8`-discriminant tag
+    // families. Encoding writes `tag as u64` (the enum's declaration order);
+    // decoding reads `from_wire(ARRAY, n)` (the array position). Nothing else
+    // forces those two orderings to coincide, so a variant reordered in the
+    // enum but not the array (or the reverse) would silently reinterpret every
+    // definition already committed to a content-addressed store. This pins the
+    // invariant directly: for every tag, its discriminant equals its array
+    // position, so what encode writes is exactly what decode reads back.
+    #[test]
+    fn tag_discriminant_matches_array_position() {
+        for (index, tag) in TAGS.iter().enumerate() {
+            assert_eq!(
+                *tag as u64, index as u64,
+                "node tag {index} has a discriminant that disagrees with its `TAGS` position"
+            );
+            assert_eq!(to_wire(TAGS, *tag), index as u64);
+        }
+        for (index, tag) in REF_TAGS.iter().enumerate() {
+            assert_eq!(
+                *tag as u64, index as u64,
+                "ref tag {index} discriminant disagrees with its `REF_TAGS` position"
+            );
+            assert_eq!(to_wire(REF_TAGS, *tag), index as u64);
+        }
+        for (index, tag) in PAT_TAGS.iter().enumerate() {
+            assert_eq!(
+                *tag as u64, index as u64,
+                "pattern tag {index} discriminant disagrees with its `PAT_TAGS` position"
+            );
+            assert_eq!(to_wire(PAT_TAGS, *tag), index as u64);
+        }
     }
 
     // Unboxed products are ordinary elaborated values, so they must survive a

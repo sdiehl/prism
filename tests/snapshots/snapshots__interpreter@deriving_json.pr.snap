@@ -1,0 +1,16 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/deriving_json.pr
+---
+{"x":1,"y":2}
+{"$":"Circle","_0":{"x":1,"y":2},"_1":3}
+{"$":"Dot"}
+{"name":"s","origin":{"x":1,"y":2},"shapes":[{"$":"Circle","_0":{"x":1,"y":2},"_1":3},{"$":"Rect","corner":{"x":1,"y":2},"h":5,"w":4},{"$":"Dot"}]}
+true
+true
+true
+None
+None
+None
+=> ()

@@ -1,0 +1,3 @@
+-- An unknown backslash escape in a string: the lexer refuses this file. The
+-- fault lifts to the opening quote, the compiler's `LexError::Invalid` (E7000).
+fn main() = println("\y")

@@ -13,28 +13,28 @@ use super::typed::{
     TypedCore, VerifyEnv,
 };
 use super::{verify_typed_core, CoreFnSig};
-use crate::error::{
-    Error, TypeError, TypedCoreConstructionFailure, TypedCoreErasureFailure,
-    TypedCoreVerificationFailure, TypedCoreViolation,
-};
 use crate::hir::{self, CheckedHir, NodeRes};
-use crate::kw;
-use crate::names::{
-    self, dict_ctor, instance_method, DIV_MOD_METHOD, DIV_QUOT_METHOD, EQ_METHOD, NUM_ADD_METHOD,
-    NUM_FROMINT_METHOD, NUM_MUL_METHOD, NUM_NEG_METHOD, NUM_SUB_METHOD, ORD_METHOD,
-};
-use crate::sym::Sym;
-use crate::syntax::ast::{
-    Arm, BigInt, BinOp, Core as CorePhase, Expr, HandlerArm, IntLit, NodeId, PathOp, PathStep,
-    Pattern, Program, Spanned, Suffix, S,
-};
 use crate::types::ty::EffRow;
 use crate::types::{
     infer_expr_env, Checked, CtorInfo, Dict, Env, Type, CONS, DIV_CLASS, EQ_CLASS, LIST, NIL,
     NUM_CLASS, ORD_CLASS, SHOW_CLASS,
 };
-use crate::util::fresh::Fresh;
 use crate::wired::Indexable;
+use prism_common::fresh::Fresh;
+use prism_common::sym::Sym;
+use prism_syntax::ast::{
+    Arm, BigInt, BinOp, Core as CorePhase, Expr, HandlerArm, IntLit, NodeId, PathOp, PathStep,
+    Pattern, Program, Spanned, Suffix, S,
+};
+use prism_syntax::error::{
+    Error, TypeError, TypedCoreConstructionFailure, TypedCoreErasureFailure,
+    TypedCoreVerificationFailure, TypedCoreViolation,
+};
+use prism_syntax::kw;
+use prism_syntax::names::{
+    self, dict_ctor, instance_method, DIV_MOD_METHOD, DIV_QUOT_METHOD, EQ_METHOD, NUM_ADD_METHOD,
+    NUM_FROMINT_METHOD, NUM_MUL_METHOD, NUM_NEG_METHOD, NUM_SUB_METHOD, ORD_METHOD,
+};
 
 mod dict;
 mod match_compile;
@@ -81,7 +81,7 @@ const ELAB_GROW_STACK: usize = 8 * 1024 * 1024;
 // elaborator's exhaustive-match backstop. The typechecker rejects these first
 // (E1018); this only fires if that ordering ever changes.
 fn unboxed_unsupported(span: Span) -> Error {
-    crate::error::ErrKind::UnboxedUnsupported {
+    prism_syntax::error::ErrKind::UnboxedUnsupported {
         what: "values".into(),
     }
     .at(span)
@@ -854,9 +854,9 @@ impl Elab<'_> {
             Expr::Bool(b) => Comp::Return(Value::Bool(*b)),
             Expr::Unit => Comp::Return(Value::Unit),
             Expr::Str(s) => Comp::Return(Value::Str(s.clone())),
-            Expr::Hole(name) => {
-                Comp::Error(Value::Str(crate::error::typed_hole_fault(name, e.span)))
-            }
+            Expr::Hole(name) => Comp::Error(Value::Str(prism_syntax::error::typed_hole_fault(
+                name, e.span,
+            ))),
             // Bare `Null` is the nullary nullable constructor (tag 0, no payload).
             Expr::Var(x) if x == kw::CTOR_NULL && !locals.contains_key(x) => {
                 Comp::Return(Value::Ctor(x.clone().into(), kw::OR_NULL_TAG, vec![]))
@@ -1489,6 +1489,12 @@ fn pat_vars(p: &S<Pattern>, acc: &mut Locals) {
                 pat_vars(p2, acc);
             }
         }
+        // Alternatives bind the same names, so the first one names them all.
+        Pattern::Or(alts) => {
+            if let Some(first) = alts.first() {
+                pat_vars(first, acc);
+            }
+        }
     }
 }
 
@@ -1553,11 +1559,14 @@ pub fn elaborate(prog: &Program<CorePhase>, checked: &Checked) -> Result<Core, E
 
 /// Both representations consumed on either side of the typed boundary.
 ///
+/// The elaborated program in both of its boundary forms.
+///
 /// `compatibility` is the exact pre-optimizer identity surface. `typed` carries
 /// the same tree plus witnesses through the typed prefix before its sole semantic
 /// erasure. Keeping both avoids rebuilding witnesses or changing the
 /// content-addressed identity at the boundary.
-pub(crate) struct TypedElaboration {
+#[derive(Debug)]
+pub struct TypedElaboration {
     compatibility: Core,
     typed: TypedCore<TypedElaborated>,
     verify_env: VerifyEnv,
@@ -1565,17 +1574,17 @@ pub(crate) struct TypedElaboration {
 
 impl TypedElaboration {
     #[must_use]
-    pub(crate) const fn compatibility(&self) -> &Core {
+    pub const fn compatibility(&self) -> &Core {
         &self.compatibility
     }
 
     #[must_use]
-    pub(crate) fn into_compatibility(self) -> Core {
+    pub fn into_compatibility(self) -> Core {
         self.compatibility
     }
 
     #[must_use]
-    pub(crate) fn into_parts(self) -> (Core, TypedCore<TypedElaborated>, VerifyEnv) {
+    pub fn into_parts(self) -> (Core, TypedCore<TypedElaborated>, VerifyEnv) {
         (self.compatibility, self.typed, self.verify_env)
     }
 }
@@ -1586,7 +1595,7 @@ impl TypedElaboration {
 /// # Errors
 /// Fails when source elaboration, witness construction, or independent typed
 /// verification fails.
-pub(crate) fn elaborate_typed(
+pub fn elaborate_typed(
     prog: &Program<CorePhase>,
     checked: &Checked,
 ) -> Result<TypedElaboration, Error> {
@@ -1791,7 +1800,7 @@ pub(crate) fn elaborate_typed(
     signatures.append(&mut elab.show_sigs);
     let raw = Core { fns };
     let compatibility = raw.clone();
-    let mut verify_env = build_verify_env(checked)?;
+    let mut verify_env = build_verify_env(&checked.ctors, &checked.eff_ops)?;
     for constructor in super::opt::newtype_ctors(prog) {
         verify_env.mark_newtype_constructor(constructor);
     }
@@ -1808,7 +1817,8 @@ pub(crate) fn elaborate_typed(
     })
 }
 
-pub(crate) fn typed_verification_error(violations: Vec<super::typed::CoreViolation>) -> Error {
+#[must_use]
+pub fn typed_verification_error(violations: Vec<super::typed::CoreViolation>) -> Error {
     TypedCoreVerificationFailure {
         violations: violations
             .into_iter()

@@ -1,0 +1,137 @@
+-- | Span-addressed source edits that refuse rather than corrupt.
+--
+-- An edit is a byte span and its replacement text, which is the only edit
+-- vocabulary a tool built on the syntax seams needs: every artifact those seams
+-- publish addresses source by exact byte span, so a tool that computes spans can
+-- state its whole result as a list of them without ever holding a mutable
+-- buffer.
+--
+-- The apply step is where the guarantee lives. Edits are sorted by start offset
+-- (a stable sort, so two edits at the same offset keep the order the caller gave
+-- them), a span that runs backwards or past the end is refused, overlapping
+-- edits are refused, and the spliced result is re-lexed before it is returned.
+-- An edit set that would produce a file the lexer cannot read comes back as a
+-- structured refusal naming the lexer's own error, never as a corrupt file. That
+-- is the difference between a rename tool and a search-and-replace: this one
+-- fails closed.
+--
+-- The re-lex is a lexical check and nothing more. It catches an edit that
+-- unbalances a string, a hole, or a numeric literal; it does not claim the
+-- result parses, typechecks, or means what the caller intended.
+
+import Data.Foldable (length)
+
+import Data.List (foldl)
+
+import Syntax.Lex (..)
+
+import Syntax.Source (..)
+
+-- | One edit: the byte span it replaces and the text that replaces it. An
+-- insertion is an empty span, a deletion is empty text.
+pub type Edit = Edit { span: Span, text: String }
+
+-- | Why an edit set was refused. Every case names the offending span, so a tool
+-- can point at the edit it got wrong.
+pub type EditError
+  = EdBadSpan(Span)
+  | EdPastEnd(Span, Int)
+  | EdOverlap(Span, Span)
+  | EdRelex(LexError)
+  deriving (Eq, Show)
+
+-- | An insertion at one offset.
+pub fn ed_insert_at(offset : Int, text : String) : Edit =
+  Edit {
+    span = Span { lo = offset, hi = offset },
+    text = text
+  }
+
+-- | A deletion of one span.
+pub fn ed_delete(span : Span) : Edit = Edit { span = span, text = "" }
+
+-- | A replacement of one span.
+pub fn ed_replace(span : Span, text : String) : Edit =
+  Edit { span = span, text = text }
+
+-- | The current text under a span, or `None` when the span does not address
+-- this text. What a rename reads to check that an occurrence still says what the
+-- plan assumed.
+pub fn ed_span_text(text : String, s : Span) : Option(String) =
+  if span_valid(s) && s.hi <= str_len(text) then
+    Some(substring(text, s.lo, span_len(s)))
+  else
+    None
+
+-- | A human-readable account of a refusal.
+pub fn ed_message(e : EditError) : String =
+  match e of
+    EdBadSpan(s) => "edit span {show(s.lo)}..{show(s.hi)} is not well formed"
+    EdPastEnd(s, n) =>
+      "edit span {show(s.lo)}..{show(s.hi)} runs past the end of {show(n)} bytes"
+    EdOverlap(a, b) =>
+      "edits {show(a.lo)}..{show(a.hi)} and {show(b.lo)}..{show(b.hi)} overlap"
+    EdRelex(le) => "the edited text does not lex: {lex_message(le)}"
+
+-- | The edits sorted by start offset, stably: two edits starting at the same
+-- offset keep their input order, so a caller that means "insert A then B here"
+-- gets it.
+pub fn ed_sort(edits : List(Edit)) : List(Edit) = foldl(ed_place, Nil, edits)
+
+fn ed_place(sorted : List(Edit), e : Edit) : List(Edit) =
+  match sorted of
+    Nil => [e]
+    Cons(x, rest) =>
+      if x.span.lo <= e.span.lo then
+        Cons(x, ed_place(rest, e))
+      else
+        Cons(e, sorted)
+
+-- | Apply an edit set to a source text.
+--
+-- The result is the spliced text when every edit is well formed, the edits do
+-- not overlap, and the splice still lexes. Otherwise it is the first refusal
+-- found, in that order.
+pub fn ed_apply(text : String, edits : List(Edit)) : Result(String, EditError) =
+  match ed_splice(text, ed_sort(edits), 0, None, "") of
+    Err(e) => Err(e)
+    Ok(out) => ed_relex(out)
+
+-- | How many edits an edit set holds: the count a plan reports before anything
+-- is applied.
+pub fn ed_count(edits : List(Edit)) : Int = length(edits)
+
+fn ed_relex(out : String) : Result(String, EditError) =
+  match lex_raw(out) of
+    Err(le) => Err(EdRelex(le))
+    Ok(_) => Ok(out)
+
+fn ed_splice(
+  text : String,
+  edits : List(Edit),
+  at : Int,
+  prev : Option(Span),
+  acc : String
+) : Result(String, EditError) =
+  match edits of
+    Nil => Ok(concat(acc, substring(text, at, str_len(text) - at)))
+    Cons(e, rest) =>
+      if not(span_valid(e.span)) then
+        Err(EdBadSpan(e.span))
+      elif e.span.hi > str_len(text) then
+        Err(EdPastEnd(e.span, str_len(text)))
+      elif e.span.lo < at then
+        Err(EdOverlap(ed_prev_span(prev, e.span), e.span))
+      else
+        ed_splice(
+            text,
+            rest,
+            e.span.hi,
+            Some(e.span),
+            concat(concat(acc, substring(text, at, e.span.lo - at)), e.text),
+          )
+
+fn ed_prev_span(prev : Option(Span), here : Span) : Span =
+  match prev of
+    Some(s) => s
+    None => here

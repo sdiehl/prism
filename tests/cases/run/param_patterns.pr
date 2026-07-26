@@ -1,0 +1,62 @@
+-- Parameters written as patterns, and alternation in a match arm. A parameter
+-- pattern must be irrefutable, so every one below is on a single-constructor
+-- type, a tuple, or a record.
+type Wrapper = Wrap(Int)
+
+type Point = Point { x: Int, y: Int }
+
+-- `Div` alone would shadow the prelude's `Div` class in the one flat namespace
+-- user names share with it, so the constructors carry the type's name.
+type Op
+  = OpAdd
+  | OpSub
+  | OpMul
+  | OpDiv
+
+type Shape = Circle(Int) | Rect(Int, Int)
+
+fn unwrap(Wrap(n)) = n
+
+fn abscissa(Point { x = x, y = _ }) = x
+
+fn diagonal(Point { x = x, .. }) = x
+
+fn swap((a, b)) = (b, a)
+
+fn shift(Wrap(n), by) = n + by
+
+fn corner(Point { x = x, y = y }, Wrap(k)) = x * k + y
+
+fn is_additive(o) =
+  match o of
+    OpAdd | OpSub => true
+    OpMul | OpDiv => false
+
+fn area(s) =
+  match s of
+    Circle(r) => 3 * r * r
+    Rect(w, h) => w * h
+
+fn tag(s) =
+  match s of
+    Circle(0) | Rect(0, _) => 0
+    Circle(_) => 1
+    Rect(_, _) => 2
+
+fn main() =
+  let u1 = println(unwrap(Wrap(42)))
+  let u2 = println(abscissa(Point { x = 7, y = 8 }))
+  let u3 = println(diagonal(Point { x = 9, y = 1 }))
+  let (a, b) = swap((1, 2))
+  let u4 = println(a * 10 + b)
+  let u5 = println(shift(Wrap(5), 3))
+  let u6 = println(corner(Point { x = 2, y = 3 }, Wrap(4)))
+  let apply = \(Wrap(n)) -> n * 2
+  let u7 = println(apply(Wrap(21)))
+  let u8 = println(if is_additive(OpAdd) then 1 else 0)
+  let u9 = println(if is_additive(OpMul) then 1 else 0)
+  let u10 = println(area(Circle(2)))
+  let u11 = println(area(Rect(3, 4)))
+  let u12 = println(tag(Circle(0)))
+  let u13 = println(tag(Rect(0, 9)))
+  println(tag(Rect(5, 9)))

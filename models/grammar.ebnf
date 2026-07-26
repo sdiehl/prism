@@ -1,9 +1,10 @@
 (* Prism surface grammar -- the single source of truth.
 
    This is hand-written documentation that mirrors the real parser in
-   src/syntax/grammar.lalrpop (terminal spellings from src/lex/token.rs, AST
-   node names from src/syntax/ast.rs). Its keyword coverage is machine-checked:
-   a test (tests/grammar_ebnf.rs) fails if the lexer defines a reserved word
+   crates/prism-syntax/src/grammar.lalrpop (terminal spellings from
+   crates/prism-syntax/src/lex/token.rs, AST node names from
+   crates/prism-syntax/src/ast.rs). Its keyword coverage is machine-checked:
+   a test (tests/language/grammar_ebnf.rs) fails if the lexer defines a reserved word
    this file never mentions as a terminal. Structure and precedence are not
    checked, so treat the lalrpop file as authoritative for fine precedence
    detail where the two ever disagree. The reference manual (docs/src/spec.md) renders the sections below
@@ -98,7 +99,10 @@ fundecl   ->  [ "logic" ] [ "test" ] [ [ "assume" ] "total" ] [ "replayable" ] [
                 -- "test" and "total"/"assume" are contextual
                 -- declaration modifiers, not reserved words, so all three stay
                 -- usable as ordinary identifiers everywhere else
-param     ->  [ "borrow" ] varid [ ":" type ] [ ":=" expr ]
+param     ->  [ "borrow" ] pattern [ ":" type ] [ ":=" expr ]
+                -- a bare varid (or "_") is the ordinary named parameter and binds
+                -- without testing; any other pattern is matched around the body and
+                -- must be irrefutable, so it has no name to pass by keyword
 retann    ->  ":" type [ decleff ]              -- result first, e.g. `: Int ! {State}`
 decleff   ->  "!" "{" [ label , ... ] "}"       -- the declaration's effect row (closed)
            |  "!"                                -- an explicit empty effect row
@@ -169,9 +173,9 @@ label   ->  conid [ "(" type , ... ")" ]
 
 (* ANCHOR: expr *)
 expr    ->  "if" expr "then" expr { "elif" expr "then" expr } "else" expr
-         |  "let" pattern "=" expr  expr            -- bind, then continue
+         |  "let" ( varid | letpat ) "=" expr  expr -- bind, then continue
          |  "var" varid ":=" expr  expr             -- local mutable, then continue
-         |  "\\" "(" [ varid , ... ] ")" "->" expr  -- lambda
+         |  "\\" "(" [ param , ... ] ")" "->" expr  -- lambda
          |  "match" expr "of" { arm }
          |  "handle" expr "with" handler
          |  "with" [ varid "<-" ] "handler" handler  expr  -- scoped handler (named if `x <-`), then continue
@@ -236,7 +240,8 @@ binop    ->  "??" | "|>" | ">>" | "<<" | "||" | "&&" -- binding given in 4.1
 (* ANCHOR_END: expr *)
 
 (* ANCHOR: pattern *)
-pattern  ->  conid [ "(" pattern , ... ")" ]        -- constructor
+pattern  ->  patalt { "|" patalt }                   -- alternation: any alternative matches
+patalt   ->  conid [ "(" pattern , ... ")" ]         -- constructor
           |  conid "{" fieldpat , ... "}"            -- record, ".." allowed
           |  varid                                    -- variable binding
           |  "_"                                      -- wildcard
@@ -246,6 +251,9 @@ pattern  ->  conid [ "(" pattern , ... ")" ]        -- constructor
           |  "[" [ pattern , ... ] "]"                -- list
           |  "(" pattern "," pattern , ... ")"        -- tuple
 fieldpat ->  varid "=" pattern  |  ".."
+letpat   ->  conid [ "(" pattern , ... ")" ]         -- a `let` destructures with a
+          |  "(" pattern "," pattern , ... ")"       -- constructor or tuple pattern only,
+                                                     -- and admits no alternation
 (* ANCHOR_END: pattern *)
 
 (* ANCHOR: handler *)

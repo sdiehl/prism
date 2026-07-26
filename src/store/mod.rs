@@ -19,7 +19,6 @@
 /// a parity-passed record keyed by hash.
 /// The Incr durable-snapshot bridge: a named blob rides the store's object layer
 /// (keyed by content hash) with a ref for the caller tag; see [`bridge`].
-pub mod bridge;
 pub mod cert;
 pub mod codec;
 /// Store-level instance coherence.
@@ -27,51 +26,14 @@ pub mod codec;
 /// The canonical `(class, head) -> instance-hash` bindings and the cross-program
 /// conflict error; see [`coherence`].
 pub mod coherence;
+/// Committing an elaborated program's definitions into the store.
+pub mod commit;
+pub use commit::commit_program;
+pub use prism_store::bridge;
 /// The on-disk two-layer store that holds the codec's bytes; see [`disk::Store`].
-pub mod disk;
+pub use prism_store::disk;
 /// Verification caching over the store: a hash that passed a check is a recorded
 /// pass, not a re-run; see [`verify`].
 pub mod verify;
 
-/// The parse failures a hostile or stale `def` frame can produce. Decode is
-/// total: every malformed input lands on one of these rather than a panic.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CodecError {
-    /// The scheme tag was absent or not [`crate::core::HASH_SCHEME`].
-    Scheme,
-    /// The kind varint was not the `def` kind.
-    Kind,
-    /// A varint ran past its byte cap, or the buffer ended mid-value.
-    Truncated,
-    /// A length prefix (string, list, or table) exceeded its named bound.
-    TooLarge,
-    /// A tag, op discriminant, or node reference had no valid interpretation.
-    Malformed,
-    /// A node or dependency index pointed outside its table.
-    BadReference,
-    /// The reconstructed graph exceeded the node-expansion budget.
-    DepthLimit,
-    /// Bytes remained after the frame was fully decoded.
-    TrailingBytes,
-    /// A string field held bytes that were not valid UTF-8.
-    Utf8,
-}
-
-impl std::fmt::Display for CodecError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let msg = match self {
-            Self::Scheme => "unrecognized or missing wire scheme tag",
-            Self::Kind => "frame is not the expected wire kind",
-            Self::Truncated => "input ended inside a value or a varint ran too long",
-            Self::TooLarge => "a length prefix exceeded its bound",
-            Self::Malformed => "a tag or discriminant had no valid interpretation",
-            Self::BadReference => "a node or dependency index was out of range",
-            Self::DepthLimit => "the reconstructed graph exceeded the expansion budget",
-            Self::TrailingBytes => "trailing bytes after the decoded frame",
-            Self::Utf8 => "a string field was not valid UTF-8",
-        };
-        f.write_str(msg)
-    }
-}
-
-impl std::error::Error for CodecError {}
+pub use prism_common::binary::CodecError;

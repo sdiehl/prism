@@ -337,6 +337,7 @@ fn case_over(
             pat,
             guard: None,
             body,
+            alt: false,
         });
     }
     // The pass-through arm is for constructors no path touched; drop it when the
@@ -347,6 +348,7 @@ fn case_over(
             pat: spat(Pattern::Wild, synth_span(cx)),
             guard: None,
             body: target.clone(),
+            alt: false,
         });
     }
     Ok(sp(Expr::Match(Box::new(target), arms), synth_span(cx)))
@@ -499,6 +501,7 @@ fn to_list_case(
         pat,
         guard: None,
         body,
+        alt: false,
     }];
     // Drop the unreachable pass-through arm when the type has one constructor.
     if cx.ctor_total.get(ctor).copied() != Some(1) {
@@ -506,6 +509,7 @@ fn to_list_case(
             pat: spat(Pattern::Wild, synth_span(cx)),
             guard: None,
             body: nil(cx),
+            alt: false,
         });
     }
     Ok(sp(Expr::Match(Box::new(focus), arms), synth_span(cx)))

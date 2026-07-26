@@ -8,8 +8,6 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 #[cfg(feature = "native")]
-use crate::codegen::rt::{runtime_profile_digest, RuntimeProfile};
-#[cfg(feature = "native")]
 use crate::core::{pass_fingerprint, LoweredCore, PassStage};
 #[cfg(feature = "native")]
 use crate::error::Error;
@@ -21,6 +19,8 @@ use crate::resolve::Root;
 use crate::store::disk::{atomic_write, resolve_store_path, Store, Written};
 #[cfg(feature = "native")]
 use crate::types::CtorInfo;
+#[cfg(feature = "native")]
+use prism_native::rt::{runtime_profile_digest, RuntimeProfile};
 
 #[cfg(feature = "native")]
 use super::identity::compiler_binary_fingerprint;

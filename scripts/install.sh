@@ -10,7 +10,8 @@
 # binary to ~/.local/bin. No sudo, no arbitrary code from the tarball is run.
 #
 # Supported platforms: macOS on Apple Silicon, Linux (glibc) on x86_64 and
-# aarch64. Alpine/musl users should install the apk from the releases page.
+# aarch64. Alpine/musl is not supported by the prebuilt binary (it is
+# glibc-linked); use the bundled container image `ghcr.io/sdiehl/prism` instead.
 #
 # If Nix is installed, the installer uses it instead: `nix profile install
 # github:sdiehl/prism`, where the flake pin and the Nix store's own hash
@@ -60,7 +61,7 @@ detect_target() {
       ;;
     Linux)
       if [ -f /etc/alpine-release ] || (ldd --version 2>&1 | grep -qi musl); then
-        err "musl libc detected; install the apk from https://github.com/$REPO/releases instead"
+        err "musl libc detected; the prebuilt binary is glibc-linked and will not run. Use the container image: docker run ghcr.io/$REPO"
       fi
       case "$arch" in
         x86_64) TARGET="x86_64-unknown-linux-gnu" ;;

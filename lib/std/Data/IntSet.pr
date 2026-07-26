@@ -1,0 +1,177 @@
+-- | Sets of 64-bit integers, reusing the patricia trie.
+--
+-- An `IntSet` is `IntMap(Unit)`, the same big-endian radix trie carrying no
+-- payload, exactly as `Data.Set` is `Data.Map` at `Unit`. Sharing the type
+-- rather than declaring a second one keeps a single trie implementation, so the
+-- canonical-shape argument in `Data.IntMap` is made once and covers both: a set
+-- is determined by its elements, its iteration order is ascending regardless of
+-- insertion order, and structural equality is set equality. Set algebra is the
+-- map algebra at `Unit`, where the union's left bias cannot be observed. Sharing
+-- the type also avoids a second instance head; instance resolution keys on the
+-- head type constructor, so a distinct `IntSet` newtype would need its own `Eq`
+-- and `Show` while an alias-free reuse inherits `IntMap`'s.
+--
+-- Elements are `I64` for the reason keys are in `Data.IntMap`: branching is a
+-- bit test on a fixed-width word. Opt-in: not in Base.
+
+import Data.IntMap (IntMap, intmap_empty, intmap_singleton, intmap_insert, intmap_member, intmap_delete, intmap_size, intmap_is_empty, intmap_union, intmap_intersection, intmap_difference, intmap_filter, intmap_fold, intmap_keys)
+
+import Data.List (foldl, map)
+
+-- | The empty set.
+pub let intset_empty : IntMap(Unit) = intmap_empty
+
+-- | The set containing `x` alone.
+--
+-- ```prism
+-- intset_to_list(intset_singleton(7i64))
+-- ```
+-- ```output
+-- [7]
+-- ```
+pub fn intset_singleton(x : I64) : IntMap(Unit) = intmap_singleton(x, ())
+
+-- | Add `x` (a no-op when already present).
+--
+-- ```prism
+-- intset_to_list(intset_insert(2i64, intset_insert(1i64, intset_empty)))
+-- ```
+-- ```output
+-- [1, 2]
+-- ```
+pub fn intset_insert(x : I64, s : IntMap(Unit)) : IntMap(Unit) =
+  intmap_insert(x, (), s)
+
+-- | True when `x` is a member.
+--
+-- ```prism
+-- intset_member(2i64, intset_from_list([1i64, 2i64, 3i64]))
+-- ```
+-- ```output
+-- true
+-- ```
+pub fn intset_member(x : I64, s : IntMap(Unit)) : Bool = intmap_member(x, s)
+
+-- | Remove `x` (a no-op when absent).
+--
+-- ```prism
+-- intset_to_list(intset_delete(2i64, intset_from_list([1i64, 2i64, 3i64])))
+-- ```
+-- ```output
+-- [1, 3]
+-- ```
+pub fn intset_delete(x : I64, s : IntMap(Unit)) : IntMap(Unit) = intmap_delete(x, s)
+
+-- | The number of elements.
+--
+-- ```prism
+-- intset_size(intset_from_list([1i64, 2i64, 2i64, 3i64]))
+-- ```
+-- ```output
+-- 3
+-- ```
+pub fn intset_size(s : IntMap(Unit)) : Int = intmap_size(s)
+
+-- | True when the set has no elements.
+--
+-- ```prism
+-- intset_is_empty(intset_empty)
+-- ```
+-- ```output
+-- true
+-- ```
+pub fn intset_is_empty(s : IntMap(Unit)) : Bool = intmap_is_empty(s)
+
+-- | The elements in ascending order, negatives first.
+--
+-- ```prism
+-- intset_to_list(intset_from_list([3i64, 1i64, 2i64, 1i64]))
+-- ```
+-- ```output
+-- [1, 2, 3]
+-- ```
+pub fn intset_to_list(s : IntMap(Unit)) : List(I64) = intmap_keys(s)
+
+-- | Build a set from a list, dropping duplicates.
+--
+-- ```prism
+-- intset_to_list(intset_from_list([3i64, 1i64, 2i64, 1i64]))
+-- ```
+-- ```output
+-- [1, 2, 3]
+-- ```
+pub fn intset_from_list(xs : List(I64)) : IntMap(Unit) =
+  foldl(\(acc, x) -> intset_insert(x, acc), intset_empty, xs)
+
+-- | Every element in either set, merged by walking the two tries together.
+--
+-- ```prism
+-- intset_to_list(intset_union(intset_from_list([1i64, 2i64]), intset_from_list([2i64, 3i64])))
+-- ```
+-- ```output
+-- [1, 2, 3]
+-- ```
+pub fn intset_union(s1 : IntMap(Unit), s2 : IntMap(Unit)) : IntMap(Unit) =
+  intmap_union(s1, s2)
+
+-- | The elements in both sets.
+--
+-- ```prism
+-- intset_to_list(
+--   intset_intersection(
+--     intset_from_list([1i64, 2i64, 3i64]),
+--     intset_from_list([2i64, 3i64, 4i64]),
+--   ),
+-- )
+-- ```
+-- ```output
+-- [2, 3]
+-- ```
+pub fn intset_intersection(s1 : IntMap(Unit), s2 : IntMap(Unit)) : IntMap(Unit) =
+  intmap_intersection(s1, s2)
+
+-- | The elements of `s1` that are not in `s2`.
+--
+-- ```prism
+-- intset_to_list(
+--   intset_difference(intset_from_list([1i64, 2i64, 3i64]), intset_from_list([2i64, 3i64])),
+-- )
+-- ```
+-- ```output
+-- [1]
+-- ```
+pub fn intset_difference(s1 : IntMap(Unit), s2 : IntMap(Unit)) : IntMap(Unit) =
+  intmap_difference(s1, s2)
+
+-- | The elements satisfying `keep`.
+--
+-- ```prism
+-- intset_to_list(intset_filter(\(x) -> x > 1i64, intset_from_list([1i64, 2i64, 3i64])))
+-- ```
+-- ```output
+-- [2, 3]
+-- ```
+pub fn intset_filter(keep, s : IntMap(Unit)) : IntMap(Unit) =
+  intmap_filter(\(x, _u) -> keep(x), s)
+
+-- | Fold `f(acc, x)` over the elements in ascending order.
+--
+-- ```prism
+-- intset_fold(\(acc, x) -> acc + x, 0i64, intset_from_list([1i64, 2i64, 3i64]))
+-- ```
+-- ```output
+-- 6
+-- ```
+pub fn intset_fold(f, z : b, s : IntMap(Unit)) : b =
+  intmap_fold(\(acc, k, _u) -> f(acc, k), z, s)
+
+-- | Apply `f` to every element, rebuilding the set (`f` need not be injective).
+--
+-- ```prism
+-- intset_to_list(intset_map(\(x) -> x * 2i64, intset_from_list([1i64, 2i64, 3i64])))
+-- ```
+-- ```output
+-- [2, 4, 6]
+-- ```
+pub fn intset_map(f, s : IntMap(Unit)) : IntMap(Unit) =
+  intset_from_list(map(f, intset_to_list(s)))

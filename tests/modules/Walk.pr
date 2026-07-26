@@ -1,0 +1,13 @@
+-- A traversal module of the kind a compiler-authoring library wants to write:
+-- plain short names, no defensive prefix, even where the prelude or a sibling
+-- module already uses the same word.
+
+pub fn children(n : Int) : Int = n * 2
+
+pub fn fresh(n : Int) : Int = n + 1
+
+pub fn apply(f : (Int) -> Int, x : Int) : Int = f(x)
+
+-- `map` is what the prelude glob-imports from Data.List. An importer's own
+-- import outranks the prelude's, so this one wins unqualified.
+pub fn map(x : Int) : Int = x - 1

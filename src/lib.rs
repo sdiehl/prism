@@ -6,20 +6,21 @@
 //! it. The load-bearing guarantee is that **merged Core is the semantic
 //! authority**, so the surface is organized around consuming and producing Core:
 //!
-//! - [`core`] — the call-by-push-value Core IR and its content-addressed
+//! - [`core`]: the call-by-push-value Core IR and its content-addressed
 //!   identity. A custom front end lowers to it; a custom back end reads it.
-//! - [`codegen`] — the [`codegen::Isa`] trait and [`codegen::emit_with_isa`]:
+//! - [`codegen`]: the [`codegen::Isa`] trait and [`codegen::emit_with_isa`]:
 //!   implement `Isa` to reuse Prism's semantic Core-to-instruction lowering for
 //!   an out-of-tree backend.
 //! - The front-end phases a custom front end can reuse to reach Core:
 //!   [`lex`], [`parse`], [`resolve`], [`syntax`] (desugaring), [`hir`],
 //!   [`types`], the versioned syntax exports (`dump syntax-tokens` /
-//!   `surface-syntax`), and the resolved/checked inspection dumps
-//!   (`dump tc-input` / `tc-facts` / `elab-input`).
-//! - [`driver`] — the compile entry points (`check`, `dump`, `build`,
+//!   `surface-syntax` / `syntax-diagnostics`), and the resolved/checked
+//!   inspection dumps (`dump tc-input` / `resolved-syntax` / `tc-facts` /
+//!   `elab-input`).
+//! - [`driver`]: the compile entry points (`check`, `dump`, `build`,
 //!   `interpret`, the durable-run and patch surfaces), most re-exported at the
 //!   crate root below.
-//! - [`eval`] — the interpreter, the differential oracle every backend matches.
+//! - [`eval`]: the interpreter, the differential oracle every backend matches.
 //! - Supporting durable and diagnostic types: [`error`], [`flags`], [`sym`],
 //!   [`names`], [`resolve::Root`], [`store`], [`lineage`], [`stdlib`].
 //!
@@ -47,7 +48,8 @@ extern crate libmimalloc_sys as _;
 // Public intentionally: external compiler hackers can implement `codegen::Isa`
 // and reuse Prism's semantic Core-to-instruction lowering for experimental
 // out-of-tree backends.
-pub mod codegen;
+#[cfg(feature = "native")]
+pub use prism_native as codegen;
 // The CLI command bodies. Native-only: it drives clap parsing, project builds, the
 // package manager, and the interpreter, none of which exist in a wasm build.
 #[cfg(feature = "native")]
@@ -58,19 +60,19 @@ pub mod debug;
 // its intended surface is the crate-root re-exports below, not the module.
 pub(crate) mod docs;
 pub mod driver;
-pub mod error;
+pub use prism_syntax::error;
 pub mod eval;
-pub mod flags;
+pub use prism_core::flags;
 // Internal: the intended surface is the crate-root re-exports (`format`,
 // `format_check`, `format_wire_accept`), not the module's helpers.
-pub(crate) mod fmt;
+pub use prism_syntax::fmt;
 pub mod hir;
 // Internal: keyword tables are a lexer/parser detail, never a library commitment.
-pub(crate) mod kw;
-pub mod lex;
+pub(crate) use prism_syntax::kw;
+pub use prism_syntax::lex;
 pub mod lineage;
-pub mod names;
-pub mod parse;
+pub use prism_syntax::names;
+pub use prism_syntax::parse;
 pub mod patch;
 // The package manager is native-only: it drives `crate::project` builds and the
 // disk transport, neither of which exists in a wasm build, and every use site
@@ -82,18 +84,20 @@ pub mod project;
 #[cfg(feature = "native")]
 pub mod repl;
 pub mod resolve;
-pub mod stable_lock;
+pub mod stable;
+pub use stable::lock as stable_lock;
 pub mod stdlib;
 pub mod store;
-pub mod sym;
+pub use prism_common::sym;
 pub mod syntax;
 pub(crate) mod tc;
 // `prism test` discovery and the harness runner. Native-only: it drives the CLI,
 // the project loader, and the interpreter, none of which exist in a wasm build.
 #[cfg(feature = "native")]
 pub mod testing;
+#[path = "types.rs"]
 pub mod types;
-pub(crate) mod util;
+
 // Internal: `prism verify` is driven through the CLI; the module exposes no
 // public items, so it is not a library surface.
 pub(crate) mod verify;
@@ -102,12 +106,10 @@ pub mod wasm;
 // Internal: the compiler's wired-in stdlib symbol table, not a library surface.
 pub(crate) mod wired;
 
-/// Inclusive byte bounds of the printable ASCII range.
-///
-/// Bytes outside `LO..=HI` are non-printable and get escaped by the string
-/// emitters (`codegen::emit`, `wasm`); shared here so both agree on the range.
-pub const ASCII_PRINTABLE_LO: u8 = 0x20;
-pub const ASCII_PRINTABLE_HI: u8 = 0x7E;
+// The printable-ASCII byte bounds live in `prism_common`; re-exported at the
+// crate root so `crate::ASCII_PRINTABLE_*` keeps resolving for the wasm and
+// native string emitters, which share the range.
+pub use prism_common::{ASCII_PRINTABLE_HI, ASCII_PRINTABLE_LO};
 
 pub use core::{CorePass, EffectStrategy, OptLevel, PassSpec, EFFECT_TIERS};
 pub use docs::{
@@ -151,10 +153,11 @@ pub use error::{
     LexError, ParseError, TypeError, TYPED_HOLE,
 };
 pub use flags::{DynFlags, EffectTier, WarnDupes};
-pub use fmt::{format, format_check, format_wire_accept};
 pub use lineage::provenance::{Observation, ObservationTrace, OBSERVATION_TRACE_FORMAT};
+pub use prism_syntax::fmt::{format, format_check};
 pub use resolve::{
     default_roots, project_roots, project_roots_with_packages_and_std, project_roots_with_std, Root,
 };
+pub use stable::wire_fmt::format_wire_accept;
 pub use sym::Sym;
 pub use types::{show_effects, TypecheckSeed};

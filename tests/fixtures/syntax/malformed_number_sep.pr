@@ -1,0 +1,4 @@
+-- A misplaced digit separator: the lexer refuses this file at the `_`, the
+-- compiler's `LexError::NumberSeparator` (E7004). A `_` must sit between two
+-- digits, so a trailing one is malformed.
+fn main() = println(show_int(1_))

@@ -107,6 +107,8 @@ tests/cases/run/control_validate.pr: whole-program-free-monad
 tests/cases/run/curry_effect.pr: evidence
 tests/cases/run/deep_effect_recursion.pr: state-fusion
 tests/cases/run/default_or.pr: selective-free-monad
+tests/cases/run/deriving_json.pr: whole-program-free-monad
+tests/cases/run/deriving_plate.pr: whole-program-free-monad
 tests/cases/run/eff_closure_arg.pr: whole-program-free-monad
 tests/cases/run/eff_eta_thunk.pr: whole-program-free-monad
 tests/cases/run/eff_fn_list.pr: whole-program-free-monad
@@ -134,6 +136,7 @@ tests/cases/run/incr_diff.pr: whole-program-free-monad
 tests/cases/run/indexing_ops.pr: selective-free-monad
 tests/cases/run/interp_effects.pr: evidence
 tests/cases/run/interp_show.pr: evidence
+tests/cases/run/intmap.pr: whole-program-free-monad
 tests/cases/run/law_fail.pr: whole-program-free-monad
 tests/cases/run/law_reader.pr: whole-program-free-monad
 tests/cases/run/law_state.pr: whole-program-free-monad
@@ -153,6 +156,7 @@ tests/cases/run/quickcheck_detect.pr: whole-program-free-monad
 tests/cases/run/read_bad_utf8.pr: evidence
 tests/cases/run/reified_under_world.pr: whole-program-free-monad
 tests/cases/run/replayable_ok.pr: evidence
+tests/cases/run/rewrite_strategies.pr: whole-program-free-monad
 tests/cases/run/rollback.pr: selective-free-monad
 tests/cases/run/scc_effect_row.pr: evidence
 tests/cases/run/stable_ladder.pr: whole-program-free-monad
@@ -160,6 +164,8 @@ tests/cases/run/stable_migrations.pr: selective-free-monad
 tests/cases/run/stream_take.pr: state-fusion
 tests/cases/run/streams_edge.pr: state-fusion
 tests/cases/run/sugar_if.pr: evidence
+tests/cases/run/syntax_hostile.pr: whole-program-free-monad
+tests/cases/run/syntax_walk.pr: evidence
 tests/cases/run/tensor.pr: selective-free-monad
 tests/cases/run/thunk_effect_absorb.pr: whole-program-free-monad
 tests/cases/run/tuple_eq_ord.pr: selective-free-monad

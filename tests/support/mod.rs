@@ -45,6 +45,7 @@ const FINGERPRINT_SOURCE: &str = "source";
 /// leaves the cache warm.
 const COMPILER_SOURCE_ROOTS: &[&str] = &[
     "src",
+    "crates",
     "runtime",
     "lib",
     "build.rs",
@@ -297,7 +298,11 @@ pub fn cleanup_bin(bin: &Path) {
 }
 
 /// A per-case, per-process temp path for a native binary. The process id keeps
-/// concurrent test binaries (parity vs tier) from colliding.
+/// concurrent test binaries (parity vs tier) from colliding; within one binary
+/// the caller's `tag` is what separates concurrent tests, so two `#[test]`
+/// threads that build the same `stem` must not pass the same tag. They would
+/// otherwise share this path, and one test's cleanup deletes the object
+/// directory the other's C compiler is still writing into.
 pub fn temp_bin(tag: &str, stem: &str) -> PathBuf {
     env::temp_dir().join(format!("prism_parity_{tag}_{}_{stem}", std::process::id()))
 }
