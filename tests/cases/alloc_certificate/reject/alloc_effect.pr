@@ -1,10 +1,10 @@
 -- A performed `alloc` is a fresh cell serviced from an arena, cheaper but not
 -- absent, so an `@ noalloc` function that performs it is rejected exactly like
 -- one that builds a fresh constructor: arenas and the allocation certificate
--- stay orthogonal and honest.
-effect Alloc
-  once alloc(Int) : Cell
+-- stay orthogonal and honest. The operation is imported rather than redeclared:
+-- an operation belongs to the module that declares it, so only the real
+-- `Arena.alloc` carries this meaning and a lookalike of the same bare name is
+-- an ordinary effect the certificate says nothing about.
+import Arena
 
-type Cell = Cell(Int)
-
-fn grab(n : Int) : Cell @ noalloc ! {Alloc} = alloc(n)
+fn grab(n : Int) : Arena.Cell @ noalloc ! {Arena.Alloc} = Arena.alloc(n)
