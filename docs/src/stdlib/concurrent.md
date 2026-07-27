@@ -44,7 +44,7 @@ The outcome of `try_await`: a fiber that completed with a value, or one that was
 
 ### `Async`
 
-```prism,def,h-9f39d182a2558cbecaaede66556e99c0d20c8e70e9747b9edaaca2d0bed3a606
+```prism,def,h-2c9563b7edbc70ee99492d949789e1de0f0a3cefd9336978bd743e17051facbc
 effect Async(a)
   fork(() -> a ! {Async(a) | e}) : Fiber
   poll_yield() : Signal
@@ -64,7 +64,7 @@ The public `yield`/`await`/`send`/`recv` are thin wrappers (below) over the raw 
 
 ### `Clock`
 
-```prism,def,h-65067994935c1ed9202e26227e9c8d3778a94ff55165956078824783c1f4c2bf
+```prism,def,h-1c23f6fb1537fb88c5c2956506dc365efd943329a5d37926392396f6d154da4b
 effect Clock
   now() : Int
   sleep(Int) : Unit
@@ -78,7 +78,7 @@ A logical-time capability: `now` reads the current tick and `sleep` advances it.
 
 ### `yield`
 
-```prism,sig,h-6ae1e31a55c7cf4f3208d1a4193b969afd63e5da46b5331aaea5d53d1c92d71f
+```prism,sig,h-db4ee271d94a8002d5d0398e6e2697c190c0bc99d84e7575fefa5b342cd5b4c3
 yield : forall a. () -> Unit ! {Concurrent.Async(a)}
 ```
 
@@ -86,7 +86,7 @@ Reschedule the current fiber. A cooperative yield point; also a cancellation poi
 
 ### `await`
 
-```prism,sig,h-732951bfbf1bd5fcfa0b9fce8dab128294b6a2c12f75018b896b44a851ce9955
+```prism,sig,h-20d3a417967cf76862e65a092e6e9d4db64b934b1220a864635e7b7828a5e915
 await : forall a. (Concurrent.Fiber) -> a ! {Concurrent.Async(a)}
 ```
 
@@ -94,7 +94,7 @@ Block until fiber `f` finishes, returning its result. If `f` was cancelled, this
 
 ### `send`
 
-```prism,sig,h-d0f4e31a31eaf62287369b1a5abcf54f47ca6162ee3313b35b596a6f4a03ed9f
+```prism,sig,h-c339a48eaf4428b6459cc4717a6c58c1525fa14c45caf061c7aeb50dd54d9636
 send : forall a. (Concurrent.Chan, a) -> Unit ! {Concurrent.Async(a)}
 ```
 
@@ -102,7 +102,7 @@ Send `v` on channel `c`. On a bounded channel a full buffer parks the sender unt
 
 ### `recv`
 
-```prism,sig,h-c6fbf6216232015d7157a356a443d904829916456ad29586a81a81219c04b5a9
+```prism,sig,h-f24834c029179e447109bd346647f412ac331caae2f40d8feffab940c956e55a
 recv : forall a. (Concurrent.Chan) -> a ! {Concurrent.Async(a)}
 ```
 
@@ -129,7 +129,7 @@ fn main() = println(run_async(scene))
 
 ### `on_cancel`
 
-```prism,sig,h-5c0145f447150a4f31e02928a6b3fbe162ee9a8f38fb19a9a1fded0ea6f948c0
+```prism,sig,h-a10ee3b74eaa923b14313782569b4efe027ea34e6a63cb4dd868b59457fc46f0
 on_cancel : forall e0 a b. (() -> Unit ! {Concurrent.Async(a), e0}, () -> b ! {Concurrent.Async(a), Concurrent.Async(a), e0}) -> b ! {Concurrent.Async(a), e0}
 ```
 
@@ -137,7 +137,7 @@ Run `body`, and if it is cancelled (unwinds through `kill`), run `cleanup` once 
 
 ### `try_await`
 
-```prism,sig,h-8583df53bb21fb4c2d8b4c9a59caf002d6557a629b7f2b0af7e29332296dd64d
+```prism,sig,h-1925688032bcb6a39c03cc2b0e2c8ef32c0b16a2ac63701053adb20b35bbb9bf
 try_await : forall a. (Concurrent.Fiber) -> Concurrent.Outcome(a) ! {Concurrent.Async(a)}
 ```
 
@@ -145,7 +145,7 @@ Await fiber `f`, observing cancellation as a value instead of a signal: `Complet
 
 ### `run_async`
 
-```prism,sig,h-88e48cd96fb4de8b803dc6b87daf85024d01db3eaebd0034bd28291607ad9658
+```prism,sig,h-93f10b30ee8528ba97694c5ad826331965bf394083d8fd283caf4c5aec3b94eb
 run_async : forall e0 a. (() -> a ! {Concurrent.Async(a), Fail, e0}) -> a ! {Fail, e0}
 ```
 
@@ -163,7 +163,7 @@ fn main() = println(run_async(task))
 
 ### `run_cooperative`
 
-```prism,sig,h-75173352698244519c6a748a93ff0e4c12fcfc9b044ab98c95ed5a860f31adb2
+```prism,sig,h-c7d722758d792f6256d14c47e5e9a45f97bb9cd1ec9217f316b9a30eeed42fcc
 run_cooperative : forall e0 a. (() -> a ! {Concurrent.Async(a), Fail, e0}) -> a ! {Fail, e0}
 ```
 
@@ -171,7 +171,7 @@ The policy-neutral entry point: run `main` under the deployment's default cooper
 
 ### `run_lifo`
 
-```prism,sig,h-3ba58cccc225b33a641649d11ddee987d85f5f375f92ff84673451d5070e8fa5
+```prism,sig,h-82b96e436a03be9f300c4130c20c19d3051e0c9e80f4cee51c9d59aba3024b21
 run_lifo : forall e0 a. (() -> a ! {Concurrent.Async(a), Fail, e0}) -> a ! {Fail, e0}
 ```
 
@@ -179,7 +179,7 @@ A second scheduling policy over the same `Async` effect: LIFO (depth-first), whi
 
 ### `scope`
 
-```prism,sig,h-ddc69d4b44df0f3806ce5760b870025190b7a36d4aee63fba39be3577e1ffdf6
+```prism,sig,h-02f935d84891f2cfe82bd2cb94a3d9ccfa5604481ac1063092d2a7f17e7da2a4
 scope : forall e0 a. (List(() -> a ! {Concurrent.Async(a), e0})) -> List(a) ! {Concurrent.Async(a), e0}
 ```
 
@@ -187,7 +187,7 @@ Structured join: run `tasks` concurrently and await their results in order. On a
 
 ### `run_clock`
 
-```prism,sig,h-8fd2158c5129008c85af9f271661a71c190cec7f4418969a488100636f7bfe9e
+```prism,sig,h-6197b802b95faf68f57074155f951c5c01c934edb0074372947f7559cd3830bd
 run_clock : forall e0 a. (() -> a ! {Concurrent.Clock, e0}) -> a ! {e0}
 ```
 

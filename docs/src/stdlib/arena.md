@@ -22,7 +22,7 @@ An opaque handle to a raw cell handed out by an allocator. It carries no observa
 
 ### `Alloc`
 
-```prism,def,h-02f9cf81d4990b889f662e707d2771975efb42224c93824b687a7fe7cabccace
+```prism,def,h-6fd4df5bef42bee361d5146a7e2f0206d0b9191f5d875b4b1beb4b51af9ea896
 effect Alloc
   once alloc(Int) : Cell
 ```
@@ -33,7 +33,7 @@ The allocation effect. `alloc(n)` requests a raw `n`-word cell; a handler decide
 
 ### `with_arena`
 
-```prism,sig,h-e88c6604b143f5655132dea9328efd1c85de19088af420a6298b27a234f798ec
+```prism,sig,h-5dca094eb11d0fd7c2ece7f324a836c401b78c091efa4bcb51a8d51958d7574e
 with_arena : forall a. (() -> a ! {Arena.Alloc}) -> a
 ```
 

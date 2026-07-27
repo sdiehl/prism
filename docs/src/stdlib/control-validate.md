@@ -12,7 +12,7 @@ Unlike Haskell's `ValidateT`, Prism does not give ordinary effectful sequencing 
 
 ### `Validate`
 
-```prism,def,h-b4849742dc46be9a8619c28d7cc9e60a10ed8b78b8c2eecad860c7860ea7691a
+```prism,def,h-127e7d9447336f534652144371c4fe5fd3f5b6a135a3c7b010869d3858476452
 effect Validate(e)
   never refute(e) : a
   dispute(e) : Unit
@@ -24,7 +24,7 @@ Errors raised while validating values of type `e`.
 
 ### `run_validate`
 
-```prism,sig,h-52f3b7ce335165e1d417e4cc83ab6e59f3c510b7f1745dde4c9b6eb85e46e134
+```prism,sig,h-bf5a15120e838aa17eceede852e67043910fdf490a6ceab29571b6a9faf81239
 run_validate : forall e0 a b. (() -> a ! {Control.Validate.Validate(b), e0}) -> Data.Validation.Validation(b, a) ! {e0}
 ```
 
@@ -32,7 +32,7 @@ Run a validation computation. Any fatal or non-fatal errors make the result `Inv
 
 ### `exec_validate`
 
-```prism,sig,h-de4e531d25012f98710c2f771ee05e53572e21f8e528a8f987a38a25954de049
+```prism,sig,h-0914623c104327c23c6ed2b2d9e2f236148834c97e35c334964f8ffa1b0ad3b5
 exec_validate : forall e0 a b. (() -> a ! {Control.Validate.Validate(b), e0}) -> List(b) ! {e0}
 ```
 
@@ -40,7 +40,7 @@ Run a validation computation and return its errors, or `Nil` on success.
 
 ### `disputes`
 
-```prism,sig,h-5889d007e438c143262c375cc478d584287b42706b1371708fd0201b90af97c1
+```prism,sig,h-0b6797b5ec05ac1ce1036dc8f2b8167aea7957267c7ac1fe3c9199605b072343
 disputes : forall a. (List(a)) -> Unit ! {Control.Validate.Validate(a)}
 ```
 
@@ -48,7 +48,7 @@ Raise each error as a non-fatal dispute, in list order.
 
 ### `tolerate`
 
-```prism,sig,h-067c3a2c26f577b45f30a05f80e8ccc0ee8f75728cc5565ef7ad0e0ca51a6a6b
+```prism,sig,h-5d095ef1c0d2086b694ca30291e1c20d7cc0a8fc62fb5512ecb90c48ad0a35ce
 tolerate : forall e0 a b. (() -> a ! {Control.Validate.Validate(b), Control.Validate.Validate(b), e0}) -> Option(a) ! {Control.Validate.Validate(b), e0}
 ```
 

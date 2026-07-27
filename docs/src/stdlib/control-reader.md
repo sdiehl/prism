@@ -10,7 +10,7 @@ The canonical `Reader(r)` effect: a read-only ambient environment.
 
 ### `Reader`
 
-```prism,def,h-c469c6c2ff707c4a248fb6537441abfec0c82866423b454c8271a8463fb4be08
+```prism,def,h-d59f6e640d64fb1b9a2e004e47954ad3b107a29950dfbd415f20b3b07d62e735
 effect Reader(r)
   ask() : r
 ```
@@ -21,7 +21,7 @@ Read the ambient environment of type `r`.
 
 ### `run_reader`
 
-```prism,sig,h-db96a6c64076ded9075cdd3ee69892a8b5d0a644530cd6ca347ab03cc59dccac
+```prism,sig,h-1c318e3ac9a9e95a7e64c0e8aa9fe5258e01ef759e2ab983800c05dddc388343
 run_reader : forall e0 a b. (a, () -> b ! {Control.Reader.Reader(a), e0}) -> b ! {e0}
 ```
 
@@ -29,7 +29,7 @@ Run `action` with `env` as the ambient environment, discharging `Reader(r)`.
 
 ### `asks`
 
-```prism,sig,h-191109d77727ff5526eb5f4347be414a7c70e6176f054075a7c5cdc66e794dfb
+```prism,sig,h-321d6ea4e5fcf6c7894142b115f31ae44d8ad7801fce187957d7bab48f4818a7
 asks : forall a b. ((a) -> b) -> b ! {Control.Reader.Reader(a)}
 ```
 
@@ -37,7 +37,7 @@ Read a projection `f` of the environment.
 
 ### `local`
 
-```prism,sig,h-fcae08bdca8655c75b7ed8b20cfddf29fe4bfdab46ddb4f14d2650216708f454
+```prism,sig,h-4f5807f9dcc4985113c4c8246bef239c075945beb6d1cdf6ee30bbf7d4336953
 local : forall e0 a b. ((a) -> a, () -> b ! {Control.Reader.Reader(a), Control.Reader.Reader(a), e0}) -> b ! {Control.Reader.Reader(a), e0}
 ```
 

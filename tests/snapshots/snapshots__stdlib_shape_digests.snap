@@ -167,12 +167,10 @@ inst  ffca9e9ef4342cb4  eqSyntax.Cursor.Assoc
 shape 01914b8eb1781ff1  Var@hi@27
 shape 02513ae5d40179f5  Syntax.Ast.Ty
 shape 0268806228b317cc  Syntax.Ast.Decl
-shape 02f9cf81d4990b88  Arena.Alloc
 shape 044eed567ef648d8  Random
 shape 0543bea03b6795a7  Cli.Body
 shape 06cf53d69d37ee9a  Quickcheck.Outcome
 shape 072b337b9a0c9572  Data.Pretty@SDoc
-shape 0754ee5235da408e  Control.Fresh.Fresh
 shape 0777625f313c23cc  Cli.SubCmd
 shape 08a9dc0ec426af46  Syntax.Layout@HeadR
 shape 08b49fbbd763dcf7  Var@j@5
@@ -182,6 +180,7 @@ shape 0d730af5d0a24fb3  Syntax.Ast.Suffix
 shape 0daa9a4867e9af83  Var@col@38
 shape 119e7cef00c6e69b  Incr@Warm
 shape 1257664747c5e69a  Syntax.Ast.Expr
+shape 127e7d9447336f53  Control.Validate.Validate
 shape 14ad32cfc9c0c14d  Syntax.Token.Token
 shape 1500750793a0c99f  Var@j@9
 shape 153eda8c0a6f870d  Syntax.Layout@LEntry
@@ -192,9 +191,9 @@ shape 1889063915697ab8  Syntax.Ast.PathUpdate
 shape 198f4c814319755b  Syntax.Ast.HandlerArm
 shape 199ca071802798f5  Var@out@40
 shape 1a06fa6151c70fe5  List
-shape 1a9bbe5c5cb6ebe3  Control.Writer.Writer
 shape 1aec61024ff9033b  Syntax.Layout@StepR
 shape 1b41122d2793ae0b  Syntax.Cursor.Reply
+shape 1c23f6fb1537fb88  Concurrent.Clock
 shape 1d019dc20172444f  Json.Json
 shape 1e257de4af8d36e5  Wire.Bytes
 shape 22967850e37ba050  Control.Rewrite.RwFix
@@ -202,6 +201,7 @@ shape 235e5d172741534c  Quickcheck.Gen
 shape 27b8cc08a942c43f  Var@seen@15
 shape 283174db2b86907e  Syntax.Ast.RungField
 shape 2a91d78ef6c0fe55  Syntax.Layout@Ph1R
+shape 2c9563b7edbc70ee  Concurrent.Async
 shape 30c2231cdfce1cc2  Json.JsonError
 shape 314e21458f405f89  Concurrent.Chan
 shape 3277b2f5717b6920  Incr@Node
@@ -216,6 +216,7 @@ shape 40bfe0b2648ab408  Var@c@20
 shape 4137c66e8c4c7d81  Replay@TraceEntry
 shape 422230ddafb74958  Syntax.Ast.Item
 shape 42ae9406390b2f13  Data.Validation.Validation
+shape 42c82c7c735a3382  Syntax.Codec.Decode
 shape 4316ae397faaa7c8  Cli.OptSpec
 shape 43a64cf457c9c58f  Syntax.Ast.PatField
 shape 4426fb5b4679fb29  Data.Bind.Nameless
@@ -240,14 +241,14 @@ shape 63a38a9b9a5fe900  Syntax.Ast.Arm
 shape 640539dcfe68d760  Syntax.Resolved.RNode
 shape 647c095730ceecde  Return
 shape 64c7b07774a86711  Incr@TWarm
-shape 65067994935c1ed9  Concurrent.Clock
 shape 65841cb0e1c2e56a  Entropy
-shape 6682c761980aa330  Control.State.State
 shape 66f6d2a7ff29ec1e  Syntax.Cursor.Assoc
 shape 687c36c355bad11d  Var@out@37
 shape 6a155edb15bb7d09  Syntax.Source.Span
+shape 6a459097c4c485e3  Control.State.State
 shape 6b8d8a6d39046c24  Syntax.Codec.TokensDoc
 shape 6ce30ebe59a07788  Incr@St
+shape 6fd4df5bef42bee3  Arena.Alloc
 shape 753c32c04941462a  Concurrent@Cmd
 shape 759f11014b90dcfc  FileSystem
 shape 76a1e57aee975254  Syntax.Ast.Param
@@ -257,6 +258,7 @@ shape 7b5ba636dec6530f  Control.Layer.Layer
 shape 7cf963d67d170fcf  Syntax.Layout@CloseR
 shape 7d780e7f61e18d28  Var@idx@25
 shape 7e016327a17fe1a6  Time.Duration
+shape 7f8c053aa8abf5cc  Incr.IncrRaw
 shape 82620acf9efec45d  Syntax.Lex.LexError
 shape 829bdd9ebb6982a6  Incr.Incr
 shape 82d43b86d98a8309  Time.Wall
@@ -285,15 +287,15 @@ shape 9b186050d84fbb9d  Cli.CliError
 shape 9bf427e751f98e8f  Cli.Outcome
 shape 9d17d668e5822075  Var@j@17
 shape 9ece6a63d316787f  Syntax.Rename.RnUse
-shape 9f39d182a2558cbe  Concurrent.Async
+shape 9ede72bbbf0356e1  Control.Writer.Writer
 shape 9fbd5bd6533d01fe  Syntax.Ast.CtorShape
 shape a1572000dff0d7ab  Syntax.Diagnostic.DiagPhase
+shape a2bd6bd46cb61e70  Control.Fresh.Fresh
 shape a3cab4c4f70ebbbe  Var@ok@44
 shape a72b9e07a0e82519  Syntax.Ast.PathStep
 shape ad7caa5238e8395c  Var@i@19
 shape adfe6896b2f2cc9e  Var@i@35
 shape ae4038d02f75c3f9  Concurrent@Wake
-shape b4849742dc46be9a  Control.Validate.Validate
 shape b5f6e4e4e0d98cf0  Syntax.Ast.NamedExpr
 shape b8dc62d2bb5e74c5  Syntax.Ast.Migration
 shape b8f7c340cd4d0cfb  Syntax.Codec.CodecError
@@ -302,7 +304,6 @@ shape ba91a990a806c50b  Emit
 shape c02999fe7efada81  Var@i@29
 shape c0f451224f9ede0c  Syntax.Cursor.Infix
 shape c2ed4f03322385bd  Syntax.Cursor.Prefix
-shape c469c6c2ff707c4a  Control.Reader.Reader
 shape c56caa5f3549ebff  Syntax.Layout@Close3
 shape c6204cbdee2fdcb3  Data.Pretty.Doc
 shape c904363de94b0421  Var@i@14
@@ -318,6 +319,7 @@ shape d35824985faa2b6d  Syntax.Ast.Converter
 shape d3819448ab69a2d7  Break
 shape d40b7f54803f5f71  Sequence.Step
 shape d43bac28dc0b21b7  Continue
+shape d59f6e640d64fb1b  Control.Reader.Reader
 shape d5b225803fabda46  Syntax.Query.QueryReport
 shape d64d866378173b1f  Syntax.Ast.MigrationRoute
 shape d915ef3bcb0b1b5d  Arena.Cell
@@ -327,10 +329,8 @@ shape db216047df99c6e9  Syntax.Edit.Edit
 shape dbb2c4d73571e473  Incr@Frame
 shape dd57575ea60b714b  Incr@TSt
 shape dda146cb2354806a  Syntax.Ast.Deriving
-shape df6e8434c468f516  Syntax.Codec.Decode
 shape e0164c9ef4b42228  Syntax.Lex@LxStep
 shape e0bd5463c1cf1304  Var@i@22
-shape e1efca3784a90fdb  Incr.IncrRaw
 shape e54be8e947ea7e21  Syntax.Analysis.ExprCensus
 shape e8894712dd372e0e  Syntax.Query.DeclHead
 shape e967837b1c2f80c9  Console

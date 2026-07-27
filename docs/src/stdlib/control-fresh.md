@@ -10,7 +10,7 @@ The `Fresh` effect: a deterministic monotonic name supply (gensym).
 
 ### `Fresh`
 
-```prism,def,h-0754ee5235da408e6a540fec79fadd9cf484d0eb5355e6b9f8bd55c9f51f9ed0
+```prism,def,h-a2bd6bd46cb61e70d1232f7276e668bb5ec8db07538bcfac4a53d1d4b2497abd
 effect Fresh
   fresh() : Int
 ```
@@ -21,7 +21,7 @@ Draw the next integer from the monotonic counter.
 
 ### `run_fresh`
 
-```prism,sig,h-f405981bd190e8996c47e6dfe86bcc58a7f986698cfb24406b59c0d6d8cc7bf3
+```prism,sig,h-0cf2dd08460f2cc46a035da7113981dbed1833370c1bb38c2ffa09a2a2b106e2
 run_fresh : forall e0 a. (() -> a ! {Control.Fresh.Fresh, e0}) -> a ! {e0}
 ```
 
@@ -29,7 +29,7 @@ Run `action` with a fresh-name counter starting at `0`, discharging `Fresh`.
 
 ### `run_fresh_from`
 
-```prism,sig,h-83358378bbbce6ae5b9225861d802e21eb0d2e75081fb36666718b08e22117a7
+```prism,sig,h-dc29a17709cef75e21c7efbe09aa7ea5ab21555fa3495bd9ccd3d8b741035ae1
 run_fresh_from : forall e0 a. (Int, () -> a ! {Control.Fresh.Fresh, e0}) -> a ! {e0}
 ```
 
@@ -37,7 +37,7 @@ Run `action` with the counter starting at `start`.
 
 ### `gensym`
 
-```prism,sig,h-c448c36c39c5af433672107c4a3474dec7e185ee40915aeae4d96cece160afc8
+```prism,sig,h-73bfc6be08792aa8825134a72857ac81e0450fada92e5d3e0fcbbb100889e7d8
 gensym : (String) -> String ! {Control.Fresh.Fresh}
 ```
 

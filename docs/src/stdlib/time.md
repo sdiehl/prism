@@ -434,7 +434,7 @@ wall_cmp(wall_of_nanos(1), wall_of_nanos(2))
 
 ### `mono_clock`
 
-```prism,sig,h-0ed87e1fbd737d53bef53da3c80c4b263d7611ca850df519fab4eb30afba8534
+```prism,sig,h-7394f8439e257867cabac4e0ce73d070b0b6c49408f4601b2d520db6a5a67936
 mono_clock : () -> Time.Instant ! {Concurrent.Clock}
 ```
 
@@ -446,7 +446,7 @@ run_clock_real(\() -> mono_clock())
 
 ### `wall_clock`
 
-```prism,sig,h-f34519492ab28f197cdc108c5003cceab488b678b2e2c4af6512b0b638363189
+```prism,sig,h-213c7ecf236ba43aacd75e2fe7933f25491dddb26e1feaf1445ef452b4364a40
 wall_clock : () -> Time.Wall ! {Concurrent.Clock}
 ```
 
@@ -458,7 +458,7 @@ format_rfc3339(run_clock_real(\() -> wall_clock()))
 
 ### `run_clock_real`
 
-```prism,sig,h-41aa6834e74c57af4c435c58e00ee5f0ce1c720057a1748c700398a5fedfd2da
+```prism,sig,h-ac3ed8016ce803af3723c957b79299f9feb15e4e6054b0f04f29fa3b98da3cd1
 run_clock_real : forall e0 a. (() -> a ! {Concurrent.Clock, IO, e0}) -> a ! {IO, e0}
 ```
 

@@ -10,7 +10,7 @@ use std::fmt;
 use crate::types::ty::{EffRow, Label};
 use crate::types::{repr_of_type, Type};
 use prism_common::sym::Sym;
-use prism_syntax::names::{self, ALLOC_EFFECT, ALLOC_OP, IO_EFFECT};
+use prism_syntax::names::{self, ALLOC_OP, IO_EFFECT};
 
 // Red zone / segment size for the verifier's per-node recursion, matching the
 // builder guards in `core/typed/build.rs`.
@@ -2961,6 +2961,7 @@ mod tests {
     use crate::core::builtins::FloatOp;
     use crate::core::typed::{TypedForward, TypedHandler};
     use crate::core::Comp;
+    use prism_syntax::names::ALLOC_EFFECT;
 
     fn source(ty: Type) -> CoreType {
         CoreType::Source(ty)

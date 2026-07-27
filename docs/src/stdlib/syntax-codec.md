@@ -48,7 +48,7 @@ A decoded `prism-surface-syntax-v1` document: the envelope identity, the embedde
 
 ### `Decode`
 
-```prism,def,h-df6e8434c468f516886ae0d16da72f32a659792854691926e7c38dcb36280cb1
+```prism,def,h-42c82c7c735a3382493f2661e5daa12e3c79832e7bf0d4c92a6fe81e12f63f56
 effect Decode
   never fail_decode(CodecError) : a
 ```
@@ -73,7 +73,7 @@ Render a codec error as one line.
 
 ### `decode_tokens`
 
-```prism,sig,h-c1397b76dbd3031a5c783b08171fe0b10596359a1e40efc8be22b5d467d1ab37
+```prism,sig,h-1ca427fc67c528176956a95513b117f7dc5853aec758bd015599eb3b5cfb4287
 decode_tokens : (String) -> Result(Syntax.Codec.TokensDoc, Syntax.Codec.CodecError)
 ```
 
@@ -113,7 +113,7 @@ Encode a surface document back to the exact artifact bytes the compiler emits: `
 
 ### `decode_surface`
 
-```prism,sig,h-8142ea8538390ca1a57fb8d6914dc7a11963f420a3a82312d33526f68c8a2cfa
+```prism,sig,h-16d96b73bc88dc4bae1be384f43f8cbd0c524a397cd469b35f7819bb7fa7b5bd
 decode_surface : (String) -> Result(Syntax.Codec.SurfaceDoc, Syntax.Codec.CodecError)
 ```
 
@@ -121,7 +121,7 @@ Decode a `prism-surface-syntax-v1` document from its exact bytes. A wrong or mis
 
 ### `decode_diagnostics`
 
-```prism,sig,h-ddc6965946730b18ab705c60559bd587b70a91bd18dfa6429ba64382a2dadeb8
+```prism,sig,h-5ba8fd00241f562b4dad5f1112a98bd9ead3eba3b1573e3f2169cb2ca39e35e2
 decode_diagnostics : (String) -> Result(Syntax.Diagnostic.DiagnosticsDoc, Syntax.Codec.CodecError)
 ```
 
@@ -137,7 +137,7 @@ Encode a diagnostics document to the canonical artifact bytes, the exact inverse
 
 ### `run_decode`
 
-```prism,sig,h-f737e43dc4811e185464bea49f2be2b7c4f368833ed80b9c8b9cc193a546a129
+```prism,sig,h-e33ebfbed9d1554c89d13a5ea8560f772161f99139df78c69f0c3e8238cbea84
 run_decode : forall e0 a. (() -> a ! {Syntax.Codec.Decode, e0}) -> Result(a, Syntax.Codec.CodecError) ! {e0}
 ```
 
@@ -145,7 +145,7 @@ Run a decoding computation, turning a `fail_decode` into `Err` and a completed d
 
 ### `decode_resolved`
 
-```prism,sig,h-f8115b3c7d6ce1ecf99ec8aec19d67d74ee35b4b8bc93081859381db4b5a7102
+```prism,sig,h-11f3c7697be39a0437b7437410eda8365625f8fd315511db4e284578fee75f46
 decode_resolved : (String) -> Result(Syntax.Resolved.ResolvedDoc, Syntax.Codec.CodecError)
 ```
 

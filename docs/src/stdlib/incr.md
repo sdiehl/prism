@@ -24,7 +24,7 @@ A handle to an incremental node carrying values of type `a`. It is a phantom-typ
 
 ### `IncrRaw`
 
-```prism,def,h-e1efca3784a90fdb860d2c3d9b239eeb67ca04015bd528e88eafd7cb4f269947
+```prism,def,h-7f8c053aa8abf5cce973478b833882b3720c8c060050654848e163f0e052670e
 effect IncrRaw
   incr_input(Bytes) : String
   incr_get(String) : Bytes
@@ -36,7 +36,7 @@ effect IncrRaw
 
 ### `run_incr`
 
-```prism,sig,h-19c671b051b5549d67d1a3bbbbfeba918ad8b0ebd2c14838ea894ac448a7eaf7
+```prism,sig,h-03a42e374c262d9b0e89d0821597cb7b4481fbca12629b217fe29cfbe7ed8f5f
 run_incr : forall e0 a. (() -> a ! {Incr.IncrRaw, e0}) -> a ! {e0}
 ```
 
@@ -55,7 +55,7 @@ run_incr() fn
 
 ### `input`
 
-```prism,sig,h-2ea98abacb0bdce235b44e795eb251403237880edc4bd5cc82d41f9eab591d36
+```prism,sig,h-e63093a5a14a1b2a4afd5bb4771383946b8e2f90a4ff3178f4383926ce506bb0
 input : forall a. (a) -> Incr.Incr(a) ! {Incr.IncrRaw}
 ```
 
@@ -71,7 +71,7 @@ run_incr(\() -> get(input(42)))
 
 ### `get`
 
-```prism,sig,h-cdc2ff11beac2a6208127f9a27830fca0510cab85104eefccfda5a363695d687
+```prism,sig,h-b3405afd6936949ef3556e98972eae13df9e99c2fa8a3c8cce1deb0362a4c847
 get : forall a. (Incr.Incr(a)) -> a ! {Fail, Incr.IncrRaw}
 ```
 
@@ -90,7 +90,7 @@ run_incr() fn
 
 ### `set`
 
-```prism,sig,h-c3eca70107a5310c8e0ee6103ff09bf1917aea3c34a1adf5e5045fe4bba068c4
+```prism,sig,h-40302e203cb2b93ea63411231afdc52b9528198c744408a25d5fb37cc18fe5dc
 set : forall a. (Incr.Incr(a), a) -> Unit ! {Incr.IncrRaw}
 ```
 
@@ -109,7 +109,7 @@ run_incr() fn
 
 ### `memo`
 
-```prism,sig,h-bcafdddfaaaf666eb947411fd47a4e2dd97dcc7e60c8d6098cff45b1f2b571ae
+```prism,sig,h-6391f952aa8219fe7229a232fc18ef351a1221c7cbd0f86a1754c10ca944024a
 memo : forall e0 a. (() -> a ! {Incr.IncrRaw, e0}) -> Incr.Incr(a) ! {Incr.IncrRaw, e0}
 ```
 
@@ -138,7 +138,7 @@ run_incr() fn
 
 ### `run_incr_durable`
 
-```prism,sig,h-e7f7c52bc85ea2217f92cd7b998a6ee3541de6ba2a27c626b4929e8ac5e218d5
+```prism,sig,h-5601bfe419241b476985a720bee3b3ead49c655aee5d9d0bc28e316a224279d2
 run_incr_durable : forall a. (String, String, () -> a ! {Fail, Incr.IncrRaw}) -> a ! {Fail, IO}
 ```
 
@@ -154,7 +154,7 @@ run_incr_durable("totals.snap", "report") fn
 
 ### `run_incr_store`
 
-```prism,sig,h-efd3d8ebe7132c026380177f8af8551c5d91116210badbbd1a9d277ec5438691
+```prism,sig,h-80ef48d78b6a265c5288df0fb30a2e79e4f25d20da122ed23c0ed2151177e7f9
 run_incr_store : forall a. (String, String, () -> a ! {Fail, Incr.IncrRaw}) -> a ! {Fail, IO}
 ```
 
@@ -170,7 +170,7 @@ run_incr_store(".prism-store", "report") fn
 
 ### `run_incr_durable_replay`
 
-```prism,sig,h-e63e8508b0f724890a6f9e9c4d6deaf0b7f18ec59411b3572ea1e9d36aab562a
+```prism,sig,h-d7589f00b54da3d62efdfda384a8b03304afcad1df3f97c4b4c9b2062423ffee
 run_incr_durable_replay : forall e0 a. (String, String, () -> a ! {Fail, IO, Incr.IncrRaw, Output, e0}) -> a ! {Fail, IO, e0}
 ```
 
@@ -184,7 +184,7 @@ run_incr_durable_replay("run.snap", "job") fn
 
 ### `run_incr_store_replay`
 
-```prism,sig,h-21121018e44e2336d4c20cc312a9861585a32bf16aea36400e70e1d76eae6421
+```prism,sig,h-a581167df5c9831d32d279f6492730eb53fcdd4ed0b67553e536319e8c13bb69
 run_incr_store_replay : forall e0 a. (String, String, () -> a ! {Fail, IO, Incr.IncrRaw, Output, e0}) -> a ! {Fail, IO, e0}
 ```
 
