@@ -10,7 +10,7 @@ use std::fmt;
 use crate::types::ty::{EffRow, Label};
 use crate::types::{repr_of_type, Type};
 use prism_common::sym::Sym;
-use prism_syntax::names::{self, ALLOC_OP, IO_EFFECT};
+use prism_syntax::names::{self, ALLOC_EFFECT, ALLOC_OP, IO_EFFECT};
 
 // Red zone / segment size for the verifier's per-node recursion, matching the
 // builder guards in `core/typed/build.rs`.
@@ -3544,12 +3544,12 @@ mod tests {
             ConstructorSig::new(Vec::new(), 0, Vec::new(), source(boxed.clone())),
         );
         env.insert_operation(
-            Sym::new("alloc"),
+            Sym::new(ALLOC_OP),
             OperationSig::new(
                 Vec::new(),
                 vec![source(Type::Int)],
                 source(cell.clone()),
-                Label::bare("Alloc"),
+                Label::bare(ALLOC_EFFECT),
             ),
         );
         let ctor = || {
@@ -3572,12 +3572,12 @@ mod tests {
         let good = || init_at(local("c", cell.clone()), ctor(), boxed.clone());
         let in_scope = |body: &TypedComp| {
             TypedComp::new(
-                CompSig::new(body.sig().result().clone(), EffRow::singleton("Alloc")),
+                CompSig::new(body.sig().result().clone(), EffRow::singleton(ALLOC_EFFECT)),
                 TypedCompKind::Bind(
                     Box::new(TypedComp::new(
-                        CompSig::new(source(cell.clone()), EffRow::singleton("Alloc")),
+                        CompSig::new(source(cell.clone()), EffRow::singleton(ALLOC_EFFECT)),
                         TypedCompKind::Do {
-                            operation: Sym::new("alloc"),
+                            operation: Sym::new(ALLOC_OP),
                             instantiation: Vec::new(),
                             args: vec![value(Type::Int, TypedValueKind::Int(0))],
                         },
