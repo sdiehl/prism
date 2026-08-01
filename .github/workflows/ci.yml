@@ -132,7 +132,7 @@ jobs:
         run: rustup target add wasm32-unknown-unknown
 
       - name: sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -177,7 +177,7 @@ jobs:
       - name: Setup Rust toolchain
         run: rustup show
       - name: sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@v0.0.11
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
         with:
@@ -226,7 +226,7 @@ jobs:
         uses: ./.github/actions/setup-llvm
 
       - name: sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       # `--workspace` is load-bearing: the root is itself a package and there is no
       # `default-members`, so without it cargo selects only `prism` and the member
@@ -340,7 +340,7 @@ jobs:
         uses: taiki-e/install-action@nextest
 
       - name: sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Run tests (shard ${{ matrix.partition }} of 4)
         env:
@@ -515,7 +515,7 @@ jobs:
         run: rustup show
 
       - name: sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -594,7 +594,7 @@ jobs:
         run: rustup show
 
       - name: sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -654,7 +654,7 @@ jobs:
         run: rustup show
 
       - name: sccache
-        uses: mozilla-actions/sccache-action@v0.0.10
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
