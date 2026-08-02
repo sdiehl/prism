@@ -97,6 +97,7 @@ prism check                          # type check the enclosing project
 prism check program.pr               # type check one source file
 prism pkg init                       # create a new package interactively
 prism fmt program.pr                 # format source
+prism index                          # write the code index a program viewer reads
 prism dump core program.pr           # inspect one phase (`prism dump --help` lists every phase)
 ```
 
