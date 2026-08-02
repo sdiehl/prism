@@ -27,7 +27,9 @@ use crate::types::{check_allow_holes, Checked};
 
 mod accept;
 mod doctest;
-mod extract;
+// The code index associates doc comments to declarations the same way, so the
+// extractor is shared rather than reimplemented against the same trivia table.
+pub(crate) mod extract;
 mod mdbook;
 mod render;
 mod typespans;
@@ -201,6 +203,26 @@ pub fn stdlib_expect_files() -> Vec<ExpectFile> {
             path: std::path::PathBuf::from(spec.source_path),
             source: spec.src,
             module: spec.dotted,
+        })
+        .collect()
+}
+
+/// The embedded standard library as module descriptions: the prelude and every
+/// `Data.*`/`Replay`/`Concurrent` module, in reference order.
+///
+/// The same set and order [`stdlib_pages`] documents, so the code index and the
+/// Standard Library Reference cannot disagree about which modules the standard
+/// library consists of.
+#[must_use]
+pub fn stdlib_modules() -> Vec<ModuleSource> {
+    stdlib_specs()
+        .into_iter()
+        .map(|spec| ModuleSource {
+            dotted: spec.dotted,
+            title: spec.title,
+            source: spec.src,
+            source_path: spec.source_path,
+            is_prelude: spec.is_prelude,
         })
         .collect()
 }

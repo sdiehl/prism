@@ -27,6 +27,37 @@ web-build:
     pnpm typecheck
     pnpm build
 
+# Write the code index for the standard library and for this project's own packages, into target/.
+[group('web')]
+index:
+    cargo build --release
+    ./target/release/prism index --stdlib --out target/stdlib-index.json
+    ./target/release/prism index packages/spectra --out target/spectra-index.json
+
+# Regenerate the standard-library index the viewer page loads. Generated, not
+# committed, exactly like the wasm bundle; the viewer needs no wasm, only this.
+[group('web')]
+index-web:
+    cargo build --release
+    ./target/release/prism index --stdlib --out web/public/stdlib-index.json
+
+# A revision pair for the viewer: index PATH as it is in the working tree and as it
+# was at REV, then compare them. The comparison separates what an author changed
+# from what merely re-hashed underneath it, so it is worth generating even for a
+# small edit. Artifacts land beside the stdlib index, generated and uncommitted.
+[group('web')]
+index-diff REV="HEAD" PATH="packages/spectra":
+    cargo build --release
+    rm -rf target/index-diff-base
+    git worktree add -q --detach target/index-diff-base {{REV}}
+    ./target/release/prism index target/index-diff-base/{{PATH}} --out web/public/old-index.json
+    ./target/release/prism index {{PATH}} --out web/public/new-index.json
+    ./target/release/prism index --diff web/public/old-index.json web/public/new-index.json --out web/public/diff-index.json
+    git worktree remove --force target/index-diff-base
+    @echo ""
+    @echo "Run \`just web\` and open:"
+    @echo "  http://localhost:5173/viewer.html?src=/new-index.json&diff=/diff-index.json"
+
 # Regenerate and test the Standard Library Reference.
 [group('docs')]
 docs-gen:

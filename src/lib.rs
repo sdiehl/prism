@@ -66,6 +66,10 @@ pub use prism_core::flags;
 // `format_check`, `format_wire_accept`), not the module's helpers.
 pub use prism_syntax::fmt;
 pub mod hir;
+// The code index: the whole-codebase artifact a program viewer reads. A
+// projection of compiler facts (namespace layers, the Core dependency graph,
+// checked effect rows) rather than a new analysis.
+pub mod index;
 // Internal: keyword tables are a lexer/parser detail, never a library commitment.
 pub(crate) use prism_syntax::kw;
 pub use prism_syntax::lex;
@@ -113,8 +117,8 @@ pub use prism_common::{ASCII_PRINTABLE_HI, ASCII_PRINTABLE_LO};
 pub use core::{CorePass, EffectStrategy, OptLevel, PassSpec, EFFECT_TIERS};
 pub use docs::{
     accept, preprocess_book, project_expect_files, project_pages, stdlib_expect_files,
-    stdlib_pages, DocPage, ExpectFile, ExpectReport, Generated, ModuleSource, Report, TypeSpan,
-    TypeSpans, TYPESPANS_FORMAT,
+    stdlib_modules, stdlib_pages, DocPage, ExpectFile, ExpectReport, Generated, ModuleSource,
+    Report, TypeSpan, TypeSpans, TYPESPANS_FORMAT,
 };
 pub use driver::{
     apply_semantic_patch, check, check_allow_holes_on_in, check_at, check_modules_on, check_on,
@@ -123,22 +127,23 @@ pub use driver::{
     effect_strategy_on, effect_warnings_full, example_program, fetch_semantic_patch,
     impact_semantic_patch, interpret, interpret_at, interpret_deferred_holes, interpret_io_at,
     interpret_io_on, interpret_io_on_with_args, interpret_io_on_with_args_deferred_holes,
-    interpret_on, module_graph, module_interface, namespace_identity, namespace_root,
-    observe_run_on, observe_run_on_deferred_holes, off_platform_builtins, public_surface, query_on,
-    rc_balanced, record_on, record_on_with_args, record_run_on, replay_on, replay_run_on, report,
-    report_at, report_on, resume_observed_on, resume_on, shape_digests_of, source_diff_on,
-    source_modules, stdlib_hash, step_ruler_on, store_def_inputs, suspend_at_cut_on,
-    suspend_line_cuts, suspend_on, verify_semantic_patch_behavior, with_custom_prelude,
-    with_prelude, BackendOpt, BehaviorCase, BehaviorCaseResult, BehaviorCorpus, BehaviorDivergence,
-    BehaviorReceipt, CheckedModule, CompilerSession, Config, CutReport, CutTarget, DeltaReport,
-    DurableRun, EvidenceTier, FetchReport, ImpactReport, InterfaceDelta, ModuleCheckReport,
-    ModuleGraph, ModuleGraphNode, ModuleInterface, ModuleInterfaceEntry, ModuleInvalidation,
-    ModuleInvalidationCause, NamespaceIdentity, PatchRefusal, PatchRefusalBody,
-    PatchRefusalSubject, PublicDef, RecordedRun, RehydratedModuleInterface, Scheduler,
-    SessionStats, StagedPatch, StdlibHash, StepRuler, StepRulerRow, SuspendAtCut, SuspendCut,
-    SuspendResult, TimingSink, MODULE_GRAPH_FORMAT, MODULE_INTERFACE_FORMAT,
-    PATCH_BEHAVIOR_CORPUS_FORMAT, PATCH_BEHAVIOR_FORMAT, PATCH_DELTA_FORMAT, PATCH_FETCH_FORMAT,
-    PATCH_IMPACT_FORMAT, PATCH_REFUSAL_FORMAT, PATCH_STAGE_FORMAT, STEP_RULER_FORMAT,
+    interpret_on, module_graph, module_interface, namespace_identity, namespace_layers,
+    namespace_root, observe_run_on, observe_run_on_deferred_holes, off_platform_builtins,
+    public_surface, query_on, rc_balanced, record_on, record_on_with_args, record_run_on,
+    replay_on, replay_run_on, report, report_at, report_on, resume_observed_on, resume_on,
+    shape_digests_of, source_diff_on, source_modules, stdlib_hash, step_ruler_on, store_def_inputs,
+    suspend_at_cut_on, suspend_line_cuts, suspend_on, type_tokens, verify_semantic_patch_behavior,
+    with_custom_prelude, with_prelude, BackendOpt, BehaviorCase, BehaviorCaseResult,
+    BehaviorCorpus, BehaviorDivergence, BehaviorReceipt, CheckedModule, CompilerSession, Config,
+    CutReport, CutTarget, DeltaReport, DurableRun, EvidenceTier, FetchReport, ImpactReport,
+    InterfaceDelta, ModuleCheckReport, ModuleGraph, ModuleGraphNode, ModuleInterface,
+    ModuleInterfaceEntry, ModuleInvalidation, ModuleInvalidationCause, NamespaceIdentity,
+    NamespaceLayers, PatchRefusal, PatchRefusalBody, PatchRefusalSubject, PublicDef, RecordedRun,
+    RehydratedModuleInterface, Scheduler, SessionStats, StagedPatch, StdlibHash, StepRuler,
+    StepRulerRow, SuspendAtCut, SuspendCut, SuspendResult, TimingSink, MODULE_GRAPH_FORMAT,
+    MODULE_INTERFACE_FORMAT, PATCH_BEHAVIOR_CORPUS_FORMAT, PATCH_BEHAVIOR_FORMAT,
+    PATCH_DELTA_FORMAT, PATCH_FETCH_FORMAT, PATCH_IMPACT_FORMAT, PATCH_REFUSAL_FORMAT,
+    PATCH_STAGE_FORMAT, STEP_RULER_FORMAT,
 };
 #[cfg(feature = "native")]
 pub use driver::{
@@ -155,7 +160,8 @@ pub use flags::{DynFlags, EffectTier, WarnDupes};
 pub use lineage::provenance::{Observation, ObservationTrace, OBSERVATION_TRACE_FORMAT};
 pub use prism_syntax::fmt::{format, format_check};
 pub use resolve::{
-    default_roots, project_roots, project_roots_with_packages_and_std, project_roots_with_std, Root,
+    default_roots, project_roots, project_roots_with_packages_and_std, project_roots_with_std,
+    resolve_modules_seeing, Occurrence, Root,
 };
 pub use stable::wire_fmt::format_wire_accept;
 pub use sym::Sym;

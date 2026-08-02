@@ -31,6 +31,7 @@ pub mod exec;
 pub mod explain;
 pub mod fmt;
 pub mod holes;
+pub mod index;
 pub mod lineage;
 pub mod patch;
 pub mod pkg;

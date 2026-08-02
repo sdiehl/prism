@@ -3,6 +3,12 @@
 /docs/book
 /web/pkg
 /web/src/examples.ts
+# The code indexes the viewer page loads, including the revision pairs `just
+# index-diff` writes: generated artifacts, regenerated from source like the wasm
+# bundle rather than committed.
+/web/public/*-index.json
+# Transpiled output of the viewer checks (`pnpm check:viewer`).
+/web/test/build
 /web/node_modules
 /web/dist
 .DS_Store

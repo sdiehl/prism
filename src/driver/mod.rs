@@ -87,13 +87,15 @@ pub use execution::{
     STEP_RULER_FORMAT,
 };
 use front::{run_front, Front, FrontRequest};
-pub(crate) use identity::stdlib_driver_src;
 #[cfg(feature = "native")]
 pub(crate) use identity::stdlib_value_schemes;
+pub(crate) use identity::{
+    addressable_surface, addressable_surface_in, stdlib_driver_src, AddressableSurface,
+};
 pub use identity::{
-    module_interface, namespace_identity, namespace_root, public_surface, stdlib_hash,
-    ModuleInterface, ModuleInterfaceEntry, NamespaceIdentity, PublicDef, StdlibHash,
-    MODULE_INTERFACE_FORMAT,
+    module_interface, namespace_identity, namespace_layers, namespace_root, public_surface,
+    stdlib_hash, ModuleInterface, ModuleInterfaceEntry, NamespaceIdentity, NamespaceLayers,
+    PublicDef, StdlibHash, MODULE_INTERFACE_FORMAT,
 };
 #[cfg(feature = "native")]
 pub(crate) use identity::{BuildIdentity, BuildRoot};
@@ -103,7 +105,7 @@ pub use module_graph::{
     MODULE_GRAPH_FORMAT,
 };
 pub use modules::{check_modules_on, CheckedModule, ModuleCheckReport};
-pub use query::query_on;
+pub use query::{query_on, type_tokens};
 pub use report::{report, report_at, report_on, shape_digests_of};
 pub use semantic_patch::{
     apply_semantic_patch, fetch_semantic_patch, impact_semantic_patch,

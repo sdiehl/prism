@@ -123,6 +123,11 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                 .to_json()
                 .map_err(|error| Error::CodegenDump(error.to_string()))
         }
+        // Every resolved reference, taken from the renamer rather than a second
+        // walk: the goto-definition relation, and reversed, find-references.
+        "occurrences" => crate::index::occurrences::extract(src, roots)?
+            .to_json()
+            .map_err(|error| Error::CodegenDump(error.to_string())),
         "interface" => {
             let entry = SourceMap::new(src).user();
             module_interface(entry, src, roots)?

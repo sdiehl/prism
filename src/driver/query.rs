@@ -94,11 +94,27 @@ fn resolve_query_target(graph: &DepGraph, target: &str) -> Result<Sym, Error> {
     }
 }
 
-// Whether a shown type string mentions the type named `name` as a whole token,
-// so `List` matches `List(Int)` but not `Listable`.
-fn type_mentions(ty: &str, name: &str) -> bool {
+/// The identifier tokens of a rendered type, the unit this query matches on.
+///
+/// Splitting on non-identifier characters is what makes `List` match `List(Int)`
+/// but not `Listable`.
+///
+/// The code index deliberately does *not* share this rule, and the difference is
+/// not an oversight. This query answers a name a human typed at a shell, where
+/// matching a bare `Option` wherever it appears is the useful behavior and the
+/// user can qualify to narrow. The index emits edges between canonical
+/// identities, where the same looseness is a correctness bug: two modules that
+/// each declare a `List` tokenize identically, so a bare match would link to both
+/// and one of those edges would be false. It walks the checked type structurally
+/// instead and keys on the resolved symbol. Convenience here, exactness there.
+pub fn type_tokens(ty: &str) -> impl Iterator<Item = &str> {
     ty.split(|c: char| !c.is_alphanumeric() && c != '_')
-        .any(|tok| tok == name)
+        .filter(|tok| !tok.is_empty())
+}
+
+// Whether a shown type string mentions the type named `name` as a whole token.
+fn type_mentions(ty: &str, name: &str) -> bool {
+    type_tokens(ty).any(|tok| tok == name)
 }
 
 // The module's target triple and data layout are host-derived, so they differ

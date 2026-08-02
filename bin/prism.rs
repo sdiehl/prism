@@ -249,7 +249,8 @@ enum Cmd {
     },
     /// Print one pipeline phase artifact
     ///
-    /// PHASE is one of: tokens, syntax-tokens, surface-syntax, ast, types, typespans, hir,
+    /// PHASE is one of: tokens, syntax-tokens, surface-syntax, ast, types, typespans,
+    /// occurrences, hir,
     /// interface, module-graph, core, core-json, core-identity, core-hash, tc-input, tc-facts,
     /// elab-input, native-kont-table, native-kont-state-map, shape, dupes,
     /// namespace, stdlib-hash, fbip, lowered, tier, effect-plan, tier-explain, captures,
@@ -316,6 +317,29 @@ enum Cmd {
         /// Open the generated index after writing
         #[arg(long)]
         open: bool,
+    },
+    /// Write the code index a program viewer reads
+    Index {
+        /// Project directory, `prism.toml`, or `.pr` file to index
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Compare two committed index artifacts instead of writing one: which
+        /// definitions the author changed, which only re-hashed underneath them
+        #[arg(long, value_names = ["OLD", "NEW"], num_args = 2, conflicts_with_all = ["stdlib", "check"])]
+        diff: Option<Vec<PathBuf>>,
+        /// Output file (default: `<project>/target/index.json`)
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+        /// Index the embedded standard library instead of `path`
+        #[arg(long)]
+        stdlib: bool,
+        /// Omit each module's source text, for a consumer that reads the working
+        /// tree itself
+        #[arg(long)]
+        no_source: bool,
+        /// Check only: exit 1 if the committed artifact is out of date, write nothing
+        #[arg(long)]
+        check: bool,
     },
     /// Execution control over recorded runs and snapshots
     #[command(subcommand)]
@@ -1064,6 +1088,17 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
             open,
             cfg,
         ),
+        Cmd::Index {
+            path,
+            diff,
+            out,
+            stdlib,
+            no_source,
+            check,
+        } => match diff.as_deref() {
+            Some([old, new]) => cli::index::diff_cmd(old, new, out),
+            _ => cli::index::index_cmd(&path, out, stdlib, no_source, check, cfg),
+        },
         Cmd::Mdbook { rest } => cli::docs::mdbook_cmd(&rest, cfg.flags.mdbook_strict),
     }
 }
