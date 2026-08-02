@@ -384,11 +384,26 @@ jobs:
   web:
     name: Web playground
     runs-on: ubuntu-latest
+    env:
+      LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
+      PRISM_CC: /usr/lib/llvm-22/bin/clang
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v7
 
       - name: Setup Rust toolchain
         run: rustup target add wasm32-unknown-unknown
+
+      # This job now builds the native binary as well as the wasm one, so it wants
+      # the shared compilation cache the other compiling jobs use.
+      - name: sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      # The viewer page reads a generated artifact (`prism index`), so the native
+      # binary is needed here, and with it LLVM — the same install the other
+      # compiling jobs share.
+      - name: Install LLVM 22
+        uses: ./.github/actions/setup-llvm
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -440,13 +455,42 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
+      # The code index the viewer page loads: generated, never committed, exactly
+      # like the wasm bundle above.
+      - name: Build the code index
+        run: |
+          cargo build --release
+          ./target/release/prism index --stdlib --out web/public/stdlib-index.json
+
       - name: Install, check, build
         working-directory: web
         run: |
           pnpm install --frozen-lockfile
           pnpm lint
           pnpm typecheck
+          pnpm check:viewer
           pnpm build
+
+      # A preview a reviewer can open without a toolchain: download, unzip, serve
+      # the directory, open `/viewer.html`. `web/dist` already carries the index,
+      # since vite copies `public/` into the build.
+      - name: Assemble the preview
+        run: |
+          cp -R web/dist preview
+          cat > preview/README.txt <<'EOF'
+          Serve this directory over HTTP and open http://localhost:8000/viewer.html:
+
+              python3 -m http.server
+
+          Opening the file directly will not work. The page is a pure consumer of
+          the index and fetches stdlib-index.json at load; a file:// origin cannot.
+          EOF
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: viewer-preview
+          path: preview
+          retention-days: 14
 
   lean:
     name: Lean model
