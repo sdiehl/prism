@@ -16,6 +16,11 @@ use crate::types::ty::{EffRow, Effects, Kind, Label, Type};
 
 mod classes;
 mod context;
+use context::Renames;
+
+// A declaration's span facts, held until its scheme is built: the node types to
+// zonk and the effect rows to render tooltips from.
+type DeferredSpans = (Vec<(NodeId, Type)>, Vec<(NodeId, EffRow)>);
 mod coverage;
 mod env;
 pub(crate) use env::is_builtin_effect;
@@ -808,6 +813,15 @@ pub struct Checked {
     pub inst_keys: InstKeys,
     pub canonical: Canon,
     pub methods: BTreeMap<Sym, (Sym, usize)>,
+    /// The inferred effect row of each instance method, keyed by the name
+    /// elaboration will lift it to (`i@showInt@show`).
+    ///
+    /// An instance method is not in `decls`: it is checked from inside its
+    /// instance rather than as a top-level function, so its row was computed,
+    /// held to the class signature's declared labels, and dropped. A consumer that
+    /// reports what a definition performs has no other source for it — an instance
+    /// has no `DeclInfo` and Core carries no rows.
+    pub method_effects: BTreeMap<String, Effects>,
     pub constrained: BTreeMap<Sym, (Type, Vec<(Sym, Type)>)>,
     pub seeds: u32,
     pub warnings: Vec<Warning>,
@@ -963,12 +977,23 @@ struct Tc<'a> {
     track_tooltips: bool,
     pending_tooltip_rows: Vec<(NodeId, EffRow)>,
     tooltip_rows: BTreeMap<NodeId, String>,
+    method_effects: BTreeMap<String, Effects>,
     touched_tooltip_rows: BTreeSet<u32>,
     tooltip_row_scaffolds: BTreeSet<u32>,
     // Per-declaration principal-body-effect witnesses ([`BodyWitness`]),
     // recorded by `infer_body` and consumed by `finalize_fn`'s borrow rule.
     body_witness: BTreeMap<String, BodyWitness>,
     pending: Vec<(NodeId, Type)>,
+    // The naming the declaration being flushed gave its own variables, so every
+    // span inside it renders under one scheme instead of canonicalizing afresh
+    // per node and calling the same variable `a` in one place and `c` in another.
+    decl_renames: Option<Renames>,
+    // One member's spans, held from the moment its body is inferred until its
+    // scheme exists. A recursion group is solved as a whole — a sibling's body is
+    // what pins an earlier member's parameter — so reading a member's types when
+    // its own body finishes reads them too early. One entry per member, pushed and
+    // taken in the order the group infers and generalizes them.
+    deferred_spans: std::collections::VecDeque<DeferredSpans>,
     hole_sites: Vec<HoleSite>,
     holes: Vec<HoleReport>,
     // Each `This(e)` site, with the span of the whole expression and the element
@@ -1478,6 +1503,7 @@ fn check_seeded_mode(
     let fixed;
     let span_types;
     let tooltip_rows;
+    let method_effects;
     let handler_nodes;
     let handler_residuals;
     let dicts;
@@ -1499,10 +1525,13 @@ fn check_seeded_mode(
             track_tooltips,
             pending_tooltip_rows: Vec::new(),
             tooltip_rows: BTreeMap::new(),
+            method_effects: BTreeMap::new(),
             touched_tooltip_rows: BTreeSet::new(),
             tooltip_row_scaffolds: BTreeSet::new(),
             body_witness: BTreeMap::new(),
             pending: Vec::new(),
+            decl_renames: None,
+            deferred_spans: std::collections::VecDeque::new(),
             hole_sites: Vec::new(),
             holes: Vec::new(),
             or_null_sites: Vec::new(),
@@ -1604,6 +1633,7 @@ fn check_seeded_mode(
         fixed = tc.fixed;
         span_types = tc.span_types;
         tooltip_rows = tc.tooltip_rows;
+        method_effects = std::mem::take(&mut tc.method_effects);
         handler_nodes = tc.handler_nodes;
         handler_residuals = tc.handler_residuals;
         dicts = tc.dicts;
@@ -1644,6 +1674,7 @@ fn check_seeded_mode(
         inst_keys,
         canonical,
         methods,
+        method_effects,
         constrained: constrained_final,
         seeds,
         warnings,
@@ -1763,10 +1794,13 @@ fn infer_expr_full(
         track_tooltips: false,
         pending_tooltip_rows: Vec::new(),
         tooltip_rows: BTreeMap::new(),
+        method_effects: BTreeMap::new(),
         touched_tooltip_rows: BTreeSet::new(),
         tooltip_row_scaffolds: BTreeSet::new(),
         body_witness: BTreeMap::new(),
         pending: Vec::new(),
+        decl_renames: None,
+        deferred_spans: std::collections::VecDeque::new(),
         hole_sites: Vec::new(),
         holes: Vec::new(),
         or_null_sites: Vec::new(),
@@ -1822,10 +1856,13 @@ fn query_tc(seed: &TypecheckSeed) -> Tc<'_> {
         track_tooltips: false,
         pending_tooltip_rows: Vec::new(),
         tooltip_rows: BTreeMap::new(),
+        method_effects: BTreeMap::new(),
         touched_tooltip_rows: BTreeSet::new(),
         tooltip_row_scaffolds: BTreeSet::new(),
         body_witness: BTreeMap::new(),
         pending: Vec::new(),
+        decl_renames: None,
+        deferred_spans: std::collections::VecDeque::new(),
         hole_sites: Vec::new(),
         holes: Vec::new(),
         or_null_sites: Vec::new(),

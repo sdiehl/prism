@@ -3,7 +3,6 @@
 //! The whole compiler front-end and tree-walking interpreter run in wasm. Only
 //! the LLVM/MLIR back-ends are absent (the `native` feature is off in a wasm
 //! build).
-use logos::Logos;
 use wasm_bindgen::prelude::*;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -15,8 +14,6 @@ use serde_json::Value;
 
 use crate::core::HASH_PREFIX_HEX;
 use crate::error::line_col;
-use crate::lex::highlight::tok_class;
-use crate::lex::Token;
 use crate::resolve::{default_roots, Root};
 use crate::{
     check, example_program, format as fmt_src, interpret, interpret_on, namespace_identity,
@@ -532,18 +529,9 @@ pub fn fmt(src: &str) -> String {
 #[wasm_bindgen]
 #[must_use]
 pub fn tokens(src: &str) -> String {
-    let parts: Vec<String> = Token::lexer(src)
-        .spanned()
-        .filter_map(|(res, sp)| {
-            res.ok().map(|t| {
-                format!(
-                    r#"{{"s":{},"e":{},"c":"{}"}}"#,
-                    sp.start,
-                    sp.end,
-                    tok_class(&t)
-                )
-            })
-        })
+    let parts: Vec<String> = crate::lex::highlight::token_spans(src)
+        .into_iter()
+        .map(|(start, end, class)| format!(r#"{{"s":{start},"e":{end},"c":"{class}"}}"#))
         .collect();
     format!("[{}]", parts.join(","))
 }

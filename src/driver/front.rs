@@ -73,6 +73,11 @@ pub(super) enum FrontRequest {
     /// The identity surface with the semantic validators, for store/package
     /// commits; byte-identical Core to `Identity`.
     IdentityValidated,
+    /// The identity surface plus the per-node type strings, for the code index:
+    /// it needs the same pre-optimizer Core every address is taken over *and* the
+    /// types a reader hovers. Collection only fills side tables, so the Core — and
+    /// therefore every hash — is byte-identical to `Identity`.
+    IdentityTooltips,
     /// Typecheck-only analysis with per-node type/effect strings, for
     /// `dump typespans` and static documentation tooltips.
     TypedTooltips,
@@ -93,6 +98,7 @@ impl FrontRequest {
             Self::FullDeferredHoles => FrontOpts::FULL_DEFERRED_HOLES,
             Self::Identity => FrontOpts::IDENTITY,
             Self::IdentityValidated => FrontOpts::IDENTITY_VALIDATED,
+            Self::IdentityTooltips => FrontOpts::IDENTITY_TOOLTIPS,
             Self::TypedTooltips => FrontOpts::TYPED_TOOLTIPS,
             Self::Report => FrontOpts::REPORT,
         }
@@ -221,6 +227,18 @@ impl FrontOpts {
         pre_opt: false,
         allow_holes: false,
         typed_tooltips: false,
+    };
+    // The identity surface with the per-node type strings the code index carries.
+    // Identical to `IDENTITY` but for the side tables: presentation metadata still
+    // cannot reach the Core a hash is taken over.
+    const IDENTITY_TOOLTIPS: Self = Self {
+        stop: FrontStop::Elaborated,
+        diagnostics: false,
+        scheduler_retarget: false,
+        validate: false,
+        pre_opt: false,
+        allow_holes: false,
+        typed_tooltips: true,
     };
     // Typecheck-only analysis for `dump typespans` and static documentation
     // tooltips. It shares every ordinary check policy except the extra facts.

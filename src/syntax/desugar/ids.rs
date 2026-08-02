@@ -1,5 +1,6 @@
-//! Stamp every expression node with a unique `NodeId`, the identity under which
-//! the typechecker records a node's resolution for the elaborator to read back.
+//! Stamp every expression node, and every pattern a match arm binds, with a
+//! unique `NodeId` — the identity under which the typechecker records a node's
+//! resolution for the elaborator to read back.
 //!
 //! Run as the last step of desugar, so identity is fixed on the exact tree both
 //! the typechecker and the elaborator traverse. Decoupling identity from `Span`
@@ -7,11 +8,11 @@
 //! duplicated one) and lets resolve leave per-module spans unshifted: a node's
 //! resolution is keyed by its id, never its location.
 
-use crate::syntax::ast::{Core, Decl, Expr, HandlerArm, NodeId, Program, S};
+use crate::syntax::ast::{Core, Decl, Expr, HandlerArm, NodeId, Pattern, Program, S};
 
-/// Assign every expression node in `prog` a fresh id, in a deterministic
-/// pre-order walk. Only function and instance-method bodies carry Core exprs;
-/// pattern synonyms are expanded away by this point.
+/// Assign every expression and arm pattern in `prog` a fresh id, in a
+/// deterministic pre-order walk. Only function and instance-method bodies carry
+/// Core exprs; pattern synonyms are expanded away by this point.
 pub(super) fn assign_ids(prog: &mut Program<Core>) {
     let mut next: u32 = 1;
     for f in &mut prog.fns {
@@ -39,6 +40,35 @@ fn decl(d: &mut Decl<Core>, next: &mut u32) {
         }
     }
     expr(&mut d.body, next);
+}
+
+// A match arm's pattern, from the same counter its expressions come from: a
+// binder's type is recorded against its id in the same table an expression's is,
+// so the two identities have to be drawn from one space to key it.
+//
+// A pattern parameter (`fn area(Circle(r))`) is desugared into a match around the
+// body before this runs, so an arm is the only place a pattern reaches Core.
+fn pat(p: &mut S<Pattern>, next: &mut u32) {
+    p.id = NodeId(*next);
+    *next += 1;
+    match &mut p.node {
+        Pattern::Wild
+        | Pattern::Var(_)
+        | Pattern::Int(_)
+        | Pattern::Float(_)
+        | Pattern::Char(_)
+        | Pattern::Bool(_) => {}
+        Pattern::Ctor(_, ps) | Pattern::Tuple(ps) | Pattern::Or(ps) => {
+            for sub in ps {
+                pat(sub, next);
+            }
+        }
+        Pattern::Record(_, fields, _) => {
+            for (_, sub) in fields {
+                pat(sub, next);
+            }
+        }
+    }
 }
 
 fn expr(e: &mut S<Expr<Core>>, next: &mut u32) {
@@ -83,6 +113,7 @@ fn expr(e: &mut S<Expr<Core>>, next: &mut u32) {
         Expr::Match(s, arms) => {
             expr(s, next);
             for a in arms {
+                pat(&mut a.pat, next);
                 if let Some(g) = &mut a.guard {
                     expr(g, next);
                 }

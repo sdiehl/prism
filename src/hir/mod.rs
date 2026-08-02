@@ -385,6 +385,14 @@ impl<'a> CheckedHir<'a> {
         self.facts.ty.get(id.0 as usize).and_then(Option::as_ref)
     }
 
+    /// The presentable `type ! row` text for a node, when the checker was asked to
+    /// collect it. Distinct from [`Self::node_type`], which is the checker's own
+    /// term and still carries its inference variables.
+    #[must_use]
+    pub fn tooltip(&self, id: NodeId) -> Option<&str> {
+        self.facts.tooltip(id)
+    }
+
     /// The operation-local residual witness for a checked handler expression.
     #[must_use]
     pub fn handler_residual(&self, id: NodeId) -> Option<&'a HandlerResidual> {

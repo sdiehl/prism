@@ -390,18 +390,66 @@ pub struct ErrorDecl {
 }
 
 // A row label: an effect name with optional type arguments, `Emit(Int)`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 pub struct EffLabel {
     pub name: String,
     pub args: Vec<Ty>,
+    // Where the label's *name* was written, not the whole label: the argument list
+    // is excluded so a consumer that turns a reference into a link covers the name
+    // and nothing else. Zero-width for a label the desugarer synthesizes (an alias
+    // expansion, a generated handler), which is how such a label is recognized as
+    // having no position in source.
+    pub span: Span,
+}
+
+// A label's identity is its name and its arguments; where it was written is not
+// part of it. This is hand-written rather than derived for that reason: alias
+// expansion dedups labels by equality (`desugar::aliases::expand_labels`), so
+// folding the span in would stop two identical labels written at different
+// positions from collapsing and would silently change the expanded effect row.
+impl PartialEq for EffLabel {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.args == other.args
+    }
+}
+
+// The span is omitted from the dump for the same reason it is omitted from
+// equality: an AST dump is a semantic view, and a position is not part of what a
+// label is. Omitting it also keeps a dump byte-identical to one taken before
+// labels carried positions, the discipline `Decl`, `Program`, and `Arm` already
+// follow for the fields a reader does not need to see.
+#[expect(
+    clippy::missing_fields_in_debug,
+    reason = "the span is omitted on purpose; see above"
+)]
+impl fmt::Debug for EffLabel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EffLabel")
+            .field("name", &self.name)
+            .field("args", &self.args)
+            .finish()
+    }
 }
 
 impl EffLabel {
+    /// A bare label with no arguments and no source position, for a synthesized
+    /// row. Source labels come from the parser, which supplies the name's span.
     #[must_use]
     pub fn bare(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             args: Vec::new(),
+            span: Span::empty(0),
+        }
+    }
+
+    /// A label as written, with the span of its name.
+    #[must_use]
+    pub fn at(name: impl Into<String>, args: Vec<Ty>, span: Span) -> Self {
+        Self {
+            name: name.into(),
+            args,
+            span,
         }
     }
 }
@@ -1858,6 +1906,34 @@ pub enum Pattern {
     // the whole form is expanded away into one arm per alternative before the
     // checker runs, so nothing past desugaring observes it.
     Or(Vec<S<Self>>),
+}
+
+impl Pattern {
+    /// Visit each directly-nested sub-pattern.
+    ///
+    /// The counterpart of [`Expr::each_child`], and there for the same reason: a
+    /// walker recursing through patterns cannot silently drop a new variant, and
+    /// adding one forces an update here rather than a quiet miss at each `match`.
+    pub fn each_child(&self, f: &mut impl FnMut(&S<Self>)) {
+        match self {
+            Self::Ctor(_, ps) | Self::Tuple(ps) | Self::Or(ps) => {
+                for p in ps {
+                    f(p);
+                }
+            }
+            Self::Record(_, fields, _) => {
+                for (_, p) in fields {
+                    f(p);
+                }
+            }
+            Self::Wild
+            | Self::Var(_)
+            | Self::Int(_)
+            | Self::Float(_)
+            | Self::Char(_)
+            | Self::Bool(_) => {}
+        }
+    }
 }
 
 pub const fn sp<P: Phase>(node: Expr<P>, span: Span) -> S<Expr<P>> {

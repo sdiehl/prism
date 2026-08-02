@@ -37,9 +37,10 @@ use crate::syntax::reflect::parse_unit;
 use crate::tc::parse_checked_signature;
 use crate::types::{Checked, Env, Type, TypecheckSeed};
 
-use super::{elaborated, hash_meta, with_prelude, WireKind, NAMESPACE_ARTIFACT_KIND};
+use super::front::{run_front, Front, FrontRequest};
+use super::{elaborated, hash_meta, with_prelude, Config, WireKind, NAMESPACE_ARTIFACT_KIND};
 #[cfg(feature = "native")]
-use super::{ArtifactField, ArtifactIdentity, Config};
+use super::{ArtifactField, ArtifactIdentity};
 
 /// Fingerprint of the executable that is executing compiler queries.
 ///
@@ -99,36 +100,167 @@ pub fn namespace_root(src: &str, roots: &[Root]) -> Result<String, Error> {
     Ok(namespace_identity(src, roots)?.root.into_string())
 }
 
-// The complete namespace-entry map a root commits to: every definition and
-// inlined-constant behavior hash, every data/effect shape digest, every class
-// digest, and every instance digest, keyed by a kind tag so declarations that
-// share a name across namespaces (a value and an instance are both lowercase)
-// cannot collide. This is the single fold the namespace contract, the
-// `dump namespace` export, the package tag, audit re-derivation, and the
-// standard-library root all share, so a change to a type's shape or an instance's
-// method moves the root even when no definition body's bytes change. Folding only
-// definitions (the previous behavior) let `Token(Int)` and `Token(String)` share
-// one namespace contract.
-fn namespace_entries(
+/// The four content-addressed layers a namespace root commits to, kept apart.
+///
+/// Every definition and inlined-constant behavior hash, every data/effect shape
+/// digest, every class interface digest, and every instance identity digest,
+/// plus the one Merkle [`root`](Self::root) folded over all four. The root is the
+/// single value the namespace contract, the `dump namespace` export, a package
+/// tag, and audit re-derivation all agree on, so a change to a type's shape or an
+/// instance's method moves it even when no definition body's bytes change.
+///
+/// The layers are kept separate rather than pre-merged because a tool that
+/// addresses *individual* definitions (the code index) needs to know which
+/// namespace a name was addressed in: a value and an instance are both lowercase,
+/// so `map` in the definition layer and `map` in the instance layer are different
+/// things, which is exactly what the kind tags the merge applies encode before
+/// the fold.
+#[derive(Debug, Clone)]
+pub struct NamespaceLayers {
+    /// The single fold over every entry below; the value a package tag names.
+    pub root: Digest,
+    /// The hashing scheme tag every constituent hash commits to.
+    pub scheme: &'static str,
+    /// The compiler version that produced this fingerprint.
+    pub version: &'static str,
+    /// Per-definition behavior hashes (term level).
+    pub defs: crate::core::Hashes,
+    /// Per-declaration structural shape digests (datatypes and effects).
+    pub shapes: BTreeMap<String, Digest>,
+    /// Per-class interface digests (name, superclasses, method signatures).
+    pub classes: BTreeMap<String, Digest>,
+    /// Per-instance identity digests (class, head, method behavior hashes).
+    pub instances: BTreeMap<String, Digest>,
+}
+
+// Elaborated Core with the inlined top-level constants folded back in, so every
+// *addressable* definition is a Core node.
+//
+// A `let` constant is inlined at its use sites and so never reaches compiled
+// Core, but it still has its own behavior hash and its own dependency edges. Both
+// the namespace fold and the dependency graph want it present, and they must agree
+// on the augmented set, so the augmentation has one home here.
+fn with_konsts(
     program: &Program<CorePhase>,
     checked: &Checked,
     core: &ElaboratedCore,
-) -> Result<BTreeMap<String, Digest>, Error> {
-    // Top-level constants are inlined at use sites, so they are not in the
-    // compiled Core; elaborate them as zero-param CoreFns so each contributes its
-    // own behavior hash, exactly as the standard-library root does.
+) -> Result<ElaboratedCore, Error> {
     let mut core = core.clone();
     core.core_mut().fns.extend(konst_fns(program, checked)?);
+    Ok(core)
+}
+
+// The layers of an already-augmented program (see [`with_konsts`]).
+fn layers_of_augmented(
+    program: &Program<CorePhase>,
+    checked: &Checked,
+    core: &ElaboratedCore,
+) -> NamespaceLayers {
     let defs = hash_program(
-        &core,
+        core,
         &hash_meta(checked, &borrow_sigs(program), &fip_annots(program)),
     );
     let shapes = shape_digests(&program.types, &program.effects);
     let classes = class_digests(&program.classes);
     let instances = instance_digests(program, &defs);
-    Ok(merge_namespace_entries(
+    let root = crate::core::hash_root(&merge_namespace_entries(
         &defs, &shapes, &classes, &instances,
+    ));
+    NamespaceLayers {
+        root,
+        scheme: HASH_SCHEME,
+        version: env!("CARGO_PKG_VERSION"),
+        defs,
+        shapes,
+        classes,
+        instances,
+    }
+}
+
+// The layers of an elaborated program. The one computation behind the
+// whole-program root, the standard-library fingerprint, and the code index, so
+// the three cannot drift on what a namespace contains.
+fn layers_of(
+    program: &Program<CorePhase>,
+    checked: &Checked,
+    core: &ElaboratedCore,
+) -> Result<NamespaceLayers, Error> {
+    Ok(layers_of_augmented(
+        program,
+        checked,
+        &with_konsts(program, checked, core)?,
     ))
+}
+
+/// Everything a tool needs to address a program's definitions individually: the
+/// elaborated program, its checked view, its Core with every addressable
+/// definition present as a node, and its [`NamespaceLayers`].
+///
+/// One elaboration serves all four. A consumer that computed them separately
+/// would pay for three front-end passes and, worse, could build a dependency
+/// graph over a different definition set than the one it hashed.
+pub(crate) struct AddressableSurface {
+    pub program: Program<CorePhase>,
+    pub checked: Checked,
+    /// Core augmented by [`with_konsts`]: the node set the layers are taken over,
+    /// so a [`crate::core::DepGraph`] built from it and the digests in `layers`
+    /// describe the same definitions.
+    pub core: ElaboratedCore,
+    pub layers: NamespaceLayers,
+}
+
+/// Elaborate `src` and return its [`AddressableSurface`].
+///
+/// Computed over the identity surface (pre-optimizer elaborated Core), so it is a
+/// pure function of `src` and `roots`.
+///
+/// # Errors
+/// Fails on any front-end error.
+pub(crate) fn addressable_surface(src: &str, roots: &[Root]) -> Result<AddressableSurface, Error> {
+    addressable_surface_in(src, roots, &Config::default())
+}
+
+/// [`addressable_surface`] under an explicit configuration.
+///
+/// The identity preset consults no optimizer or retarget knob, so `cfg` changes
+/// nothing here except the one thing upstream of it: the build mode.
+/// `BuildMode::Test` retains `test fn` declarations that a production elaboration
+/// strips before it hashes anything, so a test-mode surface is the only place a
+/// test's own content address and dependency edges exist.
+///
+/// # Errors
+/// Fails on any front-end error.
+pub(crate) fn addressable_surface_in(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+) -> Result<AddressableSurface, Error> {
+    let (program, checked, core) =
+        run_front(src, roots, cfg, FrontRequest::IdentityTooltips).map(Front::into_elaborated)?;
+    let core = with_konsts(&program, &checked, &core)?;
+    let layers = layers_of_augmented(&program, &checked, &core);
+    Ok(AddressableSurface {
+        program,
+        checked,
+        core,
+        layers,
+    })
+}
+
+/// The namespace layers of a program: every definition, shape, class, and
+/// instance digest it commits to, plus their fold.
+///
+/// [`namespace_identity`] answers "what is this program's one address"; this
+/// answers "what addresses are *in* it", which is what a tool needs to link a
+/// source declaration to its content hash. Computed over the identity surface
+/// (pre-optimizer elaborated Core), so it is a pure function of `src` and
+/// `roots` and no compiler knob can move a digest.
+///
+/// # Errors
+/// Fails on any front-end error.
+pub fn namespace_layers(src: &str, roots: &[Root]) -> Result<NamespaceLayers, Error> {
+    let (program, checked, core) = elaborated(src, roots)?;
+    layers_of(&program, &checked, &core)
 }
 
 // Merge the four namespace layers into one kind-tagged `name -> digest` map. The
@@ -185,14 +317,14 @@ pub(crate) fn instance_digests(
     instances
 }
 
-// The whole-program namespace root: the full fold over `namespace_entries`. This
-// is the published/audited contract a package tag maps to.
+// The whole-program namespace root: the fold over every namespace layer. This is
+// the published/audited contract a package tag maps to.
 pub(crate) fn namespace_root_of(
     program: &Program<CorePhase>,
     checked: &Checked,
     core: &ElaboratedCore,
 ) -> Result<Digest, Error> {
-    Ok(hash_root(&namespace_entries(program, checked, core)?))
+    Ok(layers_of(program, checked, core)?.root)
 }
 
 // The definition-layer Merkle fold: a root over definition content hashes only.
@@ -890,28 +1022,15 @@ pub(crate) fn stdlib_value_schemes() -> Result<Vec<(String, String, Type)>, Erro
     Ok(CACHE.get().cloned().unwrap_or(rows))
 }
 
-/// A content-addressed fingerprint of the whole standard library.
+/// A content-addressed fingerprint of the whole standard library: the
+/// [`NamespaceLayers`] of the embedded stdlib.
 ///
 /// One namespace root (a branch-hash-style fold) over every documented
 /// definition's behavior hash and every datatype/effect's shape digest, tagged
-/// with the hashing scheme and the compiler version that produced it.
-#[derive(Debug, Clone)]
-pub struct StdlibHash {
-    /// The single fold over every entry below; the value anchored in the docs.
-    pub root: Digest,
-    /// The hashing scheme tag every constituent hash commits to.
-    pub scheme: &'static str,
-    /// The compiler version that produced this fingerprint.
-    pub version: &'static str,
-    /// Per-definition behavior hashes (term level).
-    pub defs: Hashes,
-    /// Per-declaration structural shape digests (datatypes and effects).
-    pub shapes: BTreeMap<String, Digest>,
-    /// Per-class interface digests (name, superclasses, method signatures).
-    pub classes: BTreeMap<String, Digest>,
-    /// Per-instance identity digests (class, head, method behavior hashes).
-    pub instances: BTreeMap<String, Digest>,
-}
+/// with the hashing scheme and the compiler version that produced it. An alias
+/// rather than its own type: the standard library is addressed exactly like any
+/// other program, so the two must never grow separate layer sets.
+pub type StdlibHash = NamespaceLayers;
 
 /// Compute the standard-library fingerprint. See [`StdlibHash`].
 ///
@@ -938,29 +1057,7 @@ pub fn stdlib_hash() -> Result<StdlibHash, Error> {
 }
 
 fn stdlib_hash_uncached() -> Result<StdlibHash, Error> {
-    let src = stdlib_driver_src();
-    let (program, checked, mut core) = elaborated(&src, &[Root::Embedded(STDLIB)])?;
-    // Top-level constants (`let`) are inlined at use sites, so they are not in the
-    // compiled Core. Elaborate them as zero-param CoreFns so each gets its own
-    // behavior hash (addressable and displayable), then hash the whole set.
-    core.core_mut().fns.extend(konst_fns(&program, &checked)?);
-    let defs = hash_program(
-        &core,
-        &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
-    );
-    let shapes = shape_digests(&program.types, &program.effects);
-    let classes = class_digests(&program.classes);
-    let instances = instance_digests(&program, &defs);
-    // The whole-program root uses the shared fold, so the standard-library root
+    // The standard library goes through the shared layer computation, so its root
     // and a package/namespace contract cannot drift apart.
-    let entries = merge_namespace_entries(&defs, &shapes, &classes, &instances);
-    Ok(StdlibHash {
-        root: hash_root(&entries),
-        scheme: HASH_SCHEME,
-        version: env!("CARGO_PKG_VERSION"),
-        defs,
-        shapes,
-        classes,
-        instances,
-    })
+    namespace_layers(&stdlib_driver_src(), &[Root::Embedded(STDLIB)])
 }

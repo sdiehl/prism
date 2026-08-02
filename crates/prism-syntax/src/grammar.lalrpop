@@ -822,13 +822,15 @@ RetType: (Option<Vec<EffLabel>>, Option<String>, Option<Ty>) = {
     },
 };
 
+// `@R` sits immediately after the name token, before any argument list, so the
+// recorded span covers the name a reader would click and not `Emit(Int)` entire.
 EffLabel: EffLabel = {
-    <s:"ident"> => EffLabel::bare(s),
-    <s:"uid"> <args:CtorArgs?> => EffLabel { name: s, args: args.unwrap_or_default() },
+    <l:@L> <s:"ident"> <r:@R> => EffLabel::at(s, Vec::new(), Span::new(l, r)),
+    <l:@L> <s:"uid"> <r:@R> <args:CtorArgs?> => EffLabel::at(s, args.unwrap_or_default(), Span::new(l, r)),
     // Canonical checked-body and module-interface signatures qualify effects
     // at package boundaries (`Spectra.DeckBuilder`). Rehydrating those
     // signatures must accept the same resolved spelling that type names do.
-    <s:"qual"> <args:CtorArgs?> => EffLabel { name: s, args: args.unwrap_or_default() },
+    <l:@L> <s:"qual"> <r:@R> <args:CtorArgs?> => EffLabel::at(s, args.unwrap_or_default(), Span::new(l, r)),
 };
 
 // A parameter is a pattern. A bare variable is the ordinary named parameter and

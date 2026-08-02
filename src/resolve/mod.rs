@@ -324,10 +324,24 @@ pub(crate) fn resolve_loaded_modules(
 /// ambiguous qualified reference.
 pub(crate) fn resolve_loaded_module_units(
     root: Program,
-    mut modules: Vec<Module>,
+    modules: Vec<Module>,
 ) -> Result<(Program, Vec<Module>), Error> {
+    let (root, modules, _) = resolve_loaded_module_units_seeing(root, modules)?;
+    Ok((root, modules))
+}
+
+/// [`resolve_loaded_module_units`], additionally returning every reference the
+/// renamer resolved.
+///
+/// # Errors
+/// Fails on a cross-module name clash, undefined export, or an unresolved or
+/// ambiguous qualified reference.
+pub(crate) fn resolve_loaded_module_units_seeing(
+    root: Program,
+    mut modules: Vec<Module>,
+) -> Result<(Program, Vec<Module>, Vec<Occurrence>), Error> {
     if is_single_region(&root) {
-        return Ok((resolve(root)?, modules));
+        return Ok((resolve(root)?, modules, Vec::new()));
     }
     let (mods, by_path) = module_infos(&modules)?;
 
@@ -353,7 +367,7 @@ pub(crate) fn resolve_loaded_module_units(
         moved_prelude: &moved_prelude,
     };
     let mut root = root;
-    Rw::new("", &root_scopes, &mods).program(&mut root)?;
+    let mut seen = Rw::new("", &root_scopes, &mods).program(&mut root)?;
 
     // An imported module carries no prelude of its own, so its prelude halves
     // stay empty and every one of its declarations resolves in the user region.
@@ -370,10 +384,31 @@ pub(crate) fn resolve_loaded_module_units(
             prelude_end: 0,
             moved_prelude: &moved_prelude,
         };
-        Rw::new(&path, &scopes, &mods).program(&mut m.prog)?;
+        seen.extend(Rw::new(&path, &scopes, &mods).program(&mut m.prog)?);
     }
 
-    Ok((root, modules))
+    Ok((root, modules, seen))
+}
+
+/// Resolve a program and report every reference the renamer resolved, alongside
+/// the resolved program.
+///
+/// The goto-definition and find-references relation, taken from the resolver
+/// rather than reconstructed by a second walk. See [`Occurrence`].
+///
+/// # Errors
+/// Fails on a missing or unparseable module, a cross-module name clash, an
+/// undefined export, or an unresolved/ambiguous qualified reference.
+pub fn resolve_modules_seeing(
+    root: Program,
+    roots: &[Root],
+) -> Result<(Program, Vec<Occurrence>), Error> {
+    if root.imports.is_empty() {
+        return Ok((resolve(root)?, Vec::new()));
+    }
+    let modules = load(&root, roots)?;
+    let (root, modules, seen) = resolve_loaded_module_units_seeing(root, modules)?;
+    Ok((merge(root, modules), seen))
 }
 
 /// The bare names a program's imports open into unqualified scope.
@@ -699,6 +734,41 @@ fn merge(mut root: Program, modules: Vec<Module>) -> Program {
     root
 }
 
+/// One resolved reference: where a name was written, and what it means.
+///
+/// Collected by the renamer itself rather than by a second walk over the AST,
+/// because the renamer is where the decision is *made*. It already carries the
+/// scope stack that separates a local binding from a top-level name, and it
+/// already knows which module's coordinates a span is in. A parallel walker would
+/// have to reimplement that scoping and could then disagree with the resolver
+/// about what a name means; this cannot disagree, because it is the same walk.
+///
+/// This is the goto-definition and find-references relation: read forward it
+/// answers "what is this name", read backward "where is this used".
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Occurrence {
+    /// The dotted module whose source `span` indexes into (empty for the root).
+    pub module: String,
+    /// The canonical name of the declaration this reference sits inside.
+    pub owner: String,
+    /// That declaration's own byte range, in the same coordinates as `span`.
+    ///
+    /// Carried so a consumer can place a reference *within* its declaration
+    /// (`span.start - owner_span.start`) without knowing which coordinates these
+    /// are. That matters because the root module's are the compiled source's,
+    /// which begins with the prelude, while a tool holding one module's file has
+    /// nothing to subtract; the difference between the two spans is the same
+    /// either way.
+    pub owner_span: Span,
+    /// The reference's byte range in that module's own source.
+    pub span: Span,
+    /// The canonical name it resolves to. A builtin, an effect operation, or a
+    /// prelude name that no later phase renames stays bare, so a consumer matches
+    /// this against the definitions it knows and treats an unmatched target as a
+    /// reference leaving its own view.
+    pub target: String,
+}
+
 /// A scope-aware rewriter for one module. References to the module's own
 /// top-level names (and a selective import's unqualified names) become their
 /// canonical form; a qualified reference resolves to the imported module's
@@ -715,6 +785,13 @@ struct Rw<'a> {
     // user's. Always false for a module with no prelude prefix.
     in_prelude: bool,
     locals: Vec<String>,
+    /// Every reference resolved so far, in walk order. See [`Occurrence`].
+    occurrences: Vec<Occurrence>,
+    /// The declaration being rewritten (canonical name and span), recorded as the
+    /// owner of each reference found inside it. Every site that walks an
+    /// expression sets this first, so a reference always names the declaration a
+    /// reader would navigate to.
+    owner: (String, Span),
     // Each locally declared `stable` family mapped to the predecessor rungs whose
     // route to the current rung the migration table promises. A family-qualified
     // `T.Vk.upgrade`/`.downgrade` resolves only for a promised rung; an omitted
@@ -731,6 +808,8 @@ impl<'a> Rw<'a> {
             mods,
             in_prelude: false,
             locals: Vec::new(),
+            occurrences: Vec::new(),
+            owner: (String::new(), Span::empty(0)),
             family_routes: BTreeMap::new(),
             err: None,
         }
@@ -741,7 +820,8 @@ impl<'a> Rw<'a> {
         self.in_prelude = span.start < self.s.prelude_end;
     }
 
-    fn program(mut self, p: &mut Program) -> Result<(), Error> {
+    // Rewrite `p` in place, returning every reference resolved along the way.
+    fn program(mut self, p: &mut Program) -> Result<Vec<Occurrence>, Error> {
         // Record the promised family routes before rewriting any reference, so a
         // `T.Vk.upgrade` use resolves against the declared migration table.
         self.family_routes = p
@@ -815,6 +895,9 @@ impl<'a> Rw<'a> {
         for inst in &mut p.instances {
             self.at(inst.span);
             inst.module = self.module.to_string();
+            // An instance is global, so its own bare name is its canonical one;
+            // it owns the references in every method body it declares.
+            self.owner = (inst.name.clone(), inst.span);
             inst.class = self.value(&inst.class, inst.span);
             self.ty(&mut inst.head);
             for con in &mut inst.context {
@@ -836,6 +919,8 @@ impl<'a> Rw<'a> {
         for pat in &mut p.patterns {
             self.at(pat.span);
             pat.name = self.canon(&pat.name);
+            // The extractor owns the references in its view and make clauses.
+            self.owner = (pat.name.clone(), pat.span);
             pat.for_ty = self.value(&pat.for_ty, pat.span);
             let base = self.locals.len();
             self.locals.extend(pat.params.iter().cloned());
@@ -855,6 +940,10 @@ impl<'a> Rw<'a> {
         // local, so push that before resolving the body.
         for sd in &mut p.stable {
             self.at(sd.span);
+            // The family owns the references in its field defaults and converter
+            // bodies. They desugar into their own declarations later; before that
+            // the block is the declaration a reader would navigate to.
+            self.owner = (sd.name.clone(), sd.span);
             for rung in &mut sd.rungs {
                 for field in &mut rung.fields {
                     self.ty(&mut field.ty);
@@ -884,13 +973,25 @@ impl<'a> Rw<'a> {
                 }
             }
         }
-        self.err.take().map_or(Ok(()), |e| Err(Error::Type(e)))
+        match self.err.take() {
+            Some(e) => Err(Error::Type(e)),
+            None => Ok(self.occurrences),
+        }
     }
 
     fn decl(&mut self, d: &mut Decl, canon_name: bool) {
         if canon_name {
             d.name = self.canon(&d.name);
         }
+        // A top-level declaration owns the references in its body. An instance
+        // method (`canon_name` false) does not: its own name is the bare method
+        // name, so it keeps the owner the instance walk installed, which is the
+        // declaration a reader would navigate to.
+        let outer = if canon_name {
+            Some(std::mem::replace(&mut self.owner, (d.name.clone(), d.span)))
+        } else {
+            None
+        };
         let base = self.locals.len();
         // Defaults are capture-free: resolved before the function's own
         // parameters enter scope, so they see only the enclosing bindings.
@@ -918,6 +1019,9 @@ impl<'a> Rw<'a> {
         }
         self.expr(&mut d.body);
         self.locals.truncate(base);
+        if let Some(outer) = outer {
+            self.owner = outer;
+        }
     }
 
     fn constraint(&mut self, c: &mut Constraint) {
@@ -926,7 +1030,9 @@ impl<'a> Rw<'a> {
     }
 
     fn efflabel(&mut self, l: &mut EffLabel) {
-        l.name = self.value(&l.name, Span::empty(0));
+        // The label carries the span of its own name, so this is one of the sites
+        // whose position is exact enough to record as an occurrence.
+        l.name = self.value_ref(&l.name, l.span);
         for a in &mut l.args {
             self.ty(a);
         }
@@ -977,7 +1083,8 @@ impl<'a> Rw<'a> {
     fn expr(&mut self, e: &mut S<Expr>) {
         let span = e.span;
         match &mut e.node {
-            Expr::Var(n) => *n = self.value(n, span),
+            // The one site whose span is the identifier and nothing else.
+            Expr::Var(n) => *n = self.value_ref(n, span),
             Expr::Bin(_, a, b) | Expr::Pipe(a, b) => {
                 self.expr(a);
                 self.expr(b);
@@ -1370,9 +1477,37 @@ impl<'a> Rw<'a> {
     /// rewritten to canonical form; everything else (builtins, effect ops,
     /// prelude) left bare for later phases.
     fn value(&mut self, name: &str, span: Span) -> String {
+        // A local shadows everything and refers to a binder, not a definition.
         if self.locals.iter().any(|l| l == name) {
             return name.to_string();
         }
+        self.global(name, span)
+    }
+
+    /// [`Self::value`] where `span` is the written identifier itself, recording
+    /// the reference as an [`Occurrence`].
+    ///
+    /// Deliberately separate from `value`. Some resolution sites pass the span of
+    /// an *enclosing* node — the whole instance declaration, the whole
+    /// `Cons(p, rest)` pattern, the whole record literal — because the name they
+    /// resolve has no span of its own and there is nowhere narrower to point. Those
+    /// spans are right for a diagnostic, which underlines the construct, and wrong
+    /// for a link, which must cover the name and nothing else. Recording them would
+    /// silently turn a whole declaration into one clickable region, so a site opts
+    /// in here only when its span is exact: an expression variable, and an
+    /// effect-row label, whose span the parser sets to the label's name and not to
+    /// the argument list after it.
+    fn value_ref(&mut self, name: &str, span: Span) -> String {
+        if self.locals.iter().any(|l| l == name) {
+            return name.to_string();
+        }
+        let resolved = self.global(name, span);
+        self.see(span, &resolved);
+        resolved
+    }
+
+    // The canonical name a non-local reference resolves to.
+    fn global(&mut self, name: &str, span: Span) -> String {
         // A family-qualified `T.Vk.upgrade`/`.downgrade` reaches the generated
         // composed route, but only for a rung the migration table promises. The
         // family and rung come from the declared `stable` block, never sniffed
@@ -1387,6 +1522,27 @@ impl<'a> Rw<'a> {
             return self.qualified(q, n, name, span);
         }
         self.lookup(name, span).unwrap_or_else(|| name.to_string())
+    }
+
+    // Record a resolved reference.
+    //
+    // Positionless references are dropped: `ty` and `efflabel` resolve through
+    // the same entry point with a zero-width placeholder, because `Ty` carries no
+    // spans of its own, and a reference a consumer cannot locate is not one it can
+    // render. That is what confines this to term references for now; giving `Ty`
+    // spans would extend it to types and effect rows with no change here.
+    fn see(&mut self, span: Span, target: &str) {
+        if span.is_empty() {
+            return;
+        }
+        let (owner, owner_span) = &self.owner;
+        self.occurrences.push(Occurrence {
+            module: self.module.to_string(),
+            owner: owner.clone(),
+            owner_span: *owner_span,
+            span,
+            target: target.to_string(),
+        });
     }
 
     /// Resolve `Q.n` through the qualifier tables visible to the current region,

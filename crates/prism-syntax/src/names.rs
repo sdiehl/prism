@@ -856,6 +856,17 @@ pub fn is_instance_method(name: &str) -> bool {
     name.starts_with(INSTANCE_METHOD_PREFIX)
 }
 
+// "i@inst@method" -> (inst, method); the tested inverse of `instance_method`.
+// Neither an instance name nor a method name can contain `@` (both are source
+// identifiers), so the split is unambiguous. A consumer that renders the
+// dependency graph uses this to send a call to a lowered method back to the
+// instance declaration the method's source lives in.
+#[must_use]
+pub fn parse_instance_method(name: &str) -> Option<(&str, &str)> {
+    let (inst, method) = name.strip_prefix(INSTANCE_METHOD_PREFIX)?.split_once('@')?;
+    (!inst.is_empty() && !method.is_empty()).then_some((inst, method))
+}
+
 // FBIP reuse token bound to the scrutinee variable it recycles.
 #[must_use]
 pub fn reuse_token(s: &str) -> String {
@@ -1067,23 +1078,23 @@ pub fn local_shadow(n: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        bare_name, exported, is_synthesized, is_var_get, is_var_runner, is_var_set, lens_getter,
-        lens_setter, lens_value, module_of, named_effect, named_op, parse_named_op,
-        parse_scoped_escape, parse_var_get, parse_var_runner, parse_var_set, plate_helper,
-        plate_rebuilder, private, sort_prim_kind, split_family_member, stable_family_member,
-        stable_route_downgrade, stable_route_upgrade, stable_rung, throw_op, var_effect, var_get,
-        var_runner, var_set, ScopedEscape, ALLOC_EFFECT, ALLOC_OP, ARBITRARY_METHOD, ARENA_MODULE,
-        CAP_WRAPPERS, CHILDREN_METHOD, CONCAT_MAP_FN, DECODE_METHOD, DIV_MOD_METHOD,
-        DIV_QUOT_METHOD, EMIT_OP, ENCODE_METHOD, ENTROPY_EFFECT, EQ_METHOD, FMAP_METHOD, FORCE_FN,
-        FOREVER, FROM_JSON_METHOD, GUARD_FN, HASH_METHOD, INCR_REPLAY_DRIVERS,
-        INPUT_CAPABILITY_EFFECTS, INT_CMP, JSON_FIELD_FN, JSON_OBJ, JSON_STR, LENS_FN,
-        NUM_ADD_METHOD, NUM_FROMINT_METHOD, NUM_MUL_METHOD, NUM_NEG_METHOD, NUM_SUB_METHOD,
-        OPTIC_MK_LENS, ORD_METHOD, POW_METHOD, QC_ARB_GEN, QC_GEN_BIND, QC_GEN_CHOOSE,
-        QC_GEN_CONST, QC_GEN_RESIZE, QC_GEN_RUN, REBUILD_METHOD, REPEAT_WHILE, REPLAY_DRIVERS,
-        RUN_IO, SCOLLECT_FN, SHAPE_DIGEST_METHOD, SHOW_METHOD, SMAP_FN, SORT_BY_ORD_FN, SORT_FN,
-        SORT_PRIM_INSTANCES, STR_ESCAPE_FN, SUCCEEDS_FN, TO_JSON_METHOD, WIRE_CAT,
-        WIRE_DECODE_VALUE_WITH_DIGEST, WIRE_EMPTY, WIRE_ENCODE_VALUE_WITH_DIGEST, WIRE_GET_TAG,
-        WIRE_IS_EMPTY, WIRE_OPEN_VALUE_ANY, WIRE_TAG,
+        bare_name, exported, is_instance_method, is_synthesized, is_var_get, is_var_runner,
+        is_var_set, lens_getter, lens_setter, lens_value, module_of, named_effect, named_op,
+        parse_named_op, parse_scoped_escape, parse_var_get, parse_var_runner, parse_var_set,
+        plate_helper, plate_rebuilder, private, sort_prim_kind, split_family_member,
+        stable_family_member, stable_route_downgrade, stable_route_upgrade, stable_rung, throw_op,
+        var_effect, var_get, var_runner, var_set, ScopedEscape, ALLOC_EFFECT, ALLOC_OP,
+        ARBITRARY_METHOD, ARENA_MODULE, CAP_WRAPPERS, CHILDREN_METHOD, CONCAT_MAP_FN,
+        DECODE_METHOD, DIV_MOD_METHOD, DIV_QUOT_METHOD, EMIT_OP, ENCODE_METHOD, ENTROPY_EFFECT,
+        EQ_METHOD, FMAP_METHOD, FORCE_FN, FOREVER, FROM_JSON_METHOD, GUARD_FN, HASH_METHOD,
+        INCR_REPLAY_DRIVERS, INPUT_CAPABILITY_EFFECTS, INT_CMP, JSON_FIELD_FN, JSON_OBJ, JSON_STR,
+        LENS_FN, NUM_ADD_METHOD, NUM_FROMINT_METHOD, NUM_MUL_METHOD, NUM_NEG_METHOD,
+        NUM_SUB_METHOD, OPTIC_MK_LENS, ORD_METHOD, POW_METHOD, QC_ARB_GEN, QC_GEN_BIND,
+        QC_GEN_CHOOSE, QC_GEN_CONST, QC_GEN_RESIZE, QC_GEN_RUN, REBUILD_METHOD, REPEAT_WHILE,
+        REPLAY_DRIVERS, RUN_IO, SCOLLECT_FN, SHAPE_DIGEST_METHOD, SHOW_METHOD, SMAP_FN,
+        SORT_BY_ORD_FN, SORT_FN, SORT_PRIM_INSTANCES, STR_ESCAPE_FN, SUCCEEDS_FN, TO_JSON_METHOD,
+        WIRE_CAT, WIRE_DECODE_VALUE_WITH_DIGEST, WIRE_EMPTY, WIRE_ENCODE_VALUE_WITH_DIGEST,
+        WIRE_GET_TAG, WIRE_IS_EMPTY, WIRE_OPEN_VALUE_ANY, WIRE_TAG,
     };
 
     #[test]
@@ -1392,6 +1403,29 @@ mod tests {
         assert_eq!(parse_scoped_escape("Ask"), None);
         assert_eq!(parse_scoped_escape(&throw_op("NotFound")), None);
         assert_eq!(parse_scoped_escape("Eff@f@x"), None);
+    }
+
+    // `parse_instance_method` is the inverse of `instance_method`: a lowered
+    // method name must recover the instance and method it was minted from, so a
+    // consumer can route a call to a lowered method back to its instance
+    // declaration. Round-trip both directions and pin the near misses: a plain
+    // function, a `named_op` (the other three-part `@` scheme), and a prefixed
+    // name missing the method tail.
+    #[test]
+    fn instance_method_names_round_trip() {
+        for (inst, method) in [("showInt", "show"), ("serializeList", "encode")] {
+            let name = super::instance_method(inst, method);
+            assert!(is_instance_method(&name));
+            assert_eq!(super::parse_instance_method(&name), Some((inst, method)));
+            assert!(name.starts_with(&super::instance_method_prefix(inst)));
+        }
+        assert_eq!(super::parse_instance_method("show"), None);
+        assert_eq!(super::parse_instance_method("i@showInt"), None);
+        assert_eq!(super::parse_instance_method("i@@show"), None);
+        assert_eq!(
+            super::parse_instance_method(&named_op("get", "cell", 0)),
+            None
+        );
     }
 
     // `parse_named_op` recovers a named handler instance's private op so a

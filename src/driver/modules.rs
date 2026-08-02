@@ -799,6 +799,7 @@ impl CheckedBody {
             inst_keys: seed.inst_keys,
             canonical: seed.canonical,
             methods: seed.methods,
+            method_effects: BTreeMap::new(),
             constrained: seed.constrained,
             seeds: self.seeds,
             warnings: Vec::new(),

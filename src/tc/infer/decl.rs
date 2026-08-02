@@ -11,7 +11,8 @@ use crate::types::ty::{EffRow, Effects, Type};
 
 use super::super::env::Annot;
 use super::super::{
-    ClassInfo, Env, HoleBinding, HoleCandidate, HoleReport, InstInfo, RowScope, SelfRef, Tc,
+    ClassInfo, Env, HoleBinding, HoleCandidate, HoleReport, InstInfo, Renames, RowScope, SelfRef,
+    Tc,
 };
 
 // The existentials and scaffolding a declaration's body is inferred against: its
@@ -66,6 +67,45 @@ impl Tc<'_> {
         let r = f(self);
         self.cur_self = prev;
         r
+    }
+
+    // Set one declaration's span facts aside until its scheme exists. Taking them
+    // out of the shared buffers is what keeps a group's members separable: each is
+    // rendered under its own naming, and the buffers are refilled by the next body.
+    fn defer_spans(&mut self) {
+        let spans = std::mem::take(&mut self.pending);
+        let rows = std::mem::take(&mut self.pending_tooltip_rows);
+        self.deferred_spans.push_back((spans, rows));
+        self.touched_tooltip_rows.clear();
+        self.tooltip_row_scaffolds.clear();
+    }
+
+    // Zonk the spans of the declaration whose scheme has just been built, and render
+    // its tooltips under that scheme's own naming.
+    //
+    // Both halves belong here rather than at the end of the body. The zonk, because
+    // a group's solutions are only complete once every member's body has run. The
+    // naming, because `renames` is the very renaming the exported scheme carries, so
+    // a body reads the letters its signature does by construction — rather than by
+    // rebuilding the naming early and hoping the two agree.
+    fn flush_deferred(&mut self, renames: &Renames) {
+        let Some((spans, rows)) = self.deferred_spans.pop_front() else {
+            return;
+        };
+        for (id, t) in spans {
+            let t = self.apply(&t);
+            self.span_types.insert(id, t);
+        }
+        self.decl_renames = Some(renames.clone());
+        // Collapsed by id first: a node pushed twice renders once, and in id order.
+        let rows: BTreeMap<_, _> = rows.into_iter().collect();
+        for (id, row) in rows {
+            if let Some(ty) = self.span_types.get(&id).cloned() {
+                let rendered = self.report_tooltip(&ty, &row);
+                self.tooltip_rows.insert(id, rendered);
+            }
+        }
+        self.decl_renames = None;
     }
 
     // Zonk after resolve_all, while this declaration's solutions are still in ctx.
@@ -162,7 +202,12 @@ impl Tc<'_> {
     // rule that `! {}` is never omitted.
     fn report_tooltip(&self, ty: &Type, row: &EffRow) -> String {
         let pair = Type::Tuple(vec![self.apply(ty), Type::Row(self.apply_row(row))]);
-        let shown = self.generalize(&Env::new(), &pair);
+        // Under the enclosing declaration's own naming where there is one, so a
+        // variable shared with the signature keeps the signature's letter.
+        let shown = self.decl_renames.as_ref().map_or_else(
+            || self.generalize(&Env::new(), &pair),
+            |seed| self.generalize_seeded(&Env::new(), &pair, seed),
+        );
         let mut body = &shown;
         while let Type::Forall(_, next) | Type::RowForall(_, next) = body {
             body = next;
@@ -491,7 +536,16 @@ impl Tc<'_> {
         });
         self.cur_row = saved_row;
         checked?;
-        self.flush_spans();
+        // Held, not read. This declaration's own constraints are settled here, but a
+        // mutually recursive sibling's are not: `Cli@lex_go` passes `specs` along
+        // without using it, and `lex_long`'s `find_long(specs, …)` is what pins it —
+        // a body inferred after this one. Zonking now would report `specs` as the
+        // unsolved variable it still is at this instant. `finish_decl` reads them
+        // once the whole group is inferred, under the scheme it builds there.
+        //
+        // Holes stay here: a hole is reported against the declaration that wrote it
+        // and its report is a diagnostic, not a side table.
+        self.defer_spans();
         self.flush_holes();
         // Record the principal-body-effect witness while the solutions are
         // live: the ambient row the body actually accumulated, read before
@@ -543,6 +597,7 @@ impl Tc<'_> {
         // context by solving that variable under row unification.
         let self_ty = default_open_rows(&self.apply(&seed.self_ty));
         let (g, renames) = self.generalize_decl_map(env, &self_ty);
+        self.flush_deferred(&renames);
         if !d.constraints.is_empty() {
             // The scheme's quantified type variables; a constraint may mention only
             // these. A rigid signature variable that no parameter or result uses is
@@ -653,10 +708,17 @@ impl Tc<'_> {
             tc.resolve_all()?;
             Ok(ty)
         })?;
+        // Generalized before the spans are flushed, not after, so the declaration's
+        // naming exists while its nodes are being rendered. `generalize_decl_map`
+        // reads the context without touching it, so pulling it earlier leaves the
+        // scheme it returns exactly the one this returned when it ran last.
+        let t = self.apply(&ty);
+        let (scheme, renames) = self.generalize_decl_map(env, &t);
+        self.decl_renames = Some(renames);
         self.flush_spans();
         self.flush_holes();
-        let t = self.apply(&ty);
-        Ok((self.generalize_decl(env, &t), effs))
+        self.decl_renames = None;
+        Ok((scheme, effs))
     }
 
     pub(in crate::tc) fn check_instance(
@@ -710,8 +772,21 @@ impl Tc<'_> {
                 })
                 .map_err(|e| e.in_fn(&qual))
             })?;
+            // Deliberately unseeded, unlike a function's spans. Seeding from the
+            // class signature instantiated at this head was measured and made things
+            // worse: a method body refers to its class's own methods at several
+            // instantiations at once — `eqPair` uses `eq` at both components — and
+            // pinning those to one naming reports two genuinely different types as
+            // though they were the same one named twice.
             self.flush_spans();
             self.flush_holes();
+            // Recorded before the check below consumes it: this row is the only
+            // account of what an instance method performs, since a method is
+            // checked from inside its instance and never becomes a `DeclInfo`.
+            self.method_effects.insert(
+                crate::names::instance_method(&inst.name, &m.name),
+                effs.clone(),
+            );
             let undeclared: Vec<String> = effs
                 .iter()
                 .filter(|eff| !declared_labels.contains(eff))

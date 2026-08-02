@@ -522,6 +522,55 @@ impl Type {
         self.walk_row_vars(&mut Vec::new(), acc);
     }
 
+    /// Visit each directly-nested type, effect-row and coeffect-row arguments
+    /// included.
+    ///
+    /// The single exhaustive statement of `Type`'s structural children, the
+    /// counterpart of [`prism_syntax::ast::Ty::each_child`] on the surface side: a
+    /// walker that recurses through this cannot silently drop a variant, and adding
+    /// one forces an update here rather than a quiet miss at every hand-written
+    /// `match`. Written without a catch-all arm for exactly that reason.
+    pub fn each_child(&self, f: &mut impl FnMut(&Self)) {
+        match self {
+            Self::Con(_, args) | Self::Tuple(args) | Self::UnboxedTuple(args) => {
+                for a in args {
+                    f(a);
+                }
+            }
+            Self::Fun(params, row, ret) => {
+                for p in params {
+                    f(p);
+                }
+                row.for_each_arg(f);
+                f(ret);
+            }
+            Self::UnboxedRecord(fields) => {
+                for (_, t) in fields {
+                    f(t);
+                }
+            }
+            Self::App(head, arg) => {
+                f(head);
+                f(arg);
+            }
+            Self::Forall(_, t) | Self::RowForall(_, t) | Self::OrNull(t) | Self::Coeffect(t, _) => {
+                f(t);
+            }
+            Self::Row(row) => row.for_each_arg(f),
+            Self::Unit
+            | Self::Int
+            | Self::I64
+            | Self::U64
+            | Self::Bool
+            | Self::Float
+            | Self::Char
+            | Self::Str
+            | Self::Var(_)
+            | Self::Exist(_)
+            | Self::Nat(_) => {}
+        }
+    }
+
     fn walk_ty_vars(&self, bound: &mut Vec<Sym>, acc: &mut BTreeSet<Sym>) {
         match self {
             Self::Var(n) => {

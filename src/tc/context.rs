@@ -36,6 +36,10 @@ impl Tc<'_> {
         self.ctx.clear();
         self.ctx.extend((0..self.seeds).map(Entry::Ex));
         self.row_ctx.clear();
+        // Spans a failed declaration never reached generalization for. Their
+        // solutions are being discarded here, so rendering them later would report
+        // types from a context that no longer exists.
+        self.deferred_spans.clear();
     }
 
     pub(super) fn push_ex(&mut self) -> u32 {
@@ -427,7 +431,7 @@ impl Tc<'_> {
 
     pub(super) fn generalize_map(&self, env: &Env, ty: &Type) -> (Type, Renames) {
         let t = self.zonk(ty);
-        self.generalize_zonked(env, &t, true)
+        self.generalize_zonked(env, &t, true, None)
     }
 
     // Generalization for a finished top-level declaration. Identical to
@@ -436,13 +440,18 @@ impl Tc<'_> {
     // (the desugar's escape check guarantees no cell outlives its declaration),
     // so a cell type solved to the owner's rigid variable must not exclude that
     // variable, or its spelling, from any scheme's quantifiers.
-    pub(super) fn generalize_decl(&self, env: &Env, ty: &Type) -> Type {
-        self.generalize_decl_map(env, ty).0
-    }
-
     pub(super) fn generalize_decl_map(&self, env: &Env, ty: &Type) -> (Type, Renames) {
         let t = self.zonk(ty);
-        self.generalize_zonked(env, &t, false)
+        self.generalize_zonked(env, &t, false, None)
+    }
+
+    // Generalize under a naming already chosen elsewhere: any existential the seed
+    // names keeps that name, and only variables the seed does not know take fresh
+    // letters. Rendering every node of a declaration under the declaration's own
+    // scheme is what makes `xs` read the same in a signature and in the body.
+    pub(super) fn generalize_seeded(&self, env: &Env, ty: &Type, seed: &Renames) -> Type {
+        let t = self.zonk(ty);
+        self.generalize_zonked(env, &t, true, Some(seed)).0
     }
 
     // The scheme builder proper. It only accepts a `Zonked`, so the free-variable
@@ -451,8 +460,14 @@ impl Tc<'_> {
     // includes the pinned `var`-cell existentials in the environment anchors:
     // true for every local generalization point (the cell must stay one type
     // for as long as its scope is still being checked), false once a top-level
-    // declaration is finished (see `generalize_decl`).
-    fn generalize_zonked(&self, env: &Env, zt: &Zonked, anchor_var_ops: bool) -> (Type, Renames) {
+    // declaration is finished (see `generalize_decl_map`).
+    fn generalize_zonked(
+        &self,
+        env: &Env,
+        zt: &Zonked,
+        anchor_var_ops: bool,
+        seed: Option<&Renames>,
+    ) -> (Type, Renames) {
         let t: &Type = zt;
         let mut exs = BTreeSet::new();
         t.free_exist(&mut exs);
@@ -493,11 +508,26 @@ impl Tc<'_> {
             .filter(|v| env_tvars.contains(*v))
             .map(|v| v.as_str())
             .collect();
+        // A letter the seed has already promised to some existential is not available
+        // to a different one, or two distinct variables would print the same.
+        // A letter the seed has already promised to some variable is not available to
+        // a different one, or two distinct variables would print the same.
+        //
+        // Deliberately not the author's own spellings. A declaration's scheme is
+        // canonicalized when it is generalized, so `fn at_map(m : Map(k, v), …)` is
+        // published as `forall a b. (Map(a, b), a) -> b` and that is what a reader
+        // sees in the signature. Preserving `k` and `v` in the body was measured and
+        // made things worse — 105 inconsistent definitions became 188 — because it
+        // put the body in one convention and the rendered signature in the other.
+        let reserved: BTreeSet<String> = seed
+            .into_iter()
+            .flat_map(|r| r.reserved_names().map(ToString::to_string))
+            .collect();
         let mut next_name = 0usize;
         let mut fresh_name = || loop {
             let name = var_name(next_name);
             next_name += 1;
-            if !captured.contains(name.as_str()) {
+            if !captured.contains(name.as_str()) && !reserved.contains(&name) {
                 break name;
             }
         };
@@ -508,7 +538,9 @@ impl Tc<'_> {
         let mut names = Vec::new();
         let mut mapping = Vec::new();
         for e in &gen {
-            let name = fresh_name();
+            let name = seed
+                .and_then(|r| r.name_of(*e))
+                .map_or_else(&mut fresh_name, ToString::to_string);
             mapping.push((*e, name.clone()));
             names.push(name);
         }
@@ -524,7 +556,9 @@ impl Tc<'_> {
             .copied()
             .filter(|v| !env_tvars.contains(v))
         {
-            let name = fresh_name();
+            let name = seed
+                .and_then(|r| r.name_of_rigid(v))
+                .map_or_else(&mut fresh_name, ToString::to_string);
             rigids.push((v, name.clone()));
             names.push(name);
         }
@@ -532,9 +566,10 @@ impl Tc<'_> {
         // pass (rigids to placeholders first, so a canonical name reused as a
         // source name cannot clobber); `finish_decl` replays the same renaming onto
         // the declaration's constraints.
-        let renames = Renames {
+        let mut renames = Renames {
             exists: mapping,
             rigids,
+            rows: Vec::new(),
         };
         let mut out = renames.apply(t);
         let mut row_exs = BTreeSet::new();
@@ -545,20 +580,32 @@ impl Tc<'_> {
             .filter(|e| !env_row_exs.contains(e))
             .collect();
         // Skip row names already in the type, else a user-written `e0` binder
-        // would capture the substituted occurrences.
+        // would capture the substituted occurrences. A name the seed has promised to
+        // one row variable is skipped for the same reason a type variable's is.
         let mut taken = BTreeSet::new();
         collect_row_names(&out, &mut taken);
+        taken.extend(
+            seed.into_iter()
+                .flat_map(|r| r.rows.iter().map(|(_, name)| name.clone())),
+        );
         let mut row_names = Vec::new();
         let mut next = 0;
+        let mut fresh_row = || loop {
+            let cand = format!("e{next}");
+            next += 1;
+            if !taken.contains(&cand) {
+                break cand;
+            }
+        };
         for e in &gen_rows {
-            let name = loop {
-                let cand = format!("e{next}");
-                next += 1;
-                if !taken.contains(&cand) {
-                    break cand;
-                }
-            };
+            // A declaration's latent row is the row most of its nodes carry, so
+            // naming it once per declaration is what stops one binder from reading
+            // `e0` in one place and `e1` in another.
+            let name = seed
+                .and_then(|r| r.name_of_row(*e))
+                .map_or_else(&mut fresh_row, ToString::to_string);
             out = out.subst_row_exist(*e, &EffRow::Var(Sym::from(&name)));
+            renames.rows.push((*e, name.clone()));
             row_names.push(name);
         }
         // Type quantifiers wrap innermost and row quantifiers outermost. When such
@@ -581,12 +628,51 @@ impl Tc<'_> {
 // generalized existentials and rigid signature variables, each mapped to its
 // canonical name. `finish_decl` replays it onto the declaration's class
 // constraints so a `given C(a)` names the same variable the scheme quantifies.
+#[derive(Clone)]
 pub(super) struct Renames {
     exists: Vec<(u32, String)>,
     rigids: Vec<(Sym, String)>,
+    // Row existentials, named `e0`, `e1`, … in their own namespace. Recorded for the
+    // same reason the other two are: so a later rendering can reuse this naming
+    // instead of choosing its own.
+    rows: Vec<(u32, String)>,
 }
 
 impl Renames {
+    // The canonical name this renaming gave an existential, if it named it.
+    pub(super) fn name_of(&self, e: u32) -> Option<&str> {
+        self.exists
+            .iter()
+            .find(|(id, _)| *id == e)
+            .map(|(_, name)| name.as_str())
+    }
+
+    // The same for a rigid signature variable. A written `forall a` is canonicalized
+    // when the scheme is built, so this is the letter the published signature uses.
+    pub(super) fn name_of_rigid(&self, v: Sym) -> Option<&str> {
+        self.rigids
+            .iter()
+            .find(|(sym, _)| *sym == v)
+            .map(|(_, name)| name.as_str())
+    }
+
+    // The name this renaming gave a row existential, if it named it.
+    pub(super) fn name_of_row(&self, e: u32) -> Option<&str> {
+        self.rows
+            .iter()
+            .find(|(id, _)| *id == e)
+            .map(|(_, name)| name.as_str())
+    }
+
+    // Every letter this renaming has already promised, so a variable it does not
+    // name cannot be given one of them.
+    fn reserved_names(&self) -> impl Iterator<Item = &str> {
+        self.exists
+            .iter()
+            .map(|(_, name)| name.as_str())
+            .chain(self.rigids.iter().map(|(_, name)| name.as_str()))
+    }
+
     pub(super) fn apply(&self, t: &Type) -> Type {
         let target_names: BTreeSet<Sym> = self
             .exists

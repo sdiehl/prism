@@ -1,3 +1,5 @@
+use logos::Logos as _;
+
 use super::Token;
 use Token::{
     Alias, AmpAmp, Arrow, As, At, Bang, Bar, Borrow, Break, Canonical, Caret, Catch, CharLit,
@@ -57,4 +59,30 @@ pub const fn tok_class(t: &Token) -> &'static str {
         | DotDot | Dot | QuestionQuestion | QuestionDot | Question | VOpen | VClose | VSemi
         | VHead => "op",
     }
+}
+
+/// The unstyled category: an ordinary lowercase identifier, which every
+/// consumer paints as plain text. Named here so a producer can skip those spans
+/// rather than each site re-spelling the literal.
+pub const PLAIN_CLASS: &str = "id";
+
+/// Every token in `src` as `(start, end, class)`, in source order.
+///
+/// The one producer of highlight spans. The browser highlighter, the docs
+/// tooltips, and the code index all paint from this, so what they colour cannot
+/// disagree about what a token is — the risk a second, hand-written tokenizer
+/// would introduce, where highlighting that contradicts the compiler is worse
+/// than none.
+///
+/// Comments are included (they are among the most useful things to colour), so
+/// this reads the raw token stream rather than the layout-processed one that
+/// moves them into a trivia table. A byte that does not lex is skipped rather
+/// than failing: this is presentation, and a diagnostic surface reports the
+/// error properly.
+#[must_use]
+pub fn token_spans(src: &str) -> Vec<(usize, usize, &'static str)> {
+    Token::lexer(src)
+        .spanned()
+        .filter_map(|(token, at)| Some((at.start, at.end, tok_class(&token.ok()?))))
+        .collect()
 }
