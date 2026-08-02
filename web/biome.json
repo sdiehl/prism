@@ -1,7 +1,15 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.0/schema.json",
   "files": {
-    "includes": ["src/**/*.ts", "*.ts", "!src/examples.ts", "!pkg", "!dist"]
+    "includes": [
+      "src/**/*.ts",
+      "test/**/*.mjs",
+      "*.ts",
+      "!src/examples.ts",
+      "!pkg",
+      "!dist",
+      "!test/build"
+    ]
   },
   "formatter": {
     "enabled": true,
@@ -11,9 +19,13 @@
   },
   "linter": {
     "enabled": true,
-    "rules": { "preset": "recommended" }
+    "rules": {
+      "preset": "recommended"
+    }
   },
   "javascript": {
-    "formatter": { "quoteStyle": "double" }
+    "formatter": {
+      "quoteStyle": "double"
+    }
   }
 }

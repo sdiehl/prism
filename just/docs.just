@@ -14,17 +14,18 @@ examples:
 # Build wasm and serve the playground.
 [group('web')]
 [working-directory('web')]
-web: wasm
+web: wasm index-web
     pnpm install
     pnpm dev
 
 # Lint, type-check, and build the playground.
 [group('web')]
 [working-directory('web')]
-web-build:
+web-build: index-web
     pnpm install
     pnpm lint
     pnpm typecheck
+    pnpm check:viewer
     pnpm build
 
 # Write the code index for the standard library and for this project's own packages, into target/.

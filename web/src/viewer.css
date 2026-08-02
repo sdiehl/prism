@@ -1,0 +1,800 @@
+/* The code viewer: a search rail beside a working set of definition cards.
+   Shares the site palette and header from theme.css; everything here is layout
+   for the two-column reading surface. */
+@import "./theme.css";
+
+.viewer-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-family: var(--ui);
+}
+
+.viewer-main {
+  display: grid;
+  grid-template-columns: minmax(200px, 260px) 1fr;
+  min-height: 0;
+  flex: 1;
+}
+
+/* The header's one control: put the definition list away, and bring it back. It
+   lives here rather than on the rail so that it is still reachable once the rail
+   is gone. */
+.rail-toggle {
+  padding: 2px 7px;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+}
+
+.rail-toggle:hover {
+  color: var(--ink);
+  background: var(--bg-soft);
+  border-color: var(--line);
+}
+
+/* With the rail away the deck takes the whole width; the grid must give up the
+   column too, or an empty track is left behind. */
+.viewer-main.is-alone {
+  grid-template-columns: 1fr;
+}
+
+/* The rail: the modules, collapsed, over a search that reaches into all of them.
+   A query expands what it matched, so nothing a search finds stays hidden. */
+/* `hidden` is `display: none` from the user-agent stylesheet, which any author
+   `display` beats — including the one below. Said explicitly, or putting the rail
+   away leaves it in place and the deck lands on top of it. */
+.rail[hidden] {
+  display: none;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+  background: var(--bg-soft);
+}
+
+.rail-search {
+  margin: 10px;
+  padding: 7px 9px;
+  font-family: var(--ui);
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+}
+
+.rail-search:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.rail-list {
+  flex: 1;
+  margin: 0;
+  padding: 0 0 16px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.rail-mod {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-soft);
+}
+
+/* A module header, whether it toggles (no query) or merely labels a result group
+   (with one). The caret appears only on the version that toggles. */
+.rail-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  padding: 6px 10px 4px;
+  font-family: var(--ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  text-align: left;
+  text-transform: uppercase;
+  background: none;
+  border: 0;
+}
+
+button.rail-head {
+  cursor: pointer;
+}
+
+button.rail-head:hover {
+  color: var(--ink);
+  background: var(--accent-wash);
+}
+
+.rail-head[aria-expanded]::before {
+  display: inline-block;
+  width: 9px;
+  font-size: 11px;
+  content: "▸";
+  transition: transform 0.12s;
+}
+
+.rail-head[aria-expanded="true"]::before {
+  transform: rotate(90deg);
+}
+
+.rail-n {
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--line-strong);
+}
+
+.rail-def {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  width: 100%;
+  /* Indented to start where its module's name does, so the rail reads as a tree
+     without drawing one. */
+  padding: 3px 10px 3px 25px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--ink);
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.rail-def:hover {
+  background: var(--accent-wash);
+}
+
+.rail-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A member of a declaration, listed as itself: what kind of member it is. */
+.kind--member {
+  color: var(--accent);
+}
+
+.rail-more {
+  padding: 8px 10px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* The deck: the definitions currently open, newest last. */
+.deck {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.status,
+.empty {
+  padding: 22px 18px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.empty-hint {
+  max-width: 60ch;
+  line-height: 1.55;
+}
+
+kbd {
+  padding: 1px 5px;
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+}
+
+.cards {
+  flex: 1;
+  padding: 12px 14px 40vh;
+  overflow-y: auto;
+}
+
+.card {
+  margin-bottom: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.card.is-focused {
+  border-color: var(--accent);
+}
+
+.card.is-flash {
+  animation: flash 0.6s ease-out;
+}
+
+@keyframes flash {
+  from {
+    background: var(--accent-wash);
+  }
+}
+
+.card-head {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  /* Deeper below than above: what follows is a block of code, and it needs to
+     read as the header's subject rather than as its next line. */
+  padding: 8px 10px 10px;
+}
+
+/* Expanded by default: opening a card is already the reader asking for the
+   definition, and a second click to see what they asked for buys nothing. Folding
+   stays for a card being kept open for reference, and folds to the signature. */
+.card.is-folded .card-src,
+.card.is-folded .card-doc,
+.card.is-folded .card-eff {
+  display: none;
+}
+
+.card-name {
+  padding: 0;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.card-name::before {
+  display: inline-block;
+  width: 12px;
+  color: var(--muted);
+  content: "▸";
+  transform: rotate(90deg);
+  transition: transform 0.12s;
+}
+
+.card.is-folded .card-name::before {
+  transform: none;
+}
+
+/* The signature. It answers "what is this" more often than the name does, so it
+   gets a block of its own instead of a line squeezed between the header and the
+   prose, and it wraps rather than scrolling: a rank-N type carrying an effect row
+   is routinely wider than the card. */
+.card-sig {
+  max-width: 82ch;
+  margin: 3px 10px 9px 32px;
+  padding: 6px 9px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--accent-strong);
+  white-space: pre-wrap;
+  background: var(--bg-soft);
+  border-radius: 5px;
+}
+
+.card-eff {
+  padding: 0 10px 8px 32px;
+  font-size: 11.5px;
+  color: var(--warn);
+}
+
+.card-doc {
+  max-width: 82ch;
+  padding: 0 10px 9px 32px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+.card-doc p {
+  margin: 0 0 9px;
+}
+
+.card-doc > :last-child {
+  margin-bottom: 0;
+}
+
+.card-doc code {
+  padding: 0 3px;
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--bg-soft);
+  border-radius: 3px;
+}
+
+/* A worked example from the docstring, and the output it is asserted to produce.
+   The rule down the output's edge is the signal the book uses for a run result, so
+   the two surfaces read the same way. */
+.doc-code {
+  margin: 0 0 9px;
+  padding: 6px 9px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--bg-soft);
+  border-radius: 4px;
+}
+
+.doc-code code {
+  padding: 0;
+  font-size: inherit;
+  background: none;
+}
+
+.doc-out {
+  color: var(--muted);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 4px 4px 0;
+}
+
+.doc-note {
+  margin-bottom: 2px;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.card-src {
+  margin: 0;
+  padding: 9px 12px 11px 32px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.45;
+  border-top: 1px solid var(--line);
+}
+
+/* A resolved name inside a body. Styled as text, not as a control: the body
+   should read as code, and only reveal itself as navigable under the pointer.
+   The colour is inherited on purpose — a body is syntax-highlighted, so a link
+   that repainted every reference one accent colour would overwrite the
+   highlighting it sits inside and win an argument it should not be having. What
+   marks a name navigable is the underline. */
+.ref {
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-bottom: 1px dotted var(--line-strong);
+  cursor: pointer;
+}
+
+.ref:hover {
+  background: var(--accent-wash);
+  border-bottom-color: var(--accent);
+}
+
+/* A compiler primitive: not a link because there is nothing to link to, and
+   styled as ordinary code rather than as a broken reference. */
+.ref--prim {
+  color: inherit;
+  cursor: help;
+  border-bottom: 1px dotted transparent;
+}
+
+.ref--prim:hover {
+  border-bottom-color: var(--line-strong);
+}
+
+/* Where a declaration introduces one of its own members. Marked like a reference
+   because it is navigable, but it leads down the card to that member's users
+   rather than away — there is nowhere else to go, since this is where it lives. */
+.ref--member {
+  border-bottom-style: dashed;
+}
+
+/* A local: the checker knows its type and there is nowhere to go, so it answers on
+   hover and is marked only under the pointer. Quieter than a reference, since most
+   names in a body are locals and underlining them all would be a wall of dots. */
+.ref--local {
+  cursor: help;
+  border-bottom: 1px dotted transparent;
+}
+
+.ref--local:hover {
+  border-bottom-color: var(--line-strong);
+}
+
+/* A name resolving outside this index: still named, deliberately not a link. */
+.ref--out {
+  color: inherit;
+  cursor: help;
+  border-bottom-style: none;
+}
+
+/* The other revision's line on a card, and the status letter in the rail. */
+.card-was {
+  padding: 4px 10px 6px 32px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* Two revisions of one definition, side by side: comparing means reading across,
+   not scrolling. Each pane scrolls its own long lines, so neither can push the
+   other off the card. */
+.card-diff {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid var(--line);
+}
+
+.card-pane {
+  min-width: 0;
+  border-left: 1px solid var(--line);
+}
+
+.card-pane:first-child {
+  border-left: 0;
+}
+
+.card-pane-head {
+  padding: 5px 12px 0 32px;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.card-diff .card-src {
+  border-top: 0;
+}
+
+/* The old pane is styled exactly like the new one. It was tinted and dimmed back
+   when the two were stacked and nothing else told them apart; side by side, the
+   captions and the divider do that, and a wash over one side now suggests a
+   meaning it does not have — in a conventional diff a tinted region marks what
+   changed, and this tints a whole pane regardless. It also made the version being
+   reviewed the harder of the two to read. */
+.card-src--was {
+  border-top: 0;
+}
+
+.status {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--panel);
+  background: var(--muted);
+  border-radius: 3px;
+}
+
+/* Authored change and its consequence read differently on purpose: the first is
+   what a reviewer came for, the second is what it caused. */
+.status--changed,
+.status--added {
+  background: var(--accent);
+}
+
+.status--removed {
+  background: var(--err);
+}
+
+.status--moved {
+  background: #4a5fa8;
+}
+
+.status--cone,
+.status--cosmetic {
+  color: var(--muted);
+  background: var(--bg-soft);
+  border: 1px solid var(--line-strong);
+}
+
+/* Review state: what has been read, and what moved since. */
+.card-seen {
+  padding: 3px 10px 5px 32px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.card-seen.is-warn {
+  color: var(--warn);
+}
+
+.card-note {
+  display: block;
+  width: calc(100% - 42px);
+  min-height: 26px;
+  margin: 0 10px 9px 32px;
+  padding: 5px 7px;
+  font-family: var(--ui);
+  font-size: 12px;
+  color: var(--ink);
+  resize: vertical;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.card-note:placeholder-shown {
+  opacity: 0.6;
+}
+
+.card-note:focus {
+  outline: 2px solid var(--accent);
+  opacity: 1;
+}
+
+.seen {
+  padding: 1px 6px;
+  font-family: var(--ui);
+  font-size: 10.5px;
+  color: var(--muted);
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.seen.is-on {
+  color: var(--panel);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.card-x {
+  padding: 0 4px;
+  font-size: 15px;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.grow {
+  flex: 1;
+}
+
+/* The hover tooltip. Shown the moment the pointer arrives rather than after the
+   browser's own delay: on a surface built to answer "what is this", waiting a
+   second for the answer wastes most of it. `pre-line` so a type gets its own line
+   under the name. */
+.tip {
+  position: fixed;
+  z-index: 20;
+  max-width: min(60ch, 90vw);
+  padding: 6px 9px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink);
+  white-space: pre-line;
+  pointer-events: none;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  box-shadow: 0 3px 12px rgb(0 0 0 / 12%);
+}
+
+/* The name leads, then its type; the trailing lines are context. */
+.tip::first-line {
+  font-weight: 600;
+}
+
+/* The relation strip: every edge the index knows, both directions, always
+   visible. Traversal is the point of the tool, so it is never behind a tab. */
+.card-rel {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 10px 9px 32px;
+  border-top: 1px solid var(--line);
+}
+
+.rel {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.rel-label {
+  flex: 0 0 92px;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+  cursor: help;
+}
+
+/* A member's users. Labelled with the member's own name, in code, because the
+   label *is* the name rather than a relation's title. */
+.rel--member .rel-label code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink);
+}
+
+.rel.is-flash {
+  animation: flash 0.6s ease-out;
+}
+
+.rel-n {
+  color: var(--line-strong);
+}
+
+.rel-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chip {
+  padding: 1px 6px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--accent);
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--accent);
+}
+
+/* A compiler primitive, and a target this artifact does not cover: both shown,
+   neither a dead link, and distinguishable from each other. */
+.chip--prim {
+  color: var(--muted);
+  cursor: help;
+}
+
+/* A chip the dependency graph reports and the source does not name: reached
+   through elaboration, which inlines a constant and lifts an instance method out.
+   Marked because a name in a row that appears nowhere in the body reads as a bug. */
+.chip--derived {
+  border-style: dotted;
+  border-color: var(--line-strong);
+  opacity: 0.85;
+}
+
+/* The tail of a capped row: not a target, an offer to show the rest. */
+.chip--more {
+  color: var(--muted);
+  background: none;
+  border-style: dashed;
+}
+
+.chip--out {
+  color: var(--muted);
+  cursor: help;
+  border-style: dashed;
+}
+
+.hash {
+  padding: 1px 5px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.hash.is-copied {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.hash--none {
+  cursor: help;
+  opacity: 0.6;
+}
+
+/* The kind badge: the declaring keyword, spelled out. Trailing in the rail so
+   that a variable-width word cannot push the names out of a column. */
+.kind {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  text-align: center;
+  cursor: help;
+  background: var(--bg-soft);
+  border-radius: 3px;
+}
+
+.rail-def .kind,
+.rail-def .status {
+  margin-left: auto;
+  opacity: 0.75;
+}
+
+.kind--type,
+.kind--synonym,
+.kind--class {
+  color: #4a5fa8;
+}
+
+.kind--effect,
+.kind--error,
+.kind--row-alias {
+  color: var(--warn);
+}
+
+.kind--test {
+  color: var(--accent);
+}
+
+.tag--pub {
+  color: var(--accent);
+}
+
+.tag--claim,
+/* A fact about the artifact rather than about a definition: stated quietly, since
+   it is context for what the cards do not show. */
+.tag--layer {
+  padding: 0 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  cursor: help;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.tag--dep {
+  padding: 0 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.tag--dep {
+  color: var(--err);
+  cursor: help;
+}
+
+/* One column when there is no room for two: a pane squeezed to nothing compares
+   nothing. */
+@media (max-width: 1000px) {
+  .card-diff {
+    grid-template-columns: 1fr;
+  }
+
+  .card-pane {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .card-pane:first-child {
+    border-top: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .viewer-main {
+    grid-template-columns: 1fr;
+  }
+
+  .rail {
+    max-height: 32vh;
+  }
+}

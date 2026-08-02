@@ -14,7 +14,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "check:viewer": "node test/build.mjs && node test/viewer.mjs"
   },
   "dependencies": {
     "lucide": "^0.469.0"

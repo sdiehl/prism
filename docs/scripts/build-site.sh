@@ -27,6 +27,11 @@ cp -f web/pkg/prism.js web/pkg/prism_bg.wasm docs/src/pkg/
 cargo build --release --features native
 ./target/release/prism docs --stdlib --out docs/src/stdlib
 
+# 2b. The code index the viewer page reads. It is a generated artifact, not a
+#     committed one, and unlike every other page the viewer loads no wasm: the
+#     index carries every fact it renders, so the page is a pure consumer of it.
+./target/release/prism index --stdlib --out web/public/stdlib-index.json
+
 # 3. The book (inline Run loads /pkg/prism.js). PRISM_MDBOOK_STRICT fails the
 #    build if a block that should type-check does not.
 PRISM_MDBOOK_STRICT=1 mdbook build docs
@@ -40,7 +45,7 @@ PRISM_MDBOOK_STRICT=1 mdbook build docs
 #    pages share the same dist bundle; each subdirectory serves its own html as
 #    the directory index.
 rm -rf "$out"
-mkdir -p "$out/play" "$out/gallery" "$out/scrub" "$out/pendulum" "$out/branch" "$out/chaos" "$out/schedule" "$out/teleport" "$out/merkle" "$out/incr" "$out/world"
+mkdir -p "$out/play" "$out/gallery" "$out/scrub" "$out/pendulum" "$out/branch" "$out/chaos" "$out/schedule" "$out/teleport" "$out/merkle" "$out/incr" "$out/world" "$out/viewer"
 cp -R docs/book/. "$out/"
 cp -R web/dist/. "$out/play/"
 cp -R web/dist/. "$out/gallery/"
@@ -53,6 +58,7 @@ cp -R web/dist/. "$out/teleport/"
 cp -R web/dist/. "$out/merkle/"
 cp -R web/dist/. "$out/incr/"
 cp -R web/dist/. "$out/world/"
+cp -R web/dist/. "$out/viewer/"
 cp -f web/dist/gallery.html "$out/gallery/index.html"
 cp -f web/dist/scrubber.html "$out/scrub/index.html"
 cp -f web/dist/pendulum.html "$out/pendulum/index.html"
@@ -63,6 +69,7 @@ cp -f web/dist/teleport.html "$out/teleport/index.html"
 cp -f web/dist/merkle.html "$out/merkle/index.html"
 cp -f web/dist/incr.html "$out/incr/index.html"
 cp -f web/dist/prism-world.html "$out/world/index.html"
+cp -f web/dist/viewer.html "$out/viewer/index.html"
 cp -f web/dist/prism.png "$out/prism.png" 2>/dev/null || true
 
 # 5. The unverified semantics sketch is generated from its tracked Typst source
@@ -73,4 +80,4 @@ typst compile --root "$root" \
 # 6. The shell installer, served at /install.sh for `curl ... | sh`.
 cp -f scripts/install.sh "$out/install.sh"
 
-echo "unified site assembled at $out (docs at /, playground at /play/, gallery at /gallery/, scrubber at /scrub/, pendulum at /pendulum/, branch at /branch/, chaos at /chaos/, schedule at /schedule/, teleport at /teleport/, merkle at /merkle/, incr at /incr/, world at /world/)"
+echo "unified site assembled at $out (docs at /, playground at /play/, gallery at /gallery/, scrubber at /scrub/, pendulum at /pendulum/, branch at /branch/, chaos at /chaos/, schedule at /schedule/, teleport at /teleport/, merkle at /merkle/, incr at /incr/, world at /world/, code viewer at /viewer/)"

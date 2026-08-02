@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" href="/prism.png" />
+    <title>Prism code viewer</title>
+    <meta name="description" content="Read Prism code by definition rather than by file: every definition addressed by its content hash, with callers, callees, tests, and effects one click away in either direction." />
+    <meta name="theme-color" content="#2f6f4f" />
+  </head>
+  <body class="viewer-body">
+    <header>
+      <button id="rail-toggle" class="rail-toggle" aria-expanded="true" aria-controls="rail"
+        aria-label="Hide the definition list" data-tip="hide the definition list  ( \ )">&#9776;</button>
+      <a class="logo-link" href="https://github.com/sdiehl/prism" title="GitHub" target="_blank" rel="noopener"><img class="logo" src="/prism.png" alt="Prism" width="26" height="26" /></a>
+      <h1><b>Prism</b></h1>
+      <span class="tag" id="index-title">code viewer</span>
+      <div class="grow"></div>
+      <div class="controls">
+        <a class="ctl-link" href="../gallery/">Gallery</a>
+        <a class="ctl-link" href="../play/">Playground</a>
+        <a class="ctl-link" href="https://sdiehl.github.io/prism/compiler.html#code-index" target="_blank" rel="noopener">About the index</a>
+      </div>
+    </header>
+    <main id="viewer-main" class="viewer-main">
+      <nav id="rail" class="rail" aria-label="Definitions">
+        <input id="search" class="rail-search" type="search" placeholder="Search definitions  ( / )" aria-label="Search definitions" autocomplete="off" spellcheck="false" />
+        <ul id="rail-list" class="rail-list"></ul>
+      </nav>
+      <section class="deck" aria-label="Working set">
+        <div id="status" class="status" role="status">loading the index&hellip;</div>
+        <div id="empty" class="empty" hidden>
+          <p>Pick a definition to open it here.</p>
+          <p class="empty-hint">
+            Every name in a body is a link to what it means. Everything the definition relates to
+            &mdash; callers, callees, the tests that reach it, the effects it performs &mdash; is
+            one click away too, in either direction. Mark one <b>read</b> and it remembers the
+            address you read it at, so a later visit can tell a reformat from a real edit.
+            <kbd>/</kbd> or <kbd>&#8984;K</kbd> searches, <kbd>\</kbd> hides the list.
+          </p>
+        </div>
+        <div id="cards" class="cards"></div>
+      </section>
+    </main>
+    <script type="module" src="/src/viewer.ts"></script>
+  </body>
+</html>
