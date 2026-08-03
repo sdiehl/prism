@@ -1,9 +1,9 @@
 fn tick() =
   do get() to n
-  return n to t@735
-  return 1 to t@736
-  t@735 + t@736 to t@737
-  do put(t@737)
+  return n to t@731
+  return 1 to t@732
+  t@731 + t@732 to t@733
+  do put(t@733)
   return n
 fn counter() =
   tick()
@@ -16,23 +16,23 @@ fn run_counter(init) =
   with
     get(k) =>
       thunk { \s.
-        return s to t@738
-        return s to t@739
+        return s to t@734
+        return s to t@735
+        return k to t@736
+        (force t@736)(t@735) to t@737
+        (force t@737)(t@734)
+      }
+    put(s2, k) =>
+      thunk { \_s.
+        return s2 to t@738
+        return () to t@739
         return k to t@740
         (force t@740)(t@739) to t@741
         (force t@741)(t@738)
       }
-    put(s2, k) =>
-      thunk { \_s.
-        return s2 to t@742
-        return () to t@743
-        return k to t@744
-        (force t@744)(t@743) to t@745
-        (force t@745)(t@742)
-      }
     return r =>
       return thunk { \_s. return r }
   to f
-  return init to t@746
-  return f to t@747
-  (force t@747)(t@746)
+  return init to t@742
+  return f to t@743
+  (force t@743)(t@742)

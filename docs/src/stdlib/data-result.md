@@ -10,7 +10,7 @@ The type is wired in; Base includes this module, so these are in unqualified sco
 
 ### `is_ok`
 
-```prism,sig,h-3921f17fb00ab1cc691b8aecfc4d0ce5440bd4a86325dbd1042e09ae28067151
+```prism,sig,h-057e9b36c1820d958d031ebba3ffb5d7bd8a3910c7130096d83737dfa878cdea
 is_ok : forall a b. (Result(a, b)) -> Bool
 ```
 
@@ -26,7 +26,7 @@ true
 
 ### `is_err`
 
-```prism,sig,h-7ed51dcc882c4cd38297f2d76f3c4105515cf5f395e617a4825c88ee0de6c277
+```prism,sig,h-f28979965d4ccc22a0aa3114beaf959f244813b3acebe3dcf2d06718fd4366b9
 is_err : forall a b. (Result(a, b)) -> Bool
 ```
 
@@ -34,7 +34,7 @@ True when the result is `Err`.
 
 ### `map_result`
 
-```prism,sig,h-6d7505d801888c6d06045761a8ca4984d98a9e02820f9513e051530a63f658d5
+```prism,sig,h-684e44a25d40d4c5ac491bc2a579c6555584821cfa21fa7863bb12cd58759eb6
 map_result : forall e0 a b c. ((c) -> b ! {e0}, Result(c, a)) -> Result(b, a) ! {e0}
 ```
 
@@ -50,7 +50,7 @@ Ok(42)
 
 ### `map_err`
 
-```prism,sig,h-1dcac52079d72fd6ba539a1f34809805b31e60e3db9ceeded5daef2da825d07c
+```prism,sig,h-f3afffd3dc31fb5b171cc6582f1a849c6bb53783d57be55119db6bb19c7fc94d
 map_err : forall e0 a b c. ((c) -> b ! {e0}, Result(a, c)) -> Result(a, b) ! {e0}
 ```
 
@@ -58,7 +58,7 @@ Apply `f` to the `Err` value, leaving an `Ok` untouched (the error-side counterp
 
 ### `and_then_result`
 
-```prism,sig,h-762e3c763cebc49e596b3f8653d3571398616e314c9bd9a09d32efb59c4acf63
+```prism,sig,h-7bc4c111871a3f9f13f369b3b547fd5624e365b797aa723869df3076885a8e79
 and_then_result : forall e0 a b c. ((a) -> Result(b, c) ! {e0}, Result(a, c)) -> Result(b, c) ! {e0}
 ```
 
@@ -74,7 +74,7 @@ Ok(5)
 
 ### `result_or`
 
-```prism,sig,h-99e0f3e001404bb7ed5ad87828b76d9d76797e24a60123954f5dd443381376e2
+```prism,sig,h-89b317a3f3f38606b9a1021fccd0748392edc89ceb7386c7bb1d58f57bd7d537
 result_or : forall a b. (a, Result(a, b)) -> a
 ```
 
@@ -90,7 +90,7 @@ result_or(0, Err("boom"))
 
 ### `ok_of_option`
 
-```prism,sig,h-a3bca133e1a3a87cc96f4222ebeff1b6bea496a2fcb635b34b923f95fbcd167f
+```prism,sig,h-eb3665acfa8ca2c1ac322bb1b39968e8bf7c1156af695ddbf776df11cf71c75a
 ok_of_option : forall a b. (a, Option(b)) -> Result(b, a)
 ```
 
@@ -106,7 +106,7 @@ Err(missing)
 
 ### `option_of_result`
 
-```prism,sig,h-e24057e16a4870c67ff0a2e5446602e20dbb8463b4ef14276179adfa98f023a5
+```prism,sig,h-e1bf8c7986aeb3095e3a80a48cb3e766a294f1c948afc4a8ad5f21bbcb638ec3
 option_of_result : forall a b. (Result(a, b)) -> Option(a)
 ```
 

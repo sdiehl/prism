@@ -37,7 +37,7 @@ fn heads(xs : List(Int)) : OrNull(Int) =
 
 fn main() =
   println(show(zero_or(pick(0), 99)))
-  println(show(zero_or(pick(0 - 1), 99)))
+  println(show(zero_or(pick(-1), 99)))
   println(show(zero_or(pick(41), 99)))
   println(label(shade(true)))
   println(label(shade(false)))

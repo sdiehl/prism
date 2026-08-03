@@ -1,9 +1,11 @@
 -- | The Prism-language reimplementation of the compiler's layout pass: the
--- offside rule that turns the raw token stream into the post-layout `parse`
--- stream by splicing the virtual block delimiters `VOpen`/`VClose`/`VSemi` and
--- by opening a bare-indent body after each `class`/`instance`/`effect` head. The
--- Rust `lex` pipeline stays the authoritative oracle; this module reproduces its
--- output so the two can be diffed, never used as a silent fallback.
+-- offside rule that splices the virtual block delimiters.
+--
+-- It turns the raw token stream into the post-layout `parse` stream by splicing
+-- `VOpen`/`VClose`/`VSemi` and by opening a bare-indent body after each
+-- `class`/`instance`/`effect` head. The Rust `lex` pipeline stays the
+-- authoritative oracle; this module reproduces its output so the two can be
+-- diffed, never used as a silent fallback.
 --
 -- The pipeline mirrors the compiler exactly: `lex_raw` (Syntax.Lex) yields the
 -- decoded raw tokens; `inject` splices a zero-width head opener after every

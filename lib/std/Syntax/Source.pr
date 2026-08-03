@@ -1,8 +1,9 @@
 -- | Source identity for the versioned syntax artifacts: source files and
--- half-open byte spans. Byte offsets are the canonical position vocabulary
--- (line and column are projections for people, never a second identity), and
--- these are the Prism-side types the token and surface-syntax exports decode
--- into.
+-- half-open byte spans.
+--
+-- Byte offsets are the canonical position vocabulary (line and column are
+-- projections for people, never a second identity), and these are the
+-- Prism-side types the token and surface-syntax exports decode into.
 
 import Data.String (..)
 

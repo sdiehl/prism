@@ -8,10 +8,10 @@
 
 fn cat(n) : Unit ! {IO, Console} =
   let line = read_line()
-  if str_eq(line, "") then
+  if line == "" then
     ()
   else
-    println(concat(show_int(n), concat("  ", line)))
+    println("{n}  {line}")
     cat(n + 1)
 
 fn main() : Unit ! {IO} = cat(1)

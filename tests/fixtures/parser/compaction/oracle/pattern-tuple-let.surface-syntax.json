@@ -1,0 +1,76 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "59707c9bf51f4d62cd2cd81bed59c757f84fd81c9705533e47ffaf4d486c6b22",
+    "text": "fn corpus(v) = let (x, y) = v in 0\n"
+  },
+  "items": [
+    {
+      "body": {
+        "arms": [
+          {
+            "body": {
+              "kind": "int",
+              "span": [
+                33,
+                34
+              ],
+              "value": "0"
+            },
+            "pat": {
+              "items": [
+                {
+                  "kind": "var",
+                  "name": "x",
+                  "span": [
+                    20,
+                    21
+                  ]
+                },
+                {
+                  "kind": "var",
+                  "name": "y",
+                  "span": [
+                    23,
+                    24
+                  ]
+                }
+              ],
+              "kind": "tuple",
+              "span": [
+                19,
+                25
+              ]
+            }
+          }
+        ],
+        "kind": "match",
+        "scrutinee": {
+          "kind": "var",
+          "name": "v",
+          "span": [
+            28,
+            29
+          ]
+        },
+        "span": [
+          15,
+          15
+        ],
+        "synth": true
+      },
+      "kind": "fn",
+      "name": "corpus",
+      "params": [
+        {
+          "name": "v"
+        }
+      ],
+      "span": [
+        0,
+        34
+      ]
+    }
+  ]
+}

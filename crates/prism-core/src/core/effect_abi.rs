@@ -5,6 +5,8 @@
 
 use std::collections::BTreeMap;
 
+use prism_syntax::names;
+
 use crate::types::{CtorInfo, Type};
 
 pub const EFF: &str = "Eff";
@@ -12,6 +14,14 @@ pub const EPURE: &str = "EPure";
 pub const EOP: &str = "EOp";
 pub const ERESUME: &str = "EResume";
 pub const EBOUNCE: &str = "EBounce";
+/// Every constructor of the reified effect cell, in one place because a phase
+/// that recognizes a cell has to recognize all of them.
+///
+/// A computation whose tail answers with any of these is answering at the
+/// monadic convention, and a list that names only some of them reads a legal
+/// tail as a broken one.
+pub const EFF_CTORS: [&str; 4] = [EPURE, EOP, ERESUME, EBOUNCE];
+
 pub const TQ: &str = "TQ";
 pub const TQNIL: &str = "TQNil";
 pub const TQCONS: &str = "TQCons";
@@ -32,16 +42,76 @@ pub const STEP: &str = "Step";
 pub const SMORE: &str = "SMore";
 pub const SDONE: &str = "SDone";
 
+/// The counter a sample driver name is minted with when deriving the spelling
+/// every instance of that driver shares. Any value works; the derivation drops
+/// it again.
+const DRIVER_SUFFIX_SAMPLE: u32 = 0;
+
+/// The residual free-monad driver templates that typed lowering generates.
+///
+/// Entering one is one native structural reduction step, so lowering and native
+/// codegen have to agree on exactly which generated functions are drivers. That
+/// agreement travels as this enum: lowering names a variant and mints through
+/// [`FreeMonadDriver::mint`], so the words below are the only place a driver is
+/// spelled, and the minter and the recognizer move together under a rename.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FreeMonadDriver {
+    /// Drives one handler's reified computation to its answer.
+    Handle,
+    /// Drives a sub-computation past the handler its operations tunnel through.
+    Mask,
+    /// Drives a confined monadic region back to its enclosing convention.
+    Region,
+}
+
+impl FreeMonadDriver {
+    /// Every driver template, in one place because a phase that accounts for one
+    /// has to account for all of them.
+    pub const ALL: [Self; 3] = [Self::Handle, Self::Mask, Self::Region];
+
+    const fn hint(self) -> &'static str {
+        match self {
+            Self::Handle => "handle",
+            Self::Mask => "mask",
+            Self::Region => "region",
+        }
+    }
+
+    /// The name of the `n`th generated instance of this driver.
+    #[must_use]
+    pub fn mint(self, n: u32) -> String {
+        names::lowered(self.hint(), n)
+    }
+
+    /// The spelling every instance of this driver ends with, whatever its
+    /// counter.
+    ///
+    /// Derived from [`Self::mint`] by dropping the leading counter rather than
+    /// re-typed, so the separator the minter inserts is spelled in exactly one
+    /// place and cannot drift from it.
+    #[must_use]
+    pub fn suffix(self) -> String {
+        self.mint(DRIVER_SUFFIX_SAMPLE)
+            .trim_start_matches(|c: char| c.is_ascii_digit())
+            .to_string()
+    }
+
+    /// The driver a generated `name` was minted for, or `None` for any other
+    /// name.
+    #[must_use]
+    pub fn of_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|driver| name.ends_with(driver.suffix().as_str()))
+    }
+}
+
 /// Whether `name` is one of the residual free-monad driver templates whose
 /// entry counts as one native structural reduction step.
 #[cfg(feature = "native")]
 #[must_use]
 pub fn is_free_monad_driver(name: &str) -> bool {
-    name == EBIND
-        || name == QAPPLY
-        || name.ends_with("@handle")
-        || name.ends_with("@mask")
-        || name.ends_with("@region")
+    name == EBIND || name == QAPPLY || FreeMonadDriver::of_name(name).is_some()
 }
 
 /// Reconstruct one constructor introduced by typed effect lowering.
@@ -73,5 +143,48 @@ fn synth_ctor(type_name: &str, tag: usize, arity: usize) -> CtorInfo {
         args: vec![Type::Int; arity],
         tag,
         fields: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FreeMonadDriver;
+
+    const COUNTERS: [u32; 4] = [0, 1, 9, 4321];
+
+    // Minting and recognizing are inverses, which is the whole contract between
+    // typed lowering and native step accounting. A rename of a driver's spelling
+    // keeps this green; dropping a variant from the recognizer does not.
+    #[test]
+    fn every_minted_driver_name_names_its_own_driver() {
+        for driver in FreeMonadDriver::ALL {
+            for n in COUNTERS {
+                let minted = driver.mint(n);
+                assert_eq!(
+                    FreeMonadDriver::of_name(&minted),
+                    Some(driver),
+                    "{minted} must round-trip"
+                );
+            }
+        }
+    }
+
+    // The suffix must survive an arbitrary counter and must not be a bare word a
+    // source identifier could end with, or an ordinary function would be counted
+    // as a driver.
+    #[test]
+    fn the_driver_suffix_is_counter_free_and_unspellable() {
+        for driver in FreeMonadDriver::ALL {
+            let suffix = driver.suffix();
+            assert!(
+                !suffix.starts_with(|c: char| c.is_ascii_alphanumeric()),
+                "{suffix} must lead with the minter's separator"
+            );
+            for n in COUNTERS {
+                assert!(driver.mint(n).ends_with(&suffix), "{suffix} at {n}");
+            }
+        }
+        assert_eq!(FreeMonadDriver::of_name("handle"), None);
+        assert_eq!(FreeMonadDriver::of_name("region"), None);
     }
 }

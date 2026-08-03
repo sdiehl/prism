@@ -203,6 +203,16 @@ pub fn lat_equiv(x : a, y : a) : Bool given Semilattice(a) =
 -- about it. A transfer function reads its dependencies through this rather than
 -- matching on `map_lookup`, so an unmentioned node reads as the least element
 -- instead of an `Option` the caller has to decide about.
+--
+-- ```prism
+-- (
+--   fix_at(map_from_list([("seen", true)]), "seen"),
+--   fix_at(map_from_list([("other", false)]), "missing"),
+-- )
+-- ```
+-- ```output
+-- (true, false)
+-- ```
 pub fn fix_at(assign : Map(k, a), key : k) : a given Ord(k), Semilattice(a) =
   match map_lookup(key, assign) of
     None => lat_bottom()
@@ -213,6 +223,16 @@ pub fn fix_at(assign : Map(k, a), key : k) : a given Ord(k), Semilattice(a) =
 -- most `n` can take, which covers the archetypal carrier (a set drawn from the
 -- node set itself) with room to spare. A taller carrier belongs in
 -- `fix_least_within` with a budget the caller can justify.
+--
+-- ```prism
+-- fix_budget(
+--   map_from_list([("a", false), ("b", false)]),
+--   map_from_list([("a", ["b"])]),
+-- )
+-- ```
+-- ```output
+-- 12
+-- ```
 pub fn fix_budget(seed : Map(k, a), uses : Map(k, List(k))) : Int =
   let n = map_size(seed)
   let e = foldl(\(acc, ds) -> acc + length(ds), 0, map_values(uses))
@@ -256,6 +276,20 @@ pub fn fix_least(
 -- exhausted: the solve is abandoned rather than reported at whatever assignment
 -- it had reached, since a partial answer to a least-fixpoint question is a wrong
 -- answer, not an approximate one.
+--
+-- ```prism
+-- succeeds(\() ->
+--   fix_least_within(
+--     0,
+--     map_from_list([("a", false)]),
+--     map_empty,
+--     \(_key, _cur) -> true,
+--   ),
+-- )
+-- ```
+-- ```output
+-- false
+-- ```
 pub fn fix_least_within(
   budget : Int,
   seed : Map(k, a),

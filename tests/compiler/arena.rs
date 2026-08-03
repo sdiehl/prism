@@ -1,4 +1,4 @@
-//! Scope-directed arena lowering: the load-bearing exclusion.
+//! Scope-directed arena lowering: the required exclusion.
 //!
 //! `arena_only = arena_reachable \ otherwise_reachable`. The whole gate is that a
 //! shared function (reachable from both an arena and a non-arena path) is NOT
@@ -30,7 +30,7 @@ fn arena_only_builder_is_reified() {
 /// would silently change the non-arena call. This is the byte-identity gate.
 #[test]
 fn shared_function_is_not_reified() {
-    let out = lowered("examples/arena_shared.pr");
+    let out = lowered("examples/fixtures/compiler/arena_shared.pr");
     assert!(
         !out.contains("init_at"),
         "a shared (non-arena-only) constructor was reified, breaking byte-identity:\n{out}"
@@ -43,7 +43,10 @@ fn shared_function_is_not_reified() {
 /// allocator and the region reclamation claim would be silently vacuous.
 #[test]
 fn reified_installer_is_bracketed_with_region_hooks() {
-    for path in ["examples/arena.pr", "examples/arena_escape.pr"] {
+    for path in [
+        "examples/arena.pr",
+        "examples/fixtures/compiler/arena_escape.pr",
+    ] {
         let out = lowered(path);
         assert!(
             out.contains("arena_enter") && out.contains("arena_exit"),

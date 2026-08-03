@@ -16,6 +16,39 @@
  * every definition, internal cross-call, and wrapper call binds to prism_v_* while
  * <math.h> compiles unchanged. Force-included at the top of every libm unit and
  * pulled in by prism_libm.c, ahead of the declarations it applies to.
+ *
+ * WHAT IS DELIBERATELY ABSENT, and why the omission is safe.
+ *
+ * The vendored set also defines sqrt, floor, ceil, rint, round, trunc, scalbn,
+ * copysign, and fabs. Those nine keep their standard names, and must:
+ *
+ *   1. They are compiler libcall names. The code generator lowers the exact-float
+ *      builtins to the platform intrinsics (`FloatIntrinsic` in the native
+ *      backend's isa module: floor, ceil, round, trunc, sqrt, fabs), and the
+ *      backend is free to expand any of them into a call to the same-named C
+ *      symbol whenever the target has no single instruction for it, or at -O0.
+ *      Nothing links the system libm (that absence is the whole point of
+ *      vendoring), so a call the backend synthesizes has exactly one place left
+ *      to resolve: these definitions, under their standard names. Renaming them
+ *      would not redirect such a call, it would leave it undefined at link time.
+ *      The same holds inside the vendored set, whose units are compiled with
+ *      this header force-included and whose own math idioms the C compiler may
+ *      turn back into these calls.
+ *   2. They need no rename, because there is nothing to disambiguate. Every one
+ *      of the nine is exactly specified by IEEE-754: the result is either exact
+ *      or correctly rounded, so the platform copy and the vendored copy are
+ *      bit-identical by definition, and which one the linker picks is not
+ *      observable. The transcendentals renamed below are the opposite case:
+ *      their last bit is implementation-defined, so link order there is a real
+ *      source of divergence and the rename is what removes it.
+ *
+ * So the rule is not "rename everything", it is "rename exactly the functions
+ * whose results are not pinned by the standard". Adding a vendored function to
+ * this list is right when its result is implementation-defined; leaving one out
+ * is right only when the result is exactly specified AND some caller (the
+ * backend or the C compiler) needs the standard name to resolve. prism_libm.c
+ * additionally supplies `sqrt` itself, since the vendored set has no sqrt.c and
+ * calls it from hypot and the inverse trigonometry.
  */
 #ifndef PRISM_LIBM_RENAME_H
 #define PRISM_LIBM_RENAME_H

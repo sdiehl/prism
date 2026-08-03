@@ -1,8 +1,9 @@
--- | The token vocabulary of the `prism-syntax-tokens-v1` artifact. A fixed
--- token's wire kind is its source spelling, so `TFixed` carries the spelling
--- rather than enumerating every keyword and operator; value-carrying and
--- virtual layout tokens each get a dedicated constructor matching the grammar's
--- terminal aliases.
+-- | The token vocabulary of the `prism-syntax-tokens-v1` artifact.
+--
+-- A fixed token's wire kind is its source spelling, so `TFixed` carries the
+-- spelling rather than enumerating every keyword and operator; value-carrying
+-- and virtual layout tokens each get a dedicated constructor matching the
+-- grammar's terminal aliases.
 
 import Data.Maybe (..)
 

@@ -16,6 +16,13 @@ pub effect State(s)
 -- | Run `action`, threading `init` as the initial state; returns `(result,
 -- final_state)`. The handler makes the block a state transformer `s -> (a, s)`
 -- and applies it to `init`.
+--
+-- ```prism
+-- run_state(1, \() -> state(\(s) -> (s * 2, s + 1)))
+-- ```
+-- ```output
+-- (2, 2)
+-- ```
 pub fn run_state(init : s, action : () -> a ! {State(s) | e}) : (a, s) =
   let f =
     handle action() with
@@ -35,6 +42,13 @@ pub fn exec_state(init : s, action : () -> a ! {State(s) | e}) : s =
     (_a, s) => s
 
 -- | Apply `f` to the current state, storing the result.
+--
+-- ```prism
+-- exec_state(3, \() -> modify(\(n) -> n * 2))
+-- ```
+-- ```output
+-- 6
+-- ```
 pub fn modify(f : (s) -> s) : Unit ! {State(s)} = put(f(get()))
 
 -- | Run one combined read-and-write step: `f` maps the current state to a

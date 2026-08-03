@@ -1,0 +1,157 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "2d2815fa9f65d34071ae6c020556c840415f1bfc58c377791603b1edd1f31d90",
+    "text": "fn corpus() : ! Int = 0\n"
+  },
+  "raw": [
+    {
+      "kind": "fn",
+      "span": [
+        0,
+        2
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        3,
+        9
+      ],
+      "value": "corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        9,
+        10
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        10,
+        11
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        12,
+        13
+      ]
+    },
+    {
+      "kind": "!",
+      "span": [
+        14,
+        15
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        16,
+        19
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        20,
+        21
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        22,
+        23
+      ],
+      "value": "0"
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        0,
+        2
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        3,
+        9
+      ],
+      "value": "corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        9,
+        10
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        10,
+        11
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        12,
+        13
+      ]
+    },
+    {
+      "kind": "!",
+      "span": [
+        14,
+        15
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        16,
+        19
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        20,
+        21
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        22,
+        23
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        23,
+        23
+      ]
+    }
+  ],
+  "trivia": []
+}

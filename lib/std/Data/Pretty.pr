@@ -1,5 +1,7 @@
--- | A Leijen-style pretty printer. Build a layout-independent `Doc` from the
--- combinators below, then `render` it to a string at a chosen page width.
+-- | A Leijen-style pretty printer.
+--
+-- Build a layout-independent `Doc` from the combinators below, then `render` it
+-- to a string at a chosen page width.
 --
 -- Rendering is a pure function of the document and the width, so a document
 -- lays out identically on every backend and replays byte for byte. The strict

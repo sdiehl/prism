@@ -54,6 +54,22 @@ const RUNTIME_DIR: &str = "../../runtime";
 // embedded copy, the build-script compile, and the native link step all agree.
 const LIBM_SUBDIR: &str = "libm";
 
+// The C warning set, held in one file the lint gates read too, so the ordinary
+// cargo build reports what they report instead of only surfacing a warning in a
+// hook that not every path runs. See the file for why `-Werror` is not in it.
+const RUNTIME_WARNINGS: &str = "warnings.txt";
+
+// The warning flags, comments and blank lines dropped.
+fn warning_flags(manifest_dir: &str) -> Vec<String> {
+    let path = format!("{manifest_dir}/{RUNTIME_DIR}/{RUNTIME_WARNINGS}");
+    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {path}: {e}"));
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(str::to_string)
+        .collect()
+}
+
 // Vendored libm units excluded from the compile and every native link.
 // `nearbyint.c` is the only vendored file that calls libm's floating-point
 // environment (`fetestexcept`/`feclearexcept`), which on glibc live in the system
@@ -198,6 +214,14 @@ fn main() {
         // the native link step: an FMA fused on one platform and not another
         // breaks byte-for-byte float parity with the interpreter.
         rt.flag("-ffp-contract=off");
+        // The lint gates' warning set, applied here too so a warning is not
+        // reachable only through a hook. Each flag is probed first: a compiler
+        // that rejects one keeps building, it just reports less. Not fatal here
+        // (no -Werror); making it fatal is the gates' job, on a pinned compiler.
+        for flag in warning_flags(&manifest_dir) {
+            rt.flag_if_supported(&flag);
+        }
+        println!("cargo:rerun-if-changed={RUNTIME_DIR}/{RUNTIME_WARNINGS}");
         if let Some(min) = &macos_min {
             rt.flag(format!("-mmacosx-version-min={min}"));
         }

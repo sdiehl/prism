@@ -520,22 +520,29 @@ void prism_print_float(long f) {
 }
 
 long prism_parse_float(long s) {
-    // Mirror the interpreter's `s.trim().parse::<f64>()`: the whole trimmed
-    // string must be a valid decimal float, else 0.0. strtod alone diverges by
-    // accepting trailing garbage (`3.14x` -> 3.14) and hex (`0x10` -> 16), which
-    // the Rust parser rejects.
+    /* Mirror the interpreter's ASCII-trimmed strict grammar. The parsed end is
+     * compared with the length-derived boundary rather than a NUL byte, so an
+     * embedded NUL cannot hide a suffix. `strtod` additionally admits hex and
+     * `nan(payload)` spellings that Rust's float parser refuses; reject those
+     * extensions before accepting its result. */
     const char *data = prism_str_data(s);
-    while (isspace((unsigned char)*data)) data++;
-    const char *digits = data + (*data == '+' || *data == '-' ? 1 : 0);
-    int hex = digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X');
-    char *end;
-    double d = strtod(data, &end);
-    if (hex || end == data) {
-        d = 0.0;
-    } else {
-        while (isspace((unsigned char)*end)) end++;
-        if (*end != '\0') d = 0.0;
-    }
+    const char *limit = data + prism_str_len_bytes(s);
+    while (data < limit && prism_ws(*data)) data++;
+    while (limit > data && prism_ws(limit[-1])) limit--;
+    /* strtod performs its own locale-sensitive leading-space skip. Any byte it
+     * would still skip here is outside Rust's ASCII whitespace set (notably
+     * vertical tab), so reject that extension instead of silently accepting it. */
+    int leading_space_extension = data < limit && isspace((unsigned char)*data);
+    const char *digits = data;
+    if (digits < limit && (*digits == '+' || *digits == '-')) digits++;
+    ptrdiff_t digits_len = limit - digits;
+    int hex = digits_len >= 2 && digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X');
+    int nan_payload = digits_len > 3 && (digits[0] == 'n' || digits[0] == 'N') &&
+                      (digits[1] == 'a' || digits[1] == 'A') &&
+                      (digits[2] == 'n' || digits[2] == 'N');
+    char *parsed_end;
+    double d = strtod(data, &parsed_end);
+    if (leading_space_extension || hex || nan_payload || parsed_end != limit) d = 0.0;
     long bits;
     memcpy(&bits, &d, 8);
     return prism_box(bits);

@@ -24,7 +24,7 @@ The row variable `e` is the whole story on effects. It is open and it is threade
 
 ### `RwFix`
 
-```prism,def,h-22967850e37ba05031ebe30d814aa247bcf7554c2e3a17b55a658bbe0c9c73be
+```prism,def,h-f269ee7e7f6b4b675947c0358924029dec04bee36096578ca48a8ae1b8d0764d
 type RwFix(a) = RwFix { tree: a, steps: Int, converged: Bool }
 ```
 
@@ -34,7 +34,7 @@ The outcome of a fueled fixpoint: the tree it reached, how many steps it took, a
 
 ### `rw_id`
 
-```prism,sig,h-c5a66e3ddbf5331d5868bbc5c3d2ba3e53250c337180f0209ae9ef4b5542b64a
+```prism,sig,h-944e409f8d5e91e2ed218c2bdc12e90230f9deb12793142fd0df7f33b4f555be
 rw_id : forall a. (a) -> Option(a)
 ```
 
@@ -42,7 +42,7 @@ The rewrite that accepts every node and changes nothing: the unit of `rw_then` a
 
 ### `rw_fail`
 
-```prism,sig,h-6c53dbbf303ae72837d31e11ab49d5b7a8acaed7e6a3bc8cc231572b2ac96f6d
+```prism,sig,h-71a632f846f445c811b1acfc87dfe241d4a6216e4746d8269695dc8a9b0786f7
 rw_fail : forall a. (a) -> Option(a)
 ```
 
@@ -50,7 +50,7 @@ The rewrite that declines everywhere: the unit of `rw_or_else`. Always declines,
 
 ### `rw_then`
 
-```prism,sig,h-5bbb091bb7613363706a8910704aa4b30726570746d058ffef481bab07bab3e1
+```prism,sig,h-2baf20c3205ec98341f594f5849d0b0367083f8a9d4ee610ccef420d22af035a
 rw_then : forall e0 a. ((a) -> Option(a) ! {e0}, (a) -> Option(a) ! {e0}) -> (a) -> Option(a) ! {e0}
 ```
 
@@ -58,15 +58,25 @@ Run `s1`, then `s2` on its result. Declines if either declines, so a sequence is
 
 ### `rw_or_else`
 
-```prism,sig,h-767e89b103ddc707387937f3deedd1cb7936e49b827a335c5b0dd60a15cf017e
+```prism,sig,h-d53cc328083140f57e4f07fb384ae44449597126ee87c1c3a9f76a88fb51a866
 rw_or_else : forall e0 a. ((a) -> Option(a) ! {e0}, (a) -> Option(a) ! {e0}) -> (a) -> Option(a) ! {e0}
 ```
 
 Left-biased choice: run `s1`, and only if it declines run `s2` on the original node, not on anything `s1` produced. Declines only when both decline. The bias is the point; a rule list is an `rw_or_else` chain and the first matching rule wins, exactly as a hand-written match would. Terminates whenever both do.
 
+```prism,mod=Control.Rewrite
+# let positive = \(n) -> if n > 0 then Some(n + 1) else None
+# let times_ten = \(n) -> Some(n * 10)
+(rw_or_else(positive, times_ten)(2), rw_or_else(positive, times_ten)(-2))
+```
+
+```output
+(Some(3), Some(-20))
+```
+
 ### `rw_try`
 
-```prism,sig,h-2275088f5bc8d23de55a10a950cc3e6cca71df5318a7f287edf77a0ca93aa7dd
+```prism,sig,h-5f3b2e185b311038455180c61c896214dc0c2b95c2fab16efcb8b23f4bf2a098
 rw_try : forall e0 a. ((a) -> Option(a) ! {e0}) -> (a) -> Option(a) ! {e0}
 ```
 
@@ -74,7 +84,7 @@ Make a rewrite total: `s` where it applies, the node unchanged where it declines
 
 ### `rw_at`
 
-```prism,sig,h-832af88da65d4ebc486a0c1c26c1429366f78d3d489fdb95ad17d3f2a08f6645
+```prism,sig,h-cd1b82ecfcea5cefa70dd4fbb2465ddec974377052d26b5abbcf02762674df05
 rw_at : forall e0 a. ((a) -> Bool ! {e0}, (a) -> Option(a) ! {e0}) -> (a) -> Option(a) ! {e0}
 ```
 
@@ -82,7 +92,7 @@ Run `s` only at nodes satisfying `q`, declining everywhere else and declining wh
 
 ### `rw_where`
 
-```prism,sig,h-2a0df62dc081ae978e8b8f4e2b92e53b9f554d186899b3fd920b9e03ed83ca37
+```prism,sig,h-a21f716430c47b9b21e3c72c75bd76ca75dfd63a0e89df7a4a37fd8e374cbe80
 rw_where : forall e0 a. ((a) -> Bool ! {e0}) -> (a) -> Option(a) ! {e0}
 ```
 
@@ -90,7 +100,7 @@ The rewrite that accepts exactly the nodes satisfying `q`, unchanged, and declin
 
 ### `rw_apply`
 
-```prism,sig,h-10f4fc6c46f081a51c63146af8e873a4d72c9b389b257489b26fd31a9fb04e5e
+```prism,sig,h-1c5044bffe467ac36c9db4d43e6096807a551c906af41330c76a5289e89993bd
 rw_apply : forall e0 a. ((a) -> Option(a) ! {e0}, a) -> a ! {e0}
 ```
 
@@ -98,7 +108,7 @@ Run a rewrite for its result, keeping `x` when it declines, so the decline becom
 
 ### `rw_all`
 
-```prism,sig,h-d244851c47936fce4a37c0b35ffe9d4a79b0f6bee443492e6a0b9c7e1a0e46b5
+```prism,sig,h-7c84defb1c14042f201183d38d3db7629671d38ea6dfe457329e34eda8632a9f
 rw_all : forall e0 a. (Control.Layer.Layer(a), (a) -> Option(a) ! {e0}) -> (a) -> Option(a) ! {e0}
 ```
 
@@ -106,15 +116,15 @@ Run `s` on every immediate child and rebuild. Declines if any child declines, an
 
 ### `rw_one`
 
-```prism,sig,h-3f4ed7729f9b1821353984057d6106200c7d88a20e129ed645c91f4763d9a5bf
+```prism,sig,h-cf989db6a87ecf26c6625323a417206af7826a05ea89d9a052100cc7acf25064
 rw_one : forall e0 a. (Control.Layer.Layer(a), (a) -> Option(a) ! {e0}) -> (a) -> Option(a) ! {e0}
 ```
 
-Run `s` on the leftmost child that accepts, leaving the others alone. Declines when no child accepts, so at a leaf it always declines. That decline is load-bearing: it is how the fixpoint schemes below learn there is no redex left. One pass over the children, so it terminates whenever `s` does.
+Run `s` on the leftmost child that accepts, leaving the others alone. Declines when no child accepts, so at a leaf it always declines. That decline is essential because it tells the fixpoint schemes below there is no redex left. One pass over the children, so it terminates whenever `s` does.
 
 ### `rw_bottom_up`
 
-```prism,sig,h-4c178262d5d3ed09d5ad8dd5dd47209751243c17626a9b1bab2e3eb0ecff316b
+```prism,sig,h-b2b676069992ab6aaccb78d34bbbb4205f2db49f306a1b8fd2f062e3400652bf
 rw_bottom_up : forall e0 a. (Control.Layer.Layer(a), (a) -> Option(a) ! {e0}) -> (a) -> Option(a) ! {e0} ! {e0}
 ```
 
@@ -124,7 +134,7 @@ Terminates whenever `s` does. The recursion descends the *input* tree, and each 
 
 ### `rw_top_down`
 
-```prism,sig,h-6f6bbf8851c3996966d82bd48e6bd5d7c83fed2990eb0ddf0998aff767a02ed9
+```prism,sig,h-b966f26a622f7b01528a303ea8c2a997c9d525abbee685245ea6ba7ca4aaf72e
 rw_top_down : forall e0 a. (Control.Layer.Layer(a), (a) -> Option(a) ! {e0}) -> (a) -> Option(a) ! {e0} ! {e0}
 ```
 
@@ -134,15 +144,25 @@ Termination is conditional, unlike `rw_bottom_up`. The children traversed are th
 
 ### `rw_everywhere`
 
-```prism,sig,h-6ac51fa3998cd5b6836195ac0920bd98a1e469fb61380b3b69c4b58612487dc1
+```prism,sig,h-3347983a82d82cb5f6255b80e7123b3c78d15d96e3f9bbbb06f7da63ff2540ca
 rw_everywhere : forall e0 a. (Control.Layer.Layer(a), (a) -> Option(a) ! {e0}, a) -> a ! {e0}
 ```
 
 Run `s` everywhere it applies, bottom up, and keep the result. The common case: a total pass built from a partial rule. Cannot decline, because `rw_try` turns every refusal into "leave this node alone"; a rule that applies nowhere returns the tree unchanged. Terminates whenever `s` does.
 
+```prism,mod=Control.Rewrite
+# import Json (..)
+# let bump = \(j) -> match j of { JInt(n) => Some(JInt(n + 1)), _ => None }
+rw_everywhere(json_layer(), bump, JArr([JInt(1), JBool(true), JInt(2)]))
+```
+
+```output
+Json.JArr([Json.JInt(2), Json.JBool(true), Json.JInt(3)])
+```
+
 ### `rw_everywhere_td`
 
-```prism,sig,h-6a516046f8fb6fa2fc7c8863d00d027c5f89e951e298de361e85736dee2c8898
+```prism,sig,h-b867080a301e5127cb40de9fcd146567fbb128879b29a33f5de9d3515f166bbe
 rw_everywhere_td : forall e0 a. (Control.Layer.Layer(a), (a) -> Option(a) ! {e0}, a) -> a ! {e0}
 ```
 
@@ -150,7 +170,7 @@ Run `s` everywhere it applies, top down, and keep the result. Cannot decline, on
 
 ### `rw_once_bottom_up`
 
-```prism,sig,h-aa31fafc0d08a0b9bdb19a874ad5f03c82067edc40065ee596488ddfeb9c5d68
+```prism,sig,h-5c0ebab0ab8e6d28ebbd92f109bf0769030f01033ee7d82255fb961e4855cd60
 rw_once_bottom_up : forall e0 a. (Control.Layer.Layer(a), (a) -> Option(a) ! {e0}) -> (a) -> Option(a) ! {e0} ! {e0}
 ```
 
@@ -158,7 +178,7 @@ The single leftmost-innermost application of `s`: try the children first, and on
 
 ### `rw_once_top_down`
 
-```prism,sig,h-6594d13cf6b344ee9dfff684c88c54ec28f6063fde1828d7798f27966e64e436
+```prism,sig,h-6f739a6598ec9e07f884c04d415f998d54d7f95f16a745f0cac2cb6844301470
 rw_once_top_down : forall e0 a. (Control.Layer.Layer(a), (a) -> Option(a) ! {e0}) -> (a) -> Option(a) ! {e0} ! {e0}
 ```
 
@@ -166,7 +186,7 @@ The single outermost-leftmost application of `s`: try the node first, and only i
 
 ### `rw_repeat`
 
-```prism,sig,h-956853e57fa70cf4281ab9e99821dcf7ef781eb2a12b1efaa04215b1cc44a95c
+```prism,sig,h-3db2aab46528e30392877e126e5eca5238f7bbfc5eca4f7a7cb38bc1eec088f0
 rw_repeat : forall e0 a. ((a) -> Option(a) ! {e0}, Int, a) -> Control.Rewrite.RwFix(a) ! {e0}
 ```
 
@@ -174,9 +194,19 @@ Apply `s` to its own output until it declines, at most `fuel` times.
 
 Always terminates, whatever `s` does, and that is the whole reason it exists. The termination condition is explicit: stop when `s` declines, reporting `converged = true` and the number of applications; or stop when `fuel` applications have been made and `s` still accepts, reporting `converged = false` and the tree as it stood before the refused step. There is deliberately no unfueled closer, because a rewrite loop that may not terminate should be a value a test can assert on rather than a hang. Zero or negative fuel yields the input unchanged, converged only if `s` declines on it.
 
+```prism,mod=Control.Rewrite
+# let down = \(n) -> if n > 0 then Some(n - 1) else None
+let r = rw_repeat(down, 10, 3)
+(r.tree, r.steps, r.converged)
+```
+
+```output
+(0, 3, true)
+```
+
 ### `rw_innermost`
 
-```prism,sig,h-d1a9a440edc03f0eb5722ab632c5ebe6a174961503575b2ab898f90f04eac6ea
+```prism,sig,h-5066daee723f8a27f26a1e7a15c221243861c1102f70bc3294cca511a00e6e80
 rw_innermost : forall e0 a. (Control.Layer.Layer(a), (a) -> Option(a) ! {e0}, Int, a) -> Control.Rewrite.RwFix(a) ! {e0}
 ```
 
@@ -186,7 +216,7 @@ Always terminates, bounded by `fuel` steps. It converges exactly when `s` declin
 
 ### `rw_outermost`
 
-```prism,sig,h-f0eb4bd47460472665e1dc4466c5a5a4fcd71186304b02c11dd14c500202a92f
+```prism,sig,h-8d3d16bb3ff48f164c4a2a7e6e3fb3e87d8919e9b73c4fa431f632c72370d543
 rw_outermost : forall e0 a. (Control.Layer.Layer(a), (a) -> Option(a) ! {e0}, Int, a) -> Control.Rewrite.RwFix(a) ! {e0}
 ```
 
@@ -196,7 +226,7 @@ Always terminates, bounded by `fuel` steps, with the same convergence report as 
 
 ### `rw_choose`
 
-```prism,sig,h-bb461a3eddb06edd8508a6b8662ef6b0b496076c7bc4e47b4d3cd4834d6396e1
+```prism,sig,h-a637c8b55bc10bc70b0ed7c5e655743ccdde607176a89ef4a0b0426f439fee4a
 rw_choose : forall e0 a. (List((a) -> Option(a) ! {e0})) -> (a) -> Option(a) ! {e0}
 ```
 
@@ -204,7 +234,7 @@ The first rule in the list that applies, run on the original node. Declines only
 
 ### `rw_pipeline`
 
-```prism,sig,h-8744b4b62ded992b203c5a38123a486aa1ec368424b2462fd8b9ac814e086370
+```prism,sig,h-cf27f1f2dc52194a7658bf878cee0b6686fcfafc1dfa0512aa90dc3decf14a2a
 rw_pipeline : forall e0 a. (List((a) -> Option(a) ! {e0})) -> (a) -> Option(a) ! {e0}
 ```
 
@@ -212,7 +242,7 @@ Run every rule in order, each on the previous result, keeping the node where a r
 
 ### `rw_lift`
 
-```prism,sig,h-613a673da20fe95ffb24119e71277a8c17b8377b1ec2c78b7ae6d93b40888c26
+```prism,sig,h-dcb6fc61cce80074619a4f03f3bcc1b06b4b20e7226e2e79a1ea77bfc4128670
 rw_lift : forall e0 a. ((a) -> a ! {e0}) -> (a) -> Option(a) ! {e0}
 ```
 
@@ -220,7 +250,7 @@ Lift a total node function into a rewrite that always accepts. The bridge for an
 
 ### `rw_lift_changed`
 
-```prism,sig,h-3b20b2cc8901ea5bb86827dadb671154c6a35ee32edc89d57f349a6fa9790b7e
+```prism,sig,h-ac186b83905b553ac29d5a24941ec21bede8294a53fc21d940490149535d4bbc
 rw_lift_changed : forall e0 a. ((a) -> a ! {e0}, (a, a) -> Bool ! {e0}) -> (a) -> Option(a) ! {e0}
 ```
 
@@ -228,7 +258,7 @@ Lift a total node function into a rewrite that accepts only where it changed som
 
 ### `rw_steps`
 
-```prism,sig,h-f5274b40a90e6ef01e762eb13eb73bba30b92c720a8f65dc0c1532dfcf3d385a
+```prism,sig,h-18c0c58bb12f924ad44834a8242ba5b02ec2d8715ff1b16debf57b9923905db4
 rw_steps : forall e0 a. (Control.Layer.Layer(a), (a) -> Option(a) ! {e0}, a) -> List(a) ! {e0}
 ```
 

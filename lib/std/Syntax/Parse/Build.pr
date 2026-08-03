@@ -1,0 +1,57 @@
+-- | Canonical AST construction for a parser: every spanned node a production
+-- creates goes through a named builder here, so the meaning of a span or a
+-- synthesis bit is encoded once instead of being re-decided at hundreds of
+-- record literals.
+--
+-- The span discipline these builders enforce, the one the compiler's own
+-- exporter observes: a node's span runs from its first token's start to its
+-- last consumed token's end; a delimiter widens the span of the node it
+-- wraps; a node the parser invents (the list a multi-index desugars to, the
+-- pieces of an interpolated string) is synthesized, and a piece that
+-- corresponds to no source text of its own is zero-width at the position it
+-- conceptually occupies.
+
+import Syntax.Source (..)
+
+import Syntax.Ast (..)
+
+-- | An authored node covering `[lo, hi)`: written by the user, spanned by its
+-- own tokens.
+pub fn authored(node : a, lo : Int, hi : Int) : Sp(a) =
+  Sp {
+    node = node,
+    span = Span { lo = lo, hi = hi },
+    synth = false
+  }
+
+-- | A synthesized node covering `[lo, hi)`: invented by the parser while
+-- desugaring an authored form, spanning the source it stands for.
+pub fn synthesized(node : a, lo : Int, hi : Int) : Sp(a) =
+  Sp {
+    node = node,
+    span = Span { lo = lo, hi = hi },
+    synth = true
+  }
+
+-- | A zero-width node at `at`: a piece that corresponds to no source text of
+-- its own, carrying the position it conceptually occupies.
+pub fn zero_width(node : a, at : Int) : Sp(a) =
+  Sp {
+    node = node,
+    span = Span { lo = at, hi = at },
+    synth = false
+  }
+
+-- | Rewrap a node with a delimiter's extent: parentheses and brackets widen
+-- the span of the node they enclose while the node itself is unchanged.
+pub fn widened(x : Sp(a), lo : Int, hi : Int) : Sp(a) =
+  Sp {
+    node = x.node,
+    span = Span { lo = lo, hi = hi },
+    synth = x.synth
+  }
+
+-- | The span an infix application covers: from its left operand's start to
+-- its right operand's end.
+pub fn operands_span(l : Sp(a), r : Sp(b)) : Span =
+  Span { lo = l.span.lo, hi = r.span.hi }

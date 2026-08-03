@@ -213,7 +213,7 @@ fn hex_value(c : Int) : Int =
   elif c >= ascii_upper_a && c <= ascii_upper_f then
     c - ascii_upper_a + 10
   else
-    0 - 1
+    -1
 
 -- | Lowercase hex encoding: two hex digits per byte.
 --
@@ -344,7 +344,7 @@ fn b64_value(c : Int) : Int =
   elif c == 47 then
     63
   else
-    0 - 1
+    -1
 
 -- | Decode standard base64 (with `=` padding) to bytes, or `None` on a length that
 -- is not a multiple of four, a stray character, or misplaced padding.

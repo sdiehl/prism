@@ -1,0 +1,116 @@
+-- | Semantic checks behind the generated structural type parser.
+--
+-- This module deliberately knows nothing about Type grammar control flow.
+-- GeneratedType calls the one public hook only after consuming a complete
+-- usage row, keeping diagnostics typed without threading parser callbacks
+-- through recursive productions.
+
+import Data.List (..)
+
+import Syntax.Ast (..)
+
+import Syntax.Cursor (..)
+
+import Syntax.Parse.Support (..)
+
+pub fn validate_usage(
+  saved : Cursor,
+  base : Ty,
+  facts : List(String),
+  open_tail : Bool,
+  c : Cursor
+) : Parsed(Ty) =
+  let span = cursor_since(saved, c)
+  if open_tail then
+    PFault(
+        refuse(
+            span,
+            "usage-row polymorphism (`@ \{fact | tail\}`) is reserved but not implemented",
+          ),
+      )
+  else
+    match validate_usage_facts(facts, Nil) of
+      Ok(validated) => PTook(TyUsage(base, validated), c)
+      Err(msg) => PFault(refuse(span, msg))
+
+fn validate_usage_facts(
+  facts : List(String),
+  accepted : List(String)
+) : Result(List(String), String) =
+  match facts of
+    Nil =>
+      if is_nil(accepted) then
+        Err("a usage row cannot be empty")
+      else
+        Ok(accepted)
+    Cons(fact, rest) =>
+      if not(known_usage_fact(fact)) then
+        Err("unknown usage fact `{fact}`")
+      elif has_usage_fact(fact, accepted) then
+        Err("duplicate usage fact `{fact}`")
+      else
+        match conflicting_usage_fact(fact, accepted) of
+          Some(prior) =>
+            Err(
+                "usage facts `{prior}` and `{fact}` contradict each other (same axis)",
+              )
+          None => validate_usage_facts(rest, insert_usage_fact(fact, accepted))
+
+fn known_usage_fact(fact : String) : Bool =
+  fact == "aliased"
+    || fact == "bounded_stack"
+    || fact == "linear"
+    || fact == "local"
+    || fact == "many"
+    || fact == "noalloc"
+    || fact == "noescape"
+    || fact == "once"
+    || fact == "portable"
+    || fact == "unique"
+
+fn usage_axis(fact : String) : String =
+  if fact == "portable" then
+    "mobility"
+  elif fact == "local" || fact == "noescape" then
+    "escape"
+  elif fact == "once" || fact == "many" then
+    "multiplicity"
+  elif fact == "unique" || fact == "aliased" then
+    "aliasing"
+  elif fact == "noalloc" then
+    "allocation"
+  else
+    "fip"
+
+fn usage_axis_exclusive(fact : String) : Bool =
+  fact /= "linear" && fact /= "bounded_stack"
+
+fn conflicting_usage_fact(
+  fact : String,
+  accepted : List(String)
+) : Option(String) =
+  match accepted of
+    Nil => None
+    Cons(prior, rest) =>
+      if (usage_axis_exclusive(fact) && usage_axis(prior) == usage_axis(fact)) then
+        Some(prior)
+      else
+        conflicting_usage_fact(fact, rest)
+
+fn has_usage_fact(fact : String, facts : List(String)) : Bool =
+  match facts of
+    Nil => false
+    Cons(x, rest) =>
+      if x == fact then
+        true
+      else
+        has_usage_fact(fact, rest)
+
+fn insert_usage_fact(fact : String, facts : List(String)) : List(String) =
+  match facts of
+    Nil => [fact]
+    Cons(x, rest) =>
+      if fact < x then
+        Cons(fact, facts)
+      else
+        Cons(x, insert_usage_fact(fact, rest))

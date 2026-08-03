@@ -12,7 +12,7 @@ Wrap an instance back into a `Gen` with `arb_gen` to feed it to `quickcheck`.
 
 ### `Arbitrary`
 
-```prism,def,h-21af198c33a7f59c727c8d9cb7fbab9e29a328374bb61098939f5706be28f661
+```prism,def,h-cea7fb587352843bf9c3312d3dc42f1627f3da3432d27658607def5df369862e
 class Arbitrary(a)
   arbitrary : (Int) -> a ! {Random | e}
 ```
@@ -23,61 +23,61 @@ A structural generator, sized by a fuel budget. `deriving (Arbitrary)` spends th
 
 ### `arbitraryInt`
 
-```prism,def,h-1fb4fd815892b5468c49a6768411b906d07bd6132528af16183a9a2ccfd6183b
+```prism,def,h-4c3cb335a141aec5d98bab5ab4527841b01d8ba253387a556ed6a371a3681c08
 instance arbitraryInt : Arbitrary(Int)
 ```
 
 ### `arbitraryI64`
 
-```prism,def,h-e3d1486ead8f82e0740600133d5f06f376426ba0151785c6e2632ee98201c79e
+```prism,def,h-01ce6370101dae8e6ab96e7bd712859a0c3a176ae26116ea0813edb6e167f7a1
 instance arbitraryI64 : Arbitrary(I64)
 ```
 
 ### `arbitraryU64`
 
-```prism,def,h-89a29c087ba37ae75cc3829785e885272840a84cd8ad2d6e877d366dcc4f1f20
+```prism,def,h-56bea178d8a67f0d6e2dd41408de99206b10ecb00fee5382dc7f965e361fb9fc
 instance arbitraryU64 : Arbitrary(U64)
 ```
 
 ### `arbitraryBool`
 
-```prism,def,h-05953b0553a7ff8683c51736ad053c482f417102eb02b49edb4e64a208ce7410
+```prism,def,h-0ec6d917b898b32bb07d6e76beb26b1a0b3b9a71cc6a1c2aeedc16890cca3791
 instance arbitraryBool : Arbitrary(Bool)
 ```
 
 ### `arbitraryUnit`
 
-```prism,def,h-c13a22e81c4c9ac0015c965a25c14dda3af499d3a55fabc011c02eea06d0c344
+```prism,def,h-d2bfe6c67dd2219f1da8566b73a98001c3a03cf28a11df6ff63b6c85b57343c9
 instance arbitraryUnit : Arbitrary(Unit)
 ```
 
 ### `arbitraryChar`
 
-```prism,def,h-2714f73beca6c58ba779158a83daa0ebd82c249dba5792da60004544724e5444
+```prism,def,h-b823d36a0af0d09cd23cab56e2fa289e3e87a17d521726c91675a58865254d5b
 instance arbitraryChar : Arbitrary(Char)
 ```
 
 ### `arbitraryFloat`
 
-```prism,def,h-87c299ea0c77345b0f731d4c5e5814b8ac243529bfe62c5f477a4f60287513e0
+```prism,def,h-39e5a0f7805438113c53102e1a1cd390ed86a913472bb0c0791d946efaef3148
 instance arbitraryFloat : Arbitrary(Float)
 ```
 
 ### `arbitraryString`
 
-```prism,def,h-93de04ba484e410ff0f15b53a38c271adf7778d2ef78f39a2f39e25295ed9fd6
+```prism,def,h-38519f6250f40da43524dd452b61714283c29d88b7caa1c077f2e5035f47c8f9
 instance arbitraryString : Arbitrary(String)
 ```
 
 ### `arbitraryOption`
 
-```prism,def,h-6f8e2daa5df2adf2439b8c2cd4b9de73436936692ac82e02f98fe3c567ec979a
+```prism,def,h-531ad1aa88171b32f1fa678fbc446b5f0fa5abe18b309d6aa55a517e8ee6da32
 instance arbitraryOption : Arbitrary(Option(a))
 ```
 
 ### `arbitraryList`
 
-```prism,def,h-1df8f5350157e26db7a6a1db5d6e3f4da75bba5804f6e85940a88c12d32db6b0
+```prism,def,h-bdd26b06bb1abc2399ee02e59387f885b8d651a64e426cb3dea8af73045b098f
 instance arbitraryList : Arbitrary(List(a))
 ```
 
@@ -85,7 +85,7 @@ instance arbitraryList : Arbitrary(List(a))
 
 ### `arb_gen`
 
-```prism,sig,h-f2c3feb066a1cd8d1e7f7ad7db6a8f96fcd0f8b41a86d80d98ef45d9a198f4cf
+```prism,sig,h-1a5e6613b0a4226d4bf4a4db2bc8e03b3ffd252ae767d3c7a13c69669ffa8e7c
 arb_gen : forall a. () -> Quickcheck.Gen(a)
 ```
 

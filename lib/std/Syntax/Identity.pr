@@ -9,7 +9,7 @@
 -- computable here: it needs resolution and elaboration, which no syntax
 -- artifact carries.
 --
--- The negative directions are the load-bearing ones. Equal Core identity does
+-- The negative directions are the essential ones. Equal Core identity does
 -- not imply equal surface or source identity, since distinct spellings
 -- elaborate to one subject. Equal source bytes do not imply equal Core
 -- identity either, because the same text means different things under a

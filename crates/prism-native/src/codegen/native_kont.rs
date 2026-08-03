@@ -11,25 +11,25 @@ use std::fmt::Write as _;
 use prism_common::sym::Sym;
 use prism_core::core::{Core, Hashes, HASH_SCHEME};
 
-pub const TABLE_GLOBAL: &str = "prism_native_kont_table";
-pub const STATE_MAP_GLOBAL: &str = "prism_native_kont_state_map";
-pub const PTRS_GLOBAL: &str = "prism_native_kont_ptrs";
-pub const PTRS_LEN_GLOBAL: &str = "prism_native_kont_ptrs_len";
+pub(crate) const TABLE_GLOBAL: &str = "prism_native_kont_table";
+pub(crate) const STATE_MAP_GLOBAL: &str = "prism_native_kont_state_map";
+pub(crate) const PTRS_GLOBAL: &str = "prism_native_kont_ptrs";
+pub(crate) const PTRS_LEN_GLOBAL: &str = "prism_native_kont_ptrs_len";
 // Mach-O section names are a `__SEGMENT,__section` pair; a bare ELF-style
 // name lands in a nameless segment, which Darwin 25 rejects at exec with
 // EBADMACHO. The snapshot normalizer maps both spellings to one canonical form.
 #[cfg(target_os = "macos")]
-pub const TABLE_SECTION: &str = "__DATA,__prism_kont";
+pub(crate) const TABLE_SECTION: &str = "__DATA,__prism_kont";
 #[cfg(not(target_os = "macos"))]
-pub const TABLE_SECTION: &str = ".prism_kont";
+pub(crate) const TABLE_SECTION: &str = ".prism_kont";
 
-pub const ENTER_SYMBOL: &str = "prism_native_kont_enter";
-pub const ARG_SYMBOL: &str = "prism_native_kont_arg";
-pub const TAILCALL_SYMBOL: &str = "prism_native_kont_tailcall";
-pub const LEAVE_SYMBOL: &str = "prism_native_kont_leave";
+pub(crate) const ENTER_SYMBOL: &str = "prism_native_kont_enter";
+pub(crate) const ARG_SYMBOL: &str = "prism_native_kont_arg";
+pub(crate) const TAILCALL_SYMBOL: &str = "prism_native_kont_tailcall";
+pub(crate) const LEAVE_SYMBOL: &str = "prism_native_kont_leave";
 
 #[cfg(test)]
-pub const RUNTIME_SURFACE_SYMBOLS: &[&str] = &[
+pub(crate) const RUNTIME_SURFACE_SYMBOLS: &[&str] = &[
     "prism_native_kont_table_bytes",
     "prism_native_kont_table_len",
     "prism_native_kont_state_map_bytes",
@@ -67,18 +67,19 @@ const ARITY_FIELD: &str = "arity";
 const SLOTS_FIELD: &str = "slots";
 const EMPTY_SLOTS: &str = "abi-word[]";
 
-pub struct Row<'a> {
+pub(crate) struct Row<'a> {
     pub symbol: &'a str,
     pub def_hash: &'a str,
     pub core_name: &'a str,
 }
 
+#[derive(Debug)]
 pub struct IdentityRow<'a> {
     pub key: &'a str,
     pub value: String,
 }
 
-pub fn rows(table: &str) -> impl Iterator<Item = Row<'_>> {
+pub(crate) fn rows(table: &str) -> impl Iterator<Item = Row<'_>> {
     table.lines().filter_map(|line| {
         let mut parts = line.split_whitespace();
         (parts.next()? == FN_ROW).then(|| Row {
@@ -89,6 +90,7 @@ pub fn rows(table: &str) -> impl Iterator<Item = Row<'_>> {
     })
 }
 
+#[must_use]
 pub fn table(hashes: &Hashes, bundle: &str, identity: &[IdentityRow<'_>]) -> String {
     let mut names: Vec<&Sym> = hashes.keys().collect();
     names.sort_by_key(|s| s.as_str());
@@ -115,6 +117,7 @@ pub fn table(hashes: &Hashes, bundle: &str, identity: &[IdentityRow<'_>]) -> Str
     out
 }
 
+#[must_use]
 pub fn state_map(core: &Core, table: &str) -> String {
     let layouts: BTreeMap<String, (usize, String)> = core
         .fns

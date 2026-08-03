@@ -1,0 +1,1542 @@
+{
+  "schema": "prism-parser-compaction-coverage-v1",
+  "oracle_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+  "corpus_version": 2,
+  "scope": "declared Type/Pattern/narrow-vertical structural inventory only",
+  "semantic_matrix_complete": false,
+  "gate_ready": false,
+  "entries": [
+    {
+      "id": "pattern.Comma.Pattern",
+      "curated_cases": [
+        "pattern-comma-wrong-close",
+        "pattern-missing-a-separator",
+        "pattern-missing-close",
+        "pattern-tuple-let"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.CommaPlus.Pattern",
+      "curated_cases": [
+        "pattern-list-match"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.LetPat.qualified-constructor",
+      "curated_cases": [
+        "pattern-let-ctors"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.LetPat.tuple",
+      "curated_cases": [
+        "pattern-tuple-let"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.LetPat.uid-constructor",
+      "curated_cases": [
+        "pattern-let-ctors"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.Param.pattern",
+      "curated_cases": [
+        "pattern-ctor-param"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatAlt.atom",
+      "curated_cases": [
+        "pattern-atoms",
+        "pattern-let-ctors",
+        "pattern-list-match",
+        "pattern-record-spread"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatAlt.qualified-constructor",
+      "curated_cases": [
+        "pattern-atoms"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatAlt.record",
+      "curated_cases": [
+        "pattern-record-match",
+        "pattern-record-separator-wrong-close",
+        "pattern-record-spread"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatAlt.uid-constructor",
+      "curated_cases": [
+        "pattern-alt-match",
+        "pattern-ctor-param"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatArgs.list",
+      "curated_cases": [
+        "pattern-comma-wrong-close",
+        "pattern-ctor-param",
+        "pattern-let-ctors",
+        "pattern-missing-a-separator",
+        "pattern-missing-close"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatAtom.bool-false",
+      "curated_cases": [
+        "pattern-atoms"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatAtom.bool-true",
+      "curated_cases": [
+        "pattern-atoms"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatAtom.char",
+      "curated_cases": [
+        "pattern-atoms"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatAtom.float",
+      "curated_cases": [
+        "pattern-atoms"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatAtom.ident",
+      "curated_cases": [
+        "pattern-atoms",
+        "pattern-ctor-param",
+        "pattern-list-match",
+        "pattern-tuple-let"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatAtom.int",
+      "curated_cases": [
+        "pattern-record-match"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatAtom.list-empty",
+      "curated_cases": [
+        "pattern-atoms"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatAtom.list-nonempty",
+      "curated_cases": [
+        "pattern-list-match"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatAtom.negative-float",
+      "curated_cases": [
+        "pattern-atoms"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatAtom.negative-int",
+      "curated_cases": [
+        "pattern-atoms"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatAtom.tuple",
+      "curated_cases": [
+        "pattern-atoms"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.Pattern.alternation",
+      "curated_cases": [
+        "pattern-alt-match"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.Pattern.single",
+      "curated_cases": [
+        "pattern-atoms",
+        "pattern-let-ctors",
+        "pattern-list-match",
+        "pattern-missing-a-separator",
+        "pattern-record-spread"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.RecordPatField.explicit",
+      "curated_cases": [
+        "pattern-record-match"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.RecordPatField.shorthand",
+      "curated_cases": [
+        "pattern-record-match",
+        "pattern-record-separator-wrong-close",
+        "pattern-record-spread"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.RecordPatFields.closed",
+      "curated_cases": [
+        "pattern-record-match",
+        "pattern-record-separator-wrong-close"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.RecordPatFields.spread",
+      "curated_cases": [
+        "pattern-record-spread"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.list",
+      "curated_cases": [
+        "type-missing-close"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.name-ident-app",
+      "curated_cases": [
+        "type-shapes"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.name-ident-var",
+      "curated_cases": [
+        "type-forall"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.name-qual",
+      "curated_cases": [
+        "type-shapes"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.name-uid",
+      "curated_cases": [
+        "type-shapes"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.paren",
+      "curated_cases": [
+        "type-shapes"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.primitive.Bool",
+      "curated_cases": [
+        "type-tuple"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.primitive.Char",
+      "curated_cases": [
+        "type-primitives-params"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.primitive.Float",
+      "curated_cases": [
+        "type-primitives-params"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.primitive.I64",
+      "curated_cases": [
+        "type-primitives-params"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.primitive.Int",
+      "curated_cases": [
+        "type-primitive-int",
+        "type-tuple",
+        "type-unboxed-record",
+        "type-usage"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.primitive.String",
+      "curated_cases": [
+        "type-primitives-params"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.primitive.U64",
+      "curated_cases": [
+        "type-primitives-params"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.primitive.Unit",
+      "curated_cases": [
+        "type-primitives-params"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.tuple",
+      "curated_cases": [
+        "type-tuple"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.unboxed-record",
+      "curated_cases": [
+        "type-unboxed-record"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.unboxed-tuple",
+      "curated_cases": [
+        "type-shapes"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.Ann.type",
+      "curated_cases": [
+        "type-arrow-effect",
+        "type-forall",
+        "type-missing-close",
+        "type-primitive-int",
+        "type-tuple",
+        "type-unboxed-record",
+        "type-usage"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.Arrow.empty-domain",
+      "curated_cases": [
+        "type-shapes"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.Arrow.pass",
+      "curated_cases": [
+        "type-forall",
+        "type-primitive-int"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.Arrow.typed-domain",
+      "curated_cases": [
+        "ret-annotations",
+        "type-arrow-effect",
+        "type-function-usage-misuse"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.ArrowEff.bare",
+      "curated_cases": [
+        "type-shapes"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.ArrowEff.row",
+      "curated_cases": [
+        "ret-annotations",
+        "type-arrow-effect",
+        "type-effect-misuse",
+        "type-function-usage-misuse"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.CoeffRowParts.bare",
+      "curated_cases": [
+        "type-function-usage-misuse",
+        "type-usage"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.CoeffRowParts.row",
+      "curated_cases": [
+        "type-shapes"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.Comma.EffLabel",
+      "curated_cases": [
+        "ret-retired-braced",
+        "type-args",
+        "type-shapes"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.Comma.RecordField",
+      "curated_cases": [
+        "type-unboxed-record"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.Comma.Type",
+      "curated_cases": [
+        "type-tuple"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.Comma.TypeArg",
+      "curated_cases": [
+        "type-args",
+        "type-dim-retired"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.CtorArgs.list",
+      "curated_cases": [
+        "type-dim-retired"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.DimTail.chain",
+      "curated_cases": [
+        "type-dim-chain"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.DimTail.term",
+      "curated_cases": [
+        "type-dim-retired"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.DimTerm.ident",
+      "curated_cases": [
+        "type-dim-retired"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.DimTerm.int",
+      "curated_cases": [
+        "type-dim-chain"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.EffLabel.ident",
+      "curated_cases": [
+        "ret-annotations",
+        "type-args",
+        "type-shapes"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.EffLabel.qual",
+      "curated_cases": [
+        "type-args",
+        "type-shapes"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.EffLabel.uid",
+      "curated_cases": [
+        "ret-retired-braced",
+        "type-arrow-effect",
+        "type-effect-misuse"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.KindedTyParam.annotated",
+      "curated_cases": [
+        "type-kinds-alias"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.KindedTyParam.default",
+      "curated_cases": [
+        "type-kinds-alias"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.KindedTyParams.list",
+      "curated_cases": [
+        "type-kinds-alias"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.Param.default",
+      "curated_cases": [
+        "type-primitives-params"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.Param.pattern",
+      "curated_cases": [
+        "type-primitive-int",
+        "type-primitives-params",
+        "type-shapes"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.Param.type",
+      "curated_cases": [
+        "type-primitive-int",
+        "type-primitives-params",
+        "type-shapes"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.RecordField.named",
+      "curated_cases": [
+        "type-unboxed-record"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.RetAnn.absent",
+      "curated_cases": [
+        "type-primitive-int",
+        "type-primitives-params"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.RetAnn.present",
+      "curated_cases": [
+        "ret-annotations",
+        "type-ret-wrong-close"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.RetAnn.retired-braced-effect-first",
+      "curated_cases": [
+        "ret-retired-braced"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.RetAnn.retired-effect-first",
+      "curated_cases": [
+        "ret-retired-bare"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.RetType.arrow",
+      "curated_cases": [
+        "ret-annotations",
+        "type-ret-wrong-close"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.RetType.forall",
+      "curated_cases": [
+        "ret-annotations",
+        "type-ret-wrong-close"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.TyParams.list",
+      "curated_cases": [
+        "type-kinds-alias"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.Type.arrow",
+      "curated_cases": [
+        "type-arrow-effect",
+        "type-primitive-int"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.Type.effect-attach",
+      "curated_cases": [
+        "type-arrow-effect"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.Type.effect-misuse",
+      "curated_cases": [
+        "type-effect-misuse"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.Type.forall",
+      "curated_cases": [
+        "type-forall"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.Type.function-usage-misuse",
+      "curated_cases": [
+        "type-function-usage-misuse"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.TypeArg.dimension-arithmetic",
+      "curated_cases": [
+        "type-dim-chain",
+        "type-dim-retired"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.TypeArg.natural",
+      "curated_cases": [
+        "type-args"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.TypeArg.row",
+      "curated_cases": [
+        "type-args"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.TypeArg.type",
+      "curated_cases": [
+        "type-args"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.TypeSig.complete",
+      "curated_cases": [
+        "type-forall",
+        "type-primitive-int"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.UType.atomic",
+      "curated_cases": [
+        "type-forall",
+        "type-primitive-int"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.UType.usage",
+      "curated_cases": [
+        "type-usage"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Add.plus",
+      "curated_cases": [
+        "vert-expr-spine",
+        "vert-open-if"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Atom.ident",
+      "curated_cases": [
+        "vert-expr-spine",
+        "vert-try-bound",
+        "vertical-closed-if",
+        "vertical-index-neg",
+        "vertical-open-end"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Atom.int",
+      "curated_cases": [
+        "vert-expr-spine",
+        "vertical-closed-if"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Atom.paren",
+      "curated_cases": [
+        "vert-try-bare"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.BlockExpr.virtual",
+      "curated_cases": [
+        "carrier-pattern-try",
+        "vert-open-if",
+        "vert-try-bare",
+        "vert-try-bound",
+        "vertical-open-end"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Call.field",
+      "curated_cases": [
+        "vert-expr-spine"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Call.index",
+      "curated_cases": [
+        "vertical-index-neg"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Call.opt-chain",
+      "curated_cases": [
+        "vert-expr-spine"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Call.try",
+      "curated_cases": [
+        "carrier-pattern-try",
+        "vert-expr-spine",
+        "vert-try-bare",
+        "vert-try-bound"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.CallTight.call",
+      "curated_cases": [
+        "vert-expr-spine"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.DeclMods.assume-total",
+      "curated_cases": [
+        "vertical-modifiers"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.DeclMods.empty",
+      "curated_cases": [
+        "vertical-modifiers"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.DeclMods.test",
+      "curated_cases": [
+        "decl-newline-test",
+        "vertical-modifiers"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.DeclMods.test-assume-total",
+      "curated_cases": [
+        "decl-valid-plus-foo",
+        "vert-mods-long"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.DeclMods.test-total",
+      "curated_cases": [
+        "vertical-modifiers"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.DeclMods.total",
+      "curated_cases": [
+        "vertical-modifiers"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.FipKw.empty",
+      "curated_cases": [
+        "vert-mods-long",
+        "vertical-modifiers"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.FipKw.fbip",
+      "curated_cases": [
+        "vertical-modifiers"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.FipKw.fip",
+      "curated_cases": [
+        "vertical-modifiers"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.IfElse.else",
+      "curated_cases": [
+        "vertical-closed-if"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Item.fn",
+      "curated_cases": [
+        "decl-four-prefix",
+        "decl-newline-test",
+        "decl-valid-plus-foo",
+        "vert-mods-invalid",
+        "vert-mods-long",
+        "vertical-modifiers"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Mul.star",
+      "curated_cases": [
+        "vert-expr-spine"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Neg.prefix-minus",
+      "curated_cases": [
+        "vertical-index-neg"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.OpenIfTail.elif",
+      "curated_cases": [
+        "vert-open-if"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.OpenIfTail.end",
+      "curated_cases": [
+        "vertical-open-end"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.OpenIfTail.rest",
+      "curated_cases": [
+        "vert-open-if"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Pow.caret",
+      "curated_cases": [
+        "vert-expr-spine"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Stmts.expr",
+      "curated_cases": [
+        "vert-open-if"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Stmts.expr-seq",
+      "curated_cases": [
+        "vert-try-bare"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Stmts.let-ident",
+      "curated_cases": [
+        "vert-try-bound"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Stmts.let-pattern-try",
+      "curated_cases": [
+        "carrier-pattern-try"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Stmts.open-if",
+      "curated_cases": [
+        "vert-open-if",
+        "vertical-open-end"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.decl.fn-prefix.commit",
+      "curated_cases": [
+        "decl-four-prefix",
+        "decl-newline-test",
+        "decl-valid-plus-foo",
+        "vert-mods-invalid",
+        "vert-mods-long",
+        "vertical-modifiers"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.hook.let_pat",
+      "curated_cases": [
+        "carrier-pattern-try"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.hook.let_stmt",
+      "curated_cases": [
+        "vert-try-bound"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.hook.seq_stmt",
+      "curated_cases": [
+        "vert-try-bare"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.hook.try_mark",
+      "curated_cases": [
+        "carrier-pattern-try",
+        "vert-try-bare",
+        "vert-try-bound"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.hook.try_stmt",
+      "curated_cases": [
+        "carrier-pattern-try",
+        "vert-try-bare",
+        "vert-try-bound"
+      ],
+      "mutations": []
+    }
+  ],
+  "hooks": [
+    {
+      "id": "decl_mods",
+      "curated_cases": [
+        "decl-four-prefix",
+        "decl-newline-test",
+        "decl-valid-plus-foo",
+        "vert-mods-invalid",
+        "vert-mods-long",
+        "vertical-modifiers"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "decline-dimension-arithmetic",
+      "curated_cases": [
+        "type-dim-chain",
+        "type-dim-retired"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "function-usage-validation",
+      "curated_cases": [
+        "type-function-usage-misuse"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "kind-name-validation",
+      "curated_cases": [
+        "type-kinds-alias"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "let_pat",
+      "curated_cases": [
+        "carrier-pattern-try",
+        "pattern-let-ctors",
+        "pattern-tuple-let"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "let_stmt",
+      "curated_cases": [
+        "vert-try-bound"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "open_if",
+      "curated_cases": [
+        "vert-open-if",
+        "vertical-open-end"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "param",
+      "curated_cases": [
+        "type-primitives-params"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "retired-return-order",
+      "curated_cases": [
+        "ret-retired-bare",
+        "ret-retired-braced"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "seq_stmt",
+      "curated_cases": [
+        "vert-try-bare"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "try_mark",
+      "curated_cases": [
+        "carrier-pattern-try",
+        "vert-expr-spine",
+        "vert-try-bare",
+        "vert-try-bound"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "try_stmt",
+      "curated_cases": [
+        "carrier-pattern-try",
+        "vert-try-bare",
+        "vert-try-bound"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type-effect-validation",
+      "curated_cases": [
+        "type-effect-misuse"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "usage-row-validation",
+      "curated_cases": [
+        "type-shapes",
+        "type-usage"
+      ],
+      "mutations": []
+    }
+  ],
+  "cuts": [
+    {
+      "id": "N/A: frozen Rust has no explicit runtime cut",
+      "curated_cases": [
+        "decl-four-prefix",
+        "decl-newline-test",
+        "decl-valid-plus-foo",
+        "vert-mods-invalid",
+        "vert-mods-long",
+        "vertical-modifiers"
+      ],
+      "mutations": []
+    }
+  ],
+  "separator_boundaries": [
+    {
+      "id": "pattern.LetPat.tuple-comma",
+      "curated_cases": [
+        "pattern-tuple-let"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatArgs.after-comma",
+      "curated_cases": [
+        "pattern-comma-wrong-close"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatArgs.after-element",
+      "curated_cases": [
+        "pattern-missing-a-separator"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatArgs.close",
+      "curated_cases": [
+        "pattern-missing-close"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatArgs.comma",
+      "curated_cases": [
+        "pattern-ctor-param",
+        "pattern-let-ctors"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.PatAtom.list-comma",
+      "curated_cases": [
+        "pattern-list-match"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.Pattern.bar",
+      "curated_cases": [
+        "pattern-alt-match"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.RecordPatFields.comma",
+      "curated_cases": [
+        "pattern-record-match"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.RecordPatFields.comma-before-spread",
+      "curated_cases": [
+        "pattern-record-spread"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.RecordPatFields.field-follow",
+      "curated_cases": [
+        "pattern-record-separator-wrong-close"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern.match-arm.virtual-semi",
+      "curated_cases": [
+        "pattern-atoms"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.list-close",
+      "curated_cases": [
+        "type-missing-close"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.record-comma",
+      "curated_cases": [
+        "type-unboxed-record"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.AType.tuple-comma",
+      "curated_cases": [
+        "type-tuple"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.ArrowEff.close",
+      "curated_cases": [
+        "type-effect-misuse"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.ArrowEff.comma",
+      "curated_cases": [
+        "type-arrow-effect",
+        "type-shapes"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.CoeffRowParts.comma",
+      "curated_cases": [
+        "type-shapes"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.CtorArgs.comma",
+      "curated_cases": [
+        "type-args",
+        "type-dim-retired"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.KindedTyParams.comma",
+      "curated_cases": [
+        "type-kinds-alias"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.Param.default-marker",
+      "curated_cases": [
+        "type-primitives-params"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.Param.list-comma",
+      "curated_cases": [
+        "type-primitives-params",
+        "type-shapes"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.RetAnn.retired-effect-comma",
+      "curated_cases": [
+        "ret-retired-braced"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.RetAnn.type-start",
+      "curated_cases": [
+        "type-ret-wrong-close"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.RetType.effect-row",
+      "curated_cases": [
+        "ret-annotations"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.TyParams.comma",
+      "curated_cases": [
+        "type-kinds-alias"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type.TypeArg.row-comma-tail",
+      "curated_cases": [
+        "type-args"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.BlockExpr.virtual-close",
+      "curated_cases": [
+        "vertical-open-end"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Call.index-close",
+      "curated_cases": [
+        "vertical-index-neg"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.CallTight.args-comma",
+      "curated_cases": [
+        "vert-expr-spine"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Fn.prefix-follow",
+      "curated_cases": [
+        "decl-four-prefix",
+        "decl-valid-plus-foo"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Fn.prefix-virtual-semi",
+      "curated_cases": [
+        "decl-newline-test"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Item.virtual-semi",
+      "curated_cases": [
+        "vertical-modifiers"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.OpenIfTail.virtual-semi",
+      "curated_cases": [
+        "vert-open-if"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "vertical.Stmts.virtual-semi",
+      "curated_cases": [
+        "carrier-pattern-try",
+        "vert-try-bare",
+        "vert-try-bound"
+      ],
+      "mutations": []
+    }
+  ],
+  "recursion_families": [
+    {
+      "id": "arrow",
+      "curated_cases": [
+        "ret-annotations",
+        "type-arrow-effect",
+        "type-function-usage-misuse",
+        "type-shapes"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "expr",
+      "curated_cases": [
+        "carrier-pattern-try",
+        "type-primitives-params",
+        "vert-expr-spine",
+        "vert-open-if",
+        "vert-try-bare",
+        "vert-try-bound",
+        "vertical-closed-if",
+        "vertical-index-neg",
+        "vertical-open-end"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "forall",
+      "curated_cases": [
+        "type-forall"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "open-if",
+      "curated_cases": [
+        "vert-open-if",
+        "vertical-open-end"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "parse_let_pattern",
+      "curated_cases": [
+        "carrier-pattern-try",
+        "pattern-let-ctors",
+        "pattern-tuple-let"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern",
+      "curated_cases": [
+        "pattern-alt-match",
+        "pattern-atoms",
+        "pattern-comma-wrong-close",
+        "pattern-ctor-param",
+        "pattern-let-ctors",
+        "pattern-list-match",
+        "pattern-missing-a-separator",
+        "pattern-missing-close",
+        "pattern-record-match",
+        "pattern-tuple-let"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pattern-record",
+      "curated_cases": [
+        "pattern-record-separator-wrong-close",
+        "pattern-record-spread"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "pratt-pow",
+      "curated_cases": [
+        "vert-expr-spine"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type",
+      "curated_cases": [
+        "ret-annotations",
+        "ret-retired-bare",
+        "ret-retired-braced",
+        "type-arrow-effect",
+        "type-effect-misuse",
+        "type-forall",
+        "type-function-usage-misuse",
+        "type-primitive-int",
+        "type-primitives-params",
+        "type-ret-wrong-close",
+        "type-shapes",
+        "type-usage"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type-arg",
+      "curated_cases": [
+        "type-args",
+        "type-dim-retired"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type-list",
+      "curated_cases": [
+        "type-missing-close"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type-record",
+      "curated_cases": [
+        "type-unboxed-record"
+      ],
+      "mutations": []
+    },
+    {
+      "id": "type-tuple",
+      "curated_cases": [
+        "type-tuple"
+      ],
+      "mutations": []
+    }
+  ],
+  "uncovered": [],
+  "pending": {
+    "phase1b": {
+      "status": "blocked",
+      "reason": "Phase 1B generator implementation cannot claim parity until exact depth traces and mutation lanes are implemented and every recorded handwritten mismatch or intentional post-freeze delta is resolved."
+    },
+    "entries": [],
+    "depth_axes": [
+      "effect-label-args",
+      "expression-parens",
+      "forall",
+      "open-if",
+      "pattern-constructor",
+      "pattern-list",
+      "pattern-record",
+      "pattern-tuple",
+      "pow-right",
+      "right-arrow",
+      "type-constructor",
+      "type-list",
+      "type-tuple"
+    ],
+    "depth_followups": [
+      "direct-parse-let-pattern: required by the Phase-0 prose but absent from the frozen 13-axis pending ledger; inventory decision required before it can be claimed"
+    ],
+    "mutation_lanes": [
+      "type",
+      "pattern",
+      "vertical",
+      "cross"
+    ],
+    "reason": "Tranche 2 freezes 45 independent curated oracles, closes the Type/Pattern/vertical inventory, and records all three direct entry points. Exact depth traces and the pre-registered mutation lanes remain tranche 3."
+  }
+}

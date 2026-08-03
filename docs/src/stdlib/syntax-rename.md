@@ -16,7 +16,7 @@ The refusals are the useful part of the result, and they are the gap to report: 
 
 ### `RnUse`
 
-```prism,def,h-9ece6a63d316787f44f1a1df498be7dd7fd4a2da44b714f2f3e53af6336c7361
+```prism,def,h-222578f7643337b107f2f97e411f58cff68de07b85ed3642ad0719fe7d2597c6
 type RnUse = RnUse { id: Int, span: Span, name: String }
 ```
 
@@ -24,7 +24,7 @@ One variable reference: the node id the checker facts join on, the exact span of
 
 ### `RenameRefusal`
 
-```prism,def,h-ee25cf5df177f93573429a31a66c6b483bb6a67e7e03c03f86d7b8b70668444b
+```prism,def,h-6e9fee93e3b925c4fb7531229537b680de4e19b60259c559201c3787a58d5af6
 type RenameRefusal
   = RnNotAnIdent(String)
   | RnTaken(String)
@@ -39,7 +39,7 @@ Why a rename was refused. Every case is a fact about the document, not a guess a
 
 ### `RenameError`
 
-```prism,def,h-c98cc416f890f65f7b86de9fc51bd1d0a7e565807138bf0f2af0f1837814b62e
+```prism,def,h-fcfacb69af9862540b0331bb2ddd824bddfacf757393fd9627818dff883a355e
 type RenameError
   = RnRefused(RenameRefusal)
   | RnEdit(EditError)
@@ -52,7 +52,7 @@ The two ways a rename can fail: the seam refused to prove it, or the edits did n
 
 ### `rn_message`
 
-```prism,sig,h-063ab4891c382ebbe7719cb29c6c7a1d4f1e44fa4666a43fe9fca68c6eb6ef3d
+```prism,sig,h-a54524311a2959e196d95a902252ee93cb20751cdbc715bd83471b5205e8f016
 rn_message : (Syntax.Rename.RenameRefusal) -> String
 ```
 
@@ -60,7 +60,7 @@ A human-readable account of a refusal.
 
 ### `rn_occurrences`
 
-```prism,sig,h-bcc63a482245d50b1b7161196c9d34978485bb89397703999eb81d2c7c8e3e7c
+```prism,sig,h-5258b1ac4690ced43e947cd4f5cfa53e20f8851269c4e339b8ec550c11bd1e08
 rn_occurrences : (Syntax.Resolved.ResolvedDoc) -> List(Syntax.Rename.RnUse)
 ```
 
@@ -68,7 +68,7 @@ Every variable reference in the document, in source order: the occurrence table 
 
 ### `rn_unaddressed`
 
-```prism,sig,h-4c164fc7effd22d95e69c648130303109360c57b7c264753bbd5e7dcae6cf0cf
+```prism,sig,h-b943e1a01c394718718d0495243ad984de9e48092bf1b64a48f8bd8dd34ec21e
 rn_unaddressed : (Syntax.Resolved.ResolvedDoc) -> List(Syntax.Source.Span)
 ```
 
@@ -76,7 +76,7 @@ Every reference the embedded source cannot address. Non-empty means the document
 
 ### `rn_uses_of`
 
-```prism,sig,h-21cfa067a685a7b909d97150f0abe6b968c8918a6a2e044aeb4d092258fd37fe
+```prism,sig,h-d81ee6303a67bfde01669568056e67138dae61af01458f7af08c70f768c1167b
 rn_uses_of : (Syntax.Resolved.ResolvedDoc, String) -> List(Syntax.Rename.RnUse)
 ```
 
@@ -84,7 +84,7 @@ Every reference to one name, in source order.
 
 ### `rn_use_count`
 
-```prism,sig,h-01c1bfc7241746af2b2c8a2e5f6c02668e38f01b06366ee35153c816f19eba67
+```prism,sig,h-ee0f37f9f1b996db3bdcf7c837a33d7fba61c6681de186544cb71ff1e7d3c4cc
 rn_use_count : (Syntax.Resolved.ResolvedDoc, String) -> Int
 ```
 
@@ -92,7 +92,7 @@ How many times a name is referenced.
 
 ### `rn_is_ident`
 
-```prism,sig,h-ce86b4594986dbf2e6f021ca1168dfb7f0d5586534bbb6753a505220389488d5
+```prism,sig,h-a9bfc58c521087143eb111da626b4637117eb8f737f8279dee5068fb42acf8b9
 rn_is_ident : (String) -> Bool
 ```
 
@@ -100,7 +100,7 @@ Whether a string is a single identifier, decided by the real lexer rather than a
 
 ### `rn_mentions`
 
-```prism,sig,h-cdf5d7d406c25bdc214b1ad3ea2f3ff2491226bf5b4c9203a35fa0a151c95552
+```prism,sig,h-2f6cc458ea592fbfb19b75586a14c03aff83641e440a289a9d6f52849354ada2
 rn_mentions : (String, String) -> Result(List(Syntax.Source.Span), Syntax.Lex.LexError)
 ```
 
@@ -108,7 +108,7 @@ The span of every identifier token spelling `name`, anywhere in the text. This i
 
 ### `rn_plan`
 
-```prism,sig,h-39f222b4939a0780826b3ad1ca07d21fbbaee5911ce6e70265829c126ab8b162
+```prism,sig,h-2107f972a93fd39bdbe10a001e957afdcd1236be438bbfebbe42b46a478b1a6d
 rn_plan : (Syntax.Resolved.ResolvedDoc, String, String) -> Result(List(Syntax.Edit.Edit), Syntax.Rename.RenameRefusal)
 ```
 
@@ -118,7 +118,7 @@ The checks run in a fixed order, so the refusal a caller sees is always the firs
 
 ### `rn_rename`
 
-```prism,sig,h-ccbbfcee1717a6c1bf5caae418b9e9c161a6db3aa2e576bd05ba58ab0c042178
+```prism,sig,h-ad919903fc84840f1561037163ddef5ceafab1c3e5879e2b702d85757500fea2
 rn_rename : (Syntax.Resolved.ResolvedDoc, String, String) -> Result(String, Syntax.Rename.RenameError)
 ```
 

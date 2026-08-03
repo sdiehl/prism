@@ -38,7 +38,7 @@ A pull pipeline is correct and constant-space per stage. At `-O1`, each transfor
 
 ### `Step`
 
-```prism,def,h-d40b7f54803f5f7185f5e87095f350fc57de46c25699cae05521b8063e9b37ef
+```prism,def,h-e8383fd5daa5950d061d7e926085d15fb78dfe7b9ef9cef359540d95789cc47a
 type Step(a) = SDone | SMore(a, (Unit) -> Step(a))
 ```
 
@@ -46,7 +46,7 @@ type Step(a) = SDone | SMore(a, (Unit) -> Step(a))
 
 ### `empty`
 
-```prism,sig,h-ec00ce5f072c9f8fb01b36500567237ff063dcdd39800b90a4c23f8c5a9842be
+```prism,sig,h-1ef32a312ecebb736a360db9bd46e5857bd438362d6b05c3ffec4eff0d1afd5f
 empty : forall a. () -> (Unit) -> Sequence.Step(a)
 ```
 
@@ -63,7 +63,7 @@ Seq.to_list(Seq.empty())
 
 ### `singleton`
 
-```prism,sig,h-af74138faf714cb1995b4e902853c7f9b10178bd6109124c9af645bbccb8ede3
+```prism,sig,h-6c97c136bcde465820f37bd81a2965befb14ce78b3633a18e12e05f527a10b0a
 singleton : forall a. (a) -> (Unit) -> Sequence.Step(a)
 ```
 
@@ -80,7 +80,7 @@ Seq.to_list(Seq.singleton(42))
 
 ### `range`
 
-```prism,sig,h-3eef41aaa63aba2db085cbd0a70ee7bebc89a7e8b1dbfbaac0523503ecdfcd71
+```prism,sig,h-4e8d9a2b1e362d4e4ec62dedf7ed4be3dce78e2d8cf7f448cb604e2968921def
 range : (Int, Int) -> (Unit) -> Sequence.Step(Int)
 ```
 
@@ -97,7 +97,7 @@ Seq.to_list(Seq.range(1, 5))
 
 ### `from_list`
 
-```prism,sig,h-3f5f117b07a28be270cbdb2ebffba4b78ee7243a2c42ffc9e1c23d1063309cc0
+```prism,sig,h-66d7d54be50494c949d71f97eb57c81e5fcc94d7c667a4426ec4f14d91cdbb0a
 from_list : forall a. (List(a)) -> (Unit) -> Sequence.Step(a)
 ```
 
@@ -114,7 +114,7 @@ Seq.to_list(Seq.from_list([1, 2, 3]))
 
 ### `iterate`
 
-```prism,sig,h-aca68d4b50adfc80563a62049dcbb3f8e3a21eb63c936e15da6acc9bd0f7e360
+```prism,sig,h-c3674587643dc388bff8a1697315c162b2b47ad74ccd1814cc0984cb98f282ac
 iterate : forall a. (a, (a) -> a) -> (Unit) -> Sequence.Step(a)
 ```
 
@@ -131,7 +131,7 @@ Seq.to_list(Seq.take(Seq.iterate(1, \(x) -> x * 2), 4))
 
 ### `repeat`
 
-```prism,sig,h-fadeb002409772362aa540fb6fe0bd7d334e1a0645f7b54be20fb4d283ee461e
+```prism,sig,h-c559b159225ea3723c9d915509f476fd7bbfea41bed58b6bc8c06e89f1056619
 repeat : forall a. (a) -> (Unit) -> Sequence.Step(a)
 ```
 
@@ -148,7 +148,7 @@ Seq.to_list(Seq.take(Seq.repeat(7), 3))
 
 ### `unfold`
 
-```prism,sig,h-c4ff27f30ce1d2f40b8bc48224818a192fdc4cfb34504044498303dfbd5f5228
+```prism,sig,h-361e8c2e3bcf66fb7b49397338c87603a9c2942b2de16577aa94c88aceb3645c
 unfold : forall a b. (a, (a) -> Option((b, a))) -> (Unit) -> Sequence.Step(b)
 ```
 
@@ -165,7 +165,7 @@ Seq.to_list(Seq.unfold(1, \(n) -> if n <= 3 then Some((n, n + 1)) else None))
 
 ### `map`
 
-```prism,sig,h-f7b5ef49f33f5b41ca2135b41b29bf290c2ffa333f0f5f5f8e29415fb4de7464
+```prism,sig,h-857b1f6733771b15d57a2063d52f3d70d4207f8da90a69671180f75afded8630
 map : forall a b. ((Unit) -> Sequence.Step(a), (a) -> b) -> (Unit) -> Sequence.Step(b)
 ```
 
@@ -182,7 +182,7 @@ Seq.to_list(Seq.map(Seq.range(1, 4), \(x) -> x * x))
 
 ### `filter`
 
-```prism,sig,h-d5524a8949c9241f229b28ff189857a8a91c98360dcc92834ad728978e60fcfa
+```prism,sig,h-d02699a4c6d57cd3c806b994b4009ce92490e4d42770951f3599611236601e7d
 filter : forall a. ((Unit) -> Sequence.Step(a), (a) -> Bool) -> (Unit) -> Sequence.Step(a)
 ```
 
@@ -199,7 +199,7 @@ Seq.to_list(Seq.filter(Seq.range(1, 7), \(x) -> mod(x, 2) == 0))
 
 ### `filter_map`
 
-```prism,sig,h-bb4f155156ab254f2c081189e99ed3552d5c295e60579eca61b19b50a5e4eb04
+```prism,sig,h-96b7081f2197ae11e041f35ede99912d4167375ee4d2f16041e197e733d25eaa
 filter_map : forall a b. ((Unit) -> Sequence.Step(a), (a) -> Option(b)) -> (Unit) -> Sequence.Step(b)
 ```
 
@@ -216,7 +216,7 @@ Seq.to_list(Seq.filter_map(Seq.range(1, 5), \(x) -> if x > 2 then Some(x * 10) e
 
 ### `append`
 
-```prism,sig,h-a1b92027028edba7d916998453526ee3d63fcf419fb9ad10659e65f8be598ae1
+```prism,sig,h-7c05e9547a0099067631c2955e7a4a378df2278400881f6a091b0b60cbfdd7fb
 append : forall a. ((Unit) -> Sequence.Step(a), (Unit) -> Sequence.Step(a)) -> (Unit) -> Sequence.Step(a)
 ```
 
@@ -233,7 +233,7 @@ Seq.to_list(Seq.append(Seq.range(1, 3), Seq.range(10, 12)))
 
 ### `flat_map`
 
-```prism,sig,h-fc3d3604cb8dc1e02dffbc7458efb6f07fd29756f350fdc4551a8d21f2554d39
+```prism,sig,h-78b918bcb462d5824578c2623f9d2c26685d2345d40fc2f74ef608a9ddca85f6
 flat_map : forall a b. ((Unit) -> Sequence.Step(a), (a) -> (Unit) -> Sequence.Step(b)) -> (Unit) -> Sequence.Step(b)
 ```
 
@@ -250,7 +250,7 @@ Seq.to_list(Seq.flat_map(Seq.range(1, 4), \(x) -> Seq.range(0, x)))
 
 ### `take`
 
-```prism,sig,h-0b619b2e3b0dbe6c8760af46983bd8844315c2c506a8fd785d0e9105201e7f83
+```prism,sig,h-1b04b99ff1c5c181e8a244f1fbb001f042ac6fa0f32f45c12979374cbb2a2c3f
 take : forall a. ((Unit) -> Sequence.Step(a), Int) -> (Unit) -> Sequence.Step(a)
 ```
 
@@ -267,7 +267,7 @@ Seq.to_list(Seq.take(Seq.range(1, 100), 3))
 
 ### `drop`
 
-```prism,sig,h-94055a5e74a19397fb58238bbc3348ed17a49309953f12a198ddc43792a1a4ad
+```prism,sig,h-1c4684a864d8268100d59a378474c9d8117b9d78cbd53239d2df158d20f996bb
 drop : forall a. ((Unit) -> Sequence.Step(a), Int) -> (Unit) -> Sequence.Step(a)
 ```
 
@@ -284,7 +284,7 @@ Seq.to_list(Seq.drop(Seq.range(1, 6), 2))
 
 ### `take_while`
 
-```prism,sig,h-da09fb7f80324b2a9f93c7a6a857f68f0969b2f258571bd92c2bd339c46e4e10
+```prism,sig,h-c5dc4975425ce6e9aed8b8bc217a719caf5bca4a03cd1183abbec92473ef308e
 take_while : forall a. ((Unit) -> Sequence.Step(a), (a) -> Bool) -> (Unit) -> Sequence.Step(a)
 ```
 
@@ -301,7 +301,7 @@ Seq.to_list(Seq.take_while(Seq.range(1, 10), \(x) -> x < 4))
 
 ### `drop_while`
 
-```prism,sig,h-9603f5e95d4fc1669dce56c9374d83e3fa2267a7f954fedce32d1304fe391181
+```prism,sig,h-23df914e357ded794020da6520fe2a161494ecaba2d7e311e81bc0310cf1303b
 drop_while : forall a. ((Unit) -> Sequence.Step(a), (a) -> Bool) -> (Unit) -> Sequence.Step(a)
 ```
 
@@ -318,7 +318,7 @@ Seq.to_list(Seq.drop_while(Seq.range(1, 6), \(x) -> x < 3))
 
 ### `dedup`
 
-```prism,sig,h-8a38f010140ca7d0245c7fc611e09d74a7cc351aac05f4e1aa1e8c135aee992a
+```prism,sig,h-6e7039d7d72230600918fc31e755267e09992160ace0495fcd509bdabe5b0ca4
 dedup : forall e1 a. ((Unit) -> Sequence.Step(Int) ! {e1}) -> (a) -> Sequence.Step(Int) ! {e1}
 ```
 
@@ -335,7 +335,7 @@ Seq.to_list(Seq.dedup(Seq.from_list([1, 1, 2, 2, 2, 3])))
 
 ### `enumerate`
 
-```prism,sig,h-136457fb35b8c7a361750a4d922fa00026885decc32bb5c00d3e0d82bf63d53f
+```prism,sig,h-0fc230ab11824489e99bd94fc8afa578882a025f1422bff5765836803b3b6a93
 enumerate : forall a. ((Unit) -> Sequence.Step(a)) -> (Unit) -> Sequence.Step((Int, a))
 ```
 
@@ -352,7 +352,7 @@ Seq.to_list(Seq.enumerate(Seq.from_list(["a", "b"])))
 
 ### `scan`
 
-```prism,sig,h-4ba3907627f820890589ca40d543b93691813da297a41aceb74558a7f61db71b
+```prism,sig,h-fc6445fed8a7a72e3178340895eac1a60ca3928d1b17757c4d4a4bfae44f29b9
 scan : forall a b. ((Unit) -> Sequence.Step(a), b, (b, a) -> b) -> (Unit) -> Sequence.Step(b)
 ```
 
@@ -369,7 +369,7 @@ Seq.to_list(Seq.scan(Seq.range(1, 4), 0, \(acc, x) -> acc + x))
 
 ### `interleave`
 
-```prism,sig,h-24beee4d1d4269124670c9d322bf20ad879f93977a27e93f5d20727fa46d6b4e
+```prism,sig,h-00adcafa76f4751f69a16adfb0dd25c5cbde72dcf09a4acfe30334e3c9e68382
 interleave : forall a. ((Unit) -> Sequence.Step(a), (Unit) -> Sequence.Step(a)) -> (Unit) -> Sequence.Step(a)
 ```
 
@@ -386,7 +386,7 @@ Seq.to_list(Seq.interleave(Seq.range(1, 4), Seq.range(10, 12)))
 
 ### `zip`
 
-```prism,sig,h-5e96a6cf5d90fa4ed1358a5f9161d112650fc7137b1f9fad903ccff662e14851
+```prism,sig,h-7a3e0fd6f0dd2dcf4e283f15b9f8a88f9a235bb638c5f637e464b9ffdedebfc8
 zip : forall a b. ((Unit) -> Sequence.Step(a), (Unit) -> Sequence.Step(b)) -> (Unit) -> Sequence.Step((a, b))
 ```
 
@@ -403,7 +403,7 @@ Seq.to_list(Seq.zip(Seq.range(1, 4), Seq.from_list(["a", "b", "c"])))
 
 ### `zip_with`
 
-```prism,sig,h-2564e1bce7fda61915b8d9208c9ef7aa0b258172e4b985007ebe9a16b173fc85
+```prism,sig,h-663063f843b87eadb2d43d05324c4eb0352141e9059abc22bc819eaeaf7408f2
 zip_with : forall a b c. ((Unit) -> Sequence.Step(a), (Unit) -> Sequence.Step(b), (a, b) -> c) -> (Unit) -> Sequence.Step(c)
 ```
 
@@ -420,7 +420,7 @@ Seq.to_list(Seq.zip_with(Seq.range(1, 4), Seq.range(10, 13), \(a, b) -> a + b))
 
 ### `chunk`
 
-```prism,sig,h-b7dd8d10385ce876d93ac318a9b9e168eb94356bc8d6bb00195ddf246d21fab1
+```prism,sig,h-d0a2d2bb70a91fa2f02a809efcec8e8050238b86d76a293999421726306988d3
 chunk : forall a. ((Unit) -> Sequence.Step(a), Int) -> (Unit) -> Sequence.Step(List(a))
 ```
 
@@ -437,7 +437,7 @@ Seq.to_list(Seq.chunk(Seq.range(1, 6), 2))
 
 ### `window`
 
-```prism,sig,h-3a0da2c9a1b8a976d58b415b9a5938268e4ae22684565850776aebdd23f66009
+```prism,sig,h-3d2a9ad262776bcd131a7ff73f4e5880025f0494a6c07e4d1d0341edc17b04be
 window : forall a. ((Unit) -> Sequence.Step(a), Int) -> (Unit) -> Sequence.Step(List(a))
 ```
 
@@ -454,7 +454,7 @@ Seq.to_list(Seq.window(Seq.range(1, 5), 2))
 
 ### `fold`
 
-```prism,sig,h-b78dc0e311a5c9815cb95c0be9e270bafa94eaa716ca7677317b0bf4220b67d4
+```prism,sig,h-9cc38876d6f5f34d2b909eca8831f0e5c4d0e3d44a4e0c24b818b3b9e00e5923
 fold : forall a b. ((Unit) -> Sequence.Step(b), a, (a, b) -> a) -> a
 ```
 
@@ -471,7 +471,7 @@ Seq.fold(Seq.range(1, 5), 0, \(acc, x) -> acc + x)
 
 ### `for_each`
 
-```prism,sig,h-b63f40aad5960bcc848a4541651ddc44662ad02806b7851d4dbd25dbff882880
+```prism,sig,h-fd3e0653f1fc0afa40ce708b3144ddb368841665776a6f51a743551961ec470f
 for_each : forall e0 a. ((Unit) -> Sequence.Step(a), (a) -> Unit ! {e0}) -> Unit ! {e0}
 ```
 
@@ -490,7 +490,7 @@ Seq.for_each(Seq.range(1, 4), \(x) -> println(show(x)))
 
 ### `sum`
 
-```prism,sig,h-0ff3d7da56419889d2230b9329892f8d7406f3e5c079125a0d6f2de4fe84c1ff
+```prism,sig,h-c7a6595b6954973e02943e706c731ecae8022cd375ce22bd097c5ff1e2f73a09
 sum : ((Unit) -> Sequence.Step(Int)) -> Int
 ```
 
@@ -507,7 +507,7 @@ Seq.sum(Seq.range(1, 5))
 
 ### `product`
 
-```prism,sig,h-bb0feca86b3c542bff90a8402dfa851dbf8a9e4a31615c9cfae6cd32f52f3b5d
+```prism,sig,h-44daa29c446b2cd2cda7cc09f5c3883d46f61effa8b958271c96ccd35490fe55
 product : ((Unit) -> Sequence.Step(Int)) -> Int
 ```
 
@@ -524,7 +524,7 @@ Seq.product(Seq.range(1, 5))
 
 ### `count`
 
-```prism,sig,h-d62036a06888d3f95e83133623a7aab2471fee2b5f9e2d64e9965c415cb6b4f2
+```prism,sig,h-de96d77d11121ac623cddd75f1997aac73b24e5b9902e261963d34a5edc80b19
 count : forall a. ((Unit) -> Sequence.Step(a)) -> Int
 ```
 
@@ -541,7 +541,7 @@ Seq.count(Seq.range(1, 100))
 
 ### `to_list`
 
-```prism,sig,h-dd04c4141822df7a1deef31532219e85fc36072f5b4b729db77df3c6a4792dc3
+```prism,sig,h-5583871aa8887568a998a4b51a3564dd70b99b0fc88c8be77b5d1fc06cf1cb18
 to_list : forall a. ((Unit) -> Sequence.Step(a)) -> List(a)
 ```
 
@@ -558,7 +558,7 @@ Seq.to_list(Seq.map(Seq.range(1, 4), \(x) -> x + 100))
 
 ### `head`
 
-```prism,sig,h-5e8647b03c98549a740ba77ca99b1015f6eec41222ef7fbb7542cb344a0db7e4
+```prism,sig,h-1dd9c60452c7c577a436587d2660210cd18e4a861cce0e2195dbfb00ad30d15d
 head : forall e0 a. ((Unit) -> Sequence.Step(a) ! {e0}) -> Option(a) ! {e0}
 ```
 
@@ -575,7 +575,7 @@ Some(5)
 
 ### `find`
 
-```prism,sig,h-01239cc756a2b7ccd8b2f55e15f37a3a881f920f8b2923080c3db3cfdc00a8e5
+```prism,sig,h-284c3385b553cf0d7c1352157dcc588556e7afa11fb169283db1c08de343c036
 find : forall a. ((Unit) -> Sequence.Step(a), (a) -> Bool) -> Option(a)
 ```
 
@@ -592,7 +592,7 @@ Some(11)
 
 ### `any`
 
-```prism,sig,h-92d3fb25056cc0d1f6110f8160455192a8225df1b06fcb2e405b730e3c42360a
+```prism,sig,h-d84fd059c40765f39dcd275d7b006e5eab42dfd8c18f3fffa6d93267548902c9
 any : forall a. ((Unit) -> Sequence.Step(a), (a) -> Bool) -> Bool
 ```
 
@@ -609,7 +609,7 @@ true
 
 ### `all`
 
-```prism,sig,h-9ba254ddd85b91c7bde73f58c0b2f3ccab7751a25e84defe313b1a10fce84379
+```prism,sig,h-977e16b64fdfb78a535abb807a69a85152c9e179465dbadebedff6e8102a3191
 all : forall a. ((Unit) -> Sequence.Step(a), (a) -> Bool) -> Bool
 ```
 
@@ -626,7 +626,7 @@ true
 
 ### `from_bytes`
 
-```prism,sig,h-8b142a8072a8ff3def9a09f228aa3598a30735a801ad4ad92fe47ff22dd8b5db
+```prism,sig,h-7ffaa9c149d1567704ca207472aa7070127afe9b9317806c007aa28476c9fc2f
 from_bytes : (Wire.Bytes) -> (Unit) -> Sequence.Step(Int)
 ```
 
@@ -634,7 +634,7 @@ The bytes of `bs` as a sequence of ints in `0..255`, in order.
 
 ### `to_bytes`
 
-```prism,sig,h-4a02508749790b5cb5d9502e845189344ab5fa6eb171343b2fd1f605cae4081f
+```prism,sig,h-b83b6526cc5e8996f0a453657b790e633a5f86fe8cdc808b1c186d1e9e9ed614
 to_bytes : ((Unit) -> Sequence.Step(Int)) -> Wire.Bytes
 ```
 

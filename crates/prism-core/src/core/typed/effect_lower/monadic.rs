@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::builtins::Builtin;
 use crate::core::cbpv::CoreOp;
-use crate::core::effect_abi::EBIND;
+use crate::core::effect_abi::{FreeMonadDriver, EBIND};
 use crate::types::ty::EffRow;
 use crate::types::Type;
 use prism_common::fresh::Fresh;
@@ -19,13 +19,17 @@ use super::super::{
     TypedCompKind, TypedCoreFn, TypedHandleOp, TypedPattern, TypedValue, TypedValueKind,
 };
 use super::abi;
-use super::analysis::{MonadicRegionPlan, MonadicScope};
+use super::analysis::{Effects, MonadicRegionPlan, MonadicScope};
+use super::decline::{Decline, Refusal, Site};
 use super::evidence::OpIds;
+use super::flow::{self, ThunkFlow};
 use super::latent::Latent;
+use super::plan;
 use super::residual::Rows;
 use super::union_effects;
+use super::walk;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ResumeRepresentation {
     Continuation,
     Queue,
@@ -58,8 +62,13 @@ fn forced_var(comp: &TypedComp) -> Option<Sym> {
     instantiation.is_empty().then_some(*name)
 }
 
-fn state_return(return_body: Option<&TypedComp>) -> Option<(TypedBinder, TypedComp)> {
-    let TypedCompKind::Return(value) = return_body?.kind() else {
+/// The thunk a clause answers with, when its body has the parameter-passing
+/// shape: a thunk over a lambda that the code around the handle applies once the
+/// handle has returned. It is the one answer whose value is a computation rather
+/// than a result, which is why the state path and the refusal below both ask for
+/// it here rather than each re-reading the shape.
+fn answered_thunk(body: &TypedComp) -> Option<(&TypedValue, &[TypedBinder], &TypedComp)> {
+    let TypedCompKind::Return(value) = body.kind() else {
         return None;
     };
     let TypedValueKind::Thunk(lambda) = &value.kind else {
@@ -68,10 +77,22 @@ fn state_return(return_body: Option<&TypedComp>) -> Option<(TypedBinder, TypedCo
     let TypedCompKind::Lam(parameters, body) = lambda.kind() else {
         return None;
     };
-    let [state] = parameters.as_slice() else {
+    Some((value, parameters, body))
+}
+
+/// [`answered_thunk`](answered_thunk) without the value, for the state path,
+/// which asks about the transformer's shape and never about its convention.
+fn answered_lambda(body: &TypedComp) -> Option<(&[TypedBinder], &TypedComp)> {
+    let (_, parameters, body) = answered_thunk(body)?;
+    Some((parameters, body))
+}
+
+fn state_return(return_body: Option<&TypedComp>) -> Option<(TypedBinder, TypedComp)> {
+    let (parameters, body) = answered_lambda(return_body?)?;
+    let [state] = parameters else {
         return None;
     };
-    Some((state.clone(), (**body).clone()))
+    Some((state.clone(), body.clone()))
 }
 
 fn state_apply_tail(comp: &TypedComp, result: Sym) -> Option<TypedValue> {
@@ -168,21 +189,13 @@ fn resume_app(
 }
 
 fn state_clause(operation: &TypedHandleOp) -> Option<StateClause> {
-    let TypedCompKind::Return(value) = operation.body().kind() else {
-        return None;
-    };
-    let TypedValueKind::Thunk(lambda) = &value.kind else {
-        return None;
-    };
-    let TypedCompKind::Lam(parameters, body) = lambda.kind() else {
-        return None;
-    };
-    let [state] = parameters.as_slice() else {
+    let (parameters, body) = answered_lambda(operation.body())?;
+    let [state] = parameters else {
         return None;
     };
     let mut aliases = BTreeSet::from([operation.resume().name()]);
     let mut prefix = Vec::new();
-    let mut current = body.as_ref();
+    let mut current = body;
     loop {
         let TypedCompKind::Bind(head, binder, tail) = current.kind() else {
             return None;
@@ -272,27 +285,65 @@ fn function_applied_once_tail(comp: &TypedComp, function: Sym) -> bool {
     }
 }
 
+/// What a binder displaced when it entered scope, restored when it leaves.
+struct Shadowed {
+    name: Sym,
+    local: Option<CoreType>,
+    word: Option<CoreType>,
+    resume: bool,
+    signature: Option<flow::Sig>,
+}
+
+/// The confined-region facts a selective lowering consults: which declarations
+/// share the free-monad convention, what each function can still perform, and
+/// which suspended computations the region owns.
+#[derive(Debug)]
+pub struct Region<'a> {
+    pub plan: &'a MonadicRegionPlan,
+    pub latent: &'a Latent,
+    pub flow: &'a ThunkFlow,
+    pub native_enabled: bool,
+}
+
 /// Translate computations into the row-indexed effect runtime while retaining
 /// the source type of every value stored in its existential word slots.
+#[derive(Debug)]
 pub struct Monadic<'a> {
     ops: &'a OpIds,
     fresh: &'a mut Fresh,
     row: EffRow,
+    /// The row the monadic convention uses for a computation this declaration
+    /// suspends. Equal to `row` wherever the declaration is itself monadic;
+    /// outside a confined region it is the declaration's residual row instead,
+    /// because a thunk the region owns performs what its own body performs and
+    /// not what the declaration building it performs, while `row` has to stay
+    /// the source row so the direct rewrite around it is left alone.
+    suspension_row: EffRow,
     calls: &'a BTreeMap<Sym, CoreFnSig>,
     generated: Vec<TypedCoreFn>,
     generated_signatures: BTreeMap<Sym, CoreFnSig>,
     quantifiers: Vec<CoreQuantifier>,
     locals: BTreeMap<Sym, CoreType>,
+    /// What forcing each thunk-valued binder in lexical scope can still
+    /// perform, threaded beside `locals` because the convention a thunk was
+    /// built at is not recoverable from its type: a monadic thunk and a direct
+    /// one share the shape `Thunk(_)`, so the rewrite has to remember.
+    thunk_sigs: flow::Loc,
     word_binders: BTreeMap<Sym, CoreType>,
     resume_aliases: BTreeSet<Sym>,
     resume_representation: ResumeRepresentation,
     region_plan: Option<&'a MonadicRegionPlan>,
+    /// Why a confined attempt was refused, if one was. Carried rather than
+    /// discarded so the plan artifact and the fallback warning can say why the
+    /// program is paying for the wider region.
+    refusal: Option<(Refusal, Site)>,
     latent: Option<&'a Latent>,
+    flow: Option<&'a ThunkFlow>,
     native_enabled: bool,
 }
 
 impl<'a> Monadic<'a> {
-    pub const fn new(
+    pub fn new(
         ops: &'a OpIds,
         fresh: &'a mut Fresh,
         row: EffRow,
@@ -301,23 +352,37 @@ impl<'a> Monadic<'a> {
         Self {
             ops,
             fresh,
+            suspension_row: row.clone(),
             row,
             calls,
             generated: Vec::new(),
             generated_signatures: BTreeMap::new(),
             quantifiers: Vec::new(),
             locals: BTreeMap::new(),
+            thunk_sigs: BTreeMap::new(),
             word_binders: BTreeMap::new(),
             resume_aliases: BTreeSet::new(),
             resume_representation: ResumeRepresentation::Continuation,
             region_plan: None,
+            refusal: None,
             latent: None,
+            flow: None,
             native_enabled: false,
         }
     }
 
+    /// Set the row for a declaration whose own convention is the monadic one,
+    /// where everything it suspends shares that row.
     fn set_row(&mut self, row: EffRow) {
+        self.suspension_row = row.clone();
         self.row = row;
+    }
+
+    /// Set the rows for a declaration the rewrite leaves at the direct
+    /// convention while it may still build a computation the region owns.
+    fn set_direct_row(&mut self, row: EffRow, suspension_row: EffRow) {
+        self.row = row;
+        self.suspension_row = suspension_row;
     }
 
     fn call_instantiation(
@@ -378,19 +443,119 @@ impl<'a> Monadic<'a> {
         ))
     }
 
-    const fn configure_region(
-        &mut self,
-        plan: &'a MonadicRegionPlan,
-        latent: &'a Latent,
-        native_enabled: bool,
-    ) {
-        self.region_plan = Some(plan);
-        self.latent = Some(latent);
-        self.native_enabled = native_enabled;
+    const fn configure_region(&mut self, region: &Region<'a>) {
+        self.region_plan = Some(region.plan);
+        self.latent = Some(region.latent);
+        self.flow = Some(region.flow);
+        self.native_enabled = region.native_enabled;
+    }
+
+    /// Whether a value stands for a computation this region lowers at the
+    /// monadic convention, asked against the signatures currently in scope.
+    ///
+    /// False outside a configured confined region: whole-style lowering has no
+    /// second convention to confuse this one with, having put every declaration
+    /// it rewrites into the monadic one, and asking there would answer for
+    /// thunks the flow solution was never consulted about.
+    fn monadic_thunk(&self, value: &TypedValue) -> bool {
+        let (Some(latent), Some(_)) = (self.latent, self.flow) else {
+            return false;
+        };
+        plan::thunk_is_monadic(value, &self.thunk_sigs, latent)
+    }
+
+    /// [`monadic_thunk`](Self::monadic_thunk) restricted to a thunk written
+    /// here rather than a variable holding one. Only a literal is the producer's
+    /// to rewrite; a variable already carries whatever convention its binding
+    /// site chose, and re-deriving one for it would rewrite the same thunk twice.
+    fn produces_monadic_thunk(&self, value: &TypedValue) -> bool {
+        walk::is_thunk(value) && self.monadic_thunk(value)
+    }
+
+    /// Whether a handler answers with a transformer this region rewrites at the
+    /// monadic convention: a clause, or the return clause, hands back a thunk
+    /// over a lambda that performs, for the code around the handle to apply.
+    ///
+    /// Such an answer leaves the driver as an ordinary value word, and nothing
+    /// downstream can read the convention back off it. A transformer that does
+    /// not perform is not in question: every arm builds it at the direct
+    /// convention, so applying it directly is right, which is why this asks the
+    /// thunk rather than the shape.
+    fn answers_monadic_transformer(&self, comp: &TypedComp) -> bool {
+        let TypedCompKind::Handle {
+            return_body, ops, ..
+        } = comp.kind()
+        else {
+            return false;
+        };
+        let answered = return_body
+            .as_deref()
+            .into_iter()
+            .chain(ops.arms().iter().map(TypedHandleOp::body));
+        answered
+            .filter_map(answered_thunk)
+            .any(|(thunk, _, _)| self.produces_monadic_thunk(thunk))
+    }
+
+    /// Whether a callee position forces a thunk this region lowered at the
+    /// monadic convention. Such a force answers with an `Eff` cell, so it must
+    /// be applied through the monadic head path and never through the direct
+    /// one, which would apply the free-monad cell as if it were the suspended
+    /// source function.
+    fn forces_monadic_thunk(&self, comp: &TypedComp) -> bool {
+        let TypedCompKind::Force(value) = comp.kind() else {
+            return false;
+        };
+        self.monadic_thunk(value)
+    }
+
+    /// The signature of the thunk a computation returns, in the current scope.
+    /// Empty outside a configured confined region, where no thunk is tracked.
+    fn result_sig(&self, comp: &TypedComp) -> flow::Sig {
+        match (self.latent, self.flow) {
+            (Some(latent), Some(flow)) => flow::result_sig(comp, &self.thunk_sigs, latent, flow),
+            _ => flow::Sig::new(),
+        }
+    }
+
+    /// Record what forcing the computation bound to `name` can still perform,
+    /// for the scope the binder covers. An empty signature is left unrecorded so
+    /// that an absent entry and a pure one are the same answer; the binder's
+    /// enclosing scope guard has already removed any shadowed entry.
+    fn note_thunk_sig(&mut self, name: Sym, signature: flow::Sig) {
+        if !signature.is_empty() {
+            self.thunk_sigs.insert(name, signature);
+        }
+    }
+
+    /// Suspend a computation at the monadic convention: the body goes through
+    /// the monadic builder and the thunk's type follows the body it now holds,
+    /// which is what makes the change of convention visible to the verifier
+    /// rather than a silent reinterpretation of the same `Thunk(_)` word.
+    fn build_monadic_thunk(&mut self, body: &TypedComp) -> Option<TypedValue> {
+        let lowered = match body.kind() {
+            TypedCompKind::Lam(params, inner) => Self::lam_with(
+                Self::lam_quantifiers(body),
+                params.clone(),
+                self.with_source_binders(params, |this| this.comp(inner))?,
+            ),
+            _ => self.comp(body)?,
+        };
+        Some(TypedValue::new(
+            CoreType::Thunk(Box::new(lowered.sig().clone())),
+            TypedValueKind::Thunk(Box::new(lowered)),
+        ))
     }
 
     fn mint(&mut self, hint: &str) -> Sym {
         Sym::from(names::lowered(hint, self.fresh.bump()))
+    }
+
+    // Driver templates are named by the effect ABI, which owns both the spelling
+    // and the predicate native codegen counts structural reduction steps with.
+    // Spelling one here would let a rename drift the two apart silently.
+    fn mint_driver(&mut self, driver: FreeMonadDriver) -> Sym {
+        Sym::from(driver.mint(self.fresh.bump()))
     }
 
     const fn var(name: Sym, ty: CoreType) -> TypedValue {
@@ -499,6 +664,30 @@ impl<'a> Monadic<'a> {
         Self::retag_runtime_word(transformed, expected.clone())
     }
 
+    /// Refuse when a callee's thunk-valued slot is driven at the monadic
+    /// convention and the argument standing in it was left at the direct one.
+    ///
+    /// A slot's convention is the join over every call site, and a thunk carries
+    /// no convention in its type, so a callee reached with a computation the
+    /// region owns at one site and a plain one at another leaves the plain site
+    /// nothing to hand over: there is no coercion to insert, only a forcer that
+    /// would drive a source function as if it were an effect cell.
+    fn check_monadic_arguments(&mut self, callee: Sym, args: &[TypedValue]) -> Option<()> {
+        let Some(slots) = self
+            .region_plan
+            .filter(|plan| plan.scope == MonadicScope::Selective)
+            .and_then(|plan| plan.monadic_params.get(&callee))
+        else {
+            return Some(());
+        };
+        for argument in slots.iter().filter_map(|index| args.get(*index)) {
+            if !self.monadic_thunk(argument) {
+                return self.refuse(Refusal::ThunkBoundary, Self::value_site(argument));
+            }
+        }
+        Some(())
+    }
+
     fn whole_style(&self) -> bool {
         self.region_plan
             .is_none_or(|plan| plan.scope == MonadicScope::WholeProgram)
@@ -513,19 +702,29 @@ impl<'a> Monadic<'a> {
         binders: &[TypedBinder],
         f: impl FnOnce(&mut Self) -> Option<T>,
     ) -> Option<T> {
-        let saved: Vec<(Sym, Option<CoreType>, Option<CoreType>, bool)> = binders
+        let saved: Vec<Shadowed> = binders
             .iter()
-            .map(|binder| {
-                (
-                    binder.name(),
-                    self.locals.insert(binder.name(), binder.ty().clone()),
-                    self.word_binders.remove(&binder.name()),
-                    self.resume_aliases.remove(&binder.name()),
-                )
+            .map(|binder| Shadowed {
+                name: binder.name(),
+                local: self.locals.insert(binder.name(), binder.ty().clone()),
+                word: self.word_binders.remove(&binder.name()),
+                resume: self.resume_aliases.remove(&binder.name()),
+                // A fresh binder carries no signature until its binding site
+                // records one. Dropping the shadowed entry is what keeps a
+                // pattern variable that reuses an outer thunk's name from
+                // inheriting the outer thunk's convention.
+                signature: self.thunk_sigs.remove(&binder.name()),
             })
             .collect();
         let result = f(self);
-        for (name, local, word, resume) in saved.into_iter().rev() {
+        for Shadowed {
+            name,
+            local,
+            word,
+            resume,
+            signature,
+        } in saved.into_iter().rev()
+        {
             match local {
                 Some(ty) => {
                     self.locals.insert(name, ty);
@@ -544,6 +743,14 @@ impl<'a> Monadic<'a> {
             } else {
                 self.resume_aliases.remove(&name);
             }
+            match signature {
+                Some(signature) => {
+                    self.thunk_sigs.insert(name, signature);
+                }
+                None => {
+                    self.thunk_sigs.remove(&name);
+                }
+            }
         }
         result
     }
@@ -557,6 +764,7 @@ impl<'a> Monadic<'a> {
         let old_local = self.locals.insert(binder.name(), binder.ty().clone());
         let old_word = self.word_binders.insert(binder.name(), binder.ty().clone());
         let old_resume = self.resume_aliases.remove(&binder.name());
+        let old_signature = self.thunk_sigs.remove(&binder.name());
         if resume_alias {
             self.resume_aliases.insert(binder.name());
         }
@@ -581,6 +789,14 @@ impl<'a> Monadic<'a> {
             self.resume_aliases.insert(binder.name());
         } else {
             self.resume_aliases.remove(&binder.name());
+        }
+        match old_signature {
+            Some(signature) => {
+                self.thunk_sigs.insert(binder.name(), signature);
+            }
+            None => {
+                self.thunk_sigs.remove(&binder.name());
+            }
         }
         result
     }
@@ -744,21 +960,14 @@ impl<'a> Monadic<'a> {
                 },
             ),
             TypedValueKind::Thunk(body) => {
-                if !self.whole_style() {
-                    return Some(value.clone());
+                // A confined region rewrites only the thunks whose forcing can
+                // still perform an operation. The rest keep the convention they
+                // were written at, so what a non-capturing program erases to is
+                // exactly what it erased to before the region existed.
+                if !self.whole_style() && !self.monadic_thunk(value) {
+                    return self.verbatim(value);
                 }
-                let body = match body.kind() {
-                    TypedCompKind::Lam(params, inner) => Self::lam_with(
-                        Self::lam_quantifiers(body),
-                        params.clone(),
-                        self.with_source_binders(params, |this| this.comp(inner))?,
-                    ),
-                    _ => self.comp(body)?,
-                };
-                TypedValue::new(
-                    CoreType::Thunk(Box::new(body.sig().clone())),
-                    TypedValueKind::Thunk(Box::new(body)),
-                )
+                self.build_monadic_thunk(body)?
             }
             TypedValueKind::Ctor {
                 name,
@@ -804,8 +1013,11 @@ impl<'a> Monadic<'a> {
                     }) if instantiation.is_empty() && self.resume_aliases.contains(name)
                 );
                 let result = TypedBinder::new(self.mint("m"), abi::eff(self.row.clone()));
-                let monadic_tail =
-                    self.with_word_binder(binder, resume_alias, |this| this.comp(tail))?;
+                let bound = self.result_sig(head);
+                let monadic_tail = self.with_word_binder(binder, resume_alias, |this| {
+                    this.note_thunk_sig(binder.name(), bound);
+                    this.comp(tail)
+                })?;
                 let monadic_head = self.comp(head)?;
                 let parameter = TypedBinder::new(binder.name(), abi::word());
                 let lambda = Self::lam(vec![parameter], monadic_tail);
@@ -890,7 +1102,14 @@ impl<'a> Monadic<'a> {
                         ));
                     }
                 }
-                if !self.whole_style() && self.resume_head(callee).is_none() {
+                // A confined member applies most callees directly and lifts the
+                // answer. Forcing a thunk the region owns is the exception: that
+                // force answers with an `Eff` cell, which only the head path can
+                // apply.
+                if !self.whole_style()
+                    && self.resume_head(callee).is_none()
+                    && !self.forces_monadic_thunk(callee)
+                {
                     let direct = self.direct(comp)?;
                     return self.lift(direct);
                 }
@@ -930,6 +1149,7 @@ impl<'a> Monadic<'a> {
                 instantiation,
                 args,
             } => {
+                self.check_monadic_arguments(*callee, args)?;
                 let signature = self
                     .generated_signatures
                     .get(callee)
@@ -1051,6 +1271,21 @@ impl<'a> Monadic<'a> {
                 )
             }
             TypedCompKind::Handle { .. } if self.handler_is_open(comp) => {
+                // A transformer a clause answers with is rewritten at the
+                // monadic convention when it performs, while the answer itself
+                // leaves the driver as an ordinary value word. Nothing can read the
+                // convention back off that word: the source type names a
+                // function, the monadic bind erases the binder to a word, and
+                // the driver's own pure arm answers with a transformer built at
+                // the direct convention, so the two arms could not agree even if
+                // the use site could ask. Applying such an answer directly would
+                // consume an effect cell as a result, which is a wrong value
+                // rather than a crash, so the confined region is refused and the
+                // whole-program lowering, where every answer is a cell, takes
+                // the program.
+                if !self.whole_style() && self.answers_monadic_transformer(comp) {
+                    return self.refuse(Refusal::HandlerAnswer, Site::Function);
+                }
                 self.handle(comp, true)?
             }
             TypedCompKind::Handle { .. } => {
@@ -1146,7 +1381,14 @@ impl<'a> Monadic<'a> {
         let TypedCompKind::Force(value) = comp.kind() else {
             return self.direct(comp);
         };
-        let value = self.direct_argument(value);
+        // The callee of a direct application must answer with the suspended
+        // source function. A thunk the region owns answers with an `Eff` cell
+        // instead, and the caller has to route the application through the
+        // monadic head path; declining is how that caller learns.
+        if self.monadic_thunk(value) {
+            return self.refuse(Refusal::DirectForce, Self::value_site(value));
+        }
+        let value = self.direct_argument(value)?;
         let ty = self.ambient_direct_thunk_type(value.ty())?;
         let value = Self::retag_runtime_word(value, ty)?;
         let CoreType::Thunk(signature) = value.ty().clone() else {
@@ -1315,7 +1557,7 @@ impl<'a> Monadic<'a> {
     }
 
     fn mask_driver(&mut self, operations: &[Sym]) -> Option<Sym> {
-        let driver = self.mint("mask");
+        let driver = self.mint_driver(FreeMonadDriver::Mask);
         let driver_signature = CoreFnSig::new(
             self.quantifiers.clone(),
             vec![abi::eff(self.row.clone())],
@@ -1532,10 +1774,19 @@ impl<'a> Monadic<'a> {
     }
 
     fn handler_is_open(&self, comp: &TypedComp) -> bool {
-        match (self.region_plan, self.latent) {
-            (Some(plan), Some(latent)) => plan.handler_is_open(comp, latent),
+        match (self.region_plan, self.effects()) {
+            (Some(plan), Some(effects)) => plan.handler_is_open(comp, effects, &self.thunk_sigs),
             _ => true,
         }
+    }
+
+    /// The two effect maps a planning question needs, when this builder was
+    /// configured with a region to consult.
+    fn effects(&self) -> Option<Effects<'a>> {
+        Some(Effects {
+            latent: self.latent?,
+            flow: self.flow?,
+        })
     }
 
     fn rewrite_function_answer_use(
@@ -1617,10 +1868,10 @@ impl<'a> Monadic<'a> {
         else {
             return Some(FnAnswerLowering::Declined);
         };
-        let (Some(plan), Some(latent)) = (self.region_plan, self.latent) else {
+        let (Some(plan), Some(effects)) = (self.region_plan, self.effects()) else {
             return Some(FnAnswerLowering::Declined);
         };
-        if !plan.native_closed(comp, latent, self.native_enabled)
+        if !plan.native_closed(comp, effects, &self.thunk_sigs, self.native_enabled)
             || function.ty() != comp.sig().result()
         {
             return Some(FnAnswerLowering::Declined);
@@ -1646,7 +1897,7 @@ impl<'a> Monadic<'a> {
         }
 
         let captures = self.handler_captures(comp)?;
-        let region = self.mint("region");
+        let region = self.mint_driver(FreeMonadDriver::Region);
         let accumulator = TypedBinder::new(self.mint("acc"), return_state.ty().clone());
         let mut region_params = vec![abi::eff(self.row.clone()), accumulator.ty().clone()];
         region_params.extend(captures.iter().map(|capture| capture.ty().clone()));
@@ -1822,13 +2073,24 @@ impl<'a> Monadic<'a> {
 
     fn direct(&mut self, comp: &TypedComp) -> Option<TypedComp> {
         Some(match comp.kind() {
+            // A thunk the region owns must be built by the monadic builder even
+            // where the code producing it stays direct, or the closure stored
+            // here and the cell every force of it expects disagree. Nothing
+            // else about the node changes: the value keeps its source type, so
+            // this arm is the identity on a program that produces no such thunk.
+            TypedCompKind::Return(value) => TypedComp::new(
+                comp.sig().clone(),
+                TypedCompKind::Return(self.direct_value(value)?),
+            ),
             TypedCompKind::Bind(head, binder, body) => {
                 match self.try_handle_native_function_answer(head, binder, body)? {
                     FnAnswerLowering::Lowered(native) => *native,
                     FnAnswerLowering::Declined => {
+                        let bound = self.result_sig(head);
                         let head = self.direct(head)?;
-                        let body = self
-                            .with_source_binders(std::slice::from_ref(binder), |this| {
+                        let body =
+                            self.with_source_binders(std::slice::from_ref(binder), |this| {
+                                this.note_thunk_sig(binder.name(), bound);
                                 this.direct(body)
                             })?;
                         TypedComp::new(
@@ -1850,12 +2112,13 @@ impl<'a> Monadic<'a> {
             TypedCompKind::If(condition, yes, no) => TypedComp::new(
                 comp.sig().clone(),
                 TypedCompKind::If(
-                    condition.clone(),
+                    self.verbatim(condition)?,
                     Box::new(self.direct(yes)?),
                     Box::new(self.direct(no)?),
                 ),
             ),
             TypedCompKind::Case(scrutinee, arms) => {
+                let scrutinee = self.verbatim(scrutinee)?;
                 let arms: Vec<(TypedPattern, TypedComp)> = arms
                     .iter()
                     .map(|(pattern, body)| {
@@ -1877,7 +2140,7 @@ impl<'a> Monadic<'a> {
                 });
                 TypedComp::new(
                     CompSig::new(comp.sig().result().clone(), effects),
-                    TypedCompKind::Case(scrutinee.clone(), arms),
+                    TypedCompKind::Case(scrutinee, arms),
                 )
             }
             TypedCompKind::Lam(parameters, body) => TypedComp::new(
@@ -1906,7 +2169,10 @@ impl<'a> Monadic<'a> {
                     TypedCompKind::App {
                         callee: Box::new(callee),
                         instantiation: instantiation.clone(),
-                        args: args.iter().map(|a| self.direct_argument(a)).collect(),
+                        args: args
+                            .iter()
+                            .map(|a| self.direct_argument(a))
+                            .collect::<Option<_>>()?,
                     },
                 )
             }
@@ -1915,6 +2181,7 @@ impl<'a> Monadic<'a> {
                 instantiation,
                 args,
             } => {
+                self.check_monadic_arguments(*callee, args)?;
                 let declaration = self
                     .generated_signatures
                     .get(callee)
@@ -1946,12 +2213,172 @@ impl<'a> Monadic<'a> {
                 self.handle(comp, false)?
             }
             TypedCompKind::Handle { .. } => return None,
-            TypedCompKind::Force(value) => TypedComp::new(
-                comp.sig().clone(),
-                TypedCompKind::Force(self.direct_argument(value)),
-            ),
-            _ => comp.clone(),
+            TypedCompKind::Force(value) => {
+                // Forcing a thunk the region owns answers with an `Eff` cell,
+                // not the source result this position expects. Membership is
+                // meant to have pulled the forcer into the region already;
+                // declining here refuses the plan rather than emitting the two
+                // conventions spliced together.
+                if self.monadic_thunk(value) {
+                    return self.refuse(Refusal::DirectForce, Self::value_site(value));
+                }
+                TypedComp::new(
+                    comp.sig().clone(),
+                    TypedCompKind::Force(self.direct_argument(value)?),
+                )
+            }
+            _ => {
+                // Every remaining form copies its values verbatim, which is
+                // sound only while none of them holds a thunk the region owns:
+                // a copy would store the source-convention closure where every
+                // force of it expects an `Eff` cell.
+                if self.holds_monadic_thunk(comp) {
+                    return self.refuse(Refusal::DirectHolds, Site::Function);
+                }
+                // The same copy is sound only while none of those values reads
+                // a binder the region reified into a word: there is no crossing
+                // inside a verbatim copy, so the reference would keep its
+                // source type where the word is in scope.
+                if self.reads_reified_binder(&free_comp_vars(comp)) {
+                    return self.refuse(Refusal::WordCapture, Site::Function);
+                }
+                comp.clone()
+            }
         })
+    }
+
+    /// Record why a confined attempt is refused, and decline. The first
+    /// refusal wins: it is the innermost one, and every decline above it is
+    /// only this one unwinding.
+    const fn refuse<T>(&mut self, reason: Refusal, site: Site) -> Option<T> {
+        if self.refusal.is_none() {
+            self.refusal = Some((reason, site));
+        }
+        None
+    }
+
+    /// The refusal this builder recorded, attributed to the declaration being
+    /// lowered when it stopped. A decline with nothing recorded is a form the
+    /// confined builder has no rewrite for at all, which is a refusal of its
+    /// own kind rather than an unexplained one.
+    const fn declined(&self, function: Sym) -> Decline {
+        let (reason, site) = match self.refusal {
+            Some(recorded) => recorded,
+            None => (Refusal::UnsupportedForm, Site::Function),
+        };
+        Decline::new(reason, function, site)
+    }
+
+    /// The site a refusal names when it turns on forcing a value: the binder,
+    /// when the value is one, and the enclosing function otherwise.
+    const fn value_site(value: &TypedValue) -> Site {
+        match value.kind() {
+            TypedValueKind::Var { name, .. } => Site::Name(*name),
+            _ => Site::Function,
+        }
+    }
+
+    /// Whether any immediate value position of a computation writes material
+    /// the region owns: a thunk it lowered, or a capture of the continuation a
+    /// handler clause resumes through.
+    fn holds_monadic_thunk(&self, comp: &TypedComp) -> bool {
+        let mut found = false;
+        walk::each_value(comp, &mut |value| {
+            found = found || self.produces_monadic_thunk(value) || self.captures_resume(value);
+        });
+        found
+    }
+
+    /// Refuse when a value the rewrite is about to copy verbatim closes over
+    /// the continuation a handler clause resumes through.
+    fn check_verbatim_capture(&mut self, value: &TypedValue) -> Option<()> {
+        if self.captures_resume(value) {
+            return self.refuse(Refusal::ThunkBoundary, Self::value_site(value));
+        }
+        Some(())
+    }
+
+    /// Whether a value written into direct code closes over the continuation a
+    /// handler clause resumes through.
+    ///
+    /// A resume alias stands for the monadic continuation the handler driver
+    /// threads, so a direct value holding one stores a binder of the region's
+    /// own shape where the direct convention describes a source function. The
+    /// flow solution cannot report this: a continuation performs whatever the
+    /// action it resumes performs, which no latent set of the clause names, so
+    /// the builder is the only place that knows the value crossed the boundary.
+    fn captures_resume(&self, value: &TypedValue) -> bool {
+        !self.resume_aliases.is_empty() && !free_value_vars(value).is_disjoint(&self.resume_aliases)
+    }
+
+    /// Whether any of these names is a binder the transform reified into a
+    /// runtime word. Every use of one reads back as `Lowered(Word)`, so a
+    /// source-typed mention of it that no crossing reaches contradicts the
+    /// binder in scope. A binder already written at the word representation is
+    /// not one of them: nothing about it moved.
+    fn reads_reified_binder(&self, names: &BTreeSet<Sym>) -> bool {
+        !self.word_binders.is_empty()
+            && names.iter().any(|name| {
+                self.word_binders
+                    .get(name)
+                    .is_some_and(|ty| ty != &abi::word())
+            })
+    }
+
+    /// A value handed to direct code unchanged.
+    ///
+    /// A reference standing on its own crosses back through the word
+    /// representation here, which is the whole of what a residual argument
+    /// needs. A mention buried anywhere else, inside a thunk the region leaves
+    /// at the direct convention or under a constructor, has no crossing to
+    /// stand in: the copy is verbatim, so it would read the reified binder at
+    /// its source type where the word is what is in scope. The rewrite that
+    /// would fix such a mention is a rewrite of the direct body, which is
+    /// exactly what confinement promises not to do, so the region refuses and
+    /// the whole-program lowering below it takes the declaration instead.
+    fn verbatim(&mut self, value: &TypedValue) -> Option<TypedValue> {
+        self.check_verbatim_capture(value)?;
+        // The crossing is written for an uninstantiated reference, which is
+        // what a local ever is; a reference carrying witnesses falls through to
+        // the check below rather than being copied without one.
+        if let TypedValueKind::Var { instantiation, .. } = &value.kind {
+            if instantiation.is_empty() {
+                return Some(self.word_reference(value));
+            }
+        }
+        if self.reads_reified_binder(&free_value_vars(value)) {
+            return self.refuse(Refusal::WordCapture, Self::value_site(value));
+        }
+        Some(value.clone())
+    }
+
+    /// A value produced by a direct-convention computation. The identity unless
+    /// it is a thunk the region owns, which is rewritten here and then retagged
+    /// back to its source type so that no enclosing node's signature moves.
+    fn direct_value(&mut self, value: &TypedValue) -> Option<TypedValue> {
+        if !self.produces_monadic_thunk(value) {
+            return self.verbatim(value);
+        }
+        self.check_verbatim_capture(value)?;
+        // The suspended body performs what it performs regardless of the row
+        // its builder sits at, so the monadic material inside it is written
+        // under the suspension row and the direct rewrite around it keeps the
+        // declaration's own. The retag below restores the source type, so the
+        // choice stays private to the thunk.
+        let outer = std::mem::replace(&mut self.row, self.suspension_row.clone());
+        let rewritten = self.value(value);
+        self.row = outer;
+        Self::retag_runtime_word(rewritten?, value.ty().clone())
+    }
+
+    // An argument of a residual App/Call/Force. A thunk the region owns is
+    // built at the monadic convention, exactly as in a returned position;
+    // everything else only crosses the word representation described below.
+    fn direct_argument(&mut self, argument: &TypedValue) -> Option<TypedValue> {
+        if self.produces_monadic_thunk(argument) {
+            return self.direct_value(argument);
+        }
+        self.verbatim(argument)
     }
 
     // A source binder the monadic transform reified into a Word continuation
@@ -1959,7 +2386,7 @@ impl<'a> Monadic<'a> {
     // still references it must cross back through the word representation, or the
     // reference type contradicts the word-typed binder. Non-word references pass
     // through untouched. Row/representation-only, so erased Core is unchanged.
-    fn direct_argument(&self, argument: &TypedValue) -> TypedValue {
+    fn word_reference(&self, argument: &TypedValue) -> TypedValue {
         if let TypedValueKind::Var {
             name,
             instantiation,
@@ -1976,8 +2403,13 @@ impl<'a> Monadic<'a> {
     // row substitutes through its higher-order parameters too. Keep direct
     // values structurally unchanged, but retag their exact runtime-word
     // representation to the instantiated parameter witness.
-    fn direct_argument_at(&self, argument: &TypedValue, expected: &CoreType) -> Option<TypedValue> {
-        Self::retag_runtime_word(self.direct_argument(argument), expected.clone())
+    fn direct_argument_at(
+        &mut self,
+        argument: &TypedValue,
+        expected: &CoreType,
+    ) -> Option<TypedValue> {
+        let argument = self.direct_argument(argument)?;
+        Self::retag_runtime_word(argument, expected.clone())
     }
 
     fn handler_captures(&self, comp: &TypedComp) -> Option<Vec<TypedBinder>> {
@@ -2023,10 +2455,10 @@ impl<'a> Monadic<'a> {
         if return_binder.is_some() != return_body.is_some() {
             return false;
         }
-        let (Some(plan), Some(latent)) = (self.region_plan, self.latent) else {
+        let (Some(plan), Some(effects)) = (self.region_plan, self.effects()) else {
             return false;
         };
-        plan.native_eligible(comp, latent, self.native_enabled)
+        plan.native_eligible(comp, effects, &self.thunk_sigs, self.native_enabled)
     }
 
     fn handle_native(&mut self, comp: &TypedComp) -> Option<TypedComp> {
@@ -2044,7 +2476,7 @@ impl<'a> Monadic<'a> {
         }
         let result_ty = comp.sig().result().clone();
         let captures = self.handler_captures(comp)?;
-        let region = self.mint("region");
+        let region = self.mint_driver(FreeMonadDriver::Region);
         let mut region_params = vec![abi::eff(self.row.clone())];
         region_params.extend(captures.iter().map(|capture| capture.ty().clone()));
         let region_signature = CoreFnSig::new(
@@ -2298,7 +2730,7 @@ impl<'a> Monadic<'a> {
         }
         let captures = self.handler_captures(comp)?;
 
-        let driver = self.mint("handle");
+        let driver = self.mint_driver(FreeMonadDriver::Handle);
         let result = TypedBinder::new(self.mint("res"), abi::eff(self.row.clone()));
         let mut driver_params = vec![result.ty().clone()];
         driver_params.extend(captures.iter().map(|capture| capture.ty().clone()));
@@ -2482,6 +2914,19 @@ impl<'a> Monadic<'a> {
                 handled
             };
 
+            // Every clause folds into this one dispatch, and a branch of it can
+            // carry only one result type. A closed handler keeps its answers at
+            // the source convention, where a clause whose answer never performs
+            // holds an empty row inside the answered function type and a
+            // performing sibling holds the ambient one: the checker unified
+            // those at the source, but they are two Core types here and no
+            // branch can hold both. Whole-program lowering answers with a cell
+            // from every clause and never has the question, so refusing the
+            // confined region costs speed and not meaning.
+            if !open && selected.sig().result() != dispatch.sig().result() {
+                return self.refuse(Refusal::HandlerArms, Site::Function);
+            }
+
             let matched = TypedBinder::new(self.mint("t"), CoreType::Source(Type::Bool));
             let is_operation = TypedComp::new(
                 CompSig::new(CoreType::Source(Type::Bool), EffRow::Empty),
@@ -2564,9 +3009,11 @@ fn monadic_quantifiers(function: &TypedCoreFn, row: &EffRow) -> Vec<CoreQuantifi
     quantifiers
 }
 
-/// Put every function in one monadic calling convention. Each declaration's
-/// row retains the direct effects that remain after source operations are
-/// reified; call instantiation aligns the callee with its current caller.
+/// Put every function in one monadic calling convention.
+///
+/// Each declaration's row retains the direct effects that remain after source
+/// operations are reified; call instantiation aligns the callee with its
+/// current caller.
 pub fn lower_whole<R: Rows + ?Sized>(
     functions: &[TypedCoreFn],
     ops: &OpIds,
@@ -2605,6 +3052,9 @@ pub fn lower_whole<R: Rows + ?Sized>(
         // `resume k`) is mistyped as the reified continuation. `lower_region`
         // already clears this per member; whole-program lowering must match.
         monadic.resume_aliases.clear();
+        // Thunk signatures are per-declaration for the same reason: they are
+        // keyed by binder name, and two declarations share names freely.
+        monadic.thunk_sigs.clear();
         let body = monadic.comp(function.body())?;
         let entry = function.name().as_str() == ENTRY_POINT;
         let body = if entry {
@@ -2634,8 +3084,14 @@ pub fn lower_whole<R: Rows + ?Sized>(
 }
 
 /// Lower one clean `LocalPartial` component in the whole-style convention while
-/// retaining direct signatures for the fused rest's inert callees. Region
-/// entries unwrap their `Eff` result for the direct caller across the split.
+/// retaining direct signatures for the fused rest's inert callees.
+///
+/// Region entries unwrap their `Eff` result for the direct caller across the
+/// split.
+///
+/// # Errors
+/// A message when a region member has no planned row, or when its body has no
+/// monadic rewrite.
 pub fn lower_region<R: Rows + ?Sized>(
     functions: &[TypedCoreFn],
     region: &BTreeSet<Sym>,
@@ -2705,6 +3161,7 @@ pub fn lower_region<R: Rows + ?Sized>(
             .collect();
         monadic.word_binders.clear();
         monadic.resume_aliases.clear();
+        monadic.thunk_sigs.clear();
         let body = monadic.comp(function.body()).ok_or_else(|| {
             format!(
                 "LocalPartial member `{}` failed after its region plan committed",
@@ -2746,49 +3203,80 @@ pub fn lower_region<R: Rows + ?Sized>(
     Ok(lowered)
 }
 
-/// Lower only declarations selected by a pre-rewrite region plan. Functions
-/// outside the region keep their source convention and are traversed only to
-/// discharge closed handlers; region entries unwrap their `Eff` result for the
-/// direct caller named by the plan.
+/// Lower only declarations selected by a pre-rewrite region plan.
+///
+/// Functions outside the region keep their source convention and are traversed
+/// only to discharge closed handlers; region entries unwrap their `Eff` result
+/// for the direct caller named by the plan.
+///
+/// A refusal is returned rather than dropped: the caller answers it by widening
+/// the plan, and what it answered is what the plan artifact and the fallback
+/// warning report.
+///
+/// # Errors
+/// The [`Decline`] the region recorded: the shape it has no confined rewrite
+/// for, and where it met it.
+///
+/// # Panics
+/// Panics if the plan is not a confined one. Which scope a plan carries is the
+/// caller's to dispatch on, so a whole-program plan arriving here is a bug in
+/// the cascade rather than a program the region refused.
 pub fn lower_selective<R: Rows + ?Sized>(
     functions: &[TypedCoreFn],
     ops: &OpIds,
     fresh: &mut Fresh,
     rows: &R,
-    plan: &MonadicRegionPlan,
-    latent: &Latent,
-    native_enabled: bool,
-) -> Option<Vec<TypedCoreFn>> {
-    if plan.scope != MonadicScope::Selective {
-        return None;
+    region: &Region<'_>,
+) -> Result<Vec<TypedCoreFn>, Decline> {
+    let plan = region.plan;
+    assert_eq!(
+        plan.scope,
+        MonadicScope::Selective,
+        "confined lowering needs a confined plan"
+    );
+    let mut signatures: BTreeMap<Sym, CoreFnSig> = BTreeMap::new();
+    for function in functions {
+        let signature = if plan.members.contains(&function.name()) {
+            let row = rows
+                .row(function.name())
+                .ok_or_else(|| Decline::whole(Refusal::MissingRow, function.name()))?;
+            CoreFnSig::new(
+                monadic_quantifiers(function, &row),
+                function.sig().params().to_vec(),
+                CompSig::new(abi::eff(row.clone()), row),
+            )
+        } else {
+            function.sig().clone()
+        };
+        signatures.insert(function.name(), signature);
     }
-    let signatures: BTreeMap<Sym, CoreFnSig> = functions
-        .iter()
-        .map(|function| {
-            let signature = if plan.members.contains(&function.name()) {
-                let row = rows.row(function.name())?;
-                CoreFnSig::new(
-                    monadic_quantifiers(function, &row),
-                    function.sig().params().to_vec(),
-                    CompSig::new(abi::eff(row.clone()), row),
-                )
-            } else {
-                function.sig().clone()
-            };
-            Some((function.name(), signature))
-        })
-        .collect::<Option<_>>()?;
     let mut monadic = Monadic::new(ops, fresh, EffRow::Empty, &signatures);
-    monadic.configure_region(plan, latent, native_enabled);
+    monadic.configure_region(region);
     let mut lowered = Vec::with_capacity(functions.len());
     for function in functions {
         let member = plan.members.contains(&function.name());
+        let missing_row = || Decline::whole(Refusal::MissingRow, function.name());
         if member {
-            let row = rows.row(function.name())?;
+            let row = rows.row(function.name()).ok_or_else(missing_row)?;
             monadic.set_row(row.clone());
             monadic.quantifiers = monadic_quantifiers(function, &row);
         } else {
-            monadic.set_row(function.sig().body().effects().clone());
+            // A declaration outside the region keeps its source row, but the
+            // computations it suspends for the region reify what its residual
+            // plan says the declaration's whole body performs, thunks included.
+            // Those labels sit over the declaration's own tail rather than the
+            // region's: only a member quantifies the phase-private row, so a
+            // suspension built here has to stay inside the rows the direct
+            // declaration already binds.
+            let source = function.sig().body().effects().clone();
+            let residual = rows.row(function.name()).ok_or_else(missing_row)?;
+            monadic.set_direct_row(
+                source.clone(),
+                EffRow::canonical(
+                    residual.labels().into_iter().cloned(),
+                    source.tail().clone(),
+                ),
+            );
             monadic.quantifiers = function.sig().quantifiers().to_vec();
         }
         monadic.locals = function
@@ -2798,22 +3286,36 @@ pub fn lower_selective<R: Rows + ?Sized>(
             .collect();
         monadic.word_binders.clear();
         monadic.resume_aliases.clear();
+        // Seed the scope from the interprocedural solution: what flowed into
+        // each thunk-valued parameter is what forcing that parameter performs,
+        // and reading it from the same place the plan did is what keeps the
+        // membership decision and the rewrite from disagreeing.
+        monadic.thunk_sigs = flow::param_loc(function, region.flow);
         let entry = plan.entries.contains(&function.name());
-        let body = if member {
-            let body = monadic.comp(function.body())?;
-            if entry {
-                monadic.unwrap_entry(body, function.sig().body().result().clone())
-            } else {
-                body
-            }
+        let rewritten = if member {
+            monadic.comp(function.body())
         } else {
-            monadic.direct(function.body())?
+            monadic.direct(function.body())
+        };
+        let Some(body) = rewritten else {
+            return Err(monadic.declined(function.name()));
+        };
+        let body = if member && entry {
+            monadic.unwrap_entry(body, function.sig().body().result().clone())
+        } else {
+            body
         };
         let signature = if member && !entry {
-            signatures.get(&function.name())?.clone()
+            signatures
+                .get(&function.name())
+                .ok_or_else(missing_row)?
+                .clone()
         } else if member {
             CoreFnSig::new(
-                monadic_quantifiers(function, &rows.row(function.name())?),
+                monadic_quantifiers(
+                    function,
+                    &rows.row(function.name()).ok_or_else(missing_row)?,
+                ),
                 function.sig().params().to_vec(),
                 CompSig::new(
                     function.sig().body().result().clone(),
@@ -2850,7 +3352,7 @@ pub fn lower_selective<R: Rows + ?Sized>(
         ));
     }
     lowered.append(&mut monadic.generated);
-    Some(lowered)
+    Ok(lowered)
 }
 
 #[cfg(test)]
@@ -2858,6 +3360,7 @@ mod tests {
     use super::super::super::{
         CoreFnSig, EffectLowered, Elaborated, TypedCore, TypedCoreFn, TypedHandleOp, TypedHandler,
     };
+    use super::super::fixtures;
     use super::*;
     use crate::core::cbpv::{Comp, CoreOp, CorePat, Value};
     use crate::core::typed::verify::{verify, VerifyEnv};
@@ -3728,9 +4231,9 @@ mod tests {
             0,
         );
         let source = TypedCore::<Elaborated>::new(vec![main]);
-        let latent = super::super::latent::latent_map(&source.fns);
-        let flow = super::super::flow::analyze(&source.fns, &latent);
-        let plan = super::super::analysis::plan(&source.fns, &latent, &flow);
+        let effects = super::super::EffectPlan::analyze(&source.fns);
+        let latent = effects.latent();
+        let plan = super::super::analysis::plan(&source.fns, &effects, false);
         assert_eq!(plan.scope, MonadicScope::Selective);
 
         let mut fresh = Fresh::new();
@@ -3739,9 +4242,12 @@ mod tests {
             &ops,
             &mut fresh,
             &EffRow::Empty,
-            &plan,
-            &latent,
-            false,
+            &Region {
+                plan: &plan,
+                latent,
+                flow: effects.flow(),
+                native_enabled: false,
+            },
         )
         .expect("selective closed handler translates");
         lowered.push(abi::ebind_fn());
@@ -3831,18 +4337,21 @@ mod tests {
             0,
         );
         let source = TypedCore::<Elaborated>::new(vec![main]);
-        let latent = super::super::latent::latent_map(&source.fns);
-        let flow = super::super::flow::analyze(&source.fns, &latent);
-        let plan = super::super::analysis::plan(&source.fns, &latent, &flow);
+        let effects = super::super::EffectPlan::analyze(&source.fns);
+        let latent = effects.latent();
+        let plan = super::super::analysis::plan(&source.fns, &effects, false);
         let mut fresh = Fresh::new();
         let mut lowered = lower_selective(
             &source.fns,
             &ops,
             &mut fresh,
             &EffRow::Empty,
-            &plan,
-            &latent,
-            true,
+            &Region {
+                plan: &plan,
+                latent,
+                flow: effects.flow(),
+                native_enabled: true,
+            },
         )
         .expect("native selective handler translates");
         lowered.push(abi::ebind_fn());
@@ -3944,6 +4453,336 @@ mod tests {
         assert_eq!(
             verify(&TypedCore::<EffectLowered>::new(lowered), &env),
             Ok(())
+        );
+    }
+
+    #[test]
+    fn a_confined_region_translates_and_leaves_no_raw_effects() {
+        let ops = OpIds::assign(&BTreeSet::from([Sym::from(fixtures::ASK_OP)]))
+            .expect("one operation has an id");
+        let functions = fixtures::capturing_program();
+        let source = TypedCore::<Elaborated>::new(functions);
+        let effects = super::super::EffectPlan::analyze(&source.fns);
+        let plan = super::super::analysis::plan(&source.fns, &effects, false);
+        assert_eq!(plan.scope, MonadicScope::Selective);
+        assert!(
+            !plan.members.contains(&Sym::from(ENTRY_POINT)),
+            "the capturer stays outside the region"
+        );
+
+        let mut fresh = Fresh::new();
+        let mut lowered = lower_selective(
+            &source.fns,
+            &ops,
+            &mut fresh,
+            &EffRow::Empty,
+            &Region {
+                plan: &plan,
+                latent: effects.latent(),
+                flow: effects.flow(),
+                native_enabled: false,
+            },
+        )
+        .expect("the confined region translates");
+        lowered.push(abi::ebind_fn());
+        lowered.push(abi::qapply_fn());
+        let mut env = VerifyEnv::new();
+        abi::insert(&mut env);
+        let typed = TypedCore::<EffectLowered>::new(lowered);
+        assert_eq!(verify(&typed, &env), Ok(()));
+        crate::core::residual_effects(&typed.erase()).expect("no raw effects survive");
+    }
+
+    #[test]
+    fn a_region_reaching_through_an_island_handler_translates_and_verifies() {
+        // The forwarder forces what it is handed from inside a handler for an
+        // unrelated operation, so the operation the computation performs is in
+        // no row the forwarder's own body discharges. The thunk is still built
+        // at the monadic convention, and the bind inside it still suspends at
+        // the row its body performs, which is the pairing the verifier checks.
+        let ops = OpIds::assign(&BTreeSet::from([
+            Sym::from(fixtures::ASK_OP),
+            Sym::from(fixtures::LEAK_OP),
+        ]))
+        .expect("both operations have ids");
+        let source = TypedCore::<Elaborated>::new(fixtures::island_program());
+        let effects = super::super::EffectPlan::analyze(&source.fns);
+        let plan = super::super::analysis::plan(&source.fns, &effects, false);
+        assert_eq!(plan.scope, MonadicScope::Selective);
+        assert!(plan.members.contains(&Sym::from(fixtures::RUN)));
+
+        let mut fresh = Fresh::new();
+        let mut lowered = lower_selective(
+            &source.fns,
+            &ops,
+            &mut fresh,
+            &EffRow::Empty,
+            &Region {
+                plan: &plan,
+                latent: effects.latent(),
+                flow: effects.flow(),
+                native_enabled: true,
+            },
+        )
+        .expect("the region reaches through the island handler");
+        lowered.push(abi::ebind_fn());
+        lowered.push(abi::qapply_fn());
+        let mut env = VerifyEnv::new();
+        abi::insert(&mut env);
+        let typed = TypedCore::<EffectLowered>::new(lowered);
+        assert_eq!(verify(&typed, &env), Ok(()));
+        crate::core::residual_effects(&typed.erase()).expect("no raw effects survive");
+    }
+
+    #[test]
+    fn a_clause_handing_its_continuation_to_direct_code_declines_the_region() {
+        // The clause suspends a resume application and passes it to a
+        // declaration outside the region, which is the shape a clause takes
+        // when something else decides how often to resume. The region reifies
+        // that continuation, so the suspension holds a binder of the region's
+        // own shape where the direct convention describes a source function. A
+        // continuation performs whatever the computation it resumes performs,
+        // so no flow fact reports this and the builder is the only place that
+        // can see the value cross the boundary.
+        let refusal = refusal_of(
+            fixtures::resume_capturing_program(),
+            &confined(&[fixtures::BUMP, fixtures::HELPER]),
+        );
+        assert_eq!(
+            refusal,
+            Decline::whole(Refusal::ThunkBoundary, Sym::from(fixtures::HELPER)),
+        );
+    }
+
+    #[test]
+    fn a_direct_thunk_reading_a_reified_binder_declines_the_region() {
+        // The member binds what the operation answers, which the transform
+        // reifies into a word parameter of the continuation, and hands a
+        // suspension reading that binder to a declaration outside the region.
+        // The suspension performs nothing, so it stays at the direct
+        // convention and is copied verbatim: no crossing reaches the reference
+        // inside it, and the copy would read the binder at its source type
+        // where the word is what is in scope.
+        let refusal = refusal_of(
+            fixtures::word_capturing_program(),
+            &confined(&[fixtures::HELPER]),
+        );
+        assert_eq!(
+            refusal,
+            Decline::whole(Refusal::WordCapture, Sym::from(fixtures::HELPER)),
+        );
+    }
+
+    #[test]
+    fn a_performing_handler_answering_with_a_transformer_declines_the_region() {
+        // The clause answers with a lambda for the code around the handle to
+        // apply, and that lambda still performs, so the region rewrites it at
+        // the monadic convention. The answer leaves the driver as an ordinary
+        // value word: the source type names a function, the monadic bind erases
+        // the binder holding it, and the driver's pure arm answers with a
+        // transformer built at the direct convention, so no use site can read
+        // back which convention it holds. Applying it directly would consume an
+        // effect cell as a result, which is a wrong value rather than a crash.
+        let refusal = refusal_of(
+            fixtures::transformer_answer_program(),
+            &confined(&[fixtures::BUMP, fixtures::HELPER]),
+        );
+        assert_eq!(
+            refusal,
+            Decline::whole(Refusal::HandlerAnswer, Sym::from(fixtures::HELPER)),
+        );
+    }
+
+    #[test]
+    fn a_region_missing_a_forcer_declines_instead_of_mixing_conventions() {
+        let ops = OpIds::assign(&BTreeSet::from([Sym::from(fixtures::ASK_OP)]))
+            .expect("one operation has an id");
+        let functions = fixtures::capturing_program();
+        let source = TypedCore::<Elaborated>::new(functions);
+        let effects = super::super::EffectPlan::analyze(&source.fns);
+        let mut plan = super::super::analysis::plan(&source.fns, &effects, false);
+        // Hand-narrow the region to drop the forwarder. Nothing in the planner
+        // produces this shape; the point is that if anything ever did, the
+        // builder refuses to emit direct code that forces a monadic thunk
+        // rather than emitting a program whose two halves disagree.
+        assert!(plan.members.remove(&Sym::from(fixtures::RUN)));
+        plan.monadic_params.remove(&Sym::from(fixtures::RUN));
+
+        let mut fresh = Fresh::new();
+        let refusal = lower_selective(
+            &source.fns,
+            &ops,
+            &mut fresh,
+            &EffRow::Empty,
+            &Region {
+                plan: &plan,
+                latent: effects.latent(),
+                flow: effects.flow(),
+                native_enabled: false,
+            },
+        )
+        .expect_err("forcing a monadic thunk from direct code declines the region");
+        assert_eq!(
+            refusal,
+            Decline::new(
+                Refusal::DirectForce,
+                Sym::from(fixtures::RUN),
+                Site::Name(Sym::from("action")),
+            ),
+            "the refusal names the forwarder and the parameter it forces"
+        );
+    }
+
+    /// A region confined to exactly these declarations. The refusals below turn
+    /// on shapes no planner produces, so the plan is written rather than
+    /// derived from the program it is applied to.
+    fn confined(members: &[&str]) -> MonadicRegionPlan {
+        let members: BTreeSet<Sym> = members.iter().copied().map(Sym::from).collect();
+        MonadicRegionPlan {
+            genuine_effects: members.clone(),
+            members,
+            entries: BTreeSet::new(),
+            monadic_params: BTreeMap::new(),
+            scope: MonadicScope::Selective,
+        }
+    }
+
+    /// Run the confined builder over a hand-written program and region, and
+    /// report the refusal it recorded.
+    fn refusal_of(functions: Vec<TypedCoreFn>, plan: &MonadicRegionPlan) -> Decline {
+        let ops = OpIds::assign(&BTreeSet::from([
+            Sym::from(fixtures::ASK_OP),
+            Sym::from(fixtures::LEAK_OP),
+        ]))
+        .expect("both operations have ids");
+        let source = TypedCore::<Elaborated>::new(functions);
+        let effects = super::super::EffectPlan::analyze(&source.fns);
+        let mut fresh = Fresh::new();
+        lower_selective(
+            &source.fns,
+            &ops,
+            &mut fresh,
+            &EffRow::Empty,
+            &Region {
+                plan,
+                latent: effects.latent(),
+                flow: effects.flow(),
+                native_enabled: false,
+            },
+        )
+        .expect_err("the confined builder refuses this program")
+    }
+
+    #[test]
+    fn a_cell_holding_a_computation_the_region_owns_declines_the_region() {
+        // Storing the suspension in a reference is a form the rewrite copies
+        // verbatim, so copying it would leave the source-convention closure
+        // where every force of it expects an effect cell.
+        let stashed = fixtures::nullary_thunk(fixtures::call(
+            fixtures::BUMP,
+            Vec::new(),
+            fixtures::asking(),
+        ));
+        let stash = TypedComp::new(
+            CompSig::new(CoreType::Ref(Box::new(stashed.ty().clone())), EffRow::Empty),
+            TypedCompKind::RefNew(stashed),
+        );
+        let refusal = refusal_of(
+            vec![
+                fixtures::named(fixtures::BUMP, Vec::new(), fixtures::performed()),
+                fixtures::named(fixtures::HELPER, Vec::new(), stash),
+            ],
+            &confined(&[fixtures::BUMP]),
+        );
+        assert_eq!(
+            refusal,
+            Decline::whole(Refusal::DirectHolds, Sym::from(fixtures::HELPER)),
+        );
+    }
+
+    #[test]
+    fn a_form_the_confined_builder_cannot_rewrite_declines_the_region() {
+        // An open handler is not a convention crossing at all: the confined
+        // builder simply has no rewrite for one, and the whole-program builder
+        // is the one that handles it.
+        let leaking = fixtures::handling_ask(
+            fixtures::call(fixtures::BUMP, Vec::new(), fixtures::asking()),
+            true,
+        );
+        let refusal = refusal_of(
+            vec![
+                fixtures::named(fixtures::BUMP, Vec::new(), fixtures::performed()),
+                fixtures::named(fixtures::HELPER, Vec::new(), leaking),
+            ],
+            &confined(&[fixtures::BUMP]),
+        );
+        assert_eq!(
+            refusal,
+            Decline::whole(Refusal::UnsupportedForm, Sym::from(fixtures::HELPER)),
+        );
+    }
+
+    #[test]
+    fn a_member_with_no_residual_row_declines_before_minting_names() {
+        let ops = OpIds::assign(&BTreeSet::from([Sym::from(fixtures::ASK_OP)]))
+            .expect("one operation has an id");
+        let source = TypedCore::<Elaborated>::new(fixtures::capturing_program());
+        let effects = super::super::EffectPlan::analyze(&source.fns);
+        let plan = super::super::analysis::plan(&source.fns, &effects, false);
+        let mut fresh = Fresh::new();
+        let refusal = lower_selective(
+            &source.fns,
+            &ops,
+            &mut fresh,
+            &MissingRows,
+            &Region {
+                plan: &plan,
+                latent: effects.latent(),
+                flow: effects.flow(),
+                native_enabled: false,
+            },
+        )
+        .expect_err("a member needs a residual row for its monadic signature");
+        assert_eq!(
+            refusal,
+            Decline::whole(Refusal::MissingRow, Sym::from(fixtures::BUMP)),
+        );
+        assert_eq!(fresh.bump(), 0, "planning failures cannot consume names");
+    }
+
+    #[test]
+    fn a_slot_reached_at_two_conventions_declines_the_region() {
+        // The forwarder's slot is driven at the monadic convention because one
+        // call site fills it with a computation that performs. A second site
+        // fills the same slot with one that only declares the row and performs
+        // nothing, which the flow solution leaves at the direct convention. A
+        // thunk carries no convention in its type, so there is nothing to
+        // retag and no coercion to insert: the region declines.
+        let quiet = fixtures::nullary_thunk(TypedComp::new(
+            CompSig::new(fixtures::int(), fixtures::asking()),
+            TypedCompKind::Return(TypedValue::new(
+                fixtures::int(),
+                TypedValueKind::Int(0.into()),
+            )),
+        ));
+        let mut functions = fixtures::capturing_program();
+        functions.push(fixtures::named(
+            fixtures::HELPER,
+            Vec::new(),
+            fixtures::call(fixtures::RUN, vec![quiet], fixtures::asking()),
+        ));
+        let source = TypedCore::<Elaborated>::new(functions);
+        let effects = super::super::EffectPlan::analyze(&source.fns);
+        let plan = super::super::analysis::plan(&source.fns, &effects, false);
+        assert_eq!(
+            plan.monadic_params.get(&Sym::from(fixtures::RUN)),
+            Some(&BTreeSet::from([0])),
+            "the performing call site is what makes the slot monadic",
+        );
+        let refusal = refusal_of(source.fns, &plan);
+        assert_eq!(
+            refusal,
+            Decline::whole(Refusal::ThunkBoundary, Sym::from(fixtures::HELPER)),
         );
     }
 }

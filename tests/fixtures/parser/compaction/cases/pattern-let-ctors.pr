@@ -1,0 +1,2 @@
+fn one(v) = let A(x) = v in x
+fn two(v) = let Pkg.A(x) = v in x

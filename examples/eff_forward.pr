@@ -16,7 +16,7 @@ effect Exn
 fn work() : Int ! {Log, Exn} =
   log(1)
   log(2)
-  let x = raise(0 - 7)
+  let x = raise(-7)
   log(x)
   x
 

@@ -4,6 +4,8 @@
 
 Ordered sets, reusing the balanced-tree map.
 
+There is no `Set` type. A set is exactly a `Map(k, Unit)`, which is what the signatures below say and what the reference documents: the module is a naming layer over `Data.Map`, not an abstraction over it. So a set is also a map wherever one is expected, `map_size` and `map_keys` read it directly (which is how `set_size` and `set_to_list` are defined), and only the `Unit` value discipline of these functions keeps its values uniform.
+
 Set algebra stays O(n log n) and preserves iteration order. Base includes this module.
 
 Like `Map`, a set's representation depends on the canonical `Ord` instance used to build it. The compiler classifies `Ord` and `Hash` as representation-affecting in `store::coherence::is_representation_affecting`. Set identity does not currently encode that instance, so programs exchanging a set across an assembly boundary must agree on its canonical ordering.
@@ -12,7 +14,7 @@ Like `Map`, a set's representation depends on the canonical `Ord` instance used 
 
 ### `set_empty`
 
-```prism,sig,h-beb9c1576642b9045a3ea341b8d03d6dae8aa39ece22886a04fc8add3882e5a7
+```prism,sig,h-1c5fb83fb4029dfe97285037965c2f4cb59aae59320cff7fd18ccc385c82ec33
 set_empty : forall a b. Map(a, Unit, b)
 ```
 
@@ -20,7 +22,7 @@ The empty set.
 
 ### `set_insert`
 
-```prism,sig,h-9881d2b0e250bcaa97fc3049f0d00bb5102fd2ee867843de6debfc4ee528a3c6
+```prism,sig,h-fd0deebb70f5ecaab9688031a826ebb9ac55d757e09a40808fb776c7857d52ce
 set_insert : forall a b. (b, Map(b, Unit, a)) -> Map(b, Unit, a)
 ```
 
@@ -36,7 +38,7 @@ set_to_list(set_insert(2, set_insert(1, set_empty)))
 
 ### `set_member`
 
-```prism,sig,h-8b2057aac088e1d001aad8d49d91b8a5632e868b4faec568419a7ee44c4236f0
+```prism,sig,h-b44ab229e6b087c1c9a25973b737d533d220c37c5143f3f9b154d97146544349
 set_member : forall a b. (b, Map(b, Unit, a)) -> Bool
 ```
 
@@ -52,7 +54,7 @@ true
 
 ### `set_delete`
 
-```prism,sig,h-8e6af9d4fae6998e0711c59bb6e4cf8d128693fe855fb055c6e3a835d06b6242
+```prism,sig,h-c5caaee7df58ba34b8517f16ed9e2af5b746908dbc4cdd00a5900fe250590ef4
 set_delete : forall a b. (b, Map(b, Unit, a)) -> Map(b, Unit, a)
 ```
 
@@ -68,7 +70,7 @@ set_to_list(set_delete(2, set_from_list([1, 2, 3])))
 
 ### `set_size`
 
-```prism,sig,h-f08191187ed1e148c5aef1c72710594a717537e7434bbf79ee6daca3fb306849
+```prism,sig,h-bf13cb0ce24421b63d945ccc09fd1b2baefe1b0bbe31b15df5e48597eb17a196
 set_size : forall a b c. (Map(a, b, c)) -> Int
 ```
 
@@ -84,7 +86,7 @@ set_size(set_from_list([1, 2, 2, 3]))
 
 ### `set_to_list`
 
-```prism,sig,h-8c400f523c8592e6144eee262725f62270f1d6448f7bd616629c71c26f7de9ff
+```prism,sig,h-1867c8a72d6996735ea0506c8dc518602aca8b4c24691b19a6340c6ac96a7563
 set_to_list : forall a b c. (Map(a, b, c)) -> List(a)
 ```
 
@@ -100,7 +102,7 @@ set_to_list(set_from_list([3, 1, 2, 1]))
 
 ### `set_from_list`
 
-```prism,sig,h-fcfbf7f3609686944a73b208bde6a6d07536165a1a541f0cbd6b1a5c9eda911e
+```prism,sig,h-832a57c611963988b3ba5da62cc610fe2780dc59eb64f0fc98908fa53c78b649
 set_from_list : forall a b. (List(b)) -> Map(b, Unit, a)
 ```
 
@@ -116,7 +118,7 @@ set_to_list(set_from_list([3, 1, 2, 1]))
 
 ### `set_union`
 
-```prism,sig,h-11d94eaf135240d78a172614b6a27e526c92cb72d957e54a0766d55bd1382ce9
+```prism,sig,h-f93ada8aa4bada3cebddda074441ceebf9c5007dcfb21a2e9f5403c5f2cf37c8
 set_union : forall a b c. (Map(c, Unit, a), Map(c, Unit, b)) -> Map(c, Unit, a)
 ```
 
@@ -132,7 +134,7 @@ set_to_list(set_union(set_from_list([1, 2]), set_from_list([2, 3])))
 
 ### `set_intersection`
 
-```prism,sig,h-88adf960472ad9f216867a47018e1021c5859d8da3f2e1ec94c697c24b8e5d24
+```prism,sig,h-8c62e1e81b8947ce083eaf9b6336560b71881c839a46387bb9e0ee65f0df8b28
 set_intersection : forall a b c d. (Map(d, Unit, a), Map(d, Unit, b)) -> Map(d, Unit, c)
 ```
 
@@ -148,7 +150,7 @@ set_to_list(set_intersection(set_from_list([1, 2, 3]), set_from_list([2, 3, 4]))
 
 ### `set_difference`
 
-```prism,sig,h-5ba4260d73a15b2c4f0886eb9a9b65d7f81b681ea1e5ec56ceaa979832657fcc
+```prism,sig,h-fb3f5fe3107f254175b5a312bb9e417d07de371c09ab06309f02372d44bc9973
 set_difference : forall a b c d. (Map(d, Unit, a), Map(d, Unit, b)) -> Map(d, Unit, c)
 ```
 

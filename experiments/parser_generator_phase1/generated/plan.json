@@ -1,0 +1,473 @@
+{
+  "accounting": {
+    "baseline": {
+      "generator": 2559,
+      "maintained_t_lines": 3732,
+      "pattern": 505,
+      "type": 668
+    },
+    "generator_code_lines": 2862,
+    "maintained_t_delta": 296,
+    "maintained_t_lines": 4028,
+    "maintained_t_verdict": "regressed",
+    "pattern": {
+      "facade": 20,
+      "generated": 0,
+      "semantics": 43
+    },
+    "shared_control_code_lines": 206,
+    "status": "pattern-scaffold",
+    "type": {
+      "facade": 22,
+      "generated": 777,
+      "semantics": 98
+    }
+  },
+  "analysis": {
+    "concrete_instance_count": 154,
+    "convergence_iterations": 9
+  },
+  "manifest_validation": {
+    "classes": {
+      "Pratt": 12,
+      "escaped": 27,
+      "predictive": 94
+    },
+    "handwritten_symbol_count": 189,
+    "handwritten_use_count": 251,
+    "hook_count": 34,
+    "hook_evidence": {
+      "converter-direction": {
+        "evidence_roots": [
+          "ConvKw"
+        ],
+        "feed_path_owners": []
+      },
+      "decl-mods": {
+        "evidence_roots": [
+          "DeclMods"
+        ],
+        "feed_path_owners": []
+      },
+      "decreases-word": {
+        "evidence_roots": [
+          "Decreases"
+        ],
+        "feed_path_owners": []
+      },
+      "deprecated-context": {
+        "evidence_roots": [
+          "DeprecatedD"
+        ],
+        "feed_path_owners": []
+      },
+      "dimension-decline": {
+        "evidence_roots": [
+          "TypeArg"
+        ],
+        "feed_path_owners": []
+      },
+      "dot-call": {
+        "evidence_roots": [
+          "CallTight"
+        ],
+        "feed_path_owners": []
+      },
+      "dot-op-retired": {
+        "evidence_roots": [
+          "Add",
+          "Cmp",
+          "Mul"
+        ],
+        "feed_path_owners": [
+          "DotAddOp",
+          "DotCmpOp",
+          "DotMulOp"
+        ]
+      },
+      "drop-loss-word": {
+        "evidence_roots": [
+          "DropLoss"
+        ],
+        "feed_path_owners": []
+      },
+      "effect-grade": {
+        "evidence_roots": [
+          "EffOp"
+        ],
+        "feed_path_owners": []
+      },
+      "expr-top-sugar": {
+        "evidence_roots": [
+          "Expr"
+        ],
+        "feed_path_owners": []
+      },
+      "flip-class": {
+        "evidence_roots": [
+          "ClassD"
+        ],
+        "feed_path_owners": []
+      },
+      "flip-effect": {
+        "evidence_roots": [
+          "EffDecl"
+        ],
+        "feed_path_owners": []
+      },
+      "flip-instance": {
+        "evidence_roots": [
+          "InstanceD"
+        ],
+        "feed_path_owners": []
+      },
+      "frozen-word": {
+        "evidence_roots": [
+          "FrozenBadge"
+        ],
+        "feed_path_owners": []
+      },
+      "handler-grade": {
+        "evidence_roots": [
+          "HandlerArm"
+        ],
+        "feed_path_owners": []
+      },
+      "interpolation": {
+        "evidence_roots": [
+          "Atom"
+        ],
+        "feed_path_owners": []
+      },
+      "kind-validation": {
+        "evidence_roots": [
+          "KindedTyParam"
+        ],
+        "feed_path_owners": []
+      },
+      "lift-noalloc": {
+        "evidence_roots": [
+          "Fn"
+        ],
+        "feed_path_owners": []
+      },
+      "migration-dir": {
+        "evidence_roots": [
+          "VersionArg"
+        ],
+        "feed_path_owners": []
+      },
+      "migration-route": {
+        "evidence_roots": [
+          "Route"
+        ],
+        "feed_path_owners": []
+      },
+      "migrations-word": {
+        "evidence_roots": [
+          "Migrations"
+        ],
+        "feed_path_owners": []
+      },
+      "newtype-shape": {
+        "evidence_roots": [
+          "Newtype"
+        ],
+        "feed_path_owners": []
+      },
+      "param-normalize": {
+        "evidence_roots": [
+          "Param",
+          "Params"
+        ],
+        "feed_path_owners": []
+      },
+      "pat-clause-word": {
+        "evidence_roots": [
+          "PatClause"
+        ],
+        "feed_path_owners": []
+      },
+      "pattern-decl": {
+        "evidence_roots": [
+          "PatternD"
+        ],
+        "feed_path_owners": []
+      },
+      "resume-migration": {
+        "evidence_roots": [
+          "HandlerArm",
+          "ResumeTail"
+        ],
+        "feed_path_owners": []
+      },
+      "return-binding": {
+        "evidence_roots": [
+          "RetType"
+        ],
+        "feed_path_owners": []
+      },
+      "return-order": {
+        "evidence_roots": [
+          "RetAnn"
+        ],
+        "feed_path_owners": []
+      },
+      "stable-build": {
+        "evidence_roots": [
+          "StableD"
+        ],
+        "feed_path_owners": []
+      },
+      "statement-sugar": {
+        "evidence_roots": [
+          "Stmts"
+        ],
+        "feed_path_owners": []
+      },
+      "try-mark": {
+        "evidence_roots": [
+          "Call"
+        ],
+        "feed_path_owners": []
+      },
+      "type-effect-attach": {
+        "evidence_roots": [
+          "Type"
+        ],
+        "feed_path_owners": []
+      },
+      "typearg-natural": {
+        "evidence_roots": [
+          "TypeArg"
+        ],
+        "feed_path_owners": []
+      },
+      "usage-validate": {
+        "evidence_roots": [
+          "UType"
+        ],
+        "feed_path_owners": []
+      }
+    },
+    "hook_owners": {
+      "converter-direction": [
+        "ConvKw"
+      ],
+      "decl-mods": [
+        "DeclMods"
+      ],
+      "decreases-word": [
+        "Decreases"
+      ],
+      "deprecated-context": [
+        "DeprecatedD"
+      ],
+      "dimension-decline": [
+        "TypeArg"
+      ],
+      "dot-call": [
+        "CallTight"
+      ],
+      "dot-op-retired": [
+        "Add",
+        "Cmp",
+        "DotAddOp",
+        "DotCmpOp",
+        "DotMulOp",
+        "Mul"
+      ],
+      "drop-loss-word": [
+        "DropLoss"
+      ],
+      "effect-grade": [
+        "EffOp"
+      ],
+      "expr-top-sugar": [
+        "Expr"
+      ],
+      "flip-class": [
+        "ClassD"
+      ],
+      "flip-effect": [
+        "EffDecl"
+      ],
+      "flip-instance": [
+        "InstanceD"
+      ],
+      "frozen-word": [
+        "FrozenBadge"
+      ],
+      "handler-grade": [
+        "HandlerArm"
+      ],
+      "interpolation": [
+        "Atom"
+      ],
+      "kind-validation": [
+        "KindedTyParam"
+      ],
+      "lift-noalloc": [
+        "Fn"
+      ],
+      "migration-dir": [
+        "VersionArg"
+      ],
+      "migration-route": [
+        "Route"
+      ],
+      "migrations-word": [
+        "Migrations"
+      ],
+      "newtype-shape": [
+        "Newtype"
+      ],
+      "param-normalize": [
+        "Param",
+        "Params"
+      ],
+      "pat-clause-word": [
+        "PatClause"
+      ],
+      "pattern-decl": [
+        "PatternD"
+      ],
+      "resume-migration": [
+        "HandlerArm",
+        "ResumeTail"
+      ],
+      "return-binding": [
+        "RetType"
+      ],
+      "return-order": [
+        "RetAnn"
+      ],
+      "stable-build": [
+        "StableD"
+      ],
+      "statement-sugar": [
+        "Stmts"
+      ],
+      "try-mark": [
+        "Call"
+      ],
+      "type-effect-attach": [
+        "Type"
+      ],
+      "typearg-natural": [
+        "TypeArg"
+      ],
+      "usage-validate": [
+        "UType"
+      ]
+    },
+    "owners": {
+      "decls": 65,
+      "exprs": 43,
+      "patterns": 7,
+      "shared": 4,
+      "types": 14
+    },
+    "production_count": 133,
+    "reference_count": 464,
+    "terminal_alias_count": 132,
+    "terminal_use_count": 631
+  },
+  "predictive_validation": {
+    "production_count": 45,
+    "productions": [
+      "AliasOrSynonym",
+      "Ann",
+      "ArmSep",
+      "BlockExpr",
+      "CanonicalD",
+      "CatchArm",
+      "CatchArms",
+      "ClassSig",
+      "CmpOp",
+      "CoeffRowParts",
+      "CompoundOp",
+      "ConstD",
+      "ConstraintP",
+      "ConvBody",
+      "ConvField",
+      "CtorArgs",
+      "Data",
+      "DeriveName",
+      "Derives",
+      "DimTerm",
+      "EffLabel",
+      "EffOpSep",
+      "Ensures",
+      "ErrorD",
+      "GivenClause",
+      "HandleArms",
+      "ImportName",
+      "KindedTyParams",
+      "LetPat",
+      "LogicFn",
+      "MatchArms",
+      "MigrationRow",
+      "ModPath",
+      "PatArgs",
+      "PathIndex",
+      "Program",
+      "Qual",
+      "RecordExprField",
+      "RecordField",
+      "ReflectTarget",
+      "Requires",
+      "Rung",
+      "RungField",
+      "TyParams",
+      "WhereBlock"
+    ]
+  },
+  "schema": "prism-parser-generator-plan-v2",
+  "shared_runtime": {
+    "api_markers": [
+      "generated_bind",
+      "generated_spend",
+      "generated_separated",
+      "GSRequiredFirst",
+      "GSAfterSeparator"
+    ],
+    "artifact": "lib/std/Syntax/Parse/GeneratedControl.pr",
+    "classification": "handwritten-family-neutral-runtime",
+    "code_lines": 206,
+    "sha256": "ef02cc68783747d7fad5b90998405e598b14e62d2634c01315cb53fa0369c3b5",
+    "test_fixture": {
+      "artifact": "experiments/parser_generator_phase1/generated/type_leaf/tests/pattern_contract.pr",
+      "classification": "independent-handwritten",
+      "generated": false,
+      "sha256": "c14ace32b196215420bfc20b95622f57e995e36dc197e5764b40ac7a58b1f096",
+      "test_count": 1,
+      "transitive": false
+    }
+  },
+  "source": {
+    "grammar_blob_oid": "98999527f07adf5a371681b65c1cdaa517b82555",
+    "grammar_path": "crates/prism-syntax/src/grammar.lalrpop",
+    "manifest_oracle_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+    "source_pins_verified": 9
+  },
+  "type_leaf_emission": {
+    "action_schema": {
+      "artifact": "experiments/parser_generator_phase1/generated/action_schema.json",
+      "entry_count": 65,
+      "helper_production_count": 4,
+      "sha256": "eb6e5d36fab08fce7ada02dd5db601afa755d3bf724576589dd0c20f80d380d3"
+    },
+    "artifact": "experiments/parser_generator_phase1/generated/type_leaf/src/GeneratedTypeLeaf.pr",
+    "artifact_sha256": "df494064c565751182aec5afe9b292d44e47b5c563a160346029bc854ec27670",
+    "production_artifact": "lib/std/Syntax/Parse/GeneratedType.pr",
+    "test_fixture": {
+      "artifact": "experiments/parser_generator_phase1/generated/type_leaf/tests/type_leaf.pr",
+      "classification": "independent-handwritten",
+      "generated": false,
+      "sha256": "ef459f81df12e22a16d75f347787a79f6cf9296a08a84fa2776e0bac2edeb9f5",
+      "test_count": 55,
+      "transitive": false
+    }
+  }
+}

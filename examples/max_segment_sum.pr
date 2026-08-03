@@ -33,9 +33,9 @@ fn mss_spec(xs) =
     )
 
 fn main() =
-  let xs = [0 - 2, 1, 0 - 3, 4, 0 - 1, 2, 1, 0 - 5, 4]
+  let xs = [-2, 1, -3, 4, -1, 2, 1, -5, 4]
   println(mss(xs))
   println(mss_spec(xs))
-  let ys = [0 - 1, 0 - 2, 0 - 3]
+  let ys = [-1, -2, -3]
   println(mss(ys))
   println(mss_spec(ys))

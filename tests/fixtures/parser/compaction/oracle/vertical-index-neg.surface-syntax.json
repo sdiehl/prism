@@ -1,0 +1,56 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "cb6f4c79eaa0a03e0e7ee766d86fb32c2775e3387b44bdb9f6559e17bbed6267",
+    "text": "fn corpus(x, i) = -x[i]\n"
+  },
+  "items": [
+    {
+      "body": {
+        "expr": {
+          "expr": {
+            "kind": "var",
+            "name": "x",
+            "span": [
+              19,
+              20
+            ]
+          },
+          "index": {
+            "kind": "var",
+            "name": "i",
+            "span": [
+              21,
+              22
+            ]
+          },
+          "kind": "index",
+          "span": [
+            19,
+            23
+          ]
+        },
+        "kind": "neg",
+        "span": [
+          18,
+          23
+        ]
+      },
+      "kind": "fn",
+      "name": "corpus",
+      "params": [
+        {
+          "name": "x"
+        },
+        {
+          "name": "i"
+        }
+      ],
+      "span": [
+        0,
+        23
+      ]
+    }
+  ]
+}

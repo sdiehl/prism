@@ -96,7 +96,7 @@
 
 <a id="wand-1987"></a> Wand, M. (1987). Complete type inference for simple objects. _Logic in Computer Science (LICS)_.
 
-<a id="weeks-2006"></a> Weeks, S. (2006). Whole-program compilation in MLton. _ML Workshop_.
+<a id="weeks-2006"></a> Weeks, S. (2006). Whole-program compilation in MLton. _ML Workshop_. MLton and Stalin are the two direct whole-program compiler precursors in Prism's lineage.
 
 <a id="white-2015"></a> White, L., Bour, F., & Yallop, J. (2015). Modular implicits. _Electronic Proceedings in Theoretical Computer Science, 198_, 22-63.
 

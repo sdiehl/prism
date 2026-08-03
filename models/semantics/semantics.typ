@@ -161,6 +161,12 @@ $
 $Gamma$ is a closed Core program: a finite table of named functions. Function
 lookup is written $Gamma(f)$ and is partial.
 
+#pagebreak(weak: true)
+
+#include "statics.typ"
+
+#pagebreak(weak: true)
+
 = Runtime terms
 
 Runtime values are distinct from syntactic values because closures, thunks, and

@@ -24,6 +24,7 @@ pub type Latent = BTreeMap<Sym, BTreeSet<MaskOp>>;
 
 /// The latent map: each function's ops plus those latent in its callees, as a
 /// least fixpoint over the call graph.
+#[must_use]
 pub fn latent_map(fns: &[TypedCoreFn]) -> Latent {
     let seed: Latent = fns.iter().map(|f| (f.name(), BTreeSet::new())).collect();
     let bodies: BTreeMap<Sym, &TypedComp> = fns.iter().map(|f| (f.name(), f.body())).collect();
@@ -32,14 +33,6 @@ pub fn latent_map(fns: &[TypedCoreFn]) -> Latent {
         latent(bodies[name], cur, &mut s);
         s
     })
-}
-
-/// Each function's latent op identities, with the mask depth dropped.
-pub fn latent_ops(fns: &[TypedCoreFn]) -> BTreeMap<Sym, BTreeSet<Sym>> {
-    latent_map(fns)
-        .into_iter()
-        .map(|(f, ops)| (f, ops.into_iter().map(|o| o.id).collect()))
-        .collect()
 }
 
 /// The ops `c` can still perform in its enclosing context.
@@ -95,11 +88,13 @@ pub fn latent(c: &TypedComp, fl: &Latent, out: &mut BTreeSet<MaskOp>) {
 }
 
 /// The escape set of a `handle`: every op its evaluation can still perform in
-/// the enclosing context. Ops the handler catches are removed at depth 0 (a
-/// masked occurrence peels one level instead). The return and op clauses run
-/// in the enclosing context, not under the handler, so their latents flow out
-/// unmasked: a clause re-performing this handler's own op escapes outward
-/// exactly like a foreign op.
+/// the enclosing context.
+///
+/// Ops the handler catches are removed at depth 0 (a masked occurrence peels
+/// one level instead). The return and op clauses run in the enclosing context,
+/// not under the handler, so their latents flow out unmasked: a clause
+/// re-performing this handler's own op escapes outward exactly like a foreign
+/// op.
 // The escape set contributed by the handled action alone: `latent(body)` with
 // the handler's own ops removed at depth 0 (a masked occurrence peels one level
 // instead). This is the whole escape set the compatibility warning diagnostic

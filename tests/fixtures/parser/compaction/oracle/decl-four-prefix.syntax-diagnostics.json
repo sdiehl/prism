@@ -1,0 +1,26 @@
+{
+  "schema": "prism-syntax-diagnostics-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "b687cdfb8b9838e9faf0b2e883d03d62b31c07be43aed72f23067537866bd63e",
+    "text": "foo bar baz qux fn corpus(x) = x\n"
+  },
+  "diagnostics": [
+    {
+      "code": "E7100",
+      "phase": "parse",
+      "span": [
+        12,
+        15
+      ],
+      "message": "unexpected identifier 'qux' at line 1:13, expected 'fn', 'fip', 'fbip', 'replayable'",
+      "expected": [
+        "fbip",
+        "fip",
+        "fn",
+        "replayable"
+      ],
+      "related": []
+    }
+  ]
+}

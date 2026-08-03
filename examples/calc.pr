@@ -2,25 +2,25 @@
 --
 -- Each line is an operator and operand ("+ 5", "* 3") applied to an
 -- accumulator starting at 0. An empty line or "q" quits and prints the total.
--- Parsing is substring + parse_int. step() is pure (! Int), repl() owns the IO.
+-- Parsing is substring + parse_int. step() is pure; repl() owns the IO.
 --
 -- Input fixture (calc.in): + 5, * 3, - 1, q  ->  5, 15, 14, 14.
 
 fn step(acc, op, n) : Int =
-  if str_eq(op, "+") then
+  if op == "+" then
     acc + n
-  elif str_eq(op, "-") then
+  elif op == "-" then
     acc - n
-  elif str_eq(op, "*") then
+  elif op == "*" then
     acc * n
-  elif str_eq(op, "/") then
+  elif op == "/" then
     acc / n
   else
     acc
 
 fn repl(acc) : Int ! {IO, Console} =
   let line = read_line()
-  if str_eq(line, "q") || str_eq(line, "") then
+  if line == "q" || line == "" then
     println(acc)
     acc
   else

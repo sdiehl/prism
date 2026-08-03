@@ -1,0 +1,427 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "6604ed563d03dafd3f88333113a7c4ff73ca81f6ee7f2a5d25f7d9c9cccfc62e",
+    "text": "fn corpus(x) =\n  if x > 0 then\n    x + 1\n  elif x < 0 then\n    x - 1\n  x\n"
+  },
+  "raw": [
+    {
+      "kind": "fn",
+      "span": [
+        0,
+        2
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        3,
+        9
+      ],
+      "value": "corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        9,
+        10
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        10,
+        11
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ")",
+      "span": [
+        11,
+        12
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        13,
+        14
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        17,
+        19
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        20,
+        21
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ">",
+      "span": [
+        22,
+        23
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        24,
+        25
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "then",
+      "span": [
+        26,
+        30
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        35,
+        36
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "+",
+      "span": [
+        37,
+        38
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        39,
+        40
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "elif",
+      "span": [
+        43,
+        47
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        48,
+        49
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "<",
+      "span": [
+        50,
+        51
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        52,
+        53
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "then",
+      "span": [
+        54,
+        58
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        63,
+        64
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "-",
+      "span": [
+        65,
+        66
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        67,
+        68
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        71,
+        72
+      ],
+      "value": "x"
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        0,
+        2
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        3,
+        9
+      ],
+      "value": "corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        9,
+        10
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        10,
+        11
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ")",
+      "span": [
+        11,
+        12
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        13,
+        14
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        17,
+        17
+      ]
+    },
+    {
+      "kind": "if",
+      "span": [
+        17,
+        19
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        20,
+        21
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ">",
+      "span": [
+        22,
+        23
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        24,
+        25
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "then",
+      "span": [
+        26,
+        30
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        35,
+        35
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        35,
+        36
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "+",
+      "span": [
+        37,
+        38
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        39,
+        40
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        40,
+        40
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        40,
+        40
+      ]
+    },
+    {
+      "kind": "elif",
+      "span": [
+        43,
+        47
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        48,
+        49
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "<",
+      "span": [
+        50,
+        51
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        52,
+        53
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "then",
+      "span": [
+        54,
+        58
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        63,
+        63
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        63,
+        64
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "-",
+      "span": [
+        65,
+        66
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        67,
+        68
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        68,
+        68
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        68,
+        68
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        71,
+        72
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        72,
+        72
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        72,
+        72
+      ]
+    }
+  ],
+  "trivia": []
+}

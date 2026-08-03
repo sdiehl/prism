@@ -1,0 +1,5 @@
+fn f(x) =
+  if x then
+    0
+  elif x 0 then
+    0

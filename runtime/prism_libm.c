@@ -102,7 +102,9 @@ double prism_m_fmod(double x, double y) {
 /* The vendored hypot calls `sqrt`; provide it as the hardware IEEE square root
  * (correctly rounded on every target, so identical everywhere and matching the
  * `Sqrt` FloatOp's intrinsic lowering). Defining it here means the vendored set
- * needs no system libm even at -O0, where clang would otherwise emit a libcall. */
+ * needs no system libm even at -O0, where clang would otherwise emit a libcall.
+ * The standard name is deliberate and required: it is what a synthesized
+ * libcall resolves to. See the absent-names rule in prism_libm_rename.h. */
 double sqrt(double x) {
     /* Emit the hardware IEEE square-root instruction directly on the real
      * targets. `__builtin_sqrt` is permitted to lower to a call to this very

@@ -4,7 +4,7 @@ class Ord(a)
 instance ordInt : Ord(Int)
   fn cmp(x, y) =
     if x < y then
-      0 - 1
+      -1
     else
       1
 
@@ -13,6 +13,6 @@ instance ordRev : Ord(Int)
     if x < y then
       1
     else
-      0 - 1
+      -1
 
 fn main() = cmp(1, 2)

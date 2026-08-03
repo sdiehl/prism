@@ -1,6 +1,6 @@
 -- Parametric effects: the prelude's one Emit, many instantiations.
 --
--- walk() walks any list, performing Emit(a) at the element type, so one
+-- `sof` turns any list into an Emit(a) stream, so one
 -- producer serves both uses below. Emit(Int) and Emit(String) are distinct
 -- row labels. total() folds emitted numbers into a sum, shout() prints emitted
 -- words, and neither handler sees the other's values. Expected output:
@@ -9,22 +9,17 @@
 --   lo
 --   hi
 
-fn walk(xs : List(a)) : Unit ! {Emit(a)} =
-  match xs of
-    Nil => ()
-    Cons(x, rest) =>
-      emit(x)
-      walk(rest)
-
 fn total(xs : List(Int)) : Int =
+  let stream = sof(xs)
   let f =
-    handle walk(xs) with
+    handle stream(()) with
       emit(v) resume k => \(acc) -> k(())(acc + v)
       return r => \(acc) -> acc
   f(0)
 
 fn shout(xs : List(String)) : Unit ! {IO} =
-  handle walk(xs) with
+  let stream = sof(xs)
+  handle stream(()) with
     emit(w) resume k =>
       println(w)
       k(())

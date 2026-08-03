@@ -20,6 +20,13 @@ import Data.List (append, reverse, foldl)
 pub let graph_empty : Map(k, List(k)) = map_empty
 
 -- | The successors of `u` in ascending order (empty if `u` has no out-edges).
+--
+-- ```prism
+-- graph_successors(graph_from_edges([(1, 3), (1, 2), (1, 2)]), 1)
+-- ```
+-- ```output
+-- [2, 3]
+-- ```
 pub fn graph_successors(g : Map(k, List(k)), u : k) : List(k) given Ord(k) =
   match map_lookup(u, g) of
     None => Nil
@@ -64,6 +71,13 @@ pub fn graph_from_edges(es : List((k, k))) : Map(k, List(k)) given Ord(k) =
 
 -- | Every node, in ascending order: the sources plus everything pointed at, so a
 -- sink that only ever appears as a successor still shows up.
+--
+-- ```prism
+-- graph_nodes(graph_from_edges([(3, 1), (1, 2)]))
+-- ```
+-- ```output
+-- [1, 2, 3]
+-- ```
 pub fn graph_nodes(g : Map(k, List(k))) : List(k) given Ord(k) =
   let sources = set_from_list(map_keys(g))
   let all = foldl(
@@ -75,6 +89,13 @@ pub fn graph_nodes(g : Map(k, List(k))) : List(k) given Ord(k) =
 
 -- | The reverse graph: every edge `u -> v` becomes `v -> u`. Nodes are
 -- preserved, so an isolated node survives.
+--
+-- ```prism
+-- graph_successors(graph_reverse(graph_from_edges([(1, 2), (3, 2)])), 2)
+-- ```
+-- ```output
+-- [1, 3]
+-- ```
 pub fn graph_reverse(g : Map(k, List(k))) : Map(k, List(k)) given Ord(k) =
   let seeded =
     foldl(\(acc, u) -> graph_add_node(acc, u), graph_empty, graph_nodes(g))
@@ -86,6 +107,14 @@ pub fn graph_reverse(g : Map(k, List(k))) : Map(k, List(k)) given Ord(k) =
 
 -- | Depth-first preorder from `start`: `start`, then its successors' subtrees,
 -- successors taken in ascending order. Each node appears once.
+--
+-- ```prism
+-- # let g = graph_from_edges([(1, 2), (1, 3), (2, 4), (3, 4)])
+-- (graph_dfs(g, 1), graph_bfs(g, 1))
+-- ```
+-- ```output
+-- ([1, 2, 4, 3], [1, 2, 3, 4])
+-- ```
 pub fn graph_dfs(g : Map(k, List(k)), start : k) : List(k) given Ord(k) =
   match dfs_go(g, Cons(start, Nil), set_empty, Nil) of
     (_seen, acc) => reverse(acc)
@@ -147,6 +176,13 @@ pub fn graph_reachable(g : Map(k, List(k)), start : k) : List(k) given Ord(k) =
 
 -- | The transitive closure: an edge `u -> v` for every `v` reachable from `u`
 -- via at least one step (so `u -> u` only when `u` lies on a cycle).
+--
+-- ```prism
+-- graph_successors(graph_transitive_closure(graph_from_edges([(1, 2), (2, 3)])), 1)
+-- ```
+-- ```output
+-- [2, 3]
+-- ```
 pub fn graph_transitive_closure(g : Map(k, List(k))) : Map(k, List(k)) given Ord(k) =
   foldl(
       \(acc, u) -> foldl(\(a, v) -> graph_add_edge(a, u, v), acc, reachable_from_succ(g, u)),
@@ -167,6 +203,13 @@ fn reachable_from_succ(g : Map(k, List(k)), u : k) : List(k) given Ord(k) =
 -- a depth-first postorder over nodes in ascending order, reversed. A graph with
 -- a cycle still yields a total order, but not a valid topo sort (a cycle admits
 -- none); pair it with `graph_scc` when cycles are possible.
+--
+-- ```prism
+-- graph_topo_sort(graph_from_edges([(1, 2), (1, 3), (2, 3)]))
+-- ```
+-- ```output
+-- [1, 2, 3]
+-- ```
 pub fn graph_topo_sort(g : Map(k, List(k))) : List(k) given Ord(k) =
   match (foldl(\(st, u) -> topo_visit(g, u, st), (set_empty, Nil), graph_nodes(g))) of
     (_seen, order) => order
@@ -192,6 +235,13 @@ fn topo_visit(
 -- comes after every component reachable from it, and each component's members
 -- are in ascending order. A node with no self-loop is its own singleton
 -- component. This mirrors the compiler's own SCC ordering exactly.
+--
+-- ```prism
+-- graph_scc(graph_from_edges([(1, 2), (2, 1), (2, 3)]))
+-- ```
+-- ```output
+-- [[3], [1, 2]]
+-- ```
 pub fn graph_scc(g : Map(k, List(k))) : List(List(k)) given Ord(k) =
   match (foldl(\(st, u) -> scc_start(g, u, st), scc_init(), graph_nodes(g))) of
     (_meta, _on, _cstk, _next, sccs, _work) => reverse(sccs)

@@ -13,7 +13,7 @@ fn fizz(o) =
   match o of
     Some(0) => 1000
     Some(n) => n
-    None => 0 - 1
+    None => -1
 
 fn flag(b) =
   match b of

@@ -110,7 +110,7 @@ const WEB_RESIDENTS: &[Resident] = &[
             "teleport_source",
             "teleport_suspend",
         ],
-        example: Some("teleport.pr"),
+        example: Some("fixtures/runtime/teleport.pr"),
         sentinel: None,
     },
     Resident {

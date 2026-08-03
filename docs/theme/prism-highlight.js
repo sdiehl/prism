@@ -16,12 +16,17 @@
             "try catch transact alias class instance canonical pattern deriving where " +
             "given handle with handler mask ctl final fun val return let var " +
             "borrow in for while loop break continue do if then else elif match of " +
-            "each forall using stable probe logic requires ensures total assume",
+            "each forall using stable probe logic requires ensures total assume reflect " +
+            "never once many portable noescape noalloc",
           literal: "true false",
           type: "Int Bool Unit Float Char String I64 U64",
         },
         contains: [
           hl.COMMENT("--", "$"),
+          // The raw multiline form first: its body admits no escapes, so it
+          // takes no `contains`, and it must be tried before the ordinary
+          // opener would match its first quote.
+          { className: "string", begin: 'r"""', end: '"""' },
           { className: "string", begin: '"', end: '"', contains: [{ begin: "\\\\." }] },
           { className: "string", begin: "'", end: "'", contains: [{ begin: "\\\\." }] },
           hl.C_NUMBER_MODE,

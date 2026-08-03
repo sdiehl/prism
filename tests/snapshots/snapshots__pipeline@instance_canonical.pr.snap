@@ -4,7 +4,7 @@ expression: "normalize_pipeline_report(&prism::report(&src))"
 input_file: tests/cases/instance_canonical.pr
 ---
 == tokens ==
-VOpen Class UIdent("Ord") LParen Ident("a") RParen VOpen Ident("cmp") Colon LParen Ident("a") Comma Ident("a") RParen Arrow KwInt VClose VSemi Instance Ident("ordInt") Colon UIdent("Ord") LParen KwInt RParen VOpen Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq VOpen If Ident("x") Lt Ident("y") Then VOpen Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) VClose VSemi Else VOpen Int(IntLit { value: 1, suffix: None }) VClose VClose VClose VSemi Instance Ident("ordRev") Colon UIdent("Ord") LParen KwInt RParen VOpen Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq VOpen If Ident("x") Lt Ident("y") Then VOpen Int(IntLit { value: 1, suffix: None }) VClose VSemi Else VOpen Int(IntLit { value: 0, suffix: None }) Minus Int(IntLit { value: 1, suffix: None }) VClose VClose VClose VSemi Canonical UIdent("Ord") LParen KwInt RParen Eq Ident("ordInt") VSemi Fn Ident("main") LParen RParen Eq Ident("cmp") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 2, suffix: None }) RParen VClose
+VOpen Class UIdent("Ord") LParen Ident("a") RParen VOpen Ident("cmp") Colon LParen Ident("a") Comma Ident("a") RParen Arrow KwInt VClose VSemi Instance Ident("ordInt") Colon UIdent("Ord") LParen KwInt RParen VOpen Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq VOpen If Ident("x") Lt Ident("y") Then VOpen Minus Int(IntLit { value: 1, suffix: None }) VClose VSemi Else VOpen Int(IntLit { value: 1, suffix: None }) VClose VClose VClose VSemi Instance Ident("ordRev") Colon UIdent("Ord") LParen KwInt RParen VOpen Fn Ident("cmp") LParen Ident("x") Comma Ident("y") RParen Eq VOpen If Ident("x") Lt Ident("y") Then VOpen Int(IntLit { value: 1, suffix: None }) VClose VSemi Else VOpen Minus Int(IntLit { value: 1, suffix: None }) VClose VClose VClose VSemi Canonical UIdent("Ord") LParen KwInt RParen Eq Ident("ordInt") VSemi Fn Ident("main") LParen RParen Eq Ident("cmp") LParen Int(IntLit { value: 1, suffix: None }) Comma Int(IntLit { value: 2, suffix: None }) RParen VClose
 
 == ast ==
 Program {
@@ -84,17 +84,7 @@ Program {
                                 span: 87..92,
                             },
                             Spanned {
-                                node: Bin(
-                                    Sub,
-                                    Spanned {
-                                        node: Int(
-                                            IntLit {
-                                                value: 0,
-                                                suffix: None,
-                                            },
-                                        ),
-                                        span: 104..105,
-                                    },
+                                node: Neg(
                                     Spanned {
                                         node: Int(
                                             IntLit {
@@ -102,10 +92,10 @@ Program {
                                                 suffix: None,
                                             },
                                         ),
-                                        span: 108..109,
+                                        span: 105..106,
                                     },
                                 ),
-                                span: 104..109,
+                                span: 104..106,
                             },
                             Spanned {
                                 node: Int(
@@ -114,17 +104,17 @@ Program {
                                         suffix: None,
                                     },
                                 ),
-                                span: 125..126,
+                                span: 122..123,
                             },
                         ),
-                        span: 84..126,
+                        span: 84..123,
                     },
                     wheres: [],
-                    span: 65..126,
+                    span: 65..123,
                 },
             ],
             module: "",
-            span: 36..126,
+            span: 36..123,
         },
         InstanceDecl {
             name: "ordRev",
@@ -160,16 +150,16 @@ Program {
                                         node: Var(
                                             "x",
                                         ),
-                                        span: 179..180,
+                                        span: 176..177,
                                     },
                                     Spanned {
                                         node: Var(
                                             "y",
                                         ),
-                                        span: 183..184,
+                                        span: 180..181,
                                     },
                                 ),
-                                span: 179..184,
+                                span: 176..181,
                             },
                             Spanned {
                                 node: Int(
@@ -178,20 +168,10 @@ Program {
                                         suffix: None,
                                     },
                                 ),
-                                span: 196..197,
+                                span: 193..194,
                             },
                             Spanned {
-                                node: Bin(
-                                    Sub,
-                                    Spanned {
-                                        node: Int(
-                                            IntLit {
-                                                value: 0,
-                                                suffix: None,
-                                            },
-                                        ),
-                                        span: 213..214,
-                                    },
+                                node: Neg(
                                     Spanned {
                                         node: Int(
                                             IntLit {
@@ -199,20 +179,20 @@ Program {
                                                 suffix: None,
                                             },
                                         ),
-                                        span: 217..218,
+                                        span: 211..212,
                                     },
                                 ),
-                                span: 213..218,
+                                span: 210..212,
                             },
                         ),
-                        span: 176..218,
+                        span: 173..212,
                     },
                     wheres: [],
-                    span: 157..218,
+                    span: 154..212,
                 },
             ],
             module: "",
-            span: 128..218,
+            span: 125..212,
         },
     ],
     canonicals: [
@@ -220,7 +200,7 @@ Program {
             class: "Ord",
             head: Int,
             name: "ordInt",
-            span: 220..247,
+            span: 214..241,
         },
     ],
     fns: [
@@ -236,7 +216,7 @@ Program {
                         node: Var(
                             "cmp",
                         ),
-                        span: 261..264,
+                        span: 255..258,
                     },
                     [
                         Spanned {
@@ -246,7 +226,7 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 265..266,
+                            span: 259..260,
                         },
                         Spanned {
                             node: Int(
@@ -255,14 +235,14 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 268..269,
+                            span: 262..263,
                         },
                     ],
                 ),
-                span: 261..270,
+                span: 255..264,
             },
             wheres: [],
-            span: 249..270,
+            span: 243..264,
         },
     ],
 }
@@ -278,25 +258,21 @@ fn main() =
 fn i@ordInt@cmp(x, y) =
   return x to t@2
   return y to t@3
-  t@2 < t@3 to t@6
-  if t@6 then
-    return 0 to t@4
-    return 1 to t@5
-    t@4 - t@5
+  t@2 < t@3 to t@4
+  if t@4 then
+    return -1
   else
     return 1
 fn ordInt() =
   return _DOrd(thunk { \_p0 _p1. i@ordInt@cmp(_p0, _p1) })
 fn i@ordRev@cmp(x, y) =
-  return x to t@7
-  return y to t@8
-  t@7 < t@8 to t@11
-  if t@11 then
+  return x to t@5
+  return y to t@6
+  t@5 < t@6 to t@7
+  if t@7 then
     return 1
   else
-    return 0 to t@9
-    return 1 to t@10
-    t@9 - t@10
+    return -1
 fn ordRev() =
   return _DOrd(thunk { \_p0 _p1. i@ordRev@cmp(_p0, _p1) })
 
@@ -308,29 +284,25 @@ fn main() =
 fn i@ordInt@cmp(x, y) =
   return x to t@2
   return y to t@3
-  t@2 < t@3 to t@6
-  if t@6 then
-    drop t@6
-    return 0 to t@4
-    return 1 to t@5
-    t@4 - t@5
+  t@2 < t@3 to t@4
+  if t@4 then
+    drop t@4
+    return -1
   else
-    drop t@6
+    drop t@4
     return 1
 fn ordInt() =
   return _DOrd(thunk { \_p0 _p1. i@ordInt@cmp(_p0, _p1) })
 fn i@ordRev@cmp(x, y) =
-  return x to t@7
-  return y to t@8
-  t@7 < t@8 to t@11
-  if t@11 then
-    drop t@11
+  return x to t@5
+  return y to t@6
+  t@5 < t@6 to t@7
+  if t@7 then
+    drop t@7
     return 1
   else
-    drop t@11
-    return 0 to t@9
-    return 1 to t@10
-    t@9 - t@10
+    drop t@7
+    return -1
 fn ordRev() =
   return _DOrd(thunk { \_p0 _p1. i@ordRev@cmp(_p0, _p1) })
 
@@ -338,10 +310,10 @@ fn ordRev() =
 ; ModuleID = 'prism'
 source_filename = "prism"
 
-@prism_native_kont_table = constant [1136 x i8] c"scheme  prism-core-hash-v1\0Abundle  26005db8057b97b629f35158330325d6a3cc7ee92ada4e0f64ba38efe10e9088\0Acompiler  0.15.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:26005db8057b97b629f35158330325d6a3cc7ee92ada4e0f64ba38efe10e9088\0Aflag  stdlib-root  prism-core-hash-v1:fa9b26b325586f03a015c0b171e8b665a45821f42a0ba0b58fc6c1304929eb20\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_iZaordIntZacmp  8dc886fc1faf08dbff30f56e901e5210657246b8a9ca13729b65d4c0a37f924e  i@ordInt@cmp\0Afn      prismfn_iZaordRevZacmp  63b364304687a1c3aa2806264000188696d357fddedb18692cbe3d2de19301f5  i@ordRev@cmp\0Afn      prismfn_main  414ab1f4cd86c5479e16a7a87b34586c7f16763833aa2f85724a631049dee256  main\0Afn      prismfn_ordInt  f931e6f0483951f4d1ec06364d33545b7a64ee9666ed6acaf3e269ac3a33c35c  ordInt\0Afn      prismfn_ordRev  b4a3732f785ccfdc97d0d435727bd789ef947de33898cb01bd386b5e7ab7a4db  ordRev\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [949 x i8] c"state-map 1\0Ascheme  prism-core-hash-v1\0Abundle  26005db8057b97b629f35158330325d6a3cc7ee92ada4e0f64ba38efe10e9088\0Acompiler  0.15.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v1:26005db8057b97b629f35158330325d6a3cc7ee92ada4e0f64ba38efe10e9088\0Aflag  stdlib-root  prism-core-hash-v1:fa9b26b325586f03a015c0b171e8b665a45821f42a0ba0b58fc6c1304929eb20\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_iZaordIntZacmp 8dc886fc1faf08dbff30f56e901e5210657246b8a9ca13729b65d4c0a37f924e i@ordInt@cmp arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prismfn_main 414ab1f4cd86c5479e16a7a87b34586c7f16763833aa2f85724a631049dee256 main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [1157 x i8] c"scheme  prism-core-hash-v2\0Abundle  e2b9d440297b39a25388429cc9f69efafeeb2ee86d9f695e9c61f6b313d2dbed\0Acompiler  0.16.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:e2b9d440297b39a25388429cc9f69efafeeb2ee86d9f695e9c61f6b313d2dbed\0Aflag  stdlib-root  prism-core-hash-v2:5f74ceb8cdbb6bee38bb1d4797b4d7688c207bf37e02c35c3cc5ef7876557fa3\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_iZaordIntZacmp  08eace05b71e4956caa3a8b2aa58770c0868212b4ffb0efa256c345e881d123f  i@ordInt@cmp\0Afn      prismfn_iZaordRevZacmp  a55aaea16e55f530509d4217818614a9d0e14e791bf58d6f94bbe2e458551220  i@ordRev@cmp\0Afn      prismfn_main  ed0609e5d77f0f5f6ddbad114d0233b709bd2eff84c61b14ff0997af334528fd  main\0Afn      prismfn_ordInt  935765be9b0a38f5be50cc3b2c0969e4219c788fc93b8126e9a7e17ae3bc9306  ordInt\0Afn      prismfn_ordRev  d4d1cfc48a8fd97d9c43afdec88e431a31a0794bf17706d7d3e946076ef0ed4d  ordRev\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [970 x i8] c"state-map 1\0Ascheme  prism-core-hash-v2\0Abundle  e2b9d440297b39a25388429cc9f69efafeeb2ee86d9f695e9c61f6b313d2dbed\0Acompiler  0.16.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:e2b9d440297b39a25388429cc9f69efafeeb2ee86d9f695e9c61f6b313d2dbed\0Aflag  stdlib-root  prism-core-hash-v2:5f74ceb8cdbb6bee38bb1d4797b4d7688c207bf37e02c35c3cc5ef7876557fa3\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_iZaordIntZacmp 08eace05b71e4956caa3a8b2aa58770c0868212b4ffb0efa256c345e881d123f i@ordInt@cmp arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prismfn_main ed0609e5d77f0f5f6ddbad114d0233b709bd2eff84c61b14ff0997af334528fd main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol2 = private constant [13 x i8] c"prismfn_main\00"
-@.kont_hash2 = private constant [65 x i8] c"414ab1f4cd86c5479e16a7a87b34586c7f16763833aa2f85724a631049dee256\00"
+@.kont_hash2 = private constant [65 x i8] c"ed0609e5d77f0f5f6ddbad114d0233b709bd2eff84c61b14ff0997af334528fd\00"
 @.kont_name2 = private constant [5 x i8] c"main\00"
 @prism_native_kont_ptrs = constant [1 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prismfn_main, ptr @.kont_symbol2, ptr @.kont_hash2, ptr @.kont_name2 }], section ",.prism_kont", align 8
 @prism_native_kont_ptrs_len = constant i64 1, section ",.prism_kont", align 8

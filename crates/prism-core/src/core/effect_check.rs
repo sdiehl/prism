@@ -4,6 +4,9 @@ use super::cbpv::{Comp, Core, Value};
 
 /// Reject any raw `do`, `handle`, or `mask` node that survives typed effect
 /// lowering and erasure.
+///
+/// # Errors
+/// A message naming the first function that still carries such a node.
 pub fn residual_effects(core: &Core) -> Result<(), String> {
     for function in &core.fns {
         if raw_effects(&function.body) {

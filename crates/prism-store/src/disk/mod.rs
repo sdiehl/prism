@@ -559,10 +559,17 @@ fn write_temp(dir: &Path, bytes: &[u8]) -> io::Result<PathBuf> {
     Ok(tmp)
 }
 
-// Write `bytes` to `path` atomically: full write plus fsync to a unique temp in
-// the same directory, then hard-link into place. The link is the commit point:
-// it fails rather than replaces when the destination exists, so a published
-// object is never overwritten; a crash before it leaves only the temp.
+/// Write `bytes` to `path` atomically, without ever replacing an existing file.
+///
+/// A full write plus fsync to a unique temp in the same directory, then a hard
+/// link into place. The link is the commit point: it fails rather than replaces
+/// when the destination exists, so a published object is never overwritten; a
+/// crash before it leaves only the temp. The flag reports whether this call was
+/// the one that published.
+///
+/// # Errors
+/// Any filesystem failure while creating the temp directory entry, writing,
+/// syncing, or linking. An existing destination is not an error.
 pub fn atomic_write_if_absent(path: &Path, bytes: &[u8]) -> io::Result<bool> {
     let tmp = write_temp(parent_dir(path)?, bytes)?;
     #[cfg(test)]
@@ -576,8 +583,14 @@ pub fn atomic_write_if_absent(path: &Path, bytes: &[u8]) -> io::Result<bool> {
     linked
 }
 
-// As above, but the commit point is a rename over the destination, for the
-// mutable layers (metadata, indexes) where replacement is the point.
+/// Write `bytes` to `path` atomically, replacing any existing file.
+///
+/// As [`atomic_write_if_absent`], but the commit point is a rename over the
+/// destination, for the mutable layers (metadata, indexes) where replacement is
+/// the point.
+///
+/// # Errors
+/// Any filesystem failure while writing, syncing, or renaming.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let tmp = write_temp(parent_dir(path)?, bytes)?;
     #[cfg(test)]

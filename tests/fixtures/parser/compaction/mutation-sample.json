@@ -1,0 +1,651 @@
+{
+  "schema": "prism-parser-compaction-mutation-sample-v1",
+  "oracle_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+  "status": "reviewed-local-rust-reproduction-not-content-addressed",
+  "oracle_provenance": {
+    "executable_path": "target/release/prism",
+    "executable_blake3": "f18f9baf5818c83ad95ee1a87eba269c86521b2b3629b7f130032c5f9bbe9c71",
+    "manifest_executable_blake3": "6a1e6b2c0e6c1cb9621c653714f96321563cb7ff26e3cb73ebc1fdc46c49141a",
+    "curated_receipts_exact": 45,
+    "curated_receipts_total": 45,
+    "content_addressed": false
+  },
+  "draw_cap_per_mutator": 1,
+  "totals": {
+    "scheduled": 32,
+    "applicable": 24,
+    "inapplicable": 8,
+    "lex_failed": 0,
+    "oracle_accepted": 6,
+    "oracle_rejected": 18,
+    "discarded": 0,
+    "novel": 24,
+    "handwritten_exact": 21,
+    "handwritten_mismatch": 3
+  },
+  "edit_classes_exercised": [
+    "delete-name",
+    "delete-punctuation",
+    "insert-punctuation",
+    "substitute-name",
+    "substitute-punctuation"
+  ],
+  "lanes": [
+    {
+      "lane": "type",
+      "seed": "0x5459504556310001",
+      "scheduled": 8,
+      "applicable": 5,
+      "inapplicable": 3,
+      "oracle_accepted": 2,
+      "oracle_rejected": 3,
+      "handwritten_exact": 5,
+      "handwritten_mismatch": 0
+    },
+    {
+      "lane": "pattern",
+      "seed": "0x5041545656310001",
+      "scheduled": 8,
+      "applicable": 8,
+      "inapplicable": 0,
+      "oracle_accepted": 2,
+      "oracle_rejected": 6,
+      "handwritten_exact": 8,
+      "handwritten_mismatch": 0
+    },
+    {
+      "lane": "vertical",
+      "seed": "0x5645525456310001",
+      "scheduled": 8,
+      "applicable": 5,
+      "inapplicable": 3,
+      "oracle_accepted": 1,
+      "oracle_rejected": 4,
+      "handwritten_exact": 3,
+      "handwritten_mismatch": 2
+    },
+    {
+      "lane": "cross",
+      "seed": "0x43524f5356310001",
+      "scheduled": 8,
+      "applicable": 6,
+      "inapplicable": 2,
+      "oracle_accepted": 1,
+      "oracle_rejected": 5,
+      "handwritten_exact": 5,
+      "handwritten_mismatch": 1
+    }
+  ],
+  "candidates": [
+    {
+      "id": "type-000-45b34b961732",
+      "lane": "type",
+      "schedule_index": 0,
+      "mutator": "delete-token",
+      "base_case": "type-unboxed-record",
+      "source_blake3": "45b34b961732d1e7abe9b5ec99f73f8d9a7793fee9e2bf861f06c0baa2b7a0cf",
+      "oracle_result_kind": "diagnostics",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "type-064-a3ec50f39aec",
+      "lane": "type",
+      "schedule_index": 64,
+      "mutator": "truncate-token-boundary",
+      "base_case": "type-effect-misuse",
+      "source_blake3": "a3ec50f39aece54f5bae0df55abe00366683783ea398b04afbaed651e74ddb90",
+      "oracle_result_kind": "diagnostics",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "type-192-73d60384f786",
+      "lane": "type",
+      "schedule_index": 192,
+      "mutator": "edit-comma-or-bar",
+      "base_case": "type-tuple",
+      "source_blake3": "73d60384f78687c3ea3af36d635219d6d620a882f508b62aa1ad26e14a51f18d",
+      "oracle_result_kind": "surface",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "type-320-8d2db5446220",
+      "lane": "type",
+      "schedule_index": 320,
+      "mutator": "edit-or-splice-prefix",
+      "base_case": "type-dim-chain",
+      "source_blake3": "8d2db5446220d24eb62a110631cfb715248283dfbcaa7e5cc5202a05d63445f9",
+      "oracle_result_kind": "diagnostics",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "type-384-fdc02b57c612",
+      "lane": "type",
+      "schedule_index": 384,
+      "mutator": "replace-payload-same-lexer-class",
+      "base_case": "type-forall",
+      "source_blake3": "fdc02b57c61246ffd9afc6fe83d242e84a8bc4165675a720bf39cce1cb26fc80",
+      "oracle_result_kind": "surface",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "pattern-000-b7a78a97dab6",
+      "lane": "pattern",
+      "schedule_index": 0,
+      "mutator": "delete-token",
+      "base_case": "pattern-missing-a-separator",
+      "source_blake3": "b7a78a97dab67e1987d8169f8847086a3c1a14b59f5a0ed67112942136dcc758",
+      "oracle_result_kind": "surface",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "pattern-064-42065a0c84b3",
+      "lane": "pattern",
+      "schedule_index": 64,
+      "mutator": "truncate-token-boundary",
+      "base_case": "pattern-record-spread",
+      "source_blake3": "42065a0c84b305eed6d167ee0535751ee56b04f622418a9d75dbd7f58047adee",
+      "oracle_result_kind": "diagnostics",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "pattern-128-278ab9f6a683",
+      "lane": "pattern",
+      "schedule_index": 128,
+      "mutator": "replace-closer",
+      "base_case": "pattern-record-match",
+      "source_blake3": "278ab9f6a683405b5dfdd877d4d07d342a811fda11a5627b8041addf0d4605bc",
+      "oracle_result_kind": "diagnostics",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "pattern-192-2090bb1169ec",
+      "lane": "pattern",
+      "schedule_index": 192,
+      "mutator": "edit-comma-or-bar",
+      "base_case": "pattern-list-match",
+      "source_blake3": "2090bb1169ec0f15bfdb1bc78a325dbad40dc778f018ddce8b606aa1f5bece69",
+      "oracle_result_kind": "diagnostics",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "pattern-256-213dae7341b8",
+      "lane": "pattern",
+      "schedule_index": 256,
+      "mutator": "insert-closer-at-separator",
+      "base_case": "pattern-comma-wrong-close",
+      "source_blake3": "213dae7341b8530493020fa4a15348d6c364ce66bc4cd3e681fba54c740993b7",
+      "oracle_result_kind": "diagnostics",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "pattern-320-def1263f2e60",
+      "lane": "pattern",
+      "schedule_index": 320,
+      "mutator": "edit-or-splice-prefix",
+      "base_case": "pattern-record-separator-wrong-close",
+      "source_blake3": "def1263f2e60ad439c5c18bf27c8faa57316c43f9f85436e62cc4f44e8811a09",
+      "oracle_result_kind": "diagnostics",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "pattern-384-74a43a39f76d",
+      "lane": "pattern",
+      "schedule_index": 384,
+      "mutator": "replace-payload-same-lexer-class",
+      "base_case": "pattern-record-spread",
+      "source_blake3": "74a43a39f76d11ffb992f101a2f658f2a2b02597b00c24e47345183c5375485f",
+      "oracle_result_kind": "surface",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "pattern-448-e815c00d223e",
+      "lane": "pattern",
+      "schedule_index": 448,
+      "mutator": "edit-newline-or-indentation",
+      "base_case": "pattern-record-separator-wrong-close",
+      "source_blake3": "e815c00d223e9710ad6ba3bfd38a48be810076db5e9938ff9d6cc6dd4c00f69a",
+      "oracle_result_kind": "diagnostics",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "vertical-000-09d14df7411f",
+      "lane": "vertical",
+      "schedule_index": 0,
+      "mutator": "delete-token",
+      "base_case": "vert-open-if",
+      "source_blake3": "09d14df7411fe74d69e77651a96d239421be1486ef840972c6fa608ccc329dbc",
+      "oracle_result_kind": "diagnostics",
+      "handwritten_status": "mismatch"
+    },
+    {
+      "id": "vertical-064-dea2b412aa90",
+      "lane": "vertical",
+      "schedule_index": 64,
+      "mutator": "truncate-token-boundary",
+      "base_case": "decl-newline-test",
+      "source_blake3": "dea2b412aa90f1b43a06ca5e8b8feafec45ae1357971322749480f4e1572eaa2",
+      "oracle_result_kind": "diagnostics",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "vertical-320-0ba2908f9177",
+      "lane": "vertical",
+      "schedule_index": 320,
+      "mutator": "edit-or-splice-prefix",
+      "base_case": "vert-try-bound",
+      "source_blake3": "0ba2908f91778a3ce587267d89f498c15750981ae3dcea859144992c5c674e04",
+      "oracle_result_kind": "diagnostics",
+      "handwritten_status": "mismatch"
+    },
+    {
+      "id": "vertical-384-17a63ffed72f",
+      "lane": "vertical",
+      "schedule_index": 384,
+      "mutator": "replace-payload-same-lexer-class",
+      "base_case": "vertical-modifiers",
+      "source_blake3": "17a63ffed72f19ba3a5b73f781573b9ff5565974cfeadf6a13d72b15b3b5c460",
+      "oracle_result_kind": "surface",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "vertical-448-56c9fc85615f",
+      "lane": "vertical",
+      "schedule_index": 448,
+      "mutator": "edit-newline-or-indentation",
+      "base_case": "vert-open-if",
+      "source_blake3": "56c9fc85615f86750dd3e58c75aabcde5fa5a158699f2e3a55f2a6f420c575da",
+      "oracle_result_kind": "diagnostics",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "cross-000-80a9a1b38680",
+      "lane": "cross",
+      "schedule_index": 0,
+      "mutator": "delete-token",
+      "base_case": "pattern-record-separator-wrong-close",
+      "source_blake3": "80a9a1b386801b178bb172ed7b9aaae446a66724972aee33d6f266399f834114",
+      "oracle_result_kind": "diagnostics",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "cross-064-6392a808f7ee",
+      "lane": "cross",
+      "schedule_index": 64,
+      "mutator": "truncate-token-boundary",
+      "base_case": "vert-mods-long",
+      "source_blake3": "6392a808f7ee816233098fd4fb95e1410a64bf79ae0ea12de6d3eb09e3ae1ad3",
+      "oracle_result_kind": "diagnostics",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "cross-192-9d43ce7cbd81",
+      "lane": "cross",
+      "schedule_index": 192,
+      "mutator": "edit-comma-or-bar",
+      "base_case": "pattern-record-match",
+      "source_blake3": "9d43ce7cbd81fc712b42090d3ea3175bdccd1dbfdd7832ac14c735979ce112f2",
+      "oracle_result_kind": "diagnostics",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "cross-320-fea384c4df28",
+      "lane": "cross",
+      "schedule_index": 320,
+      "mutator": "edit-or-splice-prefix",
+      "base_case": "ret-retired-bare",
+      "source_blake3": "fea384c4df28e3320f235c86b4487d5476203ff8aa2a86144a63483a70c8526b",
+      "oracle_result_kind": "diagnostics",
+      "handwritten_status": "mismatch"
+    },
+    {
+      "id": "cross-384-9b74aa22b589",
+      "lane": "cross",
+      "schedule_index": 384,
+      "mutator": "replace-payload-same-lexer-class",
+      "base_case": "vert-mods-invalid",
+      "source_blake3": "9b74aa22b589de8bbe38d34d75d2044da66b2d6ed83c1eb183c201e9f590e0f2",
+      "oracle_result_kind": "diagnostics",
+      "handwritten_status": "exact"
+    },
+    {
+      "id": "cross-448-97afa874ca61",
+      "lane": "cross",
+      "schedule_index": 448,
+      "mutator": "edit-newline-or-indentation",
+      "base_case": "vertical-modifiers",
+      "source_blake3": "97afa874ca619ebdcf7688c04b77ae57eee793dd872d8749ccea93762465318a",
+      "oracle_result_kind": "surface",
+      "handwritten_status": "exact"
+    }
+  ],
+  "witnesses": [
+    {
+      "origins": [
+        "type-064-a3ec50f39aec"
+      ],
+      "status": "exact",
+      "oracle_status": "rejected",
+      "handwritten_result": "exact",
+      "provenance": [
+        {
+          "origin": "type-064-a3ec50f39aec",
+          "lane": "type",
+          "seed": "0x5459504556310001",
+          "mutator": "truncate-token-boundary",
+          "parent": "type-effect-misuse"
+        }
+      ],
+      "source": "mutations/minimized/type-truncated-annotation.pr",
+      "oracle": "mutations/oracle/type-truncated-annotation.syntax-diagnostics.json",
+      "minimization": {
+        "method": "token-and-payload reduction",
+        "original_bytes": [
+          19
+        ],
+        "minimized_bytes": 11,
+        "deduplicated_origins": false,
+        "preserved": "E7100 parse span class with unequal expected sets"
+      },
+      "rust_expected": [
+        ")",
+        ",",
+        ":="
+      ],
+      "handwritten_expected": [
+        ")",
+        ",",
+        ":="
+      ]
+    },
+    {
+      "origins": [
+        "pattern-320-def1263f2e60",
+        "cross-000-80a9a1b38680"
+      ],
+      "status": "exact",
+      "oracle_status": "rejected",
+      "handwritten_result": "exact",
+      "provenance": [
+        {
+          "origin": "pattern-320-def1263f2e60",
+          "lane": "pattern",
+          "seed": "0x5041545656310001",
+          "mutator": "edit-or-splice-prefix",
+          "parent": "pattern-record-separator-wrong-close"
+        },
+        {
+          "origin": "cross-000-80a9a1b38680",
+          "lane": "cross",
+          "seed": "0x43524f5356310001",
+          "mutator": "delete-token",
+          "parent": "pattern-record-separator-wrong-close"
+        }
+      ],
+      "source": "mutations/minimized/pattern-record-wrong-close.pr",
+      "oracle": "mutations/oracle/pattern-record-wrong-close.syntax-diagnostics.json",
+      "minimization": {
+        "method": "token-and-payload reduction",
+        "original_bytes": [
+          49,
+          48
+        ],
+        "minimized_bytes": 24,
+        "deduplicated_origins": true,
+        "preserved": "E7100 parse span class with unequal expected sets"
+      },
+      "rust_expected": [
+        "(",
+        "-",
+        "[",
+        "char",
+        "false",
+        "float",
+        "ident",
+        "int",
+        "qual",
+        "true",
+        "uid",
+        "v}"
+      ],
+      "handwritten_expected": [
+        "(",
+        "-",
+        "[",
+        "char",
+        "false",
+        "float",
+        "ident",
+        "int",
+        "qual",
+        "true",
+        "uid",
+        "v}"
+      ]
+    },
+    {
+      "origins": [
+        "vertical-000-09d14df7411f"
+      ],
+      "status": "expected-delta",
+      "oracle_status": "rejected",
+      "handwritten_result": "mismatch",
+      "provenance": [
+        {
+          "origin": "vertical-000-09d14df7411f",
+          "lane": "vertical",
+          "seed": "0x5645525456310001",
+          "mutator": "delete-token",
+          "parent": "vert-open-if"
+        }
+      ],
+      "source": "mutations/minimized/vertical-elif-missing-operator.pr",
+      "oracle": "mutations/oracle/vertical-elif-missing-operator.syntax-diagnostics.json",
+      "minimization": {
+        "method": "token-and-payload reduction",
+        "original_bytes": [
+          72
+        ],
+        "minimized_bytes": 50,
+        "deduplicated_origins": false,
+        "preserved": "E7100 parse span class with unequal expected sets"
+      },
+      "rust_expected": [
+        "%",
+        "%=",
+        "&&",
+        "(",
+        "*",
+        "*.",
+        "*=",
+        "+",
+        "+.",
+        "+=",
+        "-",
+        "-.",
+        "-=",
+        ".",
+        "/",
+        "/.",
+        "/=",
+        "/=.",
+        ":=",
+        "<",
+        "<.",
+        "<<",
+        "<=",
+        "<=.",
+        "==",
+        "==.",
+        ">",
+        ">.",
+        ">=",
+        ">=.",
+        ">>",
+        "?",
+        "?.",
+        "??",
+        "[",
+        "^",
+        "fn",
+        "then",
+        "type",
+        "|>",
+        "||"
+      ],
+      "handwritten_expected": [
+        "then"
+      ]
+    },
+    {
+      "origins": [
+        "vertical-320-0ba2908f9177"
+      ],
+      "status": "expected-delta",
+      "oracle_status": "rejected",
+      "handwritten_result": "mismatch",
+      "provenance": [
+        {
+          "origin": "vertical-320-0ba2908f9177",
+          "lane": "vertical",
+          "seed": "0x5645525456310001",
+          "mutator": "edit-or-splice-prefix",
+          "parent": "vert-try-bound"
+        }
+      ],
+      "source": "mutations/minimized/vertical-try-prefix-swap.pr",
+      "oracle": "mutations/oracle/vertical-try-prefix-swap.syntax-diagnostics.json",
+      "minimization": {
+        "method": "token-and-payload reduction",
+        "original_bytes": [
+          32
+        ],
+        "minimized_bytes": 17,
+        "deduplicated_origins": false,
+        "preserved": "E7100 parse span class with unequal expected sets"
+      },
+      "rust_expected": [
+        "%",
+        "%=",
+        "&&",
+        "(",
+        "*",
+        "*.",
+        "*=",
+        "+",
+        "+.",
+        "+=",
+        "-",
+        "-.",
+        "-=",
+        ".",
+        "/",
+        "/.",
+        "/=",
+        "/=.",
+        ":=",
+        "<",
+        "<.",
+        "<<",
+        "<=",
+        "<=.",
+        "==",
+        "==.",
+        ">",
+        ">.",
+        ">=",
+        ">=.",
+        ">>",
+        "?",
+        "?.",
+        "??",
+        "[",
+        "^",
+        "fn",
+        "type",
+        "v;",
+        "v}",
+        "|>",
+        "||"
+      ],
+      "handwritten_expected": [
+        "v;",
+        "v}"
+      ]
+    },
+    {
+      "origins": [
+        "vertical-448-56c9fc85615f"
+      ],
+      "status": "exact",
+      "oracle_status": "rejected",
+      "handwritten_result": "exact",
+      "provenance": [
+        {
+          "origin": "vertical-448-56c9fc85615f",
+          "lane": "vertical",
+          "seed": "0x5645525456310001",
+          "mutator": "edit-newline-or-indentation",
+          "parent": "vert-open-if"
+        }
+      ],
+      "source": "mutations/minimized/vertical-elif-newline-delete.pr",
+      "oracle": "mutations/oracle/vertical-elif-newline-delete.syntax-diagnostics.json",
+      "minimization": {
+        "method": "token-and-payload reduction",
+        "original_bytes": [
+          73
+        ],
+        "minimized_bytes": 47,
+        "deduplicated_origins": false,
+        "preserved": "E7100 parse span class with unequal expected sets"
+      },
+      "rust_expected": [
+        "v;",
+        "v}"
+      ],
+      "handwritten_expected": [
+        "v;",
+        "v}"
+      ]
+    },
+    {
+      "origins": [
+        "cross-320-fea384c4df28"
+      ],
+      "status": "expected-delta",
+      "oracle_status": "rejected",
+      "handwritten_result": "mismatch",
+      "provenance": [
+        {
+          "origin": "cross-320-fea384c4df28",
+          "lane": "cross",
+          "seed": "0x43524f5356310001",
+          "mutator": "edit-or-splice-prefix",
+          "parent": "ret-retired-bare"
+        }
+      ],
+      "source": "mutations/minimized/cross-retired-effect-order.pr",
+      "oracle": "mutations/oracle/cross-retired-effect-order.syntax-diagnostics.json",
+      "minimization": {
+        "method": "token-and-payload reduction",
+        "original_bytes": [
+          24
+        ],
+        "minimized_bytes": 9,
+        "deduplicated_origins": false,
+        "preserved": "E7100 parse span class with unequal expected sets"
+      },
+      "rust_expected": [
+        ":",
+        "=",
+        "ensures",
+        "given",
+        "ident",
+        "requires"
+      ],
+      "handwritten_expected": [
+        "="
+      ]
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/handler_arms_answer_apart.pr
+---
+too small odd none
+true
+first fatal none
+false
+=> ()

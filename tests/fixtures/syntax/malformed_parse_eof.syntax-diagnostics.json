@@ -1,0 +1,42 @@
+{
+  "schema": "prism-syntax-diagnostics-v1",
+  "compiler": "0.16.0",
+  "source": {
+    "digest": "1ce0f0b6af63047ffd618954b6094feff7739ca8d4338cbe5f42390299a024e1",
+    "text": "-- Lexes fine but ends early: a binary operator still waiting for its right\n-- operand when the source stops. The layout pass closes the open block before\n-- the stream ends, so the fault is the general parse code at a zero-width\n-- caret on the virtual closer, not the exhausted-stream code, which only the\n-- expression entry can reach.\nfn broken() : Int = 1 +\n"
+  },
+  "diagnostics": [
+    {
+      "code": "E7100",
+      "phase": "parse",
+      "span": [
+        362,
+        362
+      ],
+      "message": "unexpected end of block at line 6:24, expected 'error', 'mask', 'break', 'continue', 'true', 'false', string literal, '-', ...",
+      "expected": [
+        "#",
+        "(",
+        "-",
+        "?",
+        "[",
+        "break",
+        "char",
+        "continue",
+        "error",
+        "false",
+        "float",
+        "ident",
+        "int",
+        "istart",
+        "mask",
+        "qual",
+        "str",
+        "true",
+        "uid",
+        "{"
+      ],
+      "related": []
+    }
+  ]
+}

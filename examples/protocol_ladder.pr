@@ -22,7 +22,7 @@ effect KvV3
 -- explicit composition: the whole idea is that the ladder is spelled out.
 
 -- The sentinel V1 uses for an absent key. V2 replaces it with None.
-fn absent_v1() : Int = 0 - 1
+fn absent_v1() : Int = -1
 
 -- Terminal V2 server: a parameter-passing store over a Map(Int, Int).
 fn serve_v2(action) =

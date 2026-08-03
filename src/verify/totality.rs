@@ -286,6 +286,12 @@ impl<'a> Ctx<'a> {
             Expr::Match(scrut, arms) => {
                 self.body_ok(scrut, callees)?;
                 for arm in arms {
+                    // A guard runs before its arm is selected, so it is part of the
+                    // body: an unsupported construct or an uncertified call inside a
+                    // guard is exactly as fatal to the claim as one in the arm.
+                    if let Some(guard) = &arm.guard {
+                        self.body_ok(guard, callees)?;
+                    }
                     self.body_ok(&arm.body, callees)?;
                 }
                 Ok(())
@@ -430,6 +436,14 @@ fn check_descent(
                 remove_pattern_binders(&arm.pat, &mut inner);
                 if on_param {
                     add_pattern_subterms(&arm.pat, &mut inner);
+                }
+                // The guard is evaluated in the arm's pattern scope, so it descends
+                // under the same strict-subterm facts as the arm body. It is part of
+                // the same analysis: a recursive call in a guard that consumes a
+                // subterm is fine, one that does not breaks the claim, exactly as in
+                // the body. Skipping it would certify a function that loops in a guard.
+                if let Some(guard) = &arm.guard {
+                    check_descent(guard, name, p, param, &inner, ok, saw_recursive);
                 }
                 check_descent(&arm.body, name, p, param, &inner, ok, saw_recursive);
             }
@@ -589,6 +603,72 @@ total fn loops(n: Nat): Int =
         assert!(
             !out.contains("loops: checked"),
             "non-terminating recursion must never be checked total:\n{out}"
+        );
+    }
+
+    // A match-arm guard runs before its arm is selected, so a recursive call there
+    // decides termination just as one in the body does. A call on the whole
+    // parameter from a guard diverges and must not be certified, even when every
+    // arm body recurs on a strict subterm.
+    #[test]
+    fn non_descending_call_in_a_guard_is_not_structural() {
+        let src = "\
+type Nat = Z | S(Nat)
+
+total fn loops(n: Nat): Int =
+  match n of
+    Z => 0
+    S(m) if loops(n) > 0 => 1
+    S(m) => 1 + loops(m)
+";
+        let out = dump("totality", src).expect("dump totality");
+        assert!(
+            out.contains("loops: pending:"),
+            "a non-descending recursive call in a guard must not certify:\n{out}"
+        );
+        assert!(
+            !out.contains("loops: checked"),
+            "non-terminating recursion must never be checked total:\n{out}"
+        );
+    }
+
+    // The eligibility walk covers guards too: a call into an uncertified function
+    // from a guard is as disqualifying as one from an arm body.
+    #[test]
+    fn uncertified_call_in_a_guard_is_not_trivial() {
+        let src = "\
+fn helper(x: Int): Int = x + 1
+
+total fn pick(n: Int): Int =
+  match n of
+    k if helper(k) > 0 => 1
+    _ => 0
+";
+        let out = dump("totality", src).expect("dump totality");
+        assert!(
+            out.contains("pick: pending:") && out.contains("helper"),
+            "an uncertified call in a guard must not certify:\n{out}"
+        );
+    }
+
+    // Guards are ordinary expressions, so a guard whose recursive call consumes a
+    // strict subterm still certifies: the fix folds guards into the same analysis
+    // rather than rejecting them.
+    #[test]
+    fn descending_call_in_a_guard_still_certifies() {
+        let src = "\
+type Nat = Z | S(Nat)
+
+total fn depth(n: Nat): Int =
+  match n of
+    Z => 0
+    S(m) if depth(m) > 0 => 1
+    S(m) => 1 + depth(m)
+";
+        let out = dump("totality", src).expect("dump totality");
+        assert!(
+            out.contains("depth: checked (structural on n)"),
+            "a descending guard call must still certify:\n{out}"
         );
     }
 

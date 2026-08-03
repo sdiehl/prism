@@ -312,7 +312,10 @@ impl Lints {
                 }
                 self.expr(body);
             }
-            Sugar::Break | Sugar::Continue => {}
+            // A quotation is already a string literal by the time lints run, and
+            // the string is what counts as the use of its target: the splice
+            // happens against the unit's own text, before resolution.
+            Sugar::Break | Sugar::Continue | Sugar::Reflect(..) => {}
         }
     }
 

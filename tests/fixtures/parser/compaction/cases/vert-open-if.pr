@@ -1,0 +1,6 @@
+fn corpus(x) =
+  if x > 0 then
+    x + 1
+  elif x < 0 then
+    x - 1
+  x

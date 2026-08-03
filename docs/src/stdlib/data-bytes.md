@@ -22,7 +22,7 @@ Hex and base64 are written in pure Prism over the buffer builders rather than as
 
 ### `bytes_length`
 
-```prism,sig,h-91f5898604caa6281b04ec01146d39646b52221f66d28a392c75ca6dac5b226c
+```prism,sig,h-7e75ba7efcb98e48ac96625ecf963905568ec2ab2834707dd735aeeb1da598bc
 bytes_length : (Wire.Bytes) -> Int
 ```
 
@@ -38,7 +38,7 @@ bytes_length(string_to_bytes("Hello"))
 
 ### `bytes_index`
 
-```prism,sig,h-b8392f569bb2d3dae57a63c64fcd37827d2b17fd0c05f40c6d64e27c59865477
+```prism,sig,h-d884d48330e8fffdd1a5d98a3b264e331a7547333494c5b8144e9ea0b204f176
 bytes_index : (Wire.Bytes, Int) -> Int
 ```
 
@@ -54,7 +54,7 @@ bytes_index(string_to_bytes("ABC"), 0)
 
 ### `bytes_empty`
 
-```prism,sig,h-452073dbf2139781fa303bcae9a56414285965fb0a9fc52dafbc321d3beb3c13
+```prism,sig,h-ac2748597956fda3b9528cc398e6471e64489bee05462dbf4a3775d785db133c
 bytes_empty : Wire.Bytes
 ```
 
@@ -62,7 +62,7 @@ The empty `Bytes`.
 
 ### `bytes_push`
 
-```prism,sig,h-9fbbcad1bb741589e877857f60531c30e714f1669d9c9e7da3d39c86428109cf
+```prism,sig,h-db6c0f9b660d51b1bd02e3f67a9065050307a45d48e112a796a9634ab2f66482
 bytes_push : (Wire.Bytes, Int) -> Wire.Bytes
 ```
 
@@ -78,7 +78,7 @@ Some(A)
 
 ### `bytes_slice`
 
-```prism,sig,h-b405e23d6b24ba8d72dffa247f48c7b1c5edec283c298a4bba05c91c143111fd
+```prism,sig,h-bcef146f7400006362321940eb848f40b6819e9c8556edd0c043c9e4354443dc
 bytes_slice : (Wire.Bytes, Int, Int) -> Wire.Bytes
 ```
 
@@ -94,7 +94,7 @@ Some(ell)
 
 ### `bytes_concat`
 
-```prism,sig,h-afb0b2b7872689a75e7bd0eceb48648d20fa3a83a21ffb1c4f44a60e0957208a
+```prism,sig,h-dbc9c693bf112f653ab3109d4828757fa99be5e481183b4d43fc324424bd4a3f
 bytes_concat : (Wire.Bytes, Wire.Bytes) -> Wire.Bytes
 ```
 
@@ -110,7 +110,7 @@ Some(foobar)
 
 ### `bytes_eq`
 
-```prism,sig,h-a8ae3bad5fa552bd130d93e6a59936bf1c085e47a6a6a49200d84758b6fe4709
+```prism,sig,h-d915ba257e1fa44a073c906c5c50f02210ebbba27547324a350fd1f6100f6930
 bytes_eq : (Wire.Bytes, Wire.Bytes) -> Bool
 ```
 
@@ -126,7 +126,7 @@ true
 
 ### `bytes_compare`
 
-```prism,sig,h-81db8c1e0f8ba18dfb69d7020c252abbcca23df85eeff1f70b458688647c448b
+```prism,sig,h-b2a327fa20cbf9aa68b6cfabc5d0208cb2f115adebaddd37237fa166b1652d9a
 bytes_compare : (Wire.Bytes, Wire.Bytes) -> Int
 ```
 
@@ -142,7 +142,7 @@ bytes_compare(string_to_bytes("a"), string_to_bytes("b"))
 
 ### `bytes_hash`
 
-```prism,sig,h-c98b4bd5bff67bf87acafa6eaebb022e35fe7935714ef71ee936af232a40898a
+```prism,sig,h-bb207e8f4eaa076dc67c93d99da76c08ba4a996baf1dd2149c9ba4a3b4aa81ea
 bytes_hash : (Wire.Bytes) -> String
 ```
 
@@ -150,7 +150,7 @@ The blake3 content hash of a byte string as lowercase hex, byte-identical to a `
 
 ### `string_to_bytes`
 
-```prism,sig,h-2a9da037f4a20041903a2f9c7cda49774e9c8a4ca07f74dd140ba3540bf26deb
+```prism,sig,h-22c4566388bcaed86d99c83936117d58c29939bd081e97d61250bc2188cf8a75
 string_to_bytes : (String) -> Wire.Bytes
 ```
 
@@ -166,7 +166,7 @@ hex_encode(string_to_bytes("Hi"))
 
 ### `bytes_to_string`
 
-```prism,sig,h-774a7f4187b74a7ba1bb38e4ae9a31e10ff25afb2344c5624365d67d73252230
+```prism,sig,h-b8add0268ad9e58e0ed818e8109d64b47b01f773cdc2323cff0dcac54843fed0
 bytes_to_string : (Wire.Bytes) -> Option(String)
 ```
 
@@ -182,7 +182,7 @@ Some(hey)
 
 ### `hex_encode`
 
-```prism,sig,h-7e448f10446184996a9cdbab208bd2d3dc626bfad4e1b2064be754613b98f0d1
+```prism,sig,h-e139f368a39b4054a057fde96d734eaf38d96d861b1654ec857f253b067f5c5d
 hex_encode : (Wire.Bytes) -> String
 ```
 
@@ -198,7 +198,7 @@ hex_encode(string_to_bytes("Hi"))
 
 ### `hex_decode`
 
-```prism,sig,h-45d3456280c481e4fbea11dc8448aeaed4d0041ef0e2f68a0ea291c8de9afabe
+```prism,sig,h-114f86bc88ac3e05ea1c8bde4e34e25624caa7f06ae5fdeab33d3ab3dbf1c7e1
 hex_decode : (String) -> Option(Wire.Bytes)
 ```
 
@@ -214,7 +214,7 @@ Some(2)
 
 ### `base64_encode`
 
-```prism,sig,h-e2a957adfd874c2ec48c99a2d24bebae02023ac70771a939df9ec6f6bac1a3ed
+```prism,sig,h-1518ee77c1425fa1d5ba7b6e4321496054ec323ceff22eb8af791ac6dab24e7e
 base64_encode : (Wire.Bytes) -> String
 ```
 
@@ -230,7 +230,7 @@ SGk=
 
 ### `base64_decode`
 
-```prism,sig,h-16e71f64164e397a4ae9dd244ad3d39cf54648903e7bfb33c67849bfdd137723
+```prism,sig,h-9b5bdb169622a71e46102bfb5293c4aeb1cd8e86f6dce42b7368322cb03f1621
 base64_decode : (String) -> Option(Wire.Bytes)
 ```
 
@@ -246,7 +246,7 @@ Some(2)
 
 ### `read_bytes`
 
-```prism,sig,h-731993aded5c3182c9936cacc82fbc3ccd144c553d7bdb5a0b58e43aab11108d
+```prism,sig,h-5c830292448aa2a4e8537b3ebf352d456cd8bc0f6986a11b9caccac305a3ebda
 read_bytes : (String) -> Wire.Bytes ! {FileSystem}
 ```
 
@@ -258,7 +258,7 @@ bytes_length(read_bytes("data.bin"))
 
 ### `write_bytes`
 
-```prism,sig,h-56066d50a267914de29f298ce3330a9722ab4e2d342ec692e353213bdc3aa0ce
+```prism,sig,h-fded637db434233806caf8da7b92b4054642e400639613f1964780a128683f62
 write_bytes : (String, Wire.Bytes) -> Result(Unit, String) ! {IO}
 ```
 

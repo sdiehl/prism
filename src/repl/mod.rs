@@ -10,6 +10,7 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use anstyle::{AnsiColor, Color, Style};
+use marginalia::TriviaTable;
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::{CmdKind, Highlighter};
@@ -30,6 +31,7 @@ use crate::resolve::{binders, default_roots, import_bindings, resolve_expr, reso
 use crate::sym::Sym;
 use crate::syntax::ast::{ClassDecl, Core, Expr, ImportDecl, Program, S};
 use crate::syntax::desugar::{desugar, desugar_expr};
+use crate::syntax::reflect::{splice, splice_expr};
 use crate::types::{
     check, check_allow_holes, infer_expr, infer_expr_dicts, infer_expr_dicts_allow_holes,
     show_effects, show_type_with_effects, Checked, CtorInfo, Type,
@@ -142,6 +144,29 @@ struct Built {
     // Every directly imported module spelling (full path and short alias) to its
     // canonical path. Used by module-aware completion and `:browse M`.
     modules: BTreeMap<String, String>,
+    // What a quotation typed at the prompt is answered from. `reflect` renders a
+    // declaration of the unit it appears in, and the prompt's unit is the
+    // session, so the session keeps its own text, comments, and unresolved
+    // program rather than only the checked artifacts built from them.
+    quotes: QuoteScope,
+}
+
+struct QuoteScope {
+    src: String,
+    trivia: TriviaTable,
+    surface: Program,
+}
+
+impl Built {
+    // Bring a typed-in expression up to the same front-end state a declaration
+    // body reaches: quotations answered from the session's own text, then names
+    // resolved in its import scope. The order is the compiler's, since a
+    // quotation is source text and is spliced before anything is looked up.
+    fn front(&self, e: &mut S<Expr>) -> Result<(), Error> {
+        let scope = &self.quotes;
+        splice_expr(&scope.src, &scope.trivia, &scope.surface, e)?;
+        resolve_expr(e, &self.imports)
+    }
 }
 
 #[derive(Clone, Default)]
@@ -388,7 +413,16 @@ impl Session {
 
     fn build(&self) -> Result<(String, Built), Error> {
         let src = self.compose()?;
-        let ParseResult { program, .. } = parse(&src)?;
+        let ParseResult {
+            mut program,
+            trivia,
+        } = parse(&src)?;
+        splice(&src, &trivia, &mut program)?;
+        let quotes = QuoteScope {
+            src: src.clone(),
+            trivia,
+            surface: program.clone(),
+        };
         let root_binders = binders(&program);
         let import_decls = program.imports.clone();
         // The prelude opens the `Data.*` stdlib modules with glob imports, so the
@@ -437,6 +471,7 @@ impl Session {
                 classes,
                 completion,
                 modules,
+                quotes,
             },
         ))
     }
@@ -470,7 +505,7 @@ impl Session {
     fn eval_chained(&self, built: &Built, expr: &str) -> Result<(String, String, String), Error> {
         let text = self.chain(expr);
         let mut surface = parse_expr(&text)?;
-        resolve_expr(&mut surface, &built.imports)?;
+        built.front(&mut surface)?;
         let e = desugar_expr(&surface)?;
         let (ty, eff, dicts) = if self.flags.holes {
             let (ty, eff, dicts, _) = infer_expr_dicts_allow_holes(&built.checked, &e)?;
@@ -1461,7 +1496,7 @@ fn show_type(session: &Session, built: &Built, rest: &str) {
     let text = session.chain(rest);
     let desugared = match parse_expr(&text) {
         Err(e) => return report(&e.into(), &text, "<repl>"),
-        Ok(mut e) => match resolve_expr(&mut e, &built.imports) {
+        Ok(mut e) => match built.front(&mut e) {
             Err(e) => return report(&e, &text, "<repl>"),
             Ok(()) => desugar_expr(&e),
         },

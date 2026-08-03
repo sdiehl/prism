@@ -63,13 +63,11 @@ fn tally_bytes(bs : Bytes, i : Int, n : Int, thr : Int, acc : Tally) : Tally =
 fn obj_get(pairs : List((String, Json)), key : String) : Option(Json) =
   match pairs of
     Nil => None
-    Cons(kv, rest) =>
-      match kv of
-        (k, v) =>
-          if str_eq(k, key) then
-            Some(v)
-          else
-            obj_get(rest, key)
+    Cons((k, v), rest) =>
+      if k == key then
+        Some(v)
+      else
+        obj_get(rest, key)
 
 fn cfg_threshold(j : Json) : Int =
   match j of
@@ -102,13 +100,13 @@ fn tile_count(xs : List(String)) : Int =
 -- is the current directory so the lineage graph names `summary.json`, not
 -- `./summary.json`.
 fn join(base : String, rel : String) : String =
-  if str_eq(base, ".") then
+  if base == "." then
     rel
   else
-    concat(base, concat("/", rel))
+    "{base}/{rel}"
 
 fn tile_path(base : String, name : String) : String =
-  join(base, concat("tiles/", concat(name, ".gray")))
+  join(base, "tiles/{name}.gray")
 
 fn tile_summary(name : String, n : Int, t : Tally) : Json =
   JObj([

@@ -6,6 +6,6 @@ fn run(n : Int) : Int =
     s += i
     if i == n then
       return s
-  0 - 1
+  -1
 
 fn main() = println(run(__N__))

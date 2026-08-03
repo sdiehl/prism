@@ -179,6 +179,11 @@ pub(crate) fn run_with(
 /// Without agreement only the first is consulted; with it every one must be
 /// present, since agreement cannot be reached with a missing solver.
 fn pin_solvers(opts: &VerifyOptions) -> Option<Vec<PinnedSolver>> {
+    if opts.solvers.is_empty() {
+        // An empty selection consults nobody, so nothing can be discharged; report
+        // it as the missing solver it is rather than pinning an empty jury.
+        return None;
+    }
     if opts.require_agreement {
         let mut pins = Vec::new();
         for exe in &opts.solvers {
@@ -219,6 +224,15 @@ fn discharge_function(
     subject: &str,
     obligations: &[Obligation],
 ) -> (Verdict, Option<String>) {
+    if obligations.is_empty() {
+        // Nothing generated is nothing proved. `Verified(0)` would clear the exit
+        // gate and mint a certificate over an empty obligation list, which is a
+        // vacuous proof; report it as unproven instead.
+        return (
+            Verdict::Pending("no obligation was generated for this contract".into()),
+            None,
+        );
+    }
     let Some(solvers) = solvers else {
         return (Verdict::NoSolver, None);
     };
@@ -245,6 +259,11 @@ fn discharge_ranking(
     store: Option<&Store>,
     obligations: &[RankObligation],
 ) -> TermVerdict {
+    if obligations.is_empty() {
+        // The same vacuity rule as a contract: an empty ranking obligation set
+        // proves no termination, so it stays pending rather than clearing the gate.
+        return TermVerdict::Pending("no ranking obligation was generated for this measure".into());
+    }
     let Some(solvers) = solvers else {
         return TermVerdict::NoSolver;
     };
@@ -302,7 +321,15 @@ fn obtain_receipt(store: Option<&Store>, s: &PinnedSolver, query: &SmtQuery) -> 
 }
 
 /// The aggregate verdict of one obligation's per-solver receipts.
+///
+/// No receipt is no evidence: an empty set is undecided, never proved. A
+/// universally quantified "every receipt is `unsat`" is vacuously true on an empty
+/// set, which would turn "no solver answered" into a proof, so the empty case is
+/// decided first and fails closed.
 fn classify(receipts: &[SmtResult]) -> ObVerdict {
+    if receipts.is_empty() {
+        return ObVerdict::Undecided;
+    }
     if receipts.iter().all(|r| r.status == ResultStatus::Unsat) {
         return ObVerdict::Proved;
     }
@@ -577,6 +604,14 @@ mod tests {
             },
             model: vec![],
         }
+    }
+
+    // No receipt is no evidence. An empty set makes "every receipt is `unsat`"
+    // vacuously true, which would report a proof for an obligation no solver ever
+    // answered.
+    #[test]
+    fn no_receipts_prove_nothing() {
+        assert!(matches!(classify(&[]), ObVerdict::Undecided));
     }
 
     #[test]

@@ -1,0 +1,3 @@
+fn corpus(v) = match v of
+  A | B => 0
+  _ => 1

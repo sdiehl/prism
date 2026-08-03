@@ -9,6 +9,7 @@ use crate::resolve::{load, resolve_loaded_module_units, Module, Root};
 use crate::store::disk::{resolve_store_path, Store, Written};
 use crate::syntax::ast::{Core as CorePhase, Program};
 use crate::syntax::desugar::desugar_with_scope;
+use crate::syntax::reflect::parse_unit;
 use crate::types::{check_seeded, Checked, DeclInfo, TypecheckSeed};
 use serde::{Deserialize, Serialize};
 
@@ -22,14 +23,14 @@ use super::input::field;
 use super::scheduler::QueryScheduler;
 use super::{Config, PRELUDE, ROOT_MODULE_NAME};
 
-const MODULE_CHECK_QUERY_SCHEMA: &[u8] = b"prism-module-check-query-v1";
-const CHECKED_INTERFACE_QUERY_SCHEMA: &[u8] = b"prism-checked-interface-query-v1";
+const MODULE_CHECK_QUERY_SCHEMA: &[u8] = b"prism-module-check-query-v2";
+const CHECKED_INTERFACE_QUERY_SCHEMA: &[u8] = b"prism-checked-interface-query-v2";
 const CHECKED_INTERFACE_QUERY: &str = "checked-interface";
-// v4 never publishes a body whose inferred declarations or node facts still
-// contain unification metavariables. Such a body cannot be parsed back as a
-// checked signature and a cache must never turn a valid cold build into a
-// warm-build failure.
-const CHECKED_BODY_QUERY_SCHEMA: &[u8] = b"prism-checked-body-query-v4";
+// v5 keys the v4 body format by semantic tokens. It still never publishes a
+// body whose inferred declarations or node facts contain unification
+// metavariables: such a body cannot be parsed back as a checked signature, and
+// a cache must never turn a valid cold build into a warm-build failure.
+const CHECKED_BODY_QUERY_SCHEMA: &[u8] = b"prism-checked-body-query-v5";
 const CHECKED_BODY_QUERY: &str = "checked-body";
 // v2 carries the checked handler-residual facts (known operations, opaque
 // effect labels, and an open-row marker). A v1 body cannot be promoted by
@@ -95,8 +96,11 @@ struct ModuleJob {
 /// Independent ready modules run through the deterministic query scheduler. A
 /// module-import cycle falls back to the existing whole-program checker: it is
 /// semantically authoritative until checked bodies define an SCC module boundary.
-/// Successful module queries are memoized in the command session by raw module bytes and dependency-interface
-/// digests, so a private dependency edit cannot invalidate its importers.
+/// Successful module queries are memoized in the command session by semantic
+/// module tokens and dependency-interface digests, so trivia is an immediate
+/// hit and a private dependency edit cannot invalidate its importers. Computing
+/// the token digest lexes the current source before lookup, preserving the
+/// parser's trust boundary while allowing formatting-only aliases.
 ///
 /// # Errors
 /// Fails on loading, resolution, malformed interface metadata, or any local
@@ -108,7 +112,7 @@ pub fn check_modules_on(
     roots: &[Root],
     cfg: &Config,
 ) -> Result<ModuleCheckReport, Error> {
-    let mut root_entry = parse(src)?.program;
+    let mut root_entry = parse_unit(src)?;
     let foundation = if src.starts_with(PRELUDE) {
         stdlib_typecheck_seed()?
     } else {
@@ -142,9 +146,9 @@ pub fn check_modules_on(
     let (mut root_resolved, resolved) = resolve_loaded_module_units(root_entry.clone(), loaded)?;
     let mut root_interface_entry = root_entry.clone();
     if src.starts_with(PRELUDE) {
-        strip_prelude_declarations(&mut root_resolved, src);
+        strip_prelude_declarations(&mut root_resolved);
         let imports = std::mem::take(&mut root_interface_entry.imports);
-        strip_prelude_declarations(&mut root_interface_entry, src);
+        strip_prelude_declarations(&mut root_interface_entry);
         root_interface_entry.imports = imports;
     }
     let resolved = resolved
@@ -424,42 +428,30 @@ fn injected_typecheck_seed() -> Result<TypecheckSeed, Error> {
     Ok(CACHE.get().cloned().unwrap_or(seed))
 }
 
-fn strip_prelude_declarations(program: &mut Program, src: &str) {
-    let prelude_end = crate::error::SourceMap::new(src).prelude_len();
+/// Drop the prepended prelude's declarations, keeping the user file's own.
+///
+/// The region boundary is [`Program::prelude_end`], the offset the parser
+/// recorded on this very program, which is the same field name resolution reads
+/// to give the two regions separate scopes. Reading it off the program rather
+/// than recomputing it from a source string passed in alongside is what makes
+/// this safe: deleting declarations by span against a boundary derived from
+/// some other text would silently delete the wrong ones, and there is no second
+/// text here to disagree.
+fn strip_prelude_declarations(program: &mut Program) {
+    let prelude_end = program.prelude_end;
+    // Every declaration family the parser fills, each filtered by the one rule.
+    macro_rules! keep_user {
+        ($($family:ident),+ $(,)?) => {
+            $(program
+                .$family
+                .retain(|declaration| declaration.span.start >= prelude_end);)+
+        };
+    }
     program.imports.clear();
-    program
-        .types
-        .retain(|declaration| declaration.span.start >= prelude_end);
-    program
-        .effects
-        .retain(|declaration| declaration.span.start >= prelude_end);
-    program
-        .errors
-        .retain(|declaration| declaration.span.start >= prelude_end);
-    program
-        .aliases
-        .retain(|declaration| declaration.span.start >= prelude_end);
-    program
-        .synonyms
-        .retain(|declaration| declaration.span.start >= prelude_end);
-    program
-        .classes
-        .retain(|declaration| declaration.span.start >= prelude_end);
-    program
-        .instances
-        .retain(|declaration| declaration.span.start >= prelude_end);
-    program
-        .stable
-        .retain(|declaration| declaration.span.start >= prelude_end);
-    program
-        .canonicals
-        .retain(|declaration| declaration.span.start >= prelude_end);
-    program
-        .patterns
-        .retain(|declaration| declaration.span.start >= prelude_end);
-    program
-        .fns
-        .retain(|declaration| declaration.span.start >= prelude_end);
+    keep_user!(
+        types, effects, errors, aliases, synonyms, classes, instances, stable, canonicals,
+        patterns, fns, logic_fns,
+    );
     let declarations = program
         .fns
         .iter()
@@ -1025,7 +1017,10 @@ fn query_key<'a>(
     field(&mut hasher, compiler_binary_fingerprint()?.as_bytes());
     field(&mut hasher, foundation_identity.as_bytes());
     field(&mut hasher, name.as_bytes());
-    field(&mut hasher, source.as_bytes());
+    field(
+        &mut hasher,
+        super::input::semantic_source_digest(source)?.as_bytes(),
+    );
     field(
         &mut hasher,
         cfg.artifact_identity_for("module-check")

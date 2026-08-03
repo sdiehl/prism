@@ -14,16 +14,8 @@ fn cell(grid, r, c) =
     default(\() -> at_list(at_list(grid, r), c), 0)
 
 fn neighbors(grid, r, c) =
-  let ds = [
-      (0 - 1, 0 - 1),
-      (0 - 1, 0),
-      (0 - 1, 1),
-      (0, 0 - 1),
-      (0, 1),
-      (1, 0 - 1),
-      (1, 0),
-      (1, 1),
-    ]
+  let ds =
+    [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
   sum(map(\(d) -> match d of { (dr, dc) => cell(grid, r + dr, c + dc) }, ds))
 
 fn next_cell(grid, r, c) =

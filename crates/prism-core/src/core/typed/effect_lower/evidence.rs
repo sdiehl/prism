@@ -41,6 +41,7 @@ use super::latent::Latent;
 
 /// The effect ops of a program, numbered alphabetically by name so
 /// `ev@<id>` ordering and trap order are stable across compilations.
+#[derive(Debug)]
 pub struct OpIds(BTreeMap<Sym, i64>);
 
 impl OpIds {
@@ -57,15 +58,18 @@ impl OpIds {
             .map(Self)
     }
 
+    #[must_use]
     pub fn id(&self, op: Sym) -> Option<i64> {
         self.0.get(&op).copied()
     }
 
     /// The inverse of [`id`](Self::id).
+    #[must_use]
     pub fn op(&self, id: i64) -> Option<Sym> {
         self.0.iter().find(|(_, v)| **v == id).map(|(k, _)| *k)
     }
 
+    #[must_use]
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = (Sym, i64)> + '_ {
         self.0.iter().map(|(name, id)| (*name, *id))
     }
@@ -87,12 +91,14 @@ impl OpIds {
 /// One evidence parameter: the op it carries the active clause for, its
 /// canonical `ev@<id>` binder, and the clause's function type bounded by the
 /// callable's ambient row.
+#[derive(Debug)]
 pub struct EvidenceParam {
     pub id: i64,
     pub binder: TypedBinder,
 }
 
 /// How one callable's signature changes under evidence passing.
+#[derive(Debug)]
 pub struct FnPlan {
     /// The ambient residual row every clause this callable receives is bounded
     /// by, and which its own residual tail coalesces into. A callable that only
@@ -111,11 +117,13 @@ pub struct FnPlan {
 
 /// The whole-program signature rewrite, computed before any body is rewritten
 /// so a call site and its callee cannot disagree.
+#[derive(Debug)]
 pub struct EvidencePlan {
     fns: BTreeMap<Sym, FnPlan>,
 }
 
 impl EvidencePlan {
+    #[must_use]
     pub fn get(&self, name: Sym) -> Option<&FnPlan> {
         self.fns.get(&name)
     }
@@ -123,6 +131,7 @@ impl EvidencePlan {
     /// Build the plan: every function latent in at least one op gains that
     /// op's evidence. `None` when an op escaped numbering or lacks a declared
     /// signature, which leaves the program to the general lowering.
+    #[must_use]
     pub fn build(
         fns: &[TypedCoreFn],
         latent: &Latent,
@@ -316,14 +325,7 @@ fn handled_effects(c: &TypedComp, env: &VerifyEnv, out: &mut BTreeSet<Sym>) {
             }
         }
     }
-    super::walk::each_value(c, &mut |v| {
-        let mut ts = Vec::new();
-        super::walk::thunks_in_value(v, &mut ts);
-        for t in ts {
-            handled_effects(t, env, out);
-        }
-    });
-    super::walk::each_subcomp(c, &mut |sc| handled_effects(sc, env, out));
+    super::walk::each_subterm(c, &mut |sub| handled_effects(sub, env, out));
 }
 
 // A thunk-of-function witness with `handled` effects removed from its result
@@ -482,10 +484,12 @@ fn clause_type(op: Sym, effects: &EffRow, env: &VerifyEnv, ambient: Sym) -> Opti
 }
 
 /// A clause's parameters: the operation's own, or one unit parameter when the
-/// operation is nullary. A clause is applied, and an application needs an
-/// argument, so the nullary case takes the unit witness the perform site
-/// passes. The clause type and the perform site must agree on this, so both
-/// read it here.
+/// operation is nullary.
+///
+/// A clause is applied, and an application needs an argument, so the nullary
+/// case takes the unit witness the perform site passes. The clause type and the
+/// perform site must agree on this, so both read it here.
+#[must_use]
 pub fn clause_params(declared: &[CoreType]) -> Vec<CoreType> {
     if declared.is_empty() {
         vec![CoreType::Source(Type::Unit)]
@@ -520,9 +524,11 @@ fn coalesce(body: &CompSig, ambient: Sym, ids: &[i64], ops: &OpIds, env: &Verify
 }
 
 // The ambient row quantifiers, in their own deterministic namespace.
+#[derive(Debug)]
 pub struct RowNames(u32);
 
 impl RowNames {
+    #[must_use]
     pub const fn new() -> Self {
         Self(0)
     }
@@ -555,9 +561,11 @@ fn resume_set(resume: Sym) -> BTreeSet<Sym> {
 
 /// Rewrite a tail-resumptive clause body into a plain function body: drop the
 /// `resume` binder (and any rebindings of it), and turn its single tail call
-/// `resume(v)` into `return v`. `None` when the clause is not tail-resumptive
-/// (resume captured, used off the tail, or some path never resumes), which is
-/// exactly the evidence-eligibility test.
+/// `resume(v)` into `return v`.
+///
+/// `None` when the clause is not tail-resumptive (resume captured, used off the
+/// tail, or some path never resumes), which is exactly the evidence-eligibility
+/// test.
 ///
 /// Post-condition guard: a successful strip erases the continuation, so no
 /// resume alias may survive in the result. This enforces at the IR level the
@@ -674,10 +682,11 @@ pub type Env = BTreeMap<i64, TypedBinder>;
 /// carry the new type or the stored witness and the term disagree, which the
 /// independent verifier rejects (and rightly: a swapped evidence parameter
 /// would otherwise be invisible).
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Retyped(BTreeMap<Sym, CoreType>);
 
 impl Retyped {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -702,6 +711,7 @@ impl Retyped {
     }
 
     // A `Var` reading a retyped local, rebuilt at its new type.
+    #[must_use]
     pub fn lookup(&self, v: &TypedValue) -> Option<TypedValue> {
         let name = super::as_var(v)?;
         let ty = self.0.get(&name)?;
@@ -714,6 +724,7 @@ impl Retyped {
         ))
     }
 
+    #[must_use]
     pub fn rebuild(&self, v: &TypedValue) -> TypedValue {
         self.lookup(v).unwrap_or_else(|| v.clone())
     }
@@ -726,6 +737,7 @@ impl Retyped {
 /// name (so an inner handler shadows an op already in scope without a clash).
 /// `None` when a shape the engine cannot thread appears, which leaves the
 /// whole program to the general lowering.
+#[derive(Debug)]
 pub struct Threader<'a> {
     pub plan: &'a EvidencePlan,
     pub ops: &'a OpIds,
@@ -1318,8 +1330,11 @@ fn lambda_thunk(
 
 /// The eligibility prologue both fusion engines share: a program can fuse only
 /// if it has no masks, lets nothing latent escape untrackably, keeps `main`'s
-/// row closed, and installs at least one handler. Returns the program's handles
-/// for the caller's own per-handler shape check, or `None` when a guard fails.
+/// row closed, and installs at least one handler.
+///
+/// Returns the program's handles for the caller's own per-handler shape check,
+/// or `None` when a guard fails.
+#[must_use]
 pub fn fusion_handles(
     fns: &[TypedCoreFn],
     latent: &Latent,
@@ -1362,6 +1377,7 @@ fn find_handles(c: &TypedComp, out: &mut Vec<TypedComp>) {
 
 /// Lower the whole program by evidence passing, or report ineligibility by
 /// returning `None` (no state to undo: the caller falls back to the next rung).
+///
 /// Eligibility is decided up front by the static guards, then confirmed
 /// structurally as the rewrite threads each escaping thunk to its force sites;
 /// an untrackable thunk aborts the whole attempt.

@@ -3,7 +3,7 @@
 //! # Supported surface
 //!
 //! Most of the compiler is exposed so that tools can build ON it, not just call
-//! it. The load-bearing guarantee is that **merged Core is the semantic
+//! it. The essential guarantee is that **merged Core is the semantic
 //! authority**, so the surface is organized around consuming and producing Core:
 //!
 //! - [`core`]: the call-by-push-value Core IR and its content-addressed
@@ -31,7 +31,6 @@
 //! generator (`docs`, surfaced only through its re-exports).
 
 #![allow(clippy::many_single_char_names)]
-#![allow(clippy::multiple_crate_versions)]
 // `redundant_pub_crate` (nursery) and the rustc `unreachable_pub` lint pull in
 // opposite directions for a `pub(crate)` item in a `pub(crate)` module, the
 // honest visibility for an item shared between sibling crate-internal modules

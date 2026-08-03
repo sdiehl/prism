@@ -1,4 +1,4 @@
--- Recompute `prism-core-hash-v1` in Prism from an exported identity surface.
+-- Recompute `prism-core-hash-v2` in Prism from an exported identity surface.
 --
 -- arg(0) is a `prism-core-identity-v1` artifact. The output is one
 -- `<abbreviated hash>  <name>` line per exported definition, name-sorted, in the
@@ -20,7 +20,7 @@
 -- a missing field.
 import Json (Json, JNull, JBool, JInt, JFloat, JStr, JArr, JObj, decode, json_error_message)
 
-import Data.Bind (Nameless, NTok, NLit, NRef, NScope, NSeq, bind_nameless, bind_token)
+import Data.Bind (Nameless, NTok, NLit, NRef, NScope, NSeq, bind_nameless, bind_num_end, bind_token)
 
 import Control.State (..)
 
@@ -74,7 +74,7 @@ fn jstr(j : Json) : String =
 fn jint(j : Json) : Int =
   match j of
     JInt(n) => n
-    _ => 0 - 1
+    _ => -1
 
 fn jarr(j : Json) : List(Json) =
   match j of
@@ -84,6 +84,11 @@ fn jarr(j : Json) : List(Json) =
 fn jstrs(j : Json) : List(String) = map(jstr, jarr(j))
 
 fn jat(j : Json, k : String) : String = jstr(jfield(j, k))
+
+-- A numeric tag: its letter, its digits, and the terminator that keeps the digits
+-- from merging with whatever the next node writes.
+fn enc_num(tag : String, digits : String) : String =
+  concat(tag, concat(digits, bind_num_end))
 
 -- A reference to a top-level symbol, the encoder's `%` prefix and all.
 fn enc_ref(x : String) : Nameless = NSeq([NLit("%"), NRef(x)])
@@ -95,12 +100,13 @@ fn enc_free_at(sc : Scope, x : String) : String =
   match map_lookup(x, sc.members) of
     Some(i) =>
       if sc.indexed then
-        concat("r", show_int(i))
+        enc_num("r", show_int(i))
       else
+        -- Already ends in a non-digit, so it needs no terminator.
         "r?"
     None =>
       match map_lookup(x, sc.hashes) of
-        Some(h) => concat("h", h)
+        Some(h) => enc_num("h", h)
         None => concat("g", bind_token(x))
 
 fn enc_free(sc : Scope) : (String) -> String = \(x) -> enc_free_at(sc, x)
@@ -157,17 +163,18 @@ fn enc_val(j : Json) : Nameless ! {State(VarIds)} =
   if k == "Var" then
     NSeq([NLit("v"), enc_ref(jat(j, "x"))])
   elif k == "Int" then
-    NLit(concat("i", jat(j, "n")))
+    NLit(enc_num("i", jat(j, "n")))
   elif k == "I64" then
-    NLit(concat("j", jat(j, "n")))
+    NLit(enc_num("j", jat(j, "n")))
   elif k == "U64" then
-    NLit(concat("u", jat(j, "n")))
+    NLit(enc_num("u", jat(j, "n")))
   elif k == "Float" then
-    NLit(concat("f", jat(j, "bits")))
+    NLit(enc_num("f", jat(j, "bits")))
   elif k == "Bool" then
-    NLit(concat("o", enc_bool(jfield(j, "b"))))
+    NLit(enc_num("o", enc_bool(jfield(j, "b"))))
   elif k == "Unit" then
-    NLit("1")
+    -- A letter, not a digit, so nothing before it can swallow it.
+    NLit("n")
   elif k == "Str" then
     NSeq([NLit("s"), NTok(jat(j, "s"))])
   elif k == "Thunk" then
@@ -177,7 +184,7 @@ fn enc_val(j : Json) : Nameless ! {State(VarIds)} =
     NSeq([
         NLit("c"),
         NTok(jat(j, "name")),
-        NLit(concat("/", show_int(jint(jfield(j, "tag"))))),
+        NLit(enc_num("/", show_int(jint(jfield(j, "tag"))))),
         args,
       ])
   elif k == "Tuple" then
@@ -287,7 +294,11 @@ fn enc_node(k : String, j : Json) : Nameless ! {State(VarIds)} =
     NSeq([m, NScope([jat(j, "x")], n)])
   elif k == "Lam" then
     let xs = jstrs(jfield(j, "xs"))
-    NSeq([NLit(show_int(length(xs))), NScope(xs, enc_comp(jfield(j, "body")))])
+    NSeq([
+        -- The arity carries no letter tag, only the terminator.
+        NLit(concat(show_int(length(xs)), bind_num_end)),
+        NScope(xs, enc_comp(jfield(j, "body"))),
+      ])
   elif k == "App" then
     let f = enc_comp(jfield(j, "f"))
     NSeq([f, enc_args(jfield(j, "args"))])
@@ -353,7 +364,7 @@ fn enc_def(sc : Scope, d : Json) : String =
       "fn",
       concat(
           show_int(length(params)),
-          concat("d", show_int(jint(jfield(d, "dictArity")))),
+          enc_num("d", show_int(jint(jfield(d, "dictArity")))),
         ),
     )
   let tree =

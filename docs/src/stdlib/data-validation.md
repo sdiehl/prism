@@ -10,7 +10,7 @@ Where `Result` short-circuits on the first `Err`, `Validation` collects every er
 
 ### `Validation`
 
-```prism,def,h-42ae9406390b2f1352de17c0d20f4578066687f9b7c86edea2165526efe26c34
+```prism,def,h-450c5a4baddbce2009bd9517da0975dc4f0e669facde8b1f9bc077cdfee5ad4c
 type Validation(e, a) = Valid(a) | Invalid(List(e)) deriving (Eq, Show)
 ```
 
@@ -20,7 +20,7 @@ A validated `a`, or the list of accumulated errors `e`.
 
 ### `is_valid`
 
-```prism,sig,h-4bf51f4b034f6244a75e83d2cf310005526907f6e2aedddd588623aa85e2d764
+```prism,sig,h-c5c47415cb9cc92faac2d327e448e10bc9423166d2b1bd0f09ccc62cb0b9c82e
 is_valid : forall a b. (Data.Validation.Validation(a, b)) -> Bool
 ```
 
@@ -28,7 +28,7 @@ True when the value validated.
 
 ### `is_invalid`
 
-```prism,sig,h-e9e569dc4297a370c6d2b28a1811bdcc11b0d4cc26d22fd8fc43f665177add08
+```prism,sig,h-6a2ed49b1c2294c853d0393270e3ef1bb9aaa86aa34d6d460039d5315e301881
 is_invalid : forall a b. (Data.Validation.Validation(a, b)) -> Bool
 ```
 
@@ -36,7 +36,7 @@ True when there were errors.
 
 ### `map_valid`
 
-```prism,sig,h-49bd11f53b452507f3ef2d383b90f09f283d1d01b61f64ff55ea1b9b6b778c9b
+```prism,sig,h-3e6fa3b5137be5d66f0a53dcc960ff0051b7e8cd33c145e97f874b30562a76ef
 map_valid : forall e0 a b c. ((c) -> b ! {e0}, Data.Validation.Validation(a, c)) -> Data.Validation.Validation(a, b) ! {e0}
 ```
 
@@ -44,15 +44,23 @@ Apply `f` to a `Valid` value, leaving accumulated errors untouched.
 
 ### `validation_ap`
 
-```prism,sig,h-7dec2f05adb30b6c26b51c5c774e0bf77d1d22ff9ab0841c161763f87a1d8aa9
+```prism,sig,h-6900ccf265c141637a65d90d5405a01aefad98e3735042f34cc4b588a685461b
 validation_ap : forall e0 a b c. (Data.Validation.Validation(a, (c) -> b ! {e0}), Data.Validation.Validation(a, c)) -> Data.Validation.Validation(a, b) ! {e0}
 ```
 
 Applicative apply: when both sides validate, apply the function; otherwise keep every error from both sides, in order. This is the accumulation.
 
+```prism,mod=Data.Validation
+validation_ap(Invalid(["bad function"]), Invalid(["bad argument"]))
+```
+
+```output
+Data.Validation.Invalid([bad function, bad argument])
+```
+
 ### `validate2`
 
-```prism,sig,h-ae0ec6b10c5012022798d0d563833b170de92e28ec1c400b964cbdc70147b244
+```prism,sig,h-20588527b179ebd43654094d5735c6ca570592a29b9b4a78c532df7fb9834e47
 validate2 : forall e0 a b c d. ((c, d) -> b ! {e0}, Data.Validation.Validation(a, c), Data.Validation.Validation(a, d)) -> Data.Validation.Validation(a, b) ! {e0}
 ```
 
@@ -68,15 +76,23 @@ Data.Validation.Invalid([oops])
 
 ### `validation_or`
 
-```prism,sig,h-2be3708f300f10a03ec4961d958ffcaa188e63642a5de1d264c7efefb4f3fb77
+```prism,sig,h-a80978282c69bd141e98c447e1dd5c949b67fae31b0bf0fa46bd9b3620a98ec6
 validation_or : forall a b. (a, Data.Validation.Validation(b, a)) -> a
 ```
 
 The `Valid` value, or `d` when there were errors.
 
+```prism,mod=Data.Validation
+(validation_or(0, Valid(7)), validation_or(0, Invalid(["bad"])))
+```
+
+```output
+(7, 0)
+```
+
 ### `validation_of_result`
 
-```prism,sig,h-b534684dba083615df267f7fd7052beada535ab79f1ad38817bfca71454b5879
+```prism,sig,h-9ce7374916f5815b56b6b851b562e0058f2cbbc7f56793e2fb0366b7a5add170
 validation_of_result : forall a b. (Result(a, b)) -> Data.Validation.Validation(b, a)
 ```
 
@@ -84,7 +100,7 @@ Turn a `Result` into a single-error `Validation`.
 
 ### `result_of_validation`
 
-```prism,sig,h-59fd6ad0c18587895aca9bb2d90be3446daa5eb23ff5339dcbf3f128daaa192a
+```prism,sig,h-b7b61535f51b820b35f4b245ab248a24b1e02b09f689f64b15870cbe1cbfd7c0
 result_of_validation : forall a b. (Data.Validation.Validation(a, b)) -> Result(b, List(a))
 ```
 
@@ -92,8 +108,16 @@ Turn a `Validation` back into a `Result`, keeping the whole error list on the `E
 
 ### `sequence_validation`
 
-```prism,sig,h-0ef8f080abc517c64b5c10af48c14415117be5c8e70a304cf2bad0863b97474d
+```prism,sig,h-e8820ecdd1570cfa696e26aa14b85a80634721f665b2fbdff38b6bd78fc1f773
 sequence_validation : forall a b. (List(Data.Validation.Validation(a, b))) -> Data.Validation.Validation(a, List(b))
 ```
 
 Collapse a list of validations into a validation of the list, accumulating every error across all of them.
+
+```prism,mod=Data.Validation
+sequence_validation([Valid(1), Invalid(["first"]), Invalid(["second"])])
+```
+
+```output
+Data.Validation.Invalid([first, second])
+```

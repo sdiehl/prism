@@ -1,0 +1,111 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "9aaa032ae6f272652d206e6e4826cffc6a04c8379ecdfe5b850591e5b35a32ab",
+    "text": "fn corpus(v) = match v of\n  [x, y] => 0\n  _ => 1\n"
+  },
+  "items": [
+    {
+      "body": {
+        "arms": [
+          {
+            "body": {
+              "kind": "int",
+              "span": [
+                38,
+                39
+              ],
+              "value": "0"
+            },
+            "pat": {
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "x",
+                  "span": [
+                    29,
+                    30
+                  ]
+                },
+                {
+                  "args": [
+                    {
+                      "kind": "var",
+                      "name": "y",
+                      "span": [
+                        32,
+                        33
+                      ]
+                    },
+                    {
+                      "kind": "ctor",
+                      "name": "Nil",
+                      "span": [
+                        34,
+                        34
+                      ]
+                    }
+                  ],
+                  "kind": "ctor",
+                  "name": "Cons",
+                  "span": [
+                    32,
+                    33
+                  ]
+                }
+              ],
+              "kind": "ctor",
+              "name": "Cons",
+              "span": [
+                28,
+                34
+              ]
+            }
+          },
+          {
+            "body": {
+              "kind": "int",
+              "span": [
+                47,
+                48
+              ],
+              "value": "1"
+            },
+            "pat": {
+              "kind": "wild",
+              "span": [
+                42,
+                43
+              ]
+            }
+          }
+        ],
+        "kind": "match",
+        "scrutinee": {
+          "kind": "var",
+          "name": "v",
+          "span": [
+            21,
+            22
+          ]
+        },
+        "span": [
+          15,
+          48
+        ]
+      },
+      "kind": "fn",
+      "name": "corpus",
+      "params": [
+        {
+          "name": "v"
+        }
+      ],
+      "span": [
+        0,
+        48
+      ]
+    }
+  ]
+}

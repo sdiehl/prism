@@ -15,9 +15,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use prism::core::typed::effect_lower::diagnostics::DriftLog;
 use prism::core::typed::effect_lower::*;
 use prism::core::typed::effect_lower::{
-    analysis, arena, assemble_local_partial, flow, functions_use_constructor, monadic,
-    monadic_fallback, operation_ids, prepare, raw_effects, residual, state, trampoline, walk,
-    with_local_decline, Decision,
+    analysis, arena, assemble_local_partial, functions_use_constructor, monadic, monadic_fallback,
+    operation_ids, prepare, raw_effects, residual, state, trampoline, walk, with_local_decline,
+    Decision,
 };
 use prism::core::typed::effect_lower::{LocalDeclinePoint, LocalSplit, LoweringAnalysis};
 use prism::core::typed::*;
@@ -314,74 +314,86 @@ fn every_effect_strategy_and_lowering_flag_boundary_is_accounted_for() {
     struct Fixture {
         name: &'static str,
         source: &'static str,
-        expected: [EffectStrategy; 3],
+        // One rung per knob position, in `EffectTier::ALL` order.
+        expected: [EffectStrategy; EffectTier::ALL.len()],
     }
+
+    use EffectStrategy::{
+        Evidence, LocalPartial, Pure, SelectiveFreeMonad, StateFusion, WholeProgramFreeMonad,
+    };
 
     let fixtures = [
         Fixture {
             name: "pure",
             source: include_str!("../../examples/accum.pr"),
-            expected: [
-                EffectStrategy::Pure,
-                EffectStrategy::Pure,
-                EffectStrategy::Pure,
-            ],
+            expected: [Pure, Pure, Pure, Pure, Pure],
         },
         Fixture {
             name: "evidence",
             source: include_str!("../../examples/eff_reader.pr"),
             expected: [
-                EffectStrategy::Evidence,
-                EffectStrategy::SelectiveFreeMonad,
-                EffectStrategy::SelectiveFreeMonad,
+                Evidence,
+                SelectiveFreeMonad,
+                SelectiveFreeMonad,
+                SelectiveFreeMonad,
+                WholeProgramFreeMonad,
             ],
         },
         Fixture {
             name: "state",
             source: include_str!("../../examples/eff_state.pr"),
             expected: [
-                EffectStrategy::StateFusion,
-                EffectStrategy::StateFusion,
-                EffectStrategy::SelectiveFreeMonad,
+                StateFusion,
+                StateFusion,
+                SelectiveFreeMonad,
+                SelectiveFreeMonad,
+                WholeProgramFreeMonad,
             ],
         },
         Fixture {
             name: "local",
             source: include_str!("../cases/run/local_mono_combined.pr"),
             expected: [
-                EffectStrategy::LocalPartial,
-                EffectStrategy::LocalPartial,
-                EffectStrategy::WholeProgramFreeMonad,
+                LocalPartial,
+                LocalPartial,
+                LocalPartial,
+                WholeProgramFreeMonad,
+                WholeProgramFreeMonad,
             ],
         },
         Fixture {
             name: "selective",
             source: include_str!("../../examples/eff_nontail.pr"),
             expected: [
-                EffectStrategy::SelectiveFreeMonad,
-                EffectStrategy::SelectiveFreeMonad,
-                EffectStrategy::SelectiveFreeMonad,
+                SelectiveFreeMonad,
+                SelectiveFreeMonad,
+                SelectiveFreeMonad,
+                SelectiveFreeMonad,
+                WholeProgramFreeMonad,
             ],
         },
         Fixture {
             name: "whole",
             source: include_str!("../../examples/eff_poly.pr"),
             expected: [
-                EffectStrategy::WholeProgramFreeMonad,
-                EffectStrategy::WholeProgramFreeMonad,
-                EffectStrategy::WholeProgramFreeMonad,
+                WholeProgramFreeMonad,
+                WholeProgramFreeMonad,
+                WholeProgramFreeMonad,
+                WholeProgramFreeMonad,
+                WholeProgramFreeMonad,
             ],
         },
     ];
 
+    // Collect the whole table before judging it, so one failing run reports
+    // every knob position rather than aborting on the first.
+    let mut table = Vec::new();
+    let mut want = Vec::new();
     for fixture in fixtures {
         let (typed, env, ctors, grades) = typed_from_program(fixture.source);
-        for (tier_index, effect_tier) in
-            [EffectTier::Auto, EffectTier::State, EffectTier::FreeMonad]
-                .into_iter()
-                .enumerate()
-        {
-            let expected = fixture.expected[tier_index];
+        let mut row = Vec::new();
+        for effect_tier in EffectTier::ALL {
+            let mut rung = None;
             for native_effects in [false, true] {
                 for trampoline in [false, true] {
                     for quiet in [false, true] {
@@ -394,7 +406,13 @@ fn every_effect_strategy_and_lowering_flag_boundary_is_accounted_for() {
                         };
                         let out =
                             assert_typed_lowering(typed.clone(), &env, &ctors, &flags, &grades);
-                        assert_eq!(out.strategy, expected);
+                        assert_eq!(
+                            *rung.get_or_insert(out.strategy),
+                            out.strategy,
+                            "{} at {}: the auxiliary flags must not move the rung",
+                            fixture.name,
+                            effect_tier.label()
+                        );
                         if fixture.name == "local" {
                             assert!(
                                 out.warning.is_some(),
@@ -402,18 +420,39 @@ fn every_effect_strategy_and_lowering_flag_boundary_is_accounted_for() {
                             );
                         }
                         if fixture.name == "selective" {
+                            // The native handler driver takes closed handlers
+                            // only, so it appears exactly when the native-effects
+                            // cell is on *and* the program stayed selective:
+                            // whole-program scope declares every handler open,
+                            // leaving the driver nothing to take.
+                            let native_driver = native_effects
+                                && out.strategy == EffectStrategy::SelectiveFreeMonad;
                             assert_eq!(
                                 functions_use_constructor(out.core.functions(), "EResume"),
-                                native_effects,
+                                native_driver,
                                 "the native-effects cell must exercise the native driver"
                             );
-                            assert_eq!(out.ctors.contains_key("EResume"), native_effects);
+                            assert_eq!(out.ctors.contains_key("EResume"), native_driver);
                         }
                     }
                 }
             }
+            row.push((
+                effect_tier.label(),
+                rung.expect("one cell per knob position"),
+            ));
         }
+        want.push((
+            fixture.name,
+            EffectTier::ALL
+                .iter()
+                .zip(fixture.expected)
+                .map(|(tier, rung)| (tier.label(), rung))
+                .collect::<Vec<_>>(),
+        ));
+        table.push((fixture.name, row));
     }
+    assert_eq!(table, want);
 }
 
 #[test]
@@ -615,7 +654,9 @@ fn tail_resumptive_handler_lowers_by_evidence() {
 // falls onto the allocating whole-program free monad.
 #[test]
 fn returned_stream_thunks_lower_by_evidence() {
-    let out = assert_program_lowering(include_str!("../../examples/stream_fuse.pr"));
+    let out = assert_program_lowering(include_str!(
+        "../../examples/fixtures/compiler/stream_fuse.pr"
+    ));
     assert_eq!(out.strategy, EffectStrategy::Evidence);
 }
 
@@ -639,7 +680,7 @@ fn arena_program_lowers_exactly() {
 #[test]
 fn arena_program_forced_to_the_free_monad_lowers_exactly() {
     let flags = DynFlags {
-        effect_tier: EffectTier::FreeMonad,
+        effect_tier: EffectTier::WholeProgramFreeMonad,
         ..DynFlags::default()
     };
     let (typed, env, ctors, grades) = typed_from_program(include_str!("../../examples/arena.pr"));
@@ -767,13 +808,11 @@ fn threading_the_take_corpus_program_verifies() {
         );
 }
 
-// Every corpus program routed through state threading, read from the tree
-// and checked one by one: the eleven programs
-// `tests/tier_manifest.txt` records as `state-fusion` are the population,
-// not a sample, so a threading change that loses any one of them fails at its
-// source. Read at run time rather than
-// `include_str!` so the corpus stays a single source of truth; this is an
-// always-run library test, not a cached native verdict.
+// Every public corpus program routed through state threading, plus the two
+// compiler-only stream fixtures, read from the tree and checked one by one.
+// This is the population, not a sample, so a threading change that loses any
+// one of them fails at its source. Read at run time rather than `include_str!`;
+// this is an always-run library test, not a cached native verdict.
 #[test]
 fn production_state_corpus_routes_and_eliminates_effects() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -782,9 +821,9 @@ fn production_state_corpus_routes_and_eliminates_effects() {
         "examples/eff_writer.pr",
         "examples/interaction.pr",
         "examples/param_effects.pr",
-        "examples/stream_fold.pr",
+        "examples/fixtures/compiler/stream_fold.pr",
         "examples/streams.pr",
-        "examples/ufcs.pr",
+        "examples/fixtures/compiler/stream_ufcs.pr",
         "tests/cases/run/comp_map_once.pr",
         "tests/cases/run/fold_chains.pr",
         "tests/cases/run/stream_take.pr",
@@ -818,9 +857,9 @@ fn threaded_state_corpus_verifies() {
         "examples/eff_writer.pr",
         "examples/interaction.pr",
         "examples/param_effects.pr",
-        "examples/stream_fold.pr",
+        "examples/fixtures/compiler/stream_fold.pr",
         "examples/streams.pr",
-        "examples/ufcs.pr",
+        "examples/fixtures/compiler/stream_ufcs.pr",
         "tests/cases/run/comp_map_once.pr",
         "tests/cases/run/fold_chains.pr",
         "tests/cases/run/stream_take.pr",
@@ -900,9 +939,9 @@ fn native_function_answer_region_matches_the_typed_production_route() {
     assert_eq!(out.strategy, EffectStrategy::SelectiveFreeMonad);
     let prepared = prepare(source, &env, &ctors, &flags, &grades).expect("typed preparation");
     let ops = operation_ids(&prepared.fns).expect("operation ids");
-    let latent = latent::latent_map(&prepared.fns);
-    let flow = flow::analyze(&prepared.fns, &latent);
-    let plan = analysis::plan(&prepared.fns, &latent, &flow);
+    let effects = EffectPlan::analyze(&prepared.fns);
+    let latent = effects.latent();
+    let plan = analysis::plan(&prepared.fns, &effects, false);
     assert_eq!(plan.scope, analysis::MonadicScope::Selective);
 
     let mut fresh = Fresh::new();
@@ -911,9 +950,12 @@ fn native_function_answer_region_matches_the_typed_production_route() {
         &ops,
         &mut fresh,
         &EffRow::Empty,
-        &plan,
-        &latent,
-        true,
+        &monadic::Region {
+            plan: &plan,
+            latent,
+            flow: effects.flow(),
+            native_enabled: true,
+        },
     )
     .expect("native function-answer region lowers");
     lowered.push(abi::ebind_fn());
@@ -944,9 +986,12 @@ fn native_function_answer_region_matches_the_typed_production_route() {
         &ops,
         &mut off_fresh,
         &EffRow::Empty,
-        &plan,
-        &latent,
-        false,
+        &monadic::Region {
+            plan: &plan,
+            latent,
+            flow: effects.flow(),
+            native_enabled: false,
+        },
     )
     .expect("typed non-native function-answer fallback");
     off_functions.push(abi::ebind_fn());
@@ -963,7 +1008,7 @@ fn whole_program_trampoline_is_deterministic_and_verifies() {
     let src = "effect Ask\n  ask() : Int\n\nfn make() = \\() -> let answer = ask() in let _ = println(answer) in answer\n\nfn main() =\n  let unused = make()\n  0\n";
     let (source, env, ctors, grades) = typed_from_source(src);
     let flags = DynFlags {
-        effect_tier: EffectTier::FreeMonad,
+        effect_tier: EffectTier::WholeProgramFreeMonad,
         quiet: true,
         ..DynFlags::default()
     };
@@ -1038,13 +1083,20 @@ fn whole_program_trampoline_is_deterministic_and_verifies() {
     assert_eq!(verify(&typed, &lowered_env), Ok(()));
     assert_eq!(typed.erase(), out.core.erase());
 
+    // The control asks for the free-monad rung without pinning its scope, so
+    // the cascade settles on the confined one and the trampoline stays out of a
+    // program that never needed it.
+    let selective_flags = DynFlags {
+        effect_tier: EffectTier::FreeMonad,
+        ..flags
+    };
     let (selective, selective_env, selective_ctors, selective_grades) =
         typed_from_source("effect Ask\n  ask() : Int\n\nfn main() = ask()\n");
     let selective = assert_typed_lowering(
         selective,
         &selective_env,
         &selective_ctors,
-        &flags,
+        &selective_flags,
         &selective_grades,
     );
     assert_eq!(selective.strategy, EffectStrategy::SelectiveFreeMonad);
@@ -1074,7 +1126,7 @@ fn main() =
 "#;
     let (source, env, ctors, grades) = typed_from_source(src);
     let flags = DynFlags {
-        effect_tier: EffectTier::FreeMonad,
+        effect_tier: EffectTier::WholeProgramFreeMonad,
         quiet: true,
         ..DynFlags::default()
     };
@@ -1265,10 +1317,9 @@ fn local_partial_region_matches_the_pinned_program_split() {
     let (typed, env, ctors, grades) = typed_from_program(src);
     let flags = DynFlags::default();
     let prepared = prepare(typed, &env, &ctors, &flags, &grades).expect("typed preparation");
-    let latent = latent::latent_map(&prepared.fns);
-    let flow = flow::analyze(&prepared.fns, &latent);
+    let effects = EffectPlan::analyze(&prepared.fns);
     let (region, entries) =
-        analysis::local_region(&prepared.fns, &latent, &flow).expect("clean local region");
+        analysis::local_region(&prepared.fns, &effects).expect("clean local region");
     assert!(region.contains(&sym("logged")));
     assert!(region.contains(&sym("run_all")));
     assert!(!region.contains(&sym("weight")));
@@ -1564,10 +1615,10 @@ fn local_partial_composition(
     let (typed, env, ctors, grades) = typed_from_program(src);
     let flags = DynFlags::default();
     let prepared = prepare(typed, &env, &ctors, &flags, &grades).expect("typed preparation");
-    let latent = latent::latent_map(&prepared.fns);
-    let flow = flow::analyze(&prepared.fns, &latent);
+    let effects = EffectPlan::analyze(&prepared.fns);
+    let (latent, flow) = (effects.latent(), effects.flow());
     let (region, entries) =
-        analysis::local_region(&prepared.fns, &latent, &flow).expect("clean local region");
+        analysis::local_region(&prepared.fns, &effects).expect("clean local region");
     let rest: Vec<TypedCoreFn> = prepared
         .fns
         .iter()
@@ -1579,8 +1630,8 @@ fn local_partial_composition(
     assert!(
         evidence::try_lower_ev(
             &rest,
-            &latent,
-            &flow,
+            latent,
+            flow,
             &ops,
             &prepared.env,
             &DriftLog::new(true),
@@ -1589,7 +1640,7 @@ fn local_partial_composition(
         .is_none(),
         "the fused rest takes the State rung"
     );
-    let state_analysis = state::StateAnalysis::new(&ops, &latent, &flow, &prepared.env);
+    let state_analysis = state::StateAnalysis::new(&ops, latent, flow, &prepared.env);
     let state_plan = state::fold_uniform(&rest, &state_analysis).expect("state rest plan");
     assert!(state::threads(&state_plan, &rest, &state_analysis));
     let lowered = state::thread_program(
@@ -1607,8 +1658,7 @@ fn local_partial_composition(
         &prepared.ctors,
         &LoweringAnalysis {
             ops: &ops,
-            latent: &latent,
-            flow: &flow,
+            plan: &effects,
         },
         &LocalSplit {
             region: &region,
@@ -1637,12 +1687,10 @@ fn typed_local_decline_digests(point: LocalDeclinePoint) -> (String, String) {
     let prepared =
         prepare(typed, &env, &ctors, &flags, &grades).expect("typed preparation succeeds");
     let ops = operation_ids(&prepared.fns).expect("operation ids");
-    let latent = latent::latent_map(&prepared.fns);
-    let flow = flow::analyze(&prepared.fns, &latent);
+    let effects = EffectPlan::analyze(&prepared.fns);
     let analysis = LoweringAnalysis {
         ops: &ops,
-        latent: &latent,
-        flow: &flow,
+        plan: &effects,
     };
     let mut fresh = Fresh::new();
     let Decision::Lowered(clean) = monadic_fallback(
@@ -1699,11 +1747,11 @@ fn local_partial_rest_fusion_decline_preserves_the_typed_name_supply() {
     let (probed, clean) = typed_local_decline_digests(LocalDeclinePoint::AfterRestFusion);
     assert_eq!(
         probed,
-        "ae751e3cb5038eb25b108909c5bdc02b0218d3c9799aff74cb05de9c695a7ed3"
+        "9be4e15036553dcb820daac96e29cd87c194eaa84097f20871d4a92420126a55"
     );
     assert_eq!(
         clean,
-        "fb70e38b468785ce83f2e9ffe33be7edf36a052505eba3e40326b697e9229a75"
+        "a9f365f86b080fb3b5a665f5837a2860a77128cb8fdbb4cf0c8950f404e5d3c9"
     );
 }
 
@@ -1712,10 +1760,10 @@ fn local_partial_boundary_decline_preserves_the_typed_name_supply() {
     let (probed, clean) = typed_local_decline_digests(LocalDeclinePoint::AfterBoundaryAssembly);
     assert_eq!(
         probed,
-        "86b0fa0e4899076bbbaa4594c7b63ea68aba35dba5af22302afe32b624baba48"
+        "b248766afb51b84b77d8326dc9ab3cb2c7a674341b45173af8f85f0843a8638b"
     );
     assert_eq!(
         clean,
-        "fb70e38b468785ce83f2e9ffe33be7edf36a052505eba3e40326b697e9229a75"
+        "a9f365f86b080fb3b5a665f5837a2860a77128cb8fdbb4cf0c8950f404e5d3c9"
     );
 }

@@ -27,7 +27,7 @@ fn main() : Unit ! {IO} =
     never abort(u) => 0,
     return r => r
   })
-  println(handle aborter(0 - 1) with {
+  println(handle aborter(-1) with {
     never abort(u) => 999,
     return r => r
   })

@@ -3,10 +3,10 @@
 1 + [2 => E7101 6:6 expected ], found end of input want=]
 [1 + 2) => E7100 6:7 expected ], found ) want=]
 (1 + 2] => E7100 6:7 expected ), found ] want=)
-* => E7100 0:1 expected one of (, [, int, ident, found * want=(, [, int, ident
-1 + => E7101 3:3 expected one of (, [, int, ident, found end of input want=(, [, int, ident
-- => E7101 1:1 expected one of (, [, int, ident, found end of input want=(, [, int, ident
-[) => E7100 1:2 expected one of (, [, int, ident, found ) want=(, [, int, ident
+* => E7100 0:1 expected one of (, [, int, ident, found * want=(, [, ident, int
+1 + => E7101 3:3 expected one of (, [, int, ident, found end of input want=(, [, ident, int
+- => E7101 1:1 expected one of (, [, int, ident, found end of input want=(, [, ident, int
+[) => E7100 1:2 expected one of (, [, int, ident, found ) want=(, [, ident, int
 1 == 2 == 3 => E7100 7:9 expected end of input, found == want=end of input
 1 2 => E7100 2:3 expected end of input, found int want=end of input
 1 + 2 * (3 - 4) => ok (1 + (2 * ((3 - 4))))

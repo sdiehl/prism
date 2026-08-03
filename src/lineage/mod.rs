@@ -80,6 +80,6 @@ pub use render::{render_diff, render_explanation, render_human, render_world_exp
 pub use run::{replay_relation, run_entry, write_run_sidecar, RunLineage, RunLineageInput};
 #[cfg(feature = "native")]
 pub use verify::{
-    resolve_replay_file, verify, verify_run_replay, verify_world, RunVerification, VerifyReport,
-    WorldVerifyReport,
+    resolve_replay_file, stays_inside, verify, verify_run_replay, verify_world, RunVerification,
+    VerifyReport, WorldVerifyReport,
 };

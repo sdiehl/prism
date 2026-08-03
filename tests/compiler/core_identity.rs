@@ -1,5 +1,5 @@
 // The content-addressing differential: a Prism program recomputes every
-// definition's `prism-core-hash-v1` hash from the published identity surface,
+// definition's `prism-core-hash-v2` hash from the published identity surface,
 // and the result must equal what the compiler prints.
 //
 // `dump core-identity` is an observation of the identity surface, not a part of

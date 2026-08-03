@@ -124,8 +124,17 @@ fn write_text(path : String, body : String) : Result(Unit, String) ! {IO} =
       write_file(path, body),
     )
 
+-- | Prove the examples the deck shows. A slide renders a `prism` fence beside
+-- the `output` fence written under it; this hands both to the compiler's
+-- doctest runner, which compiles the example and compares what it actually
+-- prints. An example that has drifted from its output fails the build rather
+-- than reaching a screen.
+fn doctest_steps(project : String) : Result(Unit, String) ! {IO} =
+  run("deck doctests", "prism docs {shell_quote(project)} --test")
+
 fn check_steps(project : String) : Result(Unit, String) ! {IO} =
   run("Prism check", "prism check {shell_quote(project)}")?
+  doctest_steps(project)?
   run("Typst discovery", "typst --version")?
   Ok(())
 
@@ -149,6 +158,7 @@ fn build_steps(
   let typst_path = join_path(target, "deck.typ")
   let pdf_path = join_path(target, output)
   run("creating target/spectra", "mkdir -p -- {shell_quote(target)}")?
+  doctest_steps(project)?
   run(
       "deck compilation",
       "prism build {shell_quote(project)} --out {shell_quote(evaluator)}",

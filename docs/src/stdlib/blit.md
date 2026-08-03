@@ -12,7 +12,7 @@ Instanced only where a real primitive backs the copy: `String` over the `substri
 
 ### `Blit`
 
-```prism,def,h-0482b585d072b3b438526883c6e3885b50cb4c2a886a2c76c5f0dd74c41142cf
+```prism,def,h-96df58fded2751be471ed5f911c5efa9fe254e297863296d22567654cb4b9f50
 class Blit(s)
   blit : (s, Int, Int, s, Int) -> s
 ```
@@ -31,7 +31,7 @@ aXYd
 
 ### `blitString`
 
-```prism,def,h-98178a2ad2eaf7a46874b0f234a0f4753636d919e03722631ed52b666fa13431
+```prism,def,h-b359629e0e1407d8cbd1d89ced91b8cad04ac56018eec721a92de7d2d9cd2ea2
 instance blitString : Blit(String)
 ```
 
@@ -39,7 +39,7 @@ Splice the source range over the destination range with the string slice primiti
 
 ### `blitArray`
 
-```prism,def,h-9a58ef39ff2a8a07ec4fee13513df79e71077afc441464792235ee583adb16ca
+```prism,def,h-12662120fff3a63f46a04ebdde312f65578f5a2196fdaf49f30aa3104310a3a4
 instance blitArray : Blit(Array(a))
 ```
 
@@ -47,7 +47,7 @@ Overwrite `dst[dst_off + i]` with `src[src_off + i]` for each `i` in `0 .. len` 
 
 ### `blitBytes`
 
-```prism,def,h-b9ae6cddc04070fcde311c0309e4c15272f9c300f588bd629d3c2bba20f5e2d1
+```prism,def,h-276dc1051da45c1b00f8511a8b76a75b4930db87c3c110143aca667ced480d37
 instance blitBytes : Blit(Bytes)
 ```
 

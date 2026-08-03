@@ -1,0 +1,1264 @@
+-- Independently maintained behavior fixture for the generated Type slice.
+-- The generator reads and fingerprints this file but never emits or rewrites it.
+
+import Data.List (..)
+
+import Data.Maybe (..)
+
+import Syntax.Source (..)
+
+import Syntax.Token (..)
+
+import Syntax.Ast (..)
+
+import Syntax.Cursor (..)
+
+import Syntax.Parse.Support (..)
+
+import GeneratedTypeLeaf (..)
+
+fn generated_test_token(k : TokenKind, value : Option(String)) : Token =
+  Token {
+    kind = k,
+    span = Span { lo = 0, hi = 1 },
+    value = value
+  }
+
+fn fixed(s : String) : Token = generated_test_token(TFixed(s), None)
+
+fn word(k : TokenKind, s : String) : Token = generated_test_token(k, Some(s))
+
+fn located(k : TokenKind, s : String, lo : Int, hi : Int) : Token =
+  Token {
+    kind = k,
+    span = Span { lo = lo, hi = hi },
+    value = Some(s)
+  }
+
+fn child_done(
+  value : Ty,
+  c : Cursor,
+  receipt : GeneratedTypeReceipt
+) : Parsed(GeneratedChild(Ty)) =
+  PTook(TypeDone(value, receipt), c)
+
+fn note_type_start(c : Cursor) : Cursor =
+  foldl(cursor_note, c, [
+      TFixed("#"),
+      TFixed("("),
+      TFixed("Bool"),
+      TFixed("Char"),
+      TFixed("Float"),
+      TFixed("I64"),
+      TFixed("Int"),
+      TFixed("String"),
+      TFixed("U64"),
+      TFixed("Unit"),
+      TFixed("["),
+      TFixed("forall"),
+      TIdent,
+      TQual,
+      TUid,
+    ])
+
+fn note_type_arg_start(c : Cursor) : Cursor =
+  cursor_note(cursor_note(note_type_start(c), TInt), TFixed("\{"))
+
+fn generated_child(c : Cursor, depth : Int) : Parsed(GeneratedChild(Ty)) =
+  if depth == 7 || depth == 6 then
+    match cursor_peek(c) of
+      Some(t) =>
+        if t.kind == TFixed("Int") then
+          child_done(TyInt, cursor_advance(c), TRPlain)
+        elif t.kind == TFixed("Bool") then
+          child_done(TyBool, cursor_advance(c), TRPlain)
+        elif t.kind == TIdent then
+          child_done(TyVar(token_text(t)), cursor_advance(c), TRNamed)
+        elif t.kind == TFixed("[") then
+          PStuck(cursor_note(cursor_advance(c), TFixed("Int")))
+        else
+          PStuck(note_type_start(c))
+      None => PStuck(note_type_start(c))
+  else
+    PFault(refuse(cursor_span(c), "child depth changed"))
+
+fn generated_arg_child(c : Cursor, depth : Int) : Parsed(GeneratedChild(Ty)) =
+  generated_parse_type_arg_with(
+      c,
+      depth,
+      generated_type_body,
+      generated_row_body,
+    )
+
+fn generated_type_body(c : Cursor, depth : Int) : Parsed(GeneratedChild(Ty)) =
+  if depth /= 7 && depth /= 6 then
+    PFault(refuse(cursor_span(c), "type body depth changed"))
+  else
+    match cursor_peek(c) of
+      Some(t) =>
+        if t.kind == TIdent then
+          let name = token_text(t)
+          let c1 = cursor_advance(c)
+          if at_fixed(c1, "(") then
+            let c2 = cursor_advance(c1)
+            if (at_fixed(c2, "Int") && at_fixed(cursor_advance(c2), ")")) then
+              child_done(
+                  TyApp(name, [TyInt]),
+                  cursor_advance(cursor_advance(c2)),
+                  TRPlain,
+                )
+            else
+              PStuck(cursor_note(c2, TFixed("Int")))
+          elif at_fixed(c1, "@") then
+            let c2 = cursor_advance(c1)
+            if at_kind(c2, TIdent) then
+              child_done(TyVar(name), cursor_advance(c2), TRUsage)
+            else
+              PStuck(cursor_note(c2, TIdent))
+          elif at_fixed(c1, "->") then
+            let c2 = cursor_advance(c1)
+            if at_fixed(c2, "Int") then
+              child_done(TyVar(name), cursor_advance(c2), TRPlain)
+            else
+              PStuck(cursor_note(c2, TFixed("Int")))
+          else
+            child_done(TyVar(name), c1, TRNamed)
+        else
+          generated_child(c, depth)
+      None => PStuck(note_type_start(c))
+
+fn generated_row_body(c : Cursor, depth : Int) : Parsed(Row) =
+  if depth /= 7 && depth /= 6 then
+    PFault(refuse(cursor_span(c), "row body depth changed"))
+  elif at_fixed(c, "\}") then
+    PTook(Row { labels = Nil, tail = None }, cursor_advance(c))
+  elif at_fixed(c, "|") then
+    let c1 = cursor_advance(c)
+    match take_word(c1, TIdent) of
+      PTook(tail, c2) =>
+        if at_fixed(c2, "\}") then
+          PTook(Row { labels = Nil, tail = Some(tail) }, cursor_advance(c2))
+        else
+          PStuck(cursor_note(c2, TFixed("\}")))
+      PStuck(c2) => PStuck(c2)
+      PFault(d) => PFault(d)
+  elif at_kind(c, TUid) || at_kind(c, TQual) || at_kind(c, TIdent) then
+    let label = EffLabel { name = peek_word(c), args = Nil }
+    let c1 = cursor_advance(c)
+    if at_fixed(c1, "\}") then
+      PTook(Row { labels = [label], tail = None }, cursor_advance(c1))
+    elif at_fixed(c1, "|") then
+      let c2 = cursor_advance(c1)
+      match take_word(c2, TIdent) of
+        PTook(tail, c3) =>
+          if at_fixed(c3, "\}") then
+            PTook(
+                Row { labels = [label], tail = Some(tail) },
+                cursor_advance(c3),
+              )
+          else
+            PStuck(cursor_note(c3, TFixed("\}")))
+        PStuck(c3) => PStuck(c3)
+        PFault(d) => PFault(d)
+    elif at_fixed(c1, ",") then
+      generated_row_miss(cursor_advance(c1))
+    else
+      PStuck(cursor_note(cursor_note(c1, TFixed("|")), TFixed("\}")))
+  else
+    generated_row_miss(c)
+
+fn generated_row_miss(c : Cursor) : Parsed(Row) =
+  PStuck(foldl(cursor_note, c, [
+      TIdent,
+      TQual,
+      TUid,
+      TFixed("|"),
+      TFixed("\}"),
+    ]))
+
+fn parse_generated_type_arg(ts : List(Token)) : Parsed(GeneratedChild(Ty)) =
+  generated_parse_type_arg_with(
+      cursor_of(ts, length(ts)),
+      8,
+      generated_type_body,
+      generated_row_body,
+    )
+
+type TestATypeCompletion = TCPlain | TCNamed
+
+fn test_value(done : GeneratedChild(Ty)) : Ty =
+  match done of
+    TypeDone(t, _) => t
+
+fn test_completion(done : GeneratedChild(Ty)) : TestATypeCompletion =
+  match done of
+    TypeDone(_, TRPlain) => TCPlain
+    TypeDone(_, TRNamed) => TCNamed
+    _ => TCPlain
+
+fn parse_generated(ts : List(Token)) : Parsed(GeneratedChild(Ty)) =
+  generated_parse_atype(
+      cursor_of(ts, length(ts)),
+      7,
+      generated_child,
+      generated_arg_child,
+    )
+
+test fn generated_atype_int() =
+  match parse_generated([fixed("Int")]) of
+    PTook(done, c1) =>
+      match test_completion(done) of
+        TCPlain =>
+          match test_value(done) of
+            TyInt =>
+              if c1.pos == 1 then
+                ()
+              else
+                fail()
+            _ => fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_atype_i64() =
+  match parse_generated([fixed("I64")]) of
+    PTook(done, c1) =>
+      match test_completion(done) of
+        TCPlain =>
+          match test_value(done) of
+            TyI64 =>
+              if c1.pos == 1 then
+                ()
+              else
+                fail()
+            _ => fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_atype_u64() =
+  match parse_generated([fixed("U64")]) of
+    PTook(done, c1) =>
+      match test_completion(done) of
+        TCPlain =>
+          match test_value(done) of
+            TyU64 =>
+              if c1.pos == 1 then
+                ()
+              else
+                fail()
+            _ => fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_atype_bool() =
+  match parse_generated([fixed("Bool")]) of
+    PTook(done, c1) =>
+      match test_completion(done) of
+        TCPlain =>
+          match test_value(done) of
+            TyBool =>
+              if c1.pos == 1 then
+                ()
+              else
+                fail()
+            _ => fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_atype_unit() =
+  match parse_generated([fixed("Unit")]) of
+    PTook(done, c1) =>
+      match test_completion(done) of
+        TCPlain =>
+          match test_value(done) of
+            TyUnit =>
+              if c1.pos == 1 then
+                ()
+              else
+                fail()
+            _ => fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_atype_float() =
+  match parse_generated([fixed("Float")]) of
+    PTook(done, c1) =>
+      match test_completion(done) of
+        TCPlain =>
+          match test_value(done) of
+            TyFloat =>
+              if c1.pos == 1 then
+                ()
+              else
+                fail()
+            _ => fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_atype_char() =
+  match parse_generated([fixed("Char")]) of
+    PTook(done, c1) =>
+      match test_completion(done) of
+        TCPlain =>
+          match test_value(done) of
+            TyChar =>
+              if c1.pos == 1 then
+                ()
+              else
+                fail()
+            _ => fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_atype_string() =
+  match parse_generated([fixed("String")]) of
+    PTook(done, c1) =>
+      match test_completion(done) of
+        TCPlain =>
+          match test_value(done) of
+            TyStr =>
+              if c1.pos == 1 then
+                ()
+              else
+                fail()
+            _ => fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_atype_list() =
+  match parse_generated([fixed("["), fixed("Int"), fixed("]")]) of
+    PTook(done, c) =>
+      match test_value(done) of
+        TyCon(name, Cons(TyInt, Nil)) =>
+          match test_completion(done) of
+            TCPlain =>
+              if name == "List" && c.pos == 3 then
+                ()
+              else
+                fail()
+            _ => fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_atype_lower_application() =
+  match (parse_generated([word(TIdent, "f"), fixed("("), fixed("Int"), fixed(")")])) of
+    PTook(done, c) =>
+      match test_value(done) of
+        TyApp(name, Cons(TyInt, Nil)) =>
+          match test_completion(done) of
+            TCPlain =>
+              if name == "f" && c.pos == 4 then
+                ()
+              else
+                fail()
+            _ => fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_atype_bare_lower_is_named() =
+  match parse_generated([word(TIdent, "a")]) of
+    PTook(done, c) =>
+      match test_value(done) of
+        TyVar(name) =>
+          match test_completion(done) of
+            TCNamed =>
+              if name == "a" && c.pos == 1 then
+                ()
+              else
+                fail()
+            _ => fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_atype_upper_optional_args() =
+  match parse_generated([word(TUid, "Maybe")]) of
+    PTook(done, _) =>
+      match (test_value(done), test_completion(done)) of
+        (TyCon(name, Nil), TCNamed) =>
+          if name == "Maybe" then
+            ()
+          else
+            fail()
+        _ => fail()
+    _ => fail()
+  match (parse_generated([word(TUid, "Maybe"), fixed("("), fixed("Int"), fixed(")")])) of
+    PTook(done, _) =>
+      match (test_value(done), test_completion(done)) of
+        (TyCon(name, Cons(TyInt, Nil)), TCPlain) =>
+          if name == "Maybe" then
+            ()
+          else
+            fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_atype_qualified_optional_args() =
+  match parse_generated([word(TQual, "M.T")]) of
+    PTook(done, _) =>
+      match (test_value(done), test_completion(done)) of
+        (TyCon(name, Nil), TCNamed) =>
+          if name == "M.T" then
+            ()
+          else
+            fail()
+        _ => fail()
+    _ => fail()
+  match (parse_generated([word(TQual, "M.T"), fixed("("), fixed("Bool"), fixed(")")])) of
+    PTook(done, _) =>
+      match (test_value(done), test_completion(done)) of
+        (TyCon(name, Cons(TyBool, Nil)), TCPlain) =>
+          if name == "M.T" then
+            ()
+          else
+            fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_atype_parenthesized_identity_is_plain() =
+  match parse_generated([fixed("("), word(TIdent, "a"), fixed(")")]) of
+    PTook(done, _) =>
+      match (test_value(done), test_completion(done)) of
+        (TyVar(name), TCPlain) =>
+          if name == "a" then
+            ()
+          else
+            fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_atype_tuple_and_trailing_comma() =
+  match (parse_generated([
+        fixed("("),
+        fixed("Int"),
+        fixed(","),
+        fixed("Bool"),
+        fixed(","),
+        fixed(")"),
+      ])) of
+    PTook(done, c) =>
+      match test_value(done) of
+        TyTuple(Cons(TyInt, Cons(TyBool, Nil))) =>
+          if c.pos == 6 then
+            ()
+          else
+            fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_atype_unboxed_tuple_empty_and_nonempty() =
+  match parse_generated([fixed("#"), fixed("("), fixed(")")]) of
+    PTook(done, _) =>
+      match test_value(done) of
+        TyUnboxedTuple(Nil) => ()
+        _ => fail()
+    _ => fail()
+  match (parse_generated([
+        fixed("#"),
+        fixed("("),
+        fixed("Int"),
+        fixed(","),
+        fixed(")"),
+      ])) of
+    PTook(done, _) =>
+      match test_value(done) of
+        TyUnboxedTuple(Cons(TyInt, Nil)) => ()
+        _ => fail()
+    _ => fail()
+
+test fn generated_atype_unboxed_record() =
+  match (parse_generated([
+        fixed("#"),
+        fixed("\{"),
+        word(TIdent, "x"),
+        fixed(":"),
+        fixed("Int"),
+        fixed(","),
+        fixed("\}"),
+      ])) of
+    PTook(done, c) =>
+      match test_value(done) of
+        TyUnboxedRecord(Cons(field, Nil)) =>
+          if field.name == "x" && c.pos == 7 then
+            match field.ty of
+              TyInt => ()
+              _ => fail()
+          else
+            fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_atype_full_first_miss() =
+  match parse_generated([fixed("+")]) of
+    PStuck(c) =>
+      if (cursor_canonical(c)
+          == [
+              "#",
+              "(",
+              "Bool",
+              "Char",
+              "Float",
+              "I64",
+              "Int",
+              "String",
+              "U64",
+              "Unit",
+              "[",
+              "ident",
+              "qual",
+              "uid",
+            ]) then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_atype_parenthesized_wrong_close_merges_both_edges() =
+  match parse_generated([fixed("("), fixed("Int"), fixed("]")]) of
+    PStuck(c) =>
+      if cursor_canonical(c) == [")", ","] then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_atype_ctor_wrong_follow_merges_child_and_list_edges() =
+  match (parse_generated([
+        word(TUid, "List"),
+        fixed("("),
+        fixed("Int"),
+        generated_test_token(TInt, Some("3")),
+      ])) of
+    PStuck(c) =>
+      if cursor_canonical(c) == ["!", ")", ",", "->", "@"] then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_atype_post_comma_same_position_miss_adds_close() =
+  match (parse_generated([
+        word(TUid, "List"),
+        fixed("("),
+        fixed("Int"),
+        fixed(","),
+        fixed("]"),
+      ])) of
+    PStuck(c) =>
+      if (cursor_canonical(c)
+          == [
+              "#",
+              "(",
+              ")",
+              "Bool",
+              "Char",
+              "Float",
+              "I64",
+              "Int",
+              "String",
+              "U64",
+              "Unit",
+              "[",
+              "forall",
+              "ident",
+              "int",
+              "qual",
+              "uid",
+              "\{",
+            ]) then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_atype_empty_ctor_args_wrong_close_has_full_typearg_first() =
+  match parse_generated([word(TUid, "List"), fixed("("), fixed("]")]) of
+    PStuck(c) =>
+      if (cursor_canonical(c)
+          == [
+              "#",
+              "(",
+              ")",
+              "Bool",
+              "Char",
+              "Float",
+              "I64",
+              "Int",
+              "String",
+              "U64",
+              "Unit",
+              "[",
+              "forall",
+              "ident",
+              "int",
+              "qual",
+              "uid",
+              "\{",
+            ]) then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_atype_post_comma_partial_miss_does_not_add_close() =
+  match (parse_generated([
+        word(TUid, "List"),
+        fixed("("),
+        fixed("Int"),
+        fixed(","),
+        fixed("["),
+        fixed("]"),
+      ])) of
+    PStuck(c) =>
+      if cursor_canonical(c) == ["Int"] then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_atype_unboxed_post_comma_same_position_adds_close() =
+  match (parse_generated([
+        fixed("#"),
+        fixed("("),
+        fixed("Int"),
+        fixed(","),
+        fixed("]"),
+      ])) of
+    PStuck(c) =>
+      if (cursor_canonical(c)
+          == [
+              "#",
+              "(",
+              ")",
+              "Bool",
+              "Char",
+              "Float",
+              "I64",
+              "Int",
+              "String",
+              "U64",
+              "Unit",
+              "[",
+              "forall",
+              "ident",
+              "qual",
+              "uid",
+            ]) then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_atype_record_partial_field_miss_does_not_add_close() =
+  match (parse_generated([
+        fixed("#"),
+        fixed("\{"),
+        word(TIdent, "x"),
+        fixed("]"),
+        fixed("\}"),
+      ])) of
+    PStuck(c) =>
+      if cursor_canonical(c) == [":"] then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_atype_natural_arg_success_has_no_stale_receipt() =
+  match (parse_generated([
+        word(TUid, "Vec"),
+        fixed("("),
+        generated_test_token(TInt, Some("3")),
+        fixed(")"),
+      ])) of
+    PTook(_, c) =>
+      if cursor_expected(c) == [] then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_atype_lone_ident_arg_success_has_no_stale_receipt() =
+  match (parse_generated([
+        word(TUid, "Vec"),
+        fixed("("),
+        word(TIdent, "n"),
+        fixed(")"),
+      ])) of
+    PTook(_, c) =>
+      if cursor_expected(c) == [] then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_atype_natural_arg_wrong_follow_is_receipt_aware() =
+  match (parse_generated([
+        word(TUid, "Vec"),
+        fixed("("),
+        generated_test_token(TInt, Some("3")),
+        fixed("]"),
+      ])) of
+    PStuck(c) =>
+      if cursor_canonical(c) == [")", "+", ","] then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_atype_lone_ident_wrong_follow_is_receipt_aware() =
+  match (parse_generated([
+        word(TUid, "Vec"),
+        fixed("("),
+        word(TIdent, "n"),
+        fixed("]"),
+      ])) of
+    PStuck(c) =>
+      if (cursor_canonical(c) == ["!", "(", ")", "+", ",", "->", "@"]) then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_atype_unboxed_head_miss_is_factored() =
+  match parse_generated([fixed("#"), fixed("[")]) of
+    PStuck(c) =>
+      if cursor_canonical(c) == ["(", "\{"] then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_atype_success_leaves_follow_unconsumed_and_unnoted() =
+  let c0 = cursor_of([fixed("Int"), fixed("Bool")], 2)
+  match generated_parse_atype(c0, 7, generated_child, generated_child) of
+    PTook(_, c1) =>
+      if (c1.pos == 1
+          && cursor_kind(c1) == Some(TFixed("Bool"))
+          && cursor_expected(c1) == []) then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_dim_natural_leaves_plus_for_caller() =
+  let c0 = cursor_of([generated_test_token(TInt, Some("3")), fixed("+")], 2)
+  match generated_parse_dim_term(c0) of
+    PTook(done, c1) =>
+      match done of
+        GTCDimensionNatural =>
+          if (c1.pos == 1
+              && cursor_kind(c1) == Some(TFixed("+"))
+              && cursor_expected(c1) == []) then
+            ()
+          else
+            fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_dim_variable_receipt() =
+  let c0 = cursor_of([word(TIdent, "n")], 1)
+  match generated_parse_dim_term(c0) of
+    PTook(done, c1) =>
+      match done of
+        GTCDimensionVariable =>
+          if c1.pos == 1 then
+            ()
+          else
+            fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_dim_variable_leaves_plus_for_caller() =
+  let c0 = cursor_of([word(TIdent, "n"), fixed("+")], 2)
+  match generated_parse_dim_term(c0) of
+    PTook(done, c1) =>
+      match done of
+        GTCDimensionVariable =>
+          if (c1.pos == 1
+              && cursor_kind(c1) == Some(TFixed("+"))
+              && cursor_expected(c1) == []) then
+            ()
+          else
+            fail()
+        _ => fail()
+    _ => fail()
+
+test fn generated_dim_miss_is_exact() =
+  let c0 = cursor_of([fixed("Int")], 1)
+  match generated_parse_dim_term(c0) of
+    PStuck(c1) =>
+      if cursor_canonical(c1) == ["ident", "int"] then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_receipt_schema_all_eight_menus() =
+  let c = cursor_of([fixed("?")], 1)
+  if (cursor_canonical(generated_type_note_receipt(c, TRPlain))
+      /= ["!", "->", "@"]) then
+    fail()
+  if (cursor_canonical(generated_type_note_receipt(c, TRNamed))
+      /= ["!", "(", "->", "@"]) then
+    fail()
+  if (cursor_canonical(generated_type_note_receipt(c, TRUsage)) /= ["!", "->"]) then
+    fail()
+  if (cursor_canonical(generated_type_note_receipt(c, TRBareEffect))
+      /= ["@", "\{"]) then
+    fail()
+  if (cursor_canonical(generated_type_note_receipt(c, TRClosedEffect)) /= ["@"]) then
+    fail()
+  if (cursor_canonical(generated_type_note_receipt(c, TRNat)) /= ["+"]) then
+    fail()
+  if cursor_canonical(generated_type_note_receipt(c, TRRow)) /= [] then
+    fail()
+  if (cursor_canonical(generated_type_note_receipt(c, TRDimIdent))
+      /= ["!", "(", "+", "->", "@"]) then
+    fail()
+  if (generated_type_receipt_always_live(TRNat)
+      && generated_type_receipt_always_live(TRDimIdent)
+      && not(generated_type_receipt_always_live(TRPlain))) then
+    ()
+  else
+    fail()
+
+test fn generated_receipt_follow_suppression_and_always_live() =
+  let c = cursor_of([fixed(")")], 1)
+  if (cursor_canonical(generated_type_note_if_live(c, TRPlain)) /= []) then
+    fail()
+  if (cursor_canonical(generated_type_note_if_live(c, TRNat)) == ["+"]) then
+    ()
+  else
+    fail()
+
+test fn generated_typearg_natural_success() =
+  match parse_generated_type_arg([located(TInt, "3", 4, 5)]) of
+    PTook(TypeDone(TyNat(n), TRNat), c) =>
+      if n == 3 && c.pos == 1 && cursor_expected(c) == [] then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_typearg_suffix_fault_is_exact() =
+  match parse_generated_type_arg([located(TInt, "3i64", 4, 8)]) of
+    PFault(d) =>
+      if (d.span == Span { lo = 4, hi = 8 }
+          && d.message
+            == "a dimension is a plain natural literal; drop the width suffix") then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_typearg_overflow_fault_is_exact() =
+  match (parse_generated_type_arg([located(TInt, "18446744073709551616", 2, 22)])) of
+    PFault(d) =>
+      if (d.span == Span { lo = 2, hi = 22 }
+          && d.message == "dimension literal is too large") then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_typearg_dimension_decline_consumes_full_run() =
+  match (parse_generated_type_arg([
+        located(TIdent, "n", 0, 1),
+        located(TFixed("+"), "+", 1, 2),
+        located(TInt, "1", 2, 3),
+        located(TFixed("+"), "+", 3, 4),
+        located(TIdent, "m", 4, 5),
+      ])) of
+    PFault(d) =>
+      if (d.span == Span { lo = 0, hi = 5 }
+          && d.message
+            == "arithmetic on dimensions is not supported: a dimension is a plain natural literal (`0`, `1`, `2`, ...) or a type variable, and dimensions unify by equality only") then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_typearg_malformed_dimension_tail_stays_structural() =
+  match (parse_generated_type_arg([word(TIdent, "n"), fixed("+"), fixed("]")])) of
+    PStuck(c) =>
+      if c.pos == 2 && cursor_canonical(c) == ["ident", "int"] then
+        ()
+      else
+        fail()
+    _ => fail()
+  match (parse_generated_type_arg([
+        generated_test_token(TInt, Some("3")),
+        fixed("+"),
+        generated_test_token(TInt, Some("1")),
+        fixed("+"),
+      ])) of
+    PStuck(c) =>
+      if c.pos == 4 && cursor_canonical(c) == ["ident", "int"] then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_typearg_lone_ident_retags_only_one_token() =
+  match parse_generated_type_arg([word(TIdent, "x")]) of
+    PTook(TypeDone(TyVar(name), TRDimIdent), c) =>
+      if name == "x" && c.pos == 1 then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_typearg_nonlone_ident_preserves_completion() =
+  match (parse_generated_type_arg([
+        word(TIdent, "x"),
+        fixed("("),
+        fixed("Int"),
+        fixed(")"),
+      ])) of
+    PTook(TypeDone(TyApp(_, Cons(TyInt, Nil)), TRPlain), c) =>
+      if c.pos == 4 then
+        ()
+      else
+        fail()
+    _ => fail()
+  match (parse_generated_type_arg([
+        word(TIdent, "x"),
+        fixed("@"),
+        word(TIdent, "fact"),
+      ])) of
+    PTook(TypeDone(_, TRUsage), c) =>
+      if c.pos == 3 then
+        ()
+      else
+        fail()
+    _ => fail()
+  match (parse_generated_type_arg([word(TIdent, "x"), fixed("->"), fixed("Int")])) of
+    PTook(TypeDone(_, TRPlain), c) =>
+      if c.pos == 3 then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_typearg_rows_enter_after_open_and_keep_depth() =
+  match parse_generated_type_arg([fixed("\{"), fixed("\}")]) of
+    PTook(TypeDone(TyRowLit(Row { labels = Nil, tail = None }), TRRow), c) =>
+      if c.pos == 2 then
+        ()
+      else
+        fail()
+    _ => fail()
+  match (parse_generated_type_arg([
+        fixed("\{"),
+        fixed("|"),
+        word(TIdent, "e"),
+        fixed("\}"),
+      ])) of
+    PTook(TypeDone(TyRowLit(Row { labels = Nil, tail = Some(tail) }), TRRow), c) =>
+      if tail == "e" && c.pos == 4 then
+        ()
+      else
+        fail()
+    _ => fail()
+  match (parse_generated_type_arg([
+        fixed("\{"),
+        word(TUid, "Io"),
+        fixed("|"),
+        word(TIdent, "e"),
+        fixed("\}"),
+      ])) of
+    PTook(
+      TypeDone(
+        TyRowLit(Row { labels = Cons(label, Nil), tail = Some(tail) }),
+        TRRow
+      ),
+      c
+    ) =>
+      if label.name == "Io" && tail == "e" && c.pos == 5 then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_typearg_row_misses_are_exact() =
+  match parse_generated_type_arg([fixed("\{"), fixed("]")]) of
+    PStuck(c) =>
+      if (c.pos == 1 && cursor_canonical(c) == ["ident", "qual", "uid", "|", "\}"]) then
+        ()
+      else
+        fail()
+    _ => fail()
+  match (parse_generated_type_arg([
+        fixed("\{"),
+        word(TUid, "Io"),
+        fixed(","),
+        fixed("]"),
+      ])) of
+    PStuck(c) =>
+      if (c.pos == 3 && cursor_canonical(c) == ["ident", "qual", "uid", "|", "\}"]) then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_typearg_first_merge_and_partial_failure() =
+  match parse_generated_type_arg([fixed("]")]) of
+    PStuck(c) =>
+      if (cursor_canonical(c)
+          == [
+              "#",
+              "(",
+              "Bool",
+              "Char",
+              "Float",
+              "I64",
+              "Int",
+              "String",
+              "U64",
+              "Unit",
+              "[",
+              "forall",
+              "ident",
+              "int",
+              "qual",
+              "uid",
+              "\{",
+            ]) then
+        ()
+      else
+        fail()
+    _ => fail()
+  match parse_generated_type_arg([fixed("["), fixed("]")]) of
+    PStuck(c) =>
+      if c.pos == 1 && cursor_canonical(c) == ["Int"] then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_typearg_spends_before_forwarding_depth() =
+  let c1 = cursor_of([word(TIdent, "x")], 1)
+  match (generated_parse_type_arg_with(
+        c1,
+        6,
+        generated_type_body,
+        generated_row_body,
+      )) of
+    PFault(d) =>
+      if d.message == "type body depth changed" then
+        ()
+      else
+        fail()
+    _ => fail()
+  let c2 = cursor_of([fixed("\{"), fixed("\}")], 2)
+  match (generated_parse_type_arg_with(
+        c2,
+        6,
+        generated_type_body,
+        generated_row_body,
+      )) of
+    PFault(d) =>
+      if d.message == "row body depth changed" then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_atype_uses_checked_typearg_callback() =
+  match (parse_generated([
+        word(TUid, "Vec"),
+        fixed("("),
+        located(TInt, "3i64", 4, 8),
+        fixed(")"),
+      ])) of
+    PFault(d) =>
+      if (d.span == Span { lo = 4, hi = 8 }
+          && d.message
+            == "a dimension is a plain natural literal; drop the width suffix") then
+        ()
+      else
+        fail()
+    _ => fail()
+
+fn parse_full_type(ts : List(Token), depth : Int) : Parsed(GeneratedChild(Ty)) =
+  generated_parse_type(cursor_of(ts, length(ts)), depth)
+
+test fn generated_type_spine_depth_spends_once_per_authored_edge() =
+  match parse_full_type([fixed("Int")], 1) of
+    PTook(TypeDone(TyInt, TRPlain), c) =>
+      if c.pos == 1 then
+        ()
+      else
+        fail()
+    _ => fail()
+  match generated_parse_type_arg(cursor_of([fixed("Int")], 1), 1) of
+    PTook(TypeDone(TyInt, TRPlain), c) =>
+      if c.pos == 1 then
+        ()
+      else
+        fail()
+    _ => fail()
+  let nested = [word(TUid, "List"), fixed("("), fixed("Int"), fixed(")")]
+  match parse_full_type(nested, 1) of
+    PFault(_) => ()
+    _ => fail()
+  match parse_full_type(nested, 2) of
+    PTook(TypeDone(TyCon(name, Cons(TyInt, Nil)), TRPlain), c) =>
+      if name == "List" && c.pos == 4 then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_type_spine_preserves_recursive_receipts() =
+  match (parse_full_type(
+        [fixed("forall"), word(TIdent, "a"), fixed("."), word(TIdent, "x")],
+        2,
+      )) of
+    PTook(TypeDone(TyForall(vars, TyVar(name)), TRNamed), c) =>
+      if vars == ["a"] && name == "x" && c.pos == 4 then
+        ()
+      else
+        fail()
+    _ => fail()
+  match (parse_full_type([fixed("("), fixed(")"), fixed("->"), word(TIdent, "x")], 2)) of
+    PTook(TypeDone(TyFun(Nil, _, TyVar(name)), TRNamed), c) =>
+      if name == "x" && c.pos == 4 then
+        ()
+      else
+        fail()
+    _ => fail()
+  match (parse_full_type([fixed("Int"), fixed("->"), word(TIdent, "x")], 2)) of
+    PTook(TypeDone(TyFun(Cons(TyInt, Nil), _, TyVar(name)), TRNamed), c) =>
+      if name == "x" && c.pos == 3 then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_type_spine_retags_usage_and_effects() =
+  match (parse_full_type([fixed("Int"), fixed("@"), word(TIdent, "once")], 1)) of
+    PTook(TypeDone(TyUsage(TyInt, facts), TRUsage), c) =>
+      if facts == ["once"] && c.pos == 3 then
+        ()
+      else
+        fail()
+    _ => fail()
+  match (parse_full_type([fixed("Int"), fixed("->"), fixed("Int"), fixed("!")], 2)) of
+    PTook(TypeDone(TyFun(Cons(TyInt, Nil), _, TyInt), TRBareEffect), c) =>
+      if c.pos == 4 then
+        ()
+      else
+        fail()
+    _ => fail()
+  match (parse_full_type(
+        [
+            fixed("Int"),
+            fixed("->"),
+            fixed("Int"),
+            fixed("!"),
+            fixed("\{"),
+            word(TUid, "Io"),
+            fixed("\}"),
+          ],
+        2,
+      )) of
+    PTook(
+      TypeDone(
+        TyFun(
+          Cons(TyInt, Nil),
+          Row { labels = Cons(label, Nil), tail = None },
+          TyInt
+        ),
+        TRClosedEffect
+      ),
+      c
+    ) =>
+      if label.name == "Io" && c.pos == 7 then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_type_spine_malformed_prefix_menus_are_exact() =
+  match parse_full_type([fixed("("), fixed(")")], 1) of
+    PStuck(c) =>
+      if c.pos == 2 && cursor_canonical(c) == ["->"] then
+        ()
+      else
+        fail()
+    _ => fail()
+  match (parse_full_type([fixed("forall"), word(TIdent, "a"), fixed("]")], 2)) of
+    PStuck(c) =>
+      if c.pos == 2 && cursor_canonical(c) == [".", "ident"] then
+        ()
+      else
+        fail()
+    _ => fail()
+  match parse_full_type([fixed("Int"), fixed("@"), fixed("]")], 1) of
+    PStuck(c) =>
+      if c.pos == 2 && cursor_canonical(c) == ["ident", "\{"] then
+        ()
+      else
+        fail()
+    _ => fail()
+  match (parse_full_type([fixed("Int"), fixed("@"), fixed("\{"), fixed("]")], 1)) of
+    PStuck(c) =>
+      if c.pos == 3 && cursor_canonical(c) == ["ident", "|", "\}"] then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_effect_label_optional_args_receipt_is_exact() =
+  let prefix =
+    [fixed("Int"), fixed("->"), fixed("Int"), fixed("!"), fixed("\{")]
+  match (parse_full_type(append(prefix, [word(TUid, "Io"), fixed("]")]), 2)) of
+    PStuck(c) =>
+      if cursor_canonical(c) == ["(", ",", "|", "\}"] then
+        ()
+      else
+        fail()
+    _ => fail()
+  match (parse_full_type(append(prefix, [word(TQual, "Pkg.Io"), fixed("]")]), 2)) of
+    PStuck(c) =>
+      if cursor_canonical(c) == ["(", ",", "|", "\}"] then
+        ()
+      else
+        fail()
+    _ => fail()
+  match (parse_full_type(append(prefix, [word(TIdent, "io"), fixed("]")]), 2)) of
+    PStuck(c) =>
+      if cursor_canonical(c) == [",", "|", "\}"] then
+        ()
+      else
+        fail()
+    _ => fail()
+  match (parse_full_type(
+        append(prefix, [word(TUid, "Io"), fixed("("), fixed(")"), fixed("]")]),
+        2,
+      )) of
+    PStuck(c) =>
+      if cursor_canonical(c) == [",", "|", "\}"] then
+        ()
+      else
+        fail()
+    _ => fail()
+
+test fn generated_type_head_forall_leaves_effect_suffix() =
+  let ts = [
+      fixed("forall"),
+      word(TIdent, "a"),
+      fixed("."),
+      word(TIdent, "a"),
+      fixed("!"),
+      fixed("\{"),
+      word(TUid, "Io"),
+      fixed("\}"),
+    ]
+  match generated_parse_type_head(cursor_of(ts, length(ts)), 2) of
+    PTook(TypeDone(TyForall(vars, TyVar(name)), TRNamed), c) =>
+      if vars == ["a"] && name == "a" && c.pos == 4 then
+        ()
+      else
+        fail()
+    _ => fail()

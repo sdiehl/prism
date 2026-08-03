@@ -40,14 +40,17 @@ pub const DOCS_PAGE_KIND: &str = "docs-page";
 /// The docs generator's format identifier, carried by the generator node so a
 /// manifest names which renderer produced its pages.
 pub const DOCS_GENERATOR_FORMAT: &str = "prism-docs-markdown-v1";
-/// The extension of the sibling trace a run sidecar falls back to when its own
-/// trace node does not record a replay-file relation (older sidecars).
+/// The conventional extension of a run's durable trace (`foo.plineage` records its
+/// trace as `foo.replay`), named in verifier messages.
 ///
-/// A run written as `foo.plineage` records its trace as `foo.replay`; a current
-/// sidecar names that relation explicitly, and only pre-relation files rely on this.
+/// A sidecar's trace node records its actual replay path explicitly; a sidecar
+/// without that relation is refused rather than resolved against this convention.
 pub const REPLAY_EXTENSION: &str = "replay";
 /// The literal output selector that names a run's captured stdout in `why-output`.
 pub const STDOUT_SELECTOR: &str = "stdout";
+// The role prefix an input-file node id carries, so a read input and a produced
+// stdout of identical bytes cannot collide on one node.
+const INPUT_FILE_SELECTOR: &str = "input-file";
 pub const ARTIFACT_DIGEST_SCHEME: &str = "blake3";
 // Minted node ids (request, compiler identity, diagnostics, cache summary) commit
 // their canonical payload bytes under this scheme; root and artifact nodes reuse
@@ -86,6 +89,13 @@ const NODE_WORLD_FORK: &str = "world-fork";
 // (stamped `docs-page`), so they rehash through the same `verify` path.
 const NODE_DOCS_GENERATOR: &str = "docs-generator";
 const NODE_DOCTEST: &str = "doctest";
+// Request-kind discriminants, matching the `rename_all = "kebab-case"` tags on
+// `RequestKind` and echoed by `RequestKind::tag`; the same unit test checks the
+// round-trip. The tag folds into the request node's id, so a drift would move it.
+const REQUEST_PROJECT_BUILD: &str = "project-build";
+const REQUEST_CHECK_WORLD: &str = "check-world";
+const REQUEST_RUN: &str = "run";
+const REQUEST_DOCS: &str = "docs";
 // Write-mode discriminants, matching the `rename_all = "kebab-case"` tags on
 // `WriteMode` and echoed by `WriteMode::tag`; the same unit test checks the round-trip.
 const WRITE_MODE_WRITE: &str = "write";
@@ -107,6 +117,19 @@ pub enum RequestKind {
     Run,
     /// A `prism docs` documentation generation.
     Docs,
+}
+
+impl RequestKind {
+    /// The frozen discriminant spelling, for identity minting and rendering.
+    #[must_use]
+    pub const fn tag(self) -> &'static str {
+        match self {
+            Self::ProjectBuild => REQUEST_PROJECT_BUILD,
+            Self::CheckWorld => REQUEST_CHECK_WORLD,
+            Self::Run => REQUEST_RUN,
+            Self::Docs => REQUEST_DOCS,
+        }
+    }
 }
 
 /// The role a root input plays in a build.
@@ -211,6 +234,7 @@ impl LineageCache {
 
     // Newline-separated canonical encoding of the summary fields, in one place, so
     // the minted cache-summary node id is a pure function of the recorded numbers.
+    #[must_use]
     pub fn canonical_bytes(&self) -> String {
         format!(
             "{}\n{}\n{}\n{}\n{}",
@@ -236,12 +260,17 @@ impl LineageRoot {
     }
 
     // A root node names itself by the content identity it already carries.
+    #[must_use]
     pub fn node_id(&self) -> NodeId {
         NodeId(format!("{}:{}", self.scheme, self.root))
     }
 }
 
 impl LineageArtifact {
+    /// An artifact digested from the bytes on disk at `path`.
+    ///
+    /// # Errors
+    /// Any filesystem failure while reading `path`.
     pub fn from_path(kind: &str, path: &Path) -> io::Result<Self> {
         let bytes = fs::read(path)?;
         Ok(Self::from_bytes(kind, path, &bytes))
@@ -263,6 +292,7 @@ impl LineageArtifact {
 
     // An artifact node is named by its content digest, so tampered bytes cannot
     // keep the same node id.
+    #[must_use]
     pub fn node_id(&self) -> NodeId {
         NodeId(format!("{}:{}", self.digest_scheme, self.digest))
     }
@@ -313,7 +343,8 @@ pub struct TracePayload {
     pub hash: String,
     pub events: usize,
     /// The durable `.replay` file this trace was written to, if the run recorded it.
-    /// Absent on pre-relation sidecars, which verify against the sibling extension.
+    /// A sidecar without this relation cannot have its trace verified: the verifier
+    /// refuses it rather than guessing at a sibling file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay: Option<ReplayRelation>,
 }
@@ -392,6 +423,7 @@ pub struct FileWritePayload {
 impl TracePayload {
     // A trace node names itself by its own trace hash. The replay relation is
     // descriptive metadata and never enters the identity.
+    #[must_use]
     pub fn node_id(&self) -> NodeId {
         NodeId(format!("{}:{}", self.scheme, self.hash))
     }
@@ -431,6 +463,7 @@ pub struct WorldForkPayload {
 
 impl WorldLawPayload {
     // A law node names itself by the content hash the resident already shows.
+    #[must_use]
     pub fn node_id(&self) -> NodeId {
         NodeId(self.law_hash.clone())
     }
@@ -440,6 +473,7 @@ impl ArgvPayload {
     // The argv node is minted over a newline-safe canonical encoding: the argument
     // count, then each argument's content digest, so an embedded newline cannot
     // forge a boundary.
+    #[must_use]
     pub fn node_id(&self) -> NodeId {
         let mut canonical = self.args.len().to_string();
         for arg in &self.args {
@@ -453,6 +487,7 @@ impl ArgvPayload {
 impl EnvReadPayload {
     // Minted over the variable name digest and its scheme-tagged value digest, so a
     // changed value or a changed name moves the node.
+    #[must_use]
     pub fn node_id(&self) -> NodeId {
         minted_id(
             format!(
@@ -469,14 +504,22 @@ impl EnvReadPayload {
 impl InputFilePayload {
     // Named by role and content digest, so tampered input bytes cannot keep the
     // same node and identical stdout bytes cannot collide with the input node.
+    #[must_use]
     pub fn node_id(&self) -> NodeId {
-        NodeId(format!("input-file:{}:{}", self.digest_scheme, self.digest))
+        NodeId(format!(
+            "{INPUT_FILE_SELECTOR}:{}:{}",
+            self.digest_scheme, self.digest
+        ))
     }
 }
 
 impl OutputPayload {
+    #[must_use]
     pub fn node_id(&self) -> NodeId {
-        NodeId(format!("stdout:{}:{}", self.digest_scheme, self.digest))
+        NodeId(format!(
+            "{STDOUT_SELECTOR}:{}:{}",
+            self.digest_scheme, self.digest
+        ))
     }
 }
 
@@ -484,6 +527,7 @@ impl FileWritePayload {
     // Minted over the mode, path, and content digest: two writes to the same path
     // with different content move the node, and writes of the same bytes to
     // different paths stay distinct (unlike a content-addressed input file).
+    #[must_use]
     pub fn node_id(&self) -> NodeId {
         minted_id(
             format!(
@@ -519,12 +563,14 @@ pub struct DoctestPayload {
 
 impl DocsGeneratorPayload {
     // The generator node is minted over its format identifier.
+    #[must_use]
     pub fn node_id(&self) -> NodeId {
         minted_id(self.format.as_bytes())
     }
 }
 
 impl DoctestPayload {
+    #[must_use]
     pub fn node_id(&self) -> NodeId {
         minted_id(
             format!(
@@ -731,11 +777,13 @@ impl LineageGraph {
     }
 
     // The node with this id, if present.
+    #[must_use]
     pub fn node(&self, id: &NodeId) -> Option<&Node> {
         self.nodes.iter().find(|node| &node.id == id)
     }
 
     // The run's trace payload, if this is a run graph.
+    #[must_use]
     pub fn trace(&self) -> Option<&TracePayload> {
         self.nodes.iter().find_map(|node| match &node.kind {
             NodeKind::Trace(trace) => Some(trace),
@@ -744,6 +792,7 @@ impl LineageGraph {
     }
 
     // The compiler identity payload, if present.
+    #[must_use]
     pub fn compiler(&self) -> Option<&CompilerPayload> {
         self.nodes.iter().find_map(|node| match &node.kind {
             NodeKind::CompilerIdentity(compiler) => Some(compiler),
@@ -753,6 +802,7 @@ impl LineageGraph {
 
     // The first request payload, for tolerant rendering that must not fail on a
     // malformed graph the way [`request`] does.
+    #[must_use]
     pub fn first_request(&self) -> Option<&BuildRequest> {
         self.nodes.iter().find_map(|node| match &node.kind {
             NodeKind::Request(request) => Some(request),
@@ -792,6 +842,7 @@ impl LineageGraph {
 
     // The single predecessor state of a state node: the world-state it reached by
     // its one input edge. A seed (tick 0) has none.
+    #[must_use]
     pub fn predecessor_state(&self, state: &NodeId) -> Option<&Node> {
         self.inputs_of(state)
             .into_iter()
@@ -799,6 +850,7 @@ impl LineageGraph {
     }
 
     // The law node a state stepped under: the target of its one identified-by edge.
+    #[must_use]
     pub fn law_of(&self, state: &NodeId) -> Option<&WorldLawPayload> {
         match self.identity_of(state).map(|node| &node.kind) {
             Some(NodeKind::WorldLaw(law)) => Some(law),
@@ -808,6 +860,7 @@ impl LineageGraph {
 
     // The fork nodes whose produced edge lands on `state` (the branch points whose
     // first divergent state is `state`). Empty for a state no fork diverged into.
+    #[must_use]
     pub fn forks_into(&self, state: &NodeId) -> Vec<&Node> {
         let sources: std::collections::BTreeSet<&NodeId> = self
             .edges
@@ -824,6 +877,7 @@ impl LineageGraph {
     }
 
     // Every world-law node, for a timeline summary.
+    #[must_use]
     pub fn world_laws(&self) -> Vec<(&NodeId, &WorldLawPayload)> {
         self.nodes
             .iter()
@@ -835,6 +889,7 @@ impl LineageGraph {
     }
 
     // Every world-state node.
+    #[must_use]
     pub fn world_states(&self) -> Vec<(&NodeId, &WorldStatePayload)> {
         self.nodes
             .iter()
@@ -846,6 +901,7 @@ impl LineageGraph {
     }
 
     // Every world-fork node.
+    #[must_use]
     pub fn world_forks(&self) -> Vec<(&NodeId, &WorldForkPayload)> {
         self.nodes
             .iter()
@@ -860,6 +916,7 @@ impl LineageGraph {
 // Merge nodes that share a digest, pin a run-to-run order over both nodes and
 // edges, and seal the graph under its shared envelope. Every producer ends here so
 // determinism (sorted, deduped, byte-stable serialization) is defined once.
+#[must_use]
 pub fn finalize(variant: Variant, mut nodes: Vec<Node>, mut edges: Vec<Edge>) -> LineageGraph {
     nodes.sort_by(|a, b| a.id.cmp(&b.id).then_with(|| a.kind.tag().cmp(b.kind.tag())));
     nodes.dedup_by(|a, b| a.id == b.id);
@@ -875,6 +932,7 @@ pub fn finalize(variant: Variant, mut nodes: Vec<Node>, mut edges: Vec<Edge>) ->
 
 // The source, Std, and package roots as `(node kind, root)` pairs, in the order a
 // build or run star lays them out. Shared so both variants name roots identically.
+#[must_use]
 pub fn root_nodes(
     source: &LineageRoot,
     stdlib: &LineageRoot,
@@ -891,11 +949,12 @@ pub fn root_nodes(
 }
 
 // Canonical encoding of a request: newline-separated kind tag, path, and entry.
+#[must_use]
 pub fn request_node_id(request: &BuildRequest) -> NodeId {
     minted_id(
         format!(
             "{}\n{}\n{}",
-            request_kind_tag(request.kind),
+            request.kind.tag(),
             request.path,
             request.entry
         )
@@ -909,6 +968,7 @@ pub fn request_node_id(request: &BuildRequest) -> NodeId {
 // forks coincide and any change to where it forked from or diverged to moves it.
 // The web emitter mirrors this exact byte encoding so a browser-minted fork id
 // equals the one this crate would mint for the same timeline.
+#[must_use]
 pub fn world_fork_node_id(
     payload: &WorldForkPayload,
     parent_state: &NodeId,
@@ -927,18 +987,13 @@ pub fn world_fork_node_id(
     )
 }
 
-// The serde discriminant string for a request kind, in one place so identity
-// minting and human rendering agree on the label.
-pub fn request_kind_tag(kind: RequestKind) -> String {
-    serde_json::to_value(kind)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_string))
-        .unwrap_or_default()
-}
-
-// Recompute a content digest under the scheme the node committed to. The two
-// schemes in the graph are the build artifacts' blake3 and the run protocol's
-// sha256; an unrecognized scheme is a hard error, never a silent pass.
+/// Recompute a content digest under the scheme the node committed to.
+///
+/// The two schemes in the graph are the build artifacts' blake3 and the run
+/// protocol's sha256.
+///
+/// # Errors
+/// An unrecognized scheme is a hard error, never a silent pass.
 pub fn recompute_digest(scheme: &str, bytes: &[u8]) -> Result<String, Error> {
     match scheme {
         ARTIFACT_DIGEST_SCHEME => Ok(blake3::hash(bytes).to_hex().to_string()),
@@ -959,6 +1014,7 @@ pub const fn backend_name(mlir: bool) -> &'static str {
 }
 
 // The build-lineage-v1 root projection, shared by the v1 report body and adapter.
+#[must_use]
 pub fn root_json(root: &LineageRoot) -> Value {
     json!({
         "role": root.role,
@@ -995,6 +1051,20 @@ mod tests {
         for mode in [WriteMode::Write, WriteMode::Append, WriteMode::Remove] {
             let value = serde_json::to_value(mode).unwrap();
             assert_eq!(value.as_str(), Some(mode.tag()));
+        }
+    }
+
+    // Likewise for `RequestKind::tag`: a request node's id folds the kind tag in.
+    #[test]
+    fn request_kind_tags_match_serialization() {
+        for kind in [
+            RequestKind::ProjectBuild,
+            RequestKind::CheckWorld,
+            RequestKind::Run,
+            RequestKind::Docs,
+        ] {
+            let value = serde_json::to_value(kind).unwrap();
+            assert_eq!(value.as_str(), Some(kind.tag()));
         }
     }
 

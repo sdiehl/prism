@@ -1,0 +1,112 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "d4b1683b0eef7d7154902f61ea2e6612e427b60d2f7f721b48425818ce39d7ce",
+    "text": "fn corpus(r) =\n  r?\n  ()\n"
+  },
+  "items": [
+    {
+      "body": {
+        "arms": [
+          {
+            "body": {
+              "kind": "unit",
+              "span": [
+                22,
+                24
+              ]
+            },
+            "pat": {
+              "args": [
+                {
+                  "kind": "wild",
+                  "span": [
+                    17,
+                    18
+                  ]
+                }
+              ],
+              "kind": "ctor",
+              "name": "Ok",
+              "span": [
+                17,
+                18
+              ]
+            }
+          },
+          {
+            "body": {
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "e@",
+                  "span": [
+                    17,
+                    18
+                  ]
+                }
+              ],
+              "head": {
+                "kind": "var",
+                "name": "Err",
+                "span": [
+                  17,
+                  18
+                ]
+              },
+              "kind": "call",
+              "span": [
+                17,
+                18
+              ]
+            },
+            "pat": {
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "e@",
+                  "span": [
+                    17,
+                    18
+                  ]
+                }
+              ],
+              "kind": "ctor",
+              "name": "Err",
+              "span": [
+                17,
+                18
+              ]
+            }
+          }
+        ],
+        "kind": "match",
+        "scrutinee": {
+          "kind": "var",
+          "name": "r",
+          "span": [
+            17,
+            18
+          ]
+        },
+        "span": [
+          17,
+          24
+        ],
+        "synth": true
+      },
+      "kind": "fn",
+      "name": "corpus",
+      "params": [
+        {
+          "name": "r"
+        }
+      ],
+      "span": [
+        0,
+        24
+      ]
+    }
+  ]
+}

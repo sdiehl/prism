@@ -10,7 +10,7 @@ The canonical `Reader(r)` effect: a read-only ambient environment.
 
 ### `Reader`
 
-```prism,def,h-d59f6e640d64fb1b9a2e004e47954ad3b107a29950dfbd415f20b3b07d62e735
+```prism,def,h-a937eaedebdb41560b00e32856dc99a92ff4c38bcf6917178505392503b6d766
 effect Reader(r)
   ask() : r
 ```
@@ -21,15 +21,23 @@ Read the ambient environment of type `r`.
 
 ### `run_reader`
 
-```prism,sig,h-1c318e3ac9a9e95a7e64c0e8aa9fe5258e01ef759e2ab983800c05dddc388343
+```prism,sig,h-2f0e5c9d440e79d4029c4986e84834b2547b84d056dbe49f30f3f122f8df0d70
 run_reader : forall e0 a b. (a, () -> b ! {Control.Reader.Reader(a), e0}) -> b ! {e0}
 ```
 
 Run `action` with `env` as the ambient environment, discharging `Reader(r)`.
 
+```prism,mod=Control.Reader
+run_reader("hello", \() -> asks(str_len))
+```
+
+```output
+5
+```
+
 ### `asks`
 
-```prism,sig,h-321d6ea4e5fcf6c7894142b115f31ae44d8ad7801fce187957d7bab48f4818a7
+```prism,sig,h-7a719263b961f00b0688cce8549e6df7145e759133df251534b0604592f9d416
 asks : forall a b. ((a) -> b) -> b ! {Control.Reader.Reader(a)}
 ```
 
@@ -37,8 +45,16 @@ Read a projection `f` of the environment.
 
 ### `local`
 
-```prism,sig,h-4f5807f9dcc4985113c4c8246bef239c075945beb6d1cdf6ee30bbf7d4336953
+```prism,sig,h-795cf7679c2bba1b1a852f7f883a4ee6dbdc0014fe51e98e02f27211e0c62751
 local : forall e0 a b. ((a) -> a, () -> b ! {Control.Reader.Reader(a), Control.Reader.Reader(a), e0}) -> b ! {Control.Reader.Reader(a), e0}
 ```
 
 Run `action` under the environment transformed by `f`. The transformed environment is scoped to `action`; the outer environment is unchanged.
+
+```prism,mod=Control.Reader
+run_reader(10, \() -> [ask(), local(\(n) -> n + 5, \() -> ask()), ask()])
+```
+
+```output
+[10, 15, 10]
+```

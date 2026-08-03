@@ -25,6 +25,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+use super::index::Lock;
 use super::{atomic_write, shard_path, HashHex, FIELD_SEP, VERIFIED_DIR};
 
 const VERIFIED_HEADER_V1: &str = "prism-store-verified\tv1";
@@ -47,7 +48,11 @@ pub struct VerifiedRecord {
 const STATUS_PASS: &str = "pass";
 const STATUS_FAIL: &str = "fail";
 
+// Appending a record is a read-modify-write of the whole file, so it runs under
+// the store's writer lock: without it two concurrent verdicts on the same hash
+// both read the old file and the loser's record is lost in the rewrite.
 pub(super) fn put(root: &Path, hash: &HashHex<'_>, record: &VerifiedRecord) -> io::Result<()> {
+    let _lock = Lock::acquire(root)?;
     let mut records = get(root, hash)?;
     records.push(record.clone());
     let mut body = String::from(VERIFIED_HEADER_V2);

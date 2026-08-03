@@ -114,7 +114,7 @@ pub fn ends_with(suffix : String, s : String) : Bool =
 -- | Helper for `index_of`: search for `needle` in `s` from byte offset `j`.
 pub fn index_of_go(needle, s, j) =
   if j + byte_len(needle) > byte_len(s) then
-    0 - 1
+    -1
   elif occurs_at(needle, s, j, 0) then
     j
   else
@@ -216,7 +216,7 @@ pub fn trim(s : String) : String =
 -- | The index of character `c` in `s` at or after position `i`, or `-1` if absent.
 pub fn index_of_from(c, s, i) =
   if i >= str_len(s) then
-    0 - 1
+    -1
   elif char_at(s, i) == c then
     i
   else

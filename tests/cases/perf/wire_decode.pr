@@ -28,7 +28,7 @@ fn count_dec(bs : Bytes) : Int =
 
 fn caught(action : () -> Int ! {Fail | e}) : Int =
   handle action() with
-    never fail() => 0 - 1
+    never fail() => -1
     return r => r
 
 fn run(bs : Bytes) : Int = caught(\() -> count_dec(bs))

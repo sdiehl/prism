@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use prism::core::{instance_digest, Digest};
+use prism::core::{instance_digest, Digest, HASH_SCHEME};
 use prism::syntax::ast::Ty;
 
 fn with_stdlib_hash_env_lock(test: impl FnOnce()) {
@@ -25,7 +25,7 @@ fn root_is_reproducible() {
         assert_eq!(a.root, b.root);
         // A full BLAKE3 digest, not a truncation.
         assert_eq!(a.root.len(), 64);
-        assert_eq!(a.scheme, "prism-core-hash-v1");
+        assert_eq!(a.scheme, HASH_SCHEME);
         assert_eq!(a.version, env!("CARGO_PKG_VERSION"));
     });
 }

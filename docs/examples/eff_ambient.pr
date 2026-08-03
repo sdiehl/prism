@@ -1,0 +1,29 @@
+effect Say
+  say(Int) : Unit
+
+effect Defer
+  defer(() -> Int ! {Defer | e}) : Int
+
+-- Defer is discharged; every effect in the ambient tail e is preserved.
+fn run_defer(action : () -> a ! {Defer | e}) : a ! { | e} =
+  handle action() with
+    defer(thunk) resume k => k(run_defer(thunk))
+    return value => value
+
+fn report() : Int ! {Say} =
+  say(7)
+  42
+
+fn deferred_report() : Int ! {Defer, Say} = defer(report)
+
+-- run_defer removes Defer, but Say still flows to the caller.
+fn ambient_use() : Int ! {Say} = run_defer(deferred_report)
+
+fn observe() =
+  handle ambient_use() with
+    say(n) resume k =>
+      println(n)
+      k(())
+    return value => value
+
+fn main() = println(observe())

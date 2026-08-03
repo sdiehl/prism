@@ -129,7 +129,7 @@ fn require_main(checked: &Checked) -> Result<(), Error> {
 
 /// Facts reported by a successful native build.
 #[cfg(feature = "native")]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NativeBuildReport {
     /// Store commit statistics when `PRISM_STORE` is enabled.
     pub store: Option<CommitStats>,
@@ -137,6 +137,11 @@ pub struct NativeBuildReport {
     pub cache: NativeCacheStatus,
     /// LLVM bitcode query result, or `Disabled` when a final-binary hit skipped it.
     pub bitcode_cache: NativeCacheStatus,
+    /// Pre-optimizer, dependency-substituted definition identities observed by
+    /// this compilation. An exact final-artifact hit may skip the frontend and
+    /// therefore leaves this absent. Watch mode uses consecutive snapshots to
+    /// display the Merkle impact cone without re-elaborating either revision.
+    pub definition_hashes: Option<crate::core::Hashes>,
 }
 
 #[cfg(feature = "native")]
@@ -206,6 +211,7 @@ pub fn build_on_report(
                 store: None,
                 cache: NativeCacheStatus::Hit,
                 bitcode_cache: NativeCacheStatus::Disabled,
+                definition_hashes: None,
             });
         }
         if let Some(session) = &cfg.session {
@@ -249,6 +255,7 @@ pub fn build_on_report(
                 store: None,
                 cache: NativeCacheStatus::Hit,
                 bitcode_cache: NativeCacheStatus::Disabled,
+                definition_hashes: Some(hashes),
             });
         }
         if let Some(session) = &cfg.session {
@@ -396,6 +403,7 @@ pub fn build_on_report(
         store,
         cache,
         bitcode_cache: bitcode_status,
+        definition_hashes: Some(hashes),
     })
 }
 

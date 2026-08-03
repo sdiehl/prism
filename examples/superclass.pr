@@ -18,14 +18,13 @@ class Greet(a) given Nameable(a)
 instance nameRobot : Nameable(Robot)
   fn name_of(r) =
     match r of
-      MkRobot(n) => concat("unit-", show_int(n))
+      MkRobot(n) => "unit-{n}"
 
 instance greetRobot : Greet(Robot)
   fn greeting(_r) = "beep boop"
 
 -- One constraint, two capabilities: `greeting` is Greet's own method, and
 -- `name_of` is projected from the superclass field of the same dictionary.
-fn hail(x : a) : String given Greet(a) =
-  concat(name_of(x), concat(" says ", greeting(x)))
+fn hail(x : a) : String given Greet(a) = "{name_of(x)} says {greeting(x)}"
 
 fn main() = println(hail(MkRobot(7)))

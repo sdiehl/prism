@@ -189,6 +189,11 @@ pub(super) const fn capability_obs(b: Builtin) -> Option<(ObsKind, CapOp)> {
         Builtin::ReadBytesFile => Some((ObsKind::Bytes, OP_FS_READ_FILE_BYTES)),
         Builtin::FileExists => Some((ObsKind::Bool, OP_FS_FILE_EXISTS)),
         Builtin::ArgsCount => Some((ObsKind::Int, OP_ENV_ARGS_COUNT)),
+        // A probe test is an environment read (of the runtime's probe allow-list)
+        // that the program branches on, so it takes a tape frame like any other:
+        // an unrecorded read would make a replayed run depend on the environment
+        // it replays in rather than on the trace.
+        Builtin::ProbeEnabled => Some((ObsKind::Bool, OP_ENV_GETENV)),
         Builtin::WallNow => Some((ObsKind::Int, OP_CLOCK_WALL_NOW)),
         Builtin::MonoNow => Some((ObsKind::Int, OP_CLOCK_MONO_NOW)),
         Builtin::Entropy => Some((ObsKind::Int, OP_ENTROPY_READ)),

@@ -58,7 +58,7 @@ impl Error {
     pub fn primary_span(&self) -> Option<Range<usize>> {
         match self {
             Self::Lex(e) => Some(e.offset()..e.offset()),
-            Self::Parse(ParseError::Syntax { span, .. }) => Some(span_range(span)),
+            Self::Parse(e) => Some(span_range(&e.span())),
             Self::Type(e) => e.span().map(span_range),
             _ => None,
         }
@@ -101,8 +101,10 @@ impl Error {
             }
             Self::Parse(e) => {
                 let (range, label) = match e {
-                    ParseError::Syntax { span, .. } => (span_range(span), "here"),
-                    ParseError::UnexpectedEof => (src.len()..src.len(), "expected more input here"),
+                    ParseError::Syntax(f) => (span_range(&f.span), "here"),
+                    ParseError::UnexpectedEof(f) => {
+                        (span_range(&f.span), "expected more input here")
+                    }
                 };
                 write_report(
                     &map,
@@ -237,7 +239,11 @@ pub fn render_warning(src: &str, name: &str, span: &Span, msg: &str, color: bool
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one report row: bundling the parts into a struct would only move \
+              the same nine fields to the call sites"
+)]
 fn write_report(
     map: &SourceMap<'_>,
     kind: &str,

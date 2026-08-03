@@ -1,0 +1,78 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "44563c9675b58b09bdfaab9218a567cca8f10709c9406d9aee1a906253365eec",
+    "text": "fn corpus(a : I64, b : U64, c : Unit, d : Float, e : Char, f : String, g : Int := 0) = 0\n"
+  },
+  "items": [
+    {
+      "body": {
+        "kind": "int",
+        "span": [
+          87,
+          88
+        ],
+        "value": "0"
+      },
+      "kind": "fn",
+      "name": "corpus",
+      "params": [
+        {
+          "name": "a",
+          "ty": {
+            "kind": "i64"
+          }
+        },
+        {
+          "name": "b",
+          "ty": {
+            "kind": "u64"
+          }
+        },
+        {
+          "name": "c",
+          "ty": {
+            "kind": "unit"
+          }
+        },
+        {
+          "name": "d",
+          "ty": {
+            "kind": "float"
+          }
+        },
+        {
+          "name": "e",
+          "ty": {
+            "kind": "char"
+          }
+        },
+        {
+          "name": "f",
+          "ty": {
+            "kind": "str"
+          }
+        },
+        {
+          "default": {
+            "kind": "int",
+            "span": [
+              82,
+              83
+            ],
+            "value": "0"
+          },
+          "name": "g",
+          "ty": {
+            "kind": "int"
+          }
+        }
+      ],
+      "span": [
+        0,
+        88
+      ]
+    }
+  ]
+}

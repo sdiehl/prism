@@ -1,0 +1,115 @@
+{
+  "schema": "prism-parser-compaction-entry-receipt-v1",
+  "oracle_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+  "corpus_version": 2,
+  "entry_id": "prism.parse_let_pattern",
+  "visibility": "dead-public-edge",
+  "scope": "named accepted direct-entry projection and complete token consumption",
+  "matching_wrapper_case": "pattern-tuple-let",
+  "fragment": "(x, y)",
+  "token_slice": [
+    {
+      "kind": "(",
+      "span": [
+        19,
+        20
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        20,
+        21
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ",",
+      "span": [
+        21,
+        22
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        23,
+        24
+      ],
+      "value": "y"
+    },
+    {
+      "kind": ")",
+      "span": [
+        24,
+        25
+      ]
+    }
+  ],
+  "stop": 25,
+  "initial_depth": 2048,
+  "outcome": "accepted",
+  "unconsumed_position": 5,
+  "value_projection": {
+    "kind": "tuple",
+    "items": [
+      {
+        "kind": "var",
+        "name": "x",
+        "span": [
+          20,
+          21
+        ]
+      },
+      {
+        "kind": "var",
+        "name": "y",
+        "span": [
+          23,
+          24
+        ]
+      }
+    ],
+    "span": [
+      19,
+      25
+    ]
+  },
+  "wrapper_value_projection": {
+    "items": [
+      {
+        "kind": "var",
+        "name": "x",
+        "span": [
+          20,
+          21
+        ]
+      },
+      {
+        "kind": "var",
+        "name": "y",
+        "span": [
+          23,
+          24
+        ]
+      }
+    ],
+    "kind": "tuple",
+    "span": [
+      19,
+      25
+    ]
+  },
+  "value_projection_blake3": "adcc313fe1f1c16bc890057ec067559631e71782c7dc540e950f92ad892ff992",
+  "ordered_spend_trace": [
+    "parse_let_pattern",
+    "parse_pattern",
+    "parse_pattern"
+  ],
+  "status": "exact",
+  "subject": {
+    "backend": "handwritten Prism",
+    "harness_source_blake3": "5011fafe2da58c198d45b5168be436f88a7a8d831f5cf75830044890fc64ed51",
+    "harness_executable_blake3": "098628ebf5b68efc58e4e9d5a57ba5171e7b16d0efa1df571b40347bd4e1fd5a"
+  }
+}

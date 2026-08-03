@@ -36,7 +36,7 @@ fn go(i, n) =
 fn main() = go(0, 8)
 ";
 
-const TELEPORT: &str = include_str!("../../examples/teleport.pr");
+const TELEPORT: &str = include_str!("../../examples/fixtures/runtime/teleport.pr");
 
 fn uninterrupted(full: &str) -> String {
     let mut out: Vec<u8> = Vec::new();

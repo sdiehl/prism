@@ -373,7 +373,7 @@ pub fn chaos_run(start: u32, count: u32) -> String {
 // forward rather than restarting. The program is baked in so both tabs share one
 // bundle: the receiving tab re-derives its code identity and refuses an envelope
 // from any other program.
-const TELEPORT_SRC: &str = include_str!("../../examples/teleport.pr");
+const TELEPORT_SRC: &str = include_str!("../../examples/fixtures/runtime/teleport.pr");
 
 fn teleport_full() -> String {
     with_prelude(TELEPORT_SRC)
@@ -727,7 +727,7 @@ pub fn hash_defs(src: &str) -> String {
 // them. `a`, `b`, `c` are the sources; the rest are derivations. Kept beside the
 // program the export builds so the two never drift.
 const INCR_MEMOS: &[&str] = &["total", "peak", "scaled", "alert", "board"];
-const INCR_RESIDENT_SRC: &str = include_str!("../../examples/incr_resident.pr");
+const INCR_RESIDENT_SRC: &str = include_str!("../../examples/fixtures/runtime/incr_resident.pr");
 const INCR_STEP_MARKER: &str = "STEP\n";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

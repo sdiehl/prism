@@ -275,10 +275,15 @@ impl Rv {
     }
 }
 
-// Output and input are host-supplied so the interpreter never touches real stdio
-// itself: as the differential oracle and the wasm engine it must capture the
-// transcript, while the native CLI streams to a real terminal. `out_sink`
-// receives `print`/`println` bytes; `input` feeds `read_int`/`read_line`.
+// Stdout and stdin are host-supplied so the interpreter never picks them itself:
+// as the differential oracle and the wasm engine it must capture the transcript,
+// while the native CLI streams to a real terminal. `out_sink` receives
+// `print`/`println` bytes; `input` feeds `read_int`/`read_line`. The one channel
+// that is not host-supplied is stderr: `eprint` writes to the process's own
+// stderr, mirroring the native runtime's fd 2 (it is program output, not a
+// compiler diagnostic), and is recorded on the tape as an output observation so
+// replay reproduces it. The captured `term` transcript is stdout only, so a
+// program's stderr never contaminates the oracle's comparison.
 pub struct Machine<'a> {
     fns: BTreeMap<Sym, (Rc<[Sym]>, Cmp)>,
     pub out: Vec<Rv>,
@@ -1136,6 +1141,11 @@ impl<'a> Machine<'a> {
                     self.record_write_event(op, &vals)?;
                     State::Ret(v)
                 } else if let (Builtin::Eprint, [Rv::Str(s)]) = (*name, vals.as_slice()) {
+                    // Program output on stderr, not a compiler diagnostic: it goes
+                    // to the process's real fd 2 exactly as the native runtime's
+                    // does, and takes an output boundary on the tape so a replay
+                    // reproduces it. This is the sole `eprint` write site; the
+                    // value-returning builtin path refuses the builtin.
                     let s = s.clone();
                     let preview = s.clone();
                     self.observe_out(
@@ -1490,9 +1500,12 @@ pub fn globals(core: &Core) -> BTreeMap<Sym, CoreFn> {
     core.fns.iter().map(|f| (f.name, f.clone())).collect()
 }
 
-/// Run `core` capturing all `print` output into the returned [`Run`]'s `term`
-/// (the differential oracle and wasm path), reading input from an empty source.
-/// Nothing reaches real stdio.
+/// Run `core` capturing all `print` output into the returned [`Run`]'s `term`.
+///
+/// This is the differential oracle and the wasm path, and it reads input from
+/// an empty source. Nothing reaches real stdout or stdin; a program's own
+/// `eprint` still goes to the process's stderr, as it does natively, and is
+/// recorded on the tape.
 ///
 /// # Errors
 /// Fails when `main` is missing or evaluation faults.

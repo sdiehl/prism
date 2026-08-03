@@ -14,7 +14,7 @@ Opt-in: this module is not in Base, so ambient effect rows and the unbranded `Ma
 
 ### `OrdWitness`
 
-```prism,def,h-8a2e3e9460113d4ab978fcaa3978f7667cd7051b8b817ff1b7710ccb38a23ac8
+```prism,def,h-d8f957841e13dc6862da0279999df6d4f46f18a5ea874dfd56934b93b0da55b7
 type OrdWitness(k, brand) = OrdBy((k, k) -> Int)
 ```
 
@@ -24,7 +24,7 @@ An ordering witness: a comparator branded by the phantom `brand`. The only way t
 
 ### `with_ordering`
 
-```prism,sig,h-08645ffe4161983e5b2ec4ef8ee621d13f588d3d09bdd3ea60a0feddc6529f3f
+```prism,sig,h-0f31f3c7c409261c6ff2bcd4a58ad1530c90b1bfba4a4594aa9f9bac09d550aa
 with_ordering : forall a b. ((a, a) -> Int, forall brand. (Data.Ordered.OrdWitness(a, brand)) -> b) -> b
 ```
 
@@ -43,7 +43,7 @@ Some(a)
 
 ### `ord_empty`
 
-```prism,sig,h-cb546ff5601304a5155f307d3d19ee8940bd5fde0ab431873d9bc9f2ff3a8b30
+```prism,sig,h-a6f0d96a2e55d7ab3eb5a9ee9211ad85557ed96106f6431aa6119a48360834e0
 ord_empty : forall a b c. (Data.Ordered.OrdWitness(a, b)) -> Map(a, c, b)
 ```
 
@@ -51,7 +51,7 @@ The empty map under witness `w`, carrying `w`'s brand.
 
 ### `ord_insert`
 
-```prism,sig,h-ac30d23ffd18dc46f8576d5d4d666d0af9f2252128f505761093bcff0b206f66
+```prism,sig,h-076192c58b63f03343a0d25ff16f90a439eab10a63b8c760d7730f719c65c80b
 ord_insert : forall a b c. (Data.Ordered.OrdWitness(a, b), a, c, Map(a, c, b)) -> Map(a, c, b)
 ```
 
@@ -68,7 +68,7 @@ with_ordering(\(a, b) -> cmp(a, b), \(w) ->
 
 ### `ord_lookup`
 
-```prism,sig,h-a4a558866553e9c154efb940b6125d8447ea1f4b7b5b24c4d83baafc01bffeb6
+```prism,sig,h-9472de7d80cb104ba54cd9d07c231d633e129b96640aba50de404069e01ac5bc
 ord_lookup : forall a b c. (Data.Ordered.OrdWitness(a, b), a, Map(a, c, b)) -> Option(c)
 ```
 
@@ -85,7 +85,7 @@ None
 
 ### `ord_member`
 
-```prism,sig,h-0ffc90bf2d8777973b9edb3d140c5c54e4a08f6a0886323e56f5620b370315d2
+```prism,sig,h-cc209227b2bb80ce7dd9cabc222ad1d95790c9631379e5342b1ce960ca0431e2
 ord_member : forall a b c. (Data.Ordered.OrdWitness(a, b), a, Map(a, c, b)) -> Bool
 ```
 
@@ -102,7 +102,7 @@ true
 
 ### `ord_to_list`
 
-```prism,sig,h-c52ad6bcdae0ef62d47c39d2e2f1b782baec9e951a1a275ac387007bc5902c93
+```prism,sig,h-e243d29fef1502361e9c7e492a1072e1cd9d86285006c409038761c3206be31f
 ord_to_list : forall a b c. (Data.Ordered.OrdWitness(a, b), Map(a, c, b)) -> List((a, c))
 ```
 
@@ -119,7 +119,7 @@ with_ordering(\(a, b) -> cmp(a, b), \(w) ->
 
 ### `ord_size`
 
-```prism,sig,h-0df8cc4c4e55e5210e4dd1bf33e7dc840eb338afcf826762720b8ffce7a7257a
+```prism,sig,h-df5dc62073a16309c9b80642a2c12b08f01885b91f0b5e861d0a3d25127fba24
 ord_size : forall a b c. (Data.Ordered.OrdWitness(a, b), Map(a, c, b)) -> Int
 ```
 

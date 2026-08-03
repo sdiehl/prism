@@ -14,10 +14,12 @@ import Incr (..)
 -- Insert into a list kept in descending-by-score order. A small comparator sort
 -- stands in for a stdlib `sort_by`; `cmp` returns -1/0/1.
 fn ins_desc(p : (String, Int), xs : List((String, Int))) : List((String, Int)) =
+  let (_, score) = p
   match xs of
     Nil => Cons(p, Nil)
     Cons(q, rest) =>
-      if cmp(snd(p), snd(q)) > 0 then
+      let (_, other_score) = q
+      if cmp(score, other_score) > 0 then
         Cons(p, Cons(q, rest))
       else
         Cons(q, ins_desc(p, rest))
@@ -36,12 +38,12 @@ pub fn leaderboard() =
         \() -> let _ = println("  recompute: ranking") in by_score_desc(map_to_list(get(scores))),
       )
     let champion = memo(
-        \() -> let _ = println("  recompute: champion") in match head(get(ranking)) of { Some(top) => fst(top), None => "nobody" },
+        \() -> let _ = println("  recompute: champion") in match head(get(ranking)) of { Some((name, _)) => name, None => "nobody" },
       )
     let banner = memo(
-        \() -> let _ = println("  recompute: banner") in concat(get(champion), " is winning!"),
+        \() -> let _ = println("  recompute: banner") in "{get(champion)} is winning!",
       )
-    let show_state = \() -> println(concat("total=", concat(show(get(total)), concat("  banner=", get(banner)))))
+    let show_state = \() -> println("total={get(total)}  banner={get(banner)}")
     println("== opening scores ==")
     show_state()
     println("")

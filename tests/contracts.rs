@@ -1,6 +1,6 @@
 // `logic fn` declarations and `requires`/`ensures` contract clauses parse and
 // format as surface-only proof data erased before executable Core. The
-// load-bearing invariant is that a contract-only edit cannot move any runtime
+// required invariant is that a contract-only edit cannot move any runtime
 // artifact.
 
 // The same two functions, once with a `logic fn` and contract clauses, once

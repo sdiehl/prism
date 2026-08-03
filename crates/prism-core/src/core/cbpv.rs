@@ -109,14 +109,14 @@ mod f64_bits {
 
     // Serde's `with` hook requires the value by reference.
     #[allow(clippy::trivially_copy_pass_by_ref)]
-    pub fn serialize<S>(value: &f64, serializer: S) -> Result<S::Ok, S::Error>
+    pub(crate) fn serialize<S>(value: &f64, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         serializer.serialize_u64(value.to_bits())
     }
 
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<f64, D::Error>
+    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<f64, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -519,11 +519,13 @@ pub struct ElaboratedCore(Core);
 impl ElaboratedCore {
     /// Wrap the pipeline's own elaboration output. Crate-internal on purpose:
     /// the stage claim is the constructor's, and only the pipeline may make it.
+    #[must_use]
     pub const fn new(core: Core) -> Self {
         Self(core)
     }
 
     /// Consume the wrapper, yielding the owned program.
+    #[must_use]
     pub fn into_core(self) -> Core {
         self.0
     }
@@ -550,6 +552,7 @@ pub struct LoweredCore(Core);
 impl LoweredCore {
     /// Wrap the pipeline's own verified lowering output. Crate-internal on
     /// purpose; the public checked path is `validate_structural`.
+    #[must_use]
     pub const fn new(core: Core) -> Self {
         Self(core)
     }

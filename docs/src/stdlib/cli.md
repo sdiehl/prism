@@ -14,7 +14,7 @@ Everything here is pure: a `Parser` reads a `Tokens` structure, and `Tokens` com
 
 ### `CliError`
 
-```prism,def,h-9b186050d84fbb9d6de9db60f5af6e8382a09ee766eb6683024b77a171c8f105
+```prism,def,h-74a0e58db23cf4cbe60568d5bd9cb5f87fabea0af13b27f60968eec81c94c6f6
 type CliError
   = MissingFlag(String)
   | MissingArg(String)
@@ -29,7 +29,7 @@ A parse failure, carrying enough to name the offending token and the form expect
 
 ### `OptSpec`
 
-```prism,def,h-4316ae397faaa7c842e3aefdc429b9ccbc8ef5b7870628599cd6a381dbd10dbd
+```prism,def,h-03408321fe6b4079800939754ccb6ced0882bfc42a9f2c7a44c362c328f027c5
 type OptSpec = OptSpec {
   long: String,
   short: String,
@@ -43,7 +43,7 @@ The static description of one option, carried by the parser for help and to tell
 
 ### `ArgSpec`
 
-```prism,def,h-54a33bde5e5bc4ba36d9475912c24849d8718a81a20ebce9a1161a3e0cdebb93
+```prism,def,h-b3c3df89883d744ba9fd2beb1ef25ac49c07bd9042c99771d13ce9a93bfdc552
 type ArgSpec = ArgSpec { meta: String, help: String, required: Bool }
 ```
 
@@ -51,7 +51,7 @@ The static description of one positional argument.
 
 ### `Tokens`
 
-```prism,def,h-168a5c946ac36aaa2cc310a6bba5404c4b550900e5cad1be29fe0ff93c3b4374
+```prism,def,h-b9e75f3bdea89502d9ad8028aca6108b7309f059cef001746f504e81f3e36cad
 type Tokens = Tokens { opts: List((String, String)), pos: List(String) }
 ```
 
@@ -59,7 +59,7 @@ argv after lexing: options canonicalized to their long name, and the positionals
 
 ### `Parser`
 
-```prism,def,h-d9858a14444b8a272adb39d7d64e43e7f77b133536d46eaff6576b1900e547c3
+```prism,def,h-26962c326b19109e004daa8addbd653784406d566742a8169cf9327bdeb269cb
 type Parser(a) = Parser {
   opts: List(OptSpec),
   args: List(ArgSpec),
@@ -71,7 +71,7 @@ A parser for a value of type `a`: the option and positional specs it accepts (th
 
 ### `SubCmd`
 
-```prism,def,h-0777625f313c23cc6e8c0a08366aa959c16c15ee4577b3063920b78f57ee205c
+```prism,def,h-0967ae5f5418bc58c58efa609d27efa56b5783f9c625c99f647f3c027bf20b6f
 type SubCmd(a) = SubCmd { key: String, about: String, sub: Parser(a) }
 ```
 
@@ -79,7 +79,7 @@ One named subcommand: its key on the command line, a one-line description, and t
 
 ### `Body`
 
-```prism,def,h-0543bea03b6795a75e112bda326d5058feb7841a0735b0ae68ffa4e6423ff965
+```prism,def,h-4d0be8ccc26f471770a406c03f960ed3b19bfe2fd4a4422ade8cdee8f3da0be5
 type Body(a) = Plain(Parser(a)) | Group(List(SubCmd(a)))
 ```
 
@@ -87,7 +87,7 @@ A top-level command is either a single parser or a group of subcommands, all pro
 
 ### `Command`
 
-```prism,def,h-5c857ca90429995dbc96f4edc725021f9bb44c6808f34313c0a6e30dab8b503a
+```prism,def,h-e0ab9ff7e85285e90451d93a01dacaf1dfc884a1aea7f66c86d8d267ca948e8f
 type Command(a) = Command { name: String, about: String, body: Body(a) }
 ```
 
@@ -95,7 +95,7 @@ A complete command: a program name and one-line description for usage, plus its 
 
 ### `Outcome`
 
-```prism,def,h-9bf427e751f98e8f03b8056664bd10769b2d881979dbcaf7ab16ac9d6337d731
+```prism,def,h-31bdcb763fcb9a96acfd20365d7e6d0df577a7c8bd75450ec44e1783e02357a2
 type Outcome(a) = Parsed(a) | ShowHelp(String) | BadUsage(String)
 ```
 
@@ -105,19 +105,19 @@ The outcome of parsing argv: a value, a help request (carrying the rendered text
 
 ### `dash`
 
-```prism,sig,h-26e1530961c169c060029a271ddbd9b2892c42850ce3af100d79fce31eae8f58
+```prism,sig,h-9322723f8cab87163397398ec6a739642a0d309d0a17a69d45e3c2ed6cd52204
 dash : Int
 ```
 
 ### `help_col`
 
-```prism,sig,h-6ba1afe6c3b53c64c4fdd8bff16af31f395dc6147f225bdce015db57e93970f9
+```prism,sig,h-7dc56bf94cca8d8c8e45d361742db10b929805f81d7bb9348bc0442c12d66342
 help_col : Int
 ```
 
 ### `pure_p`
 
-```prism,sig,h-db52a3efa4dc4259aa822f4ec1a8b71050dae0607dc08c54db7ba0ad6db87230
+```prism,sig,h-576e53f68fd52cd9fe5ed02368c6e0e41f8b27a1636a4e407e448ff0805066e5
 pure_p : forall a. (a) -> Cli.Parser(a)
 ```
 
@@ -125,7 +125,7 @@ A parser that consumes nothing and yields `x`. The applicative unit.
 
 ### `map_p`
 
-```prism,sig,h-d458891e2d51c04cf84a2876061b940f4a14ac8d2be5fb25a130b2725e2ca3ab
+```prism,sig,h-fc8bdc7ab09ce8e15c013ea6cc9d57889d7b1814fac6e640c3df204570e4be26
 map_p : forall a b. ((b) -> a, Cli.Parser(b)) -> Cli.Parser(a)
 ```
 
@@ -133,7 +133,7 @@ Map `f` over a parser's result, leaving what it consumes unchanged.
 
 ### `ap_p`
 
-```prism,sig,h-f4245aeb9fda2b02f47e1659e5f7a77433d6643165e1cd84dd0bc6f82142ed8a
+```prism,sig,h-7b9ce235bc11a7e235c7fbdc9872799dcd0d9c83e7ff8e2257bb16ed7252e4b1
 ap_p : forall a b. (Cli.Parser((a) -> b), Cli.Parser(a)) -> Cli.Parser(b)
 ```
 
@@ -141,7 +141,7 @@ Applicative application: run `pf` then `px`, threading the positional cursor lef
 
 ### `build2`
 
-```prism,sig,h-d23f95dc1b996600614cb03efd10545518319228ff2a0b36074de77c022b3e2f
+```prism,sig,h-83a09ada0208cffd7a84b7691c0932ee01c942d6d5e64c7becad99d454fe5157
 build2 : forall a b c. ((a) -> (c) -> b, Cli.Parser(a), Cli.Parser(c)) -> Cli.Parser(b)
 ```
 
@@ -149,7 +149,7 @@ Apply a two-argument curried constructor to two parsers.
 
 ### `build3`
 
-```prism,sig,h-6faeb427948f4375de0bdce28d329b94cb7d6dd86efb9952e2cf2d66b05c3a43
+```prism,sig,h-e226b3b24a112769156d41b45e88962d4bc605481636ef3d9a8ec9926c1c6eaf
 build3 : forall a b c d. ((a) -> (b) -> (d) -> c, Cli.Parser(a), Cli.Parser(b), Cli.Parser(d)) -> Cli.Parser(c)
 ```
 
@@ -157,7 +157,7 @@ Apply a three-argument curried constructor to three parsers.
 
 ### `build4`
 
-```prism,sig,h-97fec94e769b9a8cc396229b6b52a622127ef229a5ce950fcb2692d3f5a740c9
+```prism,sig,h-c4d45064724f6d20512ba47ee9bacff9e93f31c1a3e3759b162e308edabb36a5
 build4 : forall a b c d e. ((a) -> (b) -> (c) -> (e) -> d, Cli.Parser(a), Cli.Parser(b), Cli.Parser(c), Cli.Parser(e)) -> Cli.Parser(d)
 ```
 
@@ -165,7 +165,7 @@ Apply a four-argument curried constructor to four parsers.
 
 ### `opt_str`
 
-```prism,sig,h-b36c1a61558a432025f58bc9b77dfd26c3b03e3b23928c1c5f3409a5e75505e3
+```prism,sig,h-b92f8552f23efbbff562af3f9484ad119eebe06650d5fd1e68943900a96f4166
 opt_str : (String, String, String, String, String) -> Cli.Parser(String)
 ```
 
@@ -173,7 +173,7 @@ An optional string flag with a default when absent.
 
 ### `req_str`
 
-```prism,sig,h-0dfe3aacd5eaf04bdfb1bd58916c6b43878a237251ff4558ff618f66b6776da7
+```prism,sig,h-d9252e61a779459bda12446ef773f8f8981cd0d2c04cbdf42dead1a2a00e3171
 req_str : (String, String, String, String) -> Cli.Parser(String)
 ```
 
@@ -181,7 +181,7 @@ A required string flag: an error when absent.
 
 ### `opt_int`
 
-```prism,sig,h-af8a2f1ea79bd71162a34366c78b7bfaa9d5d381a3e4e9271304c624a081e8f6
+```prism,sig,h-a2b2c1b4f714a138d7528d10299758b75760b3152af1df301be44fd5ffc22ab5
 opt_int : (String, String, String, String, Int) -> Cli.Parser(Int)
 ```
 
@@ -189,7 +189,7 @@ An optional integer flag with a default; a non-integer value is an error.
 
 ### `switch`
 
-```prism,sig,h-1f692e6ff36943685d8073161598048a1f2bf7512133ed0e5071c75571da98dc
+```prism,sig,h-96915b25a7a97b9a9c1c252a321f8f6be51b13f900f0d736e244082e39431260
 switch : (String, String, String) -> Cli.Parser(Bool)
 ```
 
@@ -197,7 +197,7 @@ A boolean switch: true when present, false when absent, never valued.
 
 ### `arg_str`
 
-```prism,sig,h-ce0f7772a9a796e07bfbe95d0af4b9932192e39b9293c655d89dace63e3ab422
+```prism,sig,h-8812c3cdd6c2b122e9ec0608ba555628035156074f3e18bfb1d241850354c630
 arg_str : (String, String) -> Cli.Parser(String)
 ```
 
@@ -205,7 +205,7 @@ A required string positional, consumed in declaration order.
 
 ### `arg_str_default`
 
-```prism,sig,h-69da1578da05dbf1b0c54369eed27f5ccf0ed60355a4c3845a0039084291aa7b
+```prism,sig,h-228654a62f102dea885f90c6e349755c540da3eed1d72e58333b7af849d52be4
 arg_str_default : (String, String, String) -> Cli.Parser(String)
 ```
 
@@ -213,7 +213,7 @@ An optional string positional, consumed in declaration order and yielding `defau
 
 ### `arg_int`
 
-```prism,sig,h-784d4af37695539bf112b0bdfab1c16c0b1a9079163e79993724b9e609864aee
+```prism,sig,h-907a4e2ce5a8bc3ba77f8a35b4e8835cf7a92abc982ae14e775ce93586bda824
 arg_int : (String, String) -> Cli.Parser(Int)
 ```
 
@@ -221,7 +221,7 @@ A required integer positional; a non-integer token is an error.
 
 ### `lex`
 
-```prism,sig,h-5d0b237ef2e602a282d43a86b87e3a7824fa4ddd0fb9f905ccd191f08db2ecb6
+```prism,sig,h-d05f72d30b4faa4e840bcc51b12a68495c8923b2b631bd96da322cbfdbb32450
 lex : (List(Cli.OptSpec), List(String)) -> Result(Cli.Tokens, Cli.CliError)
 ```
 
@@ -229,7 +229,7 @@ Lex argv against the option specs (which say whether each flag takes a value). O
 
 ### `run_argv`
 
-```prism,sig,h-8d66634bde00f6179a56c6edc758261c53b5763ebb0f325d625e753e6f46d363
+```prism,sig,h-2f84a36124a0084821e45dda45c6be21b2a288c9a2714bd9e7e9789c4b790975
 run_argv : forall a. (Cli.Command(a), List(String)) -> Cli.Outcome(a)
 ```
 
@@ -247,7 +247,7 @@ Cli.Parsed((example.com, 8080))
 
 ### `help_text`
 
-```prism,sig,h-08e130c003f2bd6a68178515f326ed364f44fd750a4559aed47ce0a1f241327b
+```prism,sig,h-db809d3b544752f46ed0139a90a94fc15bef81277aee1e3c521e93dc85560319
 help_text : forall a. (Cli.Command(a)) -> String
 ```
 
@@ -272,7 +272,7 @@ Options:
 
 ### `describe`
 
-```prism,sig,h-b6904922237fa8f6eeb22c87d2ec82ffa57db38659b8e52efa7403ce582545b9
+```prism,sig,h-ebc9a7833de22e12a15489f092feb85fe3f6119f0eb1ba7a6c05dec779f4c949
 describe : (Cli.CliError) -> String
 ```
 
@@ -288,7 +288,7 @@ error: required flag '--host' was not provided
 
 ### `run_args`
 
-```prism,sig,h-8060a93f704b8be5d4133d2bf7837349f645053f0d30f7cb7f531665a30a025a
+```prism,sig,h-e251e3f7b65652c7c8e5538e1b2fb669bde877b2b1f8054a913b9925898eada2
 run_args : forall a. (Cli.Command(a)) -> Cli.Outcome(a) ! {Env}
 ```
 

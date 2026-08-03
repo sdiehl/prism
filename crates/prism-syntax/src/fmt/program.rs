@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use marginalia::{BuiltinKind, Trivia};
 
 use super::decl::{fmt_class, fmt_data, fmt_effect, fmt_import, fmt_labels, fmt_ty};
@@ -6,7 +8,10 @@ use super::{Fmt, Mode, Program};
 use crate::kw;
 
 impl Fmt<'_> {
-    pub(super) fn fmt_program(&self, prog: &Program) -> String {
+    // Every top-level item rendered in place, as `(start, end, text)` in source
+    // order. The one enumeration of what a program prints, shared by whole-file
+    // formatting and by rendering a single declaration on its own.
+    fn items(&self, prog: &Program) -> Vec<(usize, usize, String)> {
         let mut items: Vec<(usize, usize, String)> = Vec::new();
         // Restore the visibility marker the parser stripped into `prog.exports` /
         // `prog.opaques` (opaque implies exported, so it is checked first), then
@@ -96,7 +101,27 @@ impl Fmt<'_> {
             items.push((f.span.start, f.span.end, pubd(&f.name, line)));
         }
         items.sort_by_key(|(start, _, _)| *start);
+        items
+    }
 
+    // Each top-level item on its own, keyed by source start offset and carrying
+    // the comment block written directly above it. A comment group separated
+    // from the item by a blank line belongs to what came before, not to it.
+    pub(super) fn fmt_items(&self, prog: &Program) -> BTreeMap<usize, String> {
+        let mut out = BTreeMap::new();
+        let mut prev_end: usize = 0;
+        for (start, end, s) in self.items(prog) {
+            let mut lead = String::new();
+            self.emit_leading_trivia(prev_end, start, &mut lead);
+            let attached = lead.rsplit_once("\n\n").map_or(lead.as_str(), |(_, t)| t);
+            out.insert(start, format!("{attached}{s}"));
+            prev_end = end;
+        }
+        out
+    }
+
+    pub(super) fn fmt_program(&self, prog: &Program) -> String {
+        let items = self.items(prog);
         let mut out = String::new();
         let mut prev_end: usize = 0;
         for (idx, (start, end, s)) in items.into_iter().enumerate() {

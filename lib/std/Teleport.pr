@@ -1,7 +1,7 @@
--- | The checked mobility boundary. `teleport` runs a portable, single-use
--- computation as a unit that is safe to move to a fresh runtime.
+-- | The checked mobility boundary for portable, single-use computations.
 --
--- The closure handed to `teleport` must capture only content-addressed code and
+-- `teleport` runs such a computation as a unit that is safe to move to a fresh
+-- runtime. The closure handed to it must capture only content-addressed code and
 -- portable data (`@ portable`) and be invoked at most once (`@ once`); the
 -- compiler proves that contract at every call site. Running a teleported closure
 -- is observationally identical to calling it directly -- how a computation is

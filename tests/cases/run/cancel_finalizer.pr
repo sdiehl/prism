@@ -67,5 +67,5 @@ fn failing_scene() : Int ! {Async(Int), IO, Fail} =
 
 fn main() =
   println(run_async(scene))
-  let failed = default(\() -> run_async(failing_scene), 0 - 9)
+  let failed = default(\() -> run_async(failing_scene), -9)
   println("cleanup failure recovered with {failed}")

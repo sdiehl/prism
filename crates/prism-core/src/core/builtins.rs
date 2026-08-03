@@ -243,6 +243,7 @@ impl AbiSpec {
 
     // Not test-gated: the native backend's emit tests assert every builtin's
     // ABI indices stay within its arity from outside this crate.
+    #[must_use]
     pub fn args_within(self, arity: usize) -> bool {
         self.immediate
             .iter()

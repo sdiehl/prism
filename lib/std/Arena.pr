@@ -35,6 +35,13 @@ pub type Cell = Cell(Int)
 -- result keeps is promoted to ordinary reference-counted cells at the boundary.
 -- A `body` that allocates nothing runs unchanged, and code that never calls
 -- `with_arena` allocates exactly as before.
+--
+-- ```prism
+-- with_arena(\() -> [1, 2, 3])
+-- ```
+-- ```output
+-- [1, 2, 3]
+-- ```
 pub fn with_arena(body : () -> a ! {Alloc}) : a =
   handle body() with
     once alloc(n) => prim_arena_bump(n)

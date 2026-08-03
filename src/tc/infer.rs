@@ -87,6 +87,19 @@ impl Tc<'_> {
         }
     }
 
+    // The exact summary recorded for a call to `name`, if `name` still denotes
+    // the continuation binder that recorded one. The lookup goes through `Env`
+    // because `Env` is what scopes a binding: the summary is keyed on the row
+    // existential that only the continuation's own entry carries, so any inner
+    // binding of the same name resolves to a different type, finds no summary,
+    // and leaves the call on the conservative opaque-row path.
+    fn precise_call(&self, env: &Env, name: &str) -> Option<OperationUses> {
+        let Some(Type::Fun(_, EffRow::Exist(row), _)) = env.get(&Sym::from(name)) else {
+            return None;
+        };
+        self.precise_calls.get(row).cloned()
+    }
+
     // After checking a direct thunk-taking operation, its free row has unified
     // with the ambient accumulator. Preserve every now-visible label except the
     // operation's own effect as opaque interface provenance; the own operation
@@ -656,7 +669,7 @@ impl Tc<'_> {
                 let tf = self.synth(env, f)?;
                 let tf = self.apply(&tf);
                 let precise = match &f.node {
-                    Expr::Var(name) => self.precise_calls.get(&Sym::from(name)).cloned(),
+                    Expr::Var(name) => self.precise_call(env, name),
                     _ => None,
                 };
                 self.app_synth_with_uses(env, &tf, args, span, precise.as_ref())
@@ -665,7 +678,7 @@ impl Tc<'_> {
                 let tf = self.synth(env, f)?;
                 let tf = self.apply(&tf);
                 let precise = match &f.node {
-                    Expr::Var(name) => self.precise_calls.get(&Sym::from(name)).cloned(),
+                    Expr::Var(name) => self.precise_call(env, name),
                     _ => None,
                 };
                 self.app_synth_with_uses(env, &tf, std::slice::from_ref(x), span, precise.as_ref())
@@ -899,20 +912,16 @@ impl Tc<'_> {
                         // `unify_row(Empty, {e})` and solve the residual `e` to
                         // empty, severing the row variable the reified data type
                         // carries.
-                        let k_ty = Type::fun_eff(
-                            vec![op_ret],
-                            EffRow::Exist(self.push_ex_row()),
-                            Type::Exist(ret_ex),
-                        );
-                        let k_sym = Sym::from(k_var);
-                        env2.insert(k_sym, k_ty);
-                        let previous = self.precise_calls.insert(k_sym, body_residual.clone());
+                        let k_row = self.push_ex_row();
+                        let k_ty =
+                            Type::fun_eff(vec![op_ret], EffRow::Exist(k_row), Type::Exist(ret_ex));
+                        env2.insert(Sym::from(k_var), k_ty);
+                        // The summary is keyed on the freshly minted row, which
+                        // is the binder's identity; the spelling is not, and a
+                        // nested clause that reuses the name gets its own key.
+                        self.precise_calls.insert(k_row, body_residual.clone());
                         let checked = self.check(&env2, arm_body, &Type::Exist(ret_ex));
-                        if let Some(previous) = previous {
-                            self.precise_calls.insert(k_sym, previous);
-                        } else {
-                            self.precise_calls.remove(&k_sym);
-                        }
+                        self.precise_calls.remove(&k_row);
                         checked?;
                     } else {
                         return Err(ErrKind::UnknownEffectOp {

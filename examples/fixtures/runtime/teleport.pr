@@ -1,0 +1,10 @@
+-- Runtime fixture embedded by the wasm continuation-teleport demo.
+
+fn count(i, last) =
+  if i > last then
+    ()
+  else
+    println("step {i}: {i} squared is {i * i}")
+    count(i + 1, last)
+
+fn main() = count(1, 10)

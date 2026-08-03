@@ -5,8 +5,8 @@ use std::sync::OnceLock;
 use crate::core::fbip::{borrow_sigs, Fips, Sigs};
 use crate::core::opt::PassStage;
 use crate::core::typed::{
-    insert_rc as insert_typed_rc, lower_effects as lower_typed_effects, reuse as reuse_typed,
-    TypedLowering,
+    insert_rc as insert_typed_rc, lower_effects as lower_typed_effects, prepare_effects,
+    reuse as reuse_typed, EffectPlan, TypedLowering,
 };
 use crate::core::{
     balanced, fip_annots, hash_program, hash_root, insert_rc, pp_core_pretty, reuse,
@@ -22,6 +22,7 @@ use crate::store::commit_program;
 use crate::store::disk::{self as store, CommitStats, DefMeta};
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Fip, Program, Span};
+use crate::syntax::reflect::parse_unit;
 use crate::types::{show_effects, show_type_with_effects, Checked, CtorInfo};
 
 mod artifact;
@@ -371,7 +372,7 @@ pub fn check_on(src: &str, roots: &[Root]) -> Result<Checked, Error> {
 /// # Errors
 /// Fails on parse, resolution, desugaring, or type errors.
 pub fn check_with_seed(src: &str, seed: &crate::types::TypecheckSeed) -> Result<Checked, Error> {
-    let program = parse(src)?.program;
+    let program = parse_unit(src)?;
     let program = crate::resolve::resolve(program)?;
     let program = crate::syntax::desugar::desugar(program)?;
     Ok(crate::tc::check_seeded(&program, seed)?)
@@ -672,6 +673,7 @@ fn lower_opt_on_grown_stack(
         ctors: typed_ctors,
         warning: typed_warning,
         strategy: _,
+        confined_decline: _,
     } = typed;
     let typed = timing::timed_res(
         cfg.timing.as_ref(),
@@ -1000,6 +1002,33 @@ fn typed_effect_facts(
     Ok((lowering.strategy, lowering.warning))
 }
 
+/// The effect plan the cascade reads for this program, rendered beside the tier
+/// it decided.
+///
+/// The plan is a fact about the prepared tree, so it is computed from the same
+/// preparation the strategy decision runs on, from one front end.
+///
+/// # Errors
+/// Fails on front-end or typed effect-lowering verification errors.
+pub(crate) fn typed_effect_plan(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
+    let mut cfg = cfg.clone();
+    cfg.flags.quiet = true;
+    let (_, checked, _, typed, verify_env) =
+        run_front(src, roots, &cfg, FrontRequest::Full)?.into_typed_pre();
+    let grades = checked.op_grades();
+    let echo = typed.clone();
+    let lowering = on_typed_lower_stack(|| {
+        lower_typed_effects(typed, &verify_env, &checked.ctors, &cfg.flags, &grades)
+    })?;
+    let prepared = on_typed_lower_stack(|| {
+        prepare_effects(echo, &verify_env, &checked.ctors, &cfg.flags, &grades)
+    })?;
+    // The refusal is an outcome of the cascade, not a fact about the tree, so it
+    // is read off the lowering that made the decision rather than re-derived
+    // beside it.
+    Ok(EffectPlan::analyze(&prepared.fns).render(lowering.strategy, lowering.confined_decline))
+}
+
 /// The CBPV core IR of the snippet's own functions (prelude elided),
 /// pretty-printed.
 ///
@@ -1260,8 +1289,8 @@ mod envelope_tests {
     #[cfg(feature = "native")]
     use super::identity::native_kont_table_for;
     #[cfg(feature = "native")]
-    use super::{default_roots, dump_on, Config, HASH_SCHEME};
-    use super::{dump, example_program, EnvelopeHeader, WireKind, NAMESPACE_FORMAT};
+    use super::{default_roots, dump_on, Config};
+    use super::{dump, example_program, EnvelopeHeader, WireKind, HASH_SCHEME, NAMESPACE_FORMAT};
     #[cfg(feature = "native")]
     use prism_native::MAIN_SYMBOL;
 
@@ -1318,12 +1347,12 @@ mod envelope_tests {
             .artifact_identity_for("llvm")
             .with_source_root("source123")
             .with_stdlib_root("std456")
-            .with_package_roots([format!("{STORE_PKG_NAME}@prism-core-hash-v1:pkg789")]);
+            .with_package_roots([format!("{STORE_PKG_NAME}@{HASH_SCHEME}:pkg789")]);
         let fingerprint = identity.fingerprint();
-        assert!(fingerprint.contains("source-root=prism-core-hash-v1:source123;"));
-        assert!(fingerprint.contains("stdlib-root=prism-core-hash-v1:std456;"));
+        assert!(fingerprint.contains(&format!("source-root={HASH_SCHEME}:source123;")));
+        assert!(fingerprint.contains(&format!("stdlib-root={HASH_SCHEME}:std456;")));
         assert!(fingerprint.contains(&format!(
-            "package-root={STORE_PKG_NAME}@prism-core-hash-v1:pkg789;"
+            "package-root={STORE_PKG_NAME}@{HASH_SCHEME}:pkg789;"
         )));
     }
 
@@ -1334,7 +1363,7 @@ mod envelope_tests {
     #[test]
     fn native_kont_table_names_native_symbols_by_hash() {
         let out = dump("native-kont-table", "fn main() = 1\n").expect("native kont table");
-        assert!(out.starts_with("scheme  prism-core-hash-v1\nbundle  "));
+        assert!(out.starts_with(&format!("scheme  {HASH_SCHEME}\nbundle  ")));
         assert!(
             out.contains(&format!("compiler  {}\n", env!("CARGO_PKG_VERSION")))
                 && out.contains(&format!("target  {}\n", env!("PRISM_TARGET")))
@@ -1349,8 +1378,8 @@ mod envelope_tests {
             "dumped native table must not embed host-specific C compiler strings:\n{out}"
         );
         assert!(
-            out.contains("flag  source-root  prism-core-hash-v1:")
-                && out.contains("flag  stdlib-root  prism-core-hash-v1:"),
+            out.contains(&format!("flag  source-root  {HASH_SCHEME}:"))
+                && out.contains(&format!("flag  stdlib-root  {HASH_SCHEME}:")),
             "native table names source and Std roots:\n{out}"
         );
         assert!(
@@ -1403,7 +1432,7 @@ mod envelope_tests {
             "fn count(i, last) = if i > last then i else count(i + 1, last)\n\nfn main() = count(1, 2)\n",
         )
         .expect("native kont state map");
-        assert!(out.starts_with("state-map 1\nscheme  prism-core-hash-v1\nbundle  "));
+        assert!(out.starts_with(&format!("state-map 1\nscheme  {HASH_SCHEME}\nbundle  ")));
         assert!(
             out.contains("slot-format prism-native-abi-word-v1")
                 && out.contains("backend  llvm\n")

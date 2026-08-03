@@ -34,15 +34,32 @@ slow-timeout = { period = "120s", terminate-after = 16 }
 filter = 'binary(compiler)'
 slow-timeout = { period = "120s", terminate-after = 16 }
 
+# The MLIR backend proves the same parity corpus as the LLVM one, but where that
+# work is split across four sharded jobs this is a single test pinned to one
+# thread, so its honest runtime is a multiple of theirs and had crept to within a
+# percent of the shared cap before crossing it. Same rule as every other entry
+# here: the timeout exists to catch a hang, not to bound honest work. It precedes
+# the general rule below so the narrower match wins.
+[[profile.default.overrides]]
+filter = 'binary(native_parity) & test(mlir_matches_interpreter)'
+test-group = 'native-oracles'
+slow-timeout = { period = "120s", terminate-after = 32 }
+
 [[profile.default.overrides]]
 filter = 'binary(native_parity)'
 test-group = 'native-oracles'
 slow-timeout = { period = "120s", terminate-after = 16 }
 
+# Each forced test here re-plans the whole corpus twice per program to select the
+# ones whose lowering actually moves, then builds and diffs every one it selects,
+# and the group below pins the binary to one thread. Measured at 502s, 508s, and
+# 569s per forced test on an M-series laptop; a runner is several times slower,
+# which put one of them a few percent over the shared cap. Same rule as every
+# other entry here: the timeout catches a hang, it does not bound honest work.
 [[profile.default.overrides]]
 filter = 'binary(native_tier)'
 test-group = 'native-oracles'
-slow-timeout = { period = "120s", terminate-after = 16 }
+slow-timeout = { period = "120s", terminate-after = 32 }
 
 [[profile.default.overrides]]
 filter = 'binary(native_fusion)'
@@ -89,6 +106,11 @@ filter = 'binary(compiler)'
 slow-timeout = { period = "120s", terminate-after = 16 }
 
 [[profile.ci.overrides]]
+filter = 'binary(native_parity) & test(mlir_matches_interpreter)'
+test-group = 'native-oracles'
+slow-timeout = { period = "120s", terminate-after = 32 }
+
+[[profile.ci.overrides]]
 filter = 'binary(native_parity)'
 test-group = 'native-oracles'
 slow-timeout = { period = "120s", terminate-after = 16 }
@@ -96,7 +118,7 @@ slow-timeout = { period = "120s", terminate-after = 16 }
 [[profile.ci.overrides]]
 filter = 'binary(native_tier)'
 test-group = 'native-oracles'
-slow-timeout = { period = "120s", terminate-after = 16 }
+slow-timeout = { period = "120s", terminate-after = 32 }
 
 [[profile.ci.overrides]]
 filter = 'binary(native_fusion)'

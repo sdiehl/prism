@@ -1,0 +1,21 @@
+-- A multishot op that reaches a function only through a thunk-valued
+-- parameter. `worker` names no operation of its own: `choose` arrives inside
+-- the thunk `k`, so a by-name call graph sees a pure function and would erase
+-- its `var s` to a cell shared across resumptions. The handler resumes twice,
+-- and a shared cell would carry the first branch's increment into the second,
+-- printing [1, 2] rather than [1, 1]: each resumption gets its own state.
+
+effect Amb
+  choose(Int) : Int
+
+fn worker(k) : Int =
+  var s := 0
+  k()
+  s := s + 1
+  s
+
+fn main() =
+  println(handle worker(\() -> choose(2)) with {
+    choose(m) resume k => flatten(map(\(i) -> k(i), range(0, m))),
+    return r => Cons(r, Nil)
+  })

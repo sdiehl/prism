@@ -2,8 +2,8 @@
 // decision, so forcing a program onto a slower tier must not change one byte
 // of observable output. `PRISM_EFFECT_TIER` (here set programmatically via
 // `Config.flags.effect_tier`) caps the cascade; for every corpus program whose
-// forced classification differs from its natural one, this gate builds the
-// forced native binary and diffs its stdout (and leak report) against the
+// forced effect plan differs from its natural one, this gate builds the forced
+// native binary and diffs its stdout (and leak report) against the
 // interpreter. Native-only sub-lowering knobs (`native_effects`, `trampoline`)
 // do not move the tier classifier, so they run a named effectful corpus twice
 // and diff native output directly. Together these catch both cascade-level and
@@ -13,57 +13,88 @@
 // tests/parity.rs through `support` (one leak predicate for both), so this file
 // only adds the tier-forcing filter and floor.
 //
-// Programs whose classification does not move under forcing are skipped: their
-// forced build is byte-identical to the natural one parity.rs already diffs.
-// A floor on the exercised count keeps the oracle from going vacuous if the
-// forcing knob or the strategy classifier silently breaks.
+// Programs whose lowering does not move under forcing are skipped: their forced
+// build is byte-identical to the natural one parity.rs already diffs. What
+// "does not move" means is the whole effect plan, not the tier label alone:
+// lowering confines per region, so two configurations can agree on the label and
+// still build a different region, refuse confinement for a different reason, or
+// read different per-function facts off a differently erased tree. Selecting on
+// the label would exclude exactly those programs, which are the ones a
+// tier-invisibility gate exists for. A floor on the exercised count keeps the
+// oracle from going vacuous if the forcing knob or the classifier silently
+// breaks.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use prism::{default_roots, Config, EffectTier};
+use prism::error::Error;
+use prism::{default_roots, dump_on, Config, EffectTier, Root};
 
 use crate::support::{
     check_native_parity, corpus, leak_free, parallel_check, require_cc, source, temp_bin,
 };
 
-fn forced(tier: EffectTier) -> Config {
+/// The dump phase rendering the effect plan: the strategy the cascade picked,
+/// why a confined region was refused when one was attempted, and the
+/// per-function facts (reachable operations, thunk parameters, genuine /
+/// escaping / capturing marks) it decided from. Every input to the tier decision
+/// is a row, which is what makes it the right selection fact here.
+const EFFECT_PLAN: &str = "effect-plan";
+
+// The whole tier decision for `full` under `cfg`, as the artifact the cascade
+// explains itself with. Two configurations that render the same plan lower the
+// same way, so a program whose plan is unmoved by forcing is one the natural
+// parity oracle already covers; a program whose plan moves in any row (a
+// different tier, a confined region refused for a different reason, or different
+// per-function facts once an erasure is off) is one this gate must build.
+fn effect_plan(full: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
+    dump_on(EFFECT_PLAN, full, roots, cfg)
+}
+
+fn forced(tier: EffectTier, erasures: bool) -> Config {
     let mut cfg = Config::from_env();
     cfg.flags.effect_tier = tier;
+    cfg.flags.erasures = erasures;
     cfg.flags.compiler_cache = false;
     cfg
 }
 
-// Force `tier` over the corpus, exercising exactly the programs whose lowering
-// strategy moves under the cap, and require at least `floor` of them so the
-// oracle cannot silently become vacuous.
-fn run_forced(tag: &str, tier: EffectTier, floor: usize) {
+// Force one point of the (floor, erasures) grid over the corpus, exercising
+// exactly the programs whose effect plan moves under it, and require at least
+// `floor_count` of them so the oracle cannot silently become vacuous.
+fn run_forced(tier: EffectTier, erasures: bool, floor_count: usize) {
     require_cc();
+    let tag = if erasures {
+        tier.label().to_string()
+    } else {
+        format!("{}-no-erasures", tier.label())
+    };
+    let tag = tag.as_str();
     let mut auto_cfg = Config::from_env();
     auto_cfg.flags.compiler_cache = false;
-    let forced_cfg = forced(tier);
+    let forced_cfg = forced(tier, erasures);
     let base = Path::new(".");
+    let roots = default_roots(base);
     let cases: Vec<_> = corpus()
         .into_iter()
         .filter(|case| {
             let full = source(case);
-            let auto = prism::effect_strategy_on(&full, base, &auto_cfg);
-            let hard = prism::effect_strategy_on(&full, base, &forced_cfg);
+            let auto = effect_plan(&full, &roots, &auto_cfg);
+            let hard = effect_plan(&full, &roots, &forced_cfg);
             match (auto, hard) {
                 (Ok(a), Ok(h)) => a != h,
-                // A strategy error under exactly one config is itself a tier
+                // A planning error under exactly one config is itself a tier
                 // divergence; keep the case so the build surfaces it.
                 _ => true,
             }
         })
         .collect();
     assert!(
-        cases.len() >= floor,
-        r"forcing {tag} moved only {} corpus programs off their natural tier (floor {floor}); the forcing knob or strategy classifier likely broke",
+        cases.len() >= floor_count,
+        r"forcing {tag} moved only {} corpus programs off their natural lowering (floor {floor_count}); the forcing knob or the effect planner likely broke",
         cases.len()
     );
-    let roots = default_roots(base);
     let fails = parallel_check(&cases, |case| {
         check_native_parity(case, tag, |full, bin| {
             prism::build_on(full, &roots, bin, &forced_cfg)
@@ -186,14 +217,51 @@ fn run_native_diff(
     );
 }
 
+// One point of the (floor, erasures) grid per test, each moving one axis at a
+// time so a divergence names the knob that caused it. The floors below sit under
+// the counts measured on a 346-program corpus (28, 40, 41, 89, 28, 108 in the
+// order the tests appear) with enough slack that ordinary corpus churn does not
+// trip them; when a floor does trip, its panic reports the true count, which is
+// how the numbers here were derived and how a stale one is refreshed. Those
+// counts predate selecting on the whole effect plan, which only ever admits more
+// programs, so they remain lower bounds. Forcing `auto` is deliberately absent:
+// it moves nothing, being the default.
+
+// The floors, erasures left on. Evidence is not forceable either: flooring there
+// is what `auto` already does.
 #[test]
-fn forced_free_monad_matches_interpreter() {
-    run_forced("free-monad", EffectTier::FreeMonad, 10);
+fn forced_state_fusion_matches_interpreter() {
+    run_forced(EffectTier::StateFusion, true, 20);
 }
 
 #[test]
-fn forced_state_matches_interpreter() {
-    run_forced("state", EffectTier::State, 3);
+fn forced_local_partial_matches_interpreter() {
+    run_forced(EffectTier::LocalPartial, true, 30);
+}
+
+#[test]
+fn forced_free_monad_matches_interpreter() {
+    run_forced(EffectTier::FreeMonad, true, 30);
+}
+
+#[test]
+fn forced_whole_program_free_monad_matches_interpreter() {
+    run_forced(EffectTier::WholeProgramFreeMonad, true, 60);
+}
+
+// The other axis on its own: the erasures off, the cascade otherwise free, so a
+// divergence here is the erasures' and not the ladder's.
+#[test]
+fn disabled_erasures_match_interpreter() {
+    run_forced(EffectTier::Auto, false, 20);
+}
+
+// Both axes at their extreme: nothing erased, everything reified, the whole
+// program in the monad. There is nothing slower to fall back to, so this is the
+// cascade's outer bound.
+#[test]
+fn slowest_lowering_matches_interpreter() {
+    run_forced(EffectTier::WholeProgramFreeMonad, false, 75);
 }
 
 #[test]

@@ -57,8 +57,8 @@ fn parallel(
 ) : Moore((s1, s2), (i1, i2), (o1, o2)) =
   Moore {
     init = (m1.init, m2.init),
-    step = \(s, a) -> ((m1.step)(fst(s), fst(a)), (m2.step)(snd(s), snd(a))),
-    out = \(s) -> ((m1.out)(fst(s)), (m2.out)(snd(s)))
+    step = \((left_state, right_state), (left_input, right_input)) -> ((m1.step)(left_state, left_input), (m2.step)(right_state, right_input)),
+    out = \((left_state, right_state)) -> ((m1.out)(left_state), (m2.out)(right_state))
   }
 
 -- Series wiring: m1's current readout is the input fed to m2 this tick.
@@ -68,9 +68,10 @@ fn series_step(
   s : (s1, s2),
   a : i1
 ) : (s1, s2) =
-  let ns1 = (m1.step)(fst(s), a)
-  let bridge = (m1.out)(fst(s))
-  (ns1, (m2.step)(snd(s), bridge))
+  let (left_state, right_state) = s
+  let next_left = (m1.step)(left_state, a)
+  let bridge = (m1.out)(left_state)
+  (next_left, (m2.step)(right_state, bridge))
 
 fn series(
   m1 : Moore(s1, i1, o1),
@@ -79,7 +80,7 @@ fn series(
   Moore {
     init = (m1.init, m2.init),
     step = \(s, a) -> series_step(m1, m2, s, a),
-    out = \(s) -> (m2.out)(snd(s))
+    out = \((_left_state, right_state)) -> (m2.out)(right_state)
   }
 
 fn main() : Unit ! {IO} =

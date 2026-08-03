@@ -1,0 +1,15 @@
+-- Fast bootstrap witness for the Prism-owned parser. The host compiler parses
+-- this tiny harness; every file named on the command line is then lexed, laid
+-- out, and parsed exclusively by `Syntax.Parse`.
+
+import Syntax.Lex (..)
+
+import Syntax.Parse (..)
+
+fn report(path : String) : String =
+  match parse_source(read_file(path)) of
+    Ok(items) => "ok {path} {show_int(length(items))}"
+    Err(ParseLex(e)) => "lex {path} {lex_code(e)} {lex_message(e)}"
+    Err(ParseSyntax(d)) => "parse {path} {d.code} {d.message}"
+
+fn main() = println(lines_of(map(report, args())))

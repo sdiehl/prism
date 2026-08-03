@@ -60,8 +60,8 @@ fn closure_tag(owner: Sym, ordinal: usize) -> usize {
     usize::try_from(tag).expect("closure tags fit the native target word")
 }
 
-#[derive(Clone)]
-pub enum LamBody {
+#[derive(Clone, Debug)]
+pub(crate) enum LamBody {
     // An ordinary closure.
     Core(Comp),
     // A curry adapter for under-application. Once saturated with its remaining
@@ -70,8 +70,8 @@ pub enum LamBody {
     Curry { target: usize },
 }
 
-#[derive(Clone)]
-pub struct LamInfo {
+#[derive(Clone, Debug)]
+pub(crate) struct LamInfo {
     pub tag: usize,
     pub owner: Sym,
     pub params: Vec<Sym>,
@@ -105,7 +105,7 @@ struct TrmcCtx {
     extra: String,
 }
 
-pub struct Cg<'a, I> {
+pub(crate) struct Cg<'a, I> {
     pub isa: &'a I,
     b: Buf,
     cur_arity: usize,
@@ -156,7 +156,7 @@ impl<'a, I: Isa> Cg<'a, I> {
         }
     }
 
-    pub fn mint_closure_tag(&mut self, owner: Sym) -> Result<usize, String> {
+    pub(crate) fn mint_closure_tag(&mut self, owner: Sym) -> Result<usize, String> {
         let ordinal = self.owner_ordinals.entry(owner).or_default();
         let tag = closure_tag(owner, *ordinal);
         *ordinal += 1;
@@ -317,12 +317,19 @@ impl<'a, I: Isa> Cg<'a, I> {
                 .get(x)
                 .cloned()
                 .ok_or_else(|| format!("codegen: unbound {x}")),
+            // Checked in every profile, not just under `debug_assertions`: the
+            // shift is what makes a literal an immediate, and out of range it
+            // wraps into a different value in silence. Two comparisons per
+            // literal buy a hard failure instead of a wrong program, in the
+            // release build that ships.
             Value::Int(n) => {
-                debug_assert!(
-                    (-(1i64 << TAGGED_INT_VALUE_BITS)..(1i64 << TAGGED_INT_VALUE_BITS)).contains(n),
-                    "codegen: Int literal {n} outside tagged-immediate range; the \
-                     elaborator must box a wider literal as I64/bignum before codegen"
-                );
+                if !(-(1i64 << TAGGED_INT_VALUE_BITS)..(1i64 << TAGGED_INT_VALUE_BITS)).contains(n)
+                {
+                    return Err(format!(
+                        "codegen: Int literal {n} outside tagged-immediate range; the \
+                         elaborator must box a wider literal as I64/bignum before codegen"
+                    ));
+                }
                 Ok(self.isa.const_int(&mut self.b, n.wrapping_shl(1) | 1))
             }
             Value::I64(n) => {
@@ -1281,7 +1288,7 @@ impl<'a, I: Isa> Cg<'a, I> {
     }
 }
 
-pub enum SelectedEmissionError {
+pub(crate) enum SelectedEmissionError {
     Codegen(String),
 }
 
@@ -1315,7 +1322,7 @@ pub fn emit_with_isa<I: Isa>(
 // The crate-internal entry for callers that already hold the pipeline's own
 // lowered `Core` (the LLVM module builder, whose product was constructed behind
 // the same verified boundary).
-pub fn emit_lowered_with_isa<I: Isa>(
+pub(crate) fn emit_lowered_with_isa<I: Isa>(
     isa: &I,
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,
@@ -1333,7 +1340,7 @@ pub fn emit_lowered_with_isa<I: Isa>(
 /// # Errors
 /// Returns a diagnostic when selection is empty, a selected definition is not
 /// independently emit-able, or ordinary code generation fails.
-pub fn emit_selected_with_isa<I: Isa>(
+pub(crate) fn emit_selected_with_isa<I: Isa>(
     isa: &I,
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,
@@ -1362,6 +1369,7 @@ struct ClosureShape {
 }
 
 impl ClosureSummary {
+    #[must_use]
     pub fn validate(&self) -> bool {
         let mut tags = BTreeSet::new();
         let mut owner_counts = BTreeMap::<&str, usize>::new();
@@ -1378,8 +1386,8 @@ impl ClosureSummary {
     }
 }
 
-#[derive(Clone)]
-pub struct ClosurePlan {
+#[derive(Clone, Debug)]
+pub(crate) struct ClosurePlan {
     lams: Vec<LamInfo>,
     adapters: BTreeMap<(usize, usize), usize>,
     used_apply: BTreeSet<usize>,
@@ -1387,7 +1395,7 @@ pub struct ClosurePlan {
 }
 
 impl ClosurePlan {
-    pub fn fingerprint(&self) -> String {
+    pub(crate) fn fingerprint(&self) -> String {
         let mut hasher = blake3::Hasher::new();
         // Cache-bust counter for the closure-plan shard key, not a compat version:
         // a bump misses stale codegen shards; no old plan is ever read back.
@@ -1413,7 +1421,7 @@ impl ClosurePlan {
         hasher.finalize().to_hex().to_string()
     }
 
-    pub fn dispatch_arities(&self) -> BTreeSet<usize> {
+    pub(crate) fn dispatch_arities(&self) -> BTreeSet<usize> {
         let mut arities = self
             .lams
             .iter()
@@ -1423,12 +1431,12 @@ impl ClosurePlan {
         arities
     }
 
-    pub const fn has_adapters(&self) -> bool {
+    pub(crate) const fn has_adapters(&self) -> bool {
         self.ordinary_lams < self.lams.len()
     }
 }
 
-pub fn closure_summary_with_isa<I: Isa>(
+pub(crate) fn closure_summary_with_isa<I: Isa>(
     isa: &I,
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,
@@ -1471,7 +1479,7 @@ pub fn closure_summary_with_isa<I: Isa>(
     }
 }
 
-pub fn plan_closures_from_summaries_with_isa<I: Isa>(
+pub(crate) fn plan_closures_from_summaries_with_isa<I: Isa>(
     isa: &I,
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,
@@ -1528,7 +1536,7 @@ pub fn plan_closures_from_summaries_with_isa<I: Isa>(
     })
 }
 
-pub fn plan_closures_with_isa<I: Isa>(
+pub(crate) fn plan_closures_with_isa<I: Isa>(
     isa: &I,
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,
@@ -1561,7 +1569,7 @@ fn cg_from_closure_plan<'a, I: Isa>(
     cg
 }
 
-pub fn emit_closure_adapters_with_isa<I: Isa>(
+pub(crate) fn emit_closure_adapters_with_isa<I: Isa>(
     isa: &I,
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,
@@ -1576,7 +1584,7 @@ pub fn emit_closure_adapters_with_isa<I: Isa>(
     Ok(finish_module(isa, &cg, &bodies, ""))
 }
 
-pub fn emit_closure_dispatch_with_isa<I: Isa>(
+pub(crate) fn emit_closure_dispatch_with_isa<I: Isa>(
     isa: &I,
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,
@@ -1588,7 +1596,7 @@ pub fn emit_closure_dispatch_with_isa<I: Isa>(
     finish_module(isa, &cg, "", &dispatch)
 }
 
-pub fn emit_selected_plan_with_isa<I: Isa>(
+pub(crate) fn emit_selected_plan_with_isa<I: Isa>(
     isa: &I,
     core: &Core,
     ctors: &BTreeMap<String, CtorInfo>,

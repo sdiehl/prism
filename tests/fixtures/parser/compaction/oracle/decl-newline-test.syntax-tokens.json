@@ -1,0 +1,154 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "6ee65b86054ecafa46d359a5818d469d105d54b9034f7cb9c3bba27430c35705",
+    "text": "test\nfn corpus(x) = x\n"
+  },
+  "raw": [
+    {
+      "kind": "ident",
+      "span": [
+        0,
+        4
+      ],
+      "value": "test"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        5,
+        7
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        8,
+        14
+      ],
+      "value": "corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        14,
+        15
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        15,
+        16
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ")",
+      "span": [
+        16,
+        17
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        18,
+        19
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        20,
+        21
+      ],
+      "value": "x"
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        0,
+        4
+      ],
+      "value": "test"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        4,
+        4
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        5,
+        7
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        8,
+        14
+      ],
+      "value": "corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        14,
+        15
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        15,
+        16
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ")",
+      "span": [
+        16,
+        17
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        18,
+        19
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        20,
+        21
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        21,
+        21
+      ]
+    }
+  ],
+  "trivia": []
+}

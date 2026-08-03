@@ -32,6 +32,8 @@ mod module_interface;
 mod module_queries;
 #[path = "compiler/opt.rs"]
 mod opt;
+#[path = "compiler/parser_compaction_corpus.rs"]
+mod parser_compaction_corpus;
 #[path = "compiler/report_render.rs"]
 mod report_render;
 #[path = "compiler/resolved_syntax.rs"]

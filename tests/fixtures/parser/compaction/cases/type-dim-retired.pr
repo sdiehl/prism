@@ -1,0 +1,1 @@
+type Corpus = Corpus(Box(n + 1))

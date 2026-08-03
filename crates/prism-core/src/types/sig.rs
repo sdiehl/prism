@@ -1,7 +1,9 @@
 //! Builtin-signature parsing: the registry signature strings (`"(Float) ->
 //! F32x4"`) lexed, parsed through the type-signature grammar, and converted
-//! structurally into [`Type`]. Pure and environment-free, so the typed-Core
-//! builder and verifier can parse intrinsic signatures without the checker.
+//! structurally into [`Type`].
+//!
+//! Pure and environment-free, so the typed-Core builder and verifier can parse
+//! intrinsic signatures without the checker.
 
 use std::collections::BTreeSet;
 
@@ -24,6 +26,7 @@ pub fn parse_checked_signature(name: &str, signature: &str) -> Result<Type, Type
     parse_sig(name, signature).map(|(ty, _)| ty)
 }
 
+#[must_use]
 pub fn convert_data(t: &ast::Ty) -> Type {
     convert_data_rp(t, &BTreeSet::new())
 }
@@ -91,10 +94,16 @@ pub fn convert_data_rp(t: &ast::Ty, rp: &BTreeSet<Sym>) -> Type {
     }
 }
 
-// A builtin signature carries its latent effects on the arrow, and the env type
-// keeps that row: a builtin is a function whose effects inference must attribute
-// at every call site, exactly like a surface function's inferred row. The
-// returned label list is the parsed row, checked by the signature-parsing tests.
+/// A builtin signature carries its latent effects on the arrow, and the env
+/// type keeps that row.
+///
+/// A builtin is a function whose effects inference must attribute at every call
+/// site, exactly like a surface function's inferred row. The returned label
+/// list is the parsed row, checked by the signature-parsing tests.
+///
+/// # Errors
+/// [`TypeError::InternalInvariant`] naming the builtin, when its signature text
+/// does not lex or does not parse.
 pub fn parse_sig(name: &str, sig: &str) -> Result<(Type, Vec<String>), TypeError> {
     let (tokens, _) = lex_raw(sig).map_err(|e| TypeError::InternalInvariant {
         msg: format!("builtin `{name}` signature `{sig}`: {e}"),
@@ -116,6 +125,7 @@ fn sig_row(t: &ast::Ty) -> Vec<String> {
     }
 }
 
+#[must_use]
 pub fn wrap_forall(params: &[Sym], body: Type) -> Type {
     let mut out = body;
     for p in params.iter().rev() {
@@ -129,6 +139,7 @@ pub fn wrap_forall(params: &[Sym], body: Type) -> Type {
 // effect but the row variable itself, so it moves to the tail: both `! {e}` and
 // `! {IO | e}` yield a row ending in `Var(e)`. Concrete labels stay in the
 // prefix, their args lowered with the same row-parameter awareness.
+#[must_use]
 pub fn data_row_rp(row: &ast::Row, rp: &BTreeSet<Sym>) -> EffRow {
     let ast::Row::Cons(ls, tl) = row else {
         return EffRow::Empty;

@@ -1,7 +1,9 @@
 //! JSON serialization of the CBPV core, in the tagged schema the Lean model's
-//! decoder (`models/Json.lean`) reads. `prism dump core-json <file>` emits this
-//! so the formally-verified CEK oracle (`models/`) can be fed the exact core the
-//! compiler builds, for differential checking against the interpreter.
+//! decoder (`models/Json.lean`) reads.
+//!
+//! `prism dump core-json <file>` emits this so the formally-verified CEK oracle
+//! (`models/`) can be fed the exact core the compiler builds, for differential
+//! checking against the interpreter.
 //!
 //! The shape mirrors `pp_core_pretty` but as data: each node is a JSON object
 //! tagged by `"c"` (computations), `"v"` (values), or `"p"` (patterns). `Sym`s

@@ -1,0 +1,63 @@
+{
+  "schema": "prism-syntax-diagnostics-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "558aea5d6cf066c8f7786089b5d89efb468ac1a815389eddd7b1ed877016aa99",
+    "text": "fn f(x) =\n  if x then\n    0\n  elif x 0 then\n    0\n"
+  },
+  "diagnostics": [
+    {
+      "code": "E7100",
+      "phase": "parse",
+      "span": [
+        37,
+        38
+      ],
+      "message": "unexpected integer literal at line 4:10, expected 'fn', 'type', 'then', '&&', '||', '|>', '>>', '<<', ...",
+      "expected": [
+        "%",
+        "%=",
+        "&&",
+        "(",
+        "*",
+        "*.",
+        "*=",
+        "+",
+        "+.",
+        "+=",
+        "-",
+        "-.",
+        "-=",
+        ".",
+        "/",
+        "/.",
+        "/=",
+        "/=.",
+        ":=",
+        "<",
+        "<.",
+        "<<",
+        "<=",
+        "<=.",
+        "==",
+        "==.",
+        ">",
+        ">.",
+        ">=",
+        ">=.",
+        ">>",
+        "?",
+        "?.",
+        "??",
+        "[",
+        "^",
+        "fn",
+        "then",
+        "type",
+        "|>",
+        "||"
+      ],
+      "related": []
+    }
+  ]
+}

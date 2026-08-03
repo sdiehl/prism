@@ -1,6 +1,6 @@
 effect Amb
   choose(Int) : Int
-  reject() : Int
+  never reject() : Int
 
 -- Nondeterminism by multishot resumption.
 --
@@ -23,7 +23,7 @@ fn triple(n) : Int ! {Amb} =
 fn solutions(n) =
   handle triple(n) with
     choose(m) resume k => flatten(map(\(i) -> k(i), range(0, m)))
-    reject() resume k => Nil
+    never reject() => Nil
     return r => Cons(r, Nil)
 
 fn main() =

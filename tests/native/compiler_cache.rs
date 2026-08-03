@@ -123,6 +123,7 @@ fn warm_native_build_materializes_byte_identical_binary() {
     let first = build_on_report(&src, &roots, &bin, &cfg).unwrap();
     assert_eq!(first.cache, NativeCacheStatus::Write);
     assert_eq!(first.bitcode_cache, NativeCacheStatus::Write);
+    assert!(first.definition_hashes.is_some());
     assert_eq!(
         first.cache_explanation(),
         "linked artifact and LLVM bitcode keys changed"
@@ -164,6 +165,7 @@ fn warm_native_build_materializes_byte_identical_binary() {
     let second = build_on_report(&src, &roots, &bin, &cfg).unwrap();
     assert_eq!(second.cache, NativeCacheStatus::Hit);
     assert_eq!(second.bitcode_cache, NativeCacheStatus::Disabled);
+    assert!(second.definition_hashes.is_none());
     assert_eq!(second.cache_explanation(), "linked artifact key matched");
     assert_eq!(fs::read(&bin).unwrap(), cold);
     assert!(!bin.with_extension("bc").exists());
@@ -226,6 +228,7 @@ fn warm_native_build_materializes_byte_identical_binary() {
     let formatted_only = format!("{src}\n-- query identity ignores trivia\n");
     let semantic = build_on_report(&formatted_only, &roots, &bin, &cfg).unwrap();
     assert_eq!(semantic.cache, NativeCacheStatus::Hit);
+    assert!(semantic.definition_hashes.is_some());
     assert_eq!(fs::read(&bin).unwrap(), cold);
     assert_eq!(
         fs::read_dir(tmp.store_root().join(OPTIMIZED_SCC_QUERIES))

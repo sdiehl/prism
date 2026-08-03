@@ -26,6 +26,8 @@ mod num_tower;
 mod ordered_witness;
 #[path = "language/query.rs"]
 mod query;
+#[path = "language/reflect.rs"]
+mod reflect;
 #[path = "language/rigid_sig_vars.rs"]
 mod rigid_sig_vars;
 #[path = "language/skolem_escape.rs"]

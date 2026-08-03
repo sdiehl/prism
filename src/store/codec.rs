@@ -13,7 +13,7 @@
 //!   | scheme tag | kind | contract digest  |     body     |
 //!   +------------+------+------------------+--------------+
 //!
-//!   scheme tag       length-prefixed string, "prism-core-hash-v1"; a foreign
+//!   scheme tag       length-prefixed string, "prism-core-hash-v2"; a foreign
 //!                    scheme is rejected before anything else
 //!   kind             uvarint, the def kind (WireKind::Def)
 //!   contract digest  length-prefixed hex, the definition's content hash, so a

@@ -122,9 +122,11 @@ pub fn put_indices(out: &mut Vec<u8>, idxs: &[u32]) {
 ///
 /// Its position in an ordered table that is the single source of truth for the
 /// numbering. Each codec keeps its own tables (op families, node tags) and
-/// numbers them through here, so encode and decode cannot drift. Panics on an
-/// entry absent from its table: a codec bug on trusted input (a new enum
-/// variant that was not appended), never a hostile-input path.
+/// numbers them through here, so encode and decode cannot drift.
+///
+/// # Panics
+/// When `entry` is absent from `table`: a codec bug on trusted input (a new
+/// enum variant that was not appended), never a hostile-input path.
 pub fn to_wire<T: PartialEq + Copy>(table: &[T], entry: T) -> u64 {
     table
         .iter()
@@ -151,31 +153,40 @@ pub fn from_wire<T: Copy>(table: &[T], n: u64) -> Result<T, CodecError> {
 
 // ------------------------------- reading ----------------------------------
 
-/// A cursor over an untrusted byte frame. Every read is bounds- and range-checked,
-/// so a decode over hostile bytes ends in a [`CodecError`], never a panic or an
-/// over-read.
+/// A cursor over an untrusted byte frame.
+///
+/// Every read is bounds- and range-checked, so a decode over hostile bytes ends
+/// in a [`CodecError`], never a panic or an over-read.
+#[derive(Debug)]
 pub struct Reader<'a> {
     buf: &'a [u8],
     pos: usize,
 }
 
 impl<'a> Reader<'a> {
+    #[must_use]
     pub const fn new(buf: &'a [u8]) -> Self {
         Self { buf, pos: 0 }
     }
 
     // Whether every byte has been consumed, the trailing-byte check a total decoder
     // performs before it trusts a frame.
+    #[must_use]
     pub const fn at_end(&self) -> bool {
         self.pos == self.buf.len()
     }
 
+    /// # Errors
+    /// [`CodecError::Truncated`] when the buffer has no byte left.
     pub fn byte(&mut self) -> Result<u8, CodecError> {
         let b = *self.buf.get(self.pos).ok_or(CodecError::Truncated)?;
         self.pos += 1;
         Ok(b)
     }
 
+    /// # Errors
+    /// [`CodecError::Truncated`] when the buffer ends mid-varint or the value
+    /// runs past [`VARINT_MAX_BYTES`].
     pub fn uvarint(&mut self) -> Result<u64, CodecError> {
         let mut acc: u64 = 0;
         let mut shift = 0;
@@ -190,10 +201,16 @@ impl<'a> Reader<'a> {
         Err(CodecError::Truncated)
     }
 
+    /// # Errors
+    /// [`CodecError::Truncated`] on a buffer that ends mid-varint or a varint
+    /// past its byte cap.
     pub fn svarint(&mut self) -> Result<i64, CodecError> {
         Ok(unzigzag(self.uvarint()?))
     }
 
+    /// # Errors
+    /// [`CodecError::Truncated`] on a malformed varint, or
+    /// [`CodecError::TooLarge`] when the length exceeds [`WIRE_LEN_MAX`].
     pub fn bounded_len(&mut self) -> Result<usize, CodecError> {
         let n = self.uvarint()?;
         if n > WIRE_LEN_MAX {
@@ -202,6 +219,8 @@ impl<'a> Reader<'a> {
         usize::try_from(n).map_err(|_| CodecError::TooLarge)
     }
 
+    /// # Errors
+    /// [`CodecError::Truncated`] when fewer than `n` bytes remain.
     pub fn bytes(&mut self, n: usize) -> Result<&'a [u8], CodecError> {
         let end = self.pos.checked_add(n).ok_or(CodecError::Truncated)?;
         let slice = self.buf.get(self.pos..end).ok_or(CodecError::Truncated)?;
@@ -209,11 +228,17 @@ impl<'a> Reader<'a> {
         Ok(slice)
     }
 
+    /// # Errors
+    /// [`CodecError::TooLarge`] when the length prefix exceeds its bound, or
+    /// [`CodecError::Truncated`] when that many bytes do not remain.
     pub fn blob(&mut self) -> Result<&'a [u8], CodecError> {
         let n = self.bounded_len()?;
         self.bytes(n)
     }
 
+    /// # Errors
+    /// The [`Reader::blob`] failures, or [`CodecError::Utf8`] when the bytes are
+    /// not valid UTF-8.
     pub fn string(&mut self) -> Result<String, CodecError> {
         let slice = self.blob()?;
         std::str::from_utf8(slice)
@@ -221,6 +246,8 @@ impl<'a> Reader<'a> {
             .map_err(|_| CodecError::Utf8)
     }
 
+    /// # Errors
+    /// [`CodecError::Truncated`] when fewer than eight bytes remain.
     pub fn float(&mut self) -> Result<f64, CodecError> {
         let slice = self.bytes(8)?;
         let mut bytes = [0u8; 8];
@@ -228,6 +255,9 @@ impl<'a> Reader<'a> {
         Ok(f64::from_bits(u64::from_le_bytes(bytes)))
     }
 
+    /// # Errors
+    /// [`CodecError::Truncated`] at end of input, or [`CodecError::Malformed`]
+    /// for a byte other than 0 or 1.
     pub fn bool(&mut self) -> Result<bool, CodecError> {
         match self.byte()? {
             0 => Ok(false),
@@ -236,9 +266,13 @@ impl<'a> Reader<'a> {
         }
     }
 
-    // A node reference: an index into the table strictly below the node being
-    // parsed, so the graph is acyclic and decode is a forward pass. A hostile
-    // back-reference (a cycle) lands here as a `BadReference`.
+    /// A node reference: an index into the table strictly below the node being
+    /// parsed, so the graph is acyclic and decode is a forward pass. A hostile
+    /// back-reference (a cycle) lands here as a [`CodecError::BadReference`].
+    ///
+    /// # Errors
+    /// [`CodecError::Truncated`] on a malformed varint, or
+    /// [`CodecError::BadReference`] when the index is not strictly below `below`.
     pub fn node_ref(&mut self, below: u32) -> Result<u32, CodecError> {
         let i = u32::try_from(self.uvarint()?).map_err(|_| CodecError::BadReference)?;
         if i >= below {
@@ -247,6 +281,9 @@ impl<'a> Reader<'a> {
         Ok(i)
     }
 
+    /// # Errors
+    /// The [`Reader::bounded_len`] failures, or any [`Reader::node_ref`] failure
+    /// on an element.
     pub fn node_refs(&mut self, below: u32) -> Result<Vec<u32>, CodecError> {
         let n = self.bounded_len()?;
         (0..n).map(|_| self.node_ref(below)).collect()

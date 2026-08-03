@@ -1,0 +1,23 @@
+-- Focused documentation/type-span fixture for the stable declaration surface.
+
+import Wire (..)
+
+stable Save {
+  V1 = { hero: String, depth: Int } frozen "43155dc037063174",
+  V2 = { ..V1, fog: Int = 30 },
+  migrations {
+    V1 -> V2 = auto
+  }
+}
+
+fn reload(s : Save) : Save =
+  let (v, _rest) = decode(encode(s))
+  v
+
+fn body() =
+  let s = reload(Save { hero = "Ada", depth = 12, fog = 30 })
+  let (old, loss) = Save.V1.downgrade(s)
+  println(show(loss_names(loss)))
+  println(show(Save.V1.upgrade(old).fog))
+
+fn main() = default(body, ())

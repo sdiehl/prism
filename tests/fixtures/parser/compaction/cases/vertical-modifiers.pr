@@ -1,0 +1,7 @@
+fn plain(x) = x
+test fn tested(x) = x
+total fn tot(x) = x
+assume total fn trusted(x) = x
+test total fn tested_total(x) = x
+fip fn inplace(x) = x
+fbip fn borrowed(x) = x

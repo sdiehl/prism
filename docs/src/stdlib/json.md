@@ -18,7 +18,7 @@ Strings are validated UTF-8 by construction (the `String` type), so invalid UTF-
 
 ### `Json`
 
-```prism,def,h-1d019dc20172444f417d2b268028d3244599485c236e88482d60f6ffd7ae4241
+```prism,def,h-04a506598cb8be595e0a5aa2dab794fa56d31142863cad36f361e8ef1e0582a0
 type Json
   = JNull
   | JBool(Bool)
@@ -41,7 +41,7 @@ encode(JObj([("ok", JBool(true)), ("n", JInt(3))]))
 
 ### `JsonError`
 
-```prism,def,h-30c2231cdfce1cc2d2c181bf78aec84eb991cc25b65e45f73cd0eda736333235
+```prism,def,h-1e2e5cf374d235d92d59c6123e189654b80e4fd580d366fa9c98b5aff5a7c05e
 type JsonError = JsonError(String, Int, Int)
 ```
 
@@ -51,7 +51,7 @@ A decode failure: a human-readable message and the 1-based line and column of th
 
 ### `ToJson`
 
-```prism,def,h-72eeb6eb72c263c47b8a5a3917855c8ba5a72537cf1eaf685186a4b557b8b84c
+```prism,def,h-07e6f7d5d2166eb337090ddd8f60d9b6a3fc0a988865c8edbde18b501e20134f
 class ToJson(a)
   to_json : (a) -> Json
 ```
@@ -72,7 +72,7 @@ Json.JArr([Json.JInt(1), Json.JInt(2), Json.JInt(3)])
 
 ### `FromJson`
 
-```prism,def,h-5c7a20486fefc0fab87a119e41f7fe1738f68627367e2c7ccb0a5f841fdf6a97
+```prism,def,h-bc04cd3309b50265c7d33235513d828f8c5fa81ffdc6be5e8d34c315a65827dd
 class FromJson(a)
   from_json : (Json) -> a ! {Fail | e}
 ```
@@ -93,85 +93,85 @@ from_json(JInt(41)) + 1
 
 ### `toJsonInt`
 
-```prism,def,h-32b6f9de622a634459cbe7e1cf40936088774f1056d575a00a6d95748459b64e
+```prism,def,h-46d5cea31a8579f1672408ac31dc78140999ad37472bb01154b4158a4aca00b7
 instance toJsonInt : ToJson(Int)
 ```
 
 ### `toJsonFloat`
 
-```prism,def,h-111bdf60aa04ac3a326279df105a00a1ad4ce1d903001d97d4b9fc30c7012ca5
+```prism,def,h-cae57953498ba011645c459660dd777b243bd5ae64222dde9adda222d8573362
 instance toJsonFloat : ToJson(Float)
 ```
 
 ### `toJsonBool`
 
-```prism,def,h-b8abd1b65f64014801a752792e27751612fdecaf71894b0cd3a6072c51861c75
+```prism,def,h-1939f104c7a5f4e3768d5cad143b28c453cea727d77833652b8202439db76bbd
 instance toJsonBool : ToJson(Bool)
 ```
 
 ### `toJsonString`
 
-```prism,def,h-e7cf0150e6bc042b57437e9aebb594f5da560a2f4b756dce555407b66e10b837
+```prism,def,h-e7489627cec790ece22a36ccf0e0e9cc54a3c6cb000a7f69d181dffe0bb9db40
 instance toJsonString : ToJson(String)
 ```
 
 ### `toJsonList`
 
-```prism,def,h-eb29e88e1da969d64b7009cba1e7ccb893512a91b39869c93bb79c6f67378e22
+```prism,def,h-65ac1b0c736a5fdd8dfc54b77e588e963b93bc910abe3ddf1459ecedc2950d61
 instance toJsonList : ToJson(List(a))
 ```
 
 ### `toJsonOption`
 
-```prism,def,h-59de435c02561719f3c18601f1ff2403604ccac12d7498a5af879557b4238f22
+```prism,def,h-01463f92b33a5a1b8e6c5644426182efbaafc0b6ea94337ea5ac89b1ec2715f2
 instance toJsonOption : ToJson(Option(a))
 ```
 
 ### `toJsonPair`
 
-```prism,def,h-f46b50d2e5f71862b0f66950e7404062aa0e9957a161ec0b9bbe611c3b53f1af
+```prism,def,h-ec436d594144372fa822ae6f3b8c26f15ea278c1a85ca724e562b4f1273a6e63
 instance toJsonPair : ToJson((a, b))
 ```
 
 ### `fromJsonInt`
 
-```prism,def,h-55308c934d632ee2a77b6aede3e63741ffd5df0b97998cca2f6affd531257723
+```prism,def,h-27434c51cfdeb2018d64030c08e632a8b23948eaf17dfe3fad554150783f6fcd
 instance fromJsonInt : FromJson(Int)
 ```
 
 ### `fromJsonFloat`
 
-```prism,def,h-6a7d26abac950aa8abb582882ccd199795fe4dfdce7b5d48d915522243cf88aa
+```prism,def,h-2e2c2d736236457b6268fde72555ce6f64d6c0831da4aa665c27b9b96dc7cf37
 instance fromJsonFloat : FromJson(Float)
 ```
 
 ### `fromJsonBool`
 
-```prism,def,h-5dd3e47e039d48203532c30b62881461bd6b8c7051846baff081d1aba0629c56
+```prism,def,h-f89ea0ac8c243a5a3513ee8d47a3a10235f9421159cbc5234fb9cf2b07d391d5
 instance fromJsonBool : FromJson(Bool)
 ```
 
 ### `fromJsonString`
 
-```prism,def,h-c415a208a684074eb4fdb1998fb8d3b14937b9781e1e0d55c2ea21582f8a7b34
+```prism,def,h-0009065ea7a33a5d19c4f7ff1683e36af82ad3e9ecfb8d15018ae043ba2324d9
 instance fromJsonString : FromJson(String)
 ```
 
 ### `fromJsonList`
 
-```prism,def,h-ed54201a64e45c42a570314c9b1e3db66e973c9a886b18cd51a3b891bb0e8c26
+```prism,def,h-d38d96ac6f6ff8f9e5d7fecb03c98879fd3e01e5e44759ef3c9b7e119fdcb8b3
 instance fromJsonList : FromJson(List(a))
 ```
 
 ### `fromJsonOption`
 
-```prism,def,h-58d97c98e2213bcf2f66747a65150ddb9c4ad1872e96249fef953412d6c0d2e5
+```prism,def,h-37d42f6efa3035c4816212618c0b4b109caa9c824bf62f90b82614e22627b83d
 instance fromJsonOption : FromJson(Option(a))
 ```
 
 ### `fromJsonPair`
 
-```prism,def,h-a53627f2b193a00b4fd6ca7f2db31107a404ec449e6c3dfeb5560b3dfb5ce796
+```prism,def,h-0b27528352f1195f14c9adb0df85f564448a7035782cf982520f10c788b54ac4
 instance fromJsonPair : FromJson((a, b))
 ```
 
@@ -179,7 +179,7 @@ instance fromJsonPair : FromJson((a, b))
 
 ### `json_error_message`
 
-```prism,sig,h-d827db90aadb9ec99c6e602d955f23cc12f835cadfaf8e4b596603365737eb5c
+```prism,sig,h-4ea4d777fa90a10eecac80e57e3f66168c48de03461e57e6827941d296caef9f
 json_error_message : (Json.JsonError) -> String
 ```
 
@@ -195,7 +195,7 @@ line 1 col 5: unexpected character
 
 ### `decode`
 
-```prism,sig,h-8ffae19d4dbf7d80cfb0c1bf5a8e3515b2b0ea67c090769ee6e1a7ded5e729a7
+```prism,sig,h-b94dded291f273a1e36df8e663d76e9eb3152158050814feb24a3c434dc848c3
 decode : (String) -> Result(Json.Json, Json.JsonError)
 ```
 
@@ -211,7 +211,7 @@ Ok(Json.JArr([Json.JInt(1), Json.JInt(2), Json.JInt(3)]))
 
 ### `decode_lossy`
 
-```prism,sig,h-887f61312281e2ec0fece08c95932ae117f1ae2057f2a0574e6eca609b58eefd
+```prism,sig,h-ca8591a1ac859c1095d6bfd1146deedd0dd5a18b57ef1020fe45230eb342cb88
 decode_lossy : (String) -> Result(Json.Json, Json.JsonError)
 ```
 
@@ -227,7 +227,7 @@ Ok(Json.JFloat(1000))
 
 ### `encode`
 
-```prism,sig,h-98f2bc05816e96174c7cf50b9d7863390c826959199c07c3d386e7405a50f51e
+```prism,sig,h-76c7ee22bb15ebb6bcb60a5e68574f4580192a89dd09869bbc63aed1d1fa857c
 encode : (Json.Json) -> String
 ```
 
@@ -243,7 +243,7 @@ encode(JObj([("b", JInt(2)), ("a", JInt(1))]))
 
 ### `json_field`
 
-```prism,sig,h-bb3033c4f3738ec88f98fdc73dbf420d616a4afc81507bd35d1ede547d18b30f
+```prism,sig,h-652cf1593d8b4dd14964b14920aa9856b64941e81240ef5ae7d66173c3d9c365
 json_field : (List((String, Json.Json)), String) -> Json.Json ! {Fail}
 ```
 
@@ -259,7 +259,7 @@ Json.JInt(2)
 
 ### `to_json_string`
 
-```prism,sig,h-24c511bbf533e34b787aa840538a0cb339035df220668d67190ad2f5a8a4d9f2
+```prism,sig,h-de8d3593c7338c38d6c08be32cfe92a59275b7cd60c7b2e1bf64717ad5c2378b
 to_json_string : forall a. (a) -> String
 ```
 
@@ -275,23 +275,39 @@ to_json_string((1, true))
 
 ### `json_children`
 
-```prism,sig,h-7787c4c625c0b61a28374e14213a0025abe2b517ea32dcc6ccd56fe7ae50b9eb
+```prism,sig,h-02435f604d298a6cbb6812c0ca83aed10731a2ab2febcdd76cb055e8e7e7485e
 json_children : (Json.Json) -> List(Json.Json)
 ```
 
 The immediate `Json` children of a value: an array's elements, an object's field values in field order, and nothing at a scalar.
 
+```prism,mod=Json
+json_children(JObj([("x", JInt(1)), ("ok", JBool(true))]))
+```
+
+```output
+[Json.JInt(1), Json.JBool(true)]
+```
+
 ### `json_rebuild`
 
-```prism,sig,h-f1205ad4da23f1f9f236a4b02b6c48873e8f5e4c08438c946872c16763f7e447
+```prism,sig,h-ef7921b0ca94e51f9839ba5ce073115f9c55581674f5b41dea0ec35e6f7d90e0
 json_rebuild : (Json.Json, List(Json.Json)) -> Json.Json
 ```
 
 Put a replacement child list back, in `json_children` order, keeping an object's field names. Fails closed: a list of the wrong length yields the value unchanged rather than a truncated or padded one.
 
+```prism,mod=Json
+json_rebuild(JObj([("x", JInt(1))]), [JInt(2)])
+```
+
+```output
+Json.JObj([(x, Json.JInt(2))])
+```
+
 ### `json_layer`
 
-```prism,sig,h-d1c700ee552d7ec57f7619063fcadea517c32f6c0b3af32f97e5ac41cba68b90
+```prism,sig,h-ce35a4225667d054d4d7c7b6425991e61e052182fa0ead82bbf9f55d6b6d8bb9
 json_layer : () -> Control.Layer.Layer(Json.Json)
 ```
 

@@ -1,0 +1,164 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "bfec63e2733283246f353ca1b6f23fb4af41c91f040173a6c89df4be14336790",
+    "text": "fn plain(x) = x\ntest fn tested(x) = x\ntotal fn tot(x) = x\nassume total fn trusted(x) = x\ntest total fn tested_total(x) = x\nfip fn inplace(x) = x\nfbip fn borrowed(x) = x\n"
+  },
+  "items": [
+    {
+      "body": {
+        "kind": "var",
+        "name": "x",
+        "span": [
+          14,
+          15
+        ]
+      },
+      "kind": "fn",
+      "name": "plain",
+      "params": [
+        {
+          "name": "x"
+        }
+      ],
+      "span": [
+        0,
+        15
+      ]
+    },
+    {
+      "body": {
+        "kind": "var",
+        "name": "x",
+        "span": [
+          36,
+          37
+        ]
+      },
+      "kind": "fn",
+      "name": "tested",
+      "params": [
+        {
+          "name": "x"
+        }
+      ],
+      "span": [
+        16,
+        37
+      ],
+      "test": true
+    },
+    {
+      "body": {
+        "kind": "var",
+        "name": "x",
+        "span": [
+          56,
+          57
+        ]
+      },
+      "kind": "fn",
+      "name": "tot",
+      "params": [
+        {
+          "name": "x"
+        }
+      ],
+      "span": [
+        38,
+        57
+      ],
+      "total": "prove"
+    },
+    {
+      "body": {
+        "kind": "var",
+        "name": "x",
+        "span": [
+          87,
+          88
+        ]
+      },
+      "kind": "fn",
+      "name": "trusted",
+      "params": [
+        {
+          "name": "x"
+        }
+      ],
+      "span": [
+        58,
+        88
+      ],
+      "total": "assume"
+    },
+    {
+      "body": {
+        "kind": "var",
+        "name": "x",
+        "span": [
+          121,
+          122
+        ]
+      },
+      "kind": "fn",
+      "name": "tested_total",
+      "params": [
+        {
+          "name": "x"
+        }
+      ],
+      "span": [
+        89,
+        122
+      ],
+      "test": true,
+      "total": "prove"
+    },
+    {
+      "body": {
+        "kind": "var",
+        "name": "x",
+        "span": [
+          143,
+          144
+        ]
+      },
+      "fip": "fip",
+      "kind": "fn",
+      "name": "inplace",
+      "params": [
+        {
+          "name": "x"
+        }
+      ],
+      "span": [
+        123,
+        144
+      ]
+    },
+    {
+      "body": {
+        "kind": "var",
+        "name": "x",
+        "span": [
+          167,
+          168
+        ]
+      },
+      "fip": "fbip",
+      "kind": "fn",
+      "name": "borrowed",
+      "params": [
+        {
+          "name": "x"
+        }
+      ],
+      "span": [
+        145,
+        168
+      ]
+    }
+  ]
+}

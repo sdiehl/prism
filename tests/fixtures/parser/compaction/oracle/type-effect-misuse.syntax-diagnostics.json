@@ -1,0 +1,21 @@
+{
+  "schema": "prism-syntax-diagnostics-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "d8672c9cf0c514ccce4c692b9fe5de545fb3ed8c9db676c5e129d0a76ae187bb",
+    "text": "fn corpus(x : Int ! {Io}) = x\n"
+  },
+  "diagnostics": [
+    {
+      "code": "E7100",
+      "phase": "parse",
+      "span": [
+        14,
+        24
+      ],
+      "message": "effect row `! {..}` only applies to a function type",
+      "expected": [],
+      "related": []
+    }
+  ]
+}

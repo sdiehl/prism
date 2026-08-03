@@ -12,7 +12,7 @@ The `alloc` operation is compiler-internal: the arena-lowering pass rewrites a c
 
 ### `Cell`
 
-```prism,def,h-d915ef3bcb0b1b5ddd57964598bd1575832b5dcf358f73d97f4bb5076cacdec9
+```prism,def,h-272e6c12f90ed48de7a84984ec89ccd88645f5ee83b7137c6b108fc7f6cb0cd6
 type Cell = Cell(Int)
 ```
 
@@ -22,7 +22,7 @@ An opaque handle to a raw cell handed out by an allocator. It carries no observa
 
 ### `Alloc`
 
-```prism,def,h-6fd4df5bef42bee361d5146a7e2f0206d0b9191f5d875b4b1beb4b51af9ea896
+```prism,def,h-e1519781a57bacddb40d96c1670ef4a87e412cd93290e43d83266f2bfde2cb3e
 effect Alloc
   once alloc(Int) : Cell
 ```
@@ -33,8 +33,16 @@ The allocation effect. `alloc(n)` requests a raw `n`-word cell; a handler decide
 
 ### `with_arena`
 
-```prism,sig,h-5dca094eb11d0fd7c2ece7f324a836c401b78c091efa4bcb51a8d51958d7574e
+```prism,sig,h-29bee24e550af0db2a2b60e2897eaf734194cb32783b46ff1cf4561405fe6ec4
 with_arena : forall a. (() -> a ! {Arena.Alloc}) -> a
 ```
 
 Run `body`, servicing each eligible allocation out of this activation's region and reclaiming the whole region when the handler returns. Anything the result keeps is promoted to ordinary reference-counted cells at the boundary. A `body` that allocates nothing runs unchanged, and code that never calls `with_arena` allocates exactly as before.
+
+```prism,mod=Arena
+with_arena(\() -> [1, 2, 3])
+```
+
+```output
+[1, 2, 3]
+```

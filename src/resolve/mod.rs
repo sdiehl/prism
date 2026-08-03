@@ -1173,7 +1173,11 @@ impl<'a> Rw<'a> {
                 }
                 self.expr(body);
             }
-            Sugar::Break | Sugar::Continue => {}
+            // Nothing to resolve. A quotation in particular is spliced into a
+            // string literal against the unit's own unresolved text, before this
+            // pass runs, so its target name is never canonicalized: what it
+            // quotes is what its author wrote.
+            Sugar::Break | Sugar::Continue | Sugar::Reflect(..) => {}
             Sugar::Return(e) | Sugar::Probe(_, e) => self.expr(e),
         }
     }

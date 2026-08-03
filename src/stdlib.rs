@@ -85,6 +85,59 @@ pub const STDLIB: &[(&str, &str)] = &[
     ("Syntax.Report", include_str!("../lib/std/Syntax/Report.pr")),
     ("Syntax.Cursor", include_str!("../lib/std/Syntax/Cursor.pr")),
     (
+        "Syntax.Parse.Support",
+        include_str!("../lib/std/Syntax/Parse/Support.pr"),
+    ),
+    (
+        "Syntax.Parse.Build",
+        include_str!("../lib/std/Syntax/Parse/Build.pr"),
+    ),
+    (
+        "Syntax.Parse.TypeSemantics",
+        include_str!("../lib/std/Syntax/Parse/TypeSemantics.pr"),
+    ),
+    (
+        "Syntax.Parse.GeneratedControl",
+        include_str!("../lib/std/Syntax/Parse/GeneratedControl.pr"),
+    ),
+    (
+        "Syntax.Parse.GeneratedType",
+        include_str!("../lib/std/Syntax/Parse/GeneratedType.pr"),
+    ),
+    (
+        "Syntax.Parse.PatternSemantics",
+        include_str!("../lib/std/Syntax/Parse/PatternSemantics.pr"),
+    ),
+    (
+        "Syntax.Parse.GeneratedPattern",
+        include_str!("../lib/std/Syntax/Parse/GeneratedPattern.pr"),
+    ),
+    (
+        "Syntax.Parse.Type",
+        include_str!("../lib/std/Syntax/Parse/Type.pr"),
+    ),
+    (
+        "Syntax.Parse.Pattern",
+        include_str!("../lib/std/Syntax/Parse/Pattern.pr"),
+    ),
+    (
+        "Syntax.Parse.Expr",
+        include_str!("../lib/std/Syntax/Parse/Expr.pr"),
+    ),
+    (
+        "Syntax.Parse.DeclClass",
+        include_str!("../lib/std/Syntax/Parse/DeclClass.pr"),
+    ),
+    (
+        "Syntax.Parse.DeclStable",
+        include_str!("../lib/std/Syntax/Parse/DeclStable.pr"),
+    ),
+    (
+        "Syntax.Parse.Decl",
+        include_str!("../lib/std/Syntax/Parse/Decl.pr"),
+    ),
+    ("Syntax.Parse", include_str!("../lib/std/Syntax/Parse.pr")),
+    (
         "Syntax.Resolved",
         include_str!("../lib/std/Syntax/Resolved.pr"),
     ),

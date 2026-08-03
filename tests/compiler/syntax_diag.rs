@@ -40,6 +40,15 @@ const NEG: [(&str, &str); 5] = [
     ("malformed_number_sep", "E7004"),
 ];
 
+// The parse-fault corpus: stem, code, and whether the diagnostic carries a
+// non-empty canonical expectation set. Deliberate migration diagnostics do not;
+// generic refusals must.
+const NEG_PARSE: [(&str, &str, bool); 3] = [
+    ("malformed_parse", "E7100", true),
+    ("malformed_parse_eof", "E7100", true),
+    ("malformed_parse_flip", "E7100", false),
+];
+
 fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(FIXTURE_DIR)
 }
@@ -62,46 +71,78 @@ fn write_golden(path: &Path, bytes: &str) {
     fs::rename(&tmp, path).unwrap_or_else(|e| panic!("rename to {}: {e}", path.display()));
 }
 
+// Dump one negative source, assert determinism, hold (or accept) its golden,
+// and return the single diagnostic it carries.
+fn golden_diagnostic(stem: &str, accepting: bool) -> Value {
+    let dir = fixture_dir();
+    let src = read(&dir.join(format!("{stem}.pr")));
+    let out = prism::dump(PHASE, &src).unwrap_or_else(|e| panic!("{stem}: dump: {e}"));
+    let again = prism::dump(PHASE, &src).unwrap_or_else(|e| panic!("{stem}: dump: {e}"));
+    assert_eq!(
+        out, again,
+        "{stem}: diagnostics dump must be byte-identical across runs"
+    );
+
+    let golden_path = dir.join(format!("{stem}.{PHASE}.json"));
+    let document = golden_document(&out);
+    if accepting {
+        write_golden(&golden_path, &document);
+        eprintln!("accepted {}", golden_path.display());
+    } else {
+        let golden = read(&golden_path);
+        assert!(
+            document == golden,
+            "{stem}: diagnostics bytes diverge from the committed golden \
+             (review as a syntax boundary change; regenerate with {ACCEPT}=1)"
+        );
+    }
+
+    let doc: Value = serde_json::from_str(&out).unwrap_or_else(|e| panic!("{stem}: JSON: {e}"));
+    assert_eq!(doc["schema"], SCHEMA, "{stem}: schema tag");
+    let diags = doc["diagnostics"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{stem}: diagnostics must be an array"));
+    assert_eq!(diags.len(), 1, "{stem}: expected exactly one diagnostic");
+    diags[0].clone()
+}
+
 // The golden gate: each negative source dumps a single lex diagnostic
 // deterministically, matches its committed golden, and carries the schema tag and
 // the expected code and phase. Under the acceptance switch it rewrites goldens.
 #[test]
 fn diag_goldens_hold() {
     let accepting = env::var_os(ACCEPT).is_some();
-    let dir = fixture_dir();
     for (stem, code) in NEG {
-        let src = read(&dir.join(format!("{stem}.pr")));
-        let out = prism::dump(PHASE, &src).unwrap_or_else(|e| panic!("{stem}: dump: {e}"));
-        let again = prism::dump(PHASE, &src).unwrap_or_else(|e| panic!("{stem}: dump: {e}"));
+        let diag = golden_diagnostic(stem, accepting);
+        assert_eq!(diag["code"], code, "{stem}: expected code {code}");
+        assert_eq!(diag["phase"], "lex", "{stem}: expected a lex diagnostic");
+    }
+}
+
+// The parse-side golden gate over the three refusal shapes the program seam can
+// produce: an unexpected token (canonical expectation set present), an early end
+// of source (the layout pass closes the block, so the fault is the general code
+// at a zero-width caret on the virtual closer), and a deliberate migration
+// rewrite (the message names the rewrite, so the generic expectation set stays
+// empty). The exhausted-stream code is absent on purpose: only the expression
+// entry can reach it, and this seam parses programs.
+#[test]
+fn parse_diag_goldens_hold() {
+    let accepting = env::var_os(ACCEPT).is_some();
+    for (stem, code, has_expected) in NEG_PARSE {
+        let diag = golden_diagnostic(stem, accepting);
+        assert_eq!(diag["code"], code, "{stem}: expected code {code}");
         assert_eq!(
-            out, again,
-            "{stem}: diagnostics dump must be byte-identical across runs"
+            diag["phase"], "parse",
+            "{stem}: expected a parse diagnostic"
         );
-
-        let golden_path = dir.join(format!("{stem}.{PHASE}.json"));
-        let document = golden_document(&out);
-        if accepting {
-            write_golden(&golden_path, &document);
-            eprintln!("accepted {}", golden_path.display());
-        } else {
-            let golden = read(&golden_path);
-            assert!(
-                document == golden,
-                "{stem}: diagnostics bytes diverge from the committed golden \
-                 (review as a syntax boundary change; regenerate with {ACCEPT}=1)"
-            );
-        }
-
-        let doc: Value = serde_json::from_str(&out).unwrap_or_else(|e| panic!("{stem}: JSON: {e}"));
-        assert_eq!(doc["schema"], SCHEMA, "{stem}: schema tag");
-        let diags = doc["diagnostics"]
+        let expected = diag["expected"]
             .as_array()
-            .unwrap_or_else(|| panic!("{stem}: diagnostics must be an array"));
-        assert_eq!(diags.len(), 1, "{stem}: expected exactly one diagnostic");
-        assert_eq!(diags[0]["code"], code, "{stem}: expected code {code}");
+            .unwrap_or_else(|| panic!("{stem}: expected must be an array"));
         assert_eq!(
-            diags[0]["phase"], "lex",
-            "{stem}: expected a lex diagnostic"
+            !expected.is_empty(),
+            has_expected,
+            "{stem}: expectation-set presence diverged from the corpus contract"
         );
     }
 }
@@ -157,28 +198,42 @@ diag_gate! {
     diag_number_sep => ("malformed_number_sep", "E7004"),
 }
 
-// Every malformed lex fixture is exercised by the gate: a new `malformed_*.pr`
-// source (other than the parse-fault fixture, which raises no lex diagnostic)
-// cannot slip past the negative corpus.
+// Every malformed fixture is exercised by a gate: a new `malformed_*.pr`
+// source cannot slip past the negative corpus. The `malformed_parse` prefix
+// routes a stem to the parse-fault table; everything else must be in the lex
+// table.
 #[test]
-fn diag_covers_every_malformed_lex_fixture() {
-    let mut found: Vec<String> = fs::read_dir(fixture_dir())
-        .expect("fixture dir")
-        .filter_map(Result::ok)
-        .filter_map(|e| {
-            let name = e.file_name().into_string().ok()?;
-            let stem = name.strip_suffix(".pr")?;
-            let keep = stem.starts_with("malformed") && stem != "malformed_parse";
-            keep.then(|| stem.to_string())
-        })
-        .collect();
-    found.sort_unstable();
+fn diag_covers_every_malformed_fixture() {
+    let mut lex_found: Vec<String> = Vec::new();
+    let mut parse_found: Vec<String> = Vec::new();
+    for entry in fs::read_dir(fixture_dir()).expect("fixture dir") {
+        let Ok(entry) = entry else { continue };
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        let Some(stem) = name.strip_suffix(".pr") else {
+            continue;
+        };
+        if stem.starts_with("malformed_parse") {
+            parse_found.push(stem.to_string());
+        } else if stem.starts_with("malformed") {
+            lex_found.push(stem.to_string());
+        }
+    }
+    lex_found.sort_unstable();
+    parse_found.sort_unstable();
 
-    let mut expected: Vec<String> = NEG.iter().map(|(s, _)| s.to_string()).collect();
-    expected.sort_unstable();
+    let mut lex_expected: Vec<String> = NEG.iter().map(|(s, _)| s.to_string()).collect();
+    lex_expected.sort_unstable();
+    let mut parse_expected: Vec<String> = NEG_PARSE.iter().map(|(s, _, _)| s.to_string()).collect();
+    parse_expected.sort_unstable();
 
     assert_eq!(
-        found, expected,
+        lex_found, lex_expected,
         "malformed lex fixtures and the negative-corpus stem list have drifted apart"
+    );
+    assert_eq!(
+        parse_found, parse_expected,
+        "malformed parse fixtures and the parse-fault stem list have drifted apart"
     );
 }

@@ -10,7 +10,7 @@ The `List(a)` type and its `Nil`/`Cons` constructors are wired into the language
 
 ### `singleton`
 
-```prism,sig,h-a9a194ae81b3f193244ad5b652035f7d12d9dc2bb5d0a6b88721f85322d13fda
+```prism,sig,h-122f9a9abe377b542204ac93123bb0b9e116660d50d07131d686fdaed9bc0833
 singleton : forall a. (a) -> List(a)
 ```
 
@@ -18,7 +18,7 @@ The one-element list `Cons(x, Nil)`.
 
 ### `is_nil`
 
-```prism,sig,h-04e03dca1732beb68520a48ded9ce937d73107751fc0a26258f49597fdd868a0
+```prism,sig,h-25a926bd8943d2bcf4a44a427dc735f76ecc106d285eb337c3292f0d6fc12ea3
 is_nil : forall a. (List(a)) -> Bool
 ```
 
@@ -26,7 +26,7 @@ True for the empty list.
 
 ### `head`
 
-```prism,sig,h-04bd000332c53f768d8328e673ff63da3d3a8606de5db9b29456d64f3bb95042
+```prism,sig,h-6b77a4f9bd7cb8a7590acebe1d2969526ffde6660e5f7d0fe59c8da952f206b7
 head : forall a. (List(a)) -> Option(a)
 ```
 
@@ -42,7 +42,7 @@ Some(1)
 
 ### `tail`
 
-```prism,sig,h-d59a69227d9a845beaa2803e49a71295ae085c7d02e151f606c88f9598b6201b
+```prism,sig,h-80500dc9873f7154aa9d9896e4ccd60b02d0d4e156e6eb5e045304c946ccd15a
 tail : forall a. (List(a)) -> List(a)
 ```
 
@@ -50,7 +50,7 @@ Everything after the first element (`Nil` for the empty list).
 
 ### `last`
 
-```prism,sig,h-b5f3c7d4f3b548b925f4ebc052336307ea3b88b9c7d848cb5335d6b4be657d13
+```prism,sig,h-04e82dbfd3a509db57b39bd9d7be15fc7f8302ad80fa64ec6a83305919d92472
 last : forall a. (List(a)) -> Option(a)
 ```
 
@@ -66,7 +66,7 @@ Some(3)
 
 ### `nth`
 
-```prism,sig,h-9d36473c0a32433082f3bbf542f70a6a26fcd5414b855ae8ebf0b07e8e0eb382
+```prism,sig,h-e54067f9ceb430e4a752d5bd25562459a6233db1590b22b683ed1f7af92d509a
 nth : forall a. (Int, List(a)) -> Option(a)
 ```
 
@@ -82,7 +82,7 @@ Some(20)
 
 ### `take`
 
-```prism,sig,h-46bf43e41bcc95ae9be9cf1f8fde84267230b4c39b2d69c2be72025d4f68c8c0
+```prism,sig,h-2ad738ae20539f65cdd0772c0fbc15369de8604813f9a0f378a182e627ba8365
 take : forall a. (Int, List(a)) -> List(a)
 ```
 
@@ -98,7 +98,7 @@ take(2, [1, 2, 3, 4])
 
 ### `drop`
 
-```prism,sig,h-23d534c0820c601485a991da1e3120045a09aa22c1b1838145d201f7f08999a0
+```prism,sig,h-612aec8437e0efb23a476bd6947870b101c6291bb94da575041bb1353785c3f9
 drop : forall a. (Int, List(a)) -> List(a)
 ```
 
@@ -114,7 +114,7 @@ drop(2, [1, 2, 3, 4])
 
 ### `take_while`
 
-```prism,sig,h-bd4103e00592549387c9cd5b3001747d80eaf01107f18c0fbbed0c9d4f979f01
+```prism,sig,h-ef770ad6bf3f95f24dae1b61c78c32f08a7ffa3cb1f28960348fe99ed4a613a1
 take_while : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0}
 ```
 
@@ -130,7 +130,7 @@ take_while(\(x) -> x < 3, [1, 2, 3, 1])
 
 ### `drop_while`
 
-```prism,sig,h-54a4fe7e560782774fa700eb315da761493ae53e265502ef7737adc606882656
+```prism,sig,h-fbd946bcc01edf4eef3f9e83f67e78f3b9007267ca8b675f026e41c3e5feb86d
 drop_while : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0}
 ```
 
@@ -146,7 +146,7 @@ drop_while(\(x) -> x < 3, [1, 2, 3, 1])
 
 ### `split_at`
 
-```prism,sig,h-281f4fa7e1eabd9f9d8611f6d3307e8fbc858316e0d52ee0441cd583b641b6ad
+```prism,sig,h-00e881b2455448a75d6881e46225c58aade8b673b276d8c0bc299b787e3b83b1
 split_at : forall a. (Int, List(a)) -> (List(a), List(a))
 ```
 
@@ -154,7 +154,7 @@ split_at : forall a. (Int, List(a)) -> (List(a), List(a))
 
 ### `map`
 
-```prism,sig,h-a4f280f0f9319f9f07464eed76ca9c6cb8e86b5f09173691b817e40c6115947a
+```prism,sig,h-867c9ac7874a91f890df538cdb94308328d285d252a160a5d4bcb855ad36400d
 map : forall e0 a b. ((b) -> a ! {e0}, List(b)) -> List(a) ! {e0}
 ```
 
@@ -170,7 +170,7 @@ map(\(x) -> x + 1, [1, 2, 3])
 
 ### `filter`
 
-```prism,sig,h-33a95f837dd7e0b66bb172e461e7260f5df22fc391e083a54ebb65a812d7d798
+```prism,sig,h-cf2eed25c9c222ed97747bb0f02d903a5266ed0afbd7576d66a1e4f06a53e8fa
 filter : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0}
 ```
 
@@ -186,7 +186,7 @@ filter(\(x) -> x > 1, [1, 2, 3])
 
 ### `foldr`
 
-```prism,sig,h-8352a5021f1a7a16272a57a20e6d09c60041e1a4247898e559f488bcf4789583
+```prism,sig,h-d802047c3bb50ea68f80e3cad48f56b6b8b06168d3e57b9464553f1fd0efcb61
 foldr : forall e0 a b. ((a, b) -> b ! {e0}, b, List(a)) -> b ! {e0}
 ```
 
@@ -202,7 +202,7 @@ foldr(\(x, acc) -> x + acc, 0, [1, 2, 3])
 
 ### `foldl`
 
-```prism,sig,h-bd78f0fde16d7e54704625b1d4906ca72cc38c52d599b0e27668bdfa8a1dca9d
+```prism,sig,h-7bf230a5f1d09f77fc2d853aff132fa47c647befd2a8c24112964b6387b89959
 foldl : forall e0 a b. ((a, b) -> a ! {e0}, a, List(b)) -> a ! {e0}
 ```
 
@@ -218,7 +218,7 @@ foldl(\(a, b) -> a + b, 0, [1, 2, 3])
 
 ### `append`
 
-```prism,sig,h-c738ed21727021a2cf1338598e9f138a64b751e7a96081b901de194c1a18f145
+```prism,sig,h-ec08c416b5caaa098ecc68a1ae7388218c67a32be1ba52ba9d68de2e757c63d6
 append : forall a. (List(a), List(a)) -> List(a)
 ```
 
@@ -234,7 +234,7 @@ append([1, 2], [3, 4])
 
 ### `reverse`
 
-```prism,sig,h-d81133e144bbb68abadaf48b744276c73660a8427c0f3bf490c2f36de32fdb59
+```prism,sig,h-0746a73d0ca3b32222f1e48c55648c8e1d77ef9bf9373d3522296d645e820474
 reverse : forall a. (List(a)) -> List(a)
 ```
 
@@ -250,7 +250,7 @@ reverse([1, 2, 3])
 
 ### `flatten`
 
-```prism,sig,h-c10542e967f86fb935c326ae3fe716764276fa771f1b219b0ebff4d5f31224c6
+```prism,sig,h-a308dcdc688cda6c6fc63ade71351d7c5bb0dff8c39ae5f1ebafbaf3454b9aea
 flatten : forall a. (List(List(a))) -> List(a)
 ```
 
@@ -266,7 +266,7 @@ flatten([[1, 2], [3], [4, 5]])
 
 ### `concat_map`
 
-```prism,sig,h-cc17609e5a8dcde888b8f3d5192cb78738e69584923dba8bef3ea122aab718f6
+```prism,sig,h-c3b8f5b8f10f45ad6640355baa7a06c00cce32b9abbb5828d09fcaeb304194de
 concat_map : forall e0 a b. ((a) -> List(b) ! {e0}, List(a)) -> List(b) ! {e0}
 ```
 
@@ -282,7 +282,7 @@ concat_map(\(x) -> [x, x], [1, 2])
 
 ### `zip_with`
 
-```prism,sig,h-899696ecb63c2032ef49769ebda06733a62cbec1ae6944fd2ca04f6124efd24f
+```prism,sig,h-d4d741d31c92460d0df342a089aa7f6172b927b33c951cea8e21fd513b58efa1
 zip_with : forall e0 a b c. ((b, c) -> a ! {e0}, List(b), List(c)) -> List(a) ! {e0}
 ```
 
@@ -298,7 +298,7 @@ zip_with(\(x, y) -> x + y, [1, 2, 3], [10, 20])
 
 ### `zip`
 
-```prism,sig,h-791d5335567d72e54570c2e251998639b7c5111bcf3c45d6c2d3895707d3822b
+```prism,sig,h-2ec2889e4331098137fbff8e294b8be673f3f6eadade32ccc35aa6b5ef7c6c11
 zip : forall a b. (List(a), List(b)) -> List((a, b))
 ```
 
@@ -314,7 +314,7 @@ zip([1, 2], ["a", "b"])
 
 ### `unzip`
 
-```prism,sig,h-d4f33411161fe7296cedb8ebff7251fdcf7ed28a81c7b8d05329cc11431e0d0f
+```prism,sig,h-d8ac0868c6270504998eaa3900b5e040b55bb19bd4809fc110d070bc65f0d922
 unzip : forall a b. (List((a, b))) -> (List(a), List(b))
 ```
 
@@ -330,7 +330,7 @@ unzip([(1, "a"), (2, "b")])
 
 ### `count`
 
-```prism,sig,h-437b1266c7bd9fe505b5403a436d319ab1527623852fd6f322129d68090aa3d7
+```prism,sig,h-5077a97ff5c7c11911903e1a90150c075be6a0da0afbca8d73e3889644c9a218
 count : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> Int ! {e0}
 ```
 
@@ -346,7 +346,7 @@ count(\(x) -> x > 1, [1, 2, 3])
 
 ### `position_go`
 
-```prism,sig,h-6b4c9ed7a5b8f17befe783d5efd49a7f7227b4048cb94e688a18e48236978239
+```prism,sig,h-cc23e4b95f276019362e96cba8ed0182f607108b97bc1bed53f5f13acbb127ef
 position_go : forall e0 a. ((a) -> Bool ! {e0}, Int, List(a)) -> Option(Int) ! {e0}
 ```
 
@@ -354,7 +354,7 @@ Helper for `position`: search from index `n`.
 
 ### `position`
 
-```prism,sig,h-09005c8fc6025262c4d42a795f87d29f32b5850f77ad7679bff49369cfe60053
+```prism,sig,h-e245016c51dca4c5fbf7e8434b62e908ebd904ffefa30f0fd19d19cb3411e0e8
 position : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> Option(Int) ! {e0}
 ```
 
@@ -370,7 +370,7 @@ Some(1)
 
 ### `maximum`
 
-```prism,sig,h-f0b6534c4edf226e15be31ee90ee82d282454ab8b57e333e0d8727745056f0d2
+```prism,sig,h-638da662ffad9ebff415ec500003756c75b89d1694715d3fdd43aaca4c61fd0f
 maximum : (List(Int)) -> Option(Int)
 ```
 
@@ -386,7 +386,7 @@ Some(3)
 
 ### `minimum`
 
-```prism,sig,h-0ba0a051712c930b1267a08c1a82f87c0dbcaff641848218020b388774f68389
+```prism,sig,h-6d98c585df87fa734ef83bd47c5bb849989c69acc09866fbe311a4c8800f169a
 minimum : (List(Int)) -> Option(Int)
 ```
 
@@ -402,7 +402,7 @@ Some(1)
 
 ### `replicate`
 
-```prism,sig,h-80b003e44a9b69185ad8af9d65dffecf704421133d7bb7b21eddd27f638eceed
+```prism,sig,h-c6d7d884aa4c72fd7667b308f3a3208bc44fa83d02c8d0c65de621a1c5c04b5c
 replicate : forall a. (Int, a) -> List(a)
 ```
 
@@ -418,7 +418,7 @@ replicate(3, 0)
 
 ### `range`
 
-```prism,sig,h-ac53e1edac65c996ea82be79ca074540bff94ffd99aec570a2f60e1fbad53f4d
+```prism,sig,h-0311a5411be821efe7a70d1cfcf19c29c6dcd157b2375b8c5aebc47106ade68a
 range : (Int, Int) -> List(Int)
 ```
 
@@ -434,7 +434,7 @@ range(0, 5)
 
 ### `tabulate`
 
-```prism,sig,h-795b505a45a9f34742b3e1789a743e3eb11268705fd7367499ca7b8ca116ab49
+```prism,sig,h-210b3fb2350eb7093356f3c231014a7194adf74296ef74c08a022d208d7ee0ef
 tabulate : forall e0 a. (Int, (Int) -> a ! {e0}) -> List(a) ! {e0}
 ```
 
@@ -450,7 +450,7 @@ tabulate(3, \(i) -> i * i)
 
 ### `insert_sorted`
 
-```prism,sig,h-c8612275f166f99903cd45f5aeae8343c71ba8324c36341067041fdcd44d2976
+```prism,sig,h-35f8100d2e92c400aaa1aaaefaa340c2497bacb2363c0bc2be89645838ed5da2
 insert_sorted : (Int, List(Int)) -> List(Int)
 ```
 
@@ -466,7 +466,7 @@ insert_sorted(3, [1, 2, 4])
 
 ### `list_to_option`
 
-```prism,sig,h-04bd000332c53f768d8328e673ff63da3d3a8606de5db9b29456d64f3bb95042
+```prism,sig,h-6b77a4f9bd7cb8a7590acebe1d2969526ffde6660e5f7d0fe59c8da952f206b7
 list_to_option : forall a. (List(a)) -> Option(a)
 ```
 
@@ -474,7 +474,7 @@ The first element as `Some`, or `None` (an `Option` view of the head).
 
 ### `partition`
 
-```prism,sig,h-9a9664bec258d45efa0e5306918d1f83c499abed76a7b7eb5ae8724e580912c6
+```prism,sig,h-a095cbdd787668373afeee2944840898503d2bea07877456f87873ec1a16fff2
 partition : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> (List(a), List(a)) ! {e0}
 ```
 
@@ -490,7 +490,7 @@ partition(\(x) -> x > 1, [1, 2, 3])
 
 ### `chunks_of`
 
-```prism,sig,h-95221285a3cf532d275079dd4829f1aab7def57126ad227c9d82272dcdc14f01
+```prism,sig,h-d10d88307be4f855dd5bbb253e27908c24dabf5120bb0f0e5eff4f71191f38c4
 chunks_of : forall a. (Int, List(a)) -> List(List(a))
 ```
 
@@ -506,7 +506,7 @@ chunks_of(2, [1, 2, 3, 4, 5])
 
 ### `scan_left`
 
-```prism,sig,h-f1addd30a697b009a26c8097c0d168c7719241d9a0b0e9d22bb997ac9848dfb8
+```prism,sig,h-0dc9860eb93eed0ceba40d8975a0f1c598b01d0341e806aada1ab832017af2c8
 scan_left : forall e0 a b. ((a, b) -> a ! {e0}, a, List(b)) -> List(a) ! {e0}
 ```
 
@@ -522,7 +522,7 @@ scan_left(\(a, b) -> a + b, 0, [1, 2, 3])
 
 ### `list_ap`
 
-```prism,sig,h-fc1a3d730988bcfcfd46ef1247b550af0d5f209ffb67100d7f2a91f27eb81228
+```prism,sig,h-c2ddef8efc7cd48bd7d8ba20b27b3285cbf58b249dee173ce765309ef68dff62
 list_ap : forall e0 a b. (List((b) -> a ! {e0}), List(b)) -> List(a) ! {e0}
 ```
 

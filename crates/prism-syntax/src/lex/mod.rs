@@ -4,6 +4,7 @@ pub mod highlight;
 
 use token::LexFail;
 pub use token::Token;
+pub(crate) use token::{starts_raw, RAW_CLOSE};
 
 use std::convert::Infallible;
 
@@ -107,7 +108,11 @@ fn emit(
     src: &str,
     out: &mut Vec<LexSpanned>,
 ) -> Result<(), LexError> {
-    if matches!(tok, Token::StringLit(_)) && token::has_hole(&src[start + 1..end - 1]) {
+    // A raw literal has no holes to split: a brace in its body is a brace.
+    if matches!(tok, Token::StringLit(_))
+        && !token::starts_raw(src, start)
+        && token::has_hole(&src[start + 1..end - 1])
+    {
         split_interp(start, end, src, out)
     } else {
         out.push((start, tok, end));

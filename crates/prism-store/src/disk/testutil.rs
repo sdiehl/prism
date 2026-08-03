@@ -11,12 +11,12 @@ const SCRATCH_PREFIX: &str = "prism-store-test";
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
 /// A unique scratch directory, removed on drop.
-pub struct TempDir {
-    pub path: PathBuf,
+pub(crate) struct TempDir {
+    pub(crate) path: PathBuf,
 }
 
 impl TempDir {
-    pub fn new(tag: &str) -> Self {
+    pub(crate) fn new(tag: &str) -> Self {
         let mut path = std::env::temp_dir();
         let n = NONCE.fetch_add(1, Ordering::Relaxed);
         path.push(format!("{SCRATCH_PREFIX}-{tag}-{}-{n}", std::process::id()));

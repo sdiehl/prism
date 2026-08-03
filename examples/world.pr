@@ -70,13 +70,9 @@ fn step_highlife(w, h, g) =
 -- same grid print the same digest with no coordination.
 fn bits(g) = concat_all(map(\(c) -> show_int(c), array_to_list(g)))
 
-fn state_tag(w, h) =
-  concat(
-      "prism-world-life-v1|",
-      concat(show_int(w), concat("x", concat(show_int(h), "|"))),
-    )
+fn state_tag(w : Int, h : Int) = "prism-world-life-v1|{w}x{h}|"
 
-fn state_hash(w, h, g) = blake3(concat(state_tag(w, h), bits(g)))
+fn state_hash(w, h, g) = blake3("{state_tag(w, h)}{bits(g)}")
 
 -- Decode a seed bitstring ("010110...") into a grid array; the browser generates
 -- a pattern from a seed and hands it across, so the seed is data too.
@@ -85,7 +81,7 @@ fn bit_of(s, i) = char_at(s, i) - 48
 fn grid_of(s) = array_of_list(map(\(i) -> bit_of(s, i), range(0, byte_len(s))))
 
 -- One frame line: the state hash and the raw bits, space-separated.
-fn frame_line(w, h, g) = concat(state_hash(w, h, g), concat(" ", bits(g)))
+fn frame_line(w, h, g) = "{state_hash(w, h, g)} {bits(g)}"
 
 -- The trajectory under a first-class law value: frames for ticks 0..n, one per
 -- line. `step` is any (w, h, grid) -> grid function, so the same driver runs any
@@ -94,10 +90,7 @@ fn trace(w, h, g, step, n) =
   if n == 0 then
     frame_line(w, h, g)
   else
-    concat(
-        frame_line(w, h, g),
-        concat("\n", trace(w, h, step(w, h, g), step, n - 1)),
-      )
+    "{frame_line(w, h, g)}\n{trace(w, h, step(w, h, g), step, n - 1)}"
 
 -- @world:main-below
 -- A standalone demonstration for the example gate: three ticks of a blinker on a
@@ -115,6 +108,4 @@ fn main() =
   let g0 = array_of_list(map(demo_seed, range(0, 25)))
   let g1 = step_conway(5, 5, g0)
   let g2 = step_conway(5, 5, g1)
-  print(
-      concat(bits(g0), concat("\n", concat(bits(g1), concat("\n", bits(g2))))),
-    )
+  print("{bits(g0)}\n{bits(g1)}\n{bits(g2)}")

@@ -33,9 +33,11 @@ const GATE_CACHE: &str = "PRISM_GATE_CACHE";
 /// Selects how the compiler half of the cache key is fingerprinted. Unset (the
 /// default) hashes the test executable itself, maximally conservative and stable
 /// between local runs where cargo does not rebuild. Set to `source` to hash the
-/// compiler's source inputs instead (`src/`, `runtime/`, `lib/`, the manifests),
-/// a fingerprint that is reproducible across machines, so a persisted cache hits
-/// across CI runners where the executable is not byte-reproducible.
+/// source inputs instead (`COMPILER_SOURCE_ROOTS` plus `ORACLE_SOURCE_ROOTS`:
+/// `src/`, `crates/`, `runtime/`, `lib/`, the manifests, and the harness code
+/// under `tests/`), a fingerprint that is reproducible across machines, so a
+/// persisted cache hits across CI runners where the executable is not
+/// byte-reproducible.
 const GATE_FINGERPRINT: &str = "PRISM_GATE_FINGERPRINT";
 /// The value of `PRISM_GATE_FINGERPRINT` that selects the source-tree hash.
 const FINGERPRINT_SOURCE: &str = "source";
@@ -53,6 +55,26 @@ const COMPILER_SOURCE_ROOTS: &[&str] = &[
     "Cargo.toml",
     "rust-toolchain.toml",
 ];
+/// The oracle's own roots, hashed in `source` fingerprint mode beside the
+/// compiler's. A verdict is only as strong as the check that recorded it, so a
+/// marker written by a weaker oracle must never be served to a stronger one:
+/// without these, strengthening a parity check leaves the fingerprint unmoved
+/// and the strengthened check is skipped corpus-wide while reporting green.
+/// Executable-hash mode gets this for free, the harness being part of the binary
+/// it hashes; `source` mode does not.
+///
+/// Only harness *code* is hashed (see `ORACLE_SOURCE_EXT`). The corpus programs
+/// under `tests/cases` already enter every key through the program source
+/// itself, and the fixture and snapshot corpora are inputs to other gates
+/// entirely, so hashing either would invalidate every native verdict on an
+/// unrelated regeneration while covering nothing this key does not already
+/// cover. A data file an oracle pulls in with `include_str!` is the exception to
+/// watch: it compiles into the harness without carrying the code extension, so a
+/// cached oracle that grows one must name that path here.
+const ORACLE_SOURCE_ROOTS: &[&str] = &["tests"];
+/// The extension that makes a file under [`ORACLE_SOURCE_ROOTS`] oracle code
+/// rather than corpus or fixture data.
+const ORACLE_SOURCE_EXT: &str = "rs";
 /// The backend-opt level the native build compiles at, part of the cache key so
 /// a different `-O` invalidates. Mirrors the driver default.
 const DEFAULT_BACKEND_OPT: &str = "2";
@@ -71,6 +93,7 @@ const BEHAVIOR_ENV: &[&str] = &[
     "PRISM_FUSE",
     "PRISM_SCHEDULER",
     "PRISM_EFFECT_TIER",
+    "PRISM_ERASURES",
     "PRISM_CC_FLAGS",
 ];
 
@@ -329,24 +352,33 @@ pub fn leak_free(stderr: &str) -> bool {
 /// of these moving changes the key, a stale pass can never be served after a
 /// toolchain or flag change; the cache only skips work when the exact same
 /// toolchain last passed.
+///
+/// Every input here is read fail-closed ([`KEY_INPUT_PANIC`]): a gate that
+/// cannot read one of its own key inputs has no business serving a cached pass.
 fn compiler_fingerprint() -> &'static GateCacheIdentity {
     static FP: OnceLock<GateCacheIdentity> = OnceLock::new();
     FP.get_or_init(|| {
         let compiler = if env::var(GATE_FINGERPRINT).as_deref() == Ok(FINGERPRINT_SOURCE) {
             source_tree_hash()
         } else {
-            env::current_exe()
-                .ok()
-                .and_then(|p| fs::read(p).ok())
-                .map_or_else(String::new, |b| blake3::hash(&b).to_hex().to_string())
-        };
-        let clang = Command::new(cc())
-            .arg("--version")
-            .output()
-            .ok()
-            .map_or_else(String::new, |o| {
-                String::from_utf8_lossy(&o.stdout).into_owned()
+            let exe = env::current_exe()
+                .unwrap_or_else(|e| panic!("{KEY_INPUT_PANIC} the test executable's path: {e}"));
+            let bytes = fs::read(&exe).unwrap_or_else(|e| {
+                panic!("{KEY_INPUT_PANIC} the test executable {}: {e}", exe.display())
             });
+            blake3::hash(&bytes).to_hex().to_string()
+        };
+        let version = Command::new(cc()).arg("--version").output().unwrap_or_else(|e| {
+            panic!("{KEY_INPUT_PANIC} the C compiler `{}` (set PRISM_CC): {e}", cc())
+        });
+        assert!(
+            version.status.success() && !version.stdout.is_empty(),
+            "{KEY_INPUT_PANIC} the C compiler `{}`: `--version` reported {} with {} bytes of output",
+            cc(),
+            version.status,
+            version.stdout.len()
+        );
+        let clang = String::from_utf8_lossy(&version.stdout).into_owned();
         GateCacheIdentity::new(format!(
             "{}\0{compiler}\0{clang}\0{}",
             cc(),
@@ -354,6 +386,13 @@ fn compiler_fingerprint() -> &'static GateCacheIdentity {
         ))
     })
 }
+
+/// Prefix of every fail-closed panic raised while computing the cache key. A
+/// failed read must never fall back to a shared stand-in: an empty string is a
+/// *stable* key, so an unreadable input would silently match a marker written
+/// when the input was readable and serve a verdict for a toolchain nobody
+/// fingerprinted. The gate fails instead, loudly and by name.
+const KEY_INPUT_PANIC: &str = "gate cache: cannot fingerprint";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GateCacheIdentity {
@@ -387,7 +426,7 @@ pub fn artifact_identity_context() -> String {
     out.push_str(env!("PRISM_TARGET"));
     out.push('\0');
     out.push_str("features=");
-    out.push_str(compiled_features());
+    out.push_str(&compiled_features());
     out.push('\0');
     for name in BEHAVIOR_ENV {
         out.push_str(name);
@@ -404,65 +443,124 @@ pub fn artifact_identity_context() -> String {
     out
 }
 
-const fn compiled_features() -> &'static str {
-    match (
-        cfg!(feature = "native"),
-        cfg!(feature = "mlir"),
-        cfg!(feature = "wasm"),
-        cfg!(feature = "mimalloc"),
-    ) {
-        (true, true, _, true) => "native,mlir,mimalloc",
-        (true, true, _, false) => "native,mlir",
-        (true, false, _, true) => "native,mimalloc",
-        (true, false, _, false) => "native",
-        (false, _, true, true) => "wasm,mimalloc",
-        (false, _, true, false) => "wasm",
-        (false, _, false, true) => "mimalloc",
-        (false, _, false, false) => "",
+/// Every cargo feature of the `prism` crate that selects what compiles into this
+/// test binary, paired with whether this build has it on. The one place a
+/// feature's contribution to the cache identity is written down;
+/// `feature_identity_covers_every_cargo_feature` (tests/native) reads the
+/// manifest and fails if a feature is added without a row here.
+///
+/// A row per feature, rather than a match over the tuple of them, is what makes
+/// the identity total: no combination can be written that drops a bit, which is
+/// how two configurations differing only in `mlir` or `wasm` came to share an
+/// identity.
+pub const COMPILED_FEATURES: [(&str, bool); 4] = [
+    ("native", cfg!(feature = "native")),
+    ("mlir", cfg!(feature = "mlir")),
+    ("wasm", cfg!(feature = "wasm")),
+    ("mimalloc", cfg!(feature = "mimalloc")),
+];
+
+/// The `default` feature of the manifest, which names no code of its own: it
+/// expands to the features it turns on, each of which carries its own row in
+/// [`COMPILED_FEATURES`], so it contributes nothing to the identity.
+pub const DEFAULT_FEATURE: &str = "default";
+
+/// The feature half of the cache identity: every feature, on or off, in a fixed
+/// order.
+fn compiled_features() -> String {
+    COMPILED_FEATURES
+        .iter()
+        .map(|(name, enabled)| format!("{name}={enabled}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// Which files of a hashed root are inputs to a native verdict.
+#[derive(Clone, Copy)]
+enum RootFilter {
+    /// Every regular file: a compiler root is an input whatever its extension.
+    Everything,
+    /// Only files with this extension: an oracle root holds harness code beside
+    /// corpus and fixture data that is not an input to this fingerprint.
+    Extension(&'static str),
+}
+
+impl RootFilter {
+    fn admits(self, path: &Path) -> bool {
+        match self {
+            Self::Everything => true,
+            Self::Extension(ext) => path.extension().and_then(|e| e.to_str()) == Some(ext),
+        }
     }
 }
 
-/// A reproducible hash of the compiler's source inputs (`COMPILER_SOURCE_ROOTS`):
-/// every file under those roots, path and contents, in sorted order. Content-only
-/// and order-stable, so two checkouts of the same commit on different machines
-/// hash identically, which is what lets a persisted cache hit across CI runners.
-/// The `source` fingerprint mode uses this in place of the executable's bytes.
+/// The hashed roots and how each is filtered: the compiler's inputs whole, the
+/// oracle's code only.
+const HASHED_ROOTS: [(&[&str], RootFilter); 2] = [
+    (COMPILER_SOURCE_ROOTS, RootFilter::Everything),
+    (
+        ORACLE_SOURCE_ROOTS,
+        RootFilter::Extension(ORACLE_SOURCE_EXT),
+    ),
+];
+
+/// A reproducible hash of the compiler's source inputs and the oracle's own
+/// (`HASHED_ROOTS`): every admitted file under those roots, path and contents, in
+/// sorted order. Content-only and order-stable, so two checkouts of the same
+/// commit on different machines hash identically, which is what lets a persisted
+/// cache hit across CI runners. The `source` fingerprint mode uses this in place
+/// of the executable's bytes.
+///
+/// Fail-closed throughout: a missing root or an unreadable file panics rather
+/// than hashing as nothing, because hashing nothing is what makes an unreadable
+/// input look identical to a prior readable one.
 fn source_tree_hash() -> String {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut files = Vec::new();
-    for rel in COMPILER_SOURCE_ROOTS {
-        let p = root.join(rel);
-        if p.is_dir() {
-            collect_files(&p, &mut files);
-        } else if p.is_file() {
-            files.push(p);
+    for (roots, filter) in HASHED_ROOTS {
+        for rel in roots {
+            let p = root.join(rel);
+            assert!(
+                p.exists(),
+                "{KEY_INPUT_PANIC} the source tree: root `{rel}` does not exist (a renamed or moved root must be updated in COMPILER_SOURCE_ROOTS / ORACLE_SOURCE_ROOTS)"
+            );
+            if p.is_dir() {
+                collect_files(&p, filter, &mut files);
+            } else if filter.admits(&p) {
+                files.push(p);
+            }
         }
     }
     files.sort();
     let mut h = blake3::Hasher::new();
     for f in &files {
-        if let Ok(rel) = f.strip_prefix(root) {
-            h.update(rel.to_string_lossy().as_bytes());
-            h.update(b"\0");
-        }
-        if let Ok(bytes) = fs::read(f) {
-            h.update(&(bytes.len() as u64).to_le_bytes());
-            h.update(&bytes);
-        }
+        let rel = f
+            .strip_prefix(root)
+            .unwrap_or_else(|e| panic!("{KEY_INPUT_PANIC} {}: {e}", f.display()));
+        h.update(rel.to_string_lossy().as_bytes());
+        h.update(b"\0");
+        let bytes = fs::read(f)
+            .unwrap_or_else(|e| panic!("{KEY_INPUT_PANIC} source input {}: {e}", f.display()));
+        h.update(&(bytes.len() as u64).to_le_bytes());
+        h.update(&bytes);
     }
     h.finalize().to_hex().to_string()
 }
 
-/// Collect every regular file under `dir`, recursively, into `out`.
-fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    if let Ok(entries) = fs::read_dir(dir) {
-        for e in entries.flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                collect_files(&p, out);
-            } else if p.is_file() {
-                out.push(p);
-            }
+/// Collect every regular file under `dir` that `filter` admits, recursively,
+/// into `out`. An unreadable directory panics: silently contributing no files
+/// would fingerprint a subtree as absent.
+fn collect_files(dir: &Path, filter: RootFilter, out: &mut Vec<PathBuf>) {
+    let entries = fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("{KEY_INPUT_PANIC} source directory {}: {e}", dir.display()));
+    for e in entries {
+        let p = e
+            .unwrap_or_else(|e| panic!("{KEY_INPUT_PANIC} an entry of {}: {e}", dir.display()))
+            .path();
+        if p.is_dir() {
+            collect_files(&p, filter, out);
+        } else if p.is_file() && filter.admits(&p) {
+            out.push(p);
         }
     }
 }

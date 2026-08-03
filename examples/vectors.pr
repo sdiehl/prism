@@ -27,7 +27,7 @@ fn cross(u : Vec3, v : Vec3) : Vec3 =
 
 fn absf(x : Float) : Float =
   if x < 0.0 then
-    0.0 - x
+    -x
   else
     x
 

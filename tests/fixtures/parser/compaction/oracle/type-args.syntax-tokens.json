@@ -1,0 +1,321 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "0aaf4aef3dce84bc85065dd3dee67cab64f51d85242d340706ddeb98f3dd1750",
+    "text": "type Corpus = Corpus(List(Int), {io, Pkg.Io | e}, 3)\n"
+  },
+  "raw": [
+    {
+      "kind": "type",
+      "span": [
+        0,
+        4
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        5,
+        11
+      ],
+      "value": "Corpus"
+    },
+    {
+      "kind": "=",
+      "span": [
+        12,
+        13
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        14,
+        20
+      ],
+      "value": "Corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        20,
+        21
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        21,
+        25
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        25,
+        26
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        26,
+        29
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        29,
+        30
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        30,
+        31
+      ]
+    },
+    {
+      "kind": "{",
+      "span": [
+        32,
+        33
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        33,
+        35
+      ],
+      "value": "io"
+    },
+    {
+      "kind": ",",
+      "span": [
+        35,
+        36
+      ]
+    },
+    {
+      "kind": "qual",
+      "span": [
+        37,
+        43
+      ],
+      "value": "Pkg.Io"
+    },
+    {
+      "kind": "|",
+      "span": [
+        44,
+        45
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        46,
+        47
+      ],
+      "value": "e"
+    },
+    {
+      "kind": "}",
+      "span": [
+        47,
+        48
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        48,
+        49
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        50,
+        51
+      ],
+      "value": "3"
+    },
+    {
+      "kind": ")",
+      "span": [
+        51,
+        52
+      ]
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "type",
+      "span": [
+        0,
+        4
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        5,
+        11
+      ],
+      "value": "Corpus"
+    },
+    {
+      "kind": "=",
+      "span": [
+        12,
+        13
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        14,
+        20
+      ],
+      "value": "Corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        20,
+        21
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        21,
+        25
+      ],
+      "value": "List"
+    },
+    {
+      "kind": "(",
+      "span": [
+        25,
+        26
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        26,
+        29
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        29,
+        30
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        30,
+        31
+      ]
+    },
+    {
+      "kind": "{",
+      "span": [
+        32,
+        33
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        33,
+        35
+      ],
+      "value": "io"
+    },
+    {
+      "kind": ",",
+      "span": [
+        35,
+        36
+      ]
+    },
+    {
+      "kind": "qual",
+      "span": [
+        37,
+        43
+      ],
+      "value": "Pkg.Io"
+    },
+    {
+      "kind": "|",
+      "span": [
+        44,
+        45
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        46,
+        47
+      ],
+      "value": "e"
+    },
+    {
+      "kind": "}",
+      "span": [
+        47,
+        48
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        48,
+        49
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        50,
+        51
+      ],
+      "value": "3"
+    },
+    {
+      "kind": ")",
+      "span": [
+        51,
+        52
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        52,
+        52
+      ]
+    }
+  ],
+  "trivia": []
+}

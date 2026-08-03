@@ -103,9 +103,9 @@
               ./rust-toolchain.toml
               ./examples/boids.pr
               ./examples/chaos_swarm.pr
-              ./examples/incr_resident.pr
+              ./examples/fixtures/runtime/incr_resident.pr
               ./examples/pendulum.pr
-              ./examples/teleport.pr
+              ./examples/fixtures/runtime/teleport.pr
               ./examples/world.pr
               ./crates/prism-syntax/src/grammar.lalrpop
             ];

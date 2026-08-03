@@ -6,13 +6,13 @@ The identities a Prism source file carries, and the two of them a published arti
 
 *Source identity* is the exact bytes, comments and formatting included: the digest the compiler embeds in every syntax artifact. *Surface identity* is the canonical semantic surface tree with every source position erased, so a comment or layout edit leaves it fixed while a change of syntactic form moves it. *Core identity* is the elaborated subject and is deliberately not computable here: it needs resolution and elaboration, which no syntax artifact carries.
 
-The negative directions are the load-bearing ones. Equal Core identity does not imply equal surface or source identity, since distinct spellings elaborate to one subject. Equal source bytes do not imply equal Core identity either, because the same text means different things under a different set of imported modules. Nothing here may be read as a claim about behavior.
+The negative directions are the essential ones. Equal Core identity does not imply equal surface or source identity, since distinct spellings elaborate to one subject. Equal source bytes do not imply equal Core identity either, because the same text means different things under a different set of imported modules. Nothing here may be read as a claim about behavior.
 
 ## Functions and Values
 
 ### `source_identity`
 
-```prism,sig,h-d7301a210e5c3442bba095acddd3d616be3a55149aec57f3bbae490c8cf4f12a
+```prism,sig,h-b511fb829ee13d5d7ef97c9c7251f5b61fd7462c9826328af3cc762a29cadbc9
 source_identity : (Syntax.Source.SourceFile) -> String
 ```
 
@@ -29,7 +29,7 @@ source_identity(SourceFile { digest = "9f86d0", text = "fn main() = ()" })
 
 ### `surface_identity`
 
-```prism,sig,h-329ac6a5b332443d2308f073b1e546b521524d6a45f79764b0041c820e2614c5
+```prism,sig,h-5f305e42c826e0716574f37d293151e45cf9656acd864e7e2dc84cde70811ae4
 surface_identity : (Syntax.Codec.SurfaceDoc) -> Result(String, Json.JsonError)
 ```
 

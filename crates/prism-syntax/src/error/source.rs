@@ -78,6 +78,7 @@ const LINE_SEPS: [char; 7] = [
     '\r', '\n', '\u{b}', '\u{c}', '\u{85}', '\u{2028}', '\u{2029}',
 ];
 
+#[must_use]
 pub fn line_col(src: &str, byte: usize) -> (u32, u32) {
     let (mut line, mut col) = (1u32, 1u32);
     let mut after_cr = false;

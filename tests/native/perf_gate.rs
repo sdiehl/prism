@@ -159,8 +159,8 @@ const FUSION_PROGRAMS: &[&str] = &[
     "tests/cases/run/effop_tax.pr",
     "tests/cases/run/eff_two_handlers.pr",
     "tests/cases/run/eff_fuse.pr",
-    "examples/stream_fuse.pr",
-    "examples/stream_fold.pr",
+    "examples/fixtures/compiler/stream_fuse.pr",
+    "examples/fixtures/compiler/stream_fold.pr",
     "examples/streams.pr",
     "examples/eff_state.pr",
 ];
@@ -608,11 +608,15 @@ fn each_update_reuses_uniquely_owned() {
 #[test]
 fn fbip_reuse_fires_at_runtime() {
     require_cc();
-    let hits = stat("examples/list.pr", "PRISM_REUSE_STATS", "cells reused")
-        .unwrap_or_else(|e| panic!("{e}"));
+    let hits = stat(
+        "examples/records_demo.pr",
+        "PRISM_REUSE_STATS",
+        "cells reused",
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
     assert!(
         hits > 0,
-        "drop-guided in-place reuse did not fire on list.pr (hits=0); the reuse pass regressed"
+        "drop-guided in-place reuse did not fire on records_demo.pr (hits=0); the reuse pass regressed"
     );
 }
 

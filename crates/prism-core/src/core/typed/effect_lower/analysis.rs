@@ -6,9 +6,10 @@
 //! re-inferring openness or scope from partially lowered trees.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{btree_map, BTreeMap, BTreeSet};
 use std::ptr;
 
+use prism_common::fixpoint::least_fixpoint;
 use prism_common::sym::Sym;
 use prism_syntax::names::ENTRY_POINT;
 
@@ -17,9 +18,12 @@ use super::super::{
     TypedBinder, TypedComp, TypedCompKind, TypedCoreFn, TypedHandleOp, TypedPattern, TypedValue,
     TypedValueKind,
 };
-use super::flow::{self, ThunkFlow};
-use super::latent::{self, Latent};
-use super::walk::{each_subcomp, each_subterm, each_value, thunks_in_comp};
+use super::flow;
+use super::latent::{self, Latent, MaskOp};
+use super::plan::{self, collect_calls, EffectPlan};
+use super::walk::{
+    collect_ops, each_subcomp, each_subterm, each_value, thunks_in_comp, top_thunks_in_value,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MonadicScope {
@@ -32,11 +36,45 @@ pub struct MonadicRegionPlan {
     pub members: BTreeSet<Sym>,
     pub entries: BTreeSet<Sym>,
     pub genuine_effects: BTreeSet<Sym>,
+    /// The parameter slots that receive a computation the free-monad
+    /// convention owns, per function. A member forces such a slot through the
+    /// monadic head path; a declaration outside the region must not force one
+    /// at all, which is why forcing one is what makes a function a member.
+    pub monadic_params: BTreeMap<Sym, BTreeSet<usize>>,
     pub scope: MonadicScope,
 }
 
+/// What a handler is asked about needs both maps: the latent one, which names
+/// the ops a body performs by itself, and the flow, which names the ops it
+/// performs by forcing a computation handed to it.
+///
+/// Carrying them as one value keeps the openness question from being asked with
+/// only half the answer.
+#[derive(Clone, Copy, Debug)]
+pub struct Effects<'a> {
+    pub latent: &'a Latent,
+    pub flow: &'a flow::ThunkFlow,
+}
+
+impl<'a> Effects<'a> {
+    /// The two maps a solved effect plan carries.
+    #[must_use]
+    pub const fn of(plan: &'a EffectPlan) -> Self {
+        Self {
+            latent: plan.latent(),
+            flow: plan.flow(),
+        }
+    }
+}
+
 impl MonadicRegionPlan {
-    pub fn handler_is_open(&self, comp: &TypedComp, latent: &Latent) -> bool {
+    #[must_use]
+    pub fn handler_is_open(
+        &self,
+        comp: &TypedComp,
+        effects: Effects<'_>,
+        scope: &flow::Loc,
+    ) -> bool {
         if self.scope == MonadicScope::WholeProgram {
             return true;
         }
@@ -50,12 +88,48 @@ impl MonadicRegionPlan {
             return false;
         };
         let mut escaping = BTreeSet::new();
-        latent::handle_escapes(body, return_body.as_deref(), ops, latent, &mut escaping);
+        latent::handle_escapes(
+            body,
+            return_body.as_deref(),
+            ops,
+            effects.latent,
+            &mut escaping,
+        );
+        // The latent map is not flow aware, so an action that performs only by
+        // forcing a computation handed to it names no op there. Such an op
+        // leaves this handler exactly like one performed in place, and a
+        // handler that reads itself as closed on the strength of the latent map
+        // alone compiles a dispatch table with no case for it. This handler's
+        // own ops are discharged here, exactly as they are for an op the action
+        // performs in place.
+        let mut forced = BTreeSet::new();
+        forced_thunk_ops(
+            body,
+            scope,
+            effects,
+            Islands::Enter,
+            HandedOff::Count,
+            &mut forced,
+        );
+        for op in ops.arms() {
+            forced.remove(&MaskOp {
+                id: op.name(),
+                depth: 0,
+            });
+        }
+        escaping.extend(forced);
         !escaping.is_empty()
     }
 
-    pub fn native_closed(&self, comp: &TypedComp, latent: &Latent, native_enabled: bool) -> bool {
-        if !native_enabled || self.handler_is_open(comp, latent) {
+    #[must_use]
+    pub fn native_closed(
+        &self,
+        comp: &TypedComp,
+        effects: Effects<'_>,
+        scope: &flow::Loc,
+        native_enabled: bool,
+    ) -> bool {
+        if !native_enabled || self.handler_is_open(comp, effects, scope) {
             return false;
         }
         let TypedCompKind::Handle { ops, .. } = comp.kind() else {
@@ -64,8 +138,15 @@ impl MonadicRegionPlan {
         !ops.arms().is_empty()
     }
 
-    pub fn native_eligible(&self, comp: &TypedComp, latent: &Latent, native_enabled: bool) -> bool {
-        if !self.native_closed(comp, latent, native_enabled) {
+    #[must_use]
+    pub fn native_eligible(
+        &self,
+        comp: &TypedComp,
+        effects: Effects<'_>,
+        scope: &flow::Loc,
+        native_enabled: bool,
+    ) -> bool {
+        if !self.native_closed(comp, effects, scope, native_enabled) {
             return false;
         }
         let TypedCompKind::Handle { ops, .. } = comp.kind() else {
@@ -75,30 +156,29 @@ impl MonadicRegionPlan {
     }
 }
 
-pub fn plan(functions: &[TypedCoreFn], latent: &Latent, flow: &ThunkFlow) -> MonadicRegionPlan {
-    let genuine_effects: BTreeSet<Sym> = latent
-        .iter()
-        .filter_map(|(name, operations)| (!operations.is_empty()).then_some(*name))
-        .collect();
-    let mut escaping = flow::escaping_fns(functions, latent, flow);
-    escaping.extend(
-        functions
-            .iter()
-            .filter(|function| open_resume_escapes(function.body(), latent))
-            .map(TypedCoreFn::name),
-    );
-    let whole = !escaping.is_empty()
-        || functions.iter().any(|function| {
-            let mut thunks = Vec::new();
-            thunks_in_comp(function.body(), &mut thunks);
-            thunks
-                .iter()
-                .any(|body| calls_any(body, &genuine_effects) || raw_effects(body))
-        });
+/// The monadic region plan.
+///
+/// `force_whole` requests whole-program scope for a program the analysis would
+/// have confined; the widening is decided here, not patched onto the result,
+/// because `members` and `entries` follow from it.
+pub fn plan(
+    functions: &[TypedCoreFn],
+    effects: &EffectPlan,
+    force_whole: bool,
+) -> MonadicRegionPlan {
+    let genuine_effects = effects.genuine().clone();
+    // A region can be confined only when nothing escapes it: no untrackable
+    // thunk, and no capture whose forcing the thunk signatures fail to
+    // describe. A capture the signatures *do* describe no longer widens: the
+    // computation it holds is built by the monadic builder and forced through
+    // the monadic head path, so the region reaches through the thunk instead of
+    // swallowing the function that built it.
+    let whole = force_whole || effects.opaque_thunks() || !effects.opaque_captures().is_empty();
+    let monadic_params = monadic_params(effects);
     let members = if whole {
         functions.iter().map(TypedCoreFn::name).collect()
     } else {
-        genuine_effects.clone()
+        confined_members(functions, effects, &genuine_effects, &monadic_params)
     };
     let entry = Sym::new(ENTRY_POINT);
     let entries = if members.contains(&entry) {
@@ -110,6 +190,7 @@ pub fn plan(functions: &[TypedCoreFn], latent: &Latent, flow: &ThunkFlow) -> Mon
         members,
         entries,
         genuine_effects,
+        monadic_params,
         scope: if whole {
             MonadicScope::WholeProgram
         } else {
@@ -118,31 +199,240 @@ pub fn plan(functions: &[TypedCoreFn], latent: &Latent, flow: &ThunkFlow) -> Mon
     }
 }
 
+/// The thunk-valued parameter slots that receive a computation the free-monad
+/// convention owns, read off the interprocedural flow the plan already solved.
+fn monadic_params(effects: &EffectPlan) -> BTreeMap<Sym, BTreeSet<usize>> {
+    effects
+        .flow()
+        .param
+        .iter()
+        .map(|(name, slots)| {
+            let slots = slots
+                .iter()
+                .enumerate()
+                .filter_map(|(index, signature)| (!signature.is_empty()).then_some(index))
+                .collect();
+            (*name, slots)
+        })
+        .filter(|(_, slots): &(Sym, BTreeSet<usize>)| !slots.is_empty())
+        .collect()
+}
+
+/// The members of a confined region: every function that still performs an
+/// operation, plus every one that receives or forces a computation the
+/// free-monad convention owns, closed under the callers that would otherwise
+/// call one from direct code.
+///
+/// The receivers and forcers are not covered by the genuine set because the
+/// latent map is not flow aware: a forwarder that only applies its
+/// thunk-valued parameter names no operation of its own. A slot's convention
+/// is one flow fact, so owning a monadic slot is enough on its own: the caller
+/// builds that argument at the monadic convention off the same fact, and a
+/// declaration outside the region has no way to hold an `Eff` cell, whether it
+/// forces the slot, forwards it, or forces it from inside a `handle` its own
+/// body installs. Reading membership off the slot rather than off the force
+/// site is what keeps the two sides of the boundary reading the same fact.
+///
+/// The caller closure is what makes a member's `Eff`-returning signature
+/// consumable, and it terminates at a `handle`: a handled action is built by
+/// the monadic builder inside any declaration, so a capturer that handles what
+/// it captured bounds the region rather than joining it.
+fn confined_members(
+    functions: &[TypedCoreFn],
+    effects: &EffectPlan,
+    genuine: &BTreeSet<Sym>,
+    monadic_params: &BTreeMap<Sym, BTreeSet<usize>>,
+) -> BTreeSet<Sym> {
+    let mut base = genuine.clone();
+    base.extend(monadic_params.keys().copied());
+    for function in functions {
+        let scope = flow::param_loc(function, effects.flow());
+        if forces_monadic(function.body(), &scope, effects) {
+            base.insert(function.name());
+        }
+    }
+
+    let edges: BTreeMap<Sym, BTreeSet<Sym>> = functions
+        .iter()
+        .map(|function| {
+            let mut callees = BTreeSet::new();
+            direct_calls(function.body(), effects.latent(), &mut callees);
+            (function.name(), callees)
+        })
+        .collect();
+    let seed: BTreeMap<Sym, BTreeSet<Sym>> =
+        edges.keys().map(|name| (*name, BTreeSet::new())).collect();
+    let reachable = least_fixpoint(seed, |name, current| {
+        let mut out = edges[name].clone();
+        for callee in &edges[name] {
+            if let Some(indirect) = current.get(callee) {
+                out.extend(indirect.iter().copied());
+            }
+        }
+        out
+    });
+
+    let mut members = base.clone();
+    for (name, callees) in &reachable {
+        if !callees.is_disjoint(&base) {
+            members.insert(*name);
+        }
+    }
+    members
+}
+
+/// Whether a `handle` a computation installs is entered by the traversal below.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Islands {
+    /// A handled action is an island of the monadic convention inside any
+    /// declaration, so what it forces says nothing about the convention of the
+    /// declaration around it.
+    Skip,
+    /// The island itself is what is being asked about, so its action counts.
+    Enter,
+}
+
+/// Whether a computation handed to a callee counts as performed here.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HandedOff {
+    /// Not counted. The question is what this declaration forces where a direct
+    /// force would stand, and a callee that forces the argument owns that force
+    /// itself: the slot it receives is what makes *it* a region member.
+    Ignore,
+    /// Counted. The question is what can still reach a handler, and the callee
+    /// forces the argument inside this handler's extent, so the op arrives at
+    /// its driver exactly as an in-place force would deliver it. Neither map
+    /// names such an op: the latent one records what the callee performs by
+    /// itself, which for a forwarder is nothing, and the force that performs it
+    /// sits in the callee's body rather than here.
+    Count,
+}
+
+/// The operations `comp` can still perform by forcing a computation the
+/// free-monad convention owns, with the thunk signatures threaded through the
+/// binders that introduce them. A thunk value carries its own convention, so a
+/// thunk this computation only builds contributes nothing here.
+fn forced_thunk_ops(
+    comp: &TypedComp,
+    scope: &flow::Loc,
+    effects: Effects<'_>,
+    islands: Islands,
+    handed: HandedOff,
+    out: &mut BTreeSet<MaskOp>,
+) {
+    match comp.kind() {
+        TypedCompKind::Force(value) => out.extend(flow::value_sig(value, scope, effects.latent)),
+        TypedCompKind::Handle { .. } if islands == Islands::Skip => {}
+        TypedCompKind::Call { args, .. }
+        | TypedCompKind::App { args, .. }
+        | TypedCompKind::Do { args, .. }
+            if handed == HandedOff::Count =>
+        {
+            for argument in args {
+                out.extend(flow::value_sig(argument, scope, effects.latent));
+            }
+            each_subcomp(comp, &mut |child| {
+                forced_thunk_ops(child, scope, effects, islands, handed, out);
+            });
+        }
+        TypedCompKind::Bind(head, binder, tail) => {
+            forced_thunk_ops(head, scope, effects, islands, handed, out);
+            let mut inner = scope.clone();
+            inner.insert(
+                binder.name(),
+                flow::result_sig(head, scope, effects.latent, effects.flow),
+            );
+            forced_thunk_ops(tail, &inner, effects, islands, handed, out);
+        }
+        TypedCompKind::Lam(params, body) => {
+            let mut inner = scope.clone();
+            for param in params {
+                inner.remove(&param.name());
+            }
+            forced_thunk_ops(body, &inner, effects, islands, handed, out);
+        }
+        TypedCompKind::Case(_, arms) => {
+            for (pattern, body) in arms {
+                let mut inner = scope.clone();
+                for binder in pattern_binders(pattern) {
+                    inner.remove(&binder.name());
+                }
+                forced_thunk_ops(body, &inner, effects, islands, handed, out);
+            }
+        }
+        _ => each_subcomp(comp, &mut |child| {
+            forced_thunk_ops(child, scope, effects, islands, handed, out);
+        }),
+    }
+}
+
+/// Whether `comp` forces a computation the free-monad convention owns where a
+/// direct declaration would emit a direct force.
+fn forces_monadic(comp: &TypedComp, scope: &flow::Loc, effects: &EffectPlan) -> bool {
+    let mut forced = BTreeSet::new();
+    forced_thunk_ops(
+        comp,
+        scope,
+        Effects::of(effects),
+        Islands::Skip,
+        HandedOff::Ignore,
+        &mut forced,
+    );
+    !forced.is_empty()
+}
+
+/// The functions `comp` calls from a position a direct declaration lowers
+/// directly: everything but a `handle`, whose body and clauses the monadic
+/// builder owns wherever they sit, and a thunk the convention predicate reports
+/// as monadic, whose body the monadic builder likewise owns.
+fn direct_calls(comp: &TypedComp, latent: &Latent, out: &mut BTreeSet<Sym>) {
+    if matches!(comp.kind(), TypedCompKind::Handle { .. }) {
+        return;
+    }
+    if let TypedCompKind::Call { callee, .. } = comp.kind() {
+        out.insert(*callee);
+    }
+    each_subcomp(comp, &mut |child| direct_calls(child, latent, out));
+    each_value(comp, &mut |value| {
+        let mut thunks = Vec::new();
+        top_thunks_in_value(value, &mut thunks);
+        for thunk in thunks {
+            if !plan::body_is_monadic(thunk, latent) {
+                direct_calls(thunk, latent, out);
+            }
+        }
+    });
+}
+
+fn pattern_binders(pattern: &TypedPattern) -> Vec<TypedBinder> {
+    match pattern {
+        TypedPattern::Wild => Vec::new(),
+        TypedPattern::Var(binder) => vec![binder.clone()],
+        TypedPattern::Ctor { fields, .. } | TypedPattern::Tuple(fields) => {
+            fields.iter().flatten().cloned().collect()
+        }
+    }
+}
+
 /// The clean whole-style component for `LocalPartial`, and the declarations the
 /// fused rest calls across its bare-returning boundary.
 pub fn local_region(
     functions: &[TypedCoreFn],
-    latent: &Latent,
-    flow: &ThunkFlow,
+    effects: &EffectPlan,
 ) -> Option<(BTreeSet<Sym>, BTreeSet<Sym>)> {
     let closure_flow = closure_flow(functions);
-    let mut escaping = flow::escaping_fns(functions, latent, flow);
-    escaping.extend(
-        functions
-            .iter()
-            .filter(|function| open_resume_escapes(function.body(), latent))
-            .map(TypedCoreFn::name),
-    );
+    let escaping = effects.escaping().clone();
     if escaping.is_empty() {
         return None;
     }
 
+    let latent = effects.latent();
     let by_name: BTreeMap<Sym, &TypedCoreFn> = functions.iter().map(|f| (f.name(), f)).collect();
     let footprint: BTreeMap<Sym, BTreeSet<Sym>> = functions
         .iter()
         .map(|function| {
             let mut operations = BTreeSet::new();
-            super::walk::collect_ops(function.body(), &mut operations);
+            collect_ops(function.body(), &mut operations);
             if let Some(latent) = latent.get(&function.name()) {
                 operations.extend(latent.iter().map(|masked| masked.id));
             }
@@ -276,13 +566,6 @@ pub fn local_region(
     (!region.contains(&entry_point)).then_some((region, entries))
 }
 
-fn collect_calls(comp: &TypedComp, out: &mut BTreeSet<Sym>) {
-    if let TypedCompKind::Call { callee, .. } = comp.kind() {
-        out.insert(*callee);
-    }
-    each_subterm(comp, &mut |child| collect_calls(child, out));
-}
-
 fn has_app(comp: &TypedComp) -> bool {
     if matches!(comp.kind(), TypedCompKind::App { .. }) {
         return true;
@@ -329,22 +612,55 @@ impl ClosureShape {
 
 type ClosureLoc = BTreeMap<Sym, ClosureShape>;
 
+// Site numbering for one stationary borrowed tree. A node's address is its
+// identity only while that tree is borrowed, and the site *numbers* handed out
+// come from structural traversal order, so no address can reach the fixpoint or
+// any compiler output.
+//
+// The map is deliberately opaque: interning, lookup, and a count are the whole
+// surface, and there is no way to iterate it. Iterating an address-keyed map is
+// the one route by which address order could leak into a compiler whose
+// contract is determinism, so the type makes that route unreachable rather than
+// leaving it to a comment.
+#[derive(Default)]
+struct SiteIds(BTreeMap<*const TypedComp, usize>);
+
+impl SiteIds {
+    // The site number of `comp`, assigning the next one and reporting `true` if
+    // this is its first sighting.
+    fn intern(&mut self, comp: &TypedComp) -> (usize, bool) {
+        let next = self.0.len();
+        match self.0.entry(ptr::from_ref(comp)) {
+            btree_map::Entry::Occupied(seen) => (*seen.get(), false),
+            btree_map::Entry::Vacant(slot) => {
+                slot.insert(next);
+                (next, true)
+            }
+        }
+    }
+
+    fn get(&self, comp: &TypedComp) -> Option<usize> {
+        self.0.get(&ptr::from_ref(comp)).copied()
+    }
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
 struct ClosureSites<'a> {
-    // Pointers are lookup keys only while the borrowed tree is stationary. Site
-    // numbers come from structural traversal order, so addresses cannot affect
-    // the fixpoint or any compiler output.
-    thunk_ids: BTreeMap<*const TypedComp, usize>,
+    thunk_ids: SiteIds,
     thunks: Vec<&'a TypedComp>,
-    handle_ids: BTreeMap<*const TypedComp, usize>,
+    handle_ids: SiteIds,
     operation_arities: BTreeMap<Sym, usize>,
 }
 
 impl<'a> ClosureSites<'a> {
     fn new(functions: &'a [TypedCoreFn]) -> Self {
         let mut sites = Self {
-            thunk_ids: BTreeMap::new(),
+            thunk_ids: SiteIds::default(),
             thunks: Vec::new(),
-            handle_ids: BTreeMap::new(),
+            handle_ids: SiteIds::default(),
             operation_arities: BTreeMap::new(),
         };
         for function in functions {
@@ -364,9 +680,7 @@ impl<'a> ClosureSites<'a> {
                 .or_insert(args.len());
         }
         if matches!(comp.kind(), TypedCompKind::Handle { .. }) {
-            let key = ptr::from_ref(comp);
-            let next = self.handle_ids.len();
-            self.handle_ids.entry(key).or_insert(next);
+            self.handle_ids.intern(comp);
             let TypedCompKind::Handle { ops, .. } = comp.kind() else {
                 unreachable!();
             };
@@ -385,10 +699,9 @@ impl<'a> ClosureSites<'a> {
     fn collect_value(&mut self, value: &'a TypedValue) {
         match value.kind() {
             TypedValueKind::Thunk(body) => {
-                let key = ptr::from_ref(body.as_ref());
-                if !self.thunk_ids.contains_key(&key) {
-                    let id = self.thunks.len();
-                    self.thunk_ids.insert(key, id);
+                // `thunks` is indexed by site number, so it grows in lockstep
+                // with the numbering and the two stay the same length.
+                if self.thunk_ids.intern(body).1 {
                     self.thunks.push(body);
                     self.collect_comp(body);
                 }
@@ -419,12 +732,17 @@ impl<'a> ClosureSites<'a> {
         }
     }
 
-    fn thunk_id(&self, body: &TypedComp) -> usize {
-        self.thunk_ids[&ptr::from_ref(body)]
+    // `None` for a site the collecting traversal never reached. Collection and
+    // the flow traversal walk the same tree, so a miss is not expected; the
+    // callers still answer it with the opaque shape rather than a panic, because
+    // this analysis chooses a lowering tier and the conservative shape only
+    // costs speed, while an abort on a legal program costs the compile.
+    fn thunk_id(&self, body: &TypedComp) -> Option<usize> {
+        self.thunk_ids.get(body)
     }
 
-    fn handle_id(&self, comp: &TypedComp) -> usize {
-        self.handle_ids[&ptr::from_ref(comp)]
+    fn handle_id(&self, comp: &TypedComp) -> Option<usize> {
+        self.handle_ids.get(comp)
     }
 }
 
@@ -605,7 +923,9 @@ fn closure_value(
 ) -> ClosureShape {
     match value.kind() {
         TypedValueKind::Thunk(body) => {
-            let id = flow.sites.thunk_id(body);
+            let Some(id) = flow.sites.thunk_id(body) else {
+                return ClosureShape::opaque();
+            };
             closure_thunk(id, loc, flow, updates, on_call);
             ClosureShape::atom(ClosureAtom::Thunk(id, 0))
         }
@@ -883,9 +1203,13 @@ fn closure_props(
                 {
                     extended.insert(parameter.name(), shape.clone());
                 }
+                // Without a site number there is no answer slot to resume into,
+                // so the continuation is an unknown closure.
                 extended.insert(
                     operation.resume().name(),
-                    ClosureShape::atom(ClosureAtom::Resume(id, operation.name())),
+                    id.map_or_else(ClosureShape::opaque, |id| {
+                        ClosureShape::atom(ClosureAtom::Resume(id, operation.name()))
+                    }),
                 );
                 result.merge(&closure_props(
                     operation.body(),
@@ -895,7 +1219,9 @@ fn closure_props(
                     on_call,
                 ));
             }
-            updates.handle_ret[id].merge(&result);
+            if let Some(id) = id {
+                updates.handle_ret[id].merge(&result);
+            }
             result
         }
         TypedCompKind::Do {
@@ -1014,66 +1340,6 @@ fn applies_parameter(comp: &TypedComp, parameters: &BTreeSet<Sym>) -> bool {
     }
 }
 
-fn calls_any(comp: &TypedComp, names: &BTreeSet<Sym>) -> bool {
-    let mut found =
-        matches!(comp.kind(), TypedCompKind::Call { callee, .. } if names.contains(callee));
-    each_subterm(comp, &mut |child| found |= calls_any(child, names));
-    found
-}
-
-fn raw_effects(comp: &TypedComp) -> bool {
-    if matches!(
-        comp.kind(),
-        TypedCompKind::Do { .. } | TypedCompKind::Handle { .. } | TypedCompKind::Mask(..)
-    ) {
-        return true;
-    }
-    let mut found = false;
-    each_value(comp, &mut |value| found |= raw_effects_value(value));
-    super::walk::each_subcomp(comp, &mut |child| found |= raw_effects(child));
-    found
-}
-
-fn raw_effects_value(value: &TypedValue) -> bool {
-    match &value.kind {
-        TypedValueKind::Thunk(comp) => raw_effects(comp),
-        TypedValueKind::Reinterpret(value)
-        | TypedValueKind::LoweredRepr { value, .. }
-        | TypedValueKind::NewtypeRepr { value, .. } => raw_effects_value(value),
-        TypedValueKind::Ctor { fields, .. }
-        | TypedValueKind::Tuple(fields)
-        | TypedValueKind::UnboxedTuple(fields) => fields.iter().any(raw_effects_value),
-        TypedValueKind::UnboxedRecord(fields) => {
-            fields.iter().any(|(_, field)| raw_effects_value(field))
-        }
-        _ => false,
-    }
-}
-
-pub fn open_resume_escapes(comp: &TypedComp, latent: &Latent) -> bool {
-    if let TypedCompKind::Handle { body, ops, .. } = comp.kind() {
-        // The warning measures escape from the handled action's residue alone,
-        // not the clause/return contributions `handle_escapes` folds in for
-        // planning.
-        let mut escaping = BTreeSet::new();
-        latent::body_escapes(body, ops, latent, &mut escaping);
-        if !escaping.is_empty()
-            && ops
-                .clone()
-                .erase()
-                .iter_with_use()
-                .any(|(_, usage)| usage.in_thunk)
-        {
-            return true;
-        }
-    }
-    let mut found = false;
-    super::walk::each_subcomp(comp, &mut |child| {
-        found |= open_resume_escapes(child, latent);
-    });
-    found
-}
-
 #[cfg(test)]
 mod tests {
     use crate::core::typed::{
@@ -1083,6 +1349,7 @@ mod tests {
     use crate::types::ty::EffRow;
     use crate::types::Type;
 
+    use super::super::fixtures;
     use super::*;
 
     fn function(body: &TypedComp) -> TypedCoreFn {
@@ -1097,9 +1364,7 @@ mod tests {
     }
 
     fn planned(functions: &[TypedCoreFn]) -> MonadicRegionPlan {
-        let latent = latent::latent_map(functions);
-        let flow = flow::analyze(functions, &latent);
-        plan(functions, &latent, &flow)
+        plan(functions, &EffectPlan::analyze(functions), false)
     }
 
     #[test]
@@ -1142,7 +1407,129 @@ mod tests {
         let functions = vec![function(&body)];
         let actual = planned(&functions);
         assert_eq!(actual.members, BTreeSet::from([Sym::from(ENTRY_POINT)]));
+        // The thunk escapes: nothing downstream can say where it is forced, so
+        // the signatures cannot describe what forcing it performs. That is the
+        // fact that still widens the region. A capture the signatures *can*
+        // describe no longer does, which is what
+        // `a_trackable_capturer_keeps_the_region_confined` pins.
         assert_eq!(actual.scope, MonadicScope::WholeProgram);
+    }
+
+    #[test]
+    fn a_trackable_capturer_keeps_the_region_confined() {
+        let functions = fixtures::capturing_program();
+        let effects = EffectPlan::analyze(&functions);
+        let actual = plan(&functions, &effects, false);
+
+        assert_eq!(
+            effects.tracked_captures(),
+            &BTreeSet::from([Sym::from(ENTRY_POINT)]),
+            "the entry point is the capturer"
+        );
+        assert!(
+            !effects.opaque_thunks(),
+            "the thunk travels as a named-call argument, so the flow analysis \
+             tracks it: the capture alone is what used to widen the region"
+        );
+        assert_eq!(actual.scope, MonadicScope::Selective);
+        assert_eq!(
+            actual.members,
+            BTreeSet::from([Sym::from(fixtures::BUMP), Sym::from(fixtures::RUN)]),
+            "the performer and the forwarder that forces its thunk"
+        );
+        assert!(
+            !actual.members.contains(&Sym::from(ENTRY_POINT)),
+            "the capturer stays direct: its handler bounds the region"
+        );
+        assert_eq!(
+            actual.monadic_params.get(&Sym::from(fixtures::RUN)),
+            Some(&BTreeSet::from([0usize])),
+            "slot 0 of the forwarder receives a thunk that performs an operation"
+        );
+        assert!(
+            actual.entries.is_empty(),
+            "no member is called from direct code"
+        );
+    }
+
+    #[test]
+    fn a_forcer_under_its_own_handler_joins_the_region_and_reads_open() {
+        let functions = fixtures::island_program();
+        let effects = EffectPlan::analyze(&functions);
+        let actual = plan(&functions, &effects, false);
+        let forwarder = Sym::from(fixtures::RUN);
+
+        assert_eq!(actual.scope, MonadicScope::Selective);
+        assert_eq!(
+            actual.monadic_params.get(&forwarder),
+            Some(&BTreeSet::from([0usize])),
+            "the slot is driven at the monadic convention wherever the force sits"
+        );
+        assert!(
+            actual.members.contains(&forwarder),
+            "owning a monadic slot is enough: the caller builds that argument \
+             off the same flow fact, so the forwarder cannot answer at the \
+             direct convention even though its force is buried in a handler"
+        );
+
+        let island = functions
+            .iter()
+            .find(|function| function.name() == forwarder)
+            .expect("the forwarder is in the program");
+        let scope = flow::param_loc(island, effects.flow());
+        assert!(
+            actual.handler_is_open(island.body(), Effects::of(&effects), &scope),
+            "the operation the forced computation performs leaves this handler, \
+             which discharges an unrelated one: reading it as closed would \
+             compile a dispatch table with no case for it"
+        );
+    }
+
+    #[test]
+    fn a_handler_whose_action_is_handed_to_a_callee_reads_open() {
+        let functions = fixtures::handed_off_program();
+        let effects = EffectPlan::analyze(&functions);
+        let actual = plan(&functions, &effects, false);
+        let helper = functions
+            .iter()
+            .find(|function| function.name() == Sym::from(fixtures::HELPER))
+            .expect("the intermediate is in the program");
+        let scope = flow::param_loc(helper, effects.flow());
+
+        assert_eq!(actual.scope, MonadicScope::Selective);
+        assert!(
+            actual.handler_is_open(helper.body(), Effects::of(&effects), &scope),
+            "the operation arrives at this handler's driver from the forwarder's \
+             force, so a dispatch table built from this handler's own arms would \
+             have no case for it"
+        );
+    }
+
+    #[test]
+    fn a_caller_of_a_forcer_joins_the_confined_region() {
+        let functions = fixtures::forwarded_program();
+        let effects = EffectPlan::analyze(&functions);
+        let actual = plan(&functions, &effects, false);
+
+        assert_eq!(actual.scope, MonadicScope::Selective);
+        assert!(
+            actual.members.contains(&Sym::from(fixtures::HELPER)),
+            "the intermediate performs nothing itself, and joins only because it \
+             calls the forwarder from direct code, where the forwarder now \
+             answers with an effect cell"
+        );
+        assert_eq!(
+            actual.members,
+            BTreeSet::from([
+                Sym::from(fixtures::BUMP),
+                Sym::from(fixtures::RUN),
+                Sym::from(fixtures::HELPER),
+            ]),
+        );
+        assert!(
+            !actual.members.contains(&Sym::from(ENTRY_POINT)),
+            "the closure stops at the handler, which is monadic wherever it sits"
+        );
     }
 }
 
@@ -1204,23 +1591,13 @@ fn clause_resume_tail(comp: &TypedComp, aliases: &BTreeSet<Sym>, tail: bool) -> 
 #[cfg(test)]
 mod judgment_tests {
     use crate::core::typed::{
-        CompSig, CoreFnSig, CoreType, TypedBinder, TypedComp, TypedCompKind, TypedCoreFn,
-        TypedHandleOp, TypedHandler, TypedValue, TypedValueKind,
+        CompSig, CoreFnSig, CoreType, TypedComp, TypedCompKind, TypedCoreFn, TypedValueKind,
     };
     use crate::types::ty::EffRow;
     use crate::types::Type;
 
+    use super::super::fixtures;
     use super::*;
-
-    fn value(name: Sym, ty: CoreType) -> TypedValue {
-        TypedValue::new(
-            ty,
-            TypedValueKind::Var {
-                name,
-                instantiation: Vec::new(),
-            },
-        )
-    }
 
     fn function(body: &TypedComp) -> TypedCoreFn {
         let signature = CoreFnSig::new(Vec::new(), Vec::new(), body.sig().clone());
@@ -1233,11 +1610,10 @@ mod judgment_tests {
         )
     }
 
-    fn planned(functions: &[TypedCoreFn]) -> (Latent, MonadicRegionPlan) {
-        let latent = latent::latent_map(functions);
-        let flow = flow::analyze(functions, &latent);
-        let plan = plan(functions, &latent, &flow);
-        (latent, plan)
+    fn planned(functions: &[TypedCoreFn]) -> (EffectPlan, MonadicRegionPlan) {
+        let effects = EffectPlan::analyze(functions);
+        let plan = plan(functions, &effects, false);
+        (effects, plan)
     }
 
     fn performed(operation: Sym) -> TypedComp {
@@ -1273,95 +1649,36 @@ mod judgment_tests {
         );
         let whole = vec![function(&escaped)];
         let (_, whole_plan) = planned(&whole);
+        // Escaping, not merely captured: the thunk is returned to a caller the
+        // program does not name, so no signature describes what forcing it
+        // performs and the region cannot reach through it. This is the
+        // classification the confinement flip deliberately left alone.
         assert_eq!(whole_plan.scope, MonadicScope::WholeProgram);
         assert_eq!(whole_plan.members, BTreeSet::from([main]));
         assert_eq!(whole_plan.entries, BTreeSet::from([main]));
     }
 
     fn handled(escaping: bool) -> TypedComp {
-        let operation = Sym::from("Ask.ask");
-        let leak = Sym::from("Leak.leak");
-        let parameter = TypedBinder::new(Sym::from("question"), CoreType::Source(Type::Int));
-        let resume_signature = CoreFnSig::new(
-            Vec::new(),
-            vec![CoreType::Source(Type::Int)],
-            CompSig::new(CoreType::Source(Type::Int), EffRow::Empty),
-        );
-        let resume = TypedBinder::new(
-            Sym::from("resume"),
-            CoreType::Thunk(Box::new(CompSig::new(
-                CoreType::Function(Box::new(resume_signature.clone())),
-                EffRow::Empty,
-            ))),
-        );
-        let force = TypedComp::new(
-            CompSig::new(
-                CoreType::Function(Box::new(resume_signature)),
-                EffRow::Empty,
-            ),
-            TypedCompKind::Force(value(resume.name(), resume.ty().clone())),
-        );
-        let resumed = TypedComp::new(
-            CompSig::new(CoreType::Source(Type::Int), EffRow::Empty),
-            TypedCompKind::App {
-                callee: Box::new(force),
-                instantiation: Vec::new(),
-                args: vec![value(parameter.name(), parameter.ty().clone())],
-            },
-        );
-        let clause_body = if escaping {
-            let leaked = TypedComp::new(
-                CompSig::new(CoreType::Source(Type::Unit), EffRow::singleton("Leak")),
-                TypedCompKind::Do {
-                    operation: leak,
-                    instantiation: Vec::new(),
-                    args: Vec::new(),
-                },
-            );
-            TypedComp::new(
-                CompSig::new(CoreType::Source(Type::Int), EffRow::singleton("Leak")),
-                TypedCompKind::Bind(
-                    Box::new(leaked),
-                    TypedBinder::new(Sym::from("ignored"), CoreType::Source(Type::Unit)),
-                    Box::new(resumed),
-                ),
-            )
-        } else {
-            resumed
-        };
-        let handler = TypedHandler::new(vec![TypedHandleOp::new(
-            operation,
-            Vec::new(),
-            vec![parameter],
-            resume,
-            clause_body,
-        )])
-        .expect("one unique clause");
-        TypedComp::new(
-            CompSig::new(CoreType::Source(Type::Int), EffRow::Empty),
-            TypedCompKind::Handle {
-                body: Box::new(performed(operation)),
-                return_binder: None,
-                return_body: None,
-                ops: handler,
-            },
-        )
+        fixtures::handling_ask(performed(Sym::from(fixtures::ASK_OP)), escaping)
     }
 
     #[test]
     fn one_plan_owns_openness_and_native_eligibility() {
         let closed = handled(false);
         let closed_functions = vec![function(&closed)];
-        let (closed_latent, closed_plan) = planned(&closed_functions);
+        let (closed_effects, closed_plan) = planned(&closed_functions);
+        let closed_effects = Effects::of(&closed_effects);
+        let scope = flow::Loc::new();
         assert_eq!(closed_plan.scope, MonadicScope::Selective);
-        assert!(!closed_plan.handler_is_open(&closed, &closed_latent));
-        assert!(closed_plan.native_eligible(&closed, &closed_latent, true));
-        assert!(!closed_plan.native_eligible(&closed, &closed_latent, false));
+        assert!(!closed_plan.handler_is_open(&closed, closed_effects, &scope));
+        assert!(closed_plan.native_eligible(&closed, closed_effects, &scope, true));
+        assert!(!closed_plan.native_eligible(&closed, closed_effects, &scope, false));
 
         let open = handled(true);
         let open_functions = vec![function(&open)];
-        let (open_latent, open_plan) = planned(&open_functions);
-        assert!(open_plan.handler_is_open(&open, &open_latent));
-        assert!(!open_plan.native_eligible(&open, &open_latent, true));
+        let (open_effects, open_plan) = planned(&open_functions);
+        let open_effects = Effects::of(&open_effects);
+        assert!(open_plan.handler_is_open(&open, open_effects, &scope));
+        assert!(!open_plan.native_eligible(&open, open_effects, &scope, true));
     }
 }

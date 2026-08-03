@@ -192,7 +192,7 @@ pub fn dur_cmp(a : Duration, b : Duration) : Int =
   let x = dur_nanos(a)
   let y = dur_nanos(b)
   if x < y then
-    0 - 1
+    -1
   elif x > y then
     1
   else
@@ -308,7 +308,7 @@ pub fn wall_cmp(a : Wall, b : Wall) : Int =
   let x = wall_nanos(a)
   let y = wall_nanos(b)
   if x < y then
-    0 - 1
+    -1
   elif x > y then
     1
   else

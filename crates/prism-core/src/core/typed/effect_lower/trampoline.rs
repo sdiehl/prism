@@ -118,6 +118,7 @@ fn drive(value: TypedValue, row: EffRow) -> TypedComp {
 }
 
 /// The row-polymorphic loop that forces one deferred hop at a time.
+#[must_use]
 pub fn prism_drive_fn() -> TypedCoreFn {
     let row_name = Sym::from(DRIVE_ROW);
     let row = EffRow::Var(row_name);

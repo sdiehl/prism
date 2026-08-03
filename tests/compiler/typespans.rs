@@ -190,7 +190,8 @@ fn pattern_synonyms_wildcards_and_prefixed_binders_are_pointable() {
 
 #[test]
 fn stable_ladder_surface_and_unused_pattern_binder_are_pointable() {
-    let source = fs::read_to_string(repo("docs/examples/stable.pr")).expect("read stable example");
+    let source = fs::read_to_string(repo("docs/examples/stable_surface_snippet.pr"))
+        .expect("read stable surface snippet");
     let spans = extract(&source);
 
     let stable = source.find("stable Save").expect("stable declaration");

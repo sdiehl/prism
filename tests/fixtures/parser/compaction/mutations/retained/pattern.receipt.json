@@ -1,0 +1,418 @@
+{
+  "schema": "prism-parser-compaction-bounded-mutation-run-v1",
+  "oracle_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+  "oracle_executable_path": "/Users/sdiehl/Git/prism/target/debug/prism",
+  "handwritten_harness_path": "/Users/sdiehl/Git/prism/target/parser-compaction-check",
+  "draw_cap_per_mutator": 64,
+  "status": "bounded-review-run-not-full-lane-acceptance",
+  "lanes": [
+    {
+      "lane": "pattern",
+      "seed": "0x5041545656310001",
+      "draw_cap_per_mutator": 64,
+      "counts": {
+        "scheduled": 512,
+        "applicable": 436,
+        "inapplicable": 76,
+        "lex_failed": 0,
+        "oracle_accepted": 72,
+        "oracle_rejected": 364,
+        "discarded": 0,
+        "novel": 149,
+        "handwritten_exact": 338,
+        "handwritten_mismatch": 98
+      },
+      "mismatches": [
+        "pattern-001-df0b4dddd696",
+        "pattern-003-5a3b8a1bffc2",
+        "pattern-004-da4b2b3708ca",
+        "pattern-006-2d9d75489780",
+        "pattern-010-df0b4dddd696",
+        "pattern-013-df0b4dddd696",
+        "pattern-019-e877bfd517e1",
+        "pattern-021-df0b4dddd696",
+        "pattern-025-5a3b8a1bffc2",
+        "pattern-026-eb11704e15fb",
+        "pattern-029-591783e26875",
+        "pattern-034-b4361c123a78",
+        "pattern-036-337dd5fabbd3",
+        "pattern-039-eb11704e15fb",
+        "pattern-040-dc3f3842918d",
+        "pattern-044-d524e530bb22",
+        "pattern-045-2d9d75489780",
+        "pattern-047-db49ca2d8eec",
+        "pattern-048-0925bf676948",
+        "pattern-052-c80f9f0c86ed",
+        "pattern-055-dc3f3842918d",
+        "pattern-057-4b8ee6858bea",
+        "pattern-063-da4b2b3708ca",
+        "pattern-066-2ff1ec2a1756",
+        "pattern-068-bed174a41643",
+        "pattern-071-2d792222f6f6",
+        "pattern-073-bed174a41643",
+        "pattern-076-2ff1ec2a1756",
+        "pattern-079-bed174a41643",
+        "pattern-080-295192ea1ec8",
+        "pattern-081-ece1078dde7c",
+        "pattern-082-f5f01ea8b6c6",
+        "pattern-088-4c4cd98541de",
+        "pattern-096-47482a3aaf67",
+        "pattern-097-295192ea1ec8",
+        "pattern-098-bed174a41643",
+        "pattern-099-f19da2979bd3",
+        "pattern-104-518ec1b749e5",
+        "pattern-107-58663e10f65e",
+        "pattern-112-f702ce68ed44",
+        "pattern-114-f5f01ea8b6c6",
+        "pattern-115-bed174a41643",
+        "pattern-117-bffe81562b7e",
+        "pattern-121-bffe81562b7e",
+        "pattern-123-f40992f8dd58",
+        "pattern-124-f702ce68ed44",
+        "pattern-126-f5f01ea8b6c6",
+        "pattern-186-7918409de90c",
+        "pattern-193-6e96e979f2c1",
+        "pattern-219-6e96e979f2c1",
+        "pattern-224-c1e95022fced",
+        "pattern-250-b5d4feb64591",
+        "pattern-274-c4ccce8807d6",
+        "pattern-276-df42a51f9b82",
+        "pattern-280-e365c3f9b2d2",
+        "pattern-281-2ed126f724a6",
+        "pattern-282-c1889369d3a2",
+        "pattern-284-2e2c0264d332",
+        "pattern-285-2e2c0264d332",
+        "pattern-287-e365c3f9b2d2",
+        "pattern-289-e365c3f9b2d2",
+        "pattern-305-c1889369d3a2",
+        "pattern-308-19d36612d354",
+        "pattern-312-2e2c0264d332",
+        "pattern-315-3bc5d12144e1",
+        "pattern-321-eff89932298f",
+        "pattern-322-25916998d5dd",
+        "pattern-323-54547717186c",
+        "pattern-330-37f1ef88acd1",
+        "pattern-333-0b2bd57ec631",
+        "pattern-335-757e43a5f719",
+        "pattern-336-ab2ab9233136",
+        "pattern-343-e00703612862",
+        "pattern-348-7506b71e6538",
+        "pattern-350-6237e5797ac1",
+        "pattern-353-abbd2ef1a69c",
+        "pattern-355-0b2bd57ec631",
+        "pattern-359-757e43a5f719",
+        "pattern-361-ab2ab9233136",
+        "pattern-370-37f1ef88acd1",
+        "pattern-374-0b2bd57ec631",
+        "pattern-380-8d772197731f",
+        "pattern-450-79febd20f3cc",
+        "pattern-454-dfbee0de7f2c",
+        "pattern-459-3b7eed574c37",
+        "pattern-463-e54215225a4c",
+        "pattern-465-3b7eed574c37",
+        "pattern-468-3b4a786beee2",
+        "pattern-470-5aff88f16f85",
+        "pattern-478-7e5a51cc10a3",
+        "pattern-479-c09738cd856b",
+        "pattern-483-053f677dbe92",
+        "pattern-485-3b4a786beee2",
+        "pattern-487-912b0768158a",
+        "pattern-489-79febd20f3cc",
+        "pattern-497-54cdd7d1df11",
+        "pattern-500-7e5a51cc10a3",
+        "pattern-501-9cbfa3bc6e6d"
+      ],
+      "useful": [
+        {
+          "candidate_id": "pattern-000-b7a78a97dab6",
+          "schedule_index": 0,
+          "mutator": "delete-token",
+          "base_case": "pattern-missing-a-separator",
+          "source": "fn corpus(v) = match v of\n  A( y) => 0\n  _ => 1\n",
+          "source_blake3": "b7a78a97dab67e1987d8169f8847086a3c1a14b59f5a0ed67112942136dcc758",
+          "operation": {
+            "token_index": 11,
+            "span": [
+              30,
+              31
+            ]
+          },
+          "oracle_result_kind": "surface",
+          "novelty_blake3": "17cafe71bf6e2b4314b36a1602d670ae9c7b2127aaf0f25632f4d5682d6b07c0",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "pattern-001-df0b4dddd696",
+          "schedule_index": 1,
+          "mutator": "delete-token",
+          "base_case": "pattern-missing-close",
+          "source": "fn corpus(v) = match v of\n  Ax] => 0\n  _ => 1\n",
+          "source_blake3": "df0b4dddd696720500121503463c1b93aa0425278d9a5d14eb8114bfabef6c23",
+          "operation": {
+            "token_index": 10,
+            "span": [
+              29,
+              30
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "5c15d5d08c1b32dac359d60f36029b173c10cae2e86b59c9854a5679cb19cb9a",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "pattern-002-571f8cd00a53",
+          "schedule_index": 2,
+          "mutator": "delete-token",
+          "base_case": "pattern-tuple-let",
+          "source": "fn corpus(v) = let x, y) = v in 0\n",
+          "source_blake3": "571f8cd00a5306c94728328dcfed58f434a90c1e7021a62115b2a97d5a6b2706",
+          "operation": {
+            "token_index": 7,
+            "span": [
+              19,
+              20
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "c990a1c00149fd6b86572dd79b78e381203c3abf13556126f5e0792c5b98b170",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "pattern-003-5a3b8a1bffc2",
+          "schedule_index": 3,
+          "mutator": "delete-token",
+          "base_case": "pattern-comma-wrong-close",
+          "source": "fn corpus(v) = match v of\n  Ax,] => 0\n  _ => 1\n",
+          "source_blake3": "5a3b8a1bffc250d425719463bedff31df9b2ff7adb40dc04463b773baa3ca086",
+          "operation": {
+            "token_index": 10,
+            "span": [
+              29,
+              30
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "5c15d5d08c1b32dac359d60f36029b173c10cae2e86b59c9854a5679cb19cb9a",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "pattern-004-da4b2b3708ca",
+          "schedule_index": 4,
+          "mutator": "delete-token",
+          "base_case": "pattern-alt-match",
+          "source": "fn corpus(v) = match v of\n  A  B => 0\n  _ => 1\n",
+          "source_blake3": "da4b2b3708cad44267bbdcdf2ef049171da48c92d08197a56d67a95e8ea7cfb2",
+          "operation": {
+            "token_index": 10,
+            "span": [
+              30,
+              31
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "985ae828c955806705872e617867626e3c7205fb1e776a54593f4681a580097f",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "pattern-005-ca4a59b6b78e",
+          "schedule_index": 5,
+          "mutator": "delete-token",
+          "base_case": "pattern-record-match",
+          "source": "fn corpus(v) = match v of\n  Point {x, y = } => 0\n  _ => 1\n",
+          "source_blake3": "ca4a59b6b78e4a2d50422d6fa128eb093d03f3afb58047fc36c03d1ca6e32019",
+          "operation": {
+            "token_index": 15,
+            "span": [
+              42,
+              43
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "8c881fb45c257c5406bb19072a9f4ca6d876a623cd5841579e7bfdfb5552351b",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "pattern-006-2d9d75489780",
+          "schedule_index": 6,
+          "mutator": "delete-token",
+          "base_case": "pattern-ctor-param",
+          "source": "fn corpus(Ax)) = 0\n",
+          "source_blake3": "2d9d75489780cac15aed6a644e40de82bb9c53919a00dafce309780015897b07",
+          "operation": {
+            "token_index": 4,
+            "span": [
+              11,
+              12
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "03c7f3e39cc3450fcc26bba4808a6c4016c91e824acda37f0dd983085180ba25",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "pattern-007-132156297ea8",
+          "schedule_index": 7,
+          "mutator": "delete-token",
+          "base_case": "pattern-ctor-param",
+          "source": "fn corpus(A()) = 0\n",
+          "source_blake3": "132156297ea85a7a4bcc7ad94b6969a06a26f441096e39ea8baccd3a61aeba9b",
+          "operation": {
+            "token_index": 5,
+            "span": [
+              12,
+              13
+            ]
+          },
+          "oracle_result_kind": "surface",
+          "novelty_blake3": "4ebd394425b68f510838efbfdffc5e5a201ad120132c69f96b5cb9fe41da6b8f",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "pattern-008-cafc8a879cf7",
+          "schedule_index": 8,
+          "mutator": "delete-token",
+          "base_case": "pattern-tuple-let",
+          "source": "fn corpus(v) = let (x, ) = v in 0\n",
+          "source_blake3": "cafc8a879cf7a45ff3d87f162b49ef42e7fc6904a7b8a72aa8a3f154eec60e43",
+          "operation": {
+            "token_index": 10,
+            "span": [
+              23,
+              24
+            ]
+          },
+          "oracle_result_kind": "surface",
+          "novelty_blake3": "9a08bc3435cad4604c3c3333fd4eaed35fd136c64fb770c49ee337ccc4006c46",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "pattern-009-3d66455e517d",
+          "schedule_index": 9,
+          "mutator": "delete-token",
+          "base_case": "pattern-list-match",
+          "source": "fn corpus(v) = match v of\n  [x y] => 0\n  _ => 1\n",
+          "source_blake3": "3d66455e517db28dba54a8fd290b7af5ef0772a982f7bec72b61fadc3711ba70",
+          "operation": {
+            "token_index": 11,
+            "span": [
+              30,
+              31
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "33ce34d491e4bd969cdfc802d9dc698d3b344598652b205f82ec7db2cc4be581",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "pattern-010-df0b4dddd696",
+          "schedule_index": 10,
+          "mutator": "delete-token",
+          "base_case": "pattern-missing-close",
+          "source": "fn corpus(v) = match v of\n  Ax] => 0\n  _ => 1\n",
+          "source_blake3": "df0b4dddd696720500121503463c1b93aa0425278d9a5d14eb8114bfabef6c23",
+          "operation": {
+            "token_index": 10,
+            "span": [
+              29,
+              30
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "5c15d5d08c1b32dac359d60f36029b173c10cae2e86b59c9854a5679cb19cb9a",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "pattern-011-dbb0c507457e",
+          "schedule_index": 11,
+          "mutator": "delete-token",
+          "base_case": "pattern-comma-wrong-close",
+          "source": "fn corpus(v) = match v of\n  A(x, => 0\n  _ => 1\n",
+          "source_blake3": "dbb0c507457ec27be987cedf026709d874eb029517ac06c8aec422414a80e0f2",
+          "operation": {
+            "token_index": 13,
+            "span": [
+              32,
+              33
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "8c0bda05560f0c2e1514fa46fd4e2c1503984e3dc739cd15c15ad8708d6ca402",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "pattern-012-636915d3def6",
+          "schedule_index": 12,
+          "mutator": "delete-token",
+          "base_case": "pattern-atoms",
+          "source": "fn corpus(v) = match v of\n  x => 0\n  1 => 1\n  -1.5 => 2\n  1.5 => 3\n  'a' => 4\n  true => 5\n  false => 6\n  [] => 7\n  (x,) => 8\n  Pkg.A => 9\n  _ => 10\n",
+          "source_blake3": "636915d3def628c351d7e5eb49680f88dd7434b2e050476d1beb2414ba0ff4d3",
+          "operation": {
+            "token_index": 12,
+            "span": [
+              37,
+              38
+            ]
+          },
+          "oracle_result_kind": "surface",
+          "novelty_blake3": "4943a3c5cd1b32fc1cf020c8192543e3ced0b9bb3eff7a03a56d30ca3f9c32b8",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "pattern-013-df0b4dddd696",
+          "schedule_index": 13,
+          "mutator": "delete-token",
+          "base_case": "pattern-missing-close",
+          "source": "fn corpus(v) = match v of\n  Ax] => 0\n  _ => 1\n",
+          "source_blake3": "df0b4dddd696720500121503463c1b93aa0425278d9a5d14eb8114bfabef6c23",
+          "operation": {
+            "token_index": 10,
+            "span": [
+              29,
+              30
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "5c15d5d08c1b32dac359d60f36029b173c10cae2e86b59c9854a5679cb19cb9a",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "pattern-014-78e243d3471a",
+          "schedule_index": 14,
+          "mutator": "delete-token",
+          "base_case": "pattern-missing-close",
+          "source": "fn corpus(v) = match v of\n  A(x => 0\n  _ => 1\n",
+          "source_blake3": "78e243d3471acf89ca474528d1ff300d52404317151d9b1d1f2a1f69d3c61f8e",
+          "operation": {
+            "token_index": 12,
+            "span": [
+              31,
+              32
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "6b4acdc2a1cfec7f4845d2190ca0908eb97ddab11501b976f77f9493c5fc0d2b",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "pattern-015-0036217793b5",
+          "schedule_index": 15,
+          "mutator": "delete-token",
+          "base_case": "pattern-record-match",
+          "source": "fn corpus(v) = match v of\n  Point {, y = 0} => 0\n  _ => 1\n",
+          "source_blake3": "0036217793b5b126b53c3e6bf9d4715391498d44b3e1d52410fef69aeb51390f",
+          "operation": {
+            "token_index": 11,
+            "span": [
+              35,
+              36
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "1cedc7bc8046316b8ca8267703e704d5ef09d66a8d16d0beca316a272f001ead",
+          "handwritten_status": "exact"
+        }
+      ],
+      "useful_total": 195
+    }
+  ]
+}

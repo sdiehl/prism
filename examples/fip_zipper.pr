@@ -46,7 +46,7 @@ fbip fn go_up(loc) =
 fn focus(loc) =
   match loc of
     Loc(Br(_, x, _), _) => x
-    Loc(Lf, _) => 0 - 1
+    Loc(Lf, _) => -1
 
 fn main() =
   let t = Br(Br(Br(Lf, 1, Lf), 2, Br(Lf, 3, Lf)), 4, Br(Lf, 5, Lf))

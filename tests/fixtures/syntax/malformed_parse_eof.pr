@@ -1,0 +1,6 @@
+-- Lexes fine but ends early: a binary operator still waiting for its right
+-- operand when the source stops. The layout pass closes the open block before
+-- the stream ends, so the fault is the general parse code at a zero-width
+-- caret on the virtual closer, not the exhausted-stream code, which only the
+-- expression entry can reach.
+fn broken() : Int = 1 +

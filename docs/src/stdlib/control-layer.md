@@ -16,7 +16,7 @@ Every query here terminates on a finite tree: each is structurally recursive thr
 
 ### `Layer`
 
-```prism,def,h-7b5ba636dec6530fce564e127c0761cffe9aa8d4f4b5110210833c1c9d9a8a5c
+```prism,def,h-373f024888af9b7a33e671f144b840d44f6f44669d819696b142b32f82a9b310
 type Layer(a) = Layer { kids: (a) -> List(a), rebuild: (a, List(a)) -> a }
 ```
 
@@ -26,7 +26,7 @@ One node sort's one-layer view: its immediate children and the inverse that repl
 
 ### `plate_layer`
 
-```prism,sig,h-be1cdb5b1cf5101836dc8f030e3abd9648254923c0d995b69e6b7164b8604f1c
+```prism,sig,h-3b389c20fba668732b3a6e57e7b2e196d9f19267fc393f25e1f868b374657ba2
 plate_layer : forall a. () -> Control.Layer.Layer(a)
 ```
 
@@ -36,7 +36,7 @@ The two interfaces agree on the shape and disagree only on how they report a vio
 
 ### `lay_kids`
 
-```prism,sig,h-c40c9d75f32157e286abdf31aacc0d559b0001a48e0c21ec126093994cb9ee70
+```prism,sig,h-e0d343f4fba946478c091151892e1342a2da2fd3a5895f31ba83ba591aa1481a
 lay_kids : forall a. (Control.Layer.Layer(a), a) -> List(a)
 ```
 
@@ -44,7 +44,7 @@ The immediate children of `x`, in the layer's fixed order.
 
 ### `lay_rebuild`
 
-```prism,sig,h-522dfa2e41e0c4b5c00fbe91ff272233be1e360b7f4b5c6afcbddcca0101bdcf
+```prism,sig,h-fba4b310a8200ba6d8e2698607c796be529bebd98a58e98df58f99b5b0956f7e
 lay_rebuild : forall a. (Control.Layer.Layer(a), a, List(a)) -> a
 ```
 
@@ -52,7 +52,7 @@ lay_rebuild : forall a. (Control.Layer.Layer(a), a, List(a)) -> a
 
 ### `lay_descend`
 
-```prism,sig,h-e92092fd41c6f90dbbfefd5dc594b1e52fa7a46038d57da8a59b3b960f8716ad
+```prism,sig,h-c33747dcf044749832a41f3d60bdf37292d3ebf583aa1dacb6664961d46e04a5
 lay_descend : forall e0 a. (Control.Layer.Layer(a), (a) -> a ! {e0}, a) -> a ! {e0}
 ```
 
@@ -60,7 +60,7 @@ Apply `f` to each immediate child of `x` and rebuild. The one-layer map: it neve
 
 ### `lay_universe`
 
-```prism,sig,h-3be0bc776930ac7d3b9aa0c0546e38d8496bd0646bc149d5e5bc2b68de2a1e04
+```prism,sig,h-de4e0df77eeca3589c9e4ffba73c08f4149266052c3d8b5fbe77e46d62ca3923
 lay_universe : forall a. (Control.Layer.Layer(a), a) -> List(a)
 ```
 
@@ -68,31 +68,58 @@ Every node of the tree, root first, depth first in `kids` order.
 
 ### `lay_size`
 
-```prism,sig,h-83d15ce1426aa0f08caf2dbc56fbe4bf2ae45953555bb8a875f529e3a144388d
+```prism,sig,h-75e52ab6662ac28b6fbf014b2322cfc0bd6165c146ef94dd01c29a4542cd17c4
 lay_size : forall a. (Control.Layer.Layer(a), a) -> Int
 ```
 
 The number of nodes in the tree.
 
+```prism,mod=Control.Layer
+# let countdown = Layer { kids = \(n) -> if n > 0 then [n - 1] else [], rebuild = \(n, _cs) -> n }
+lay_size(countdown, 3)
+```
+
+```output
+4
+```
+
 ### `lay_depth`
 
-```prism,sig,h-19871065d4fb7bd7c9dbb9406a7f24398c777ba0128806094429f035bc53368f
+```prism,sig,h-d5812b70e33a7cf620f471f5cbe7e581972f5a09d87f89561bb281a3556c7b09
 lay_depth : forall a. (Control.Layer.Layer(a), a) -> Int
 ```
 
 The height of the tree: `1` at a leaf.
 
+```prism,mod=Control.Layer
+# let countdown = Layer { kids = \(n) -> if n > 0 then [n - 1] else [], rebuild = \(n, _cs) -> n }
+lay_depth(countdown, 3)
+```
+
+```output
+4
+```
+
 ### `lay_collect`
 
-```prism,sig,h-fde343bbd6a184d438b85061f565302d9c8034a7498783a82a8736de81fdc248
+```prism,sig,h-dba73c8c014afe825b31b355d42851281c4eadb02a61ceaa43c903bd90ebe105
 lay_collect : forall e0 a. (Control.Layer.Layer(a), (a) -> Bool ! {e0}, a) -> List(a) ! {e0}
 ```
 
 Every node satisfying `q`, root first, depth first. The gather half of an analysis pass: one predicate replaces a hand-written collecting recursion.
 
+```prism,mod=Control.Layer
+# let countdown = Layer { kids = \(n) -> if n > 0 then [n - 1] else [], rebuild = \(n, _cs) -> n }
+lay_collect(countdown, even, 3)
+```
+
+```output
+[2, 0]
+```
+
 ### `lay_count_where`
 
-```prism,sig,h-4b6d774d387e5a1946340422d54d808c725deb216a1b156ccfbacec0d5ec6baf
+```prism,sig,h-00932f55fa3cd113cd8fc40175531445770e576cbfbe25fb92f0e94d90a349f4
 lay_count_where : forall e0 a. (Control.Layer.Layer(a), (a) -> Bool ! {e0}, a) -> Int ! {e0}
 ```
 
@@ -100,7 +127,7 @@ How many nodes satisfy `q`.
 
 ### `lay_any`
 
-```prism,sig,h-b36a5469548d90b4396754ead3fc3f06b971949f824b469db8e512e640d0cc3a
+```prism,sig,h-d8c7c1ca8055d63da95534e1dbcdf76a1d091895a26bd66bfd607564672e1366
 lay_any : forall e0 a. (Control.Layer.Layer(a), (a) -> Bool ! {e0}, a) -> Bool ! {e0}
 ```
 
@@ -108,7 +135,7 @@ Whether any node satisfies `q`. Short-circuits: the first accepting node ends th
 
 ### `lay_summarize`
 
-```prism,sig,h-8425fe65295746f1fef614c8361b0a5b89b75039578f0193897b42f742aba30b
+```prism,sig,h-a5f8b65dcc939694f106862670cd42ea894da6d64a41ca12e28e3b8dcb18d46c
 lay_summarize : forall e0 a b. (Control.Layer.Layer(a), (a) -> b ! {e0}, (b, b) -> b ! {e0}, b, a) -> b ! {e0}
 ```
 
@@ -116,7 +143,7 @@ Fold a per-node summary over the whole tree: `measure` scores one node and `comb
 
 ### `lay_index_where`
 
-```prism,sig,h-bb8ae9b769a4f06c33aa8634cdb87a78f2b56d79119086454bae6b7844a043d6
+```prism,sig,h-1b7fb201fc643e9fa34eaf6377d7aee1c16cc2a2de88768e8c9f8844e0e52729
 lay_index_where : forall e0 a. (Control.Layer.Layer(a), (a) -> Bool ! {e0}, a) -> List(Int) ! {e0}
 ```
 
@@ -124,7 +151,7 @@ The preorder index of every node satisfying `q`. An index is a deterministic add
 
 ### `lay_at_index`
 
-```prism,sig,h-e604da9d38e14e555fee6c55e473e83c8ae9479be8bd7c41a653a44ffd4c5614
+```prism,sig,h-4abddd46a6c3813003b75f91be6371fa304218d7850facef18178d650cdf543e
 lay_at_index : forall a. (Control.Layer.Layer(a), Int, a) -> Option(a)
 ```
 
@@ -132,15 +159,24 @@ The node at a preorder index, or `None` when the index is past the end.
 
 ### `lay_path_to`
 
-```prism,sig,h-f3ea408015eedaf018cf3abd4daf43b1c365ef825091a019a856c0e079ee8572
+```prism,sig,h-1121d5c4bf086da6b9a4923adec0b71a43ae95feef002ed4e0bd855877141ffa
 lay_path_to : forall a. (Control.Layer.Layer(a), Int, a) -> Option(List(Int))
 ```
 
 The preorder index path from the root to the node at index `i`: the index of each ancestor, root first, ending at `i` itself. `None` when the index is past the end. The path is what a pass reports when it must point at a node without carrying the node.
 
+```prism,mod=Control.Layer
+# let countdown = Layer { kids = \(n) -> if n > 0 then [n - 1] else [], rebuild = \(n, _cs) -> n }
+lay_path_to(countdown, 3, 3)
+```
+
+```output
+Some([0, 1, 2, 3])
+```
+
 ### `lay_indexed`
 
-```prism,sig,h-9122d47c88431af4c6acd3f53a74139056214489bc0e8294258a9b0bc4930918
+```prism,sig,h-c58f78ead9ee3e3e584bed5f7f315fa4f6702863bfeb072319e57ee96028f0ab
 lay_indexed : forall a. (Control.Layer.Layer(a), a) -> List((Int, a))
 ```
 
@@ -148,7 +184,7 @@ Every node's preorder index paired with the node, root first. The indexed walk a
 
 ### `lay_edges`
 
-```prism,sig,h-90e9133b660955ea0529eaf7404395c7c73a7574749b68367729f7728c64f312
+```prism,sig,h-dd2bd105d2e9866753bab31f7bd645653904eeced119f14d8a69bf068065f106
 lay_edges : forall a. (Control.Layer.Layer(a), a) -> List((a, a))
 ```
 

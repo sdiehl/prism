@@ -1,0 +1,4 @@
+-- The retired brace-delimited class body, recognized in full so the deliberate
+-- diagnostic names the layout rewrite instead of degrading to an unexpected
+-- token, and carries no generic expectation set.
+class Show(a) { show : (a) -> String }

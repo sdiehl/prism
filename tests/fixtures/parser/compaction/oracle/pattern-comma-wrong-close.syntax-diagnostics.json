@@ -1,0 +1,23 @@
+{
+  "schema": "prism-syntax-diagnostics-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "223662b6fddfd31c8c6850a9ac855e6b863eeaf26ffa2fcdb4967323c93b4a82",
+    "text": "fn corpus(v) = match v of\n  A(x,] => 0\n  _ => 1\n"
+  },
+  "diagnostics": [
+    {
+      "code": "E7100",
+      "phase": "parse",
+      "span": [
+        32,
+        33
+      ],
+      "message": "unexpected ']' at line 2:7, expected ')'",
+      "expected": [
+        ")"
+      ],
+      "related": []
+    }
+  ]
+}

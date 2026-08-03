@@ -20,19 +20,19 @@ Laws, tested on both backends over the lane boundaries:
 
 ### `checkedI64`
 
-```prism,def,h-44f3cf63e7748fda6b74073dd65c0de5e25d89bdc717e06645bcb28024737a0a
+```prism,def,h-b5b0697f731597f0db9e3722596b83d536925e9bb327d20f0a7160bc9ab10fc0
 instance checkedI64 : Checked(I64)
 ```
 
 ### `checkedU64`
 
-```prism,def,h-3b5ddc5e540ce2aa790b5d506251be66c77117a0efc108379c1602c73c1aadd4
+```prism,def,h-f6f92c468264bc5d56a85c2f837fd013fb86d750e0b4978e65306037d84476df
 instance checkedU64 : Checked(U64)
 ```
 
 ### `checkedInt`
 
-```prism,def,h-33bb9b254cde4c535007f5990bbb0cbd80f752ef5cc700101e2cca24d307fd9c
+```prism,def,h-de7f9eb779a1b5265e7a025fd2b2c9c9401fd49e0469875b09ab1b15bef893d6
 instance checkedInt : Checked(Int)
 ```
 
@@ -40,7 +40,7 @@ instance checkedInt : Checked(Int)
 
 ### `int_to_i64`
 
-```prism,sig,h-ce930997e6274abe54e42017eed8c730130d5aa26ba25e1430191be398fc7ee0
+```prism,sig,h-6c1b99671ef86ebf0a0cdb919f74b7a8b9869a48cf75d8f9e8ac1195adc81ac7
 int_to_i64 : (Int) -> Option(I64)
 ```
 
@@ -56,14 +56,14 @@ Narrow an unbounded `Int` to `I64`, or `None` when it falls outside the `I64` ra
 
 ### `int_to_u64`
 
-```prism,sig,h-6e87b62a8b669371031114015bc8edd72d218526db755dce46c19aa03451b680
+```prism,sig,h-5bcd472e6f5f626721b51978b05efc011e95719d081190f41131f6855f8bca59
 int_to_u64 : (Int) -> Option(U64)
 ```
 
 Narrow an unbounded `Int` to `U64`, or `None` when it falls outside the `U64` range. The inverse widening is the builtin `int_of_u64`, which is total.
 
 ```prism,mod=Data.Checked
-(int_to_u64(42), int_to_u64(0 - 1))
+(int_to_u64(42), int_to_u64(-1))
 ```
 
 ```output

@@ -18,7 +18,7 @@ use std::io::{self, Write};
 
 /// The named crash points, one per stage of the publication discipline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FaultPoint {
+pub(crate) enum FaultPoint {
     /// Mid temp-file write: only a prefix of the bytes reaches disk.
     TempPartialWrite,
     /// After the full temp write, before the flush.
@@ -36,7 +36,7 @@ pub enum FaultPoint {
 
 /// Marker carried by every injected error so tests can tell a simulated crash
 /// from a real filesystem failure.
-pub const INJECTED_MARKER: &str = "injected publication fault";
+pub(crate) const INJECTED_MARKER: &str = "injected publication fault";
 
 // A partial write keeps one part in this many of the payload: provably short
 // for any payload of at least two bytes, nonempty so bytes really land.
@@ -48,12 +48,12 @@ thread_local! {
 
 /// Arm `point` for the current thread; the next write path that reaches it
 /// fails once.
-pub fn arm(point: FaultPoint) {
+pub(crate) fn arm(point: FaultPoint) {
     ARMED.with(|a| a.set(Some(point)));
 }
 
 /// Clear any armed point (for tests whose operation never reaches it).
-pub fn disarm() {
+pub(crate) fn disarm() {
     ARMED.with(|a| a.set(None));
 }
 
@@ -74,7 +74,7 @@ fn injected(point: FaultPoint) -> io::Error {
 }
 
 /// Fail here once when `point` is armed on this thread.
-pub fn hit(point: FaultPoint) -> io::Result<()> {
+pub(crate) fn hit(point: FaultPoint) -> io::Result<()> {
     if take(point) {
         Err(injected(point))
     } else {
@@ -85,7 +85,7 @@ pub fn hit(point: FaultPoint) -> io::Result<()> {
 /// The mid-write crash: when armed, put a flushed prefix of `bytes` in the temp
 /// file and fail, so the partial content is really on disk, the worst case a
 /// reopening reader can face.
-pub fn partial_write(file: &mut File, bytes: &[u8]) -> io::Result<()> {
+pub(crate) fn partial_write(file: &mut File, bytes: &[u8]) -> io::Result<()> {
     if !take(FaultPoint::TempPartialWrite) {
         return Ok(());
     }

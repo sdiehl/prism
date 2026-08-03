@@ -1,0 +1,205 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "a757759f198268e5da128b1f75a4ebc1bdaf8b8520bd7c526692fce204a8d437",
+    "text": "type Corpus = Corpus(Box(n + 1))\n"
+  },
+  "raw": [
+    {
+      "kind": "type",
+      "span": [
+        0,
+        4
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        5,
+        11
+      ],
+      "value": "Corpus"
+    },
+    {
+      "kind": "=",
+      "span": [
+        12,
+        13
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        14,
+        20
+      ],
+      "value": "Corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        20,
+        21
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        21,
+        24
+      ],
+      "value": "Box"
+    },
+    {
+      "kind": "(",
+      "span": [
+        24,
+        25
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        25,
+        26
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "+",
+      "span": [
+        27,
+        28
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        29,
+        30
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        30,
+        31
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        31,
+        32
+      ]
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "type",
+      "span": [
+        0,
+        4
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        5,
+        11
+      ],
+      "value": "Corpus"
+    },
+    {
+      "kind": "=",
+      "span": [
+        12,
+        13
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        14,
+        20
+      ],
+      "value": "Corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        20,
+        21
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        21,
+        24
+      ],
+      "value": "Box"
+    },
+    {
+      "kind": "(",
+      "span": [
+        24,
+        25
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        25,
+        26
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "+",
+      "span": [
+        27,
+        28
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        29,
+        30
+      ],
+      "value": "1"
+    },
+    {
+      "kind": ")",
+      "span": [
+        30,
+        31
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        31,
+        32
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        32,
+        32
+      ]
+    }
+  ],
+  "trivia": []
+}

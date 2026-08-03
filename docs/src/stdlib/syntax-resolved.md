@@ -10,7 +10,7 @@ One document per source file: the embedded source identity and every user functi
 
 ### `RNode`
 
-```prism,def,h-640539dcfe68d7600da74e53024b0ef0c4e176d2f312add85c8932c579105934
+```prism,def,h-837bc7bca3cdeee5319586046795354998283d65039ed502a8da30c91515cdcd
 type RNode = RNode { id: Int, kind: String, span: Span, children: List(RNode) }
 ```
 
@@ -18,7 +18,7 @@ One resolved expression node: its NodeId (the join key), its expression-form kin
 
 ### `RParam`
 
-```prism,def,h-f4ffba1b7330007a0ab1cd7718ebf2d9f34195dfe34d92401a35414f085cd4ad
+```prism,def,h-82bba1a8e89773b798d0c892c056489144c0f83cfd24f4e09520a6dd36f01412
 type RParam = RParam { name: String, is_borrow: Bool }
 ```
 
@@ -26,7 +26,7 @@ One parameter of a resolved function: the binder its body's references resolve t
 
 ### `RFunction`
 
-```prism,def,h-84a0466a7d46bb59956bbb207ad3a25b4bfad146c33fd405f35588413299c986
+```prism,def,h-b4f203126de3fedc350040f172cb0bb875ca216e8ff9c2d3efcf9f6c51d32016
 type RFunction = RFunction { name: String, params: List(RParam), body: RNode }
 ```
 
@@ -34,7 +34,7 @@ One user function's resolved body tree, with its name and parameters.
 
 ### `ResolvedDoc`
 
-```prism,def,h-867475cbab6143cd6c7e8910b67d045e0b761b0c4a5f546f537f3237f7b8ceca
+```prism,def,h-17823dd5c8b0dfec69cfe9271e51773aeed646a5eaf98a00f86b3a72c514177a
 type ResolvedDoc = ResolvedDoc {
   schema: String,
   compiler: String,
@@ -49,7 +49,7 @@ A decoded resolved-syntax document: the envelope identity, the embedded source e
 
 ### `resolved_schema`
 
-```prism,sig,h-21d95aab695e48fde9907df52138aaecc718e48c057f1b0e6dd637bf99f3c868
+```prism,sig,h-cb5327ff0ba990a1d2689050ff7b7caf7757d77458b7f00c181de56f5bf625f3
 resolved_schema : () -> String
 ```
 
@@ -57,7 +57,7 @@ The schema tag this vocabulary decodes.
 
 ### `rkinds`
 
-```prism,sig,h-d5c87855e3092f082a91d7bf63dbeb09de6408d3065ebc97ebd0bcebd015f1f0
+```prism,sig,h-8c9d68f4faaf6bfbd2e80cc108f06245603a128aea27a506d639e5256929a9f5
 rkinds : () -> List(String)
 ```
 
@@ -65,7 +65,7 @@ The node kinds the artifact spells, one function per form, so a consumer matches
 
 ### `rkind_known`
 
-```prism,sig,h-7b0d7c4231303b8740eaf81f1eb690dd929c9e4b4e0686a30688edc139c13a20
+```prism,sig,h-5693e89d1114d6b81abb03f52e0720b8d3fbc71c2d86a730665dc5841ff9135f
 rkind_known : (String) -> Bool
 ```
 
@@ -73,7 +73,7 @@ Whether a kind string is one this vocabulary names.
 
 ### `rkind_int`
 
-```prism,sig,h-8151f70dc6d5af65f3f13d120b13f47ea76bfbfa78a3e879e52a5fb0ed406d41
+```prism,sig,h-8a21883ff9a83386e046374a9750249f71eb0a11c56da9a957857e0e6c8d062d
 rkind_int : () -> String
 ```
 
@@ -81,7 +81,7 @@ An integer literal.
 
 ### `rkind_float`
 
-```prism,sig,h-9941ec7911fded3eebb591230ff6f6e163796b7945905d154d43fbaf5ec9ff65
+```prism,sig,h-0806c771ac662cd14d5ecb64f34cbfbbe6e6c28de1a2a3cf4a34d38b0aa8e0d1
 rkind_float : () -> String
 ```
 
@@ -89,7 +89,7 @@ A float literal.
 
 ### `rkind_char`
 
-```prism,sig,h-f8c8ec8a7402d1c10576fcb2b5da5dac070152c63cf3a431178b43106804e6ee
+```prism,sig,h-f91a6d3c242bad6d66b85f736f2a1094129835f4cbffc2ebc9fe51c78665f833
 rkind_char : () -> String
 ```
 
@@ -97,7 +97,7 @@ A character literal.
 
 ### `rkind_bool`
 
-```prism,sig,h-14d93c09b127829311ae364e35000fd3ff176a6008e37d74969157b06060e4de
+```prism,sig,h-fd16a4ce1d00ccfb07dee38f6ca952a19b41efdf27245932daafe44fe29ca2d3
 rkind_bool : () -> String
 ```
 
@@ -105,7 +105,7 @@ A boolean literal.
 
 ### `rkind_unit`
 
-```prism,sig,h-be971a426239aaf076658b891c9752b956110a7a192a0bbbf49caf2c92d252a3
+```prism,sig,h-4aa3cd121a924c0b2d07e3fc039e911902ccf3daf176076ffb7670a3b524004a
 rkind_unit : () -> String
 ```
 
@@ -113,7 +113,7 @@ The unit value.
 
 ### `rkind_str`
 
-```prism,sig,h-118c0d7b9a49b06f1e9b1e27554a2c3968c5ea5b7584bec095131ab854e93359
+```prism,sig,h-7d0634590477adee7144ea0345212494cf8ff279724f8a07aa564cd7cf554791
 rkind_str : () -> String
 ```
 
@@ -121,7 +121,7 @@ A string literal.
 
 ### `rkind_var`
 
-```prism,sig,h-7502a374438673fa35483359c8f1573e21306786c7ec29b5e701392fdf2b0fb3
+```prism,sig,h-000f59da56da42c7e834798391ced9c21e4fd335c445096070e4301ad32ab2b3
 rkind_var : () -> String
 ```
 
@@ -129,7 +129,7 @@ A variable reference. Its span covers exactly the identifier, which is what make
 
 ### `rkind_hole`
 
-```prism,sig,h-d9e57a4077d00b8c242b1ba758ece453be3500f762a35f10e63cd35de22e4742
+```prism,sig,h-3e44b278d5fae77d1840e8786ce581fd1b920e9d121a4b9c26f8d7f2ec1e0f8e
 rkind_hole : () -> String
 ```
 
@@ -137,7 +137,7 @@ A typed hole.
 
 ### `rkind_bin`
 
-```prism,sig,h-7b8ac9df65f574489c014e9ce4d83ed0a4c5ebcdc0268d0c24335d5af2f9ed99
+```prism,sig,h-946590e92b17c5dcfec2559e039f86185752da1bca7d773e83344aaca51771dc
 rkind_bin : () -> String
 ```
 
@@ -145,7 +145,7 @@ A binary operator application.
 
 ### `rkind_neg`
 
-```prism,sig,h-38f462a74cb94034a3f058f45b43b45cf58deef161c283163c13c5e09f4852fc
+```prism,sig,h-c190895c5b7e0a1c3c7733bbf70f6f42340a23d8127b8e973a9c379cd0738a83
 rkind_neg : () -> String
 ```
 
@@ -153,7 +153,7 @@ An arithmetic negation.
 
 ### `rkind_if`
 
-```prism,sig,h-11e13a43d6cd8044a3dd74e323941c5966fbba3897a92abd658f20c2590f4413
+```prism,sig,h-681736981420b1eb3f350936de1f78887b37b555097e7fc1f4bd818b25855163
 rkind_if : () -> String
 ```
 
@@ -161,7 +161,7 @@ A conditional.
 
 ### `rkind_let`
 
-```prism,sig,h-b3ff8e990a85eee46f8351e6f6bbefda4486701132d0be3df8dc01d6822c60b5
+```prism,sig,h-149f13466e2f58dc787d9bcc0293ed542b93c380f43c8e62f3c2cdb771cc3a9b
 rkind_let : () -> String
 ```
 
@@ -169,7 +169,7 @@ A let binding. Its span starts at the `let` keyword, so the bound name it introd
 
 ### `rkind_lam`
 
-```prism,sig,h-9500a72636e65f7dd81de9234a281729c37a790700016c191b45deae929e1022
+```prism,sig,h-f79bebaf7a3c116c0b0a6a216f531cf481278c66719fd7af5e92827f30c635f8
 rkind_lam : () -> String
 ```
 
@@ -177,7 +177,7 @@ A lambda.
 
 ### `rkind_call`
 
-```prism,sig,h-4de8af4158cae209fd87ce363eb66ca1deae6ad602a571f2362d150c6ee9ef65
+```prism,sig,h-d8696659234dc1eecb99b9593393109dbecc8c6b087df8e9d6826c4357763927
 rkind_call : () -> String
 ```
 
@@ -185,7 +185,7 @@ A function application.
 
 ### `rkind_pipe`
 
-```prism,sig,h-3a238344bdee79facc81618c98a6105d31a2173ffcfb7c39f58608d910228cf1
+```prism,sig,h-44f23ecdbc887c4dc9c603a3d8bdbf0633cda356d44954c0432bdd624efde10e
 rkind_pipe : () -> String
 ```
 
@@ -193,7 +193,7 @@ A pipeline application.
 
 ### `rkind_match`
 
-```prism,sig,h-bf23862c97c1bf0e5317fdfa1c73a14f96ca221cdfd766b5eb4191a689322379
+```prism,sig,h-398e9957c73728be55cddb0be53754915df08d27a5a5851a6a3b679a28311e1b
 rkind_match : () -> String
 ```
 
@@ -201,7 +201,7 @@ A match expression.
 
 ### `rkind_list`
 
-```prism,sig,h-127f00cee860407d98f149f9201f8064aa487c7e51bdd71a5a1fb8c2ffb2aace
+```prism,sig,h-5f646328298df39bee940c0cc3832930d0c5fa742633a5e0c0c26fa6ac0b57c7
 rkind_list : () -> String
 ```
 
@@ -209,7 +209,7 @@ A list literal.
 
 ### `rkind_tuple`
 
-```prism,sig,h-8f50cb5a42b36b7cc91a61d178819bd91d4a0559decc4e0c0837fa69eda9283e
+```prism,sig,h-a3ed04ceb776d2ab7909c4a0373c84e1a0500192af87eb9a429a5bc93f0bbeb9
 rkind_tuple : () -> String
 ```
 
@@ -217,7 +217,7 @@ A tuple literal.
 
 ### `rkind_field`
 
-```prism,sig,h-5d2002ae76e0efac5f123c34661e99d0658cc518215ee1a984d63894a00f3369
+```prism,sig,h-3803c0463b338a763b8c8da1aa063fcea7278632e35c37759e2f528ff579aa63
 rkind_field : () -> String
 ```
 
@@ -225,7 +225,7 @@ A record field access.
 
 ### `rkind_unboxed_tuple`
 
-```prism,sig,h-32274f80c89d062abdffe715629449ce2272e8326df3bf4ac3bf111c75504857
+```prism,sig,h-4d1d044619472cc3abc182de5d9034f06d900a92b3897aee66c6d0a01a7947f4
 rkind_unboxed_tuple : () -> String
 ```
 
@@ -233,7 +233,7 @@ An unboxed tuple literal.
 
 ### `rkind_unboxed_record`
 
-```prism,sig,h-a1120b94a8596264f613cf6aec156446f6fb648936190186d0eca903739cf9b3
+```prism,sig,h-de7164d3bf85c318668f9f7b6be672480fbdb44837d93824fae165e5ea968f28
 rkind_unboxed_record : () -> String
 ```
 
@@ -241,7 +241,7 @@ An unboxed record literal.
 
 ### `rkind_unboxed_field`
 
-```prism,sig,h-cd05b906b13ddc9d0755224acf106c26e66764aa3afaab1a0dc3c47e1b8faedc
+```prism,sig,h-af431b398cddca4eb2c4f40b35ffdbaf3abe18da4fbd626988ec61baea466cef
 rkind_unboxed_field : () -> String
 ```
 
@@ -249,7 +249,7 @@ An unboxed record field access.
 
 ### `rkind_record`
 
-```prism,sig,h-c251c1528602f3fdbc26478d6fca58d7c8d3a5d88eb45f9684521ebb712ce020
+```prism,sig,h-d3fdc3c7492a791520c2a4a2c21902a8950280a0d19496238bf9c5071ec8b3a8
 rkind_record : () -> String
 ```
 
@@ -257,7 +257,7 @@ A record construction.
 
 ### `rkind_record_update`
 
-```prism,sig,h-7ae5d7c18117bbfbc3c0fe928b08e17c9f8f56b2a81b479013f2b8bbf8d6be97
+```prism,sig,h-6e8a5e3a00726c2856686df6c11784b133adcd1ddddbb16590327a06d6a62a15
 rkind_record_update : () -> String
 ```
 
@@ -265,7 +265,7 @@ A record update.
 
 ### `rkind_record_update_path`
 
-```prism,sig,h-33f9c23cf2114801f6f75d75db8c64335f7a4db05713e18541fc1126aa5b3951
+```prism,sig,h-5fcbeb60691a1d97fa51597c1e32f5c1688e87fded7fdedbd791f8f0caaaa172
 rkind_record_update_path : () -> String
 ```
 
@@ -273,7 +273,7 @@ A nested-path record update.
 
 ### `rkind_handle`
 
-```prism,sig,h-2da60721630ced7933a7619a0ad8a6d6ae8cb5c2cce4638073ad34af1894be09
+```prism,sig,h-fd6428c4389a4a94036d97b4379e1ad0f0a42643bcb1dee92766dc6ff5985727
 rkind_handle : () -> String
 ```
 
@@ -281,7 +281,7 @@ An effect handler installation.
 
 ### `rkind_mask`
 
-```prism,sig,h-84673e99788ae45b9232e6e6f71b159f4b8c6d3c3d868a3547dc9d9dfc5f0a85
+```prism,sig,h-af3f130b04fba0910a3e4ab9b3192c4fb795cae6aba04639edd67d731a9ee447
 rkind_mask : () -> String
 ```
 
@@ -289,7 +289,7 @@ An effect mask.
 
 ### `rkind_inst`
 
-```prism,sig,h-b38aeac4d3013d516f3e4870218e99ea191c4afb6ee12e4d0db988ffca6c2598
+```prism,sig,h-6987c1a283d34f03fc0bf3e0819fca58d676d8d89c82734a1e63a7d4d11c3f2b
 rkind_inst : () -> String
 ```
 
@@ -297,7 +297,7 @@ An explicit instantiation.
 
 ### `rkind_index`
 
-```prism,sig,h-403504a66ff4f77cf87b75b45f4c644aa1898a90fe23c04e09865c61ad330951
+```prism,sig,h-21633242c083d3cefaa2da97b2113e97e234e5215263743dd75915e5311ef9c2
 rkind_index : () -> String
 ```
 
@@ -305,7 +305,7 @@ An index read.
 
 ### `rkind_index_set`
 
-```prism,sig,h-261d37113c3e693ae978f893f8ea8bef95030f431c5f8169ecaaf1739bd2c3d8
+```prism,sig,h-ea8984bd1cb5d11766086b5d986935001413f709e00c63283bbc595f5c25a9d6
 rkind_index_set : () -> String
 ```
 
@@ -313,7 +313,7 @@ An index write.
 
 ### `rkind_ann`
 
-```prism,sig,h-b2f17615537aa5d37b1df5fb863a05997e2f925af19dc7c172750ed449465749
+```prism,sig,h-10016b4c9a40fcb7cb3a2da8c7414cd4e681357768cc8a69a76b8e92d1bd3916
 rkind_ann : () -> String
 ```
 
@@ -321,7 +321,7 @@ A type annotation.
 
 ### `rnode_children`
 
-```prism,sig,h-392cdc534e52bac4314690e240f9b0ee49d90b3dc2109dcdfd07d0ad86cbfe99
+```prism,sig,h-298d5ade8b3a8210010ff0b61901a79b7d51f4aabfbf69551caa9a2553b0393d
 rnode_children : (Syntax.Resolved.RNode) -> List(Syntax.Resolved.RNode)
 ```
 
@@ -329,7 +329,7 @@ The immediate children of one resolved node, in source order. The one constructo
 
 ### `rnode_rebuild`
 
-```prism,sig,h-5363f60c149b79371718cdc13c32c5807a367838f8b93fa7432f7cd0cfdf4276
+```prism,sig,h-ba42bef133a167c89540811f9f0204ff8a9d1290af224164f33f3bc85614874b
 rnode_rebuild : (Syntax.Resolved.RNode, List(Syntax.Resolved.RNode)) -> Syntax.Resolved.RNode
 ```
 
@@ -337,7 +337,7 @@ Put a replacement child list back into a resolved node, keeping its id, kind, an
 
 ### `rnode_layer`
 
-```prism,sig,h-9381959d340d37100095c3d25b16c59b1f5097e5a728104fba1d2e00d0d40761
+```prism,sig,h-c159995444b07fa339c97d3b59793e1afad7e3ef9fb2154435fb033e44646641
 rnode_layer : () -> Control.Layer.Layer(Syntax.Resolved.RNode)
 ```
 
@@ -345,7 +345,7 @@ The children-and-rebuild pair for resolved nodes, so every strategy in `Control.
 
 ### `rnode_universe`
 
-```prism,sig,h-b4934a8d340fa1576f0719a0b5160802b3674d9d847a8cc00284f17eaed4730e
+```prism,sig,h-0d1791f6d2ee8f0e89843e147472a6c66100a1defc9efc5412ea44bce167e452
 rnode_universe : (Syntax.Resolved.RNode) -> List(Syntax.Resolved.RNode)
 ```
 
@@ -353,7 +353,7 @@ Every node of a resolved body, root first, depth-first. The uniplate `universe` 
 
 ### `rnode_count`
 
-```prism,sig,h-553a9bd4866442ff2e67e613b591ffd6d6e7f252e7542339df83666e4af36e64
+```prism,sig,h-0346d899e1185d938c4b2a8d22f316f230805f1d4a614e6449063a0953a8de9f
 rnode_count : (Syntax.Resolved.RNode) -> Int
 ```
 

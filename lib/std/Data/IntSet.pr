@@ -19,6 +19,13 @@ import Data.IntMap (IntMap, intmap_empty, intmap_singleton, intmap_insert, intma
 import Data.List (foldl, map)
 
 -- | The empty set.
+--
+-- ```prism
+-- intset_is_empty(intset_empty)
+-- ```
+-- ```output
+-- true
+-- ```
 pub let intset_empty : IntMap(Unit) = intmap_empty
 
 -- | The set containing `x` alone.

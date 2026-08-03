@@ -1,0 +1,2898 @@
+{
+  "schema": "prism-parser-compaction-manifest-v1",
+  "corpus_version": 2,
+  "status": "curated-tranche-2",
+  "gate_ready": false,
+  "oracle": {
+    "commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+    "tree": "cd110efef00d124b955cb6648724887e8e5517f4",
+    "executable_blake3": "6a1e6b2c0e6c1cb9621c653714f96321563cb7ff26e3cb73ebc1fdc46c49141a",
+    "build_command": "cargo build --locked --bin prism",
+    "toolchain": {
+      "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)\nbinary: rustc\ncommit-hash: ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96\ncommit-date: 2026-05-25\nhost: aarch64-apple-darwin\nrelease: 1.96.0\nLLVM version: 22.1.2",
+      "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)"
+    }
+  },
+  "rust_inventory": {
+    "source": "crates/prism-syntax/src/grammar.lalrpop",
+    "source_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+    "ids": [
+      "pattern.Comma.Pattern",
+      "pattern.CommaPlus.Pattern",
+      "pattern.LetPat.qualified-constructor",
+      "pattern.LetPat.tuple",
+      "pattern.LetPat.uid-constructor",
+      "pattern.Param.pattern",
+      "pattern.PatAlt.atom",
+      "pattern.PatAlt.qualified-constructor",
+      "pattern.PatAlt.record",
+      "pattern.PatAlt.uid-constructor",
+      "pattern.PatArgs.list",
+      "pattern.PatAtom.bool-false",
+      "pattern.PatAtom.bool-true",
+      "pattern.PatAtom.char",
+      "pattern.PatAtom.float",
+      "pattern.PatAtom.ident",
+      "pattern.PatAtom.int",
+      "pattern.PatAtom.list-empty",
+      "pattern.PatAtom.list-nonempty",
+      "pattern.PatAtom.negative-float",
+      "pattern.PatAtom.negative-int",
+      "pattern.PatAtom.tuple",
+      "pattern.Pattern.alternation",
+      "pattern.Pattern.single",
+      "pattern.RecordPatField.explicit",
+      "pattern.RecordPatField.shorthand",
+      "pattern.RecordPatFields.closed",
+      "pattern.RecordPatFields.spread",
+      "type.AType.list",
+      "type.AType.name-ident-app",
+      "type.AType.name-ident-var",
+      "type.AType.name-qual",
+      "type.AType.name-uid",
+      "type.AType.paren",
+      "type.AType.primitive.Bool",
+      "type.AType.primitive.Char",
+      "type.AType.primitive.Float",
+      "type.AType.primitive.I64",
+      "type.AType.primitive.Int",
+      "type.AType.primitive.String",
+      "type.AType.primitive.U64",
+      "type.AType.primitive.Unit",
+      "type.AType.tuple",
+      "type.AType.unboxed-record",
+      "type.AType.unboxed-tuple",
+      "type.Ann.type",
+      "type.Arrow.empty-domain",
+      "type.Arrow.pass",
+      "type.Arrow.typed-domain",
+      "type.ArrowEff.bare",
+      "type.ArrowEff.row",
+      "type.CoeffRowParts.bare",
+      "type.CoeffRowParts.row",
+      "type.Comma.EffLabel",
+      "type.Comma.RecordField",
+      "type.Comma.Type",
+      "type.Comma.TypeArg",
+      "type.CtorArgs.list",
+      "type.DimTail.chain",
+      "type.DimTail.term",
+      "type.DimTerm.ident",
+      "type.DimTerm.int",
+      "type.EffLabel.ident",
+      "type.EffLabel.qual",
+      "type.EffLabel.uid",
+      "type.KindedTyParam.annotated",
+      "type.KindedTyParam.default",
+      "type.KindedTyParams.list",
+      "type.Param.default",
+      "type.Param.pattern",
+      "type.Param.type",
+      "type.RecordField.named",
+      "type.RetAnn.absent",
+      "type.RetAnn.present",
+      "type.RetAnn.retired-braced-effect-first",
+      "type.RetAnn.retired-effect-first",
+      "type.RetType.arrow",
+      "type.RetType.forall",
+      "type.Type.arrow",
+      "type.Type.effect-attach",
+      "type.Type.effect-misuse",
+      "type.Type.forall",
+      "type.Type.function-usage-misuse",
+      "type.TypeSig.complete",
+      "type.TypeArg.dimension-arithmetic",
+      "type.TypeArg.natural",
+      "type.TypeArg.row",
+      "type.TypeArg.type",
+      "type.TyParams.list",
+      "type.UType.atomic",
+      "type.UType.usage"
+    ]
+  },
+  "pending": {
+    "phase1b": {
+      "status": "blocked",
+      "reason": "Phase 1B generator implementation cannot claim parity until exact depth traces and mutation lanes are implemented and every recorded handwritten mismatch or intentional post-freeze delta is resolved."
+    },
+    "entries": [],
+    "depth_axes": [
+      "effect-label-args",
+      "expression-parens",
+      "forall",
+      "open-if",
+      "pattern-constructor",
+      "pattern-list",
+      "pattern-record",
+      "pattern-tuple",
+      "pow-right",
+      "right-arrow",
+      "type-constructor",
+      "type-list",
+      "type-tuple"
+    ],
+    "depth_followups": [
+      "direct-parse-let-pattern: required by the Phase-0 prose but absent from the frozen 13-axis pending ledger; inventory decision required before it can be claimed"
+    ],
+    "mutation_lanes": [
+      "type",
+      "pattern",
+      "vertical",
+      "cross"
+    ],
+    "reason": "Tranche 2 freezes 45 independent curated oracles, closes the Type/Pattern/vertical inventory, and records all three direct entry points. Exact depth traces and the pre-registered mutation lanes remain tranche 3."
+  },
+  "cases": [
+    {
+      "id": "carrier-pattern-try",
+      "source": "cases/carrier-pattern-try.pr",
+      "source_blake3": "fca98aaf31336db542d102dc32b9f4547be83ad4cb72ec95cf4b943cb5873cda",
+      "slice": "vertical-hook",
+      "wrapper": "block",
+      "fragment": "let (x, y) = r?\n  x",
+      "fragment_span": [
+        17,
+        36
+      ],
+      "production": "Stmts",
+      "alternative": "let-pattern-try-carrier",
+      "helper_path": [
+        "BlockExpr",
+        "Stmts",
+        "LetPat",
+        "Call",
+        "try_mark",
+        "let_pat",
+        "try_stmt"
+      ],
+      "accounting_family": "exprs",
+      "classes": [
+        "V",
+        "A",
+        "S"
+      ],
+      "coverage_ids": [
+        "vertical.BlockExpr.virtual",
+        "vertical.Call.try",
+        "vertical.Stmts.let-pattern-try",
+        "vertical.hook.try_mark",
+        "vertical.hook.let_pat",
+        "vertical.hook.try_stmt"
+      ],
+      "hooks": [
+        "try_mark",
+        "let_pat",
+        "try_stmt"
+      ],
+      "cuts": [],
+      "separator_boundaries": [
+        "vertical.Stmts.virtual-semi"
+      ],
+      "recursion_families": [
+        "expr",
+        "parse_let_pattern"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "frozen Stmts LetPat action; Phase-1A carrier intentionally changes lowering after the oracle"
+      },
+      "layout": true,
+      "authority_delta": {
+        "status": "intentional-post-freeze-delta",
+        "authority": "frozen Rust artifact remains historical",
+        "current_expectation": "pattern-binding statement `?` lowers through try_stmt with the whole pattern"
+      },
+      "provenance": {
+        "production": "Stmts",
+        "line": 731,
+        "fixture": "tests/fixtures/parser/edge_parity.pr"
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/carrier-pattern-try.surface-syntax.json",
+        "tokens": "oracle/carrier-pattern-try.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "decl-four-prefix",
+      "source": "cases/decl-four-prefix.pr",
+      "source_blake3": "b687cdfb8b9838e9faf0b2e883d03d62b31c07be43aed72f23067537866bd63e",
+      "slice": "vertical-declaration",
+      "wrapper": "decl",
+      "fragment": "foo bar baz qux fn",
+      "fragment_span": [
+        0,
+        18
+      ],
+      "production": "Fn",
+      "alternative": "four-contextual-identifiers",
+      "helper_path": [
+        "Item",
+        "Fn",
+        "DeclMods"
+      ],
+      "accounting_family": "decls",
+      "classes": [
+        "M",
+        "A",
+        "C"
+      ],
+      "coverage_ids": [
+        "vertical.Item.fn",
+        "vertical.decl.fn-prefix.commit"
+      ],
+      "hooks": [
+        "decl_mods"
+      ],
+      "cuts": [
+        "N/A: frozen Rust has no explicit runtime cut"
+      ],
+      "separator_boundaries": [
+        "vertical.Fn.prefix-follow"
+      ],
+      "recursion_families": [],
+      "diagnostic": {
+        "kind": "generic",
+        "action": "Fn requires reserved modifier or `fn` after bounded DeclMods"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "Fn",
+        "line": 633,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "diagnostics",
+        "result": "oracle/decl-four-prefix.syntax-diagnostics.json",
+        "tokens": "oracle/decl-four-prefix.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "decl-newline-test",
+      "source": "cases/decl-newline-test.pr",
+      "source_blake3": "6ee65b86054ecafa46d359a5818d469d105d54b9034f7cb9c3bba27430c35705",
+      "slice": "vertical-declaration",
+      "wrapper": "decl",
+      "fragment": "test\nfn",
+      "fragment_span": [
+        0,
+        7
+      ],
+      "production": "Fn",
+      "alternative": "modifier-virtual-separator",
+      "helper_path": [
+        "Item",
+        "Fn",
+        "DeclMods"
+      ],
+      "accounting_family": "decls",
+      "classes": [
+        "C",
+        "S",
+        "A"
+      ],
+      "coverage_ids": [
+        "vertical.Item.fn",
+        "vertical.DeclMods.test",
+        "vertical.decl.fn-prefix.commit"
+      ],
+      "hooks": [
+        "decl_mods"
+      ],
+      "cuts": [
+        "N/A: frozen Rust has no explicit runtime cut"
+      ],
+      "separator_boundaries": [
+        "vertical.Fn.prefix-virtual-semi"
+      ],
+      "recursion_families": [],
+      "diagnostic": {
+        "kind": "generic",
+        "action": "Fn prefix meets virtual statement separator"
+      },
+      "layout": true,
+      "provenance": {
+        "production": "Fn",
+        "line": 633,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "diagnostics",
+        "result": "oracle/decl-newline-test.syntax-diagnostics.json",
+        "tokens": "oracle/decl-newline-test.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "decl-valid-plus-foo",
+      "source": "cases/decl-valid-plus-foo.pr",
+      "source_blake3": "c63de9ac77fa0765944e744f2276252a1ab2f34fc193fba5c6f16b30d7a541cf",
+      "slice": "vertical-declaration",
+      "wrapper": "decl",
+      "fragment": "test assume total foo fn",
+      "fragment_span": [
+        0,
+        24
+      ],
+      "production": "Fn",
+      "alternative": "valid-modifiers-extra-ident",
+      "helper_path": [
+        "Item",
+        "Fn",
+        "DeclMods"
+      ],
+      "accounting_family": "decls",
+      "classes": [
+        "M",
+        "A",
+        "C"
+      ],
+      "coverage_ids": [
+        "vertical.Item.fn",
+        "vertical.DeclMods.test-assume-total",
+        "vertical.decl.fn-prefix.commit"
+      ],
+      "hooks": [
+        "decl_mods"
+      ],
+      "cuts": [
+        "N/A: frozen Rust has no explicit runtime cut"
+      ],
+      "separator_boundaries": [
+        "vertical.Fn.prefix-follow"
+      ],
+      "recursion_families": [],
+      "diagnostic": {
+        "kind": "generic",
+        "action": "Fn requires reserved modifier or `fn` after DeclMods"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "Fn",
+        "line": 633,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "diagnostics",
+        "result": "oracle/decl-valid-plus-foo.syntax-diagnostics.json",
+        "tokens": "oracle/decl-valid-plus-foo.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "pattern-alt-match",
+      "source": "cases/pattern-alt-match.pr",
+      "source_blake3": "936c022cf906e0e45a9dcd96a388c56ef15f0fd46843d14376648b7596c548a9",
+      "slice": "pattern",
+      "wrapper": "pattern-match",
+      "fragment": "A | B",
+      "fragment_span": [
+        28,
+        33
+      ],
+      "production": "Pattern",
+      "alternative": "alternation",
+      "helper_path": [
+        "Pattern",
+        "PatAlt"
+      ],
+      "accounting_family": "patterns",
+      "classes": [
+        "V",
+        "B",
+        "A"
+      ],
+      "coverage_ids": [
+        "pattern.Pattern.alternation",
+        "pattern.PatAlt.uid-constructor"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [
+        "pattern.Pattern.bar"
+      ],
+      "recursion_families": [
+        "pattern"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted Pattern::Or action"
+      },
+      "layout": true,
+      "provenance": {
+        "production": "Pattern",
+        "line": 1135,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/pattern-alt-match.surface-syntax.json",
+        "tokens": "oracle/pattern-alt-match.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "pattern-atoms",
+      "source": "cases/pattern-atoms.pr",
+      "source_blake3": "aee10f129eea079d273a2f72bc32b7a2971d4873636cb98a8ea1bc21b89ac613",
+      "slice": "pattern",
+      "wrapper": "pattern-match",
+      "fragment": "x => 0\n  -1 => 1\n  -1.5 => 2\n  1.5 => 3\n  'a' => 4\n  true => 5\n  false => 6\n  [] => 7\n  (x,) => 8\n  Pkg.A => 9\n  _",
+      "fragment_span": [
+        28,
+        142
+      ],
+      "production": "PatAtom",
+      "alternative": "remaining-atom-matrix",
+      "helper_path": [
+        "Pattern",
+        "PatAlt",
+        "PatAtom"
+      ],
+      "accounting_family": "patterns",
+      "classes": [
+        "V",
+        "B",
+        "A"
+      ],
+      "coverage_ids": [
+        "pattern.Pattern.single",
+        "pattern.PatAlt.atom",
+        "pattern.PatAlt.qualified-constructor",
+        "pattern.PatAtom.ident",
+        "pattern.PatAtom.negative-int",
+        "pattern.PatAtom.negative-float",
+        "pattern.PatAtom.float",
+        "pattern.PatAtom.char",
+        "pattern.PatAtom.bool-true",
+        "pattern.PatAtom.bool-false",
+        "pattern.PatAtom.list-empty",
+        "pattern.PatAtom.tuple"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [
+        "pattern.match-arm.virtual-semi"
+      ],
+      "recursion_families": [
+        "pattern"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted PatAtom and qualified PatAlt actions"
+      },
+      "layout": true,
+      "provenance": {
+        "production": "PatAtom",
+        "line": 1168,
+        "fixture": "tests/fixtures/syntax/patterns.pr"
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/pattern-atoms.surface-syntax.json",
+        "tokens": "oracle/pattern-atoms.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "pattern-comma-wrong-close",
+      "source": "cases/pattern-comma-wrong-close.pr",
+      "source_blake3": "223662b6fddfd31c8c6850a9ac855e6b863eeaf26ffa2fcdb4967323c93b4a82",
+      "slice": "pattern",
+      "wrapper": "pattern-match",
+      "fragment": "A(x,]",
+      "fragment_span": [
+        28,
+        33
+      ],
+      "production": "PatArgs",
+      "alternative": "separator-then-wrong-closer",
+      "helper_path": [
+        "Pattern",
+        "PatAlt",
+        "PatArgs",
+        "Comma<Pattern>"
+      ],
+      "accounting_family": "patterns",
+      "classes": [
+        "C",
+        "S"
+      ],
+      "coverage_ids": [
+        "pattern.PatArgs.list",
+        "pattern.Comma.Pattern"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [
+        "pattern.PatArgs.after-comma"
+      ],
+      "recursion_families": [
+        "pattern"
+      ],
+      "diagnostic": {
+        "kind": "generic",
+        "action": "Comma<Pattern> trailing comma admits only PatArgs `)`"
+      },
+      "layout": true,
+      "provenance": {
+        "production": "PatArgs",
+        "line": 1204,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "diagnostics",
+        "result": "oracle/pattern-comma-wrong-close.syntax-diagnostics.json",
+        "tokens": "oracle/pattern-comma-wrong-close.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "pattern-ctor-param",
+      "source": "cases/pattern-ctor-param.pr",
+      "source_blake3": "dbdf399b2237bc278312c66a68342ddbff1901a440056a270e2986dbe61b51b2",
+      "slice": "pattern",
+      "wrapper": "pattern-param",
+      "fragment": "A(x)",
+      "fragment_span": [
+        10,
+        14
+      ],
+      "production": "Param",
+      "alternative": "constructor-pattern",
+      "helper_path": [
+        "Param",
+        "Pattern",
+        "PatAlt",
+        "PatArgs"
+      ],
+      "accounting_family": "patterns",
+      "classes": [
+        "V",
+        "A"
+      ],
+      "coverage_ids": [
+        "pattern.Param.pattern",
+        "pattern.PatAlt.uid-constructor",
+        "pattern.PatArgs.list",
+        "pattern.PatAtom.ident"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [
+        "pattern.PatArgs.comma"
+      ],
+      "recursion_families": [
+        "pattern"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted Param/PatAlt actions"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "Param",
+        "line": 820,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/pattern-ctor-param.surface-syntax.json",
+        "tokens": "oracle/pattern-ctor-param.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "pattern-let-ctors",
+      "source": "cases/pattern-let-ctors.pr",
+      "source_blake3": "3ce0157c0a9c056c7df3a6561753ffe779952a8c8de82e427136177dae5d651f",
+      "slice": "pattern",
+      "wrapper": "pattern-let",
+      "fragment": "fn one(v) = let A(x) = v in x\nfn two(v) = let Pkg.A(x) = v in x",
+      "fragment_span": [
+        0,
+        63
+      ],
+      "production": "LetPat",
+      "alternative": "uid-and-qualified-constructors",
+      "helper_path": [
+        "LetPat",
+        "PatArgs",
+        "Pattern"
+      ],
+      "accounting_family": "patterns",
+      "classes": [
+        "V",
+        "A",
+        "S"
+      ],
+      "coverage_ids": [
+        "pattern.LetPat.uid-constructor",
+        "pattern.LetPat.qualified-constructor",
+        "pattern.PatArgs.list",
+        "pattern.Pattern.single",
+        "pattern.PatAlt.atom"
+      ],
+      "hooks": [
+        "let_pat"
+      ],
+      "cuts": [],
+      "separator_boundaries": [
+        "pattern.PatArgs.comma"
+      ],
+      "recursion_families": [
+        "parse_let_pattern",
+        "pattern"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted LetPat constructor actions"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "LetPat",
+        "line": 1020,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/pattern-let-ctors.surface-syntax.json",
+        "tokens": "oracle/pattern-let-ctors.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "pattern-list-match",
+      "source": "cases/pattern-list-match.pr",
+      "source_blake3": "9aaa032ae6f272652d206e6e4826cffc6a04c8379ecdfe5b850591e5b35a32ab",
+      "slice": "pattern",
+      "wrapper": "pattern-match",
+      "fragment": "[x, y]",
+      "fragment_span": [
+        28,
+        34
+      ],
+      "production": "PatAtom",
+      "alternative": "list-nonempty",
+      "helper_path": [
+        "Pattern",
+        "PatAlt",
+        "PatAtom",
+        "CommaPlus<Pattern>"
+      ],
+      "accounting_family": "patterns",
+      "classes": [
+        "V",
+        "S"
+      ],
+      "coverage_ids": [
+        "pattern.Pattern.single",
+        "pattern.PatAlt.atom",
+        "pattern.PatAtom.list-nonempty",
+        "pattern.CommaPlus.Pattern",
+        "pattern.PatAtom.ident"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [
+        "pattern.PatAtom.list-comma"
+      ],
+      "recursion_families": [
+        "pattern"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted list lowering action"
+      },
+      "layout": true,
+      "provenance": {
+        "production": "PatAtom",
+        "line": 1168,
+        "fixture": "tests/fixtures/syntax/patterns.pr"
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/pattern-list-match.surface-syntax.json",
+        "tokens": "oracle/pattern-list-match.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "pattern-missing-a-separator",
+      "source": "cases/pattern-missing-separator.pr",
+      "source_blake3": "ae74394a9df567c7243e72c9bca507b0199a61f676c8ccc2d8d2604f8a4ba9cc",
+      "slice": "pattern",
+      "wrapper": "pattern-match",
+      "fragment": "A(x y)",
+      "fragment_span": [
+        28,
+        34
+      ],
+      "production": "PatArgs",
+      "alternative": "missing-separator",
+      "helper_path": [
+        "Pattern",
+        "PatAlt",
+        "PatArgs",
+        "Comma<Pattern>"
+      ],
+      "accounting_family": "patterns",
+      "classes": [
+        "M",
+        "S",
+        "A"
+      ],
+      "coverage_ids": [
+        "pattern.PatArgs.list",
+        "pattern.Comma.Pattern",
+        "pattern.Pattern.single"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [
+        "pattern.PatArgs.after-element"
+      ],
+      "recursion_families": [
+        "pattern"
+      ],
+      "diagnostic": {
+        "kind": "generic",
+        "action": "PatArgs element follow menu"
+      },
+      "layout": true,
+      "provenance": {
+        "production": "PatArgs",
+        "line": 1204,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "diagnostics",
+        "result": "oracle/pattern-missing-a-separator.syntax-diagnostics.json",
+        "tokens": "oracle/pattern-missing-a-separator.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "pattern-missing-close",
+      "source": "cases/pattern-missing-close.pr",
+      "source_blake3": "a3a0033fd850bfca388e6b1fda51faca6bc5337c1630a9c9375ffd138e377f33",
+      "slice": "pattern",
+      "wrapper": "pattern-match",
+      "fragment": "A(x]",
+      "fragment_span": [
+        28,
+        32
+      ],
+      "production": "PatArgs",
+      "alternative": "wrong-closer",
+      "helper_path": [
+        "Pattern",
+        "PatAlt",
+        "PatArgs",
+        "Comma<Pattern>"
+      ],
+      "accounting_family": "patterns",
+      "classes": [
+        "C",
+        "M"
+      ],
+      "coverage_ids": [
+        "pattern.PatArgs.list",
+        "pattern.Comma.Pattern"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [
+        "pattern.PatArgs.close"
+      ],
+      "recursion_families": [
+        "pattern"
+      ],
+      "diagnostic": {
+        "kind": "generic",
+        "action": "PatArgs requires `)` after Comma<Pattern>"
+      },
+      "layout": true,
+      "provenance": {
+        "production": "PatArgs",
+        "line": 1204,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "diagnostics",
+        "result": "oracle/pattern-missing-close.syntax-diagnostics.json",
+        "tokens": "oracle/pattern-missing-close.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "pattern-record-match",
+      "source": "cases/pattern-record-match.pr",
+      "source_blake3": "ff6312b2715e1bcc771ac334d285a717c8b2c323eaabd6dcb9431b4a49fc20b1",
+      "slice": "pattern",
+      "wrapper": "pattern-match",
+      "fragment": "Point {x, y = 0}",
+      "fragment_span": [
+        28,
+        44
+      ],
+      "production": "PatAlt",
+      "alternative": "record",
+      "helper_path": [
+        "Pattern",
+        "PatAlt",
+        "RecordPatFields",
+        "RecordPatField"
+      ],
+      "accounting_family": "patterns",
+      "classes": [
+        "V",
+        "A",
+        "S"
+      ],
+      "coverage_ids": [
+        "pattern.PatAlt.record",
+        "pattern.RecordPatFields.closed",
+        "pattern.RecordPatField.shorthand",
+        "pattern.RecordPatField.explicit",
+        "pattern.PatAtom.int"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [
+        "pattern.RecordPatFields.comma"
+      ],
+      "recursion_families": [
+        "pattern"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted record-pattern actions"
+      },
+      "layout": true,
+      "provenance": {
+        "production": "PatAlt",
+        "line": 1143,
+        "fixture": "tests/fixtures/syntax/patterns.pr"
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/pattern-record-match.surface-syntax.json",
+        "tokens": "oracle/pattern-record-match.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "pattern-record-separator-wrong-close",
+      "source": "cases/pattern-record-wrong-close.pr",
+      "source_blake3": "ea4fdfcee2a8eec801e5eed483dd7262ad188e1363c2f414d18da06743f52cc2",
+      "slice": "pattern",
+      "wrapper": "pattern-match",
+      "fragment": "A {x ]",
+      "fragment_span": [
+        28,
+        34
+      ],
+      "production": "RecordPatFields",
+      "alternative": "field-wrong-closer",
+      "helper_path": [
+        "Pattern",
+        "PatAlt",
+        "RecordPatFields",
+        "RecordPatField"
+      ],
+      "accounting_family": "patterns",
+      "classes": [
+        "C",
+        "M",
+        "A"
+      ],
+      "coverage_ids": [
+        "pattern.PatAlt.record",
+        "pattern.RecordPatFields.closed",
+        "pattern.RecordPatField.shorthand"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [
+        "pattern.RecordPatFields.field-follow"
+      ],
+      "recursion_families": [
+        "pattern-record"
+      ],
+      "diagnostic": {
+        "kind": "generic",
+        "action": "RecordPatField/RecordPatFields follow menu"
+      },
+      "layout": true,
+      "provenance": {
+        "production": "RecordPatFields",
+        "line": 1155,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "diagnostics",
+        "result": "oracle/pattern-record-separator-wrong-close.syntax-diagnostics.json",
+        "tokens": "oracle/pattern-record-separator-wrong-close.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "pattern-record-spread",
+      "source": "cases/pattern-record-spread.pr",
+      "source_blake3": "45049afec8520373c07f94bb548c5770a0e6925be7aee54ba55b6068b16ea5ed",
+      "slice": "pattern",
+      "wrapper": "pattern-match",
+      "fragment": "Point {x, ..}",
+      "fragment_span": [
+        28,
+        41
+      ],
+      "production": "RecordPatFields",
+      "alternative": "spread",
+      "helper_path": [
+        "Pattern",
+        "PatAlt",
+        "RecordPatFields",
+        "RecordPatField"
+      ],
+      "accounting_family": "patterns",
+      "classes": [
+        "V",
+        "B",
+        "S",
+        "A"
+      ],
+      "coverage_ids": [
+        "pattern.PatAlt.record",
+        "pattern.RecordPatFields.spread",
+        "pattern.RecordPatField.shorthand",
+        "pattern.Pattern.single",
+        "pattern.PatAlt.atom"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [
+        "pattern.RecordPatFields.comma-before-spread"
+      ],
+      "recursion_families": [
+        "pattern-record"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted RecordPatFields spread action"
+      },
+      "layout": true,
+      "provenance": {
+        "production": "RecordPatFields",
+        "line": 1155,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/pattern-record-spread.surface-syntax.json",
+        "tokens": "oracle/pattern-record-spread.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "pattern-tuple-let",
+      "source": "cases/pattern-tuple-let.pr",
+      "source_blake3": "59707c9bf51f4d62cd2cd81bed59c757f84fd81c9705533e47ffaf4d486c6b22",
+      "slice": "pattern",
+      "wrapper": "pattern-let",
+      "fragment": "(x, y)",
+      "fragment_span": [
+        19,
+        25
+      ],
+      "production": "LetPat",
+      "alternative": "tuple",
+      "helper_path": [
+        "LetPat",
+        "Pattern",
+        "Comma<Pattern>"
+      ],
+      "accounting_family": "patterns",
+      "classes": [
+        "V",
+        "A",
+        "S"
+      ],
+      "coverage_ids": [
+        "pattern.LetPat.tuple",
+        "pattern.Comma.Pattern",
+        "pattern.PatAtom.ident"
+      ],
+      "hooks": [
+        "let_pat"
+      ],
+      "cuts": [],
+      "separator_boundaries": [
+        "pattern.LetPat.tuple-comma"
+      ],
+      "recursion_families": [
+        "parse_let_pattern",
+        "pattern"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted LetPat tuple action"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "LetPat",
+        "line": 1020,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/pattern-tuple-let.surface-syntax.json",
+        "tokens": "oracle/pattern-tuple-let.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "ret-annotations",
+      "source": "cases/ret-annotations.pr",
+      "source_blake3": "50f262bbb998c34d941acfe2f375a0f637366fc0515ede230279a24c6322d930",
+      "slice": "type",
+      "wrapper": "ret-ann",
+      "fragment": ": (Int) -> Int ! {io}",
+      "fragment_span": [
+        13,
+        34
+      ],
+      "production": "RetAnn",
+      "alternative": "arrow-and-forall",
+      "helper_path": [
+        "RetAnn",
+        "RetType",
+        "Arrow",
+        "ArrowEff",
+        "Type"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "V",
+        "A"
+      ],
+      "coverage_ids": [
+        "type.RetAnn.present",
+        "type.RetType.arrow",
+        "type.RetType.forall",
+        "type.Arrow.typed-domain",
+        "type.ArrowEff.row",
+        "type.EffLabel.ident"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [
+        "type.RetType.effect-row"
+      ],
+      "recursion_families": [
+        "type",
+        "arrow"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted RetAnn/RetType actions"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "RetAnn",
+        "line": 773,
+        "fixture": "tests/fixtures/syntax/types.pr"
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/ret-annotations.surface-syntax.json",
+        "tokens": "oracle/ret-annotations.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "ret-retired-bare",
+      "source": "cases/ret-retired-bare.pr",
+      "source_blake3": "2d2815fa9f65d34071ae6c020556c840415f1bfc58c377791603b1edd1f31d90",
+      "slice": "type",
+      "wrapper": "ret-ann",
+      "fragment": ": ! Int",
+      "fragment_span": [
+        12,
+        19
+      ],
+      "production": "RetAnn",
+      "alternative": "retired-effect-first",
+      "helper_path": [
+        "RetAnn"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "F",
+        "A"
+      ],
+      "coverage_ids": [
+        "type.RetAnn.retired-effect-first"
+      ],
+      "hooks": [
+        "retired-return-order"
+      ],
+      "cuts": [],
+      "separator_boundaries": [],
+      "recursion_families": [
+        "type"
+      ],
+      "diagnostic": {
+        "kind": "deliberate",
+        "action": "RetAnn `: ! Type` =>? User(MIGRATE_RET_ORDER)"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "RetAnn",
+        "line": 773,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "diagnostics",
+        "result": "oracle/ret-retired-bare.syntax-diagnostics.json",
+        "tokens": "oracle/ret-retired-bare.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "ret-retired-braced",
+      "source": "cases/ret-retired-braced.pr",
+      "source_blake3": "114383ff5c0d11b78dd525dfbf2b7d718bbeb6dcd5801c5b4125265de0639250",
+      "slice": "type",
+      "wrapper": "ret-ann",
+      "fragment": ": ! {Io} Int",
+      "fragment_span": [
+        12,
+        24
+      ],
+      "production": "RetAnn",
+      "alternative": "retired-braced-effect-first",
+      "helper_path": [
+        "RetAnn",
+        "EffLabel",
+        "Comma<EffLabel>"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "F",
+        "A",
+        "S"
+      ],
+      "coverage_ids": [
+        "type.RetAnn.retired-braced-effect-first",
+        "type.EffLabel.uid",
+        "type.Comma.EffLabel"
+      ],
+      "hooks": [
+        "retired-return-order"
+      ],
+      "cuts": [],
+      "separator_boundaries": [
+        "type.RetAnn.retired-effect-comma"
+      ],
+      "recursion_families": [
+        "type"
+      ],
+      "diagnostic": {
+        "kind": "deliberate",
+        "action": "RetAnn `: ! {..} Type` =>? User(MIGRATE_RET_ORDER)"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "RetAnn",
+        "line": 773,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "diagnostics",
+        "result": "oracle/ret-retired-braced.syntax-diagnostics.json",
+        "tokens": "oracle/ret-retired-braced.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "type-args",
+      "source": "cases/type-args.pr",
+      "source_blake3": "0aaf4aef3dce84bc85065dd3dee67cab64f51d85242d340706ddeb98f3dd1750",
+      "slice": "type",
+      "wrapper": "type-arg",
+      "fragment": "List(Int), {io, Pkg.Io | e}, 3",
+      "fragment_span": [
+        21,
+        51
+      ],
+      "production": "TypeArg",
+      "alternative": "type-row-natural",
+      "helper_path": [
+        "CtorArgs",
+        "Comma<TypeArg>",
+        "TypeArg",
+        "EffLabel"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "V",
+        "A",
+        "S"
+      ],
+      "coverage_ids": [
+        "type.TypeArg.type",
+        "type.TypeArg.row",
+        "type.TypeArg.natural",
+        "type.Comma.TypeArg",
+        "type.EffLabel.ident",
+        "type.EffLabel.qual",
+        "type.Comma.EffLabel"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [
+        "type.CtorArgs.comma",
+        "type.TypeArg.row-comma-tail"
+      ],
+      "recursion_families": [
+        "type-arg"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted TypeArg actions"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "TypeArg",
+        "line": 529,
+        "fixture": "tests/fixtures/syntax/types.pr"
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/type-args.surface-syntax.json",
+        "tokens": "oracle/type-args.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "type-arrow-effect",
+      "source": "cases/type-arrow-effect.pr",
+      "source_blake3": "2ccb9f1cc577c47e458c15407c56aef98b8cb5574057da3165a5e310063bcf27",
+      "slice": "type",
+      "wrapper": "type-ann",
+      "fragment": "(Int) -> Int ! {Io}",
+      "fragment_span": [
+        14,
+        33
+      ],
+      "production": "Type",
+      "alternative": "function-effect-attach",
+      "helper_path": [
+        "Ann",
+        "Type",
+        "Arrow",
+        "ArrowEff",
+        "EffLabel"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "V",
+        "A"
+      ],
+      "coverage_ids": [
+        "type.Ann.type",
+        "type.Type.arrow",
+        "type.Type.effect-attach",
+        "type.Arrow.typed-domain",
+        "type.ArrowEff.row",
+        "type.EffLabel.uid"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [
+        "type.ArrowEff.comma"
+      ],
+      "recursion_families": [
+        "type",
+        "arrow"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted Type function-effect action"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "Type",
+        "line": 830,
+        "fixture": "tests/fixtures/syntax/types.pr"
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/type-arrow-effect.surface-syntax.json",
+        "tokens": "oracle/type-arrow-effect.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "type-dim-chain",
+      "source": "cases/type-dim-chain.pr",
+      "source_blake3": "a7a2261e4b36eca33906b13c8b8738015ac08c4272ed1c2488a89e8c6ad3361f",
+      "slice": "type",
+      "wrapper": "type-arg",
+      "fragment": "1 + n + 2",
+      "fragment_span": [
+        21,
+        30
+      ],
+      "production": "DimTail",
+      "alternative": "chain",
+      "helper_path": [
+        "CtorArgs",
+        "TypeArg",
+        "DimTerm",
+        "DimTail"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "F",
+        "B",
+        "A"
+      ],
+      "coverage_ids": [
+        "type.TypeArg.dimension-arithmetic",
+        "type.DimTerm.int",
+        "type.DimTail.chain"
+      ],
+      "hooks": [
+        "decline-dimension-arithmetic"
+      ],
+      "cuts": [],
+      "separator_boundaries": [],
+      "recursion_families": [],
+      "diagnostic": {
+        "kind": "deliberate",
+        "action": "TypeArg DimTerm `+` DimTail =>? User(DECLINE_DIM_ARITH)"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "DimTail",
+        "line": 563,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "diagnostics",
+        "result": "oracle/type-dim-chain.syntax-diagnostics.json",
+        "tokens": "oracle/type-dim-chain.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "type-dim-retired",
+      "source": "cases/type-dim-retired.pr",
+      "source_blake3": "a757759f198268e5da128b1f75a4ebc1bdaf8b8520bd7c526692fce204a8d437",
+      "slice": "type",
+      "wrapper": "type-arg",
+      "fragment": "n + 1",
+      "fragment_span": [
+        25,
+        30
+      ],
+      "production": "TypeArg",
+      "alternative": "dimension-arithmetic",
+      "helper_path": [
+        "CtorArgs",
+        "TypeArg",
+        "DimTerm",
+        "DimTail"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "F",
+        "A"
+      ],
+      "coverage_ids": [
+        "type.CtorArgs.list",
+        "type.Comma.TypeArg",
+        "type.TypeArg.dimension-arithmetic",
+        "type.DimTerm.ident",
+        "type.DimTail.term"
+      ],
+      "hooks": [
+        "decline-dimension-arithmetic"
+      ],
+      "cuts": [],
+      "separator_boundaries": [
+        "type.CtorArgs.comma"
+      ],
+      "recursion_families": [
+        "type-arg"
+      ],
+      "diagnostic": {
+        "kind": "deliberate",
+        "action": "TypeArg DimTerm `+` DimTail =>? User(DECLINE_DIM_ARITH)"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "TypeArg",
+        "line": 529,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "diagnostics",
+        "result": "oracle/type-dim-retired.syntax-diagnostics.json",
+        "tokens": "oracle/type-dim-retired.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "type-effect-misuse",
+      "source": "cases/type-effect-misuse.pr",
+      "source_blake3": "d8672c9cf0c514ccce4c692b9fe5de545fb3ed8c9db676c5e129d0a76ae187bb",
+      "slice": "type",
+      "wrapper": "type-ann",
+      "fragment": "Int ! {Io}",
+      "fragment_span": [
+        14,
+        24
+      ],
+      "production": "Type",
+      "alternative": "effect-misuse",
+      "helper_path": [
+        "Ann",
+        "Type",
+        "Arrow",
+        "ArrowEff",
+        "EffLabel"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "F",
+        "A"
+      ],
+      "coverage_ids": [
+        "type.Type.effect-misuse",
+        "type.ArrowEff.row",
+        "type.EffLabel.uid"
+      ],
+      "hooks": [
+        "type-effect-validation"
+      ],
+      "cuts": [],
+      "separator_boundaries": [
+        "type.ArrowEff.close"
+      ],
+      "recursion_families": [
+        "type"
+      ],
+      "diagnostic": {
+        "kind": "deliberate",
+        "action": "Type non-function plus ArrowEff =>? User"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "Type",
+        "line": 830,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "diagnostics",
+        "result": "oracle/type-effect-misuse.syntax-diagnostics.json",
+        "tokens": "oracle/type-effect-misuse.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "type-forall",
+      "source": "cases/type-forall.pr",
+      "source_blake3": "aef5a68bdf64f52a90a4e91a8700b21a20a1711dfc4c6164bccf1ed8f3f3c6e5",
+      "slice": "type",
+      "wrapper": "type-ann",
+      "fragment": "forall a. a",
+      "fragment_span": [
+        14,
+        25
+      ],
+      "production": "Type",
+      "alternative": "forall",
+      "helper_path": [
+        "Ann",
+        "Type",
+        "Arrow",
+        "UType",
+        "AType"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "V",
+        "B",
+        "A"
+      ],
+      "coverage_ids": [
+        "type.Ann.type",
+        "type.TypeSig.complete",
+        "type.Type.forall",
+        "type.Arrow.pass",
+        "type.UType.atomic",
+        "type.AType.name-ident-var"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [],
+      "recursion_families": [
+        "forall",
+        "type"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted Type::Forall action"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "Type",
+        "line": 830,
+        "fixture": "tests/fixtures/syntax/types.pr"
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/type-forall.surface-syntax.json",
+        "tokens": "oracle/type-forall.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "type-function-usage-misuse",
+      "source": "cases/type-function-usage-misuse.pr",
+      "source_blake3": "c3409c6e6b210430dd88ae1ba8337d629955ceb11b69310036eb189eeba1e6b7",
+      "slice": "type",
+      "wrapper": "type-ann",
+      "fragment": "(Int) -> Int ! {Io} @ once",
+      "fragment_span": [
+        14,
+        40
+      ],
+      "production": "Type",
+      "alternative": "function-usage-misuse",
+      "helper_path": [
+        "Ann",
+        "Type",
+        "Arrow",
+        "ArrowEff",
+        "CoeffRowParts"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "F",
+        "A"
+      ],
+      "coverage_ids": [
+        "type.Type.function-usage-misuse",
+        "type.Arrow.typed-domain",
+        "type.ArrowEff.row",
+        "type.CoeffRowParts.bare"
+      ],
+      "hooks": [
+        "function-usage-validation"
+      ],
+      "cuts": [],
+      "separator_boundaries": [],
+      "recursion_families": [
+        "type",
+        "arrow"
+      ],
+      "diagnostic": {
+        "kind": "deliberate",
+        "action": "Type Arrow ArrowEff `@` CoeffRowParts =>? User"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "Type",
+        "line": 830,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "diagnostics",
+        "result": "oracle/type-function-usage-misuse.syntax-diagnostics.json",
+        "tokens": "oracle/type-function-usage-misuse.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "type-kinds-alias",
+      "source": "cases/type-kinds-alias.pr",
+      "source_blake3": "f8e4eb55f2927de1126100349433585bb629ebe283db058982c90195de0dd991",
+      "slice": "type",
+      "wrapper": "decl",
+      "fragment": "type Corpus(a, e : Row) = Corpus(a)\nalias Pair(a, b) = (a, b)",
+      "fragment_span": [
+        0,
+        61
+      ],
+      "production": "KindedTyParams",
+      "alternative": "default-annotated-and-plain-alias-params",
+      "helper_path": [
+        "KindedTyParams",
+        "KindedTyParam",
+        "TyParams"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "V",
+        "B",
+        "A",
+        "S"
+      ],
+      "coverage_ids": [
+        "type.KindedTyParams.list",
+        "type.KindedTyParam.default",
+        "type.KindedTyParam.annotated",
+        "type.TyParams.list"
+      ],
+      "hooks": [
+        "kind-name-validation"
+      ],
+      "cuts": [],
+      "separator_boundaries": [
+        "type.KindedTyParams.comma",
+        "type.TyParams.comma"
+      ],
+      "recursion_families": [],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted kinded/plain type parameter actions"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "KindedTyParams",
+        "line": 487,
+        "fixture": "tests/fixtures/syntax/types.pr"
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/type-kinds-alias.surface-syntax.json",
+        "tokens": "oracle/type-kinds-alias.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "type-missing-close",
+      "source": "cases/type-missing-close.pr",
+      "source_blake3": "de36b4b7b2e50173d3bb6c095f6cbd61dcbfee3994582627d92b115112e3ed69",
+      "slice": "type",
+      "wrapper": "type-ann",
+      "fragment": "[Int)",
+      "fragment_span": [
+        14,
+        19
+      ],
+      "production": "AType",
+      "alternative": "list-wrong-closer",
+      "helper_path": [
+        "Ann",
+        "Type",
+        "Arrow",
+        "UType",
+        "AType"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "M",
+        "C"
+      ],
+      "coverage_ids": [
+        "type.Ann.type",
+        "type.AType.list"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [
+        "type.AType.list-close"
+      ],
+      "recursion_families": [
+        "type-list"
+      ],
+      "diagnostic": {
+        "kind": "generic",
+        "action": "AType list requires `]`"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "AType",
+        "line": 907,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "diagnostics",
+        "result": "oracle/type-missing-close.syntax-diagnostics.json",
+        "tokens": "oracle/type-missing-close.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "type-primitive-int",
+      "source": "cases/type-primitive-int.pr",
+      "source_blake3": "09fd8f00171d1cf4d88c53269bb17654b7b293a91678159e68eb5838afefad57",
+      "slice": "type",
+      "wrapper": "type-ann",
+      "fragment": "Int",
+      "fragment_span": [
+        14,
+        17
+      ],
+      "production": "TypeSig",
+      "alternative": "complete-primitive",
+      "helper_path": [
+        "Ann",
+        "Type",
+        "Arrow",
+        "UType",
+        "AType"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "V",
+        "B"
+      ],
+      "coverage_ids": [
+        "type.Ann.type",
+        "type.TypeSig.complete",
+        "type.Type.arrow",
+        "type.Arrow.pass",
+        "type.UType.atomic",
+        "type.AType.primitive.Int",
+        "type.Param.pattern",
+        "type.Param.type",
+        "type.RetAnn.absent"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [],
+      "recursion_families": [
+        "type"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted AType primitive action"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "TypeSig",
+        "line": 857,
+        "fixture": "tests/fixtures/syntax/types.pr"
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/type-primitive-int.surface-syntax.json",
+        "tokens": "oracle/type-primitive-int.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "type-primitives-params",
+      "source": "cases/type-primitives-params.pr",
+      "source_blake3": "44563c9675b58b09bdfaab9218a567cca8f10709c9406d9aee1a906253365eec",
+      "slice": "type",
+      "wrapper": "type-ann",
+      "fragment": "a : I64, b : U64, c : Unit, d : Float, e : Char, f : String, g : Int := 0",
+      "fragment_span": [
+        10,
+        83
+      ],
+      "production": "Param",
+      "alternative": "primitive-annotations-and-default",
+      "helper_path": [
+        "Param",
+        "Pattern",
+        "Ann",
+        "Type",
+        "AType"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "V",
+        "B",
+        "S",
+        "A"
+      ],
+      "coverage_ids": [
+        "type.AType.primitive.I64",
+        "type.AType.primitive.U64",
+        "type.AType.primitive.Unit",
+        "type.AType.primitive.Float",
+        "type.AType.primitive.Char",
+        "type.AType.primitive.String",
+        "type.Param.pattern",
+        "type.Param.type",
+        "type.Param.default",
+        "type.RetAnn.absent"
+      ],
+      "hooks": [
+        "param"
+      ],
+      "cuts": [],
+      "separator_boundaries": [
+        "type.Param.list-comma",
+        "type.Param.default-marker"
+      ],
+      "recursion_families": [
+        "type",
+        "expr"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted Param action"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "Param",
+        "line": 820,
+        "fixture": "tests/fixtures/syntax/types.pr"
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/type-primitives-params.surface-syntax.json",
+        "tokens": "oracle/type-primitives-params.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "type-ret-wrong-close",
+      "source": "cases/type-ret-wrong-close.pr",
+      "source_blake3": "ff95ba94f6f0cfe8c332a1b39459dd354a171a47546a4693c52eacbf0b4e2b17",
+      "slice": "type",
+      "wrapper": "ret-ann",
+      "fragment": ": ]",
+      "fragment_span": [
+        12,
+        15
+      ],
+      "production": "RetAnn",
+      "alternative": "wrong-type-start",
+      "helper_path": [
+        "RetAnn",
+        "RetType",
+        "Arrow",
+        "UType",
+        "AType"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "M",
+        "C",
+        "A"
+      ],
+      "coverage_ids": [
+        "type.RetAnn.present",
+        "type.RetType.arrow",
+        "type.RetType.forall"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [
+        "type.RetAnn.type-start"
+      ],
+      "recursion_families": [
+        "type"
+      ],
+      "diagnostic": {
+        "kind": "generic",
+        "action": "RetAnn colon selects RetType leading menu"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "RetAnn",
+        "line": 773,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "diagnostics",
+        "result": "oracle/type-ret-wrong-close.syntax-diagnostics.json",
+        "tokens": "oracle/type-ret-wrong-close.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "type-shapes",
+      "source": "cases/type-shapes.pr",
+      "source_blake3": "4b0696b97458edb95cb6b7d212bc3616233654b914d4ca8a95c0f9038f5e91bb",
+      "slice": "type",
+      "wrapper": "type-ann",
+      "fragment": "a : f(Int), b : Maybe, c : Pkg.T, d : (Int), e : #(Int, Bool), f : () -> Int !, g : () -> Int ! {io, Pkg.Io}, h : Int @ {once, portable}",
+      "fragment_span": [
+        10,
+        146
+      ],
+      "production": "AType",
+      "alternative": "remaining-shape-matrix",
+      "helper_path": [
+        "Param",
+        "Ann",
+        "Type",
+        "Arrow",
+        "ArrowEff",
+        "UType",
+        "CoeffRowParts",
+        "AType",
+        "EffLabel"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "V",
+        "B",
+        "A",
+        "S"
+      ],
+      "coverage_ids": [
+        "type.AType.name-ident-app",
+        "type.AType.name-uid",
+        "type.AType.name-qual",
+        "type.AType.paren",
+        "type.AType.unboxed-tuple",
+        "type.Arrow.empty-domain",
+        "type.ArrowEff.bare",
+        "type.CoeffRowParts.row",
+        "type.Comma.EffLabel",
+        "type.EffLabel.ident",
+        "type.EffLabel.qual",
+        "type.Param.pattern",
+        "type.Param.type"
+      ],
+      "hooks": [
+        "usage-row-validation"
+      ],
+      "cuts": [],
+      "separator_boundaries": [
+        "type.ArrowEff.comma",
+        "type.CoeffRowParts.comma",
+        "type.Param.list-comma"
+      ],
+      "recursion_families": [
+        "type",
+        "arrow"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted AType/Arrow/UType shape actions"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "AType",
+        "line": 907,
+        "fixture": "tests/fixtures/syntax/types.pr"
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/type-shapes.surface-syntax.json",
+        "tokens": "oracle/type-shapes.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "type-tuple",
+      "source": "cases/type-tuple.pr",
+      "source_blake3": "ae76a53483c902439232b1daf99908c6d8a94d775c1df0313999375b1e7d98ba",
+      "slice": "type",
+      "wrapper": "type-ann",
+      "fragment": "(Int, Bool)",
+      "fragment_span": [
+        14,
+        25
+      ],
+      "production": "AType",
+      "alternative": "tuple",
+      "helper_path": [
+        "Ann",
+        "Type",
+        "Arrow",
+        "UType",
+        "AType",
+        "Comma<Type>"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "V",
+        "S",
+        "A"
+      ],
+      "coverage_ids": [
+        "type.Ann.type",
+        "type.AType.tuple",
+        "type.Comma.Type",
+        "type.AType.primitive.Int",
+        "type.AType.primitive.Bool"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [
+        "type.AType.tuple-comma"
+      ],
+      "recursion_families": [
+        "type-tuple"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted AType tuple action"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "AType",
+        "line": 907,
+        "fixture": "tests/fixtures/syntax/types.pr"
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/type-tuple.surface-syntax.json",
+        "tokens": "oracle/type-tuple.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "type-unboxed-record",
+      "source": "cases/type-unboxed-record.pr",
+      "source_blake3": "7c3b5f51cc181c3c6db376af16450f3c2066f4e262d961e26a6f1ec4aa9cff00",
+      "slice": "type",
+      "wrapper": "type-ann",
+      "fragment": "#{x : Int}",
+      "fragment_span": [
+        14,
+        24
+      ],
+      "production": "AType",
+      "alternative": "unboxed-record",
+      "helper_path": [
+        "Ann",
+        "Type",
+        "Arrow",
+        "UType",
+        "AType",
+        "RecordField"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "V",
+        "A"
+      ],
+      "coverage_ids": [
+        "type.Ann.type",
+        "type.AType.unboxed-record",
+        "type.RecordField.named",
+        "type.Comma.RecordField",
+        "type.AType.primitive.Int"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [
+        "type.AType.record-comma"
+      ],
+      "recursion_families": [
+        "type-record"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted unboxed-record action"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "AType",
+        "line": 907,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/type-unboxed-record.surface-syntax.json",
+        "tokens": "oracle/type-unboxed-record.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "type-usage",
+      "source": "cases/type-usage.pr",
+      "source_blake3": "7fff1bd832943cde268457ee87ae9c239215cbfb17ed2577a97675acd26767ac",
+      "slice": "type",
+      "wrapper": "type-ann",
+      "fragment": "Int @ once",
+      "fragment_span": [
+        14,
+        24
+      ],
+      "production": "UType",
+      "alternative": "usage-bare",
+      "helper_path": [
+        "Ann",
+        "Type",
+        "Arrow",
+        "UType",
+        "CoeffRowParts"
+      ],
+      "accounting_family": "types",
+      "classes": [
+        "V",
+        "B",
+        "A"
+      ],
+      "coverage_ids": [
+        "type.Ann.type",
+        "type.UType.usage",
+        "type.CoeffRowParts.bare",
+        "type.AType.primitive.Int"
+      ],
+      "hooks": [
+        "usage-row-validation"
+      ],
+      "cuts": [],
+      "separator_boundaries": [],
+      "recursion_families": [
+        "type"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted CoeffectRow::new validation"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "UType",
+        "line": 879,
+        "fixture": "tests/fixtures/syntax/types.pr"
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/type-usage.surface-syntax.json",
+        "tokens": "oracle/type-usage.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "vert-expr-spine",
+      "source": "cases/vert-expr-spine.pr",
+      "source_blake3": "35e4be2ed50a0e7a06c18acc1ca39521e896e3f330958d91b6b3f62113445af5",
+      "slice": "vertical-expression",
+      "wrapper": "expr",
+      "fragment": "f(1)?.value + g(2) * 3 ^ 4",
+      "fragment_span": [
+        24,
+        50
+      ],
+      "production": "Add",
+      "alternative": "mixed-postfix-infix-spine",
+      "helper_path": [
+        "Expr",
+        "Add",
+        "Mul",
+        "Pow",
+        "Call",
+        "CallTight",
+        "Atom"
+      ],
+      "accounting_family": "exprs",
+      "classes": [
+        "V",
+        "A"
+      ],
+      "coverage_ids": [
+        "vertical.Atom.ident",
+        "vertical.Atom.int",
+        "vertical.CallTight.call",
+        "vertical.Call.opt-chain",
+        "vertical.Call.field",
+        "vertical.Call.try",
+        "vertical.Add.plus",
+        "vertical.Mul.star",
+        "vertical.Pow.caret"
+      ],
+      "hooks": [
+        "try_mark"
+      ],
+      "cuts": [],
+      "separator_boundaries": [
+        "vertical.CallTight.args-comma"
+      ],
+      "recursion_families": [
+        "expr",
+        "pratt-pow"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted expression actions"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "Add",
+        "line": 1260,
+        "fixture": "tests/fixtures/syntax/exprs.pr"
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/vert-expr-spine.surface-syntax.json",
+        "tokens": "oracle/vert-expr-spine.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "vert-mods-invalid",
+      "source": "cases/vert-mods-invalid.pr",
+      "source_blake3": "f7bf7e6c303612a6f84e7aa91a95a0644c93dfaf3656b2fe580dc323a71551a1",
+      "slice": "vertical-declaration",
+      "wrapper": "decl",
+      "fragment": "assume fn",
+      "fragment_span": [
+        0,
+        9
+      ],
+      "production": "DeclMods",
+      "alternative": "invalid-assume",
+      "helper_path": [
+        "Item",
+        "Fn",
+        "DeclMods",
+        "decl_mods"
+      ],
+      "accounting_family": "decls",
+      "classes": [
+        "M",
+        "A",
+        "F"
+      ],
+      "coverage_ids": [
+        "vertical.Item.fn",
+        "vertical.decl.fn-prefix.commit"
+      ],
+      "hooks": [
+        "decl_mods"
+      ],
+      "cuts": [
+        "N/A: frozen Rust has no explicit runtime cut"
+      ],
+      "separator_boundaries": [],
+      "recursion_families": [],
+      "diagnostic": {
+        "kind": "deliberate",
+        "action": "DeclMods one-ident =>? decl_mods User"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "DeclMods",
+        "line": 649,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "diagnostics",
+        "result": "oracle/vert-mods-invalid.syntax-diagnostics.json",
+        "tokens": "oracle/vert-mods-invalid.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "vert-mods-long",
+      "source": "cases/vert-mods-long.pr",
+      "source_blake3": "ef16c7db90c35f1fe1a8048096cacbf0043a789302afea58cb6433084398f7e6",
+      "slice": "vertical-declaration",
+      "wrapper": "decl",
+      "fragment": "test assume total replayable fn",
+      "fragment_span": [
+        0,
+        31
+      ],
+      "production": "Fn",
+      "alternative": "long-contextual-prefix",
+      "helper_path": [
+        "Item",
+        "Fn",
+        "DeclMods",
+        "FipKw"
+      ],
+      "accounting_family": "decls",
+      "classes": [
+        "V",
+        "B",
+        "A"
+      ],
+      "coverage_ids": [
+        "vertical.Item.fn",
+        "vertical.DeclMods.test-assume-total",
+        "vertical.FipKw.empty",
+        "vertical.decl.fn-prefix.commit"
+      ],
+      "hooks": [
+        "decl_mods"
+      ],
+      "cuts": [
+        "N/A: frozen Rust has no explicit runtime cut"
+      ],
+      "separator_boundaries": [],
+      "recursion_families": [],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted Fn prefix actions"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "Fn",
+        "line": 633,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/vert-mods-long.surface-syntax.json",
+        "tokens": "oracle/vert-mods-long.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "vert-open-if",
+      "source": "cases/vert-open-if.pr",
+      "source_blake3": "6604ed563d03dafd3f88333113a7c4ff73ca81f6ee7f2a5d25f7d9c9cccfc62e",
+      "slice": "vertical-layout",
+      "wrapper": "block",
+      "fragment": "if x > 0 then\n    x + 1\n  elif x < 0 then\n    x - 1\n  x",
+      "fragment_span": [
+        17,
+        72
+      ],
+      "production": "Stmts",
+      "alternative": "open-if-elif-rest",
+      "helper_path": [
+        "BlockExpr",
+        "Stmts",
+        "OpenIfTail",
+        "open_if"
+      ],
+      "accounting_family": "exprs",
+      "classes": [
+        "V",
+        "A",
+        "S"
+      ],
+      "coverage_ids": [
+        "vertical.BlockExpr.virtual",
+        "vertical.Stmts.open-if",
+        "vertical.OpenIfTail.elif",
+        "vertical.OpenIfTail.rest",
+        "vertical.Stmts.expr",
+        "vertical.Add.plus"
+      ],
+      "hooks": [
+        "open_if"
+      ],
+      "cuts": [],
+      "separator_boundaries": [
+        "vertical.OpenIfTail.virtual-semi"
+      ],
+      "recursion_families": [
+        "open-if",
+        "expr"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted open_if action"
+      },
+      "layout": true,
+      "provenance": {
+        "production": "OpenIfTail",
+        "line": 1013,
+        "fixture": "tests/fixtures/syntax/exprs.pr"
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/vert-open-if.surface-syntax.json",
+        "tokens": "oracle/vert-open-if.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "vert-try-bare",
+      "source": "cases/vert-try-bare.pr",
+      "source_blake3": "d4b1683b0eef7d7154902f61ea2e6612e427b60d2f7f721b48425818ce39d7ce",
+      "slice": "vertical-hook",
+      "wrapper": "block",
+      "fragment": "r?\n  ()",
+      "fragment_span": [
+        17,
+        24
+      ],
+      "production": "Stmts",
+      "alternative": "expr-seq-try",
+      "helper_path": [
+        "BlockExpr",
+        "Stmts",
+        "Call",
+        "try_mark",
+        "seq_stmt",
+        "try_stmt"
+      ],
+      "accounting_family": "exprs",
+      "classes": [
+        "V",
+        "A",
+        "S"
+      ],
+      "coverage_ids": [
+        "vertical.BlockExpr.virtual",
+        "vertical.Call.try",
+        "vertical.Stmts.expr-seq",
+        "vertical.hook.try_mark",
+        "vertical.hook.seq_stmt",
+        "vertical.hook.try_stmt",
+        "vertical.Atom.paren"
+      ],
+      "hooks": [
+        "try_mark",
+        "seq_stmt",
+        "try_stmt"
+      ],
+      "cuts": [],
+      "separator_boundaries": [
+        "vertical.Stmts.virtual-semi"
+      ],
+      "recursion_families": [
+        "expr"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted statement-try synthesis"
+      },
+      "layout": true,
+      "provenance": {
+        "production": "Stmts",
+        "line": 731,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/vert-try-bare.surface-syntax.json",
+        "tokens": "oracle/vert-try-bare.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "vert-try-bound",
+      "source": "cases/vert-try-bound.pr",
+      "source_blake3": "1f25221b494122f833e84f6be9197577a503e094dc73f8c1f65aa80ea66344a4",
+      "slice": "vertical-hook",
+      "wrapper": "block",
+      "fragment": "let x = r?\n  x",
+      "fragment_span": [
+        17,
+        31
+      ],
+      "production": "Stmts",
+      "alternative": "let-ident-try",
+      "helper_path": [
+        "BlockExpr",
+        "Stmts",
+        "Call",
+        "try_mark",
+        "let_stmt",
+        "try_stmt"
+      ],
+      "accounting_family": "exprs",
+      "classes": [
+        "V",
+        "A",
+        "S"
+      ],
+      "coverage_ids": [
+        "vertical.BlockExpr.virtual",
+        "vertical.Call.try",
+        "vertical.Stmts.let-ident",
+        "vertical.hook.try_mark",
+        "vertical.hook.let_stmt",
+        "vertical.hook.try_stmt",
+        "vertical.Atom.ident"
+      ],
+      "hooks": [
+        "try_mark",
+        "let_stmt",
+        "try_stmt"
+      ],
+      "cuts": [],
+      "separator_boundaries": [
+        "vertical.Stmts.virtual-semi"
+      ],
+      "recursion_families": [
+        "expr"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted bound statement-try synthesis"
+      },
+      "layout": true,
+      "provenance": {
+        "production": "Stmts",
+        "line": 731,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/vert-try-bound.surface-syntax.json",
+        "tokens": "oracle/vert-try-bound.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "vertical-closed-if",
+      "source": "cases/vertical-closed-if.pr",
+      "source_blake3": "b36bc453702811f4297ceddd1dcb2bd56198e83609841d52e607b29a987653b8",
+      "slice": "vertical-layout",
+      "wrapper": "expr",
+      "fragment": "if x then 1 else 0",
+      "fragment_span": [
+        15,
+        33
+      ],
+      "production": "IfElse",
+      "alternative": "closed-else",
+      "helper_path": [
+        "Expr",
+        "IfElse"
+      ],
+      "accounting_family": "exprs",
+      "classes": [
+        "V",
+        "A"
+      ],
+      "coverage_ids": [
+        "vertical.IfElse.else",
+        "vertical.Atom.ident",
+        "vertical.Atom.int"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [],
+      "recursion_families": [
+        "expr"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted closed IfElse action"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "IfElse",
+        "line": 1007,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/vertical-closed-if.surface-syntax.json",
+        "tokens": "oracle/vertical-closed-if.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "vertical-index-neg",
+      "source": "cases/vertical-index-neg.pr",
+      "source_blake3": "cb6f4c79eaa0a03e0e7ee766d86fb32c2775e3387b44bdb9f6559e17bbed6267",
+      "slice": "vertical-expression",
+      "wrapper": "expr",
+      "fragment": "-x[i]",
+      "fragment_span": [
+        18,
+        23
+      ],
+      "production": "Neg",
+      "alternative": "prefix-minus-index",
+      "helper_path": [
+        "Expr",
+        "Neg",
+        "Pow",
+        "Call",
+        "CallTight",
+        "Atom"
+      ],
+      "accounting_family": "exprs",
+      "classes": [
+        "V",
+        "A"
+      ],
+      "coverage_ids": [
+        "vertical.Neg.prefix-minus",
+        "vertical.Call.index",
+        "vertical.Atom.ident"
+      ],
+      "hooks": [],
+      "cuts": [],
+      "separator_boundaries": [
+        "vertical.Call.index-close"
+      ],
+      "recursion_families": [
+        "expr"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted Neg and CallTight index actions"
+      },
+      "layout": false,
+      "provenance": {
+        "production": "Neg",
+        "line": 1294,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/vertical-index-neg.surface-syntax.json",
+        "tokens": "oracle/vertical-index-neg.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "vertical-modifiers",
+      "source": "cases/vertical-modifiers.pr",
+      "source_blake3": "bfec63e2733283246f353ca1b6f23fb4af41c91f040173a6c89df4be14336790",
+      "slice": "vertical-declaration",
+      "wrapper": "decl",
+      "fragment": "fn plain(x) = x\ntest fn tested(x) = x\ntotal fn tot(x) = x\nassume total fn trusted(x) = x\ntest total fn tested_total(x) = x\nfip fn inplace(x) = x\nfbip fn borrowed(x) = x",
+      "fragment_span": [
+        0,
+        168
+      ],
+      "production": "DeclMods",
+      "alternative": "remaining-valid-modifier-matrix",
+      "helper_path": [
+        "Item",
+        "Fn",
+        "DeclMods",
+        "FipKw"
+      ],
+      "accounting_family": "decls",
+      "classes": [
+        "V",
+        "B",
+        "A"
+      ],
+      "coverage_ids": [
+        "vertical.Item.fn",
+        "vertical.DeclMods.empty",
+        "vertical.DeclMods.test",
+        "vertical.DeclMods.total",
+        "vertical.DeclMods.assume-total",
+        "vertical.DeclMods.test-total",
+        "vertical.FipKw.empty",
+        "vertical.FipKw.fip",
+        "vertical.FipKw.fbip",
+        "vertical.decl.fn-prefix.commit"
+      ],
+      "hooks": [
+        "decl_mods"
+      ],
+      "cuts": [
+        "N/A: frozen Rust has no explicit runtime cut"
+      ],
+      "separator_boundaries": [
+        "vertical.Item.virtual-semi"
+      ],
+      "recursion_families": [],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted DeclMods/FipKw actions"
+      },
+      "layout": true,
+      "provenance": {
+        "production": "DeclMods",
+        "line": 649,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/vertical-modifiers.surface-syntax.json",
+        "tokens": "oracle/vertical-modifiers.syntax-tokens.json"
+      }
+    },
+    {
+      "id": "vertical-open-end",
+      "source": "cases/vertical-open-end.pr",
+      "source_blake3": "3bfa4aabc5be447b6ca15f1c404ae314947c34c75c746c88a36415b792d7c922",
+      "slice": "vertical-layout",
+      "wrapper": "block",
+      "fragment": "if x then\n    x",
+      "fragment_span": [
+        17,
+        32
+      ],
+      "production": "OpenIfTail",
+      "alternative": "end",
+      "helper_path": [
+        "BlockExpr",
+        "Stmts",
+        "OpenIfTail",
+        "open_if"
+      ],
+      "accounting_family": "exprs",
+      "classes": [
+        "V",
+        "B"
+      ],
+      "coverage_ids": [
+        "vertical.BlockExpr.virtual",
+        "vertical.Stmts.open-if",
+        "vertical.OpenIfTail.end",
+        "vertical.Atom.ident"
+      ],
+      "hooks": [
+        "open_if"
+      ],
+      "cuts": [],
+      "separator_boundaries": [
+        "vertical.BlockExpr.virtual-close"
+      ],
+      "recursion_families": [
+        "open-if",
+        "expr"
+      ],
+      "diagnostic": {
+        "kind": "N/A",
+        "action": "accepted OpenIfTail epsilon action"
+      },
+      "layout": true,
+      "provenance": {
+        "production": "OpenIfTail",
+        "line": 1013,
+        "fixture": null
+      },
+      "handwritten": {
+        "status": "unmeasured",
+        "exception_key": null
+      },
+      "artifacts": {
+        "result_kind": "surface",
+        "result": "oracle/vertical-open-end.surface-syntax.json",
+        "tokens": "oracle/vertical-open-end.syntax-tokens.json"
+      }
+    }
+  ]
+}

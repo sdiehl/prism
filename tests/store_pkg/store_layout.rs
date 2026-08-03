@@ -5,6 +5,7 @@
 use std::fs;
 use std::path::Path;
 
+use prism::core::HASH_SCHEME;
 use prism::store::disk::{
     resolve_store_path, CanonicalKey, DefMeta, Store, StoreHash, VerifiedRecord, Written,
 };
@@ -215,7 +216,7 @@ fn canonical_and_verified_reserved_layers_round_trip() {
 
     let rec = VerifiedRecord {
         kind: "parity".into(),
-        scheme: "prism-core-hash-v1".into(),
+        scheme: HASH_SCHEME.into(),
         identity: "compiler=unit-test;target=test;backend=llvm;".into(),
         passed: true,
     };

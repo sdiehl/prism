@@ -1,0 +1,14 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/reflect.pr
+---
+-- A colour of the traffic light.
+type Light = Red | Amber | Green
+-- Twice its argument.
+fn double(x : Int) : Int = x * 2
+fn main() =
+  println(reflect type Light)
+  println(reflect fn double)
+  println(reflect fn main)
+=> ()

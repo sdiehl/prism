@@ -1,0 +1,2356 @@
+-- | The Prism-owned expression parser.
+--
+-- The ordinary productions below are direct recursive descent.  Only the
+-- prefix/infix tower is a Pratt loop, with binding powers selected directly
+-- from `TokenKind`; it does not allocate an operator table or pass parsing
+-- callbacks through the generic `Syntax.Cursor.Pratt` API.
+
+import Data.Foldable (length)
+
+import Data.List (append, map, reverse)
+
+import Data.Maybe (..)
+
+import Data.String (ends_with, split)
+
+import Syntax.Source (..)
+
+import Syntax.Token (..)
+
+import Syntax.Cursor (..)
+
+import Syntax.Ast (..)
+
+import Syntax.Parse.Support (..)
+
+import Syntax.Parse.Build (..)
+
+import Syntax.Parse.Type (parse_type)
+
+import Syntax.Parse.Pattern (parse_pattern, parse_let_pattern)
+
+-- A fixed, compiler-owned binding description. `tag` distinguishes the few
+-- low-precedence forms whose AST node is not `EBin`.
+type Binding = Binding {
+  op: String,
+  left: Int,
+  right: Int,
+  compare: Bool,
+  tag: Int
+}
+
+type IfBranch = IfBranch { expr: Sp(Expr), open: Bool }
+
+fn fixed_at(c : Cursor, ahead : Int, s : String) : Bool =
+  match cursor_peek_at(c, ahead) of
+    None => false
+    Some(t) => t.kind == TFixed(s)
+
+fn kind_at(c : Cursor, ahead : Int, k : TokenKind) : Bool =
+  match cursor_peek_at(c, ahead) of
+    None => false
+    Some(t) => t.kind == k
+
+fn made(saved : Cursor, c : Cursor, node : Expr) : Sp(Expr) =
+  let s = cursor_since(saved, c)
+  authored(node, s.lo, s.hi)
+
+fn remade(saved : Cursor, c : Cursor, node : Expr) : Sp(Expr) =
+  let s = cursor_since(saved, c)
+  synthesized(node, s.lo, s.hi)
+
+fn fail_at(c : Cursor, message : String) : Parsed(a) =
+  PFault(refuse(cursor_span(c), message))
+
+fn fail_run(saved : Cursor, c : Cursor, message : String) : Parsed(a) =
+  PFault(refuse(cursor_since(saved, c), message))
+
+fn note_expr(c : Cursor) : Cursor =
+  let c1 = cursor_note(c, TIdent)
+  let c2 = cursor_note(c1, TUid)
+  let c3 = cursor_note(c2, TQual)
+  let c4 = cursor_note(c3, TInt)
+  let c5 = cursor_note(c4, TFloat)
+  let c6 = cursor_note(c5, TChar)
+  let c7 = cursor_note(c6, TStr)
+  let c8 = cursor_note(c7, TFixed("("))
+  let c9 = cursor_note(c8, TFixed("["))
+  cursor_note(c9, TFixed("if"))
+
+fn split_int(raw : String) : (String, Suffix) =
+  let n = byte_len(raw)
+  if ends_with("i64", raw) then
+    (surface_int(substring(raw, 0, n - 3)), SufI64)
+  elif ends_with("u64", raw) then
+    (surface_int(substring(raw, 0, n - 3)), SufU64)
+  else
+    (surface_int(raw), SufNone)
+
+-- Binding powers are doubled in spirit but written out: left associative
+-- operators raise the right floor; `??` and `^` keep it level. Unary minus
+-- parses at 16, between multiplication and power, giving both `-x ^ y` and
+-- `x ^ -y` the mathematical grouping used by the Rust grammar.
+fn infix_binding(k : TokenKind) : Option(Binding) =
+  match k of
+    TFixed(s) =>
+      if s == "??" then
+        Some(Binding { op = s, left = 1, right = 1, compare = false, tag = 1 })
+      elif s == "|>" then
+        Some(Binding { op = s, left = 2, right = 3, compare = false, tag = 2 })
+      elif s == ">>" then
+        Some(Binding { op = s, left = 4, right = 5, compare = false, tag = 3 })
+      elif s == "<<" then
+        Some(Binding { op = s, left = 4, right = 5, compare = false, tag = 4 })
+      elif s == "||" then
+        Some(Binding { op = s, left = 6, right = 7, compare = false, tag = 0 })
+      elif s == "&&" then
+        Some(Binding { op = s, left = 8, right = 9, compare = false, tag = 0 })
+      elif (s == "==" || s == "/=" || s == "<" || s == "<=" || s == ">" || s == ">=") then
+        Some(Binding { op = s, left = 10, right = 11, compare = true, tag = 0 })
+      elif s == "+" || s == "-" then
+        Some(
+            Binding {
+              op = s,
+              left = 12,
+              right = 13,
+              compare = false,
+              tag = 0
+            },
+          )
+      elif s == "*" || s == "/" || s == "%" then
+        Some(
+            Binding {
+              op = s,
+              left = 14,
+              right = 15,
+              compare = false,
+              tag = 0
+            },
+          )
+      elif s == "^" then
+        Some(
+            Binding {
+              op = s,
+              left = 17,
+              right = 16,
+              compare = false,
+              tag = 0
+            },
+          )
+      else
+        None
+    _ => None
+
+fn retired_dot(k : TokenKind) : Option(String) =
+  match k of
+    TFixed(s) =>
+      if s == "==." then
+        Some("the float dot-operator `==.` was removed: write `==`")
+      elif s == "/=." then
+        Some("the float dot-operator `/=.` was removed: write `/=`")
+      elif s == "<." then
+        Some("the float dot-operator `<.` was removed: write `<`")
+      elif s == "<=." then
+        Some("the float dot-operator `<=.` was removed: write `<=`")
+      elif s == ">." then
+        Some("the float dot-operator `>.` was removed: write `>`")
+      elif s == ">=." then
+        Some("the float dot-operator `>=.` was removed: write `>=`")
+      elif s == "+." then
+        Some("the float dot-operator `+.` was removed: write `+`")
+      elif s == "-." then
+        Some("the float dot-operator `-.` was removed: write `-`")
+      elif s == "*." then
+        Some("the float dot-operator `*.` was removed: write `*`")
+      elif s == "/." then
+        Some("the float dot-operator `/.` was removed: write `/`")
+      else
+        None
+    _ => None
+
+fn infix_node(b : Binding, lhs : Sp(Expr), rhs : Sp(Expr)) : Expr =
+  if b.tag == 1 then
+    EDefault(lhs, rhs)
+  elif b.tag == 2 then
+    EPipe(lhs, rhs)
+  elif b.tag == 3 then
+    ECompose("forward", lhs, rhs)
+  elif b.tag == 4 then
+    ECompose("backward", lhs, rhs)
+  else
+    EBin(b.op, lhs, rhs)
+
+fn parse_bp(c : Cursor, depth : Int, min_bp : Int) : Parsed(Sp(Expr)) =
+  match descend(depth, c) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(d, _) =>
+      match parse_prefix(c, d) of
+        PStuck(c1) => PStuck(c1)
+        PFault(diag) => PFault(diag)
+        PTook(lhs, c1) => parse_infix_loop(lhs, c1, d, min_bp, false)
+
+fn parse_prefix(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  if at_fixed(c, "-") then
+    let saved = c
+    let c1 = cursor_advance(c)
+    match parse_bp(c1, depth, 16) of
+      PStuck(c2) => PStuck(c2)
+      PFault(d) => PFault(d)
+      PTook(e, c2) => PTook(made(saved, c2, ENeg(e)), c2)
+  else
+    parse_postfix(c, depth)
+
+fn parse_infix_loop(
+  lhs : Sp(Expr),
+  c : Cursor,
+  depth : Int,
+  min_bp : Int,
+  blocked_compare : Bool
+) : Parsed(Sp(Expr)) =
+  match cursor_kind(c) of
+    None => PTook(lhs, c)
+    Some(k) =>
+      match retired_dot(k) of
+        Some(msg) => fail_at(c, msg)
+        None =>
+          match infix_binding(k) of
+            None => PTook(lhs, c)
+            Some(b) =>
+              if b.left < min_bp || b.compare && blocked_compare then
+                PTook(lhs, c)
+              else
+                let saved = c
+                let c1 = cursor_advance(c)
+                match parse_bp(c1, depth, b.right) of
+                  PStuck(c2) => PStuck(c2)
+                  PFault(d) => PFault(d)
+                  PTook(rhs, c2) =>
+                    let s = operands_span(lhs, rhs)
+                    let next = authored(infix_node(b, lhs, rhs), s.lo, s.hi)
+                    parse_infix_loop(next, c2, depth, min_bp, b.compare)
+
+-- -------------------------------------------------------------------------
+-- Atoms and postfix
+-- -------------------------------------------------------------------------
+
+fn parse_postfix(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  match parse_atom(c, depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(e, c1) => parse_postfix_loop(e, c1, depth)
+
+fn parse_postfix_loop(
+  recv : Sp(Expr),
+  c : Cursor,
+  depth : Int
+) : Parsed(Sp(Expr)) =
+  if at_fixed(c, "(") then
+    parse_call_tail(recv, c, depth)
+  elif at_fixed(c, "[") then
+    parse_index_tail(recv, c, depth)
+  elif at_fixed(c, ".") then
+    parse_dot_tail(recv, c, depth)
+  elif at_fixed(c, "?.") then
+    let saved = c
+    match take_word(cursor_advance(c), TIdent) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(name, c1) =>
+        let whole = authored(
+            EOptChain(recv, name),
+            recv.span.lo,
+            cursor_since(saved, c1).hi,
+          )
+        parse_postfix_loop(whole, c1, depth)
+  elif at_fixed(c, "?") then
+    let c1 = cursor_advance(c)
+    let marker = zero_width(EMarker("try"), recv.span.lo)
+    let whole =
+      authored(ECall(marker, [recv]), recv.span.lo, cursor_since(c, c1).hi)
+    parse_postfix_loop(whole, c1, depth)
+  else
+    PTook(recv, c)
+
+-- A trailing block argument uses the whole call's span for both the lambda and
+-- the enclosing call.  That is the surface contract the formatter keys on:
+-- `f(args) fn(params) { body }` is one authored call whose final argument is an
+-- authored lambda, unlike the synthesized lambda used by a `with` statement.
+fn parse_trailing_lambda(c : Cursor, lo : Int, depth : Int) : Parsed(Sp(Expr)) =
+  let c1 = cursor_advance(c)
+  match parse_trailer_params(c1, depth) of
+    PStuck(c2) => PStuck(c2)
+    PFault(d) => PFault(d)
+    PTook(params, c2) =>
+      match parse_block(c2, depth) of
+        PStuck(c3) => PStuck(c3)
+        PFault(d) => PFault(d)
+        PTook(body, c3) =>
+          PTook(authored(ELam(params, body), lo, body.span.hi), c3)
+
+fn parse_trailer_params(c : Cursor, depth : Int) : Parsed(List(Param)) =
+  if at_fixed(c, "(") then
+    match parse_param(cursor_advance(c), depth, 0) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(first, c1) => parse_trailer_param_rest(c1, depth, 1, [first])
+  else
+    PTook(Nil, c)
+
+fn parse_trailer_param_rest(
+  c : Cursor,
+  depth : Int,
+  index : Int,
+  acc : List(Param)
+) : Parsed(List(Param)) =
+  if at_fixed(c, ",") then
+    match parse_param(cursor_advance(c), depth, index) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(param, c1) =>
+        parse_trailer_param_rest(c1, depth, index + 1, append(acc, [param]))
+  else
+    match take_fixed(c, ")") of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(_, c1) => PTook(acc, c1)
+
+fn parse_call_tail(
+  callee : Sp(Expr),
+  c : Cursor,
+  depth : Int
+) : Parsed(Sp(Expr)) =
+  let saved = c
+  let c1 = cursor_advance(c)
+  match parse_call_args(c1, depth, Nil) of
+    PStuck(c2) => PStuck(c2)
+    PFault(d) => PFault(d)
+    PTook(pair, c2) =>
+      match pair of
+        (args, inst) =>
+          match take_fixed(c2, ")") of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(_, c3) =>
+              let hi = cursor_since(saved, c3).hi
+              match inst of
+                None =>
+                  if at_fixed(c3, "fn") then
+                    match (parse_trailing_lambda(c3, callee.span.lo, depth)) of
+                      PStuck(c4) => PStuck(c4)
+                      PFault(d) => PFault(d)
+                      PTook(lam, c4) =>
+                        let call = authored(
+                            ECall(callee, append(args, [lam])),
+                            callee.span.lo,
+                            lam.span.hi,
+                          )
+                        parse_postfix_loop(call, c4, depth)
+                  else
+                    let call = authored(ECall(callee, args), callee.span.lo, hi)
+                    parse_postfix_loop(call, c3, depth)
+                Some(names) =>
+                  let head = authored(EInst(callee, names), callee.span.lo, hi)
+                  let call = authored(ECall(head, args), callee.span.lo, hi)
+                  parse_postfix_loop(call, c3, depth)
+
+fn parse_call_args(
+  c : Cursor,
+  depth : Int,
+  rev : List(Sp(Expr))
+) : Parsed((List(Sp(Expr)), Option(List(String)))) =
+  if at_fixed(c, ")") then
+    PTook((reverse(rev), None), c)
+  elif at_fixed(c, "using") then
+    match parse_using(cursor_advance(c), Nil) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(names, c1) => PTook((reverse(rev), Some(names)), c1)
+  else
+    match parse_expr(c, depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(e, c1) =>
+        if at_fixed(c1, ",") then
+          let c2 = cursor_advance(c1)
+          if at_fixed(c2, "using") then
+            match parse_using(cursor_advance(c2), Nil) of
+              PStuck(c3) => PStuck(c3)
+              PFault(d) => PFault(d)
+              PTook(names, c3) =>
+                PTook((reverse(Cons(e, rev)), Some(names)), c3)
+          elif at_fixed(c2, ")") then
+            PTook((reverse(Cons(e, rev)), None), c2)
+          else
+            parse_call_args(c2, depth, Cons(e, rev))
+        else
+          PTook((reverse(Cons(e, rev)), None), c1)
+
+fn parse_using(c : Cursor, rev : List(String)) : Parsed(List(String)) =
+  match take_word(c, TIdent) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(name, c1) =>
+      if at_fixed(c1, ",") then
+        let c2 = cursor_advance(c1)
+        if at_fixed(c2, ")") then
+          PTook(reverse(Cons(name, rev)), c2)
+        else
+          parse_using(c2, Cons(name, rev))
+      else
+        PTook(reverse(Cons(name, rev)), c1)
+
+fn parse_index_tail(
+  recv : Sp(Expr),
+  c : Cursor,
+  depth : Int
+) : Parsed(Sp(Expr)) =
+  let saved = c
+  let c1 = cursor_advance(c)
+  match parse_expr(c1, depth) of
+    PStuck(c2) => PStuck(c2)
+    PFault(d) => PFault(d)
+    PTook(first, c2) =>
+      match parse_more_indices(c2, depth, [first]) of
+        PStuck(c3) => PStuck(c3)
+        PFault(d) => PFault(d)
+        PTook(indices, c3) =>
+          match take_fixed(c3, "]") of
+            PStuck(c4) => PStuck(c4)
+            PFault(d) => PFault(d)
+            PTook(_, c4) =>
+              let hi = cursor_since(saved, c4).hi
+              let key =
+                if length(indices) == 1 then
+                  match indices of
+                    Cons(one, _) => one
+                    Nil => first
+                else
+                  synthesized(EList(indices), recv.span.lo, hi)
+              let whole = authored(EIndex(recv, key), recv.span.lo, hi)
+              parse_postfix_loop(whole, c4, depth)
+
+fn parse_more_indices(
+  c : Cursor,
+  depth : Int,
+  acc : List(Sp(Expr))
+) : Parsed(List(Sp(Expr))) =
+  if at_fixed(c, ",") then
+    let c1 = cursor_advance(c)
+    if at_fixed(c1, "]") && length(acc) > 1 then
+      PTook(acc, c1)
+    else
+      match parse_expr(c1, depth) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(e, c2) => parse_more_indices(c2, depth, append(acc, [e]))
+  else
+    PTook(acc, c)
+
+fn parse_dot_tail(recv : Sp(Expr), c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  let saved = c
+  let c1 = cursor_advance(c)
+  if at_fixed(c1, "#") then
+    match take_word(cursor_advance(c1), TIdent) of
+      PStuck(c2) => PStuck(c2)
+      PFault(d) => PFault(d)
+      PTook(name, c2) =>
+        let hi = cursor_since(saved, c2).hi
+        parse_postfix_loop(
+            authored(EUnboxedField(recv, name), recv.span.lo, hi),
+            c2,
+            depth,
+          )
+  elif at_fixed(c1, "[") then
+    match parse_path_steps(cursor_advance(c1), depth) of
+      PStuck(c2) => PStuck(c2)
+      PFault(d) => PFault(d)
+      PTook(path, c2) =>
+        match take_fixed(c2, "]") of
+          PStuck(c3) => PStuck(c3)
+          PFault(d) => PFault(d)
+          PTook(_, c3) =>
+            let hi = cursor_since(saved, c3).hi
+            parse_postfix_loop(
+                authored(EReadPath(recv, path), recv.span.lo, hi),
+                c3,
+                depth,
+              )
+  else
+    match take_word(c1, TIdent) of
+      PStuck(c2) => PStuck(c2)
+      PFault(d) => PFault(d)
+      PTook(name, c2) =>
+        if at_fixed(c2, "(") then
+          parse_dot_call(recv, name, saved, c2, depth)
+        elif at_fixed(c2, "fn") then
+          match parse_trailing_lambda(c2, recv.span.lo, depth) of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(lam, c3) =>
+              let head = synthesized(EVar(name), recv.span.lo, recv.span.lo)
+              let whole =
+                authored(ECall(head, [recv, lam]), recv.span.lo, lam.span.hi)
+              parse_postfix_loop(whole, c3, depth)
+        else
+          let hi = cursor_since(saved, c2).hi
+          parse_postfix_loop(
+              authored(EField(recv, name), recv.span.lo, hi),
+              c2,
+              depth,
+            )
+
+fn parse_dot_call(
+  recv : Sp(Expr),
+  name : String,
+  saved : Cursor,
+  c : Cursor,
+  depth : Int
+) : Parsed(Sp(Expr)) =
+  match parse_call_args(cursor_advance(c), depth, Nil) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(pair, c1) =>
+      match pair of
+        (args0, inst) =>
+          match inst of
+            Some(_) =>
+              fail_run(saved, c1, "`using` is not accepted on a dot call")
+            None =>
+              match take_fixed(c1, ")") of
+                PStuck(c2) => PStuck(c2)
+                PFault(d) => PFault(d)
+                PTook(_, c2) =>
+                  let head = synthesized(EVar(name), recv.span.lo, recv.span.lo)
+                  let args = Cons(recv, args0)
+                  if at_fixed(c2, "fn") then
+                    match (parse_trailing_lambda(c2, recv.span.lo, depth)) of
+                      PStuck(c3) => PStuck(c3)
+                      PFault(d) => PFault(d)
+                      PTook(lam, c3) =>
+                        let whole = authored(
+                            ECall(head, append(args, [lam])),
+                            recv.span.lo,
+                            lam.span.hi,
+                          )
+                        parse_postfix_loop(whole, c3, depth)
+                  else
+                    let whole = authored(
+                        ECall(head, args),
+                        recv.span.lo,
+                        cursor_since(saved, c2).hi,
+                      )
+                    parse_postfix_loop(whole, c2, depth)
+
+fn parse_atom(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  match cursor_peek(c) of
+    None => PStuck(note_expr(c))
+    Some(t) =>
+      match t.kind of
+        TInt =>
+          let pair = split_int(token_text(t))
+          match pair of
+            (digits, suffix) =>
+              let c1 = cursor_advance(c)
+              PTook(made(c, c1, EInt(digits, suffix)), c1)
+        TFloat =>
+          let c1 = cursor_advance(c)
+          PTook(made(c, c1, EFloat(surface_float(token_text(t)))), c1)
+        TChar =>
+          let c1 = cursor_advance(c)
+          PTook(made(c, c1, EChar(token_text(t))), c1)
+        TStr =>
+          let c1 = cursor_advance(c)
+          PTook(made(c, c1, EStr(token_text(t))), c1)
+        TIStart => parse_interpolation(c, depth)
+        TIdent =>
+          let c1 = cursor_advance(c)
+          PTook(made(c, c1, EVar(token_text(t))), c1)
+        TUid => parse_uid_atom(c, depth)
+        TQual =>
+          let c1 = cursor_advance(c)
+          PTook(made(c, c1, EVar(token_text(t))), c1)
+        TFixed(s) => parse_fixed_atom(c, depth, s)
+        _ => PStuck(note_expr(c))
+
+fn parse_fixed_atom(c : Cursor, depth : Int, s : String) : Parsed(Sp(Expr)) =
+  if s == "true" then
+    let c1 = cursor_advance(c)
+    PTook(made(c, c1, EBool(true)), c1)
+  elif s == "false" then
+    let c1 = cursor_advance(c)
+    PTook(made(c, c1, EBool(false)), c1)
+  elif s == "break" then
+    let c1 = cursor_advance(c)
+    PTook(made(c, c1, EBreak), c1)
+  elif s == "continue" then
+    let c1 = cursor_advance(c)
+    PTook(made(c, c1, EContinue), c1)
+  elif s == "(" then
+    parse_paren(c, depth)
+  elif s == "[" then
+    parse_list_atom(c, depth)
+  elif s == "#" then
+    parse_unboxed_atom(c, depth)
+  elif s == "\{" then
+    parse_path_update_atom(c, depth)
+  elif s == "?" then
+    parse_hole(c)
+  elif s == "mask" then
+    parse_mask(c, depth)
+  elif s == "error" then
+    parse_error_call(c, depth)
+  else
+    PStuck(note_expr(c))
+
+fn parse_hole(c : Cursor) : Parsed(Sp(Expr)) =
+  match take_word(cursor_advance(c), TIdent) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(name, c1) => PTook(made(c, c1, EHole(name)), c1)
+
+fn parse_uid_atom(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  match cursor_peek(c) of
+    None => PStuck(cursor_note(c, TUid))
+    Some(t) =>
+      let name = token_text(t)
+      let c1 = cursor_advance(c)
+      if at_fixed(c1, "\{") then
+        parse_record_atom(c, name, c1, depth)
+      else
+        PTook(made(c, c1, EVar(name)), c1)
+
+fn parse_paren(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  let c1 = cursor_advance(c)
+  if at_fixed(c1, ")") then
+    let c2 = cursor_advance(c1)
+    PTook(made(c, c2, EUnit), c2)
+  else
+    match parse_expr(c1, depth) of
+      PStuck(c2) => PStuck(c2)
+      PFault(d) => PFault(d)
+      PTook(first, c2) =>
+        if at_fixed(c2, ":") then
+          match parse_type(cursor_advance(c2), depth) of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(ty, c3) =>
+              match take_fixed(c3, ")") of
+                PStuck(c4) => PStuck(c4)
+                PFault(d) => PFault(d)
+                PTook(_, c4) => PTook(made(c, c4, EAnn(first, ty)), c4)
+        elif at_fixed(c2, ",") then
+          match (parse_expr_comma(cursor_advance(c2), depth, ")", [first])) of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(items, c3) =>
+              match take_fixed(c3, ")") of
+                PStuck(c4) => PStuck(c4)
+                PFault(d) => PFault(d)
+                PTook(_, c4) => PTook(made(c, c4, ETuple(items)), c4)
+        else
+          match take_fixed(c2, ")") of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(_, c3) =>
+              let s = cursor_since(c, c3)
+              PTook(widened(first, s.lo, s.hi), c3)
+
+-- Parse the tail of an ordinary comma list. `acc` is kept in source order
+-- because these lists are generally short and their artifact order matters.
+fn parse_expr_comma(
+  c : Cursor,
+  depth : Int,
+  close : String,
+  acc : List(Sp(Expr))
+) : Parsed(List(Sp(Expr))) =
+  if at_fixed(c, close) then
+    PTook(acc, c)
+  else
+    match parse_expr(c, depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(e, c1) =>
+        let next = append(acc, [e])
+        if at_fixed(c1, ",") then
+          parse_expr_comma(cursor_advance(c1), depth, close, next)
+        else
+          PTook(next, c1)
+
+fn parse_interpolation(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  match cursor_peek(c) of
+    None => PStuck(cursor_note(c, TIStart))
+    Some(first) =>
+      let lo = first.span.lo
+      let initial = [zero_width(EStr(token_text(first)), lo)]
+      parse_interp_hole(c, cursor_advance(c), depth, initial)
+
+fn parse_interp_hole(
+  saved : Cursor,
+  c : Cursor,
+  depth : Int,
+  acc : List(Sp(Expr))
+) : Parsed(Sp(Expr)) =
+  match parse_expr(c, depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(hole, c1) =>
+      let with_hole = append(acc, [hole])
+      match cursor_peek(c1) of
+        None => PStuck(cursor_note(c1, TIEnd))
+        Some(seg) =>
+          if seg.kind == TIMid then
+            let part = zero_width(EStr(token_text(seg)), cursor_span(saved).lo)
+            parse_interp_hole(saved, cursor_advance(c1), depth, append(with_hole, [
+                part,
+              ]))
+          elif seg.kind == TIEnd then
+            let last = zero_width(EStr(token_text(seg)), cursor_span(saved).lo)
+            let c2 = cursor_advance(c1)
+            let marker = zero_width(EMarker("interp"), cursor_span(saved).lo)
+            PTook(made(saved, c2, ECall(marker, append(with_hole, [last]))), c2)
+          else
+            let noted = cursor_note(cursor_note(c1, TIMid), TIEnd)
+            PStuck(noted)
+
+fn parse_mask(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  let c1 = cursor_advance(c)
+  match take_fixed(c1, "<") of
+    PStuck(c2) => PStuck(c2)
+    PFault(d) => PFault(d)
+    PTook(_, c2) =>
+      match take_word(c2, TUid) of
+        PStuck(c3) => PStuck(c3)
+        PFault(d) => PFault(d)
+        PTook(eff, c3) =>
+          match take_fixed(c3, ">") of
+            PStuck(c4) => PStuck(c4)
+            PFault(d) => PFault(d)
+            PTook(_, c4) =>
+              match take_fixed(c4, "(") of
+                PStuck(c5) => PStuck(c5)
+                PFault(d) => PFault(d)
+                PTook(_, c5) =>
+                  match parse_expr(c5, depth) of
+                    PStuck(c6) => PStuck(c6)
+                    PFault(d) => PFault(d)
+                    PTook(body, c6) =>
+                      match take_fixed(c6, ")") of
+                        PStuck(c7) => PStuck(c7)
+                        PFault(d) => PFault(d)
+                        PTook(_, c7) => PTook(made(c, c7, EMask(eff, body)), c7)
+
+fn parse_error_call(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  let c1 = cursor_advance(c)
+  if at_fixed(c1, "(") then
+    let callee = authored(EVar("error"), cursor_span(c).lo, cursor_span(c).hi)
+    parse_call_tail(callee, c1, depth)
+  else
+    PStuck(cursor_note(c1, TFixed("(")))
+
+fn parse_unboxed_atom(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  let c1 = cursor_advance(c)
+  if at_fixed(c1, "(") then
+    let c2 = cursor_advance(c1)
+    match parse_expr_comma(c2, depth, ")", Nil) of
+      PStuck(c3) => PStuck(c3)
+      PFault(d) => PFault(d)
+      PTook(items, c3) =>
+        match take_fixed(c3, ")") of
+          PStuck(c4) => PStuck(c4)
+          PFault(d) => PFault(d)
+          PTook(_, c4) => PTook(made(c, c4, EUnboxedTuple(items)), c4)
+  elif at_fixed(c1, "\{") then
+    match parse_named_fields(cursor_advance(c1), depth, "\}", Nil) of
+      PStuck(c2) => PStuck(c2)
+      PFault(d) => PFault(d)
+      PTook(fields, c2) =>
+        match take_fixed(c2, "\}") of
+          PStuck(c3) => PStuck(c3)
+          PFault(d) => PFault(d)
+          PTook(_, c3) => PTook(made(c, c3, EUnboxedRecord(fields)), c3)
+  else
+    let noted = cursor_note(cursor_note(c1, TFixed("(")), TFixed("\{"))
+    PStuck(noted)
+
+fn parse_named_fields(
+  c : Cursor,
+  depth : Int,
+  close : String,
+  acc : List(NamedExpr)
+) : Parsed(List(NamedExpr)) =
+  if at_fixed(c, close) then
+    PTook(acc, c)
+  else
+    match take_word(c, TIdent) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(name, c1) =>
+        match take_fixed(c1, "=") of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(_, c2) =>
+            match parse_expr(c2, depth) of
+              PStuck(c3) => PStuck(c3)
+              PFault(d) => PFault(d)
+              PTook(value, c3) =>
+                let next =
+                  append(acc, [NamedExpr { name = name, value = value }])
+                if at_fixed(c3, ",") then
+                  parse_named_fields(cursor_advance(c3), depth, close, next)
+                else
+                  PTook(next, c3)
+
+fn parse_record_atom(
+  saved : Cursor,
+  name : String,
+  brace : Cursor,
+  depth : Int
+) : Parsed(Sp(Expr)) =
+  let c = cursor_advance(brace)
+  if at_fixed(c, "..") then
+    match parse_expr(cursor_advance(c), depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(base, c1) =>
+        if at_fixed(c1, ",") then
+          match (parse_named_fields(cursor_advance(c1), depth, "\}", Nil)) of
+            PStuck(c2) => PStuck(c2)
+            PFault(d) => PFault(d)
+            PTook(fields, c2) =>
+              match take_fixed(c2, "\}") of
+                PStuck(c3) => PStuck(c3)
+                PFault(d) => PFault(d)
+                PTook(_, c3) =>
+                  PTook(made(saved, c3, ERecordUpdate(base, name, fields)), c3)
+        else
+          match take_fixed(c1, "\}") of
+            PStuck(c2) => PStuck(c2)
+            PFault(d) => PFault(d)
+            PTook(_, c2) =>
+              PTook(made(saved, c2, ERecordUpdate(base, name, Nil)), c2)
+  else
+    match parse_named_fields(c, depth, "\}", Nil) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(fields, c1) =>
+        match take_fixed(c1, "\}") of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(_, c2) => PTook(made(saved, c2, ERecord(name, fields)), c2)
+
+fn parse_list_atom(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  let c1 = cursor_advance(c)
+  if at_fixed(c1, "]") then
+    let c2 = cursor_advance(c1)
+    PTook(made(c, c2, EList(Nil)), c2)
+  else
+    match parse_expr(c1, depth) of
+      PStuck(c2) => PStuck(c2)
+      PFault(d) => PFault(d)
+      PTook(first, c2) =>
+        if at_fixed(c2, "for") then
+          parse_comp_tail(c, first, cursor_advance(c2), depth)
+        else
+          parse_list_more(c, c2, depth, [first])
+
+fn parse_list_more(
+  saved : Cursor,
+  c : Cursor,
+  depth : Int,
+  acc : List(Sp(Expr))
+) : Parsed(Sp(Expr)) =
+  if at_fixed(c, "..") then
+    match parse_expr(cursor_advance(c), depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(hi, c1) =>
+        match take_fixed(c1, "]") of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(_, c2) => PTook(made(saved, c2, ERange(acc, hi)), c2)
+  elif at_fixed(c, ",") then
+    let c1 = cursor_advance(c)
+    if at_fixed(c1, "]") then
+      let c2 = cursor_advance(c1)
+      PTook(made(saved, c2, EList(acc)), c2)
+    elif at_fixed(c1, "..") then
+      match parse_expr(cursor_advance(c1), depth) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(hi, c2) =>
+          match take_fixed(c2, "]") of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(_, c3) => PTook(made(saved, c3, ERange(acc, hi)), c3)
+    else
+      match parse_expr(c1, depth) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(e, c2) => parse_list_more(saved, c2, depth, append(acc, [e]))
+  else
+    match take_fixed(c, "]") of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(_, c1) => PTook(made(saved, c1, EList(acc)), c1)
+
+fn parse_comp_tail(
+  saved : Cursor,
+  head : Sp(Expr),
+  c : Cursor,
+  depth : Int
+) : Parsed(Sp(Expr)) =
+  match take_word(c, TIdent) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(binder, c1) =>
+      match take_fixed(c1, "in") of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(_, c2) =>
+          match parse_expr(c2, depth) of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(seq, c3) =>
+              match parse_quals(c3, depth, Nil, "]") of
+                PStuck(c4) => PStuck(c4)
+                PFault(d) => PFault(d)
+                PTook(qs, c4) =>
+                  match take_fixed(c4, "]") of
+                    PStuck(c5) => PStuck(c5)
+                    PFault(d) => PFault(d)
+                    PTook(_, c5) =>
+                      PTook(made(saved, c5, EComp(head, binder, seq, qs)), c5)
+
+fn parse_quals(
+  c : Cursor,
+  depth : Int,
+  acc : List(Qual),
+  close : String
+) : Parsed(List(Qual)) =
+  if at_fixed(c, close) then
+    PTook(acc, c)
+  elif at_fixed(c, ",") then
+    let c1 = cursor_advance(c)
+    if at_fixed(c1, "let") then
+      match take_word(cursor_advance(c1), TIdent) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(name, c2) =>
+          match take_fixed(c2, "=") of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(_, c3) =>
+              match parse_expr(c3, depth) of
+                PStuck(c4) => PStuck(c4)
+                PFault(d) => PFault(d)
+                PTook(e, c4) =>
+                  parse_quals(c4, depth, append(acc, [QBind(name, e)]), close)
+    elif at_fixed(c1, "if") then
+      match parse_expr(cursor_advance(c1), depth) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(e, c2) => parse_quals(c2, depth, append(acc, [QGuard(e)]), close)
+    else
+      let noted = cursor_note(cursor_note(c1, TFixed("let")), TFixed("if"))
+      PStuck(noted)
+  else
+    PTook(acc, c)
+
+-- -------------------------------------------------------------------------
+-- Optic paths
+-- -------------------------------------------------------------------------
+
+fn parse_path_update_atom(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  let c1 = cursor_advance(c)
+  match parse_expr(c1, depth) of
+    PStuck(c2) => PStuck(c2)
+    PFault(d) => PFault(d)
+    PTook(base, c2) =>
+      match take_fixed(c2, "|") of
+        PStuck(c3) => PStuck(c3)
+        PFault(d) => PFault(d)
+        PTook(_, c3) =>
+          match parse_path_updates(c3, depth, Nil) of
+            PStuck(c4) => PStuck(c4)
+            PFault(d) => PFault(d)
+            PTook(ups, c4) =>
+              match take_fixed(c4, "\}") of
+                PStuck(c5) => PStuck(c5)
+                PFault(d) => PFault(d)
+                PTook(_, c5) => PTook(made(c, c5, EPathUpdate(base, ups)), c5)
+
+fn parse_path_updates(
+  c : Cursor,
+  depth : Int,
+  acc : List(PathUpdate)
+) : Parsed(List(PathUpdate)) =
+  match parse_path_steps(c, depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(path, c1) =>
+      if at_fixed(c1, "=") || at_fixed(c1, "~") then
+        let modify = at_fixed(c1, "~")
+        match parse_expr(cursor_advance(c1), depth) of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(value, c2) =>
+            let op =
+              if modify then
+                POModify(value)
+              else
+                POSet(value)
+            let next = append(acc, [PathUpdate { path = path, op = op }])
+            if at_fixed(c2, ",") then
+              let c3 = cursor_advance(c2)
+              if at_fixed(c3, "\}") then
+                PTook(next, c3)
+              else
+                parse_path_updates(c3, depth, next)
+            else
+              PTook(next, c2)
+      else
+        let noted = cursor_note(cursor_note(c1, TFixed("=")), TFixed("~"))
+        PStuck(noted)
+
+fn parse_path_steps(c : Cursor, depth : Int) : Parsed(List(PathStep)) =
+  match parse_path_segment(c, depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(first, c1) => parse_path_rest(c1, depth, first)
+
+fn parse_path_rest(
+  c : Cursor,
+  depth : Int,
+  acc : List(PathStep)
+) : Parsed(List(PathStep)) =
+  if at_fixed(c, ".") then
+    match parse_path_segment(cursor_advance(c), depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(seg, c1) => parse_path_rest(c1, depth, append(acc, seg))
+  else
+    PTook(acc, c)
+
+fn parse_path_segment(c : Cursor, depth : Int) : Parsed(List(PathStep)) =
+  match cursor_peek(c) of
+    None =>
+      let c1 = cursor_note(cursor_note(c, TIdent), TFixed("each"))
+      PStuck(cursor_note(c1, TFixed("[")))
+    Some(t) =>
+      if t.kind == TIdent then
+        parse_path_indexes(cursor_advance(c), depth, [PSField(token_text(t))])
+      elif t.kind == TFixed("each") then
+        parse_path_indexes(cursor_advance(c), depth, [PSEach])
+      elif t.kind == TFixed("?") then
+        parse_case_segment(cursor_advance(c), depth)
+      elif t.kind == TFixed("(") then
+        parse_filtered_segment(c, depth)
+      elif t.kind == TFixed("[") then
+        parse_path_indexes(c, depth, Nil)
+      else
+        let c1 = cursor_note(cursor_note(c, TIdent), TFixed("each"))
+        PStuck(cursor_note(c1, TFixed("[")))
+
+fn parse_case_segment(c : Cursor, depth : Int) : Parsed(List(PathStep)) =
+  match cursor_peek(c) of
+    None => PStuck(cursor_note(cursor_note(c, TUid), TQual))
+    Some(t) =>
+      if t.kind == TUid then
+        parse_path_indexes(cursor_advance(c), depth, [PSCase(token_text(t))])
+      elif t.kind == TQual then
+        let pieces = split(char_at(".", 0), token_text(t))
+        match pieces of
+          Nil => PStuck(cursor_note(c, TQual))
+          Cons(ctor, fields) =>
+            let steps =
+              Cons(PSCase(ctor), map(\(field) -> PSField(field), fields))
+            parse_path_indexes(cursor_advance(c), depth, steps)
+      else
+        PStuck(cursor_note(cursor_note(c, TUid), TQual))
+
+fn parse_filtered_segment(c : Cursor, depth : Int) : Parsed(List(PathStep)) =
+  let c1 = cursor_advance(c)
+  match parse_path_steps(c1, depth) of
+    PStuck(c2) => PStuck(c2)
+    PFault(d) => PFault(d)
+    PTook(inner, c2) =>
+      match take_fixed(c2, "where") of
+        PStuck(c3) => PStuck(c3)
+        PFault(d) => PFault(d)
+        PTook(_, c3) =>
+          match parse_expr(c3, depth) of
+            PStuck(c4) => PStuck(c4)
+            PFault(d) => PFault(d)
+            PTook(pred, c4) =>
+              match take_fixed(c4, ")") of
+                PStuck(c5) => PStuck(c5)
+                PFault(d) => PFault(d)
+                PTook(_, c5) =>
+                  parse_path_indexes(c5, depth, append(inner, [PSWhere(pred)]))
+
+fn parse_path_indexes(
+  c : Cursor,
+  depth : Int,
+  acc : List(PathStep)
+) : Parsed(List(PathStep)) =
+  if at_fixed(c, "[") then
+    match parse_expr(cursor_advance(c), depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(index, c1) =>
+        match take_fixed(c1, "]") of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(_, c2) =>
+            parse_path_indexes(c2, depth, append(acc, [PSIndex(index)]))
+  elif length(acc) > 0 then
+    PTook(acc, c)
+  else
+    PStuck(cursor_note(c, TFixed("[")))
+
+-- -------------------------------------------------------------------------
+-- Expression entry and leading-token forms
+-- -------------------------------------------------------------------------
+
+-- | Parse one expression from `c`, leaving the first following token
+-- unconsumed. The caller supplies the remaining structural depth budget.
+pub fn parse_expr(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  match descend(depth, c) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(d, _) => parse_expr_top(c, d)
+
+fn parse_expr_top(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  if at_fixed(c, "if") then
+    parse_if_form(c, depth, false)
+  elif at_fixed(c, "let") then
+    parse_let_form(c, depth)
+  elif at_fixed(c, "\\") then
+    parse_lambda(c, depth)
+  elif at_fixed(c, "match") then
+    parse_match(c, depth)
+  elif at_fixed(c, "handle") then
+    parse_handle(c, depth)
+  elif at_fixed(c, "throw") then
+    parse_throw(c, depth)
+  elif at_fixed(c, "try") then
+    parse_try(c, depth)
+  elif at_fixed(c, "transact") then
+    parse_transact(c, depth)
+  elif at_fixed(c, "probe") then
+    parse_probe(c, depth)
+  elif at_fixed(c, "for") then
+    parse_for(c, depth)
+  elif at_fixed(c, "while") then
+    parse_while(c, depth)
+  elif at_fixed(c, "loop") then
+    parse_loop(c, depth)
+  elif at_fixed(c, "return") then
+    parse_return(c, depth)
+  elif (peek_word(c) == "reflect"
+      && (fixed_at(c, 1, "fn") || fixed_at(c, 1, "type"))) then
+    parse_reflect(c)
+  else
+    match parse_bp(c, depth, 0) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(lhs, c1) => parse_assignment_tail(c, lhs, c1, depth)
+
+fn parse_assignment_tail(
+  saved : Cursor,
+  lhs : Sp(Expr),
+  c : Cursor,
+  depth : Int
+) : Parsed(Sp(Expr)) =
+  if at_fixed(c, ":=") then
+    match parse_expr(cursor_advance(c), depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(value, c1) =>
+        match lhs.node of
+          EVar(name) => PTook(made(saved, c1, EAssign(name, value)), c1)
+          EIndex(recv, key) =>
+            PTook(made(saved, c1, EIndexAssign(recv, key, value)), c1)
+          _ =>
+            PFault(
+                refuse(
+                    lhs.span,
+                    "the left side of `:=` must be a variable or an index `a[i]`",
+                  ),
+              )
+  elif (at_fixed(c, "+=")
+      || at_fixed(c, "-=")
+      || at_fixed(c, "*=")
+      || at_fixed(c, "%=")) then
+    let op =
+      if at_fixed(c, "+=") then
+        "+"
+      elif at_fixed(c, "-=") then
+        "-"
+      elif at_fixed(c, "*=") then
+        "*"
+      else
+        "%"
+    match parse_expr(cursor_advance(c), depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(value, c1) => build_compound(saved, lhs, op, value, c1)
+  else
+    PTook(lhs, c)
+
+fn build_compound(
+  saved : Cursor,
+  lhs : Sp(Expr),
+  op : String,
+  value : Sp(Expr),
+  c : Cursor
+) : Parsed(Sp(Expr)) =
+  let span = cursor_since(saved, c)
+  match lhs.node of
+    EVar(name) =>
+      let read = authored(EVar(name), span.lo, span.hi)
+      let rhs = synthesized(EBin(op, read, value), span.lo, span.hi)
+      PTook(authored(EAssign(name, rhs), span.lo, span.hi), c)
+    EIndex(recv, key) =>
+      let read = synthesized(EIndex(recv, key), span.lo, span.hi)
+      let rhs = synthesized(EBin(op, read, value), span.lo, span.hi)
+      PTook(authored(EIndexAssign(recv, key, rhs), span.lo, span.hi), c)
+    _ =>
+      PFault(
+          refuse(
+              lhs.span,
+              "the left side of a compound assignment must be a variable or an index `a[i]`",
+            ),
+        )
+
+-- | Parse an expression or a layout-delimited statement block. Declaration
+-- bodies use the same production as control-flow branches, so this seam is
+-- public to `Syntax.Parse.Decl` rather than duplicated there.
+pub fn parse_expr_or_block(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  if at_kind(c, TVOpen) then
+    parse_block(c, depth)
+  else
+    parse_expr(c, depth)
+
+fn parse_if_form(
+  saved : Cursor,
+  depth : Int,
+  allow_open : Bool
+) : Parsed(Sp(Expr)) =
+  match parse_expr(cursor_advance(saved), depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(cond, c1) =>
+      match take_fixed(c1, "then") of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(_, c2) =>
+          match parse_expr_or_block(c2, depth) of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(yes, c3) =>
+              match (parse_if_finish(saved, cond, yes, c3, depth, allow_open)) of
+                PStuck(c4) => PStuck(c4)
+                PFault(d) => PFault(d)
+                PTook(branch, c4) => PTook(branch.expr, c4)
+
+fn parse_if_finish(
+  saved : Cursor,
+  cond : Sp(Expr),
+  yes : Sp(Expr),
+  c : Cursor,
+  depth : Int,
+  allow_open : Bool
+) : Parsed(IfBranch) =
+  let tail =
+    if (at_kind(c, TVSemi) && (fixed_at(c, 1, "else") || fixed_at(c, 1, "elif"))) then
+      cursor_advance(c)
+    else
+      c
+  if at_fixed(tail, "else") then
+    match parse_expr_or_block(cursor_advance(tail), depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(no, c1) =>
+        PTook(
+            IfBranch {
+              expr = made(saved, c1, EIf(cond, yes, no)),
+              open = false
+            },
+            c1,
+          )
+  elif at_fixed(tail, "elif") then
+    match parse_elif(c, tail, depth, allow_open) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(branch, c1) =>
+        let no =
+          if branch.open then
+            widen_if_chain(branch.expr, cursor_span(saved).lo)
+          else
+            branch.expr
+        PTook(
+            IfBranch {
+              expr = made(saved, c1, EIf(cond, yes, no)),
+              open = branch.open
+            },
+            c1,
+          )
+  elif allow_open then
+    let unit = zero_width(EUnit, yes.span.hi)
+    PTook(
+        IfBranch { expr = made(saved, c, EIf(cond, yes, unit)), open = true },
+        c,
+      )
+  else
+    let c1 = cursor_note(cursor_note(tail, TFixed("else")), TFixed("elif"))
+    PStuck(c1)
+
+fn parse_elif(
+  saved : Cursor,
+  c : Cursor,
+  depth : Int,
+  allow_open : Bool
+) : Parsed(IfBranch) =
+  match parse_expr(cursor_advance(c), depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(cond, c1) =>
+      match take_fixed(c1, "then") of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(_, c2) =>
+          match parse_expr_or_block(c2, depth) of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(yes, c3) =>
+              parse_if_finish(saved, cond, yes, c3, depth, allow_open)
+
+fn widen_if_chain(e : Sp(Expr), lo : Int) : Sp(Expr) =
+  match e.node of
+    EIf(cond, yes, no) =>
+      Sp {
+        node = EIf(cond, yes, widen_if_chain(no, lo)),
+        span = Span { lo = lo, hi = e.span.hi },
+        synth = e.synth
+      }
+    _ => e
+
+fn parse_let_form(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  let saved = c
+  let c1 = cursor_advance(c)
+  if at_kind(c1, TIdent) then
+    match take_word(c1, TIdent) of
+      PStuck(c2) => PStuck(c2)
+      PFault(d) => PFault(d)
+      PTook(name, c2) =>
+        match take_fixed(c2, "=") of
+          PStuck(c3) => PStuck(c3)
+          PFault(d) => PFault(d)
+          PTook(_, c3) =>
+            match parse_expr(c3, depth) of
+              PStuck(c4) => PStuck(c4)
+              PFault(d) => PFault(d)
+              PTook(value, c4) =>
+                match take_fixed(c4, "in") of
+                  PStuck(c5) => PStuck(c5)
+                  PFault(d) => PFault(d)
+                  PTook(_, c5) =>
+                    match parse_expr(c5, depth) of
+                      PStuck(c6) => PStuck(c6)
+                      PFault(d) => PFault(d)
+                      PTook(body, c6) =>
+                        PTook(made(saved, c6, ELet(name, value, body)), c6)
+  else
+    match parse_pattern(c1, depth) of
+      PStuck(c2) => PStuck(c2)
+      PFault(d) => PFault(d)
+      PTook(pat, c2) =>
+        match take_fixed(c2, "=") of
+          PStuck(c3) => PStuck(c3)
+          PFault(d) => PFault(d)
+          PTook(_, c3) =>
+            match parse_expr(c3, depth) of
+              PStuck(c4) => PStuck(c4)
+              PFault(d) => PFault(d)
+              PTook(value, c4) =>
+                match take_fixed(c4, "in") of
+                  PStuck(c5) => PStuck(c5)
+                  PFault(d) => PFault(d)
+                  PTook(_, c5) =>
+                    match parse_expr(c5, depth) of
+                      PStuck(c6) => PStuck(c6)
+                      PFault(d) => PFault(d)
+                      PTook(body, c6) =>
+                        let arm = Arm { pat = pat, guard = None, body = body }
+                        PTook(
+                            synthesized(
+                                EMatch(value, [arm]),
+                                cursor_span(saved).lo,
+                                cursor_span(saved).lo,
+                              ),
+                            c6,
+                          )
+
+fn parse_lambda(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  let saved = c
+  match take_fixed(cursor_advance(c), "(") of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(_, c1) =>
+      match parse_params(c1, depth, 0, Nil) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(params, c2) =>
+          match take_fixed(c2, ")") of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(_, c3) =>
+              match take_fixed(c3, "->") of
+                PStuck(c4) => PStuck(c4)
+                PFault(d) => PFault(d)
+                PTook(_, c4) =>
+                  match parse_expr(c4, depth) of
+                    PStuck(c5) => PStuck(c5)
+                    PFault(d) => PFault(d)
+                    PTook(body, c5) =>
+                      PTook(made(saved, c5, ELam(params, body)), c5)
+
+fn parse_throw(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  let saved = c
+  match take_word(cursor_advance(c), TUid) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(name, c1) =>
+      if at_fixed(c1, "(") then
+        match parse_expr_comma(cursor_advance(c1), depth, ")", Nil) of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(args, c2) =>
+            match take_fixed(c2, ")") of
+              PStuck(c3) => PStuck(c3)
+              PFault(d) => PFault(d)
+              PTook(_, c3) => PTook(made(saved, c3, EThrow(name, args)), c3)
+      else
+        PTook(made(saved, c1, EThrow(name, Nil)), c1)
+
+fn parse_return(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  match parse_expr(cursor_advance(c), depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(value, c1) => PTook(made(c, c1, EReturn(value)), c1)
+
+fn parse_while(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  match parse_expr(cursor_advance(c), depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(cond, c1) =>
+      match take_fixed(c1, "do") of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(_, c2) =>
+          match parse_expr_or_block(c2, depth) of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(body, c3) => PTook(made(c, c3, EWhile(cond, body)), c3)
+
+fn parse_loop(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  match parse_expr_or_block(cursor_advance(c), depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(body, c1) => PTook(made(c, c1, ELoop(body)), c1)
+
+fn parse_transact(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  match parse_expr_or_block(cursor_advance(c), depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(body, c1) =>
+      let c2 =
+        if at_kind(c1, TVSemi) then
+          cursor_advance(c1)
+        else
+          c1
+      match take_fixed(c2, "else") of
+        PStuck(c3) => PStuck(c3)
+        PFault(d) => PFault(d)
+        PTook(_, c3) =>
+          match parse_expr_or_block(c3, depth) of
+            PStuck(c4) => PStuck(c4)
+            PFault(d) => PFault(d)
+            PTook(fallback, c4) =>
+              PTook(made(c, c4, ETransact(body, fallback)), c4)
+
+fn parse_probe(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  match take_word(cursor_advance(c), TStr) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(name, c1) =>
+      match take_fixed(c1, "do") of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(_, c2) =>
+          match parse_expr_or_block(c2, depth) of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(body, c3) => PTook(made(c, c3, EProbe(name, body)), c3)
+
+fn parse_reflect(c : Cursor) : Parsed(Sp(Expr)) =
+  let c1 = cursor_advance(c)
+  let decl =
+    if at_fixed(c1, "fn") then
+      "fn"
+    else
+      "type"
+  let c2 = cursor_advance(c1)
+  match cursor_peek(c2) of
+    None =>
+      PStuck(cursor_note(cursor_note(cursor_note(c2, TIdent), TUid), TQual))
+    Some(t) =>
+      if t.kind == TIdent || t.kind == TUid || t.kind == TQual then
+        let c3 = cursor_advance(c2)
+        PTook(made(c, c3, EReflect(decl, token_text(t))), c3)
+      else
+        PStuck(cursor_note(cursor_note(cursor_note(c2, TIdent), TUid), TQual))
+
+fn parse_for(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  match take_word(cursor_advance(c), TIdent) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(binder, c1) =>
+      match take_fixed(c1, "in") of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(_, c2) =>
+          match parse_expr(c2, depth) of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(seq, c3) =>
+              match parse_quals(c3, depth, Nil, "do") of
+                PStuck(c4) => PStuck(c4)
+                PFault(d) => PFault(d)
+                PTook(qs, c4) =>
+                  match take_fixed(c4, "do") of
+                    PStuck(c5) => PStuck(c5)
+                    PFault(d) => PFault(d)
+                    PTook(_, c5) =>
+                      match parse_expr_or_block(c5, depth) of
+                        PStuck(c6) => PStuck(c6)
+                        PFault(d) => PFault(d)
+                        PTook(body, c6) =>
+                          PTook(made(c, c6, EFor(binder, seq, qs, body)), c6)
+
+-- -------------------------------------------------------------------------
+-- Parameters, arms, handlers, and catches
+-- -------------------------------------------------------------------------
+
+fn parse_params(
+  c : Cursor,
+  depth : Int,
+  index : Int,
+  acc : List(Param)
+) : Parsed(List(Param)) =
+  if at_fixed(c, ")") then
+    PTook(acc, c)
+  else
+    match parse_param(c, depth, index) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(param, c1) =>
+        let next = append(acc, [param])
+        if at_fixed(c1, ",") then
+          parse_params(cursor_advance(c1), depth, index + 1, next)
+        else
+          PTook(next, c1)
+
+fn parse_param(c : Cursor, depth : Int, index : Int) : Parsed(Param) =
+  let borrowed = at_fixed(c, "borrow")
+  let c1 =
+    if borrowed then
+      cursor_advance(c)
+    else
+      c
+  match parse_pattern(c1, depth) of
+    PStuck(c2) => PStuck(c2)
+    PFault(d) => PFault(d)
+    PTook(pat, c2) =>
+      match parse_param_type(c2, depth) of
+        PStuck(c3) => PStuck(c3)
+        PFault(d) => PFault(d)
+        PTook(ty, c3) =>
+          match parse_param_default(c3, depth) of
+            PStuck(c4) => PStuck(c4)
+            PFault(d) => PFault(d)
+            PTook(dflt, c4) =>
+              match pat.node of
+                PVar(name) =>
+                  PTook(
+                      Param {
+                        name = name,
+                        pat = None,
+                        ty = ty,
+                        is_borrow = borrowed,
+                        dflt = dflt
+                      },
+                      c4,
+                    )
+                PWild =>
+                  PTook(
+                      Param {
+                        name = "_",
+                        pat = None,
+                        ty = ty,
+                        is_borrow = borrowed,
+                        dflt = dflt
+                      },
+                      c4,
+                    )
+                _ =>
+                  PTook(
+                      Param {
+                        name = "arg@{index}",
+                        pat = Some(pat),
+                        ty = ty,
+                        is_borrow = borrowed,
+                        dflt = dflt
+                      },
+                      c4,
+                    )
+
+fn parse_param_type(c : Cursor, depth : Int) : Parsed(Option(Ty)) =
+  if at_fixed(c, ":") then
+    match parse_type(cursor_advance(c), depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(ty, c1) => PTook(Some(ty), c1)
+  else
+    PTook(None, c)
+
+fn parse_param_default(c : Cursor, depth : Int) : Parsed(Option(Sp(Expr))) =
+  if at_fixed(c, ":=") then
+    match parse_expr(cursor_advance(c), depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(e, c1) => PTook(Some(e), c1)
+  else
+    PTook(None, c)
+
+fn parse_brace_open(c : Cursor) : Parsed(Bool) =
+  if at_fixed(c, "\{") then
+    PTook(false, cursor_advance(c))
+  elif at_kind(c, TVOpen) then
+    PTook(true, cursor_advance(c))
+  else
+    let c1 = cursor_note(cursor_note(c, TFixed("\{")), TVOpen)
+    PStuck(c1)
+
+fn at_brace_close(c : Cursor, layout : Bool) : Bool =
+  if layout then
+    at_kind(c, TVClose)
+  else
+    at_fixed(c, "\}")
+
+fn take_brace_close(c : Cursor, layout : Bool) : Parsed(Token) =
+  if layout then
+    take_kind(c, TVClose)
+  else
+    take_fixed(c, "\}")
+
+-- Arms is nullable. Preserve that close alternative only when Pattern failed
+-- without consuming input; a deeper Pattern failure owns its later position.
+fn note_arm_close_if_same(
+  start : Cursor,
+  failed : Cursor,
+  layout : Bool
+) : Cursor =
+  if failed.pos == start.pos then
+    if layout then
+      cursor_note(failed, TVClose)
+    else
+      cursor_note(failed, TFixed("\}"))
+  else
+    failed
+
+fn skip_arm_sep(c : Cursor) : (Bool, Cursor) =
+  if at_fixed(c, ",") || at_kind(c, TVSemi) then
+    (true, cursor_advance(c))
+  else
+    (false, c)
+
+fn parse_match(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  let saved = c
+  match parse_expr(cursor_advance(c), depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(scrutinee, c1) =>
+      match take_fixed(c1, "of") of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(_, c2) =>
+          match parse_brace_open(c2) of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(layout, c3) =>
+              match parse_match_arms(c3, depth, layout, Nil) of
+                PStuck(c4) => PStuck(c4)
+                PFault(d) => PFault(d)
+                PTook(arms, c4) =>
+                  match take_brace_close(c4, layout) of
+                    PStuck(c5) => PStuck(c5)
+                    PFault(d) => PFault(d)
+                    PTook(_, c5) =>
+                      PTook(made(saved, c5, EMatch(scrutinee, arms)), c5)
+
+fn parse_match_arms(
+  c : Cursor,
+  depth : Int,
+  layout : Bool,
+  acc : List(Arm)
+) : Parsed(List(Arm)) =
+  if at_brace_close(c, layout) then
+    PTook(acc, c)
+  else
+    match parse_pattern(c, depth) of
+      PStuck(c1) => PStuck(note_arm_close_if_same(c, c1, layout))
+      PFault(d) => PFault(d)
+      PTook(pat, c1) =>
+        match parse_guard(c1, depth) of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(guard, c2) =>
+            match take_fixed(c2, "=>") of
+              PStuck(c3) => PStuck(c3)
+              PFault(d) => PFault(d)
+              PTook(_, c3) =>
+                match parse_expr_or_block(c3, depth) of
+                  PStuck(c4) => PStuck(c4)
+                  PFault(d) => PFault(d)
+                  PTook(body, c4) =>
+                    let next = append(acc, [
+                        Arm { pat = pat, guard = guard, body = body },
+                      ])
+                    let sep = skip_arm_sep(c4)
+                    match sep of
+                      (true, c5) => parse_match_arms(c5, depth, layout, next)
+                      (false, c5) =>
+                        if at_brace_close(c5, layout) then
+                          PTook(next, c5)
+                        else
+                          let c6 =
+                            cursor_note(cursor_note(c5, TFixed(",")), TVSemi)
+                          PStuck(c6)
+
+fn parse_guard(c : Cursor, depth : Int) : Parsed(Option(Sp(Expr))) =
+  if at_fixed(c, "if") then
+    match parse_expr(cursor_advance(c), depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(g, c1) => PTook(Some(g), c1)
+  else
+    PTook(None, c)
+
+fn parse_try(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  let saved = c
+  match parse_expr_or_block(cursor_advance(c), depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(body, c1) =>
+      let c2 =
+        if at_kind(c1, TVSemi) then
+          cursor_advance(c1)
+        else
+          c1
+      match take_fixed(c2, "catch") of
+        PStuck(c3) => PStuck(c3)
+        PFault(d) => PFault(d)
+        PTook(_, c3) =>
+          match parse_brace_open(c3) of
+            PStuck(c4) => PStuck(c4)
+            PFault(d) => PFault(d)
+            PTook(layout, c4) =>
+              match parse_catch_arms(c4, depth, layout, Nil) of
+                PStuck(c5) => PStuck(c5)
+                PFault(d) => PFault(d)
+                PTook(arms, c5) =>
+                  match take_brace_close(c5, layout) of
+                    PStuck(c6) => PStuck(c6)
+                    PFault(d) => PFault(d)
+                    PTook(_, c6) =>
+                      PTook(made(saved, c6, ETryCatch(body, arms)), c6)
+
+fn parse_catch_arms(
+  c : Cursor,
+  depth : Int,
+  layout : Bool,
+  acc : List(CatchArm)
+) : Parsed(List(CatchArm)) =
+  if at_brace_close(c, layout) then
+    PTook(acc, c)
+  else
+    let saved = c
+    match take_word(c, TUid) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(name, c1) =>
+        match parse_binders_maybe(c1) of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(binders, c2) =>
+            match take_fixed(c2, "=>") of
+              PStuck(c3) => PStuck(c3)
+              PFault(d) => PFault(d)
+              PTook(_, c3) =>
+                match parse_expr_or_block(c3, depth) of
+                  PStuck(c4) => PStuck(c4)
+                  PFault(d) => PFault(d)
+                  PTook(body, c4) =>
+                    let arm = CatchArm {
+                      name = name,
+                      binders = binders,
+                      body = body,
+                      span = cursor_since(saved, c4)
+                    }
+                    let next = append(acc, [arm])
+                    let sep = skip_arm_sep(c4)
+                    match sep of
+                      (true, c5) => parse_catch_arms(c5, depth, layout, next)
+                      (false, c5) =>
+                        if at_brace_close(c5, layout) then
+                          PTook(next, c5)
+                        else
+                          PStuck(
+                              cursor_note(cursor_note(c5, TFixed(",")), TVSemi),
+                            )
+
+fn parse_binders_maybe(c : Cursor) : Parsed(List(String)) =
+  if at_fixed(c, "(") then
+    parse_binders(cursor_advance(c), Nil)
+  else
+    PTook(Nil, c)
+
+fn parse_binders(c : Cursor, acc : List(String)) : Parsed(List(String)) =
+  if at_fixed(c, ")") then
+    PTook(acc, cursor_advance(c))
+  else
+    match take_word(c, TIdent) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(name, c1) =>
+        let next = append(acc, [name])
+        if at_fixed(c1, ",") then
+          parse_binders(cursor_advance(c1), next)
+        else
+          match take_fixed(c1, ")") of
+            PStuck(c2) => PStuck(c2)
+            PFault(d) => PFault(d)
+            PTook(_, c2) => PTook(next, c2)
+
+fn parse_handle(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  let saved = c
+  match parse_expr(cursor_advance(c), depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(body, c1) =>
+      match take_fixed(c1, "with") of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(_, c2) =>
+          let partial = peek_word(c2) == "partial"
+          let c3 =
+            if partial then
+              cursor_advance(c2)
+            else
+              c2
+          if at_kind(c3, TIdent) then
+            fail_at(c3, "unknown handler mode (expected `partial`)")
+          else
+            match parse_brace_open(c3) of
+              PStuck(c4) => PStuck(c4)
+              PFault(d) => PFault(d)
+              PTook(layout, c4) =>
+                match parse_handler_arms(c4, depth, layout, Nil) of
+                  PStuck(c5) => PStuck(c5)
+                  PFault(d) => PFault(d)
+                  PTook(arms, c5) =>
+                    match take_brace_close(c5, layout) of
+                      PStuck(c6) => PStuck(c6)
+                      PFault(d) => PFault(d)
+                      PTook(_, c6) =>
+                        PTook(made(saved, c6, EHandle(body, arms, partial)), c6)
+
+fn parse_handler_arms(
+  c : Cursor,
+  depth : Int,
+  layout : Bool,
+  acc : List(HandlerArm)
+) : Parsed(List(HandlerArm)) =
+  if at_brace_close(c, layout) then
+    PTook(acc, c)
+  else
+    match parse_handler_arm(c, depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(arm, c1) =>
+        let next = append(acc, [arm])
+        let sep = skip_arm_sep(c1)
+        match sep of
+          (true, c2) => parse_handler_arms(c2, depth, layout, next)
+          (false, c2) =>
+            if at_brace_close(c2, layout) then
+              PTook(next, c2)
+            else
+              PStuck(cursor_note(cursor_note(c2, TFixed(",")), TVSemi))
+
+fn parse_handler_arm(c : Cursor, depth : Int) : Parsed(HandlerArm) =
+  if at_fixed(c, "return") then
+    match take_word(cursor_advance(c), TIdent) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(name, c1) =>
+        match take_fixed(c1, "=>") of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(_, c2) =>
+            match parse_expr_or_block(c2, depth) of
+              PStuck(c3) => PStuck(c3)
+              PFault(d) => PFault(d)
+              PTook(body, c3) => PTook(HReturn(name, body), c3)
+  elif at_fixed(c, "val") then
+    match take_word(cursor_advance(c), TIdent) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(name, c1) =>
+        match take_fixed(c1, "=") of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(_, c2) =>
+            match parse_expr_or_block(c2, depth) of
+              PStuck(c3) => PStuck(c3)
+              PFault(d) => PFault(d)
+              PTook(body, c3) => PTook(HVal(name, body), c3)
+  elif at_kind(c, TIdent) && kind_at(c, 1, TIdent) then
+    parse_graded_arm(c, depth)
+  else
+    parse_operation_arm(c, depth)
+
+fn parse_graded_arm(c : Cursor, depth : Int) : Parsed(HandlerArm) =
+  match take_word(c, TIdent) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(grade, c1) =>
+      match take_word(c1, TIdent) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(name, c2) =>
+          if grade == "many" then
+            fail_run(
+                c,
+                c2,
+                "a `many` clause binds a continuation after `resume` and takes no leading grade",
+              )
+          elif grade /= "once" && grade /= "never" then
+            fail_run(
+                c,
+                c2,
+                "unknown handler grade (expected `once` or `never`)",
+              )
+          else
+            match take_fixed(c2, "(") of
+              PStuck(c3) => PStuck(c3)
+              PFault(d) => PFault(d)
+              PTook(_, c3) =>
+                match parse_binders(c3, Nil) of
+                  PStuck(c4) => PStuck(c4)
+                  PFault(d) => PFault(d)
+                  PTook(params, c4) =>
+                    match take_fixed(c4, "=>") of
+                      PStuck(c5) => PStuck(c5)
+                      PFault(d) => PFault(d)
+                      PTook(_, c5) =>
+                        match parse_expr_or_block(c5, depth) of
+                          PStuck(c6) => PStuck(c6)
+                          PFault(d) => PFault(d)
+                          PTook(body, c6) =>
+                            if grade == "once" then
+                              PTook(HOnce(name, params, body), c6)
+                            else
+                              PTook(HNever(name, params, body), c6)
+
+fn parse_operation_arm(c : Cursor, depth : Int) : Parsed(HandlerArm) =
+  let saved = c
+  match take_word(c, TIdent) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(name, c1) =>
+      match take_fixed(c1, "(") of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(_, c2) =>
+          match parse_binders(c2, Nil) of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(params, c3) =>
+              if peek_word(c3) /= "resume" then
+                fail_run(
+                    saved,
+                    c3,
+                    "a multishot clause names its continuation after `resume`",
+                  )
+              else
+                match take_word(cursor_advance(c3), TIdent) of
+                  PStuck(c4) => PStuck(c4)
+                  PFault(d) => PFault(d)
+                  PTook(resume, c4) =>
+                    match take_fixed(c4, "=>") of
+                      PStuck(c5) => PStuck(c5)
+                      PFault(d) => PFault(d)
+                      PTook(_, c5) =>
+                        match parse_expr_or_block(c5, depth) of
+                          PStuck(c6) => PStuck(c6)
+                          PFault(d) => PFault(d)
+                          PTook(body, c6) =>
+                            PTook(HOp(name, params, resume, body), c6)
+
+-- -------------------------------------------------------------------------
+-- Layout blocks and statement sugar
+-- -------------------------------------------------------------------------
+
+fn parse_block(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  let saved = c
+  match take_kind(c, TVOpen) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(_, c1) =>
+      match parse_stmts(c1, depth) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(body, c2) =>
+          match take_kind(c2, TVClose) of
+            PStuck(c3) =>
+              -- A completed Stmts can either continue through its separator
+              -- or let BlockExpr consume the close. Do not merge an older
+              -- position if the close primitive ever gains consuming failure.
+              if c3.pos == c2.pos then
+                PStuck(cursor_note(c3, TVSemi))
+              else
+                PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(_, c3) =>
+              let span = cursor_since(saved, c3)
+              PTook(
+                  Sp { node = body.node, span = span, synth = body.synth },
+                  c3,
+                )
+
+fn parse_stmts(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  if at_fixed(c, "let") then
+    parse_let_stmt(c, depth)
+  elif at_fixed(c, "var") then
+    parse_var_stmt(c, depth)
+  elif at_fixed(c, "with") then
+    parse_with_stmt(c, depth)
+  elif at_fixed(c, "if") then
+    match parse_if_form(c, depth, true) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(e, c1) => parse_stmt_rest(c, e, c1, depth)
+  elif at_kind(c, TVClose) then
+    PStuck(note_expr(c))
+  else
+    match parse_expr(c, depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(e, c1) => parse_stmt_rest(c, e, c1, depth)
+
+fn parse_stmt_rest(
+  saved : Cursor,
+  e : Sp(Expr),
+  c : Cursor,
+  depth : Int
+) : Parsed(Sp(Expr)) =
+  if at_kind(c, TVSemi) then
+    match parse_stmts(cursor_advance(c), depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(rest, c1) =>
+        match try_scrutinee(e) of
+          Some(scrutinee) =>
+            PTook(
+                build_try_stmt(None, scrutinee, rest, cursor_span(saved).lo),
+                c1,
+              )
+          None => PTook(made(saved, c1, ELet("_", e, rest)), c1)
+  else
+    PTook(e, c)
+
+fn try_scrutinee(e : Sp(Expr)) : Option(Sp(Expr)) =
+  match e.node of
+    ECall(head, args) =>
+      match head.node of
+        EMarker(marker) =>
+          if marker == "try" then
+            match args of
+              Cons(scrutinee, Nil) => Some(scrutinee)
+              _ => None
+          else
+            None
+        _ => None
+    _ => None
+
+fn build_try_stmt(
+  binder : Option(Sp(Pat)),
+  scrutinee : Sp(Expr),
+  rest : Sp(Expr),
+  lo : Int
+) : Sp(Expr) =
+  let span = scrutinee.span
+  let ok_value =
+    match binder of
+      None => authored(PWild, span.lo, span.hi)
+      Some(pat) => pat
+  let ok = authored(PCtor("Ok", [ok_value]), span.lo, span.hi)
+  let err_value = authored(PVar("e@"), span.lo, span.hi)
+  let err = authored(PCtor("Err", [err_value]), span.lo, span.hi)
+  let err_ctor = authored(EVar("Err"), span.lo, span.hi)
+  let err_var = authored(EVar("e@"), span.lo, span.hi)
+  let rethrow = authored(ECall(err_ctor, [err_var]), span.lo, span.hi)
+  let arms = [
+      Arm { pat = ok, guard = None, body = rest },
+      Arm { pat = err, guard = None, body = rethrow },
+    ]
+  synthesized(EMatch(scrutinee, arms), lo, lo)
+
+fn build_pattern_let_stmt(
+  pat : Sp(Pat),
+  value : Sp(Expr),
+  rest : Sp(Expr),
+  lo : Int
+) : Sp(Expr) =
+  match try_scrutinee(value) of
+    Some(scrutinee) => build_try_stmt(Some(pat), scrutinee, rest, lo)
+    None =>
+      let arm = Arm { pat = pat, guard = None, body = rest }
+      synthesized(EMatch(value, [arm]), lo, lo)
+
+-- The `with` family owns the remainder of its enclosing statement block.  A
+-- present virtual semicolon introduces that remainder; without one, preserve
+-- the authored statement as the `with` marker so desugaring can report the
+-- single "nothing to wrap" diagnostic.
+fn parse_with_rest(saved : Cursor, c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  if at_kind(c, TVSemi) then
+    parse_stmts(cursor_advance(c), depth)
+  else
+    let s = cursor_since(saved, c)
+    PTook(authored(EMarker("with"), s.lo, s.hi), c)
+
+fn parse_with_stmt(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  let c1 = cursor_advance(c)
+  if at_kind(c1, TIdent) && fixed_at(c1, 1, "<-") then
+    match take_word(c1, TIdent) of
+      PStuck(c2) => PStuck(c2)
+      PFault(d) => PFault(d)
+      PTook(name, c2) =>
+        match take_fixed(c2, "<-") of
+          PStuck(c3) => PStuck(c3)
+          PFault(d) => PFault(d)
+          PTook(_, c3) =>
+            if at_fixed(c3, "handler") then
+              parse_named_with_handler(c, name, cursor_advance(c3), depth)
+            else
+              match parse_postfix(c3, depth) of
+                PStuck(c4) => PStuck(c4)
+                PFault(d) => PFault(d)
+                PTook(call, c4) =>
+                  finish_with_call(c, Some(name), call, c4, depth)
+  elif at_fixed(c1, "handler") then
+    parse_anonymous_with_handler(c, cursor_advance(c1), depth)
+  else
+    match parse_postfix(c1, depth) of
+      PStuck(c2) => PStuck(c2)
+      PFault(d) => PFault(d)
+      PTook(call, c2) => finish_with_call(c, None, call, c2, depth)
+
+fn finish_with_call(
+  saved : Cursor,
+  binder : Option(String),
+  call : Sp(Expr),
+  c : Cursor,
+  depth : Int
+) : Parsed(Sp(Expr)) =
+  match parse_with_rest(saved, c, depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(rest, c1) =>
+      let params =
+        match binder of
+          None => Nil
+          Some(name) =>
+            [
+                Param {
+                  name = name,
+                  pat = None,
+                  ty = None,
+                  is_borrow = false,
+                  dflt = None
+                },
+              ]
+      let lo = cursor_span(saved).lo
+      let lam = synthesized(ELam(params, rest), lo, lo)
+      let node =
+        match call.node of
+          ECall(head, args) => ECall(head, append(args, [lam]))
+          _ => ECall(call, [lam])
+      PTook(authored(node, lo, cursor_since(saved, c1).hi), c1)
+
+fn parse_with_handler_arms(c : Cursor, depth : Int) : Parsed(List(HandlerArm)) =
+  match parse_brace_open(c) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(layout, c1) =>
+      match parse_handler_arms(c1, depth, layout, Nil) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(arms, c2) =>
+          match take_brace_close(c2, layout) of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(_, c3) => PTook(arms, c3)
+
+fn parse_named_with_handler(
+  saved : Cursor,
+  name : String,
+  c : Cursor,
+  depth : Int
+) : Parsed(Sp(Expr)) =
+  match parse_with_handler_arms(c, depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(arms, c1) =>
+      match parse_with_rest(saved, c1, depth) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(rest, c2) =>
+          PTook(made(saved, c2, ENamedHandle(name, rest, arms)), c2)
+
+fn parse_anonymous_with_handler(
+  saved : Cursor,
+  c : Cursor,
+  depth : Int
+) : Parsed(Sp(Expr)) =
+  match parse_with_handler_arms(c, depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(arms, c1) =>
+      match parse_with_rest(saved, c1, depth) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(rest, c2) =>
+          let lo = cursor_span(saved).lo
+          PTook(synthesized(EHandle(rest, arms, false), lo, lo), c2)
+
+fn parse_let_stmt(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  let saved = c
+  let c1 = cursor_advance(c)
+  if at_kind(c1, TIdent) then
+    match take_word(c1, TIdent) of
+      PStuck(c2) => PStuck(c2)
+      PFault(d) => PFault(d)
+      PTook(name, c2) =>
+        match take_fixed(c2, "=") of
+          PStuck(c3) => PStuck(c3)
+          PFault(d) => PFault(d)
+          PTook(_, c3) =>
+            match parse_expr_or_block(c3, depth) of
+              PStuck(c4) => PStuck(c4)
+              PFault(d) => PFault(d)
+              PTook(value, c4) =>
+                let c5 =
+                  if at_fixed(c4, "in") then
+                    cursor_advance(c4)
+                  else
+                    c4
+                match take_kind(c5, TVSemi) of
+                  PStuck(c6) => PStuck(c6)
+                  PFault(d) => PFault(d)
+                  PTook(_, c6) =>
+                    match parse_stmts(c6, depth) of
+                      PStuck(c7) => PStuck(c7)
+                      PFault(d) => PFault(d)
+                      PTook(rest, c7) =>
+                        match try_scrutinee(value) of
+                          Some(scrutinee) =>
+                            let binder = authored(
+                                PVar(name),
+                                scrutinee.span.lo,
+                                scrutinee.span.hi,
+                              )
+                            PTook(
+                                build_try_stmt(
+                                    Some(binder),
+                                    scrutinee,
+                                    rest,
+                                    cursor_span(saved).lo,
+                                  ),
+                                c7,
+                              )
+                          None =>
+                            PTook(made(saved, c7, ELet(name, value, rest)), c7)
+  else
+    match parse_let_pattern(c1, depth) of
+      PStuck(c2) => PStuck(c2)
+      PFault(d) => PFault(d)
+      PTook(pat, c2) =>
+        match take_fixed(c2, "=") of
+          PStuck(c3) => PStuck(c3)
+          PFault(d) => PFault(d)
+          PTook(_, c3) =>
+            match parse_expr_or_block(c3, depth) of
+              PStuck(c4) => PStuck(c4)
+              PFault(d) => PFault(d)
+              PTook(value, c4) =>
+                let c5 =
+                  if at_fixed(c4, "in") then
+                    cursor_advance(c4)
+                  else
+                    c4
+                match take_kind(c5, TVSemi) of
+                  PStuck(c6) => PStuck(c6)
+                  PFault(d) => PFault(d)
+                  PTook(_, c6) =>
+                    match parse_stmts(c6, depth) of
+                      PStuck(c7) => PStuck(c7)
+                      PFault(d) => PFault(d)
+                      PTook(rest, c7) =>
+                        PTook(
+                            build_pattern_let_stmt(
+                                pat,
+                                value,
+                                rest,
+                                cursor_span(saved).lo,
+                              ),
+                            c7,
+                          )
+
+fn parse_var_stmt(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  let saved = c
+  match take_word(cursor_advance(c), TIdent) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(name, c1) =>
+      match take_fixed(c1, ":=") of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(_, c2) =>
+          match parse_expr(c2, depth) of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(value, c3) =>
+              match take_kind(c3, TVSemi) of
+                PStuck(c4) => PStuck(c4)
+                PFault(d) => PFault(d)
+                PTook(_, c4) =>
+                  match parse_stmts(c4, depth) of
+                    PStuck(c5) => PStuck(c5)
+                    PFault(d) => PFault(d)
+                    PTook(rest, c5) =>
+                      PTook(made(saved, c5, EVarDecl(name, value, rest)), c5)

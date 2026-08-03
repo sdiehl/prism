@@ -7,6 +7,8 @@ use std::process::Command;
 
 use crate::cli::{base_of, file_name, glob_pr, read, resolve_input, CmdResult};
 use crate::error::Error;
+use crate::stdlib::STDLIB;
+use crate::Root;
 
 const DOCS_BACKEND: &str = "docs";
 
@@ -76,7 +78,12 @@ pub fn docs_cmd(
         let g = crate::stdlib_pages().map_err(|e| (e, String::new(), "<stdlib>".into()))?;
         (
             g,
-            crate::default_roots(Path::new(".")),
+            // The embedded library documents itself: its modules and doctests
+            // resolve in the embedded stdlib alone, the same search path the page
+            // generator checks them against. The working directory is not part of
+            // this book's identity, so a stray `.pr` beside the invocation cannot
+            // shadow a stdlib module on the committed-docs path.
+            vec![Root::Embedded(STDLIB)],
             PathBuf::from("."),
             PathBuf::from("target").join("docs"),
             crate::stdlib_expect_files(),

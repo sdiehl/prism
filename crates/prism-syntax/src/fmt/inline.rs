@@ -7,7 +7,9 @@ use super::ops::{
     binop_prec, needs_left_paren, needs_paren_at, needs_right_paren, neg_operand_needs_paren, Level,
 };
 use super::pat::fmt_pat_inline;
-use super::{BinOp, Expr, Fmt, Marker, Mode, PathOp, PathStep, Qualifier, Sugar, Surface, S};
+use super::{
+    tuple_parens, BinOp, Expr, Fmt, Marker, Mode, PathOp, PathStep, Qualifier, Sugar, Surface, S,
+};
 use crate::kw;
 
 // The shared shape of `as_compound_assign`/`as_index_compound`: a synth
@@ -151,7 +153,7 @@ impl Fmt<'_> {
             Expr::Char(c) => Some(fmt_char(*c)),
             Expr::Bool(b) => Some(b.to_string()),
             Expr::Unit => Some("()".into()),
-            Expr::Str(s) => Some(format!("\"{}\"", escape_str(s))),
+            Expr::Str(s) => Some(self.str_text(e.span, s)),
             Expr::Var(x) => Some(x.clone()),
             Expr::Hole(name) => Some(format!("?{name}")),
             // A delimited list collapses onto one line only when nothing inside
@@ -165,7 +167,7 @@ impl Fmt<'_> {
                     .iter()
                     .map(|x| self.fmt_expr_inline(x, Mode::Flat))
                     .collect();
-                parts.map(|p| format!("({})", p.join(", ")))
+                parts.map(|p| tuple_parens(&p))
             }
             Expr::List(elems) if elems.is_empty() => Some("[]".into()),
             Expr::List(elems) => {
@@ -543,6 +545,7 @@ impl Fmt<'_> {
             }
             Sugar::Break => Some(kw::BREAK.to_string()),
             Sugar::Continue => Some(kw::CONTINUE.to_string()),
+            Sugar::Reflect(kind, name) => Some(format!("{} {} {name}", kw::REFLECT, kind.as_str())),
             Sugar::Return(e) => {
                 let e_s = self.fmt_expr_inline(e, mode)?;
                 Some(format!("{} {e_s}", kw::RETURN))

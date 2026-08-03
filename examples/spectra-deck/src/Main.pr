@@ -1,5 +1,28 @@
 import Spectra (..)
 
+import Data.String (str_join)
+
+-- | The artifact chain a pipeline slide shows, arrowed together.
+--
+-- A prompt line, evaluated and shown with its value:
+--
+-- ```prism
+-- pipeline(["Deck", "Typst"])
+-- ```
+-- ```output
+-- Deck → Typst
+-- ```
+--
+-- A whole program, compiled and run:
+--
+-- ```prism
+-- fn main() = print(pipeline(["one", "spectrum"]))
+-- ```
+-- ```output
+-- one → spectrum
+-- ```
+pub fn pipeline(stages : List(String)) : String = str_join(" → ", stages)
+
 fn value_slide() : Unit ! {SlideBuilder} =
   pict(para([
       plain("Spectra keeps presentation structure in "),
@@ -10,18 +33,43 @@ fn value_slide() : Unit ! {SlideBuilder} =
   pict(item("Slides, layout, and reveal stages are type checked."))
   pict(item("Generated Typst is a durable, inspectable artifact."))
 
-fn authoring_slide() : Unit ! {SlideBuilder} =
-  pict(
-      prism_code(
-          "slide(\"Composition\", body)\n\nfn body() =\n  pict(item(\"ordinary values\"))\n  reveal_next()\n  pict(item(\"typed effects\"))",
-        ),
-    )
+-- The code on this slide is this slide, title and all: one declaration that
+-- names its own heading, builds its own body, and quotes itself onto it. The
+-- quotation is not a string literal. The compiler lifts this declaration out of
+-- this file and the formatter renders it, comment block included, so what a
+-- reader sees is exactly what put it on the screen.
+fn authoring_slide() : Slide =
+  titled_slide("The authoring surface is Prism", column(14, [
+      prism_code(reflect fn authoring_slide),
+      item("Builder effects elaborate to the same pure deck representation."),
+    ]))
+
+fn reflection_slide() : Unit ! {SlideBuilder} =
+  pict(prism_code(reflect fn slides))
   reveal_next()
-  pict(item("Builder effects elaborate to the same pure deck representation."))
+  pict(item("The deck's running order, quoted out of the file that runs it."))
+  pict(item("A comment-only edit here moves this deck's identity."))
+
+-- Neither output block on this slide is written by hand. `spectra build` hands
+-- every example to the compiler's doctest runner, so a slide claiming an output
+-- its code no longer produces fails the build instead of reaching a screen.
+fn doctest_slide() : Unit ! {SlideBuilder} =
+  pict(doctest(reflect fn pipeline))
+  reveal_next()
+  pict(item_text([
+      plain("An example with no "),
+      inline_code("main"),
+      plain(" runs as a prompt line and shows its value."),
+    ]))
+  pict(item_text([
+      plain("One that defines "),
+      inline_code("main"),
+      plain(" runs as a program and shows what it prints."),
+    ]))
 
 fn artifacts_slide() : Unit ! {SlideBuilder} =
   pict(centered(16, [
-      text("Prism source → Deck → envelope → Typst → PDF"),
+      text(pipeline(["Prism source", "Deck", "envelope", "Typst", "PDF"])),
       rich_text([
           colored("muted", [
               plain("Every boundary is deterministic and content-addressable."),
@@ -30,11 +78,18 @@ fn artifacts_slide() : Unit ! {SlideBuilder} =
     ]))
 
 fn slides() : Unit ! {DeckBuilder} =
-  cover("Spectra", "Typed presentations, refracted through Typst")
+  cover("Spectra", "Statically typed presentations with reflection")
   slide("A deck is a value", value_slide)
-  slide("The authoring surface is Prism", authoring_slide)
+  add_slide(authoring_slide())
+  slide("The deck reads its own source", reflection_slide)
+  slide("The examples are run, not claimed", doctest_slide)
   slide("One source, a spectrum of artifacts", artifacts_slide)
 
-fn talk() : Deck = deck(metadata("Spectra", "Prism"), prism_theme, slides)
+fn talk() : Deck =
+  deck(
+      metadata("Statically typed presentations with reflection", "Prism"),
+      prism_theme,
+      slides,
+    )
 
 fn main() = emit_deck(talk())

@@ -6,6 +6,8 @@
 #include "prism_mem.h"
 #include "prism_string.h"
 #include <fcntl.h>
+#include <pthread.h>
+#include <stdint.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -373,6 +375,15 @@ long prism_exit(long code) {
  * place the runtime reaches across that boundary. */
 extern long prismfn_main(void);
 
+/* The entry thread's stack, sized in `size_t` so the product is computed in the
+ * width it is consumed at rather than widening an `unsigned int` result. */
+#define PRISM_ENTRY_STACK_BYTES ((size_t)64 * 1024 * 1024)
+
+static void *prism_entry_thread(void *unused) {
+    (void)unused;
+    return (void *)(intptr_t)prismfn_main();
+}
+
 int main(int argc, char **argv) {
     /* Surface `args()` is the program argument list, not C's process argv:
      * argv[0] is the launcher path and is deliberately excluded.  The
@@ -380,7 +391,19 @@ int main(int argc, char **argv) {
      * doing the normalization here keeps native and interpreted CLIs equal. */
     prism_argc = argc > 0 ? argc - 1 : 0;
     prism_argv = argc > 0 ? argv + 1 : argv;
-    long r = prismfn_main();
+    /* Keep host stack exhaustion from preceding the language-level depth
+     * budget.  Generated parser code runs on a fixed, explicitly-sized worker
+     * stack; `descend` remains the authority for E7102. */
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, PRISM_ENTRY_STACK_BYTES);
+    pthread_t thread;
+    int created = pthread_create(&thread, &attr, prism_entry_thread, NULL);
+    pthread_attr_destroy(&attr);
+    if (created != 0) return 134;
+    void *raw = NULL;
+    if (pthread_join(thread, &raw) != 0) return 134;
+    long r = (long)(intptr_t)raw;
     /* Only an explicit `exit(n)` sets the process code (it calls libc exit
      * directly, before returning here); a value-returning main exits 0. The
      * interpreter derives the exit code from `exit(n)` alone and ignores main's

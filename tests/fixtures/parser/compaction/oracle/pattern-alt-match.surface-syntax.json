@@ -1,0 +1,92 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "936c022cf906e0e45a9dcd96a388c56ef15f0fd46843d14376648b7596c548a9",
+    "text": "fn corpus(v) = match v of\n  A | B => 0\n  _ => 1\n"
+  },
+  "items": [
+    {
+      "body": {
+        "arms": [
+          {
+            "body": {
+              "kind": "int",
+              "span": [
+                37,
+                38
+              ],
+              "value": "0"
+            },
+            "pat": {
+              "alts": [
+                {
+                  "kind": "ctor",
+                  "name": "A",
+                  "span": [
+                    28,
+                    29
+                  ]
+                },
+                {
+                  "kind": "ctor",
+                  "name": "B",
+                  "span": [
+                    32,
+                    33
+                  ]
+                }
+              ],
+              "kind": "or",
+              "span": [
+                28,
+                33
+              ]
+            }
+          },
+          {
+            "body": {
+              "kind": "int",
+              "span": [
+                46,
+                47
+              ],
+              "value": "1"
+            },
+            "pat": {
+              "kind": "wild",
+              "span": [
+                41,
+                42
+              ]
+            }
+          }
+        ],
+        "kind": "match",
+        "scrutinee": {
+          "kind": "var",
+          "name": "v",
+          "span": [
+            21,
+            22
+          ]
+        },
+        "span": [
+          15,
+          47
+        ]
+      },
+      "kind": "fn",
+      "name": "corpus",
+      "params": [
+        {
+          "name": "v"
+        }
+      ],
+      "span": [
+        0,
+        47
+      ]
+    }
+  ]
+}

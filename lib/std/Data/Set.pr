@@ -1,5 +1,12 @@
 -- | Ordered sets, reusing the balanced-tree map.
 --
+-- There is no `Set` type. A set is exactly a `Map(k, Unit)`, which is what the
+-- signatures below say and what the reference documents: the module is a naming
+-- layer over `Data.Map`, not an abstraction over it. So a set is also a map
+-- wherever one is expected, `map_size` and `map_keys` read it directly (which
+-- is how `set_size` and `set_to_list` are defined), and only the `Unit` value
+-- discipline of these functions keeps its values uniform.
+--
 -- Set algebra stays O(n log n) and preserves iteration order. Base includes
 -- this module.
 --

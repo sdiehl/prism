@@ -1,0 +1,1 @@
+fn corpus(f, g, x, y) = f(1)?.value + g(2) * 3 ^ 4

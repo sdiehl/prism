@@ -70,8 +70,8 @@ impl LoweredCore {
 /// (pre-lowering) stage:
 ///
 /// ```
-/// use prism::core::{lint_core, Comp, Core, CoreFn, PassStage, Value};
-/// use prism::sym::Sym;
+/// use prism_core::core::{lint_core, Comp, Core, CoreFn, PassStage, Value};
+/// use prism_common::sym::Sym;
 ///
 /// // fn main = return 42
 /// let prog = Core {
@@ -89,8 +89,8 @@ impl LoweredCore {
 /// program that carries one at the pre-lowering stage is an error:
 ///
 /// ```
-/// use prism::core::{lint_core, Comp, Core, CoreFn, PassStage, Value};
-/// use prism::sym::Sym;
+/// use prism_core::core::{lint_core, Comp, Core, CoreFn, PassStage, Value};
+/// use prism_common::sym::Sym;
 ///
 /// let bad = Core {
 ///     fns: vec![CoreFn {

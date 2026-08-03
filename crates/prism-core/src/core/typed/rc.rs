@@ -794,7 +794,9 @@ mod tests {
     use prism_syntax::names::ALLOC_OP;
 
     use super::super::verify::{verify, OperationSig, VerifyEnv};
-    use super::super::{CoreFnSig, CoreInstantiation, CoreQuantifier, LoweredType, TypedValueKind};
+    use super::super::{
+        CoreFnSig, CoreInstantiation, CoreQuantifier, LoweredType, TypedHandler, TypedValueKind,
+    };
     use super::*;
 
     fn sym(name: &str) -> Sym {
@@ -869,6 +871,28 @@ mod tests {
             panic!("owned typed Core is invalid: {violations:#?}");
         }
         actual
+    }
+
+    // `EffectLowered` promises that no source handler remains. If a compiler
+    // bug forges that phase marker, RC must fail before emitting a transform
+    // whose ownership treatment would be unsound.
+    #[test]
+    #[should_panic(expected = "effect lowering removes every Handle before reference counting")]
+    fn surviving_handle_fails_closed_before_rc_insertion() {
+        let unit = source(Type::Unit);
+        let body = ret(TypedValue::new(unit.clone(), TypedValueKind::Unit));
+        let handled = TypedComp::new(
+            pure(unit),
+            TypedCompKind::Handle {
+                body: Box::new(body),
+                return_binder: None,
+                return_body: None,
+                ops: TypedHandler::new(Vec::new()).unwrap(),
+            },
+        );
+        let input: TypedCore<EffectLowered> =
+            TypedCore::new(vec![function("main", Vec::new(), handled)]);
+        let _ = insert_rc(input, &Sigs::new());
     }
 
     #[test]

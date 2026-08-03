@@ -38,9 +38,5 @@ fn has(w : OrdWitness(Int, brand), key : Int) : Bool =
 fn main() =
   print(with_ordering(asc, build))
   print(with_ordering(desc, build))
-  println(
-      concat("asc has 1: ", show_bool(with_ordering(asc, \(w) -> has(w, 1)))),
-    )
-  println(
-      concat("desc has 9: ", show_bool(with_ordering(desc, \(w) -> has(w, 9)))),
-    )
+  println("asc has 1: {with_ordering(asc, \(w) -> has(w, 1))}")
+  println("desc has 9: {with_ordering(desc, \(w) -> has(w, 9))}")

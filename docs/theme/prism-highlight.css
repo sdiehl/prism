@@ -1,0 +1,11 @@
+/* Prism comments are trivia. Keep them readable, but quieter than code. */
+pre code.language-prism .hljs-comment,
+code.language-prism .hljs-comment {
+    color: #8b929c !important;
+    font-style: italic;
+}
+
+body.light pre code.language-prism .hljs-comment,
+body.light code.language-prism .hljs-comment {
+    color: #737b86 !important;
+}

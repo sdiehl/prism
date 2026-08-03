@@ -2,9 +2,9 @@
 source: tests/snapshots.rs
 expression: "lines.join(\"\\n\")"
 ---
-Color  03439be58b783f6e
-Log  7a1fcf934d023539
-Point  b7c4351fef1a0897
-Range  e7948a2362d394e8
-Shape  536f8856e2045ee1
-Tree  c304902309be4a4e
+Color  75886b30f7882f2b
+Log  f55c7009037d83a4
+Point  5d253b46ed89a9f9
+Range  75eb3a5ec2c2d249
+Shape  164a8bcbaf38438d
+Tree  281ffdc3f1179437

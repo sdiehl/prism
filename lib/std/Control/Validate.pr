@@ -35,6 +35,13 @@ fn capture_validate(action : () -> a ! {Validate(e) | r}) : (Option(a), List(e))
 
 -- | Run a validation computation. Any fatal or non-fatal errors make the
 -- result `Invalid`; only a completed computation with no errors is `Valid`.
+--
+-- ```prism
+-- run_validate(\() -> disputes(["too small", "odd"]))
+-- ```
+-- ```output
+-- Data.Validation.Invalid([too small, odd])
+-- ```
 pub fn run_validate(action : () -> a ! {Validate(e) | r}) : Validation(e, a) =
   match capture_validate(action) of
     (Some(value), Nil) => Valid(value)
@@ -60,6 +67,13 @@ pub fn disputes(errs : List(e)) : Unit ! {Validate(e)} =
 -- disputes. All captured errors are re-raised as disputes in the outer
 -- validation, so the final run still fails unless another handler consumes
 -- them.
+--
+-- ```prism
+-- exec_validate(\() -> tolerate(\() -> refute("bad field")))
+-- ```
+-- ```output
+-- [bad field]
+-- ```
 pub fn tolerate(action : () -> a ! {Validate(e) | r}) : Option(a) ! {Validate(e) | r} =
   match capture_validate(action) of
     (value, errs) =>

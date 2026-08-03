@@ -1,0 +1,62 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "f8e4eb55f2927de1126100349433585bb629ebe283db058982c90195de0dd991",
+    "text": "type Corpus(a, e : Row) = Corpus(a)\nalias Pair(a, b) = (a, b)\n"
+  },
+  "items": [
+    {
+      "ctors": [
+        {
+          "args": [
+            {
+              "kind": "var",
+              "name": "a"
+            }
+          ],
+          "name": "Corpus"
+        }
+      ],
+      "kind": "data",
+      "name": "Corpus",
+      "param_kinds": [
+        "type",
+        "row"
+      ],
+      "params": [
+        "a",
+        "e"
+      ],
+      "span": [
+        0,
+        35
+      ]
+    },
+    {
+      "kind": "type-synonym",
+      "name": "Pair",
+      "params": [
+        "a",
+        "b"
+      ],
+      "span": [
+        36,
+        61
+      ],
+      "ty": {
+        "items": [
+          {
+            "kind": "var",
+            "name": "a"
+          },
+          {
+            "kind": "var",
+            "name": "b"
+          }
+        ],
+        "kind": "tuple"
+      }
+    }
+  ]
+}

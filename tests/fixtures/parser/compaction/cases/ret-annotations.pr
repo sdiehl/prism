@@ -1,0 +1,2 @@
+fn closure() : (Int) -> Int ! {io} = \(x) -> x
+fn poly() : forall a. a = ?hole

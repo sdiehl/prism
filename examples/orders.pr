@@ -38,7 +38,7 @@ fn main() =
       guard(balance >= 0)
       balance
     else
-      0 - 1
+      -1
   println(balance)
   println(r1)
   -- A line that overdraws fails its guard, so the balance rolls back.
@@ -48,6 +48,6 @@ fn main() =
       guard(balance >= 0)
       balance
     else
-      0 - 1
+      -1
   println(balance)
   println(r2)

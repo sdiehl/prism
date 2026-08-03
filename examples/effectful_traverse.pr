@@ -11,12 +11,8 @@ type Tree(a) = Leaf(a) | Branch(Tree(a), Tree(a)) deriving (Show)
 
 -- The higher-kinded tower for Tree. Traversable names Functor and Foldable as
 -- superclasses, so this instance trio is what lets the prelude's generic
--- `traverse`/`fmap`/`fold_r` resolve on the `Tree` head. Each delegates to a
--- top-level recursive walker; `twalk` is itself effect-polymorphic.
-fn tmap(g, t) =
-  match t of
-    Leaf(x) => Leaf(g(x))
-    Branch(l, r) => Branch(tmap(g, l), tmap(g, r))
+-- `traverse`/`fmap`/`fold_r` resolve on the `Tree` head. Both mapping methods
+-- delegate to the one effect-polymorphic recursive walker.
 
 fn tfold(g, z, t) =
   match t of
@@ -34,7 +30,7 @@ fn twalk(g, t) =
     Branch(l, r) => Branch(twalk(g, l), twalk(g, r))
 
 instance functorTree : Functor(Tree)
-  fn fmap(g, t) = tmap(g, t)
+  fn fmap(g, t) = twalk(g, t)
 
 instance foldableTree : Foldable(Tree)
   fn fold_r(g, z, t) = tfold(g, z, t)
@@ -86,7 +82,7 @@ fn sign(x : Int) : Int ! {Choice} =
   if pick() then
     x
   else
-    0 - x
+    -x
 
 fn audit(x : Int) : (Int, Int) ! {State, Fail} =
   guard(x >= 0)
@@ -98,7 +94,7 @@ fn main() : Unit ! {IO} =
   println(show(run_state(0, \() -> traverse(number, t))))
   -- Fail: short-circuit the whole traversal on a bad leaf (the Maybe applicative).
   println(show(attempt(\() -> traverse(nonneg, t))))
-  println(show(attempt(\() -> traverse(nonneg, Branch(Leaf(0 - 9), Leaf(2))))))
+  println(show(attempt(\() -> traverse(nonneg, Branch(Leaf(-9), Leaf(2))))))
   -- Choice, by multishot resumption: one whole tree per sign assignment, all
   -- 2^3 of them collected (the List applicative; here the continuation is reentered).
   let worlds =

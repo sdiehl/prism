@@ -14,7 +14,7 @@ Shrinking is intentionally omitted. The seam is the seed and size carried on a f
 
 ### `Gen`
 
-```prism,def,h-235e5d172741534ca04e508cac27d65d3486d5832b8659e70e41299a7ffd2f94
+```prism,def,h-b14e25b2e371fb55daa22b7a2d5327058f6d6a0387796c4aa551dea6207b8a82
 type Gen(a) = Gen((Int) -> a ! {Random})
 ```
 
@@ -22,7 +22,7 @@ A seeded, sized generator of `a`. Apply it with `gen_run`; build one with the co
 
 ### `Config`
 
-```prism,def,h-46d050c2f5c74d563d7efc7ecf79f7801bf4aae0a31b6a0e0bd5815d1e10dc20
+```prism,def,h-995a7b7a3ba5f9c69eb679f9ef3940955626380278e1b2044a0440fa419693df
 type Config = Cfg { seed: U64, count: Int, max_size: Int }
 ```
 
@@ -30,7 +30,7 @@ How a property run configures the seeded stream: the base `seed`, the number of 
 
 ### `Outcome`
 
-```prism,def,h-06cf53d69d37ee9aeaf5322d26896984dfd63b2785cd9e0be3269a33c09c8540
+```prism,def,h-76528ba1767ee92028499788eb2921f84a41a9627abcf5497766e0d19735f420
 type Outcome(a) = Passed(Int) | Failed(a, Int, U64, Int)
 ```
 
@@ -40,7 +40,7 @@ The result of a property run: `Passed(n)` after `n` cases held, or `Failed(value
 
 ### `run_seeded`
 
-```prism,sig,h-78f0920a39fd46cb5d8afb7a2afb4cafbc19dbb508565279b72fa74a58a358d2
+```prism,sig,h-7af9244794b828bcdfb81dfd624f2a0de50257c8776cd1f7bef2eaadf9784c61
 run_seeded : forall e0 a. (U64, () -> a ! {Random, e0}) -> a ! {e0}
 ```
 
@@ -56,7 +56,7 @@ run_seeded(1u64, \() -> gen_run(gen_int, 5))
 
 ### `gen_run`
 
-```prism,sig,h-bbc03f98f71b7d1cbd36265d971132775f29f2f998ccc14cc72394efd4ed2446
+```prism,sig,h-2d81fb0d8dd43f0256490cf44dac4608ff604a1540f78c6701c29172b08cf161
 gen_run : forall a. (Quickcheck.Gen(a), Int) -> a ! {Random}
 ```
 
@@ -72,7 +72,7 @@ run_seeded(1u64, \() -> gen_run(gen_const(9), 5))
 
 ### `gen_at`
 
-```prism,sig,h-159448058b7242c4c1b8d4effdbcb8db4f14e98dd7675e3a3e4ff5f45a32c9a7
+```prism,sig,h-0d4c950082dce9e847234f1d987a0488166a3d09e7829f07a3299e4843318c7b
 gen_at : forall a. (Quickcheck.Gen(a), U64, Int) -> a
 ```
 
@@ -88,7 +88,7 @@ gen_at(gen_int, 42u64, 10)
 
 ### `gen_const`
 
-```prism,sig,h-8f6fc853b174b6f7a2b7c582e175a2f7de82903afa2134f63fc3539800fdbe47
+```prism,sig,h-b852b2a42af290a3634da7d4c77dd990f35ebc02aeebd3b955d0aaa88f890304
 gen_const : forall a. (a) -> Quickcheck.Gen(a)
 ```
 
@@ -104,7 +104,7 @@ gen_at(gen_const(7), 1u64, 5)
 
 ### `gen_map`
 
-```prism,sig,h-215d5397f401c5e612c77ce83faa9a4121feaceabd3dfbbea8e7ff7cbba53621
+```prism,sig,h-824105cb5d7450c44a0e093ce7bb23e4cff7dac5bbd61f7d0b6a542bb6225790
 gen_map : forall a b. ((a) -> b, Quickcheck.Gen(a)) -> Quickcheck.Gen(b)
 ```
 
@@ -120,7 +120,7 @@ gen_at(gen_map(\(x) -> x + 1, gen_const(4)), 1u64, 5)
 
 ### `gen_map2`
 
-```prism,sig,h-8f6f565e4499cd6079c007d34ba46938582e77703dcc942338f585d284647260
+```prism,sig,h-07ca079d4ca7fd0cdc3865a4d3eb01b879f5f6f4499b280a4d58bc96d3569bbe
 gen_map2 : forall a b c. ((a, b) -> c, Quickcheck.Gen(a), Quickcheck.Gen(b)) -> Quickcheck.Gen(c)
 ```
 
@@ -136,7 +136,7 @@ gen_at(gen_map2(\(a, b) -> a + b, gen_const(2), gen_const(3)), 1u64, 5)
 
 ### `gen_bind`
 
-```prism,sig,h-cc38b74473e0c2a767e77dd6584b9f85558ce26b6e4bf0efa1b52671550737e9
+```prism,sig,h-a8a94c4aadcfd13fd05ddf4913c6dcdce7fe8ca97bf61a92e23d25bf5075a014
 gen_bind : forall a b. (Quickcheck.Gen(a), (a) -> Quickcheck.Gen(b)) -> Quickcheck.Gen(b)
 ```
 
@@ -152,7 +152,7 @@ gen_at(gen_bind(gen_const(3), \(x) -> gen_const(x * 2)), 1u64, 5)
 
 ### `gen_sized`
 
-```prism,sig,h-be59c643ecf5dbf74ea08761d1c2a24c811e0727661bd903b32483f013468a54
+```prism,sig,h-14de01e4b2726bd02ef8873251cb00f36371b4aebb4596378e500e4bd447a080
 gen_sized : forall a. ((Int) -> Quickcheck.Gen(a)) -> Quickcheck.Gen(a)
 ```
 
@@ -168,7 +168,7 @@ gen_at(gen_sized(\(sz) -> gen_const(sz)), 1u64, 12)
 
 ### `gen_resize`
 
-```prism,sig,h-7afc33cc61770abd460f49f8106a196786aee5e562728aa397d40df630b3668f
+```prism,sig,h-e4fef405b048c12667810606b94f7c947f8d3bed9781dec3b444df31b9826359
 gen_resize : forall a. (Int, Quickcheck.Gen(a)) -> Quickcheck.Gen(a)
 ```
 
@@ -184,7 +184,7 @@ gen_at(gen_resize(4, gen_sized(\(sz) -> gen_const(sz))), 1u64, 99)
 
 ### `gen_choose`
 
-```prism,sig,h-fad0d246d7adb5b4bff8c642f126d532caa8fa264b9193a4c3c9ace45a5dcbb8
+```prism,sig,h-b890601ba6a06eecf4e1e5d9f85b5cc17816e8036888098af46343a165d8bb00
 gen_choose : forall a. (Quickcheck.Gen(a), List(Quickcheck.Gen(a))) -> Quickcheck.Gen(a)
 ```
 
@@ -200,7 +200,7 @@ gen_at(gen_choose(gen_const(1), [gen_const(2)]), 5u64, 3)
 
 ### `gen_one_of`
 
-```prism,sig,h-bc12b4f51acc5ee6012efccaebee9e03fdf4fd19855218d24ab6dfb7aac2cc91
+```prism,sig,h-89b277b096f09ea166c52d31057fa931336706c7a73bf5a5e14637d742ef95a1
 gen_one_of : forall a. (a, List(a)) -> Quickcheck.Gen(a)
 ```
 
@@ -216,7 +216,7 @@ gen_at(gen_one_of(10, [20, 30]), 5u64, 3)
 
 ### `gen_int`
 
-```prism,sig,h-11147e2d21e0b3a31f8dc884b2e89d6846cc7d2ad4e84abb4f1a4ac670860a62
+```prism,sig,h-a2cd355d3b20f3ee192565ab2abcd01ddd852d8c367922ebe2a2173c6b7985f5
 gen_int : Quickcheck.Gen(Int)
 ```
 
@@ -232,7 +232,7 @@ gen_at(gen_int, 42u64, 10)
 
 ### `gen_i64`
 
-```prism,sig,h-7851fbd927d366d4028ef09d7c1c1acfcf2bc5a07159f506d3c733a88a8b086c
+```prism,sig,h-a24f21e73e5bf94882260cd66c64845ad81581d3e255784b8ff2c071d5f567b0
 gen_i64 : Quickcheck.Gen(I64)
 ```
 
@@ -240,7 +240,7 @@ Generator of `I64`, reusing the `Int` distribution.
 
 ### `gen_u64`
 
-```prism,sig,h-6ed10805597bd0d598da8038c051301338f74ca31a9f01f5b446309167880c76
+```prism,sig,h-d9038a8182d2acf545f9e6a09c0a93915bcc1eefc1cd981a51c27c18cd97f459
 gen_u64 : Quickcheck.Gen(U64)
 ```
 
@@ -248,7 +248,7 @@ Generator of `U64`, reusing the `Int` distribution (negatives wrap).
 
 ### `gen_bool`
 
-```prism,sig,h-5fc2660fc673fdc88e06b0afde532f7b198cccc7e4ba178505c2d5b677a368c6
+```prism,sig,h-dc16a77b2f056c7ccab886c43066f4674c21df0ef44662b4558f9ae330be1fd1
 gen_bool : Quickcheck.Gen(Bool)
 ```
 
@@ -264,7 +264,7 @@ false
 
 ### `gen_float`
 
-```prism,sig,h-215493211a448b3750996580d0ef685af71cc618319955980ca09bc995702df7
+```prism,sig,h-85d40df1f174e6d6ba963c9890f2b015afb06ec80de7dea2613d99a89f41ff30
 gen_float : Quickcheck.Gen(Float)
 ```
 
@@ -272,7 +272,7 @@ Generator of `Float`, including the nasty values (`+/-0`, `+/-inf`, `NaN`).
 
 ### `gen_char`
 
-```prism,sig,h-f5f64f8bc16963d8a151c5af9c0c47866208aa78155b2fb5d498adcea9c3bc1e
+```prism,sig,h-08a888b32e09cf3287ce82e3f6926a10316e98d79957d985337d835f5b63c4d3
 gen_char : Quickcheck.Gen(Char)
 ```
 
@@ -280,7 +280,7 @@ Generator of a printable-ASCII `Char`.
 
 ### `gen_string`
 
-```prism,sig,h-47923958f88efd4f72dcbae851808c95b7f2a151cde6b162feabcbc0e518896a
+```prism,sig,h-d3911a3cf576cce69bb7abd5c0ad50039824976e0725a88130f2576900756306
 gen_string : Quickcheck.Gen(String)
 ```
 
@@ -288,7 +288,7 @@ Generator of a printable-ASCII `String`, length bounded by size.
 
 ### `gen_list`
 
-```prism,sig,h-0a4f26902e31c38ed428ff9c9958b64cd4de19585dfd66a214328ccc6fef6a24
+```prism,sig,h-17966c334f83c943c7a2fc254a8e4cd37f02f1684e97ecaada61c7e20a21357b
 gen_list : forall a. (Quickcheck.Gen(a)) -> Quickcheck.Gen(List(a))
 ```
 
@@ -304,7 +304,7 @@ gen_at(gen_list(gen_const(1)), 7u64, 4)
 
 ### `gen_option`
 
-```prism,sig,h-328001aac35378fd0f0cc943f18fd4c4e7449f5796e2fa6084b8507c818dadcd
+```prism,sig,h-17f7bc6c3f2a8671bed7881698cc8a9ea2c5c947fb805b0cc9c3455b51c8d7a8
 gen_option : forall a. (Quickcheck.Gen(a)) -> Quickcheck.Gen(Option(a))
 ```
 
@@ -320,7 +320,7 @@ Some(5)
 
 ### `gen_pair`
 
-```prism,sig,h-e5cda331c75a00acae130e9f01fe66ef8a9bc21f0e097d3542e855593dd0f651
+```prism,sig,h-2979686d8d16be8110592fb6a292cd903e251f3522c320282d9ad11e8c039d41
 gen_pair : forall a b. (Quickcheck.Gen(a), Quickcheck.Gen(b)) -> Quickcheck.Gen((a, b))
 ```
 
@@ -336,7 +336,7 @@ gen_at(gen_pair(gen_const(1), gen_const(2)), 1u64, 3)
 
 ### `gen_triple`
 
-```prism,sig,h-a401bb3df9b28c5625827dca88e09480651772e239947c402646e77958c23630
+```prism,sig,h-2ff7c12c517efdcd097cae38779780ed25b44626b52ca89cceec582ba3041e01
 gen_triple : forall a b c. (Quickcheck.Gen(a), Quickcheck.Gen(b), Quickcheck.Gen(c)) -> Quickcheck.Gen((a, b, c))
 ```
 
@@ -352,7 +352,7 @@ gen_at(gen_triple(gen_const(1), gen_const(2), gen_const(3)), 1u64, 3)
 
 ### `default_config`
 
-```prism,sig,h-e833751cbf33409c40d318967058b6783f4675007e7dd53d06f67177eac6aa35
+```prism,sig,h-713f5d1cd89ff19f22b4164c009965905a54d60e035e7f72112ab544ace2265a
 default_config : Quickcheck.Config
 ```
 
@@ -368,7 +368,7 @@ default_config.count
 
 ### `check_with`
 
-```prism,sig,h-43741e0ff8c3dfa236f413d2fcf2ad2b7c80559984bf11ba8b6b78bda6fb886a
+```prism,sig,h-1e94103fa95a821b850994cbc8acab6eb4e71b278d7eaf71c4afe44b38ff7c54
 check_with : forall a. (Quickcheck.Config, Quickcheck.Gen(a), (a) -> Bool) -> Quickcheck.Outcome(a)
 ```
 
@@ -384,7 +384,7 @@ Quickcheck.Passed(100)
 
 ### `quickcheck`
 
-```prism,sig,h-c98f863feed97108d56f2df4c545dc03b90601fdb5a0cb63220f5b8ef629ac3e
+```prism,sig,h-545db99bf117aeed579cf58def5cfd414e249197dce82029d68cd6116cc0e135
 quickcheck : forall a. (Quickcheck.Gen(a), (a) -> Bool) -> Quickcheck.Outcome(a)
 ```
 
@@ -400,7 +400,7 @@ Quickcheck.Passed(100)
 
 ### `passed`
 
-```prism,sig,h-9aefbed0dc87f112e8eaef1a07fa582c4428f3fdb8dc465d8ec2dcd5d5ac8224
+```prism,sig,h-b2097268094f731cd67757a6ec574115e51aa4b710f17dff3b3cbf3c48ae8c2b
 passed : forall a. (Quickcheck.Outcome(a)) -> Bool
 ```
 
@@ -416,7 +416,7 @@ true
 
 ### `show_outcome`
 
-```prism,sig,h-bfc4ce38dd8b1220876ce6e8f153624f33a900c0c33ccc35e8d8337818f58ea1
+```prism,sig,h-020e309e97e3467d09953557c2845bf8ada69b09788bd563bbf9087107d04fac
 show_outcome : forall a. (String, Quickcheck.Outcome(a)) -> String
 ```
 

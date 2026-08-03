@@ -1,0 +1,3 @@
+fn corpus(r) =
+  let x = r?
+  x

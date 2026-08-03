@@ -17,7 +17,7 @@ use prism::{default_roots, Config, EffectTier};
 use crate::support::fuzzgen::{generate, generate_arena, shrink, Program};
 use crate::support::{check_native_parity, require_cc, TempDir};
 
-const TIERS: &[EffectTier] = &[EffectTier::Auto, EffectTier::State, EffectTier::FreeMonad];
+const TIERS: &[EffectTier] = &EffectTier::ALL;
 const GENERATED_CASES: usize = 12;
 const SEED: u64 = 0x7479_7065_645f_667a;
 const ARENA_CASES: usize = 8;

@@ -1,0 +1,30 @@
+-- Compiler fixture: composition, pipes, and receiver-first stream UFCS must
+-- retain the state-fusion lowering used by the stream pipeline at the end.
+
+fn double(x) = x * 2
+
+fn square(x) = x * x
+
+fn inc(x) = x + 1
+
+fn is_big(x) = x > 10
+
+fn pipeline(xs) = xs |> filter(odd) |> map(square) |> map(inc) |> sum
+
+fn main() =
+  println(sum(map(square, filter(odd, range(1, 6)))))
+  println(range(1, 6) |> filter(odd) |> map(square) |> sum)
+  println(pipeline(range(1, 11)))
+  let transform = double >> inc >> square
+  let transform_back = square << inc << double
+  println(transform(3))
+  println(transform_back(3))
+  let process = filter(odd) >> map(square) >> sum
+  println(range(1, 11) |> process)
+  println(process(range(1, 11)))
+  let odd_squares = filter(odd) >> map(square)
+  let report = odd_squares >> filter(is_big) >> sum
+  println(range(1, 11) |> report)
+  println(srange(1, 20).smap(square).skeep(is_big).stake(3).ssum())
+  println(10 |> transform)
+  println(5 |> inc >> double)

@@ -636,6 +636,12 @@ fn rw_sugar(
             }
             rw(&handled, env, cx)
         }
+        // A quotation is spliced into a string literal against its own unit's
+        // text, before name resolution. One reaching here means the unit was
+        // parsed with the pure surface entry rather than the compilation one.
+        Sugar::Reflect(kind, name) => Err(TypeError::InternalInvariant {
+            msg: format!("unspliced quotation of `{} {name}`", kind.as_str()),
+        }),
         Sugar::Probe(name, body) => {
             validate_probe_name(name, span)?;
             let gate = call(
@@ -892,8 +898,9 @@ impl CtlScan {
                 self.go(s);
                 self.quals(quals);
             }
-            // A nested loop/comprehension captures its own break/continue.
-            Sugar::While(..) | Sugar::For(..) | Sugar::Comp(..) => {}
+            // A nested loop/comprehension captures its own break/continue, and a
+            // quotation is a string literal by now: neither roots a handler.
+            Sugar::While(..) | Sugar::For(..) | Sugar::Comp(..) | Sugar::Reflect(..) => {}
             Sugar::VarDecl(_, v, b) => {
                 self.go(v);
                 self.go(b);

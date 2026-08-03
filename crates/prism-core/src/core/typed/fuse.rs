@@ -1,18 +1,16 @@
 //! Whole-program stream fusion for typed Core (pre-lowering, O2 and forced
 //! Fuse).
 //!
-//! Mirrors [`super::super::opt::fuse::fuse_counted`] rule-for-rule: recognize a
-//! fusion seed (a self-recursive fold-shaped consumer applied to a pipeline of
-//! known step-shaped combinators), drive one symbolic production step through
-//! the pipeline (case-of-case cancelling every intermediate `Step` cell),
-//! anti-unify the seed against its one-step tail to pick the advancing join
-//! parameters, and residualize the knot into one fresh top-level join function,
-//! redirecting the seed call. Every misfire (unrecognized shape, effectful
-//! step, budget overrun, leaked local) degrades to not fusing, and the fresh
-//! and join counters advance exactly as the legacy pass advances them, so the
-//! erased output is byte-identical.
+//! The pass recognizes a fusion seed (a self-recursive fold-shaped consumer
+//! applied to a pipeline of known step-shaped combinators), drives one symbolic
+//! production step through the pipeline (case-of-case cancelling every
+//! intermediate `Step` cell), anti-unifies the seed against its one-step tail
+//! to pick the advancing join parameters, and residualizes the knot into one
+//! fresh top-level join function, redirecting the seed call. Every misfire
+//! (unrecognized shape, effectful step, budget overrun, leaked local) degrades
+//! to not fusing.
 //!
-//! The typed-specific steps are:
+//! Typed Core adds:
 //! - Witness instantiation before inlining: a combinator or consumer body is
 //!   instantiated at the call site's explicit scheme arguments (a pure type
 //!   substitution that never touches term structure), so every driven piece
@@ -148,6 +146,7 @@ struct Cx {
 /// A no-op when no seed is recognized; every unrecognized or over-budget
 /// configuration is left untouched (degrade to not fusing, never a partial
 /// rewrite).
+#[must_use]
 pub fn fuse<P>(core: TypedCore<P>) -> (TypedCore<P>, FuseStats) {
     let mut cx = Cx {
         fns: core
@@ -798,6 +797,41 @@ fn forced_value(v: &TypedValue, params: &[Sym], hits: &mut Vec<usize>) {
 
 // --- purity ---------------------------------------------------------------------
 
+// The row witness. A row carrying a concrete label proves the node it sits on
+// can perform that operation, whatever the syntax underneath looks like; the
+// checker has already paid for the fact, so no walk here may contradict it. An
+// open tail (`Var`, `Exist`) is evidence in neither direction and decides
+// nothing: a row-polymorphic combinator keeps whatever verdict its structure
+// earns, and stays fusible at a pure instantiation.
+fn row_effectful(row: &EffRow) -> bool {
+    !row.labels().is_empty()
+}
+
+// The same witness for a value, which performs nothing by itself: what a fused
+// loop can perform through it is what forcing and applying it yields. A thunk
+// type carries the row of the computation it suspends, and a function type the
+// row of its body, so `\() -> choose(2)` is `Thunk(pure -> Function(! choose))`
+// and the operation is two levels in. This is the only purity evidence an
+// opaque value offers, and reading it is what stops an effectful thunk arriving
+// through a parameter, syntactically absent at every use site, from passing as
+// pure.
+fn ty_effectful(ty: &CoreType) -> bool {
+    match ty {
+        CoreType::Thunk(suspended) => {
+            row_effectful(suspended.effects()) || ty_effectful(suspended.result())
+        }
+        CoreType::Function(signature) => {
+            row_effectful(signature.body().effects()) || ty_effectful(signature.body().result())
+        }
+        // A source type, a cell, a reuse shell, and a lowered word are all inert
+        // as values: whatever they contain becomes forcible only by being
+        // projected out, and the projection is a node with its own row.
+        CoreType::Source(_) | CoreType::Ref(_) | CoreType::ReuseToken(_) | CoreType::Lowered(_) => {
+            false
+        }
+    }
+}
+
 fn stream_pure(s: &StreamExpr, cx: &mut Cx) -> bool {
     fn_pure(s.comb, cx)
         && s.args.iter().all(|a| match a {
@@ -854,6 +888,9 @@ fn body_info(def: &TypedCoreFn, fns: &BTreeMap<Sym, TypedCoreFn>) -> BodyInfo {
 // handled as graph edges by `body_info`, so recursion cannot influence this
 // local predicate.
 fn comp_has_direct_effect(c: &TypedComp) -> bool {
+    if row_effectful(c.sig().effects()) {
+        return true;
+    }
     match c.kind() {
         TypedCompKind::Io(..)
         | TypedCompKind::Do { .. }
@@ -900,6 +937,9 @@ fn comp_has_direct_effect(c: &TypedComp) -> bool {
 }
 
 fn value_has_direct_effect(value: &TypedValue) -> bool {
+    if ty_effectful(value.ty()) {
+        return true;
+    }
     match &value.kind {
         TypedValueKind::Thunk(body) => comp_has_direct_effect(body),
         TypedValueKind::Reinterpret(inner)
@@ -993,6 +1033,9 @@ impl PurityWalk {
 }
 
 fn comp_pure(c: &TypedComp, cx: &mut Cx) -> bool {
+    if row_effectful(c.sig().effects()) {
+        return false;
+    }
     match c.kind() {
         TypedCompKind::Io(..)
         | TypedCompKind::Do { .. }
@@ -1040,6 +1083,9 @@ fn comp_pure(c: &TypedComp, cx: &mut Cx) -> bool {
 // Every thunk anywhere inside `v` has a pure body (the deep descent the legacy
 // visitor performs inside computations).
 fn value_thunks_pure(v: &TypedValue, cx: &mut Cx) -> bool {
+    if ty_effectful(v.ty()) {
+        return false;
+    }
     match &v.kind {
         TypedValueKind::Thunk(body) => comp_pure(body, cx),
         TypedValueKind::Reinterpret(inner)
@@ -1054,14 +1100,21 @@ fn value_thunks_pure(v: &TypedValue, cx: &mut Cx) -> bool {
         TypedValueKind::UnboxedRecord(fields) => {
             fields.iter().all(|(_, f)| value_thunks_pure(f, cx))
         }
+        // A literal or a variable holds no syntax to inspect. Its type was the
+        // whole evidence, and it was read above.
         _ => true,
     }
 }
 
 // The shallow value gate the legacy pass applies to baked closures and pipeline
-// value arguments: a thunk's body must be pure; anything else passes.
+// value arguments: a thunk's body must be pure; anything else passes its type
+// witness or nothing.
 fn value_pure(v: &TypedValue, cx: &mut Cx) -> bool {
-    match &peel(v).kind {
+    let peeled = peel(v);
+    if ty_effectful(peeled.ty()) {
+        return false;
+    }
+    match &peeled.kind {
         TypedValueKind::Thunk(body) => comp_pure(body, cx),
         _ => true,
     }
@@ -2586,6 +2639,53 @@ mod tests {
         let mut cx = purity_cx(Vec::new());
 
         assert!(!value_thunks_pure(&wrapped, &mut cx));
+    }
+
+    // A mapper that arrives through a parameter is a bare variable at the
+    // pipeline site: there is no thunk body to walk, and the structural gate
+    // that walks one passes it. Its type still carries the row, two levels in
+    // for a closure (a thunk of a function), and reading that witness is what
+    // refuses the fusion.
+    //
+    // Tested here rather than on a program because the pull-`Sequence` element
+    // type stores its tail as a pure thunk, so no source pipeline can carry an
+    // effectful step past the checker today. The gate is what keeps that true
+    // of a combinator set that later admits one.
+    #[test]
+    fn an_effectful_thunk_parameter_cannot_pass_as_pure() {
+        let mapper = CoreFnSig::new(
+            Vec::new(),
+            vec![int()],
+            CompSig::new(int(), EffRow::singleton(sym("Log"))),
+        );
+        let opaque = var(
+            "f",
+            CoreType::Thunk(Box::new(pure_sig(CoreType::Function(Box::new(mapper))))),
+        );
+        let mut cx = purity_cx(Vec::new());
+
+        assert!(!value_pure(&opaque, &mut cx));
+        assert!(!value_thunks_pure(&opaque, &mut cx));
+    }
+
+    // The same parameter under a row variable: the row proves nothing, so the
+    // structural verdict stands and a row-polymorphic combinator stays fusible
+    // at the pure instantiations its call sites supply.
+    #[test]
+    fn a_row_polymorphic_thunk_parameter_keeps_its_structural_verdict() {
+        let mapper = CoreFnSig::new(
+            Vec::new(),
+            vec![int()],
+            CompSig::new(int(), EffRow::Var(sym("e"))),
+        );
+        let opaque = var(
+            "f",
+            CoreType::Thunk(Box::new(pure_sig(CoreType::Function(Box::new(mapper))))),
+        );
+        let mut cx = purity_cx(Vec::new());
+
+        assert!(value_pure(&opaque, &mut cx));
+        assert!(value_thunks_pure(&opaque, &mut cx));
     }
 
     // Discovery starts at `a`: the old optimistic recursion breaker finalized

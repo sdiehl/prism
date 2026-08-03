@@ -10,7 +10,7 @@ The canonical `Writer(w)` effect: accumulate output on the side.
 
 ### `Writer`
 
-```prism,def,h-9ede72bbbf0356e1b2b3d869ff4e733d1e017e8f4fe3ea7437f8e7b1b38e0b3b
+```prism,def,h-29818c7ffa7f477b7c8a06dd4ec6068ff32c2b7ba05d96882e77df7b642c7d17
 effect Writer(w)
   tell(w) : Unit
 ```
@@ -21,15 +21,23 @@ Append one item of type `w` to the accumulated log.
 
 ### `run_writer`
 
-```prism,sig,h-71139096fb40a4f6396c4d9dde69ba32cbff2d7ab16e77f0d4b5595faa70ae47
+```prism,sig,h-fad2b47b51a0f267b237b375aa477f452d43f805f1b89693499905e6d089cd96
 run_writer : forall e0 a b. (() -> a ! {Control.Writer.Writer(b), e0}) -> (a, List(b)) ! {e0}
 ```
 
 Run `action`, collecting every `tell` into a log, and return the computation's result paired with that log in emission order.
 
+```prism,mod=Control.Writer
+run_writer(\() -> tells(["started", "finished"]))
+```
+
+```output
+((), [started, finished])
+```
+
 ### `eval_writer`
 
-```prism,sig,h-e3434b7d57392fb1eccc049483cfcfb34a7b47d4677073f4f1fff6accada81d4
+```prism,sig,h-71bc08e5a0317e56cb1e649a132c57d10b14dc9673787b03cb92ccfb71df491f
 eval_writer : forall e0 a b. (() -> a ! {Control.Writer.Writer(b), e0}) -> a ! {e0}
 ```
 
@@ -37,7 +45,7 @@ Run `action` and keep only its result, discarding the log.
 
 ### `exec_writer`
 
-```prism,sig,h-d4514eea0cc57e9d1aaa17610ba33866f1f3f6f51db7e34b6b475a63fdbe1ee8
+```prism,sig,h-374495b2805f674c491aa066273883c07e66617634af8a2947054a319ca33222
 exec_writer : forall e0 a b. (() -> a ! {Control.Writer.Writer(b), e0}) -> List(b) ! {e0}
 ```
 
@@ -45,7 +53,7 @@ Run `action` and keep only the log, discarding the result.
 
 ### `listen`
 
-```prism,sig,h-6f8e9f4043e5846416a820c59d6de35315a8d86061629433614eb96033ae92d5
+```prism,sig,h-a47d96f8a42b55312bb3c60d3293f707bb336ae9eec1f775a501782970e49dd5
 listen : forall e0 a b. (() -> a ! {Control.Writer.Writer(b), Control.Writer.Writer(b), e0}) -> (a, List(b)) ! {Control.Writer.Writer(b), e0}
 ```
 
@@ -53,15 +61,23 @@ Run `action`, re-emit its log unchanged, and return the result paired with that 
 
 ### `censor`
 
-```prism,sig,h-d28d149b9038e32e9ec93397d4b966d8a534a1ba640429cf359f508e82f8033e
+```prism,sig,h-2d714183fbedb9c50249aaa6b21c05f23d6d82f69e770716968c111de1363e42
 censor : forall e0 a b. ((List(a)) -> List(a), () -> b ! {Control.Writer.Writer(a), Control.Writer.Writer(a), e0}) -> b ! {Control.Writer.Writer(a), e0}
 ```
 
 Run `action`, rewrite its whole log with `f`, and re-emit the rewritten log, returning the result. The rewrite sees the log in emission order.
 
+```prism,mod=Control.Writer
+exec_writer(\() -> censor(reverse, \() -> tells(["a", "b"])))
+```
+
+```output
+[b, a]
+```
+
 ### `tells`
 
-```prism,sig,h-4797417a875742afa7d26c22d143d448ba432e7bb164d27d2fa1dd452bef7a3c
+```prism,sig,h-0bb730c6e77094055be550a27f585cdf3843f657a00b9b580630b8c663fd999e
 tells : forall a. (List(a)) -> Unit ! {Control.Writer.Writer(a)}
 ```
 

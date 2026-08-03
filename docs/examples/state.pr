@@ -1,8 +1,8 @@
 -- State as explicit threading.
 --
 -- State is a value threaded through every call. A stateful step is a pure
--- function s -> (result, s). The annotation ! (Int, Int) on step proves it has
--- no IO: all mutation is explicit. This is the structure that var blocks and a
+-- function s -> (result, s). The `(Int, Int)` result annotation on `step` leaves
+-- its effect row empty: all mutation is explicit. This is the structure that var blocks and a
 -- State effect desugar to, written out by hand.
 
 type Op
@@ -22,9 +22,8 @@ fn run(ops, s) : Unit ! {IO} =
   match ops of
     Nil => ()
     Cons(op, rest) =>
-      match step(op, s) of
-        (v, s2) =>
-          println(v)
-          run(rest, s2)
+      let (v, s2) = step(op, s)
+      println(v)
+      run(rest, s2)
 
 fn main() : Unit ! {IO} = run([Inc, Inc, Inc, Get, Dec, Reset, Inc, Get], 0)

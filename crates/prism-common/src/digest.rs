@@ -70,7 +70,7 @@ impl From<Digest> for String {
 
 /// Scheme tag: every hash commits to it, so a change to this encoding cannot
 /// silently reuse an old hash computed under a different scheme.
-pub const SCHEME: &str = "prism-core-hash-v1";
+pub const SCHEME: &str = "prism-core-hash-v2";
 
 /// Width, in hex characters, of the abbreviated hash prefix shown in the
 /// human-facing `core-hash`/`shape`/`stdlib-hash` dumps. Full hashes are longer;

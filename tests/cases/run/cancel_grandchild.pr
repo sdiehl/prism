@@ -61,5 +61,5 @@ fn cancel_main_scene() : Int ! {Async(Int), IO} =
 
 fn main() =
   println(run_async(scene))
-  let cancelled_main = default(\() -> run_lifo(cancel_main_scene), 0 - 7)
+  let cancelled_main = default(\() -> run_lifo(cancel_main_scene), -7)
   println("main cancellation recovered with {cancelled_main}")

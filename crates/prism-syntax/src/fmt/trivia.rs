@@ -1,7 +1,9 @@
 use marginalia::{BuiltinKind, Trivia};
 
+use super::lit::escape_str;
 use super::{Fmt, INDENT};
 use crate::ast::Span;
+use crate::lex;
 
 impl Fmt<'_> {
     pub(super) fn verbatim(&self, start: usize, end: usize) -> String {
@@ -20,6 +22,21 @@ impl Fmt<'_> {
             src.to_string()
         } else {
             canonical()
+        }
+    }
+
+    // The same courtesy for a string. A raw multiline literal is reprinted from
+    // source, because its body is exactly what the author typed: it admits no
+    // escapes, so the escaped one-line form would be a different spelling of the
+    // same value and would collapse a block written to be read as a block. The
+    // block's own indentation is relative to its closing delimiter, so moving
+    // the whole literal leaves the string it denotes alone.
+    pub(super) fn str_text(&self, span: Span, value: &str) -> String {
+        let src = self.source.get(span.start..span.end).unwrap_or_default();
+        if lex::starts_raw(self.source, span.start) && src.ends_with(lex::RAW_CLOSE) {
+            src.to_string()
+        } else {
+            format!("\"{}\"", escape_str(value))
         }
     }
 

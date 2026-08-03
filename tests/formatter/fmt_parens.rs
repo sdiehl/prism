@@ -275,3 +275,79 @@ fn low_precedence_operands_keep_their_meaning(
     assert_eq!(out, case.expect(), "from {:?}", case.src());
     roundtrips(case.src());
 }
+
+// Equal-precedence nesting inside the binary ladder. Reparsing and idempotence
+// are both blind here for the same reason as above: dropping a required paren
+// yields output that parses, formats to itself, and simply denotes a different
+// tree. Over Float that different tree is a different number, since neither
+// addition nor multiplication reassociates, so the operands are float literals
+// and each case pins the exact text. The pairs are chosen so one member must
+// keep its parens (right-nesting, which the reparse would regroup) and the other
+// must drop them (left-nesting, which is what the reparse already yields), with
+// `^` reversed because it is the one right-associative level.
+#[derive(Clone, Copy, Debug)]
+enum AssocCase {
+    AddOfSub,
+    AddOfAdd,
+    SubOfSub,
+    MulOfMul,
+    MulOfDiv,
+    DivOfMul,
+    AddLeftNested,
+    MulLeftNested,
+    PowRightNested,
+    PowLeftNested,
+}
+
+impl AssocCase {
+    const fn src(self) -> &'static str {
+        match self {
+            Self::AddOfSub => "fn f() = 1.0 + (2.0 - 3.0)\n",
+            Self::AddOfAdd => "fn f() = 1.0 + (2.0 + 3.0)\n",
+            Self::SubOfSub => "fn f() = 1.0 - (2.0 - 3.0)\n",
+            Self::MulOfMul => "fn f() = 1.0 * (2.0 * 3.0)\n",
+            Self::MulOfDiv => "fn f() = 1.0 * (2.0 / 3.0)\n",
+            Self::DivOfMul => "fn f() = 1.0 / (2.0 * 3.0)\n",
+            Self::AddLeftNested => "fn f() = (1.0 + 2.0) + 3.0\n",
+            Self::MulLeftNested => "fn f() = (1.0 * 2.0) * 3.0\n",
+            Self::PowRightNested => "fn f() = 2.0 ^ (3.0 ^ 4.0)\n",
+            Self::PowLeftNested => "fn f() = (2.0 ^ 3.0) ^ 4.0\n",
+        }
+    }
+
+    const fn expect(self) -> &'static str {
+        match self {
+            Self::AddOfSub => "fn f() = 1.0 + (2.0 - 3.0)\n",
+            Self::AddOfAdd => "fn f() = 1.0 + (2.0 + 3.0)\n",
+            Self::SubOfSub => "fn f() = 1.0 - (2.0 - 3.0)\n",
+            Self::MulOfMul => "fn f() = 1.0 * (2.0 * 3.0)\n",
+            Self::MulOfDiv => "fn f() = 1.0 * (2.0 / 3.0)\n",
+            Self::DivOfMul => "fn f() = 1.0 / (2.0 * 3.0)\n",
+            Self::AddLeftNested => "fn f() = 1.0 + 2.0 + 3.0\n",
+            Self::MulLeftNested => "fn f() = 1.0 * 2.0 * 3.0\n",
+            Self::PowRightNested => "fn f() = 2.0 ^ 3.0 ^ 4.0\n",
+            Self::PowLeftNested => "fn f() = (2.0 ^ 3.0) ^ 4.0\n",
+        }
+    }
+}
+
+#[rstest]
+fn equal_precedence_nesting_keeps_its_tree(
+    #[values(
+        AssocCase::AddOfSub,
+        AssocCase::AddOfAdd,
+        AssocCase::SubOfSub,
+        AssocCase::MulOfMul,
+        AssocCase::MulOfDiv,
+        AssocCase::DivOfMul,
+        AssocCase::AddLeftNested,
+        AssocCase::MulLeftNested,
+        AssocCase::PowRightNested,
+        AssocCase::PowLeftNested
+    )]
+    case: AssocCase,
+) {
+    let out = prism::format(case.src()).expect("input must parse");
+    assert_eq!(out, case.expect(), "from {:?}", case.src());
+    roundtrips(case.src());
+}

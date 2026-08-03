@@ -22,6 +22,7 @@ pub struct ResumeUse {
 
 /// Classify one clause. `CheckedHandler` is the sole durable owner of this
 /// derived fact and recomputes it whenever a handler is rebuilt.
+#[must_use]
 pub fn classify_resume(op: &HandleOp) -> ResumeUse {
     let aliases = resume_set(op.resume);
     let tail = strip_resume(&op.body, &aliases).is_some();
@@ -188,6 +189,7 @@ pub enum FoldAKind {
 }
 
 /// Whether a forwarding handler has the identity return clause.
+#[must_use]
 pub fn is_id_return(return_var: Option<Sym>, return_body: Option<&Comp>) -> bool {
     matches!(
         (return_var, return_body),
@@ -196,6 +198,7 @@ pub fn is_id_return(return_var: Option<Sym>, return_body: Option<&Comp>) -> bool
 }
 
 /// Whether a fold has the identity state-transformer return clause.
+#[must_use]
 pub fn is_id_transformer(return_body: &Comp) -> bool {
     matches!(return_body, Comp::Return(Value::Thunk(thunk))
         if matches!(thunk.as_ref(), Comp::Lam(params, body)
@@ -205,12 +208,14 @@ pub fn is_id_transformer(return_body: &Comp) -> bool {
 }
 
 /// Whether a return clause is a one-parameter state transformer.
+#[must_use]
 pub fn is_state_transformer(return_body: &Comp) -> bool {
     matches!(return_body, Comp::Return(Value::Thunk(thunk))
         if matches!(thunk.as_ref(), Comp::Lam(params, _) if params.len() == 1))
 }
 
 /// Classify a parameter-passing fold clause.
+#[must_use]
 pub fn is_fold(op: &HandleOp, resume: ResumeUse) -> Option<FoldAKind> {
     if resume.tail {
         return None;

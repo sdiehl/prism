@@ -8,7 +8,7 @@ pattern OnXAxis(x) for Vec2 =
 fn describe(v) =
   match v of
     OnXAxis(x) => x
-    _ => 0 - 1
+    _ => -1
 
 fn main() =
   println(describe(Vec2 { x = 5, y = 0 }))

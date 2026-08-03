@@ -14,3 +14,12 @@ fn nested(name : String) : String =
 fn multiline() : Int =
   let a = let b = 1 in let c = 2 in b + c
   a
+
+-- The raw form is the same token and the same kind of value; only its spelling
+-- differs. Its body has no holes and no escapes, so a brace is a brace and a
+-- backslash is a backslash, and the indentation every line shares belongs to
+-- this file rather than to the string.
+fn raw() : String = r"""
+  {not_a_hole} and \n
+    one step further in
+  """

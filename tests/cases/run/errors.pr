@@ -32,14 +32,14 @@ fn burn(n) =
     n - 1
 
 fn main() =
-  println(try lookup("x") catch { NotFound(k) => 0 - 1 })
-  println(try lookup("y") catch { NotFound(k) => 0 - 1 })
+  println(try lookup("x") catch { NotFound(k) => -1 })
+  println(try lookup("y") catch { NotFound(k) => -1 })
   let c = try both("y", "1") catch { NotFound(k) => 100, Malformed(m) => 200 }
   println(c)
   println(try burn(0) catch { OutOfFuel => 42 })
   let outer =
     try
-      try both("x", "zzz") catch { NotFound(k) => 0 - 5 }
+      try both("x", "zzz") catch { NotFound(k) => -5 }
     catch
       Malformed(m) => 300
   println(outer)

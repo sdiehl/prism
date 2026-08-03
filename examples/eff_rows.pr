@@ -26,7 +26,7 @@ fn accumulate(xs) : Int ! {State} =
 
 fn validate(total) : Int ! {Exn} =
   if total > 100 then
-    raise(0 - 1)
+    raise(-1)
   else
     total
 

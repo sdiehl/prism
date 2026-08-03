@@ -12,7 +12,7 @@ Expectations are token wire names, the vocabulary of `Syntax.Token`, and a refus
 
 ### `Cursor`
 
-```prism,def,h-cb8e8cfb06a8de35be2f7a36c5739405b874003b84af1e3b784b1695735d7250
+```prism,def,h-0809e96a4afc68454786901b09754d7b9e29a0e0fcf8fb9eef24b379d62567aa
 type Cursor = Cursor {
   toks: Array(Token),
   pos: Int,
@@ -26,7 +26,7 @@ A token cursor: the tokens being read, the read position, the byte offset the en
 
 ### `Reply`
 
-```prism,def,h-1b41122d2793ae0bb9bde85b75cfe88c9c87f03f5a2182e8d7d167137806be20
+```prism,def,h-dedae554b14c1e311ba7d4283f43ac69b3c4115e554e84edc18361f8efbd5555
 type Reply(a) = Took(a, Cursor) | Stuck(Cursor)
 ```
 
@@ -34,7 +34,7 @@ The reply of a cursor step: the value and the advanced cursor, or the cursor alo
 
 ### `Assoc`
 
-```prism,def,h-66f6d2a7ff29ec1e8e2f31236453c08afd2970d4e9bf64dc015c690703591981
+```prism,def,h-a6e8abaab968e9650d7e082b3f735682297b3ac3d6575482e3bd239cde841630
 type Assoc = ALeft | ARight | ANone deriving (Eq)
 ```
 
@@ -42,7 +42,7 @@ How an infix operator groups a chain of its own level. A non-associative operato
 
 ### `Infix`
 
-```prism,def,h-c0f451224f9ede0c2839583c06d35ee921ce96732ac6c4a619edefc4da704476
+```prism,def,h-26b0ccd2a185fe148888ab6e9dacfb097a504ec2036c0524c80f8dcfc3402d83
 type Infix = Infix { op: String, level: Int, assoc: Assoc }
 ```
 
@@ -50,7 +50,7 @@ One infix operator: the token spelling, its level (higher binds tighter), and ho
 
 ### `Prefix`
 
-```prism,def,h-c2ed4f03322385bd58764399cea7e8ea87f0193bccc785566fca80c7a432ff0d
+```prism,def,h-eb6e20d9f732bcfd0473745f904a5ded2c86e39b2d2e4c1f0f539474d954573d
 type Prefix = Prefix { op: String, level: Int }
 ```
 
@@ -58,7 +58,7 @@ One prefix operator: the token spelling and the level its operand is parsed at. 
 
 ### `Pratt`
 
-```prism,def,h-8d356d0c77cdc2f594f71d78c5d4be60fc8d1984fee05852d59bac5fb18adec7
+```prism,def,h-217628769ede9df6d7fe6b193231a541ff5776900bd1678b68887c9bd469849e
 type Pratt(a) = Pratt {
   infixes: List(Infix),
   prefixes: List(Prefix),
@@ -74,7 +74,7 @@ Everything the driver needs that is not the cursor: the two operator tables, the
 
 ### `span_join`
 
-```prism,sig,h-8bac24df7903b0f0cfedcfd9a2ecefc5586773aecf9e9aa4ff0e4e60433c0715
+```prism,sig,h-6d879ec6817387add3a431a7960e9aad0aa89f255750cbabcf7dba808c1095ff
 span_join : (Syntax.Source.Span, Syntax.Source.Span) -> Syntax.Source.Span
 ```
 
@@ -91,7 +91,7 @@ let s = span_join(span_at(2), span_at(11))
 
 ### `span_at`
 
-```prism,sig,h-08e839ae2e270ee124e20fcd251f69965bf072eb5483210cb432fe4b4cc0bbba
+```prism,sig,h-d25c62af74f59617be54589291b4be387478566ca48e7ea7ddcef3bd1c0f0c51
 span_at : (Int) -> Syntax.Source.Span
 ```
 
@@ -108,7 +108,7 @@ let s = span_at(12)
 
 ### `span_cover`
 
-```prism,sig,h-c4e36d665790fa2756a75f01e5b45e6659f9003a8e75c8ffc16347e08397f537
+```prism,sig,h-43f06b2e251b2f873a72e1a65986ab8567b870501ea437c34f4f86a4270e0c16
 span_cover : (List(Syntax.Source.Span)) -> Option(Syntax.Source.Span)
 ```
 
@@ -116,7 +116,7 @@ The smallest span covering every span in the list, or None for the empty list. J
 
 ### `cursor_of`
 
-```prism,sig,h-d3b4d3ba34d6d6fd88d4c140cdd33d93560141c6ddfe1dd3e1cdcf3a4c271d9b
+```prism,sig,h-723290bc2c570fbd43293f3b679fc0c3304c48f5ddf9a4b79328266e514ddbd4
 cursor_of : (List(Syntax.Token.Token), Int) -> Syntax.Cursor.Cursor
 ```
 
@@ -124,7 +124,7 @@ A cursor over a token list. `stop` is the byte offset the end-of-input caret poi
 
 ### `cursor_count`
 
-```prism,sig,h-546a558362103ff17ae18040adc6476966c382e734c6f87b8657775f7f4b897e
+```prism,sig,h-1e07c97dc5628dfedeb804ae9b2a50597ad13a4c58fbf233980c7d9e2eff5e50
 cursor_count : (Syntax.Cursor.Cursor) -> Int
 ```
 
@@ -132,7 +132,7 @@ The number of tokens the cursor reads over.
 
 ### `cursor_at_end`
 
-```prism,sig,h-a9fc62285493feb0e56c18d98ded0db293d048254e33afb44b990518bef1fa8b
+```prism,sig,h-b5f10c5b20294fb19048b487b376a4c7b5dfb1ecd3213303261750cbafd5df84
 cursor_at_end : (Syntax.Cursor.Cursor) -> Bool
 ```
 
@@ -140,7 +140,7 @@ Whether every token has been consumed.
 
 ### `cursor_peek_at`
 
-```prism,sig,h-d3b5192774686c75e5c7a59325f33651853264a63a8902bc30720fbe7bb6c3e0
+```prism,sig,h-ee8679cd3d914d34145816f9a05be05007a0ddb30d8bde84377d15d92d54f70d
 cursor_peek_at : (Syntax.Cursor.Cursor, Int) -> Option(Syntax.Token.Token)
 ```
 
@@ -148,7 +148,7 @@ The token `k` positions ahead of the read position, or None past the end.
 
 ### `cursor_peek`
 
-```prism,sig,h-d82127f187e1e8a226014dfee31772e30ecb00463d2524a51bb9f52467916abf
+```prism,sig,h-2f28ca494df7766555e9950194e1b364670793f80e3109db2bc681c1c3de7883
 cursor_peek : (Syntax.Cursor.Cursor) -> Option(Syntax.Token.Token)
 ```
 
@@ -156,7 +156,7 @@ The token at the read position, or None at the end. Peeking never consumes and n
 
 ### `cursor_kind`
 
-```prism,sig,h-aec57d48625d49943170059d213d4e0812ea080bd578d59ff881c6d8a65ec6c6
+```prism,sig,h-5e1949797680197e25a3980ad56ccc37f3797c5b5a88e75c74c861a03a2fcb40
 cursor_kind : (Syntax.Cursor.Cursor) -> Option(Syntax.Token.TokenKind)
 ```
 
@@ -164,7 +164,7 @@ The kind of the token at the read position, or None at the end.
 
 ### `cursor_span`
 
-```prism,sig,h-5cedc653fd4c857fc3ea8879c188f142d2ac378e48c81611097dd985cb0a063d
+```prism,sig,h-44f21c9a50b84025dcb0a97ebd604523e0e8631396910ddf5fdfe070736ec992
 cursor_span : (Syntax.Cursor.Cursor) -> Syntax.Source.Span
 ```
 
@@ -172,7 +172,7 @@ The span the cursor points at: the next token's span, or the end-of-input caret 
 
 ### `cursor_advance`
 
-```prism,sig,h-6b2a16dba9c94faf8e27991f204ac1fb2efd48d4f042fe9123d90d2a18576095
+```prism,sig,h-6fa448598f50ab7d2c64f95714ffbb0e1ff6e00b89e6610359d8db7d43d31fd1
 cursor_advance : (Syntax.Cursor.Cursor) -> Syntax.Cursor.Cursor
 ```
 
@@ -180,7 +180,7 @@ The cursor advanced past one token. At the end this is the identity, so a parser
 
 ### `cursor_since`
 
-```prism,sig,h-b138bbbe57ebf658c7fffec718b39002ebaf4d14cd0dca3a0d27c2c334e6de59
+```prism,sig,h-5aa29f3bdfa0a0bd826c1a71a589a4b18cd9bd3a419e00f2d3b0972883b3b077
 cursor_since : (Syntax.Cursor.Cursor, Syntax.Cursor.Cursor) -> Syntax.Source.Span
 ```
 
@@ -188,7 +188,7 @@ The span covering the tokens consumed between `saved` and `c`, or the caret at t
 
 ### `end_of_input`
 
-```prism,sig,h-d7f1c7e8a6cc87b27236a58a145ac73fde2abe41b55c1ed89f62a3508956c49e
+```prism,sig,h-905f8e368b7a37bfbea37899282d0f977290e8688ab9d834f6b2e62a9d183d47
 end_of_input : () -> String
 ```
 
@@ -196,7 +196,7 @@ The name the end of the token stream is expected under. Not a token, so not a to
 
 ### `cursor_note_name`
 
-```prism,sig,h-7db18372188eeb5ca29c7484782e77148be252ec572067767edcfbb544352a79
+```prism,sig,h-e7033ed2752132360e66585ed09bf5cae497f9f4c788d4e3e83b6527b0657df2
 cursor_note_name : (Syntax.Cursor.Cursor, String) -> Syntax.Cursor.Cursor
 ```
 
@@ -206,7 +206,7 @@ The record only ever moves forward. A name recorded past the furthest position r
 
 ### `cursor_note`
 
-```prism,sig,h-b7196fd4a4edcbfb042f93f536937302f66169b57898987efd915a1ed484f874
+```prism,sig,h-5ffa10695ddc0fbdac54b0051ea6fbcd6fbd0aeb4e8d06452cb65b4d41580cd0
 cursor_note : (Syntax.Cursor.Cursor, Syntax.Token.TokenKind) -> Syntax.Cursor.Cursor
 ```
 
@@ -214,7 +214,7 @@ Record a token kind as admissible at the read position. The name recorded is the
 
 ### `cursor_expect`
 
-```prism,sig,h-bf00f88effbeccc351b40acaf0b7741253123325101593f0cfb32cecf65dd5a1
+```prism,sig,h-7d8be42d69299e15b2d89547ad19b37f8597da5a63f4f684750650aaea20a487
 cursor_expect : (Syntax.Cursor.Cursor, Syntax.Token.TokenKind) -> Syntax.Cursor.Reply(Syntax.Token.Token)
 ```
 
@@ -222,7 +222,7 @@ Consume the next token when its kind is `k`. On a mismatch nothing is consumed a
 
 ### `cursor_expect_fixed`
 
-```prism,sig,h-a0a129bc7b6a307277790f861a260dbc14ff798645db51f8ab934df8f236a3dd
+```prism,sig,h-f31dbdcb8b4be6253ef3f7bd7d7f7f720fd5e733dfaee01bf64b16df3b6007cb
 cursor_expect_fixed : (Syntax.Cursor.Cursor, String) -> Syntax.Cursor.Reply(Syntax.Token.Token)
 ```
 
@@ -230,7 +230,7 @@ Consume the next token when it is the fixed token spelled `s`.
 
 ### `cursor_expect_end`
 
-```prism,sig,h-e6e35a5e73b6656524b6d7539424cf8e43b70f0b7b3ad9ac9fedad93b183d1dc
+```prism,sig,h-69b7b5919febb156e7a66d267bc30beef28c86f9ecf724e22fbaf613f18c7da4
 cursor_expect_end : (Syntax.Cursor.Cursor) -> Syntax.Cursor.Reply(Unit)
 ```
 
@@ -238,7 +238,7 @@ Require that every token has been consumed, recording the end of the stream as t
 
 ### `cursor_restore`
 
-```prism,sig,h-2003ecbfb9535cf3c8fe2cb287922624943558b086a9c79ec2b8bba06ff4aea5
+```prism,sig,h-bd0ccfd3256d9d0c43730495d5910b2e1e291654f23a66f39c5061e2f9d5535c
 cursor_restore : (Syntax.Cursor.Cursor, Syntax.Cursor.Cursor) -> Syntax.Cursor.Cursor
 ```
 
@@ -258,7 +258,7 @@ ident
 
 ### `cursor_expected`
 
-```prism,sig,h-2340235722aa0b4c138585e36151231f5e0e4d74d712a863f5e366986696f3dc
+```prism,sig,h-60a4876288185e6456aab098994fac920afc4d85ee3df65126715a99ed4d1bd3
 cursor_expected : (Syntax.Cursor.Cursor) -> List(String)
 ```
 
@@ -273,9 +273,26 @@ str_join(", ", cursor_expected(cursor_note_name(c, "int")))
 ident, int
 ```
 
+### `cursor_canonical`
+
+```prism,sig,h-28ea3ee30b3f981c03781e12a6d209200705f3561440dae5d8d4698360a58d12
+cursor_canonical : (Syntax.Cursor.Cursor) -> List(String)
+```
+
+The canonical expectation set of a refusal: the recorded names deduplicated and byte-lexicographically sorted, so the set a diagnostic carries does not depend on the order alternatives were tried, and a harmless reordering of a parser's branches moves no artifact bytes.
+
+```prism,mod=Syntax.Cursor
+let c = cursor_note_name(cursor_of(Nil, 3), "int")
+str_join(", ", cursor_canonical(cursor_note_name(c, "ident")))
+```
+
+```output
+ident, int
+```
+
 ### `cursor_far_span`
 
-```prism,sig,h-161455be505d800aa7d3c968b0ec9054eb5b83f4c113f7597ec7620edfabe165
+```prism,sig,h-813675e4bf5066ec39b518ff2218211ec3b354614a56b8aa2c243e85576def7f
 cursor_far_span : (Syntax.Cursor.Cursor) -> Syntax.Source.Span
 ```
 
@@ -283,15 +300,31 @@ The span the failure record points at: the token at the furthest position reache
 
 ### `cursor_message`
 
-```prism,sig,h-2933aa5f8e45dfa73c4046b9e230df17e84a248f41a9e1f295ea7036680e3f07
+```prism,sig,h-978e46ee683acd3b008f736decfe18e68f6b65ac94556c4b1a6ca41e34f7c7b9
 cursor_message : (Syntax.Cursor.Cursor) -> String
 ```
 
 The rendered message of an unmet expectation: the merged expectation set and what stood there instead.
 
+### `parse_syntax_code`
+
+```prism,sig,h-e8b5a69589c9b02f1c96eaebb50dac4170c858d7f375fec63661c4e6b2e90529
+parse_syntax_code : () -> String
+```
+
+The compiler's general parse-fault code, the one home for the string on this side of the seam.
+
+### `parse_eof_code`
+
+```prism,sig,h-1ec1304507119239bc1ec4ca9761172e9f87430621e8f6a95d653d5a7c582cee
+parse_eof_code : () -> String
+```
+
+The compiler's exhausted-stream code: the token stream itself ended while the parser wanted more.
+
 ### `cursor_code`
 
-```prism,sig,h-13c6ec73cd090392cc0d364b76804902b4bdb7596b4a25d8503b721317aa5e1b
+```prism,sig,h-c25a1834f7b13f539fd09e86088078c025dfacd3a72a815173ec6d3258b7cced
 cursor_code : (Syntax.Cursor.Cursor) -> String
 ```
 
@@ -299,15 +332,15 @@ The stable code an unmet expectation carries: the parser's end-of-input code whe
 
 ### `cursor_diagnostic`
 
-```prism,sig,h-0c4ba7b0ba160c594bb01edc3e0bd07c2de973a20d8c8cd041cdb26631c7b91e
+```prism,sig,h-85ce9082910a5fedd01c3435ae22007e24944df547aa452db6cda800f7613b77
 cursor_diagnostic : (Syntax.Cursor.Cursor) -> Syntax.Diagnostic.Diagnostic
 ```
 
-The refusal an unmet expectation produces: a parse-phase diagnostic at the furthest position reached, carrying the merged expectation set. A cursor failure is a diagnostic and never a bespoke error value, so a hand-written parser's refusals join the same document the compiler's own do.
+The refusal an unmet expectation produces: a parse-phase diagnostic at the furthest position reached, carrying the canonical expectation set. The message keeps the order alternatives were tried, for a reader; the set is sorted, for the artifact. A cursor failure is a diagnostic and never a bespoke error value, so a hand-written parser's refusals join the same document the compiler's own do.
 
 ### `infix_left_bp`
 
-```prism,sig,h-b1497fa9063ac3af7f3893520317ac41d831a8df52e5ac2894f109895a454ebe
+```prism,sig,h-5bb49115387d9e64e69e2f65bfed9b8c3f924e47b4bbcb7e23eba8bd9c04bbe1
 infix_left_bp : (Syntax.Cursor.Infix) -> Int
 ```
 
@@ -317,7 +350,7 @@ Levels are doubled so each has a half step above it. A left-associative operator
 
 ### `infix_right_bp`
 
-```prism,sig,h-547b87eb41b38878a2e5624b702d264d124ebae0aeb4e01563e30a34043f057f
+```prism,sig,h-74fbafd3dd26a2bafca970d955eacbecb424c3683f55add9e0be90b10fa39568
 infix_right_bp : (Syntax.Cursor.Infix) -> Int
 ```
 
@@ -325,7 +358,7 @@ The power an infix operator's right operand is parsed at.
 
 ### `prefix_bp`
 
-```prism,sig,h-8c42f22ef170917b67a404f9988afda17032f0b747da1dae4162d79e33ae708f
+```prism,sig,h-844a43477333694e2bed94d0572a6c041fb2cf456d67cc9d3ceec78bff3de910
 prefix_bp : (Syntax.Cursor.Prefix) -> Int
 ```
 
@@ -333,7 +366,7 @@ The power a prefix operator's operand is parsed at.
 
 ### `infix_lookup`
 
-```prism,sig,h-c54ee55e71b6093ddba1e8cb20eb48455c921778adfc35a0e6ed8a6fe9f317e3
+```prism,sig,h-fbf6d0893c8f44be62599956f300338684916edc1e458485a1fea8f4fe60ca77
 infix_lookup : (List(Syntax.Cursor.Infix), String) -> Option(Syntax.Cursor.Infix)
 ```
 
@@ -341,7 +374,7 @@ The entry for an operator spelling in an infix table, or None when the spelling 
 
 ### `prefix_lookup`
 
-```prism,sig,h-963dab9e6995ca0b98544986abd58cc622cd7d508b33df532cbfd303966bcbbf
+```prism,sig,h-c30fc01d82b1cbe27e2df6f666ff450875bceaee901ad67b34a4246d4d0a20c1
 prefix_lookup : (List(Syntax.Cursor.Prefix), String) -> Option(Syntax.Cursor.Prefix)
 ```
 
@@ -349,7 +382,7 @@ The entry for an operator spelling in a prefix table, or None when the spelling 
 
 ### `pratt_expr`
 
-```prism,sig,h-df8beba01b60b49ef66d041646585e384962c917c47bf114cbb5bc1388878282
+```prism,sig,h-929e9445eb44a91cba24a55c4a20c4402b7cbae0d1ed8f602d5e8f5b22c52062
 pratt_expr : forall a. (Syntax.Cursor.Pratt(a), Syntax.Cursor.Cursor, Int) -> Syntax.Cursor.Reply(a)
 ```
 
@@ -357,7 +390,7 @@ Parse one expression whose operators all bind at least as tightly as `min_bp`: o
 
 ### `pratt_parse`
 
-```prism,sig,h-e2e64173c9e29a07430c19184669487724b7660dd4bc69dac1af5d6c8ff0d936
+```prism,sig,h-c0a1f27a459db41051aec5ec5f8eb14ee346b0771b7a5256bdbdf597c04dd264
 pratt_parse : forall a. (Syntax.Cursor.Pratt(a), Syntax.Cursor.Cursor) -> Syntax.Cursor.Reply(a)
 ```
 
@@ -365,7 +398,7 @@ Parse one expression at the loosest binding power. Tokens after it are left for 
 
 ### `pratt_all`
 
-```prism,sig,h-76708cfa504493b363a2b3936636051e619456ef376125fc6f92a9a40ae31863
+```prism,sig,h-b3bae75d67bf8ad7676f866cf44df9c449abe6d6759adbb58af436b8df2bb622
 pratt_all : forall a. (Syntax.Cursor.Pratt(a), Syntax.Cursor.Cursor) -> Syntax.Cursor.Reply(a)
 ```
 
@@ -373,7 +406,7 @@ Parse one expression and require the whole token stream to be consumed. A traili
 
 ### `expr_infix_table`
 
-```prism,sig,h-1ecf2e1a9efc6ebb65c8b8034b43e49f28871d5b30cea3829afc734b400c22da
+```prism,sig,h-44d76a6899078896a571f05c71dceb326ce44c266497864e20421cc974ad450d
 expr_infix_table : () -> List(Syntax.Cursor.Infix)
 ```
 
@@ -381,7 +414,7 @@ The infix table of Prism's own expression grammar, loosest first. Levels are rel
 
 ### `expr_prefix_table`
 
-```prism,sig,h-3556f3737e93964412f9d1935ad254c4cdd9d247ddcc8cda7a887177774794b7
+```prism,sig,h-229e90dd66f46af778b4dce3d762a6c02f8c18fe5605a02f4354c1038c6202ad
 expr_prefix_table : () -> List(Syntax.Cursor.Prefix)
 ```
 

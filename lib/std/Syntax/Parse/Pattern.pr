@@ -1,0 +1,27 @@
+-- | Stable public facade for the generated Pattern-family parser.
+
+import Syntax.Ast (..)
+
+import Syntax.Cursor (..)
+
+import Syntax.Parse.Support (..)
+
+import Syntax.Parse.GeneratedPattern (..)
+
+pub fn parse_pattern(c : Cursor, depth : Int) : Parsed(Sp(Pat)) =
+  match generated_parse_pattern(c, depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(done, c1) =>
+      match done of
+        PatternDone(pat, receipt) =>
+          PTook(pat, generated_pattern_note_receipt(c1, receipt))
+
+pub fn parse_let_pattern(c : Cursor, depth : Int) : Parsed(Sp(Pat)) =
+  match generated_parse_let_pattern(c, depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(done, c1) =>
+      match done of
+        LetDone(pat, receipt) =>
+          PTook(pat, generated_let_note_receipt(c1, receipt))

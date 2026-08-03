@@ -25,6 +25,7 @@ use super::graph::{
     LineageGraph, LineageRoot, Node, NodeKind, OutputPayload, ReplayRelation, RootRole,
     TracePayload, Variant, WriteMode,
 };
+use super::verify;
 use super::BuildRequest;
 
 /// The facts a recorded run explains.
@@ -333,17 +334,71 @@ pub fn run_entry(graph: &LineageGraph) -> Result<String, Error> {
 /// The replay-file relation for a run whose sidecar sits at `sidecar`.
 ///
 /// The durable trace being written to `replay` is described by its path relative to
-/// the sidecar's directory and the digest of `trace_bytes`.
+/// the sidecar's directory and the digest of `trace_bytes`. Verification resolves
+/// that path under the sidecar's directory again and refuses anything that escapes
+/// it, so a trace that does not live under that directory is refused here, at
+/// record time, rather than minting a sidecar no verifier will ever accept.
 ///
-/// The recorded path assumes the trace sits beside its sidecar (the CLI writes them
-/// together); when it does not, verification falls back to the sibling extension.
-#[must_use]
-pub fn replay_relation(sidecar: &Path, replay: &Path, trace_bytes: &[u8]) -> ReplayRelation {
+/// # Errors
+/// Fails when `replay` does not sit under the sidecar's directory.
+pub fn replay_relation(
+    sidecar: &Path,
+    replay: &Path,
+    trace_bytes: &[u8],
+) -> Result<ReplayRelation, Error> {
     let dir = sidecar.parent().unwrap_or_else(|| Path::new(""));
-    let relative = replay.strip_prefix(dir).unwrap_or(replay);
-    ReplayRelation {
+    let relative = replay
+        .strip_prefix(dir)
+        .ok()
+        .filter(|rel| verify::stays_inside(rel));
+    let Some(relative) = relative else {
+        return Err(Error::ResolveLineage(format!(
+            "record: replay trace `{}` does not sit under the sidecar's directory `{}`; \
+             `lineage verify` resolves the trace relative to the sidecar, so write \
+             `--record` and `--lineage` into the same directory",
+            replay.display(),
+            dir.display(),
+        )));
+    };
+    Ok(ReplayRelation {
         path: relative.display().to_string(),
         scheme: EVENT_HASH_SCHEME.to_string(),
         digest: provenance::sha256_hex(trace_bytes),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::replay_relation;
+
+    #[test]
+    fn replay_relation_records_the_trace_relative_to_its_sidecar() {
+        let relation = replay_relation(
+            Path::new("out/run.plineage"),
+            Path::new("out/run.replay"),
+            b"trace",
+        )
+        .expect("a sibling trace is relatable");
+        assert_eq!(relation.path, "run.replay");
+    }
+
+    // Layouts the verifier can never resolve (absolute, a different directory, a
+    // parent-climbing prefix) must be refused when recording, not discovered at
+    // verification time.
+    #[test]
+    fn replay_relation_refuses_a_trace_outside_the_sidecar_directory() {
+        for (sidecar, replay) in [
+            ("out/run.plineage", "/tmp/run.replay"),
+            ("run.plineage", "/tmp/run.replay"),
+            ("out/run.plineage", "elsewhere/run.replay"),
+            ("out/run.plineage", "out/../run.replay"),
+        ] {
+            assert!(
+                replay_relation(Path::new(sidecar), Path::new(replay), b"trace").is_err(),
+                "`{replay}` beside `{sidecar}` must be refused"
+            );
+        }
     }
 }

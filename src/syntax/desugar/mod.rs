@@ -920,6 +920,70 @@ fn check_noescape_arg(
     }
 }
 
+// A wired-in declaration or effect that later passes assume is already on the
+// program. Injections cannot fail and cannot reject, so they carry no result.
+type Injection = fn(&mut Program);
+
+// The injections, in the order they run, before any surface pass reads the
+// program. `desugar_pass_order` pins the sequence.
+const INJECTIONS: &[(&str, Injection)] = &[
+    ("shadow_fns", shadow_fns),
+    ("inject_fail", inject_fail),
+    ("inject_loop_effects", inject_loop_effects),
+    ("inject_return_effect", inject_return_effect),
+];
+
+// One whole-program surface pass. A `Check` only reads the program and rejects
+// it; a `Rewrite` may replace parts of it. Keeping the two apart is what makes
+// the order auditable: a `Check` has to run while the shape it rejects is still
+// on the tree, so moving one past a `Rewrite` that erases that shape disarms it
+// silently.
+enum Pass {
+    Check(fn(&Program) -> Result<(), TypeError>),
+    Rewrite(fn(&mut Program) -> Result<(), TypeError>),
+}
+
+impl Pass {
+    fn run(&self, prog: &mut Program) -> Result<(), TypeError> {
+        match *self {
+            Self::Check(f) => f(prog),
+            Self::Rewrite(f) => f(prog),
+        }
+    }
+}
+
+// The whole-program surface passes, in the order they run. The order is the
+// contract, so it lives here as data rather than as a statement sequence: each
+// entry's comment says what it depends on having already happened, and
+// `desugar_pass_order` pins the list so a reordering is a visible diff. The name
+// sits beside the pass rather than inside it, as it does for an injection: a
+// pass is selected by position here, never by name lookup, so only the order
+// test reads it.
+const SURFACE_PASSES: &[(&str, Pass)] = &[
+    // Runs on the program `lower_errors` has already lowered, so a repeated
+    // `error Foo`, an `error` colliding with an `effect` of the same name, and a
+    // throw-op clashing with another effect's op are all rejected here rather
+    // than silently overwriting.
+    ("check_effect_dups", Pass::Check(check_effect_dups)),
+    // Expand `stable` blocks into rung types, ladder functions, and synonyms
+    // before deriving (the rungs derive their codecs) and synonym expansion (the
+    // current-rung version tag is a synonym), and before the frozen goldens are
+    // gated against the recomputed per-rung shape digests.
+    ("expand_stable", Pass::Rewrite(expand_stable)),
+    // Every usage row still inside a type is rejected here, before synonym and
+    // alias expansion can copy one into other positions: the single wired fact
+    // (`@ noalloc` at a `fn` return root) was lifted onto the decl flag at
+    // parse, so anything left is a reserved fact or a misplaced certificate.
+    ("reject_coeffect_tys", Pass::Check(reject_coeffect_tys)),
+    ("check_once_linearity", Pass::Check(check_once_linearity)),
+    (
+        "check_portable_captures",
+        Pass::Check(check_portable_captures),
+    ),
+    ("expand_synonyms", Pass::Rewrite(expand_synonyms)),
+    ("expand_aliases", Pass::Rewrite(expand_aliases)),
+];
+
 /// # Errors
 /// Fails on malformed sugar, reported as a type error.
 pub fn desugar(prog: Program) -> Result<Program<Core>, TypeError> {
@@ -937,30 +1001,21 @@ pub fn desugar_with_scope(
     external_classes: &BTreeMap<String, String>,
     external_values: &BTreeMap<String, String>,
 ) -> Result<Program<Core>, TypeError> {
-    shadow_fns(&mut prog);
-    inject_fail(&mut prog);
-    inject_loop_effects(&mut prog);
-    inject_return_effect(&mut prog);
-    // Lower errors first so their synthesized throw-effects and throw-ops take
-    // part in the duplicate check: a repeated `error Foo`, an `error` colliding
-    // with an `effect` of the same name, or a throw-op clashing with another
-    // effect's op are all rejected here rather than silently overwriting.
+    for (_, inject) in INJECTIONS {
+        inject(&mut prog);
+    }
+    // Sequenced rather than manifested: it hands back the error-name set the
+    // rest of desugaring carries in `Cx`, so it does not fit the pass shape.
+    // Errors lower here, before the surface passes, so their synthesized
+    // throw-effects and throw-ops take part in `check_effect_dups`.
     let errors = lower_errors(&mut prog);
-    check_effect_dups(&prog)?;
-    // Expand `stable` blocks into rung types, ladder functions, and synonyms
-    // before deriving (the rungs derive their codecs) and synonym expansion (the
-    // current-rung version tag is a synonym), and before the frozen goldens are
-    // gated against the recomputed per-rung shape digests.
-    expand_stable(&mut prog)?;
-    // Every usage row still inside a type is rejected here, before synonym and
-    // alias expansion can copy one into other positions: the single wired fact
-    // (`@ noalloc` at a `fn` return root) was lifted onto the decl flag at
-    // parse, so anything left is a reserved fact or a misplaced certificate.
-    reject_coeffect_tys(&prog)?;
-    check_once_linearity(&prog)?;
-    check_portable_captures(&prog)?;
-    expand_synonyms(&mut prog)?;
-    expand_aliases(&mut prog)?;
+    for (_, pass) in SURFACE_PASSES {
+        pass.run(&mut prog)?;
+    }
+    // Sequenced rather than manifested: it reads the imported class and helper
+    // names, which are arguments to this function and not program state. It
+    // runs after every entry in `SURFACE_PASSES`, in particular after
+    // `expand_stable`, whose rungs derive their codecs here.
     derive_instances(&mut prog, external_classes, external_values)?;
     let ctors: BTreeSet<String> = prog
         .types
@@ -1319,4 +1374,41 @@ pub(in crate::syntax::desugar) fn expand_interp(
     });
     out.span = span;
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{INJECTIONS, SURFACE_PASSES};
+
+    // The desugar order is a contract carried by the manifests above, not by the
+    // order of statements in `desugar_with_scope`. Pinning both sequences here
+    // makes a reordering a visible diff rather than a silent behavior change.
+    // Two lists, not one: `lower_errors` runs between them and `derive_instances`
+    // after them, neither of which fits the pass shape.
+    #[test]
+    fn desugar_pass_order() {
+        let injections: Vec<&str> = INJECTIONS.iter().map(|(n, _)| *n).collect();
+        assert_eq!(
+            injections,
+            [
+                "shadow_fns",
+                "inject_fail",
+                "inject_loop_effects",
+                "inject_return_effect",
+            ]
+        );
+        let passes: Vec<&str> = SURFACE_PASSES.iter().map(|(n, _)| *n).collect();
+        assert_eq!(
+            passes,
+            [
+                "check_effect_dups",
+                "expand_stable",
+                "reject_coeffect_tys",
+                "check_once_linearity",
+                "check_portable_captures",
+                "expand_synonyms",
+                "expand_aliases",
+            ]
+        );
+    }
 }

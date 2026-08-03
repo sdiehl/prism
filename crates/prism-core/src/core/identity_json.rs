@@ -204,6 +204,10 @@ fn def(f: &CoreFn, meta: &str) -> J {
 /// referenced symbol defined outside `defs` to its content hash; a symbol in
 /// neither list is a leaf the hash commits to by name, exactly as the encoder
 /// treats it.
+#[expect(
+    clippy::similar_names,
+    reason = "`defs` and `deps` are the encoder's own vocabulary for definitions and dependencies"
+)]
 pub fn core_identity_json(
     defs: &[&CoreFn],
     meta_of: impl Fn(Sym) -> String,

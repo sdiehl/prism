@@ -35,3 +35,11 @@
 /push_private
 /pull_private
 setup.sh
+__pycache__
+# Internal parser-experiment working notes: kept on disk, never shipped.
+/docs/internal/SCOREBOARD.md
+/docs/internal/PARSER_COMPACTION_BASELINE.md
+/docs/internal/PARSER_COMPACTION_CORPUS.md
+/docs/internal/PARSER_GENERATOR_SEMANTICS.md
+/docs/internal/PARSER_PERFORMANCE_PROTOCOL.md
+/docs/internal/PARSER_PRODUCTION_MANIFEST.md

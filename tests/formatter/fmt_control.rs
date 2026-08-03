@@ -8,6 +8,8 @@
 
 use rstest::rstest;
 
+use prism::syntax::ast::{Expr, Pattern};
+
 fn ast_no_spans(src: &str) -> String {
     prism::dump("ast", src)
         .expect("must parse")
@@ -60,4 +62,90 @@ fn short_try_stays_inline() {
 )]
 fn nested_control_breaks_vertically(#[case] src: &str, #[case] want: &str) {
     pin(src, want);
+}
+
+#[test]
+fn statement_try_restores_full_let_patterns() {
+    let src = "\
+fn tuple_try(r) =
+  let (name, c1) = r?
+  (name, c1)
+
+fn ctor_record_try(r) =
+  let Some(User { name, .. }) = r?
+  name
+";
+    let once = prism::format(src).expect("pattern-bound statement `?` must parse");
+    let twice = prism::format(&once).expect("formatted pattern-bound `?` must reparse");
+    assert_eq!(once, twice, "pattern-bound statement `?` is not idempotent");
+    assert_eq!(
+        ast_no_spans(src),
+        ast_no_spans(&once),
+        "formatting changed the pattern-bound statement `?` lowering"
+    );
+    assert!(
+        once.contains("let (name, c1) = r?"),
+        "tuple binder was not restored: {once}"
+    );
+    assert!(
+        once.contains("let Some(User { name = name, .. }) = r?"),
+        "constructor/record binder was not restored: {once}"
+    );
+
+    let parsed = prism::parse::parse(src).expect("pattern-bound statement `?` must parse");
+    let tuple = &parsed
+        .program
+        .fns
+        .iter()
+        .find(|d| d.name == "tuple_try")
+        .expect("tuple_try declaration")
+        .body;
+    let Expr::Match(_, arms) = &tuple.node else {
+        panic!("tuple-bound `?` did not lower to a match: {tuple:?}");
+    };
+    assert!(
+        tuple.synth,
+        "statement `?` match must carry the formatter marker"
+    );
+    assert!(matches!(
+        &arms[0].pat.node,
+        Pattern::Ctor(name, subs)
+            if name == "Ok" && matches!(subs.as_slice(), [p]
+                if matches!(&p.node, Pattern::Tuple(_)))
+    ));
+
+    let ctor = &parsed
+        .program
+        .fns
+        .iter()
+        .find(|d| d.name == "ctor_record_try")
+        .expect("ctor_record_try declaration")
+        .body;
+    let Expr::Match(_, arms) = &ctor.node else {
+        panic!("constructor-bound `?` did not lower to a match: {ctor:?}");
+    };
+    assert!(matches!(
+        &arms[0].pat.node,
+        Pattern::Ctor(ok, subs)
+            if ok == "Ok" && matches!(subs.as_slice(), [p]
+                if matches!(&p.node, Pattern::Ctor(some, args)
+                    if some == "Some" && matches!(args.as_slice(), [record]
+                        if matches!(&record.node, Pattern::Record(user, _, true)
+                            if user == "User"))))
+    ));
+}
+
+#[test]
+fn statement_try_does_not_broaden_let_pattern_syntax() {
+    // `LetPat` deliberately requires an outer constructor or tuple. A record
+    // remains legal nested inside a constructor, but not as the outer binder.
+    let src = "\
+fn bad(r) =
+  let User { name } = r?
+  name
+";
+    assert!(
+        prism::parse::parse(src).is_err(),
+        "statement `?` must use the ordinary restricted let-pattern grammar"
+    );
 }

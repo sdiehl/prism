@@ -1,6 +1,6 @@
 effect Amb
   choose(Int) : Int
-  reject() : Int
+  never reject() : Int
 
 -- N-queens as pure nondeterminism, in the spirit of eff_amb.
 --
@@ -36,10 +36,10 @@ fn place(row, board) : List(Int) ! {Amb} =
 fn solutions() =
   handle place(0, Nil) with
     choose(m) resume k => flatten(map(\(i) -> k(i), range(0, m)))
-    reject() resume k => Nil
+    never reject() => Nil
     return r => Cons(reverse(r), Nil)
 
-fn show_board(b) = concat("[", concat(str_join(", ", map(show_int, b)), "]"))
+fn show_board(b) = "[{str_join(", ", map(show_int, b))}]"
 
 fn main() =
   let sols = solutions()

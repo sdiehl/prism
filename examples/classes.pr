@@ -23,8 +23,7 @@ instance shapeRect : Shape(Rect)
       MkRect(w, h) => w * h
   fn name(_s) = "rectangle"
 
-fn summary(x : a) : String given Shape(a) =
-  concat(name(x), concat(" of area ", show_float(area(x))))
+fn summary(x : a) : String given Shape(a) = "{name(x)} of area {area(x)}"
 
 -- Instances are named values (Lean-style), which is what the knobs below hang
 -- off. A second instance for the same head type is legal; designating one

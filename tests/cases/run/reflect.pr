@@ -1,0 +1,14 @@
+-- Quoting a declaration of this file. The rendering is the formatter's, and it
+-- carries the comment block written directly above the target, so `main` here
+-- quotes the quotation itself rather than what the quotation became.
+
+-- A colour of the traffic light.
+type Light = Red | Amber | Green
+
+-- Twice its argument.
+fn double(x : Int) : Int = x * 2
+
+fn main() =
+  println(reflect type Light)
+  println(reflect fn double)
+  println(reflect fn main)

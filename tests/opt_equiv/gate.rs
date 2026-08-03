@@ -181,7 +181,7 @@ fn optimizer_equivalence_representative_sample() {
         "examples/eff_state.pr",
         "examples/handlers_funval.pr",
         "examples/fip_tree.pr",
-        "examples/stream_fuse.pr",
+        "examples/fixtures/compiler/stream_fuse.pr",
         "examples/newtype_order.pr",
         "tests/cases/run/floats.pr",
         "tests/fixtures/opt_equiv/cse.pr",

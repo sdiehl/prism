@@ -12,7 +12,7 @@ The edges come from the same seam `Syntax.Rename` queries, with the same limit. 
 
 ### `fl_defined`
 
-```prism,sig,h-726380bf3679a8d1f731880bd2a7e90cb6ace4489b63a18f0d5305c0d18ea080
+```prism,sig,h-93a1bb97ebf8acaebeb5fb029257eac8b8ce84c9bdf03084691181a2d9db8036
 fl_defined : forall a. (Syntax.Resolved.ResolvedDoc) -> Map(String, Unit, a)
 ```
 
@@ -20,7 +20,7 @@ The names the document defines, as a set.
 
 ### `fl_references`
 
-```prism,sig,h-07553dad59fc489629a73ec3eb5fb4c6b53757c74c42c3b45d1d584bb17f15d1
+```prism,sig,h-6d1982ae3508464fe4f372fc7431af55f74bb0512b70bdee0eea0efe78109c5a
 fl_references : (Syntax.Source.SourceFile, Syntax.Resolved.RFunction) -> List(String)
 ```
 
@@ -28,7 +28,7 @@ Every identifier one function's body references, in source order, sliced from th
 
 ### `fl_calls`
 
-```prism,sig,h-800617e08adfa7febdd38fc7a1fde27c8f36f945cb5cd297b77e0676adc4e220
+```prism,sig,h-c9680b5c82675bb85ebe7006e85b85a22371872bf97c7e9c8adbd522218104df
 fl_calls : forall a. (Syntax.Resolved.ResolvedDoc) -> Map(String, List(String), a)
 ```
 
@@ -36,7 +36,7 @@ The call graph: an edge from each function to every function of this document it
 
 ### `fl_direct`
 
-```prism,sig,h-2b0497dcbd9c6b14383cd835ae30df398e784bcfd735e0f92c99603f9522d82f
+```prism,sig,h-17a3e9cbcf43b99ac324344a7ded2f708efa775efae06ffce497def2f03dd239
 fl_direct : forall a b c d. (Map(d, List(d), a)) -> Map(d, Map(d, Unit, b), c)
 ```
 
@@ -53,7 +53,7 @@ map(\(p) -> (fst(p), set_to_list(snd(p))), map_to_list(fl_direct(graph_from_edge
 
 ### `fl_transitive`
 
-```prism,sig,h-e573696fd00b24f233ebb223b3dd5709a5e654bbf9f899698039011500194a46
+```prism,sig,h-2b6078502d358d8b0e52f6f49cf838edd0d203d89811a9c86a56f6a64f070899
 fl_transitive : forall a b. (Syntax.Resolved.ResolvedDoc) -> Map(String, Map(String, Unit, a), b) ! {Fail}
 ```
 
@@ -61,7 +61,7 @@ Every function each function transitively calls: the least assignment with `x[f]
 
 ### `fl_live`
 
-```prism,sig,h-3620ab5e19acd8954349cae912fbc30a33df4763dcd11c32ff9d9b9121b94088
+```prism,sig,h-b8863e8bd284ccd803d2d25985c658699d607546f1f6344d853cbe3e3aef6295
 fl_live : forall a. (Syntax.Resolved.ResolvedDoc, List(String)) -> Map(String, Unit, a) ! {Fail}
 ```
 
@@ -69,7 +69,7 @@ The functions reachable from `roots`: the same solve with the calls relation rev
 
 ### `fl_dead`
 
-```prism,sig,h-8e5263b8ff05c0d569051f73371d0267bc736df4128bb6935646672cd40a97fb
+```prism,sig,h-4effacabd3b21e0cf82eecc85199c406f081fb4cd01627e4463fc2436a26e671
 fl_dead : (Syntax.Resolved.ResolvedDoc, List(String)) -> List(String) ! {Fail}
 ```
 
@@ -77,7 +77,7 @@ The functions no root reaches, ascending: what a dead-code report is, once the d
 
 ### `fl_recursive`
 
-```prism,sig,h-6196e7cc0ca6f425cab5932b05ef7c0a168f528a821a39f1332984aed8806b5a
+```prism,sig,h-8f424c3e713a76d1dce4909eeb8f6b923354f824a70af619cd8b1dba952ef194
 fl_recursive : (Syntax.Resolved.ResolvedDoc) -> List(String) ! {Fail}
 ```
 

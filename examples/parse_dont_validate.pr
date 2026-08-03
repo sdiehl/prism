@@ -55,5 +55,5 @@ fn main() =
     Some(ne) => println(first(ne))
     None => println("empty")
   -- Validate: the partial head must be reified on every use.
-  println(default(\() -> head_or_fail([7, 8]), 0 - 1))
-  println(default(\() -> head_or_fail((Nil : List(Int))), 0 - 1))
+  println(head_or_fail([7, 8]) ?? -1)
+  println(head_or_fail((Nil : List(Int))) ?? -1)

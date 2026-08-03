@@ -27,3 +27,6 @@ lalrpop = "0.23"
 
 [features]
 wasm = []
+
+[lints]
+workspace = true

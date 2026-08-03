@@ -6,6 +6,12 @@ use std::path::{Path, PathBuf};
 use crate::cli::{file_name, glob_pr, read, CmdResult};
 use crate::error::Error;
 
+// One path per line, `#` starting a comment, resolved against the directory
+// holding the file, which is searched for upward from each walk root the way
+// git finds its own configuration. A path matches the file itself or anything
+// beneath it.
+const IGNORE_FILE: &str = ".prismfmtignore";
+
 // `prism fmt [paths..] [--check]`. With no path, the current directory is
 // walked, as is any directory path. Explicitly named files must parse. Files
 // reached by walking are skipped with a notice if they do not, so one
@@ -16,11 +22,11 @@ pub fn fmt_cmd(paths: &[PathBuf], check: bool) -> CmdResult {
     }
     let mut targets: Vec<(PathBuf, bool)> = Vec::new();
     if paths.is_empty() {
-        targets.extend(glob_pr(Path::new(".")).into_iter().map(|p| (p, false)));
+        targets.extend(walk(Path::new(".")));
     } else {
         for p in paths {
             if p.is_dir() {
-                targets.extend(glob_pr(p).into_iter().map(|q| (q, false)));
+                targets.extend(walk(p));
             } else {
                 targets.push((p.clone(), true));
             }
@@ -60,6 +66,50 @@ pub fn fmt_cmd(paths: &[PathBuf], check: bool) -> CmdResult {
     } else {
         Ok(())
     }
+}
+
+// Walk a directory for `.pr` files, dropping the ones an `IGNORE_FILE` claims.
+// Ignoring applies to walking only: naming a file on the command line still
+// formats it, so the exemption never becomes a way to lose an edit silently.
+fn walk(root: &Path) -> Vec<(PathBuf, bool)> {
+    let ignored = ignored_paths(root);
+    glob_pr(root)
+        .into_iter()
+        .filter(|p| {
+            let full = absolute(p);
+            !ignored.iter().any(|i| full.starts_with(i))
+        })
+        .map(|p| (p, false))
+        .collect()
+}
+
+// The absolute form of every path an `IGNORE_FILE` at or above `root` lists.
+// Test data pinned by digest cannot also be formatter-owned: its exact bytes
+// are the contract, so a formatter release that changes layout would otherwise
+// rewrite the very inputs a frozen corpus exists to hold still.
+fn ignored_paths(root: &Path) -> Vec<PathBuf> {
+    let mut dir = absolute(root);
+    loop {
+        let candidate = dir.join(IGNORE_FILE);
+        if let Ok(text) = std::fs::read_to_string(&candidate) {
+            return text
+                .lines()
+                .map(|line| line.split('#').next().unwrap_or_default().trim())
+                .filter(|line| !line.is_empty())
+                .map(|line| dir.join(line))
+                .collect();
+        }
+        if !dir.pop() {
+            return Vec::new();
+        }
+    }
+}
+
+fn absolute(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    std::env::current_dir().map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
 }
 
 // Editor format-on-save filter: read source on stdin, write the canonical form

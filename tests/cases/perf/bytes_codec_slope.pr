@@ -12,7 +12,7 @@ import Wire (..)
 fn hex_round(bs : Bytes) : Int =
   match hex_decode(hex_encode(bs)) of
     Some(out) => bytes_length(out)
-    None => 0 - 1
+    None => -1
 
 fn main() : Unit ! {IO} =
   println(show_int(hex_round(bytes_of_buf(buf_new(__N__, 65)))))

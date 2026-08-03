@@ -42,11 +42,11 @@ type Instr
 
 -- Compile-time name environment: the list of names currently in scope,
 -- innermost first, so its length-position IS the de Bruijn depth.
-fn depth_of(name, cenv, i) : Int =
+fn depth_of(name : String, cenv : List(String), i : Int) : Int =
   match cenv of
     Nil => 0
     Cons(n, rest) =>
-      if str_eq(n, name) then
+      if n == name then
         i
       else
         depth_of(name, rest, i + 1)
@@ -96,7 +96,7 @@ fn run_instrs(instrs, stack, frame) : Int =
             _ => 0
         INeg =>
           match stack of
-            Cons(x, s2) => run_instrs(rest, Cons(0 - x, s2), frame)
+            Cons(x, s2) => run_instrs(rest, Cons(-x, s2), frame)
             _ => 0
         Load(d) =>
           match nth(d, frame) of

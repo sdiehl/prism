@@ -1,6 +1,6 @@
 import { createElement, Github, Play } from "lucide";
 import init, { core_ir, diagnostics, dump, dump_hir, fmt, tokens } from "../pkg/prism.js";
-import { examples } from "./examples.js";
+import { exampleMeta, examples } from "./examples.js";
 import "./styles.css";
 
 interface Diag {
@@ -350,12 +350,21 @@ function runProgram(): void {
   worker.postMessage(src.value);
 }
 
-const names = Object.keys(examples).sort();
-for (const name of names) {
+const names = exampleMeta.map((example) => example.id);
+const groups = new Map<string, HTMLOptGroupElement>();
+for (const example of exampleMeta) {
+  let group = groups.get(example.category);
+  if (!group) {
+    group = document.createElement("optgroup");
+    group.label = example.category;
+    groups.set(example.category, group);
+    sel.append(group);
+  }
   const opt = document.createElement("option");
-  opt.value = name;
-  opt.textContent = name;
-  sel.append(opt);
+  opt.value = example.id;
+  opt.textContent = example.title;
+  opt.dataset.role = example.role;
+  group.append(opt);
 }
 // A docs "Open in playground" link carries the snippet UTF-8 + base64 in the
 // URL fragment (`#code=...`). When present, it overrides the default example.

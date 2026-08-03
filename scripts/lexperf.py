@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Prism-to-Rust lexer throughput, peak memory, and growth exponent.
+"""Prism-to-Rust syntax-pipeline throughput, peak memory, and growth exponent.
 
-Times two single-shot drivers that do the same work in the same shape: the
-compiler's own lexer (`benches/lexbench.rs`) and the Prism-language lexer
+Times two single-shot drivers over byte-identical frozen inputs: the compiler's
+own front end (`benches/lexbench.rs`) and the Prism-language twin
 (`benches/lexbench.pr`, compiled natively), each reading one file and running
-one layer over it.
+one layer over it. Counts are the cross-implementation correctness control.
+Only Prism-to-Prism baseline/candidate samples judge parser adoption speed:
+the Rust parse path additionally distributes items into `Program`.
 
 The Rust driver reports its own elapsed time, because a whole run there is
 microseconds and process startup would swamp it. The Prism driver cannot:
@@ -23,8 +25,12 @@ near 2.0 is quadratic and is the failure this exists to catch.
 Peak resident set is the whole process, startup included, and is reported raw.
 """
 import argparse
+import datetime
+import hashlib
 import json
 import math
+import os
+import platform
 import re
 import shutil
 import subprocess
@@ -34,7 +40,27 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LAYERS = ("raw", "layout")
+PARSER_ORACLE_COMMIT = "46886c1fa7064e4809020c1b788b3ee3531d6a63"
+# Exact Ledger-B parser boundary from scripts/parser_baseline.py. Keep paths
+# explicit: directory expansion would let a receipt silently omit a moved file.
+PARSER_SOURCE_PATHS = (
+    "crates/prism-syntax/src/coeffect.rs",
+    "crates/prism-syntax/src/error/parse.rs",
+    "crates/prism-syntax/src/grammar.lalrpop",
+    "crates/prism-syntax/src/parse/mod.rs",
+    "crates/prism-syntax/src/sugar.rs",
+    "lib/std/Syntax/Cursor.pr",
+    "lib/std/Syntax/Parse.pr",
+    "lib/std/Syntax/Parse/Build.pr",
+    "lib/std/Syntax/Parse/Decl.pr",
+    "lib/std/Syntax/Parse/DeclClass.pr",
+    "lib/std/Syntax/Parse/DeclStable.pr",
+    "lib/std/Syntax/Parse/Expr.pr",
+    "lib/std/Syntax/Parse/Pattern.pr",
+    "lib/std/Syntax/Parse/Support.pr",
+    "lib/std/Syntax/Parse/Type.pr",
+)
+LAYERS = ("raw", "layout", "parse")
 KIB = 1024
 # The doubling ladder, in bytes. A class stops climbing when the Prism side
 # passes the budget, so the pathological layers report at the size they reach.
@@ -54,12 +80,133 @@ def run(cmd, **kw):
     return subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, **kw)
 
 
+def bytes_identity(data, path):
+    return {
+        "path": path,
+        "bytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+
+
+def file_identity(path):
+    """Stable identity for one source or executable used by a receipt."""
+    path = Path(path)
+    digest = hashlib.sha256()
+    with path.open("rb") as src:
+        for chunk in iter(lambda: src.read(1024 * 1024), b""):
+            digest.update(chunk)
+    try:
+        shown = str(path.resolve().relative_to(ROOT))
+    except ValueError:
+        shown = str(path.resolve())
+    return {
+        "path": shown,
+        "bytes": path.stat().st_size,
+        "sha256": digest.hexdigest(),
+    }
+
+
+def parser_source_identities():
+    """Every handwritten/Rust parser source pinned by the Phase 0 oracle."""
+    if len(PARSER_SOURCE_PATHS) != len(set(PARSER_SOURCE_PATHS)):
+        sys.exit("duplicate path in exact Ledger-B parser boundary")
+    return [file_identity(ROOT / rel) for rel in PARSER_SOURCE_PATHS]
+
+
+def git_text(commit, rel):
+    result = run(["git", "show", f"{commit}:{rel}"])
+    if result.returncode:
+        sys.exit(result.stderr.strip() or f"cannot read {commit}:{rel}")
+    return result.stdout
+
+
+def frozen_corpus():
+    """Source corpus read only from the frozen oracle tree.
+
+    Returning named units lets the module workload preserve file boundaries
+    while every candidate sees byte-identical inputs.
+    """
+    result = run(["git", "ls-tree", "-r", "--name-only", PARSER_ORACLE_COMMIT])
+    if result.returncode:
+        sys.exit(result.stderr.strip() or "cannot enumerate parser oracle tree")
+    paths = result.stdout.splitlines()
+    stdlib_paths = sorted(
+        p for p in paths if p.startswith("lib/std/") and p.endswith(".pr")
+    )
+    example_paths = sorted(
+        p for p in paths
+        if p.startswith("examples/")
+        and p.endswith(".pr")
+        and "/" not in p.removeprefix("examples/")
+    )
+    if not stdlib_paths or not example_paths:
+        sys.exit("frozen syntax benchmark corpus is empty")
+    stdlib = [(p, git_text(PARSER_ORACLE_COMMIT, p)) for p in stdlib_paths]
+    examples = [(p, git_text(PARSER_ORACLE_COMMIT, p)) for p in example_paths]
+    return stdlib, examples
+
+
+def host_identity():
+    """Best-effort machine and timer identity; unavailable fields stay visible."""
+    def probe(cmd):
+        result = run(cmd)
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    cpu = platform.processor() or platform.machine()
+    memory = None
+    power = None
+    if sys.platform == "darwin":
+        cpu = probe(["sysctl", "-n", "machdep.cpu.brand_string"]) or cpu
+        memory = probe(["sysctl", "-n", "hw.memsize"])
+        power = probe(["pmset", "-g", "custom"])
+    elif Path("/proc/cpuinfo").exists():
+        for line in Path("/proc/cpuinfo").read_text().splitlines():
+            if line.lower().startswith("model name"):
+                cpu = line.split(":", 1)[-1].strip()
+                break
+        if Path("/proc/meminfo").exists():
+            memory = Path("/proc/meminfo").read_text().splitlines()[0]
+        power = probe(["sh", "-c",
+                       "cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"])
+    clock = time.get_clock_info("perf_counter")
+    return {
+        "platform": platform.platform(),
+        "machine": platform.machine(),
+        "cpu": cpu,
+        "logical_cpus": os.cpu_count(),
+        "memory": memory,
+        "power": power,
+        "timer": {
+            "implementation": clock.implementation,
+            "monotonic": clock.monotonic,
+            "adjustable": clock.adjustable,
+            "resolution_seconds": clock.resolution,
+        },
+    }
+
+
+def command_version(cmd):
+    result = run(cmd)
+    return {
+        "command": cmd,
+        "status": result.returncode,
+        "stdout": result.stdout.strip(),
+        "stderr": result.stderr.strip(),
+    }
+
+
 def build_drivers(quiet):
     """Build both drivers, returning (rust_driver, prism_cli) paths."""
     if not quiet:
         print("building the compiler and both drivers...", file=sys.stderr)
-    r = run(["cargo", "build", "--release", "--bench", "lexbench",
-             "--message-format=json"])
+    # Build the compiler binary in the same invocation as the Rust driver. A
+    # pre-existing target/release/prism may belong to another tree, which would
+    # make an otherwise well-identified receipt compile the Prism twin with a
+    # stale compiler.
+    r = run([
+        "cargo", "build", "--release", "--bin", "prism", "--bench", "lexbench",
+        "--message-format=json",
+    ])
     if r.returncode != 0:
         sys.exit(f"cargo build failed:\n{r.stderr}")
     rust = None
@@ -112,16 +259,65 @@ def lines_to(make, size):
     return "".join(out)
 
 
-def classes():
+def complete_to(units, size):
+    """Whole source units accumulated to at least `size` bytes.
+
+    Parser benchmarks cannot cut arbitrary source text at a byte or line
+    boundary: a line can still be the middle of a declaration. Cycling complete
+    units keeps every point syntactically closed.
+    """
+    out = []
+    total = 0
+    i = 0
+    while total < size:
+        unit = units[i % len(units)]
+        out.append(unit)
+        total += len(unit)
+        i += 1
+    return "".join(out)
+
+
+def classes(layer, corpus=None):
     """(name, description, size -> text) for every corpus class."""
-    stdlib = "".join(p.read_text() for p in sources("lib/std/**/*.pr"))
-    biggest = max(sources("examples/*.pr"), key=lambda p: p.stat().st_size)
-    example = biggest.read_text()
+    stdlib_named, example_named = corpus or frozen_corpus()
+    stdlib_texts = [text for _, text in stdlib_named]
+    stdlib = "".join(stdlib_texts)
+    stdlib_units = [text.rstrip() + "\n" for text in stdlib_texts]
+    biggest_name, example = max(
+        example_named, key=lambda pair: len(pair[1].encode("utf-8"))
+    )
+    example_unit = example.rstrip() + "\n"
+    biggest_name = Path(biggest_name).name
     nest = "(" * 500 + "1" + ")" * 500
+    if layer == "parse":
+        comment_sentinel = "fn comments_sentinel() : Int = 0\n"
+        return [
+            ("stdlib", "complete standard-library source units",
+             lambda n: complete_to(stdlib_units, n)),
+            ("example", f"complete copies of largest example ({biggest_name})",
+             lambda n: complete_to([example_unit], n)),
+            ("flat", "wide flat generated definitions",
+             lambda n: lines_to(
+                 lambda i: f"fn f{i}(x : Int) : Int = x + {i}\n", n)),
+            ("comments", "comment-dominated source with one declaration",
+             lambda n: lines_to(
+                 lambda i: (
+                     f"-- line {i}: ordinary words carrying no tokens at all\n"
+                 ),
+                 max(0, n - len(comment_sentinel))) + comment_sentinel),
+            ("nesting", "500-deep bracket nesting per definition",
+             lambda n: lines_to(lambda i: f"fn n{i}() : Int = {nest}\n", n)),
+            ("interp", "nested string interpolation",
+             lambda n: lines_to(
+                 lambda i: (
+                     f'fn s{i}() : String = "a{{"c{{show_int(1)}}d"}}b"\n'
+                 ),
+                 n)),
+        ]
     return [
         ("stdlib", "standard-library sources",
          lambda n: repeat_to(stdlib, n)),
-        ("example", f"largest example ({biggest.name})",
+        ("example", f"largest example ({biggest_name})",
          lambda n: repeat_to(example, n)),
         ("flat", "wide flat generated definitions",
          lambda n: lines_to(lambda i: f"fn f{i}(x : Int) : Int = x + {i}\n", n)),
@@ -151,13 +347,14 @@ def peak_rss(cmd):
 
 
 def measure(driver, paths, layer, reps):
-    """Best-of-`reps` timing over `paths`, or `(None, message)` on failure.
+    """Best-of-`reps` timing and raw samples over `paths`.
 
-    Returns `(wall, inner, tokens)`. `wall` is the whole process, launch
-    included. `inner` is what the driver reports for the layer itself, or None
-    when it does not report one.
+    Returns `(wall, inner, count, samples)`. `wall` is the whole process,
+    launch included. `inner` is what the driver reports for the layer itself,
+    or None when it does not report one.
     """
     best = None
+    samples = []
     tokens = 0
     for _ in range(reps):
         wall = 0.0
@@ -170,7 +367,8 @@ def measure(driver, paths, layer, reps):
                                text=True, capture_output=True)
             wall += time.perf_counter() - t0
             if r.returncode != 0:
-                return None, None, f"{path.name}: {r.stderr.strip() or 'died'}"
+                return (None, None,
+                        f"{path.name}: {r.stderr.strip() or 'died'}", samples)
             fields = r.stdout.split()
             tokens += int(fields[0])
             if len(fields) > 1:
@@ -178,11 +376,12 @@ def measure(driver, paths, layer, reps):
             else:
                 timed = False
         here = (wall, inner if timed else None)
+        samples.append({"wall_seconds": here[0], "inner_seconds": here[1]})
         if best is None or (here[1] or here[0]) < (best[1] or best[0]):
             best = here
     if best is None:
-        return None, None, "no repetitions requested"
-    return best[0], best[1], tokens
+        return None, None, "no repetitions requested", samples
+    return best[0], best[1], tokens, samples
 
 
 def slope(points):
@@ -215,13 +414,20 @@ class Bench:
         the point is `solid` only when the run is long enough that the
         subtraction cannot dominate it.
         """
-        wall, inner, tokens = measure(self.drivers[side], paths, layer, self.reps)
+        wall, inner, tokens, raw_samples = measure(
+            self.drivers[side], paths, layer, self.reps)
         if wall is None:
-            return None, tokens, False
+            return None, tokens, False, raw_samples
         if inner is not None:
-            return inner, tokens, True
+            samples = [sample["inner_seconds"] for sample in raw_samples]
+            return inner, tokens, True, samples
         launch = self.startup[side] * len(paths)
-        return max(wall - launch, 1e-9), tokens, wall >= FLOOR_FACTOR * launch
+        samples = [
+            max(sample["wall_seconds"] - launch, 1e-9)
+            for sample in raw_samples
+        ]
+        return (max(wall - launch, 1e-9), tokens,
+                wall >= FLOOR_FACTOR * launch, samples)
 
     def launch_share(self, side, count, secs):
         """Fraction of an externally timed wall clock that was process launch."""
@@ -236,27 +442,31 @@ class Bench:
     def ladder(self, name, layer, make, tmp):
         """Climb the size ladder until the Prism side passes the budget."""
         row = {"class": name, "layer": layer, "points": {}, "note": "",
-               "caveat": ""}
+               "caveat": "", "samples": {}, "inputs": {}, "gate": "timing"}
         widest_path = None
         for size in SIZES:
             path = tmp / f"{name}-{size}.pr"
             if not path.exists():
                 path.write_text(make(size))
             actual = path.stat().st_size
+            row["inputs"][actual] = bytes_identity(
+                path.read_bytes(), f"{name}-{size}.pr"
+            )
             if not self.quiet:
                 print(f"  {name:<9} {layer:<6} {actual // KIB:>5} KiB",
                       file=sys.stderr)
             here = {}
             solid = True
             for side in ("rust", "prism"):
-                secs, tokens, ok = self.one(side, [path], layer)
+                secs, tokens, ok, samples = self.one(side, [path], layer)
                 if secs is None:
                     row["note"] = f"{side} failed at {actual} bytes: {tokens}"
                     return row
                 here[side] = (secs, tokens)
+                row["samples"].setdefault(actual, {})[side] = samples
                 solid = solid and ok
             if here["rust"][1] != here["prism"][1]:
-                row["note"] = (f"token mismatch at {actual} bytes: "
+                row["note"] = (f"count mismatch at {actual} bytes: "
                                f"rust={here['rust'][1]} prism={here['prism'][1]}")
                 return row
             # Sizes a process launch could dominate are climbed through, not
@@ -275,41 +485,46 @@ class Bench:
                     [str(self.drivers[side]), str(widest_path), layer])
         return row
 
-    def modules(self, layer):
-        """Many small modules: one process per file over the real sources.
+    def modules(self, layer, paths, corpus_inputs):
+        """Many small frozen modules, one process per source file.
 
         This class pays one process launch per module by construction, so unlike
         the ladder it cannot climb out of the startup floor by growing its input.
-        A launch-dominated result is therefore disclosed rather than dropped: the
-        corpus class is required, and the note says how much of the wall clock
-        was subtracted instead of measured.
+        It remains a correctness/count and operational-cost report, never a hard
+        timing gate.
         """
-        paths = sources("lib/std/**/*.pr")
         size = sum(p.stat().st_size for p in paths)
         row = {"class": "modules", "layer": layer, "points": {}, "note": "",
-               "caveat": "", "files": len(paths)}
+               "caveat": "", "files": len(paths), "samples": {},
+               "inputs": corpus_inputs, "gate": "report-only"}
         if not self.quiet:
             print(f"  {'modules':<9} {layer:<6} {len(paths)} files",
                   file=sys.stderr)
         here = {}
         solid = True
         for side in ("rust", "prism"):
-            secs, tokens, ok = self.one(side, paths, layer)
+            secs, tokens, ok, samples = self.one(side, paths, layer)
             if secs is None:
                 row["note"] = f"{side} failed: {tokens}"
                 return row
             here[side] = (secs, tokens)
+            row["samples"].setdefault(size, {})[side] = samples
             solid = solid and ok
             row[f"{side}_rss"] = None
         if here["rust"][1] != here["prism"][1]:
-            row["note"] = (f"token mismatch: rust={here['rust'][1]} "
+            row["note"] = (f"count mismatch: rust={here['rust'][1]} "
                            f"prism={here['prism'][1]}")
             return row
         if not solid:
             share = self.launch_share("prism", len(paths), here["prism"][0])
             row["caveat"] = (f"launch-dominated: {share:.0%} of the Prism wall clock "
                              f"was process startup, subtracted rather than "
-                             f"measured, so this throughput is approximate")
+                             f"measured; timing is report-only")
+        elif not row["caveat"]:
+            row["caveat"] = (
+                "one process per module; timing is report-only even above the "
+                "launch floor"
+            )
         row["points"][size] = here
         row["tokens"] = here["rust"][1]
         return row
@@ -359,24 +574,46 @@ def main():
                     help="timed runs per point; the best is reported (default 3)")
     ap.add_argument("--budget", type=float, default=2.0,
                     help="stop growing a class past this many Prism seconds")
-    ap.add_argument("--layer", choices=LAYERS, help="measure only one layer")
+    ap.add_argument("--layer", choices=LAYERS,
+                    help="measure only one layer (default: all)")
     ap.add_argument("--quiet", action="store_true", help="no progress on stderr")
+    ap.add_argument("--json", type=Path, metavar="PATH",
+                    help="also write a machine-readable receipt with raw samples")
+    ap.add_argument("--arm", choices=("baseline", "candidate"),
+                    help="receipt arm (required with --json for gate evidence)")
+    ap.add_argument("--pair", type=int,
+                    help="one-based alternating run pair (required with --json)")
     args = ap.parse_args()
+    if args.json and (args.arm is None or args.pair is None or args.pair < 1):
+        ap.error("--json gate receipts require --arm and positive --pair")
     layers = (args.layer,) if args.layer else LAYERS
 
     rust, prism_cli = build_drivers(args.quiet)
     with tempfile.TemporaryDirectory(prefix="prism-lexperf-") as td:
         tmp = Path(td)
+        corpus = frozen_corpus()
+        frozen_modules = tmp / "frozen-modules"
+        module_paths = []
+        module_inputs = []
+        for rel, text in corpus[0]:
+            path = frozen_modules / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+            module_paths.append(path)
+            module_inputs.append(bytes_identity(text.encode("utf-8"), rel))
         prism = compile_prism_driver(prism_cli, tmp / "lexbench-prism")
         empty = tmp / "empty.pr"
         empty.write_text("")
         startup = {}
+        startup_samples = {}
         for side, driver in (("rust", rust), ("prism", prism)):
             # One warm-up first: a cold first launch would set the floor every
             # later row is judged against.
             measure(driver, [empty], LAYERS[0], 1)
-            wall, _inner, _tokens = measure(driver, [empty], LAYERS[0], args.reps)
+            wall, _inner, _tokens, samples = measure(
+                driver, [empty], LAYERS[0], args.reps)
             startup[side] = wall
+            startup_samples[side] = samples
         if not args.quiet:
             print(f"startup: rust {startup['rust'] * 1e3:.1f} ms, "
                   f"prism {startup['prism'] * 1e3:.1f} ms", file=sys.stderr)
@@ -384,10 +621,70 @@ def main():
         bench = Bench(rust, prism, startup, args.reps, args.budget, args.quiet)
         rows = []
         for layer in layers:
-            for name, _desc, make in classes():
+            for name, _desc, make in classes(layer, corpus):
                 rows.append(bench.ladder(name, layer, make, tmp))
-            rows.append(bench.modules(layer))
+            rows.append(bench.modules(layer, module_paths, module_inputs))
         report(rows, args.budget)
+        if args.json:
+            status = run([
+                "git", "status", "--short", "--untracked-files=normal",
+            ]).stdout.splitlines()
+            oracle_changes = run([
+                "git", "diff", "--name-only", PARSER_ORACLE_COMMIT, "--",
+                *PARSER_SOURCE_PATHS,
+            ]).stdout.splitlines()
+            receipt = {
+                "schema": "prism-lexperf-v1",
+                "generated_at": (
+                    datetime.datetime.now(datetime.timezone.utc).isoformat()
+                ),
+                "commit": run(["git", "rev-parse", "HEAD"]).stdout.strip(),
+                "tree": run(["git", "rev-parse", "HEAD^{tree}"]).stdout.strip(),
+                "worktree_changes": status,
+                "parser_oracle_commit": PARSER_ORACLE_COMMIT,
+                "parser_source_changes_from_oracle": oracle_changes,
+                "host": host_identity(),
+                "build_profile": "release",
+                "arm": args.arm,
+                "pair": args.pair,
+                "required_pair_order": (
+                    ["baseline", "candidate"]
+                    if args.pair % 2 == 1
+                    else ["candidate", "baseline"]
+                ),
+                "toolchain": {
+                    "cargo": command_version(["cargo", "--version"]),
+                    "rustc": command_version(["rustc", "-Vv"]),
+                },
+                "source_identities": [
+                    file_identity(ROOT / "scripts" / "lexperf.py"),
+                    file_identity(ROOT / "benches" / "lexbench.rs"),
+                    file_identity(ROOT / "benches" / "lexbench.pr"),
+                    *parser_source_identities(),
+                ],
+                "binary_identities": {
+                    "rust_driver": file_identity(rust),
+                    "prism_compiler": file_identity(prism_cli),
+                    "prism_driver": file_identity(prism),
+                },
+                "layers": list(layers),
+                "repetitions": args.reps,
+                "budget_seconds": args.budget,
+                "corpus": {
+                    "commit": PARSER_ORACLE_COMMIT,
+                    "stdlib": module_inputs,
+                    "examples": [
+                        bytes_identity(text.encode("utf-8"), rel)
+                        for rel, text in corpus[1]
+                    ],
+                },
+                "startup_seconds": startup,
+                "startup_samples": startup_samples,
+                "rows": rows,
+            }
+            args.json.parent.mkdir(parents=True, exist_ok=True)
+            args.json.write_text(json.dumps(receipt, indent=2, sort_keys=True)
+                                 + "\n")
         if any(r["note"] for r in rows):
             sys.exit(1)
 

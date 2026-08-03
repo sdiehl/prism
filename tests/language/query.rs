@@ -65,7 +65,7 @@ fn uses_type_matches_whole_type_tokens() {
 // prelude `factorial`'s body hashes to the same value and is reported as a clone.
 #[test]
 fn dupes_finds_structural_clones() {
-    let src = "fn fact(n) = if n == 0 then 1 else n * fact(n - 1)\nfn main() = ()";
+    let src = "fn fact(n) = if n <= 0 then 1 else n * fact(n - 1)\nfn main() = ()";
     let out = dump("dupes", &with_prelude(src)).expect("dupes");
     assert!(
         out.lines()

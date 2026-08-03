@@ -116,6 +116,13 @@ fn im_ins(g, w : U64, key : I64, value : v, t : IntMap(v)) : IntMap(v) =
         IMBranch(p, m, l, im_ins(g, w, key, value, r))
 
 -- | The empty map.
+--
+-- ```prism
+-- intmap_is_empty(intmap_empty)
+-- ```
+-- ```output
+-- true
+-- ```
 pub let intmap_empty : IntMap(v) = IMEmpty
 
 -- | The map binding `key` to `value` and nothing else.

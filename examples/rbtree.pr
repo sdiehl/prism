@@ -76,7 +76,7 @@ fn black_height(t) : Int =
       let lh = black_height(l)
       let rh = black_height(r)
       if lh < 0 || rh < 0 || lh /= rh then
-        0 - 1
+        -1
       else
         lh + (match c of { B => 1, R => 0 })
 

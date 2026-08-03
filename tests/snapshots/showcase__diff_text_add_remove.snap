@@ -1,9 +1,9 @@
 ---
-source: tests/showcase.rs
-expression: "diff(old, new)"
+source: tests/runtime/showcase.rs
+expression: value.as_ref()
 ---
 diff: 1 changed, 1 added, 1 removed, 1 unchanged
-  ~ main  a024c250e41333ef -> c2e47a470c47c1e5
-  + fresh  2b9b7bc9737e589d
-  - gone  e1e89e07f13e9379
+  ~ main  d7c879ab24c026e2 -> 6f28cdd3597f37be
+  + fresh  a26a5c97b365c611
+  - gone  ee6f76b30085a5fc
 cone: 0 affected

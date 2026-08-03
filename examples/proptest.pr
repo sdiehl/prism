@@ -13,7 +13,12 @@ import Test (..)
 import Quickcheck (..)
 
 fn report(name : String, o : Outcome(a)) =
-  println(concat(name, if passed(o) then ": OK" else ": FAILED"))
+  let status =
+    if passed(o) then
+      "OK"
+    else
+      "FAILED"
+  println("{name}: {status}")
 
 type Tree = Leaf | Node(Tree, Int, Tree) deriving (Eq, Show, Arbitrary)
 

@@ -1,7 +1,7 @@
 -- `??` falls back on failure and nests right; the fallback may itself be
 -- failable, letting its `Fail` escape to the next handler out.
 
-fn pick(xs, i, j) = xs.at_list(i) ?? xs.at_list(j) ?? 0 - 1
+fn pick(xs, i, j) = xs.at_list(i) ?? xs.at_list(j) ?? -1
 
 fn main() =
   let xs = [5, 6, 7]

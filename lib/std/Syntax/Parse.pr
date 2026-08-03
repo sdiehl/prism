@@ -1,0 +1,87 @@
+-- | The public Prism-owned parser.
+--
+-- The compiler remains the bootstrap oracle, but this module is a complete
+-- value-passing entry seam: source text is lexed and laid out by the Prism
+-- frontend, then declarations and expressions consume that exact post-layout
+-- token stream without calling back into Rust.
+
+import Syntax.Source (..)
+
+import Syntax.Token (..)
+
+import Syntax.Lex (..)
+
+import Syntax.Layout (..)
+
+import Syntax.Ast (..)
+
+import Syntax.Diagnostic (..)
+
+import Syntax.Cursor (..)
+
+import Syntax.Parse.Support (..)
+
+import Syntax.Parse.Expr (..)
+
+import Syntax.Parse.Decl (..)
+
+-- | A source-level parse failure, preserving whether lexing or parsing refused
+-- the input.
+pub type ParseFailure = ParseLex(LexError) | ParseSyntax(Diagnostic)
+
+-- | Parse an already-laid-out whole-program token stream.
+pub fn parse_program_tokens(
+  tokens : List(Token),
+  stop : Int
+) : Result(List(Item), Diagnostic) =
+  match parse_program(cursor_of(tokens, stop), depth_budget()) of
+    PTook(items, _) => Ok(items)
+    PStuck(c) => Err(cursor_diagnostic(c))
+    PFault(d) => Err(d)
+
+-- | Lex, lay out, and parse one complete Prism source file.
+pub fn parse_source(text : String) : Result(List(Item), ParseFailure) =
+  match layout(text) of
+    Err(e) => Err(ParseLex(e))
+    Ok(tokens) =>
+      match parse_program_tokens(tokens, str_len(text)) of
+        Ok(items) => Ok(items)
+        Err(d) => Err(ParseSyntax(d))
+
+-- | Parse one expression from a token cursor and require complete consumption.
+pub fn parse_expr_tokens(
+  tokens : List(Token),
+  stop : Int
+) : Result(Sp(Expr), Diagnostic) =
+  let c0 = cursor_of(tokens, stop)
+  match parse_expr(c0, depth_budget()) of
+    PStuck(c) => Err(cursor_diagnostic(c))
+    PFault(d) => Err(d)
+    PTook(expr, c1) =>
+      match cursor_expect_end(c1) of
+        Took(_, _) => Ok(expr)
+        Stuck(c2) => Err(cursor_diagnostic(c2))
+
+-- | Lex, lay out, and parse a standalone expression. Layout wraps a complete
+-- input in its top-level virtual block, so the expression entry removes that
+-- envelope before requiring the stream end.
+pub fn parse_expr_source(text : String) : Result(Sp(Expr), ParseFailure) =
+  match layout(text) of
+    Err(e) => Err(ParseLex(e))
+    Ok(tokens) =>
+      let c0 = cursor_of(tokens, str_len(text))
+      match take_kind(c0, TVOpen) of
+        PStuck(c1) => Err(ParseSyntax(cursor_diagnostic(c1)))
+        PFault(d) => Err(ParseSyntax(d))
+        PTook(_, c1) =>
+          match parse_expr(c1, depth_budget()) of
+            PStuck(c2) => Err(ParseSyntax(cursor_diagnostic(c2)))
+            PFault(d) => Err(ParseSyntax(d))
+            PTook(expr, c2) =>
+              match take_kind(c2, TVClose) of
+                PStuck(c3) => Err(ParseSyntax(cursor_diagnostic(c3)))
+                PFault(d) => Err(ParseSyntax(d))
+                PTook(_, c3) =>
+                  match cursor_expect_end(c3) of
+                    Took(_, _) => Ok(expr)
+                    Stuck(c4) => Err(ParseSyntax(cursor_diagnostic(c4)))

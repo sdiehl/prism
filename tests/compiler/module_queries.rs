@@ -16,6 +16,10 @@ const MODULE_DECISION_DIR: &str = "decisions/query-facts";
 const CORRUPT_QUERY_ENTRY: &str = "prism-query-index-v1\nnot-a-hash\n";
 
 fn roots(b_value: i64) -> Vec<Root> {
+    roots_with_b(&format!("pub fn value() : Int = {b_value}\n"))
+}
+
+fn roots_with_b(b_source: &str) -> Vec<Root> {
     vec![Root::source_bundle(
         "modules".to_string(),
         BTreeMap::from([
@@ -23,10 +27,7 @@ fn roots(b_value: i64) -> Vec<Root> {
                 "A".to_string(),
                 "import B\nimport C\npub fn total() : Int = B.value() + C.value()\n".to_string(),
             ),
-            (
-                "B".to_string(),
-                format!("pub fn value() : Int = {b_value}\n"),
-            ),
+            ("B".to_string(), b_source.to_string()),
             ("C".to_string(), "pub fn value() : Int = 1\n".to_string()),
         ]),
     )]
@@ -111,6 +112,20 @@ fn private_dependency_edit_preserves_importer_interfaces() {
             writes: EXPECTED_CUTOFF_WRITES
         }
     );
+}
+
+#[test]
+fn module_trivia_edit_reuses_every_checked_body() {
+    let session = CompilerSession::new();
+    let cfg = session_config(PARALLEL_THREADS, session);
+    check_modules_on(ROOT, &roots(BEFORE_VALUE), &cfg).unwrap();
+
+    let trivia = roots_with_b("\n-- shifted trivia\npub fn value () : Int = 41\n");
+    let warm = check_modules_on(ROOT, &trivia, &cfg).unwrap();
+
+    assert!(warm.root_reused);
+    assert!(warm.modules.iter().all(|module| module.reused));
+    assert!(warm.decisions.iter().all(|decision| decision.reused));
 }
 
 #[test]

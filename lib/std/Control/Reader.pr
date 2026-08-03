@@ -10,6 +10,13 @@ pub effect Reader(r)
   ask() : r
 
 -- | Run `action` with `env` as the ambient environment, discharging `Reader(r)`.
+--
+-- ```prism
+-- run_reader("hello", \() -> asks(str_len))
+-- ```
+-- ```output
+-- 5
+-- ```
 pub fn run_reader(env : r, action : () -> a ! {Reader(r) | e}) : a =
   handle action() with
     ask() resume k => k(env)
@@ -20,5 +27,12 @@ pub fn asks(f : (r) -> a) : a ! {Reader(r)} = f(ask())
 
 -- | Run `action` under the environment transformed by `f`. The transformed
 -- environment is scoped to `action`; the outer environment is unchanged.
+--
+-- ```prism
+-- run_reader(10, \() -> [ask(), local(\(n) -> n + 5, \() -> ask()), ask()])
+-- ```
+-- ```output
+-- [10, 15, 10]
+-- ```
 pub fn local(f : (r) -> r, action : () -> a ! {Reader(r) | e}) : a =
   run_reader(f(ask()), action)

@@ -223,15 +223,21 @@ impl Fmt<'_> {
             Expr::Match(s, arms) if cur.synth && arms.len() == 2 => {
                 let v = self.fmt_expr(s, indent, Mode::Flat);
                 let binder = match &arms[0].pat.node {
-                    Pattern::Ctor(_, subs) => match subs.first().map(|p| &p.node) {
-                        Some(Pattern::Var(x)) => Some(x.clone()),
-                        _ => None,
-                    },
+                    Pattern::Ctor(_, subs) => {
+                        subs.first().filter(|p| !matches!(&p.node, Pattern::Wild))
+                    }
                     _ => None,
                 };
                 let s = binder.map_or_else(
                     || format!("{ind}{v}{}", kw::QUESTION),
-                    |x| format!("{ind}{} {x} = {v}{}", kw::LET, kw::QUESTION),
+                    |p| {
+                        format!(
+                            "{ind}{} {} = {v}{}",
+                            kw::LET,
+                            fmt_pat_inline(p),
+                            kw::QUESTION
+                        )
+                    },
                 );
                 (s, arms[0].body.span.start, &arms[0].body)
             }

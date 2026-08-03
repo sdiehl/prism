@@ -1,18 +1,17 @@
 //! Common subexpression elimination for typed Core (late pass, O2).
 //!
-//! Mirrors [`super::super::opt::cse::cse_counted`] rule-for-rule: only a `Prim`
-//! over a non-trapping operator (never `Div`/`Rem`, whose divide-by-zero trap
-//! is observable) is shared, keyed on its operator and its two keyable
-//! operands (`Float` keys on the bit pattern so the map stays total and
-//! `Ord`); constructors, tuples, thunks, effects, refs, and calls are never
-//! shared. The typed-specific step is representation transparency: a
+//! Only a `Prim` over a non-trapping operator (never `Div`/`Rem`, whose
+//! divide-by-zero trap is observable) is shared, keyed on its operator and its
+//! two keyable operands (`Float` keys on the bit pattern so the map stays total
+//! and `Ord`); constructors, tuples, thunks, effects, refs, and calls are never
+//! shared. Typed Core adds representation transparency: a
 //! [`TypedValueKind::Reinterpret`]/[`TypedValueKind::NewtypeRepr`] wrapper
 //! erases away transparently ([`TypedValue::erase`]), so the operand key must
-//! look through it via [`peel`] to key exactly what the erased legacy
-//! operand would, while the rewrite still carries the original (possibly
-//! wrapped) value forward unchanged. Each top-level function starts CSE from
-//! an empty availability map, so the pass transforms every definition
-//! independently and stays SCC-local.
+//! look through it via [`peel`] to key exactly what the erased operand would,
+//! while the rewrite still carries the original (possibly wrapped) value
+//! forward unchanged. Each top-level function starts CSE from an empty
+//! availability map, so the pass transforms every definition independently and
+//! stays SCC-local.
 //!
 //! Runs after effect lowering (a late pass) so it cannot disturb the
 //! var/State fusion.
@@ -42,6 +41,7 @@ impl CseStats {
 }
 
 /// Eliminate repeated pure scalar subexpressions, preserving every witness.
+#[must_use]
 pub fn cse<P>(core: TypedCore<P>) -> (TypedCore<P>, CseStats) {
     let mut eliminator = Cse { ticks: 0 };
     let fns = core
@@ -398,6 +398,7 @@ mod tests {
             ctors,
             warning: _,
             strategy,
+            confined_decline: _,
         } = lower_effects(input, &env, &BTreeMap::new(), &flags, &OpGrades::new())
             .expect("fixture lowers through the production effect ABI");
         assert_eq!(strategy, EffectStrategy::SelectiveFreeMonad);

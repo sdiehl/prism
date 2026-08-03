@@ -1,0 +1,784 @@
+version = 1
+
+# Defaults describe an ordinary deterministic playground example. Individual
+# entries override them when they need host capabilities, input, multiple runs,
+# or belong to the showcase/fixture collections instead.
+[defaults]
+role = "gallery"
+platforms = ["interpreter", "native", "wasm"]
+expected_output = "exact"
+
+[[example]]
+path = "accum.pr"
+title = "Tail-recursive accumulators"
+category = "Functions"
+
+[[example]]
+path = "ad.pr"
+title = "Automatic differentiation with Dual numbers"
+category = "Numerics"
+
+[[example]]
+path = "arena.pr"
+title = "Arena allocation"
+category = "Memory"
+
+[[example]]
+path = "array.pr"
+title = "Mutable arrays"
+category = "Collections"
+
+[[example]]
+path = "async.pr"
+title = "Structured concurrency"
+category = "Concurrency"
+
+[[example]]
+path = "async_capability.pr"
+title = "Async capabilities"
+category = "Concurrency"
+
+[[example]]
+path = "bignum.pr"
+title = "Arbitrary-precision integers"
+category = "Numerics"
+
+[[example]]
+path = "bits.pr"
+title = "Fixed-width bit operations"
+category = "Numerics"
+
+[[example]]
+path = "boids.pr"
+title = "Boids simulation"
+category = "Showcases"
+role = "showcase"
+
+[[example]]
+path = "builder.pr"
+title = "List builders"
+category = "Collections"
+
+[[example]]
+path = "bytecode.pr"
+title = "Bytecode compiler and VM"
+category = "Languages"
+
+[[example]]
+path = "calc.pr"
+title = "Interactive calculator"
+category = "Applications"
+platforms = ["interpreter", "native"]
+expected_output = "input-fixture"
+
+[[example]]
+path = "calkin_wilf.pr"
+title = "Calkin-Wilf tree"
+category = "Algorithms"
+
+[[example]]
+path = "capabilities.pr"
+title = "Host capabilities"
+category = "Systems"
+platforms = ["native"]
+expected_output = "host-dependent"
+
+[[example]]
+path = "cbpv.pr"
+title = "Call-by-push-value"
+category = "Languages"
+
+[[example]]
+path = "channels.pr"
+title = "Channels"
+category = "Concurrency"
+
+[[example]]
+path = "chaos_swarm.pr"
+title = "Deterministic chaos scheduler"
+category = "Showcases"
+role = "showcase"
+
+[[example]]
+path = "chars.pr"
+title = "Characters and codepoints"
+category = "Text"
+
+[[example]]
+path = "class_pattern.pr"
+title = "Class-dispatched patterns"
+category = "Types"
+
+[[example]]
+path = "classes.pr"
+title = "Type classes"
+category = "Types"
+
+[[example]]
+path = "cli.pr"
+title = "Typed command-line interface"
+category = "Applications"
+
+[[example]]
+path = "clock.pr"
+title = "Logical clocks"
+category = "Concurrency"
+
+[[example]]
+path = "collatz.pr"
+title = "Collatz sequence"
+category = "Algorithms"
+
+[[example]]
+path = "compose.pr"
+title = "Composition and pipelines"
+category = "Functions"
+
+[[example]]
+path = "comprehension.pr"
+title = "Comprehensions"
+category = "Collections"
+
+[[example]]
+path = "condition.pr"
+title = "Conditions and restarts"
+category = "Control"
+
+[[example]]
+path = "curry.pr"
+title = "Currying and partial application"
+category = "Functions"
+
+[[example]]
+path = "deep_tco.pr"
+title = "Deep tail-call optimization"
+category = "Functions"
+
+[[example]]
+path = "delim.pr"
+title = "Delimited control"
+category = "Control"
+
+[[example]]
+path = "derivative.pr"
+title = "Brzozowski regex derivatives"
+category = "Algorithms"
+
+[[example]]
+path = "deriving.pr"
+title = "Derived hashing"
+category = "Types"
+
+[[example]]
+path = "durable.pr"
+title = "Durable record and replay"
+category = "Systems"
+platforms = ["native"]
+expected_output = "multi-run"
+
+[[example]]
+path = "echo.pr"
+title = "Numbered input"
+category = "Applications"
+platforms = ["interpreter", "native"]
+expected_output = "input-fixture"
+
+[[example]]
+path = "eff_amb.pr"
+title = "Nondeterminism handlers"
+category = "Effects"
+
+[[example]]
+path = "eff_exn.pr"
+title = "Exception handlers"
+category = "Effects"
+
+[[example]]
+path = "eff_forward.pr"
+title = "Effect forwarding"
+category = "Effects"
+
+[[example]]
+path = "eff_nontail.pr"
+title = "Non-tail handlers"
+category = "Effects"
+
+[[example]]
+path = "eff_poly.pr"
+title = "Effect polymorphism"
+category = "Effects"
+
+[[example]]
+path = "eff_reader.pr"
+title = "Reader from first principles"
+category = "Effects"
+
+[[example]]
+path = "eff_rows.pr"
+title = "Effect rows"
+category = "Effects"
+
+[[example]]
+path = "eff_state.pr"
+title = "State from first principles"
+category = "Effects"
+
+[[example]]
+path = "eff_writer.pr"
+title = "Writer from first principles"
+category = "Effects"
+
+[[example]]
+path = "eff_yield.pr"
+title = "Yield handlers"
+category = "Effects"
+
+[[example]]
+path = "effectful_traverse.pr"
+title = "Effect-polymorphic traversal"
+category = "Effects"
+
+[[example]]
+path = "errors.pr"
+title = "Named error rows"
+category = "Errors"
+
+[[example]]
+path = "exceptions.pr"
+title = "Failure idioms"
+category = "Errors"
+
+[[example]]
+path = "expr.pr"
+title = "Result-based expression evaluator"
+category = "Languages"
+
+[[example]]
+path = "factorial.pr"
+title = "Factorial"
+category = "Basics"
+# Deliberately teaches the recursive definition instead of calling the prelude.
+allow_stdlib_reimplementation = ["fact"]
+
+[[example]]
+path = "fip_list.pr"
+title = "Fully in-place lists"
+category = "Memory"
+
+[[example]]
+path = "fip_tree.pr"
+title = "Fully in-place trees"
+category = "Memory"
+
+[[example]]
+path = "fip_zipper.pr"
+title = "Fully in-place zipper"
+category = "Memory"
+
+[[example]]
+path = "fold.pr"
+title = "Folds"
+category = "Collections"
+
+[[example]]
+path = "fold_zoo.pr"
+title = "Fold variants"
+category = "Collections"
+
+[[example]]
+path = "game.pr"
+title = "Guessing game"
+category = "Applications"
+platforms = ["interpreter", "native"]
+expected_output = "input-fixture"
+
+[[example]]
+path = "greet.pr"
+title = "File-backed greeting"
+category = "Systems"
+platforms = ["native"]
+expected_output = "host-dependent"
+
+[[example]]
+path = "guards.pr"
+title = "Pattern guards"
+category = "Patterns"
+
+[[example]]
+path = "handlers_funval.pr"
+title = "Handler values"
+category = "Effects"
+
+[[example]]
+path = "hangman.pr"
+title = "Hangman"
+category = "Applications"
+platforms = ["interpreter", "native"]
+expected_output = "input-fixture"
+
+[[example]]
+path = "hashmap.pr"
+title = "Hash maps"
+category = "Collections"
+
+[[example]]
+path = "hkt.pr"
+title = "Higher-kinded types"
+category = "Types"
+
+[[example]]
+path = "imperative.pr"
+title = "Imperative syntax"
+category = "Control"
+
+[[example]]
+path = "incr_trace.pr"
+title = "Durable incremental traces"
+category = "Incremental"
+platforms = ["native"]
+expected_output = "multi-run"
+
+[[example]]
+path = "incr_warm.pr"
+title = "Warm incremental cache"
+category = "Incremental"
+platforms = ["native"]
+expected_output = "multi-run"
+
+[[example]]
+path = "indexing.pr"
+title = "Indexing and defaults"
+category = "Collections"
+
+[[example]]
+path = "interaction.pr"
+title = "Polynomial interaction"
+category = "Functions"
+
+[[example]]
+path = "interp.pr"
+title = "Interpreter"
+category = "Languages"
+
+[[example]]
+path = "json.pr"
+title = "JSON"
+category = "Data"
+
+[[example]]
+path = "lambda.pr"
+title = "Lambda calculus"
+category = "Languages"
+
+[[example]]
+path = "leaderboard.pr"
+title = "Incremental leaderboard"
+category = "Incremental"
+
+[[example]]
+path = "lens_derive.pr"
+title = "Derived field lenses"
+category = "Optics"
+
+[[example]]
+path = "lexer.pr"
+title = "Lexer"
+category = "Languages"
+
+[[example]]
+path = "life.pr"
+title = "Conway's Game of Life"
+category = "Algorithms"
+
+[[example]]
+path = "map.pr"
+title = "List mapping"
+category = "Collections"
+
+[[example]]
+path = "mask.pr"
+title = "Effect masking"
+category = "Effects"
+
+[[example]]
+path = "max_segment_sum.pr"
+title = "Maximum segment sum"
+category = "Algorithms"
+
+[[example]]
+path = "memo.pr"
+title = "Memoization handler"
+category = "Effects"
+
+[[example]]
+path = "mergesort.pr"
+title = "Merge sort"
+category = "Algorithms"
+
+[[example]]
+path = "moore.pr"
+title = "Moore machines"
+category = "Functions"
+
+[[example]]
+path = "named_args.pr"
+title = "Named and default arguments"
+category = "Functions"
+
+[[example]]
+path = "named_handlers.pr"
+title = "Named handlers"
+category = "Effects"
+
+[[example]]
+path = "newtype_order.pr"
+title = "Newtype ordering"
+category = "Types"
+
+[[example]]
+path = "optic_zoo.pr"
+title = "Advanced optic paths"
+category = "Optics"
+
+[[example]]
+path = "optics.pr"
+title = "Optic paths"
+category = "Optics"
+
+[[example]]
+path = "optionals.pr"
+title = "Optional chaining"
+category = "Errors"
+
+[[example]]
+path = "ordered_witness.pr"
+title = "Ordering witnesses"
+category = "Types"
+
+[[example]]
+path = "orders.pr"
+title = "Order-processing application"
+category = "Applications"
+
+[[example]]
+path = "os.pr"
+title = "Operating-system capabilities"
+category = "Systems"
+platforms = ["native"]
+expected_output = "host-dependent"
+
+[[example]]
+path = "param_effects.pr"
+title = "Parameter-passing effects"
+category = "Effects"
+
+[[example]]
+path = "parse_dont_validate.pr"
+title = "Parse, don't validate"
+category = "Types"
+
+[[example]]
+path = "pendulum.pr"
+title = "Double pendulum"
+category = "Showcases"
+role = "showcase"
+
+[[example]]
+path = "pipeline.pr"
+title = "Data pipeline"
+category = "Applications"
+
+[[example]]
+path = "player_manual.pr"
+title = "Stable data evolution"
+category = "Data"
+
+[[example]]
+path = "polynomial.pr"
+title = "Polynomial functors"
+category = "Types"
+
+[[example]]
+path = "primes.pr"
+title = "Prime sieve"
+category = "Algorithms"
+
+[[example]]
+path = "probe.pr"
+title = "Debug probes"
+category = "Tooling"
+
+[[example]]
+path = "proptest.pr"
+title = "Property testing"
+category = "Testing"
+
+[[example]]
+path = "protocol_ladder.pr"
+title = "Versioned protocol adapters"
+category = "Effects"
+
+[[example]]
+path = "queens.pr"
+title = "N-Queens"
+category = "Algorithms"
+
+[[example]]
+path = "rbtree.pr"
+title = "Red-black tree"
+category = "Algorithms"
+
+[[example]]
+path = "record_replay.pr"
+title = "Record and replay"
+category = "Systems"
+
+[[example]]
+path = "records_demo.pr"
+title = "Records and functional updates"
+category = "Data"
+
+[[example]]
+path = "recursion_schemes.pr"
+title = "Recursion schemes"
+category = "Functions"
+
+[[example]]
+path = "recursion_zoo.pr"
+title = "Recursion patterns"
+category = "Functions"
+
+[[example]]
+path = "regex.pr"
+title = "Backtracking regular expressions"
+category = "Algorithms"
+
+[[example]]
+path = "replay_concurrent.pr"
+title = "Concurrent replay"
+category = "Concurrency"
+
+[[example]]
+path = "result_pipeline.pr"
+title = "Result pipeline"
+category = "Errors"
+
+[[example]]
+path = "same_fringe.pr"
+title = "Same fringe"
+category = "Control"
+
+[[example]]
+path = "sandbox.pr"
+title = "Capability sandbox"
+category = "Systems"
+platforms = ["native"]
+
+[[example]]
+path = "scheduler.pr"
+title = "Cooperative scheduler"
+category = "Concurrency"
+
+[[example]]
+path = "scheduler_policy.pr"
+title = "Scheduler policies"
+category = "Concurrency"
+
+[[example]]
+path = "show.pr"
+title = "Structural display"
+category = "Data"
+
+[[example]]
+path = "simd.pr"
+title = "SIMD vectors"
+category = "Numerics"
+
+[[example]]
+path = "smallest_free.pr"
+title = "Smallest-free-number algorithm"
+category = "Algorithms"
+
+[[example]]
+path = "sort.pr"
+title = "Generic sorting"
+category = "Algorithms"
+
+[[example]]
+path = "state.pr"
+title = "Explicit state threading"
+category = "Functions"
+
+[[example]]
+path = "stlc.pr"
+title = "Simply typed lambda calculus"
+category = "Languages"
+
+[[example]]
+path = "streams.pr"
+title = "Fusing streams"
+category = "Collections"
+
+[[example]]
+path = "superclass.pr"
+title = "Superclasses"
+category = "Types"
+
+[[example]]
+path = "systemf.pr"
+title = "System F type inference"
+category = "Showcases"
+role = "showcase"
+
+[[example]]
+path = "tagless.pr"
+title = "Tagless-final interpreters"
+category = "Languages"
+
+[[example]]
+path = "tensor_ops.pr"
+title = "Tensor operations"
+category = "Numerics"
+
+[[example]]
+path = "textutil.pr"
+title = "Text utilities and word counts"
+category = "Text"
+
+[[example]]
+path = "time.pr"
+title = "State and time"
+category = "Effects"
+
+[[example]]
+path = "transact.pr"
+title = "Transactional failure"
+category = "Control"
+
+[[example]]
+path = "tree.pr"
+title = "Binary trees"
+category = "Data"
+
+[[example]]
+path = "trmc.pr"
+title = "Tail recursion modulo cons"
+category = "Functions"
+
+[[example]]
+path = "ufcs.pr"
+title = "Uniform function calls"
+category = "Functions"
+
+[[example]]
+path = "unicode.pr"
+title = "Unicode strings"
+category = "Text"
+
+[[example]]
+path = "validate.pr"
+title = "Failure-based validation"
+category = "Errors"
+
+[[example]]
+path = "var_pure.pr"
+title = "Pure local mutation"
+category = "Control"
+
+[[example]]
+path = "vectors.pr"
+title = "Vector algebra"
+category = "Numerics"
+
+[[example]]
+path = "where_blocks.pr"
+title = "Where blocks"
+category = "Functions"
+
+[[example]]
+path = "world.pr"
+title = "Cellular-automata world"
+category = "Showcases"
+role = "showcase"
+
+[[example]]
+path = "zipper.pr"
+title = "List zipper"
+category = "Data"
+
+[[example]]
+path = "zygo.pr"
+title = "Zygomorphisms"
+category = "Functions"
+
+[[example]]
+path = "fixtures/compiler/arena_escape.pr"
+title = "Arena escape lowering"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
+path = "fixtures/compiler/arena_shared.pr"
+title = "Arena shared-function exclusion"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
+path = "fixtures/compiler/diff_after_edit.pr"
+title = "Behavior diff edit"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
+path = "fixtures/compiler/diff_after_refactor.pr"
+title = "Behavior diff refactor"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
+path = "fixtures/compiler/diff_before.pr"
+title = "Behavior diff baseline"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
+path = "fixtures/compiler/grade_isolation.pr"
+title = "Effect-grade isolation"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
+path = "fixtures/compiler/semantic_patch.pr"
+title = "Semantic patch target"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
+path = "fixtures/compiler/stream_fold.pr"
+title = "Fold-consumer lowering"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
+path = "fixtures/compiler/stream_fuse.pr"
+title = "Stream-fusion lowering"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
+path = "fixtures/compiler/stream_ufcs.pr"
+title = "Stream UFCS lowering"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
+path = "fixtures/runtime/incr_resident.pr"
+title = "Incremental wasm resident"
+category = "Runtime"
+role = "fixture"
+
+[[example]]
+path = "fixtures/runtime/teleport.pr"
+title = "Continuation teleport resident"
+category = "Runtime"
+role = "fixture"

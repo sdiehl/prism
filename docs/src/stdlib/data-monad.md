@@ -10,7 +10,7 @@ Like `Data.Foldable`, these are constrained free functions written once against 
 
 ### `join`
 
-```prism,sig,h-a210308c7cbcb65bfe1108ef95608e39c4033e7badce9f4375574bbc3152faa7
+```prism,sig,h-86f39eed14e5b8ce7ed4283d5e5adc29a7a93547a426edc93025c64b99c78b4f
 join : forall a b. (a(a(b))) -> a(b)
 ```
 
@@ -26,7 +26,7 @@ join([[1, 2], [3, 4]])
 
 ### `map2`
 
-```prism,sig,h-e5dbe81bf850f5a7060477ed1a6db80101ca5a2d1daed1ac57a682411e40b171
+```prism,sig,h-32b648e6f911067c480f5cd78ac776376792d000c11fa5b2bb7b63b51f0a6175
 map2 : forall a b c d. ((a, b) -> c, d(a), d(b)) -> d(c)
 ```
 
@@ -42,7 +42,7 @@ Some(3)
 
 ### `map3`
 
-```prism,sig,h-d5108ffb55a57a1c25bcc020a4d08dcf36af95504228d5f0dbf66ef9d315dc15
+```prism,sig,h-c899c8c882b3521ec3456257eac60f0672763e2709c1e37a66f2744364160099
 map3 : forall a b c d e. ((a, b, c) -> d, e(a), e(b), e(c)) -> e(d)
 ```
 
@@ -58,7 +58,7 @@ Some(6)
 
 ### `sequence`
 
-```prism,sig,h-9c4d0067ebd9b99d25fd41cc36609444bb7b519759335bd6b0e31491961bbfa9
+```prism,sig,h-591025e11da4139e811e5703e000314025f15bf335729dc36dada87defc7e193
 sequence : forall a b. (List(a(b))) -> a(List(b))
 ```
 
@@ -74,7 +74,7 @@ Some([1, 2, 3])
 
 ### `traverse_list`
 
-```prism,sig,h-b48a784a2c143341151dbc5bdbfcbbc19697f61d18534dbfb2c4aebfb93777b8
+```prism,sig,h-b376920493893ab472ab3645d86af1d74c352e50032446c616e377e0cce5947e
 traverse_list : forall a b c. ((a) -> b(c), List(a)) -> b(List(c))
 ```
 

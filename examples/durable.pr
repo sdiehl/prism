@@ -60,7 +60,7 @@ fn main() =
   write_file(cfg_path(), cfg_text())
   let resuming = prim_file_exists(log) && str_len(prim_read_file(log)) > 0
   if resuming then
-    let total = durable(log, \(u) -> flow(5, 0 - 1, u))
+    let total = durable(log, \(u) -> flow(5, -1, u))
     println("resumed and finished: final sum mod 97 = {mod(total, 97)}")
     cleanup()
   else

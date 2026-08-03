@@ -1,8 +1,8 @@
 use crate::error::Error;
 use crate::lex::lex;
-use crate::parse::parse;
 use crate::resolve::{load, Module, Root};
 use crate::syntax::ast::Program;
+use crate::syntax::reflect::{parse_unit, quotes_source};
 
 use super::scheduler::QueryScheduler;
 
@@ -20,7 +20,7 @@ pub(super) fn load_front_inputs(
     roots: &[Root],
     query_threads: usize,
 ) -> Result<LoadedFrontInputs, Error> {
-    let root = parse(src)?.program;
+    let root = parse_unit(src)?;
     let modules = load(&root, roots)?;
     let mut raw = blake3::Hasher::new();
     field(&mut raw, src.as_bytes());
@@ -97,8 +97,17 @@ pub(super) fn semantic_source_digest(src: &str) -> Result<String, Error> {
     Ok(hasher.finalize().to_hex().to_string())
 }
 
+// A unit's semantic identity is its token stream: trivia is not semantic, so
+// reformatting or recommenting a file must not invalidate anything downstream.
+// The exception is a unit that quotes its own text, whose splice carries the
+// comments written above its target; there the bytes are the identity, because
+// a comment-only edit genuinely changes what the program computes.
 fn hash_tokens(hasher: &mut blake3::Hasher, src: &str) -> Result<(), Error> {
     let (tokens, _) = lex(src)?;
+    if quotes_source(&tokens) {
+        field(hasher, src.as_bytes());
+        return Ok(());
+    }
     for (_, token, _) in tokens {
         field(hasher, format!("{token:?}").as_bytes());
     }
@@ -142,6 +151,17 @@ mod tests {
         assert_ne!(
             semantic_inputs_digest(changed, &roots, SEQUENTIAL_QUERY_THREADS).unwrap(),
             digest
+        );
+    }
+
+    #[test]
+    fn a_quotation_puts_its_own_comments_in_the_identity() {
+        let roots = [Root::Embedded(crate::stdlib::STDLIB)];
+        let base = "-- one\nfn answer() : Int = 42\nfn q() : String = reflect fn answer\n";
+        let recommented = "-- two\nfn answer() : Int = 42\nfn q() : String = reflect fn answer\n";
+        assert_ne!(
+            semantic_inputs_digest(recommented, &roots, SEQUENTIAL_QUERY_THREADS).unwrap(),
+            semantic_inputs_digest(base, &roots, SEQUENTIAL_QUERY_THREADS).unwrap()
         );
     }
 }

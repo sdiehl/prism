@@ -20,7 +20,7 @@ fn play(secret, round) : Int ! {IO, Console} =
   match hint(secret, guess) of
     Exact => round
     TooLow =>
-      println(0 - 1)
+      println(-1)
       play(secret, round + 1)
     TooHigh =>
       println(1)

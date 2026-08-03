@@ -11,9 +11,14 @@
 //! Append and removal writes cannot be rehashed against a file's final state (a
 //! later write may have changed it), so they are recorded but skipped, counted in a
 //! distinct `skipped` category rather than silently passed.
+//!
+//! Every path a graph names is untrusted input here. A recorded path that claims to
+//! be relative to the directory being verified must stay inside it, and the replay
+//! trace, the one recorded path whose bytes are fed back into an evaluator, must be
+//! relative and contained (the recorder refuses to mint any other kind).
 
 use std::fs;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use crate::provenance::TraceDigest;
 use prism_syntax::error::Error;
@@ -53,8 +58,8 @@ pub fn verify(graph: &LineageGraph, base_dir: &Path) -> Result<VerifyReport, Err
             NodeKind::Artifact(artifact) => {
                 verify_content(
                     "artifact",
+                    base_dir,
                     &artifact.path,
-                    &base_dir.join(&artifact.path),
                     &artifact.digest_scheme,
                     &artifact.digest,
                 )?;
@@ -63,8 +68,8 @@ pub fn verify(graph: &LineageGraph, base_dir: &Path) -> Result<VerifyReport, Err
             NodeKind::InputFile(file) => {
                 verify_content(
                     "input file",
+                    base_dir,
                     &file.path,
-                    &base_dir.join(&file.path),
                     &file.digest_scheme,
                     &file.digest,
                 )?;
@@ -77,8 +82,8 @@ pub fn verify(graph: &LineageGraph, base_dir: &Path) -> Result<VerifyReport, Err
                 WriteMode::Write => {
                     verify_content(
                         "written file",
+                        base_dir,
                         &write.path,
-                        &base_dir.join(&write.path),
                         &write.digest_scheme,
                         &write.digest,
                     )?;
@@ -223,16 +228,77 @@ fn fork_endpoint(
     Ok(target.clone())
 }
 
-// Read `resolved`, rehash under `scheme`, and reject on a missing file or a
-// digest mismatch. `kind`/`label` name the node in both error styles.
+/// True when `path` is a non-empty relative path built only of plain (or `.`)
+/// components, so joining it under a directory can never name a location outside
+/// that directory.
+///
+/// The one containment rule, shared by the verifier and the recorder so that the
+/// recorder refuses to mint a replay path no verifier would accept, rather than
+/// writing a sidecar that fails only later.
+#[must_use]
+pub fn stays_inside(path: &Path) -> bool {
+    !path.as_os_str().is_empty()
+        && path
+            .components()
+            .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
+}
+
+// Resolve the recorded replay path against the directory it is verified under,
+// failing if it is empty, absolute, or climbs out of `base_dir`.
+//
+// The graph is untrusted input to a verifier, and this is the path whose bytes are
+// replayed rather than merely rehashed, so it may only name a
+// location INSIDE `base_dir`: an absolute path (which `Path::join` would let replace
+// `base_dir` outright) and any `..` component are rejected rather than normalized
+// away, so what gets read and rehashed is always the file the graph literally names
+// under the directory the caller chose. Containment is checked on components alone;
+// a symlink inside `base_dir` is followed like any other path, exactly as the
+// recording run would have.
+fn resolve_under(base_dir: &Path, kind: &str, recorded: &str) -> Result<PathBuf, Error> {
+    let relative = Path::new(recorded);
+    if !stays_inside(relative) {
+        return Err(Error::ResolveLineage(format!(
+            "lineage verify: {kind} path `{recorded}` escapes the directory being verified \
+             (an absolute path or a `..` component is refused, never followed)"
+        )));
+    }
+    Ok(base_dir.join(relative))
+}
+
+// Resolve a graph-recorded content path, which the recorder writes as the location
+// the recording run itself saw.
+//
+// A relative path is joined under `base_dir` and must stay inside it: `..` would
+// name a file the caller never pointed the verifier at, and an empty path names
+// nothing. An absolute path is read where it says, because that is what a build
+// records for its artifacts and what a run records for the files it touched; there
+// is no relative spelling of a file that lives outside the sidecar's directory.
+// Rehashing is a read: what containment buys here is that the *caller's* directory
+// choice is honored for every path that claims to be inside it.
+fn resolve_recorded(base_dir: &Path, kind: &str, recorded: &str) -> Result<PathBuf, Error> {
+    let path = Path::new(recorded);
+    let contained = path.is_absolute() || stays_inside(path);
+    if !contained {
+        return Err(Error::ResolveLineage(format!(
+            "lineage verify: {kind} path `{recorded}` escapes the directory being verified \
+             (an empty path, or a relative one with a `..` component, is refused, \
+             never followed)"
+        )));
+    }
+    Ok(base_dir.join(path))
+}
+
+// Resolve `path` under `base_dir`, read it, rehash under `scheme`, and reject on an
+// escaping path, a missing file, or a digest mismatch. `kind` names the node.
 fn verify_content(
     kind: &str,
-    label: &str,
-    resolved: &Path,
+    base_dir: &Path,
+    path: &str,
     scheme: &str,
     digest: &str,
 ) -> Result<(), Error> {
-    let bytes = fs::read(resolved).map_err(|e| {
+    let resolved = resolve_recorded(base_dir, kind, path)?;
+    let bytes = fs::read(&resolved).map_err(|e| {
         Error::ResolveLineage(format!(
             "lineage verify: missing {kind} `{}`: {e}",
             resolved.display()
@@ -241,7 +307,7 @@ fn verify_content(
     let actual = graph::recompute_digest(scheme, &bytes)?;
     if actual != digest {
         return Err(Error::ResolveLineage(format!(
-            "lineage verify: {kind} `{label}` changed: recorded {scheme}:{digest}, \
+            "lineage verify: {kind} `{path}` changed: recorded {scheme}:{digest}, \
              bytes hash to {scheme}:{actual}"
         )));
     }
@@ -313,8 +379,8 @@ pub fn verify_run_replay(
             NodeKind::InputFile(file) => {
                 verify_content(
                     "input file",
+                    base_dir,
                     &file.path,
-                    &base_dir.join(&file.path),
                     &file.digest_scheme,
                     &file.digest,
                 )?;
@@ -324,8 +390,8 @@ pub fn verify_run_replay(
                 WriteMode::Write => {
                     verify_content(
                         "written file",
+                        base_dir,
                         &write.path,
-                        &base_dir.join(&write.path),
                         &write.digest_scheme,
                         &write.digest,
                     )?;
@@ -347,25 +413,33 @@ pub fn verify_run_replay(
 
 /// Resolve the durable `.replay` trace for a run sidecar and confirm it is intact.
 ///
-/// A current sidecar's trace node records the replay file's relation (its path
-/// relative to `sidecar_dir` and a digest of its bytes); this reads and verifies
-/// that file, returning its path. A pre-relation sidecar has no such field, so this
-/// falls back to the sibling `.replay` beside `sidecar` without a digest check.
+/// A sidecar's trace node records the replay file's relation (its path relative to
+/// `sidecar_dir` and a digest of its bytes); this reads and verifies that file,
+/// returning its path.
+///
+/// A sidecar that does not record the relation is rejected rather than guessed at.
+/// Falling back to the sibling `.replay` beside `sidecar` would verify a file the
+/// graph never committed to, and would do so without a digest check: a pass that
+/// checked nothing, indistinguishable from one that checked everything.
 ///
 /// # Errors
-/// Fails with distinct messages when the recorded replay file is missing versus when
-/// its bytes no longer match the recorded digest.
+/// Fails with distinct messages when the trace records no replay relation, when the
+/// recorded path escapes `sidecar_dir`, when the file is missing, and when its bytes
+/// no longer match the recorded digest.
 pub fn resolve_replay_file(
     graph: &LineageGraph,
     sidecar: &Path,
     sidecar_dir: &Path,
-) -> Result<std::path::PathBuf, Error> {
+) -> Result<PathBuf, Error> {
     let Some(relation) = graph.trace().and_then(|trace| trace.replay.as_ref()) else {
-        // Older sidecars, written before the trace recorded its replay relation,
-        // lack the field; fall back to the sibling `.replay` beside the sidecar.
-        return Ok(sidecar.with_extension(REPLAY_EXTENSION));
+        return Err(Error::ResolveLineage(format!(
+            "verify-lineage: sidecar `{}` records no replay-file relation, so its `.{}` trace \
+             cannot be verified; re-record the run to produce a checkable sidecar",
+            sidecar.display(),
+            REPLAY_EXTENSION
+        )));
     };
-    let path = sidecar_dir.join(&relation.path);
+    let path = resolve_under(sidecar_dir, "replay file", &relation.path)?;
     let bytes = fs::read(&path).map_err(|e| {
         Error::ResolveLineage(format!(
             "verify-lineage: replay file `{}` is missing: {e}",
@@ -384,4 +458,91 @@ pub fn resolve_replay_file(
         )));
     }
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::{resolve_recorded, resolve_replay_file, resolve_under, stays_inside};
+    use crate::graph::{self, Node, NodeId, NodeKind, TracePayload, Variant};
+    use crate::provenance::EVENT_HASH_SCHEME;
+
+    // Every escape shape a hostile graph can record: absolute, parent-climbing
+    // (bare and buried), and empty. Each must be refused, never joined.
+    #[test]
+    fn resolve_under_refuses_a_path_that_escapes_the_verified_directory() {
+        let base = Path::new("out");
+        for hostile in [
+            "/etc/passwd",
+            "../trace.replay",
+            "sub/../../trace.replay",
+            "",
+        ] {
+            assert!(
+                !stays_inside(Path::new(hostile)),
+                "`{hostile}` must not count as contained"
+            );
+            let err = resolve_under(base, "replay file", hostile)
+                .expect_err("an escaping path must be refused");
+            assert!(
+                err.to_string().contains("escapes"),
+                "`{hostile}` must be named an escape, got: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_under_joins_a_contained_path() {
+        let resolved = resolve_under(Path::new("out"), "replay file", "sub/trace.replay")
+            .expect("a plain relative path resolves");
+        assert_eq!(resolved, Path::new("out").join("sub/trace.replay"));
+    }
+
+    // A content path is read where it was recorded: a build names its artifacts by
+    // the absolute path it wrote them to, and no relative spelling exists for a file
+    // outside the sidecar's directory. A path claiming to be relative still may not
+    // climb out of the directory the caller chose.
+    #[test]
+    fn resolve_recorded_reads_an_absolute_path_where_it_says_and_contains_relative_ones() {
+        let base = Path::new("out");
+        assert_eq!(
+            resolve_recorded(base, "artifact", "/tmp/build/app").expect("absolute resolves"),
+            Path::new("/tmp/build/app"),
+        );
+        assert_eq!(
+            resolve_recorded(base, "artifact", "sub/app").expect("relative resolves"),
+            base.join("sub/app"),
+        );
+        for hostile in ["../app", "sub/../../app", ""] {
+            let err = resolve_recorded(base, "artifact", hostile)
+                .expect_err("a climbing or empty path must be refused");
+            assert!(
+                err.to_string().contains("escapes"),
+                "`{hostile}` must be named an escape, got: {err}"
+            );
+        }
+    }
+
+    // A trace node with no replay relation must be refused outright: falling back to
+    // a sibling file would verify bytes the graph never committed to.
+    #[test]
+    fn a_sidecar_without_a_replay_relation_is_refused() {
+        let trace = Node {
+            id: NodeId("ab".repeat(32)),
+            kind: NodeKind::Trace(TracePayload {
+                scheme: EVENT_HASH_SCHEME.to_string(),
+                hash: "cd".repeat(32),
+                events: 1,
+                replay: None,
+            }),
+        };
+        let graph = graph::finalize(Variant::Run, vec![trace], vec![]);
+        let err = resolve_replay_file(&graph, Path::new("out/run.plineage"), Path::new("out"))
+            .expect_err("a relation-free sidecar must not be guessed at");
+        assert!(
+            err.to_string().contains("records no replay-file relation"),
+            "the refusal must name the missing relation, got: {err}"
+        );
+    }
 }

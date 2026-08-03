@@ -26,7 +26,7 @@ use super::{
 /// passes. Implementors override only the nodes or witness leaves they change.
 /// Binder-sensitive rewrites override the corresponding computation forms so
 /// their context extension stays explicit.
-pub trait Rewrite {
+pub(crate) trait Rewrite {
     type Ctx;
 
     fn core_type(&mut self, ty: &CoreType, _cx: &Self::Ctx) -> CoreType {
@@ -326,7 +326,7 @@ pub trait Rewrite {
 /// Substitute any supplied prefix of a quantifier list through every typed-Core
 /// witness. Unmatched quantifiers remain rigid, which lets specialization apply
 /// only the concrete instance arguments it knows.
-pub fn substitute_witnesses(
+pub(crate) fn substitute_witnesses(
     comp: &TypedComp,
     quantifiers: &[CoreQuantifier],
     arguments: &[CoreInstantiation],
@@ -341,7 +341,10 @@ pub fn substitute_witnesses(
 /// Instantiate a known prefix of a function's own quantifiers, retaining and
 /// capture-avoiding any unsupplied suffix.
 #[cfg(test)]
-pub fn instantiate_fn_prefix(signature: &CoreFnSig, arguments: &[CoreInstantiation]) -> CoreFnSig {
+pub(crate) fn instantiate_fn_prefix(
+    signature: &CoreFnSig,
+    arguments: &[CoreInstantiation],
+) -> CoreFnSig {
     let supplied = arguments.len();
     debug_assert!(
         supplied <= signature.quantifiers.len(),
@@ -403,7 +406,7 @@ impl Rewrite for TypeSubstitution<'_> {
 }
 
 /// Capture-avoiding substitution of typed local variables by typed values.
-pub fn substitute_terms(
+pub(crate) fn substitute_terms(
     comp: &TypedComp,
     substitution: &BTreeMap<Sym, TypedValue>,
     counter: &mut u32,
@@ -657,14 +660,14 @@ impl Rewrite for TermSubstitution<'_> {
 }
 
 /// Free local/global term references in a typed computation.
-pub fn free_comp_vars(comp: &TypedComp) -> BTreeSet<Sym> {
+pub(crate) fn free_comp_vars(comp: &TypedComp) -> BTreeSet<Sym> {
     let mut free = BTreeSet::new();
     collect_comp_vars(comp, &mut Vec::new(), &mut free);
     free
 }
 
 /// Free local/global term references in a typed value, including thunk bodies.
-pub fn free_value_vars(value: &TypedValue) -> BTreeSet<Sym> {
+pub(crate) fn free_value_vars(value: &TypedValue) -> BTreeSet<Sym> {
     let mut free = BTreeSet::new();
     collect_value_vars(value, &mut Vec::new(), &mut free);
     free
@@ -832,12 +835,12 @@ fn pattern_typed_binders(pattern: &TypedPattern) -> Vec<(Sym, CoreType)> {
 }
 
 /// Freshen every typed binder in legacy traversal order.
-pub fn freshen(comp: &TypedComp, counter: &mut u32, prefix: &'static str) -> TypedComp {
+pub(crate) fn freshen(comp: &TypedComp, counter: &mut u32, prefix: &'static str) -> TypedComp {
     freshen_with(comp, &BTreeMap::new(), counter, prefix)
 }
 
 /// Freshen every binder, seeded with renames supplied by the caller.
-pub fn freshen_with(
+pub(crate) fn freshen_with(
     comp: &TypedComp,
     renames: &BTreeMap<Sym, Sym>,
     counter: &mut u32,
@@ -846,7 +849,7 @@ pub fn freshen_with(
     Freshen { counter, prefix }.comp(comp, renames)
 }
 
-pub fn next_fresh(counter: &mut u32, prefix: &'static str) -> Sym {
+pub(crate) fn next_fresh(counter: &mut u32, prefix: &'static str) -> Sym {
     let name = Sym::from(&names::fresh_binder(prefix, *counter));
     *counter += 1;
     name

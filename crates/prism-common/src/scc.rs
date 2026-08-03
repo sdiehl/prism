@@ -11,6 +11,9 @@
 /// (each component after the ones it depends on), each component's members in
 /// increasing index order. The explicit work stack avoids overflowing the native
 /// stack on a deep call chain (a deep prelude dependency, say).
+///
+/// # Panics
+/// When a successor in `adj` is not a valid vertex index (`>= adj.len()`).
 #[must_use]
 pub fn tarjan_scc(adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
     const UNVISITED: u32 = u32::MAX;

@@ -1,0 +1,4 @@
+fn f() =
+  if 0 then
+    0 elif 0 then
+      0

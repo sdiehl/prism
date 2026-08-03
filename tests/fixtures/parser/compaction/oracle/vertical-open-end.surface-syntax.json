@@ -1,0 +1,53 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "3bfa4aabc5be447b6ca15f1c404ae314947c34c75c746c88a36415b792d7c922",
+    "text": "fn corpus(x) =\n  if x then\n    x\n"
+  },
+  "items": [
+    {
+      "body": {
+        "cond": {
+          "kind": "var",
+          "name": "x",
+          "span": [
+            20,
+            21
+          ]
+        },
+        "else": {
+          "kind": "unit",
+          "span": [
+            32,
+            32
+          ]
+        },
+        "kind": "if",
+        "span": [
+          17,
+          32
+        ],
+        "then": {
+          "kind": "var",
+          "name": "x",
+          "span": [
+            31,
+            32
+          ]
+        }
+      },
+      "kind": "fn",
+      "name": "corpus",
+      "params": [
+        {
+          "name": "x"
+        }
+      ],
+      "span": [
+        0,
+        32
+      ]
+    }
+  ]
+}

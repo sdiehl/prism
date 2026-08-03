@@ -85,7 +85,11 @@ pub(super) const fn needs_left_paren(child: &Expr, parent_op: BinOp, parent_prec
             let cp = binop_prec(*op);
             // `^` is right-associative, so a same-precedence left operand (another
             // `^`) must be parenthesized to keep `(a ^ b) ^ c` from reparsing as
-            // `a ^ (b ^ c)`.
+            // `a ^ (b ^ c)`. Every other level is left-associative, where a
+            // same-precedence left operand is exactly the tree the unparenthesized
+            // print reparses to, so the parens are redundant and go. The mirror
+            // case is not symmetric: an equal-precedence *right* operand is not the
+            // tree the print reparses to, which is why `needs_right_paren` keeps it.
             cp < parent_prec || (cp == parent_prec && matches!(parent_op, BinOp::Pow))
         }
         // Unary minus binds looser than `^`, so a negated base keeps its parens
@@ -104,18 +108,18 @@ pub(super) const fn needs_right_paren(child: &Expr, parent_op: BinOp, parent_pre
             if cp != parent_prec {
                 return cp < parent_prec;
             }
-            // Equal precedence, left-associative: `parent(a, child(b, c))` reprints as
-            // `a P b C c` and reparses as `child(parent(a, b), c)`. That regrouping is
-            // meaning-preserving only when the ops reassociate. An additive parent does
-            // (`a + (b - c) == (a + b) - c`); a subtractive parent does not. A
-            // multiplicative parent only does over a pure `*` child.
-            match parent_op {
-                // Subtractive/divisive parents keep parens because the regrouping
-                // changes meaning.
-                BinOp::Sub | BinOp::Div | BinOp::Rem => true,
-                BinOp::Mul => matches!(*op, BinOp::Div | BinOp::Rem),
-                _ => false,
-            }
+            // Equal precedence. Under a left-associative parent, dropping the parens
+            // reprints `parent(a, child(b, c))` as `a P b C c`, which reparses as
+            // `child(parent(a, b), c)`: a different tree. The formatter has no types,
+            // so it cannot know the two trees agree on the values at hand, and over
+            // Float they do not, since neither addition nor multiplication
+            // reassociates. So the parens stay, whatever the operator pair. The cost
+            // is nil for unparenthesized source, which parses left-nested and so
+            // presents no `Bin` right child at all.
+            //
+            // `^` is the one right-associative level: `a ^ b ^ c` already reparses to
+            // the right-nested tree, so those parens are redundant and go.
+            !matches!(parent_op, BinOp::Pow)
         }
         _ => low_prec_operand(child),
     }

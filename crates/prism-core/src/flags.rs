@@ -25,7 +25,7 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use crate::core::OptLevel;
+use crate::core::{EffectStrategy, OptLevel};
 
 const DEFAULT_QUERY_THREADS: usize = 1;
 
@@ -38,38 +38,80 @@ const DEFAULT_QUERY_THREADS: usize = 1;
 /// that, by letting a differential oracle (`tests/tier_parity.rs`) run one
 /// program on two tiers and diff the results. It is a test/debug instrument, not
 /// a user-facing performance switch.
+///
+/// One position per rung, so a forced run isolates exactly one lowering. Each
+/// position but `auto` names the cheapest rung the cascade may take, and takes
+/// its spelling and its order from [`EffectStrategy`] itself, so the ladder is
+/// described in one place. There is no position for the pure or evidence rungs:
+/// a program with no effects has no rung to force, and flooring at evidence is
+/// what `auto` already does. Erasure is a separate axis
+/// ([`DynFlags::erasures`]), because a cap that turned off the erasures *and*
+/// every fusion rung at once could not say which of the two a divergence came
+/// from.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum EffectTier {
     /// The full cascade: every rung tried in cost order (the shipping default).
     #[default]
     Auto,
     /// Skip evidence fusion: state fusion is the first rung tried.
-    State,
-    /// Skip var/loop-control erasure and every fusion rung: all effects reify
-    /// into the free monad (the slowest, most general lowering).
+    StateFusion,
+    /// Skip evidence and state fusion: local confinement is the first rung tried.
+    LocalPartial,
+    /// Skip every fusion rung: effects reify into the free monad, confined to
+    /// handler regions where the plan finds them closed.
     FreeMonad,
+    /// Skip the confinement too: the whole program runs in the monad. The
+    /// costliest rung, and the only one legal for every program, which is why
+    /// it is forceable while its selective sibling is not.
+    WholeProgramFreeMonad,
 }
 
 impl EffectTier {
-    /// Parse a `PRISM_EFFECT_TIER` spelling (`auto`, `state`, `free-monad`).
+    /// Every position, for the tier-parity sweep and for diagnostics that list
+    /// the accepted spellings.
+    pub const ALL: [Self; 5] = [
+        Self::Auto,
+        Self::StateFusion,
+        Self::LocalPartial,
+        Self::FreeMonad,
+        Self::WholeProgramFreeMonad,
+    ];
+
+    /// Parse a `PRISM_EFFECT_TIER` spelling.
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "auto" => Some(Self::Auto),
-            "state" => Some(Self::State),
-            "free-monad" => Some(Self::FreeMonad),
-            _ => None,
+        let s = s.trim().to_ascii_lowercase();
+        Self::ALL.into_iter().find(|tier| tier.label() == s)
+    }
+
+    /// Stable spelling used in artifact identity rows. Every position but
+    /// `auto` is named by the rung it floors at, so the knob cannot drift from
+    /// the ladder's own vocabulary.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self.floor() {
+            None => "auto",
+            Some(rung) => rung.label(),
         }
     }
 
-    /// Stable spelling used in artifact identity rows.
-    #[must_use]
-    pub const fn label(self) -> &'static str {
+    /// The cheapest rung this tier admits, or `None` for the full cascade.
+    const fn floor(self) -> Option<EffectStrategy> {
         match self {
-            Self::Auto => "auto",
-            Self::State => "state",
-            Self::FreeMonad => "free-monad",
+            Self::Auto => None,
+            Self::StateFusion => Some(EffectStrategy::StateFusion),
+            Self::LocalPartial => Some(EffectStrategy::LocalPartial),
+            Self::FreeMonad => Some(EffectStrategy::SelectiveFreeMonad),
+            Self::WholeProgramFreeMonad => Some(EffectStrategy::WholeProgramFreeMonad),
         }
+    }
+
+    /// Whether the cascade may take `rung`. Rungs cheaper than the floor are
+    /// skipped; cost comes from the ladder's own `Ord`, which is total, so a
+    /// rung can never be denied because a lookup failed to place it.
+    #[must_use]
+    pub fn admits(self, rung: EffectStrategy) -> bool {
+        self.floor().is_none_or(|floor| rung >= floor)
     }
 }
 
@@ -192,6 +234,13 @@ pub struct DynFlags {
     pub trampoline: bool,
     /// `PRISM_CORE_LINT` (default off): run Core Lint between optimization passes,
     /// panicking (naming the pass) if one produces ill-formed Core.
+    ///
+    /// Mutually exclusive with the typed-SCC query cache: a cache hit returns an
+    /// already-optimized SCC without replaying the passes, so there is nothing to
+    /// lint between. Setting this therefore forces the uncached route, which is
+    /// why it belongs on runs that already disable the cache (the whole-corpus
+    /// optimizer-equivalence sweep, the example compile) and not on a whole test
+    /// suite, where it would quietly stand down the cache under test.
     pub core_lint: bool,
     /// `PRISM_RT_CHECKS` (default off): compile the native C runtime with
     /// `-DPRISM_RT_DEBUG`, inserting a cheap validity check at every cell
@@ -207,7 +256,8 @@ pub struct DynFlags {
     /// platform optimizer's defaults.
     pub native_kont_frames: bool,
     /// `PRISM_DUMP_CORE` (default none): sink for the per-pass Core dump.
-    /// `stdout`/`stderr` stream a banner plus the block; any other value is a base
+    /// `stdout`/`stderr` stream a banner plus the block; an off spelling (`0`,
+    /// `false`, `off`, `no`, empty) disables the dump; any other value is a base
     /// directory of one file per pass.
     pub dump_core: Option<OsString>,
     /// `PRISM_OPT_STATS` (default off): dump per-pass rewrite tick counts to
@@ -259,23 +309,34 @@ pub struct DynFlags {
     /// `PRISM_NO_SPECIALIZE` (default off): turn off the `Specialize` Core pass.
     /// Presence-flagged, resolved into `Config::disabled`.
     pub no_specialize: bool,
-    /// `PRISM_FUSE` (default off): run the whole-program stream-fusion pass
-    /// (`core/opt/fuse`) first in the pre-lowering stage, collapsing recognized
-    /// pull-`Sequence` pipelines into allocation-free loops. Off until the ON/OFF
-    /// differential oracle and the full gate battery are green; a fused loop is a
-    /// lowering tier, so it must produce byte-identical output either way.
+    /// `PRISM_FUSE` (default off): force the whole-program stream-fusion pass
+    /// (`core/opt/fuse`) to run first in the pre-lowering stage, collapsing
+    /// recognized pull-`Sequence` pipelines into allocation-free loops. Off by
+    /// default because `-O2` already runs the pass; the knob only adds it at the
+    /// lower levels, and `--no-fuse` removes it either way. A fused loop is a
+    /// lowering tier, so the output is byte-identical with fusion on or off:
+    /// `tests/native/fuse_parity.rs` diffs a fuse-on native build against the
+    /// interpreter, and the optimizer-equivalence sweep runs `-O2` against
+    /// `--no-fuse` over the whole corpus.
     pub fuse: bool,
     /// `PRISM_SCHEDULER` (default cooperative/FIFO): which shipped cooperative
     /// scheduler `run_cooperative` binds to when the CLI does not pass
     /// `--scheduler`.
     pub scheduler: Scheduler,
     /// `PRISM_EFFECT_TIER` (default `auto`): the lowest effect-lowering rung the
-    /// cascade may take (`auto`, `state`, `free-monad`). Capping the cascade is
-    /// contractually unobservable; the tier-parity oracle forces the slow rungs
-    /// and diffs them against the interpreter. An invalid spelling is reported
-    /// once and falls back to `auto` (the tier-parity test independently asserts
-    /// the forcing engaged, so a typo cannot make the oracle silently vacuous).
+    /// cascade may take, one position per rung (see [`EffectTier`]). Capping the
+    /// cascade is contractually unobservable; the tier-parity oracle forces
+    /// every rung and diffs them against the interpreter. An invalid spelling is
+    /// reported once and falls back to `auto` (the tier-parity test
+    /// independently asserts the forcing engaged, so a typo cannot make the
+    /// oracle silently vacuous).
     pub effect_tier: EffectTier,
+    /// `PRISM_ERASURES` (default on): run the var and loop-control erasures that
+    /// precede the cascade. Off leaves those constructs for the cascade to lower
+    /// as ordinary effects. Orthogonal to [`DynFlags::effect_tier`], so a forced
+    /// run can move the erasures and the floor one at a time; like the floor,
+    /// turning it off is a cost decision the output must not reveal.
+    pub erasures: bool,
     /// `PRISM_COMPILER_CACHE` (default on): reuse byte-identical compiler
     /// artifacts from the content-addressed query store. Set to `0` for the
     /// from-scratch oracle or when investigating invalidation.
@@ -348,6 +409,7 @@ impl Default for DynFlags {
             fuse: false,
             scheduler: Scheduler::default(),
             effect_tier: EffectTier::default(),
+            erasures: true,
             compiler_cache: true,
             store: false,
             store_path: None,
@@ -386,7 +448,8 @@ impl DynFlags {
             core_lint: base.core_lint || env_present("PRISM_CORE_LINT"),
             rt_checks: base.rt_checks || env_present("PRISM_RT_CHECKS"),
             native_kont_frames: base.native_kont_frames || env_present("PRISM_NATIVE_KONT_FRAMES"),
-            dump_core: std::env::var_os("PRISM_DUMP_CORE").or_else(|| base.dump_core.clone()),
+            dump_core: std::env::var_os("PRISM_DUMP_CORE")
+                .map_or_else(|| base.dump_core.clone(), dump_sink),
             opt_stats: base.opt_stats || env_present("PRISM_OPT_STATS"),
             compiler_stats: base.compiler_stats || env_present("PRISM_COMPILER_STATS"),
             explain_cache: base.explain_cache || env_present("PRISM_EXPLAIN_CACHE"),
@@ -408,6 +471,7 @@ impl DynFlags {
                 .and_then(|s| Scheduler::parse(&s))
                 .unwrap_or(base.scheduler),
             effect_tier: effect_tier_from_env(base.effect_tier),
+            erasures: env_bool("PRISM_ERASURES", base.erasures),
             compiler_cache: env_bool("PRISM_COMPILER_CACHE", base.compiler_cache),
             store: base.store || env_present("PRISM_STORE"),
             store_path: std::env::var_os("PRISM_STORE_PATH")
@@ -476,12 +540,13 @@ impl DynFlags {
             "backend-opt" => self.backend_opt = toml_parsed(key, val, BackendOpt::parse)?,
             "scheduler" => self.scheduler = toml_parsed(key, val, Scheduler::parse)?,
             "effect-tier" => self.effect_tier = toml_parsed(key, val, EffectTier::parse)?,
+            "erasures" => self.erasures = toml_bool(key, val)?,
             "sign-mode" => self.sign_mode = toml_parsed(key, val, SignMode::parse)?,
             "warn-dupes" => self.warn_dupes = toml_parsed(key, val, WarnDupes::parse)?,
             "warn-stdlib-dupes" => {
                 self.warn_stdlib_dupes = toml_parsed(key, val, WarnDupes::parse)?;
             }
-            "dump-core" => self.dump_core = Some(toml_string(key, val)?.into()),
+            "dump-core" => self.dump_core = dump_sink(toml_string(key, val)?.into()),
             "store-path" => self.store_path = Some(PathBuf::from(toml_string(key, val)?)),
             "solver-timeout-ms" => self.solver_timeout_ms = Some(toml_pos_int(key, val)? as u64),
             "sign-key" => self.sign_key = Some(PathBuf::from(toml_string(key, val)?)),
@@ -551,6 +616,11 @@ fn sign_mode_from_env(base: SignMode) -> SignMode {
     })
 }
 
+// The accepted spellings of a knob, for the diagnostic an invalid value prints.
+fn spellings(labels: impl IntoIterator<Item = &'static str>) -> String {
+    labels.into_iter().collect::<Vec<_>>().join(", ")
+}
+
 // The effect-tier cap from `PRISM_EFFECT_TIER`. An unrecognized value is
 // reported once and falls back to `base` rather than silently forcing (or
 // silently not forcing) a tier.
@@ -558,7 +628,8 @@ fn effect_tier_from_env(base: EffectTier) -> EffectTier {
     std::env::var("PRISM_EFFECT_TIER").map_or(base, |s| {
         EffectTier::parse(&s).unwrap_or_else(|| {
             eprintln!(
-                "ignoring invalid PRISM_EFFECT_TIER={s:?} (expected auto, state, free-monad); using {}",
+                "ignoring invalid PRISM_EFFECT_TIER={s:?} (expected {}); using {}",
+                spellings(EffectTier::ALL.map(EffectTier::label)),
                 base.label()
             );
             base
@@ -598,17 +669,31 @@ fn warn_dupes_from_env(var: &str, base: WarnDupes) -> WarnDupes {
     })
 }
 
-// An opt-out boolean flag: absent takes `default`; a falsey spelling (`0`,
-// `false`, `off`, `no`, empty, case-insensitive) is false, anything else true.
-// Accepting the word spellings avoids the footgun where `NAME=false` reads as
-// enabled on a soundness-relevant toggle.
+// The spellings that switch a knob off, in one place so `NAME=0` means the same
+// thing at every knob that can be switched off. Accepting the word spellings
+// avoids the footgun where `NAME=false` reads as enabled on a soundness-relevant
+// toggle, and accepting the empty string avoids `NAME=` reading as enabled.
+const ENV_OFF: [&str; 5] = ["0", "false", "off", "no", ""];
+
+// Whether a raw knob value is one of the off spellings (trimmed, case-insensitive).
+fn env_off(value: &str) -> bool {
+    ENV_OFF.contains(&value.trim().to_ascii_lowercase().as_str())
+}
+
+// An opt-out boolean flag: absent takes `default`; an off spelling is false,
+// anything else true.
 fn env_bool(name: &str, default: bool) -> bool {
-    std::env::var(name).map_or(default, |v| {
-        !matches!(
-            v.trim().to_ascii_lowercase().as_str(),
-            "0" | "false" | "off" | "no" | ""
-        )
-    })
+    std::env::var(name).map_or(default, |v| !env_off(&v))
+}
+
+// The Core-dump sink from a raw knob value. An off spelling disables the dump
+// instead of naming a base directory called `0`; a value that is not valid UTF-8
+// cannot be an off spelling and is kept as a path.
+fn dump_sink(value: OsString) -> Option<OsString> {
+    match value.to_str() {
+        Some(text) if env_off(text) => None,
+        _ => Some(value),
+    }
 }
 
 // A presence flag: any value (even empty) is true, absent is false.
@@ -618,7 +703,9 @@ fn env_present(name: &str) -> bool {
 
 #[cfg(all(test, feature = "native"))]
 mod tests {
-    use super::{DynFlags, WarnDupes};
+    use std::ffi::OsString;
+
+    use super::{dump_sink, DynFlags, WarnDupes};
     use crate::core::OptLevel;
 
     fn table(text: &str) -> toml::Table {
@@ -637,6 +724,19 @@ mod tests {
         assert_eq!(flags.query_threads, 4);
         assert_eq!(flags.opt_level, OptLevel::O0);
         assert!(flags.fuse);
+    }
+
+    #[test]
+    fn an_off_spelling_disables_the_core_dump_instead_of_naming_a_directory() {
+        // The natural way to switch the knob off must not dump Core into `./0/`.
+        for off in ["0", "false", "OFF", " no ", ""] {
+            assert_eq!(dump_sink(off.into()), None, "{off:?} should disable");
+        }
+        assert_eq!(
+            dump_sink("stdout".into()),
+            Some(OsString::from("stdout")),
+            "a real sink survives"
+        );
     }
 
     #[test]

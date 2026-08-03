@@ -9,7 +9,12 @@ default-theme = "ayu"
 preferred-dark-theme = "ayu"
 no-section-label = true
 smart-punctuation = true
-additional-css = ["theme/tabs.css", "theme/run.css", "theme/prism-tooltips.css"]
+additional-css = [
+  "theme/tabs.css",
+  "theme/run.css",
+  "theme/prism-tooltips.css",
+  "theme/prism-highlight.css",
+]
 additional-js = [
   "theme/tabs.js",
   "theme/prism-highlight.js",

@@ -95,7 +95,7 @@ struct Cli {
     /// Emit one timing row per compiler phase to stderr
     #[arg(long, global = true)]
     time_compile: bool,
-    /// Print effect-lowering fusion-fallback warnings to stderr (off by default)
+    /// Print detailed diagnostics; watch builds include impact and timing
     #[arg(long, global = true)]
     verbose: bool,
     /// Disable the persistent compiler artifact cache
@@ -167,6 +167,9 @@ enum Cmd {
         /// Use the MLIR backend instead of LLVM
         #[arg(long)]
         mlir: bool,
+        /// Keep the compiler session alive and rebuild when project sources change
+        #[arg(long)]
+        watch: bool,
     },
     /// Remove the build-artifact directory (`target/`)
     Clean {
@@ -199,7 +202,7 @@ enum Cmd {
     /// PHASE is one of: tokens, syntax-tokens, surface-syntax, ast, types, typespans, hir,
     /// interface, module-graph, core, core-json, core-identity, core-hash, tc-input, tc-facts,
     /// elab-input, native-kont-table, native-kont-state-map, shape, dupes,
-    /// namespace, stdlib-hash, fbip, lowered, tier, captures, usage-summary,
+    /// namespace, stdlib-hash, fbip, lowered, tier, effect-plan, captures, usage-summary,
     /// usage-summary-md, usage-summary-json, llvm, mlir, verify, smt, totality.
     Dump { phase: String, file: PathBuf },
     /// Behavior or lineage diff by content hash
@@ -739,22 +742,19 @@ fn main() -> ExitCode {
     }
     match result {
         Ok(()) => ExitCode::SUCCESS,
-        // A runtime fault prints exactly what the native trap prints (the C
-        // runtime's `fatal: <msg>` on stderr, exit 1), so a faulting program is
-        // byte-identical across backends; compile-time errors keep the
-        // span-annotated diagnostic report.
-        Err((Error::RuntimeEvaluation(msg), _, _)) => {
-            eprintln!("fatal: {msg}");
-            ExitCode::FAILURE
-        }
         // Semantic-patch refusals are already canonical JSON. Keep stdout
         // machine-readable and do not wrap them in a human diagnostic.
         Err((Error::SemanticPatch(json), _, _)) => {
             println!("{json}");
             ExitCode::FAILURE
         }
+        // Every other failure goes through the one CLI rendering, so the binary
+        // and the in-process command paths cannot drift: a runtime fault prints
+        // exactly what the native trap prints (the C runtime's `fatal: <msg>` on
+        // stderr, exit 1) and a compile-time error keeps the span-annotated
+        // diagnostic report.
         Err((e, src, name)) => {
-            eprint!("{}", e.render(&src, &name));
+            eprint!("{}", cli::render_cli_error(&e, &src, &name));
             ExitCode::FAILURE
         }
     }
@@ -885,7 +885,12 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
         Cmd::Pkg(pkg) => dispatch_pkg(pkg, cfg),
         Cmd::Store(store) => dispatch_store(store, cfg),
         Cmd::Patch(patch) => dispatch_patch(patch, cfg),
-        Cmd::Build { path, out, mlir } => {
+        Cmd::Build {
+            path,
+            out,
+            mlir,
+            watch,
+        } => {
             // `build` is the project verb: locate the nearest enclosing
             // `prism.toml` and compile it. A single file compiles via
             // `prism <file.pr>`. Canonicalize first so the default `.` has real
@@ -902,7 +907,11 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
                     start.display().to_string(),
                 )
             })?;
-            cli::build_input(&manifest, out, mlir, cfg)
+            if watch {
+                cli::watch_build_input(&manifest, out.as_deref(), mlir, cfg)
+            } else {
+                cli::build_input(&manifest, out, mlir, cfg)
+            }
         }
         Cmd::Clean { path } => cli::clean_cmd(&path),
         Cmd::Check { file } => cli::check_cmd(file.as_deref(), cfg),

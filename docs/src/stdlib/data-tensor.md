@@ -14,7 +14,7 @@ The surface covers construction, indexing, transpose-by-name, a contiguity-check
 
 ### `Tensor`
 
-```prism,def,h-95be73d420215e199c05f53c9523b187c6dc8a1f405910aa3ca74c7cc5e5413a
+```prism,def,h-3b008fef87fab75946a2b14ac6b8fa3fba1e110889bd6a9090217e44b91a8658
 type Tensor = MkTensor(FloatBuf, List(Int), List(Int), List(String))
 ```
 
@@ -24,7 +24,7 @@ A dense tensor: flat storage plus per-axis shape, strides, and names.
 
 ### `buf`
 
-```prism,sig,h-ef46804750c80c3b43a147bc96ab948795ba8b80f0b2b32635c6da89e57fdc11
+```prism,sig,h-7654fc040134ba41fcc9d5b567c0a77b2c8353790e23ba022ec0d0cbb0a586bc
 buf : (Data.Tensor.Tensor) -> FloatBuf
 ```
 
@@ -32,7 +32,7 @@ The flat backing buffer.
 
 ### `shape`
 
-```prism,sig,h-58df84c53e8071dcf8a0485e6c0677d49f46d48cbfa73b36fbcba4d4df7ce426
+```prism,sig,h-674c82137c13dc5a46c57306229631891ec7bdc5350cd7e5a55910f32c2ef506
 shape : (Data.Tensor.Tensor) -> List(Int)
 ```
 
@@ -48,7 +48,7 @@ shape(new([2, 3], 0.0))
 
 ### `strides`
 
-```prism,sig,h-7ace8776e12005e49dfa25656ac9088e181a429a00972a9df839ec97212943ba
+```prism,sig,h-2b7de391041218d0b71c5344dfa204d759aa961f1c602fc836e8ab7c338a32f8
 strides : (Data.Tensor.Tensor) -> List(Int)
 ```
 
@@ -64,7 +64,7 @@ strides(new([2, 3], 0.0))
 
 ### `axes`
 
-```prism,sig,h-c92d5c0d57261561888724459364ede1cc54bfff4480a3cef7409068d13c0412
+```prism,sig,h-14862231b4124238be1a2b7e743fee20b7a51530aa94ea9915c07274d2f73a73
 axes : (Data.Tensor.Tensor) -> List(String)
 ```
 
@@ -80,7 +80,7 @@ axes(new([2, 3], 0.0))
 
 ### `rank`
 
-```prism,sig,h-57bc683253254dd4c179492614b19db1f919ee3e9be745760bc64eed30242aa1
+```prism,sig,h-86d0f28430970a0568e98243bad5a602a457f46441200fb9c5236054fbe0e877
 rank : (Data.Tensor.Tensor) -> Int
 ```
 
@@ -96,7 +96,7 @@ rank(new([2, 3], 0.0))
 
 ### `size`
 
-```prism,sig,h-7be8affae7d523e3fd75b24d8d95828471e020f5863f4d0447b3831caaf95f58
+```prism,sig,h-de110f1f9a3ccec0a41daa4afa1cb00fc0935314f2c5028d947dff79d3350a83
 size : (Data.Tensor.Tensor) -> Int
 ```
 
@@ -112,7 +112,7 @@ size(new([2, 3], 0.0))
 
 ### `new`
 
-```prism,sig,h-0931be4e634cad3ea30f9ef14c89aa2415332b47d286bb3e3b283db9d5e40c7b
+```prism,sig,h-9ef678c7b7500da6c1d27df8b8e8a248cde8a25a61816c875f647b75ca3aeb0e
 new : (List(Int), Float) -> Data.Tensor.Tensor
 ```
 
@@ -129,7 +129,7 @@ t[1, 1]
 
 ### `from_list`
 
-```prism,sig,h-97e1874ac302af9ef2d08ebf599de9f743248729462a0bfbdf35a6db91de5164
+```prism,sig,h-8a1f064c28bf151b4b516fb8cc98b5744f0950206955ef4ff34b994f0cfe0282
 from_list : (List(Int), List(Float)) -> Data.Tensor.Tensor
 ```
 
@@ -146,7 +146,7 @@ t[1, 0]
 
 ### `at_tensor`
 
-```prism,sig,h-4e467ac95f04a35c9409f5dec8468f0ea17ed31568a03a80bbe502a2407c06d5
+```prism,sig,h-41544470b839fcd03fe408ca639b63db1206b132313ae57eaa0c97c7377d3bf7
 at_tensor : (Data.Tensor.Tensor, List(Int)) -> Float ! {Fail}
 ```
 
@@ -162,7 +162,7 @@ at_tensor(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), [0, 1])
 
 ### `tensor_set`
 
-```prism,sig,h-4f932e486146edf5b0d2119e45a115456d9e31e3d84bfac8780e6d5b5053cf7c
+```prism,sig,h-3407d979d08ca5151d7dc0cfbd291f62525502a423249044f50e75f7b6160aa8
 tensor_set : (Data.Tensor.Tensor, List(Int), Float) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -179,7 +179,7 @@ t[0, 1]
 
 ### `transpose`
 
-```prism,sig,h-ea27421ec526053ecc7e28f4b56d8f1dfa09b77ab5925d23258a39f064a0989c
+```prism,sig,h-3ba30e516f91af4afabf522b61c0232f6250572a949e485803f26cf58563d4ef
 transpose : (Data.Tensor.Tensor, String, String) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -196,7 +196,7 @@ t[0, 1]
 
 ### `reshape`
 
-```prism,sig,h-706ea3322ca735430bf5bc9234bb4171ce206d7990aa9ec26b9889291cfdbf5b
+```prism,sig,h-81e934e4d13392898d41cb7a83d0f4d5cc17f7619f69d95d3459511bd268823b
 reshape : (Data.Tensor.Tensor, List(Int)) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -212,7 +212,7 @@ shape(reshape(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), [4]))
 
 ### `map_tensor`
 
-```prism,sig,h-cf1dcec23253fb31b02c77ae07bd6bca23a98c359f7db2300e859053740c0a10
+```prism,sig,h-9a68ec7c50b29c32a85d1514598e1b8750afbdd70494d76a77a3bd2edc84a78a
 map_tensor : forall e0. ((Float) -> Float ! {Fail, e0}, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail, e0}
 ```
 
@@ -228,7 +228,7 @@ sum_all(map_tensor(\(x) -> x + 1.0, from_list([2], [10.0, 20.0])))
 
 ### `zip_with_tensor`
 
-```prism,sig,h-4789b65b64bfceceb06bbd83f17bc1ef47046c35cd177e4748647ae578ca5bfc
+```prism,sig,h-be8c753842a246faf93c3b6d7eb47f4916245582b7d1a44d1dbec40c3ea65868
 zip_with_tensor : forall e0. ((Float, Float) -> Float ! {Fail, e0}, Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail, e0}
 ```
 
@@ -244,7 +244,7 @@ sum_all(zip_with_tensor(\(x, y) -> x + y, from_list([2], [1.0, 2.0]), from_list(
 
 ### `add`
 
-```prism,sig,h-4bab1c77b8228a1146b05a0056864bdf7c61c2613b0da4f96bec288fc7bf36e0
+```prism,sig,h-a4c858309e59cda1f9c5db2d3acd4e57713ba00b0fc2375fddd9aef36bde8a51
 add : (Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -260,7 +260,7 @@ sum_all(add(from_list([2], [1.0, 2.0]), from_list([2], [3.0, 4.0])))
 
 ### `sub`
 
-```prism,sig,h-3137b4d040960712b209b429ec13f63865685fb9c7bf38bf3186752cb1590fa7
+```prism,sig,h-1de0727c3f714a1578045890f1721584eb473a53d34281f9b013e0b45fb82e62
 sub : (Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -268,7 +268,7 @@ Elementwise difference.
 
 ### `mul`
 
-```prism,sig,h-7a68a44105d0205e72c84b225ea05f23e7a350d65753c979a567fc17b2974b17
+```prism,sig,h-e854ed47df74d17a397e88a0505fc72a2aa3eafff6e08e8afecf80bc039fcb04
 mul : (Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -284,7 +284,7 @@ sum_all(mul(from_list([2], [2.0, 3.0]), from_list([2], [4.0, 5.0])))
 
 ### `div`
 
-```prism,sig,h-49699a14f9c83b2a4c128e3f6d3beecb36d99ed18922a21398987aa9697455cf
+```prism,sig,h-b90e1194b57b2e7066bb96df9f00dd22d3164dcde913529a38be397f572d7a12
 div : (Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -292,7 +292,7 @@ Elementwise quotient.
 
 ### `scale`
 
-```prism,sig,h-7b7d30a9317d18400ded602a7ede01a90084634b6f95dbd24245759a5328e3c7
+```prism,sig,h-ff117090e6a2cfd3c35ff30bf8418bd29f4091f5bef4915f632322949493b322
 scale : (Float, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -308,7 +308,7 @@ sum_all(scale(2.0, from_list([2], [1.0, 2.0])))
 
 ### `sum_all`
 
-```prism,sig,h-97cb276526732016c178f23a32b97ae77887a6891f342113b041c81b2e44448b
+```prism,sig,h-e7e9331464eaa763c57ab0cea47bcdc352a5c740838a1283832c24163492e5ea
 sum_all : (Data.Tensor.Tensor) -> Float ! {Fail}
 ```
 
@@ -324,7 +324,7 @@ sum_all(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]))
 
 ### `prod_all`
 
-```prism,sig,h-e390a0813d70a7cae4d2c3cb5a01722583294a5a30391dc1d8efacff386d1b85
+```prism,sig,h-4006de9070d8da15391f54f96606b058fb862391d1a1043b9e78157f5d9853c4
 prod_all : (Data.Tensor.Tensor) -> Float ! {Fail}
 ```
 
@@ -340,7 +340,7 @@ prod_all(from_list([2], [3.0, 4.0]))
 
 ### `mean`
 
-```prism,sig,h-2471f21934c1fd5e10fe21641a473a0526c08338aa541ca64f07d3b16e0caac8
+```prism,sig,h-c91f231404048f3f2077cf4d0313f199e1e8b55bb28a84b92990e09c9fd3032c
 mean : (Data.Tensor.Tensor) -> Float ! {Fail}
 ```
 
@@ -356,7 +356,7 @@ mean(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]))
 
 ### `sum_axis`
 
-```prism,sig,h-8e800749c547bd236d29c9c6e846950f79f4e04d700b2f94559581d5de5231a8
+```prism,sig,h-34399c050fdee0ad0d85a58fcb80c2acc1633ef1e4f6e0de92f2b51de6016a32
 sum_axis : (Data.Tensor.Tensor, String) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -373,7 +373,7 @@ let s = sum_axis(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), "0")
 
 ### `mean_axis`
 
-```prism,sig,h-d528f334e963ef97feff4925aa21704245e238917d20373754961978aa859a2b
+```prism,sig,h-773ed97cd8978c5dc01d58b468d2aa7caacf308ddbdf1136f5774a45fc84ab74
 mean_axis : (Data.Tensor.Tensor, String) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -390,7 +390,7 @@ let m = mean_axis(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), "1")
 
 ### `matmul`
 
-```prism,sig,h-90dcd6d991b9674b27ffc5bd401c371ea1eadfe3bddad7e9c13693dc0b45f54f
+```prism,sig,h-857e49ea029928b8d5738c025533e638ce8c810e7076b07b768f43be173b536c
 matmul : (Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
 ```
 

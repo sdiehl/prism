@@ -1,0 +1,21 @@
+{
+  "schema": "prism-syntax-diagnostics-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "a7a2261e4b36eca33906b13c8b8738015ac08c4272ed1c2488a89e8c6ad3361f",
+    "text": "type Corpus = Corpus(1 + n + 2)\n"
+  },
+  "diagnostics": [
+    {
+      "code": "E7100",
+      "phase": "parse",
+      "span": [
+        21,
+        30
+      ],
+      "message": "arithmetic on dimensions is not supported: a dimension is a plain natural literal (`0`, `1`, `2`, ...) or a type variable, and dimensions unify by equality only",
+      "expected": [],
+      "related": []
+    }
+  ]
+}

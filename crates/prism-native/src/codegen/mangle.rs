@@ -36,12 +36,12 @@
 /// unlikely.
 ///
 /// This is the root they all share; the byte right after it is the discriminant.
-pub const SYM_NAMESPACE: &str = "prism";
-pub const SYM_FN: &str = "prismfn_";
-pub const SYM_LAM: &str = "prismlam_";
-pub const SYM_APPLY: &str = "prismap_";
-pub const SYM_TRMC: &str = "prismtrmc_";
-pub const SYM_RUNTIME: &str = "prism_";
+pub(crate) const SYM_NAMESPACE: &str = "prism";
+pub(crate) const SYM_FN: &str = "prismfn_";
+pub(crate) const SYM_LAM: &str = "prismlam_";
+pub(crate) const SYM_APPLY: &str = "prismap_";
+pub(crate) const SYM_TRMC: &str = "prismtrmc_";
+pub(crate) const SYM_RUNTIME: &str = "prism_";
 
 // GHC-style escape codes for the punctuation carried by real Core names. `Z`
 // introduces every escape and therefore escapes itself; the generic `ZxHH`

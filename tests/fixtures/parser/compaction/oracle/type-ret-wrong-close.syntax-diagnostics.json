@@ -1,0 +1,38 @@
+{
+  "schema": "prism-syntax-diagnostics-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "ff95ba94f6f0cfe8c332a1b39459dd354a171a47546a4693c52eacbf0b4e2b17",
+    "text": "fn corpus() : ] = 0\n"
+  },
+  "diagnostics": [
+    {
+      "code": "E7100",
+      "phase": "parse",
+      "span": [
+        14,
+        15
+      ],
+      "message": "unexpected ']' at line 1:15, expected 'forall', 'Int', 'Bool', 'Unit', 'Float', 'Char', 'String', 'I64', ...",
+      "expected": [
+        "!",
+        "#",
+        "(",
+        "Bool",
+        "Char",
+        "Float",
+        "I64",
+        "Int",
+        "String",
+        "U64",
+        "Unit",
+        "[",
+        "forall",
+        "ident",
+        "qual",
+        "uid"
+      ],
+      "related": []
+    }
+  ]
+}

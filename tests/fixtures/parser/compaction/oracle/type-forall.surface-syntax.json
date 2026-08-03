@@ -1,0 +1,41 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "aef5a68bdf64f52a90a4e91a8700b21a20a1711dfc4c6164bccf1ed8f3f3c6e5",
+    "text": "fn corpus(x : forall a. a) = x\n"
+  },
+  "items": [
+    {
+      "body": {
+        "kind": "var",
+        "name": "x",
+        "span": [
+          29,
+          30
+        ]
+      },
+      "kind": "fn",
+      "name": "corpus",
+      "params": [
+        {
+          "name": "x",
+          "ty": {
+            "kind": "forall",
+            "ty": {
+              "kind": "var",
+              "name": "a"
+            },
+            "vars": [
+              "a"
+            ]
+          }
+        }
+      ],
+      "span": [
+        0,
+        30
+      ]
+    }
+  ]
+}

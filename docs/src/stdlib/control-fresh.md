@@ -10,7 +10,7 @@ The `Fresh` effect: a deterministic monotonic name supply (gensym).
 
 ### `Fresh`
 
-```prism,def,h-a2bd6bd46cb61e70d1232f7276e668bb5ec8db07538bcfac4a53d1d4b2497abd
+```prism,def,h-aeece4d2dcdd3d784b4a163ffc802070e1fe44f91e7ae9d6d9a88597f64a9a47
 effect Fresh
   fresh() : Int
 ```
@@ -21,23 +21,39 @@ Draw the next integer from the monotonic counter.
 
 ### `run_fresh`
 
-```prism,sig,h-0cf2dd08460f2cc46a035da7113981dbed1833370c1bb38c2ffa09a2a2b106e2
+```prism,sig,h-f47a49359d4036a331620cbdcbceca8131709b573b2f6e1b66c74b7a289b298e
 run_fresh : forall e0 a. (() -> a ! {Control.Fresh.Fresh, e0}) -> a ! {e0}
 ```
 
 Run `action` with a fresh-name counter starting at `0`, discharging `Fresh`.
 
+```prism,mod=Control.Fresh
+run_fresh(\() -> [gensym("tmp"), gensym("tmp")])
+```
+
+```output
+[tmp0, tmp1]
+```
+
 ### `run_fresh_from`
 
-```prism,sig,h-dc29a17709cef75e21c7efbe09aa7ea5ab21555fa3495bd9ccd3d8b741035ae1
+```prism,sig,h-7f4b7ff4f1689cccfff8041f881addc2fdbab606e1d674a7e3edcbcfc1987c2f
 run_fresh_from : forall e0 a. (Int, () -> a ! {Control.Fresh.Fresh, e0}) -> a ! {e0}
 ```
 
 Run `action` with the counter starting at `start`.
 
+```prism,mod=Control.Fresh
+run_fresh_from(10, \() -> [fresh(), fresh()])
+```
+
+```output
+[10, 11]
+```
+
 ### `gensym`
 
-```prism,sig,h-73bfc6be08792aa8825134a72857ac81e0450fada92e5d3e0fcbbb100889e7d8
+```prism,sig,h-33eda975865dd18f9b4b4de81ebbc1f9a96c462f844e6071a910c6b78bb64515
 gensym : (String) -> String ! {Control.Fresh.Fresh}
 ```
 

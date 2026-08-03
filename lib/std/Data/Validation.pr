@@ -28,6 +28,13 @@ pub fn map_valid(f, v) =
 
 -- | Applicative apply: when both sides validate, apply the function; otherwise
 -- keep every error from both sides, in order. This is the accumulation.
+--
+-- ```prism
+-- validation_ap(Invalid(["bad function"]), Invalid(["bad argument"]))
+-- ```
+-- ```output
+-- Data.Validation.Invalid([bad function, bad argument])
+-- ```
 pub fn validation_ap(vf, va) =
   match vf of
     Valid(f) =>
@@ -60,6 +67,13 @@ pub fn validate2(f, va, vb) =
         Invalid(es2) => Invalid(append(es1, es2))
 
 -- | The `Valid` value, or `d` when there were errors.
+--
+-- ```prism
+-- (validation_or(0, Valid(7)), validation_or(0, Invalid(["bad"])))
+-- ```
+-- ```output
+-- (7, 0)
+-- ```
 pub fn validation_or(d, v) =
   match v of
     Valid(x) => x
@@ -94,4 +108,11 @@ fn cons_validation(v, acc) =
 
 -- | Collapse a list of validations into a validation of the list, accumulating
 -- every error across all of them.
+--
+-- ```prism
+-- sequence_validation([Valid(1), Invalid(["first"]), Invalid(["second"])])
+-- ```
+-- ```output
+-- Data.Validation.Invalid([first, second])
+-- ```
 pub fn sequence_validation(vs) = foldr(cons_validation, Valid(Nil), vs)

@@ -94,6 +94,15 @@ pub fn run_file_cmd(
             .map_err(|e| (e, full.clone(), name.clone()))?;
         drop(out);
         drop(input);
+        // Compute the trace's relation to its sidecar (relative path plus a digest of
+        // the trace bytes) now, while both paths are in hand, so the sidecar's trace
+        // node describes where its durable trace lives and `lineage verify` can find
+        // and check it from the graph alone. A trace outside the sidecar's directory
+        // is refused here, before either file is written, rather than minting a
+        // sidecar the verifier would always reject.
+        let replay =
+            crate::lineage::replay_relation(lineage_path, record_path, recorded.trace.as_bytes())
+                .map_err(|e| (e, full.clone(), record_path.display().to_string()))?;
         crate::debug::durable::write_atomic(record_path, &recorded.trace).map_err(|e| {
             (
                 Error::Io(e),
@@ -101,12 +110,6 @@ pub fn run_file_cmd(
                 record_path.display().to_string(),
             )
         })?;
-        // Compute the trace's relation to its sidecar (relative path plus a digest of
-        // the trace bytes) now, while both paths are in hand, so the sidecar's trace
-        // node describes where its durable trace lives and `lineage verify` can find
-        // and check it from the graph alone.
-        let replay =
-            crate::lineage::replay_relation(lineage_path, record_path, recorded.trace.as_bytes());
         let run_lineage = crate::lineage::RunLineage::collect(crate::lineage::RunLineageInput {
             request: crate::lineage::BuildRequest::run(file),
             source: &full,

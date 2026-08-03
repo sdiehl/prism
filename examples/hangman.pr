@@ -22,7 +22,7 @@ fn reveal(secret, guessed, i) : String =
 fn str_contains(hay, needle) : Bool =
   index_of_from(char_at(needle, 0), hay, 0) >= 0
 
-fn solved(secret, guessed) : Bool = str_eq(reveal(secret, guessed, 0), secret)
+fn solved(secret, guessed) : Bool = reveal(secret, guessed, 0) == secret
 
 fn play(secret, guessed, lives) : Unit ! {IO, Console} =
   println(reveal(secret, guessed, 0))

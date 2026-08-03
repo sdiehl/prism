@@ -18,7 +18,7 @@ end
 local cmd = vim.cmd
 
 -- Declarations and binding forms.
-cmd([[syntax keyword prismKeyword let var in val return do borrow with handler given where as forall deriving of handle using probe logic requires ensures]])
+cmd([[syntax keyword prismKeyword let var in val return do borrow with handler given where as forall deriving of handle using probe logic requires ensures reflect]])
 cmd([[syntax keyword prismInclude import pub]])
 cmd([[syntax keyword prismStructure fn fip fbip replayable type newtype opaque stable alias effect class instance canonical pattern]])
 cmd([[syntax keyword prismConditional if then else elif match]])
@@ -41,6 +41,9 @@ cmd([[syntax match prismConstructor "\<[A-Z][A-Za-z0-9_]*\>"]])
 cmd([[syntax match prismFloat "\<[0-9]\+\.[0-9]\+\>"]])
 cmd([[syntax match prismNumber "\<[0-9]\+\%(i64\|u64\)\?\>"]])
 cmd([[syntax match prismCharacter "'\%(\\.\|[^'\\]\)'"]])
+-- The raw multiline form is declared first so its opener wins over the ordinary
+-- one; its body admits no escapes, so it contains nothing.
+cmd([[syntax region prismRawString start=+r"""+ end=+"""+]])
 cmd([[syntax region prismString start=+"+ skip=+\\.+ end=+"+ contains=prismStringEscape]])
 cmd([[syntax match prismStringEscape "\\." contained]])
 
@@ -71,6 +74,7 @@ link("prismFloat", "Float")
 link("prismNumber", "Number")
 link("prismCharacter", "Character")
 link("prismString", "String")
+link("prismRawString", "String")
 link("prismStringEscape", "SpecialChar")
 link("prismOperator", "Operator")
 link("prismComment", "Comment")

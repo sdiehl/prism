@@ -1,0 +1,1 @@
+type Corpus = Corpus(List(Int), {io, Pkg.Io | e}, 3)

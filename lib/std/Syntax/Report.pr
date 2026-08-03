@@ -1,8 +1,8 @@
 -- | Caret rendering for `Syntax.Diagnostic`: the plain-text report the compiler
--- prints for a refused source, rebuilt in Prism from the diagnostic and the
--- source text alone.
+-- prints for a refused source.
 --
--- The target is exact bytes, not a lookalike, so the layout below is an
+-- It is rebuilt in Prism from the diagnostic and the source text alone. The
+-- target is exact bytes, not a lookalike, so the layout below is an
 -- executable specification of the compiler's renderer: the header line, the
 -- location line, the gutter, the source line with tabs expanded to four-column
 -- stops, the underline row, the arrow row carrying the label, and the closing

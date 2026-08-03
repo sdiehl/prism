@@ -22,16 +22,20 @@ check FILE:
 # platforms with small thread stacks; optimized release frames already fit.
 test:
     RUST_MIN_STACK=33554432 PRISM_COMPILER_CACHE=0 cargo nextest run --all
-    PRISM_COMPILER_CACHE=0 cargo test --doc
+    PRISM_COMPILER_CACHE=0 cargo test --workspace --doc
 
 parity:
     PRISM_COMPILER_CACHE=0 cargo test --test native_parity parity::
 
 # Whole runnable corpus across every supported optimizer configuration. Kept
 # ignored in the ordinary unit sweep because it recompiles each case at eight
-# pass configurations; the authoritative gate invokes it explicitly.
+# pass configurations; the authoritative gate invokes it explicitly. Core Lint
+# is on because this is the densest pass coverage the tree has: eight
+# configurations times the whole corpus, so a rewrite that produces ill-formed
+# Core is attributed to the pass that produced it rather than to whatever
+# miscompiles later.
 opt-equiv *FLAGS:
-    PRISM_COMPILER_CACHE=0 PRISM_QUIET=1 cargo test {{FLAGS}} --test opt_equiv gate::optimizer_configurations_have_identical_observation_traces -- --ignored --exact
+    PRISM_COMPILER_CACHE=0 PRISM_CORE_LINT=1 PRISM_QUIET=1 cargo test {{FLAGS}} --test opt_equiv gate::optimizer_configurations_have_identical_observation_traces -- --ignored --exact
 
 perf:
     PRISM_COMPILER_CACHE=0 cargo test --test native_perf perf_gate::
@@ -53,7 +57,7 @@ clippy:
 # Full test suite via nextest (failures-only), then doctests (nextest skips them).
 t:
     PRISM_COMPILER_CACHE=0 cargo nextest run --all
-    PRISM_COMPILER_CACHE=0 cargo test --doc
+    PRISM_COMPILER_CACHE=0 cargo test --workspace --doc
 
 # Run one test target or filter, filtered the same way. e.g. `just t1 fmt_records`
 t1 FILTER:
@@ -116,6 +120,12 @@ csyn:
 feature-matrix:
     cargo check --all-targets
     cargo check --no-default-features --features wasm --target wasm32-unknown-unknown
+    # The line above checks the wasm build in its non-test configuration only, so
+    # a `cfg(test)` item that resolves under `native` and nowhere else stays
+    # invisible until CI builds the playground smoke test. Compile the lib test
+    # harness too, without running it: no wasm runner needed, and the feature-gated
+    # test code is held to the same standard as the code it tests.
+    cargo test --no-default-features --features wasm --target wasm32-unknown-unknown --lib --no-run
     cargo check --features mlir
     cargo check --features mimalloc
 
@@ -148,6 +158,12 @@ _gate *FLAGS:
     set -eo pipefail
     # Oracles compile from scratch; native_cache tests cache identity separately.
     export PRISM_COMPILER_CACHE=0
+    # Deliberately no PRISM_CORE_LINT here. The knob bypasses the typed-SCC query
+    # cache (a cache hit would skip the per-pass lint), so exporting it across
+    # these targets would silently stand down the very cache `native_cache` and
+    # `source_identity` exist to exercise. Inter-pass linting is `opt-equiv`'s
+    # job: cache-free by construction, and the whole corpus at every optimizer
+    # configuration is denser pass coverage than this list is.
     targets="--test native_parity --test native_tier --test native_fusion --test native_perf --test native_conformance --test native_sort --test native_cache --test snapshots --test compiler"
     if command -v cargo-nextest >/dev/null; then
         cargo nextest run --profile ci {{FLAGS}} $targets
@@ -207,7 +223,7 @@ fmt-examples: build-release
 package-world: build-release
     ./target/release/prism pkg check-world packages --strict
 
-ci: fmt-check clippy stub-check doc-check feature-matrix test fmt-examples package-world
+ci: fmt-check clippy stub-check doc-check feature-matrix test fmt-examples package-world artifacts-check
 
 # CI-only checks mirrored locally: stub-marker grep + rustdoc deny-warnings.
 stub-check:
@@ -240,6 +256,24 @@ docs-gen:
     ./target/release/prism docs --stdlib --out docs/src/stdlib
     ./target/release/prism docs --stdlib --test
 
+# Regenerate the committed compaction scoreboard: per-component line counts on both sides under one counting rule, beside the cost of the Prism side (CI checks it's current). `--check` to check without writing.
+scoreboard *ARGS:
+    ./scripts/scoreboard.py {{ARGS}}
+
+# Regenerate the pinned parser-compaction baseline receipt (Ledger A/B boundaries, frozen classifications, per-family budgets). `--check` to check without writing.
+parser-baseline *ARGS:
+    ./scripts/parser_baseline.py {{ARGS}}
+
+# Verify or explicitly accept the frozen parser-compaction corpus. Normal use
+# is `just parser-corpus check`; acceptance additionally requires the
+# PRISM_ACCEPT_PARSER_COMPACTION=1 environment guard.
+parser-corpus COMMAND="check" *ARGS:
+    ./scripts/parser-compaction-corpus.py {{COMMAND}} --oracle 46886c1fa7064e4809020c1b788b3ee3531d6a63 {{ARGS}}
+
+# Validate the frozen 133-production strategy/owner/depth/hook manifest.
+parser-production-manifest COMMAND="check":
+    ./scripts/parser-production-manifest.py {{COMMAND}}
+
 # Regenerate the committed Core/lowered/fbip dumps behind the book figures from their `.pr` sources; rerun after a front-end change (ANF binder ids shift), idempotent.
 docs-core:
     cargo build --release
@@ -248,6 +282,10 @@ docs-core:
 # Regenerate every content-addressed stdlib artifact after a hash-shifting change: the Merkle root and `#hash` badges (via docs-gen) plus the shape/type digest snapshots.
 hash: docs-gen
     INSTA_UPDATE=always cargo test --test snapshots shape_digests
+
+# Drift check for every committed generated artifact no ordinary test keeps honest; reports all of them, and each failure names the recipe that fixes it.
+artifacts-check:
+    ./scripts/artifacts-check.sh
 
 # Regenerate the stdlib reference and rebuild the wasm bundle first, so the book and served playground are never stale.
 docs: docs-gen wasm

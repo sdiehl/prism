@@ -7,7 +7,7 @@ use marginalia::pretty::{
 };
 
 use super::lit::{fmt_char, fmt_float};
-use super::{INDENT, LINE_WIDTH};
+use super::{tuple_items, INDENT, LINE_WIDTH};
 use crate::ast::{Pattern, S};
 use crate::kw;
 
@@ -38,7 +38,12 @@ fn pat_doc(p: &S<Pattern>) -> Doc {
             text(name.clone()),
             block(lparen(), rparen(), &comma(), subs.iter().map(pat_doc)),
         ]),
-        Pattern::Tuple(subs) => block(lparen(), rparen(), &comma(), subs.iter().map(pat_doc)),
+        Pattern::Tuple(subs) => block(
+            lparen(),
+            rparen(),
+            &comma(),
+            tuple_items(subs.iter().map(pat_doc), false),
+        ),
         Pattern::Record(name, fields, spread) => {
             let mut items: Vec<Doc> = fields
                 .iter()

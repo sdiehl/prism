@@ -1,16 +1,15 @@
 //! Bounded inliner for typed Core (late pass).
 //!
-//! Mirrors [`super::super::opt::inline::inline_counted`] rule-for-rule: inlines
-//! a top-level function called exactly once (a single `Call` head, and never
-//! referenced first-class) so its body moves rather than duplicates, with its
-//! parameters let-bound to the evaluated arguments and every binder alpha-
-//! renamed to a fresh `%i{n}` name from a per-compilation counter. The
-//! typed-specific step is scheme instantiation: a typed `Call` carries the
-//! callee's explicit type/row instantiation, which must be substituted through
-//! the callee's body *before* freshening and binding its parameters, so every
-//! witness in the spliced term already reflects the call's monomorphic
-//! instance. `Inline` is whole-program, exactly like the legacy pass: it does
-//! not confine itself to one strongly connected component.
+//! Inlines a top-level function called exactly once (a single `Call` head, and
+//! never referenced first-class) so its body moves rather than duplicates, with
+//! its parameters let-bound to the evaluated arguments and every binder alpha-
+//! renamed to a fresh `%i{n}` name from a per-compilation counter. Typed Core
+//! adds scheme instantiation: a typed `Call` carries the callee's explicit
+//! type/row instantiation, which must be substituted through the callee's body
+//! *before* freshening and binding its parameters, so every witness in the
+//! spliced term already reflects the call's monomorphic instance. `Inline` is
+//! whole-program: it does not confine itself to one strongly connected
+//! component.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -41,6 +40,7 @@ impl InlineStats {
 }
 
 /// Inline single-call-site non-recursive functions, preserving every witness.
+#[must_use]
 pub fn inline<P>(core: TypedCore<P>) -> (TypedCore<P>, InlineStats) {
     let names: BTreeSet<Sym> = core.fns.iter().map(|function| function.name).collect();
 
@@ -140,7 +140,7 @@ fn recursive_set<P>(core: &TypedCore<P>, names: &BTreeSet<Sym>) -> BTreeSet<Sym>
 // Every direct `Call` head reachable anywhere in `comp`, including inside
 // thunked values, in occurrence order. A bare function name flowing as a
 // first-class value (not a call head) is not counted here.
-pub fn calls_in(comp: &TypedComp) -> Vec<Sym> {
+pub(crate) fn calls_in(comp: &TypedComp) -> Vec<Sym> {
     let mut heads = Vec::new();
     collect_calls_comp(comp, &mut heads);
     heads
@@ -502,6 +502,7 @@ mod tests {
             ctors,
             warning: _,
             strategy,
+            confined_decline: _,
         } = lower_effects(input, &env, &BTreeMap::new(), &flags, &OpGrades::new())
             .expect("fixture lowers through the production effect ABI");
         assert_eq!(strategy, EffectStrategy::SelectiveFreeMonad);

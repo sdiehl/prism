@@ -1,0 +1,512 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "50f262bbb998c34d941acfe2f375a0f637366fc0515ede230279a24c6322d930",
+    "text": "fn closure() : (Int) -> Int ! {io} = \\(x) -> x\nfn poly() : forall a. a = ?hole\n"
+  },
+  "raw": [
+    {
+      "kind": "fn",
+      "span": [
+        0,
+        2
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        3,
+        10
+      ],
+      "value": "closure"
+    },
+    {
+      "kind": "(",
+      "span": [
+        10,
+        11
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        11,
+        12
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        13,
+        14
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        15,
+        16
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        16,
+        19
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        19,
+        20
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        21,
+        23
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        24,
+        27
+      ]
+    },
+    {
+      "kind": "!",
+      "span": [
+        28,
+        29
+      ]
+    },
+    {
+      "kind": "{",
+      "span": [
+        30,
+        31
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        31,
+        33
+      ],
+      "value": "io"
+    },
+    {
+      "kind": "}",
+      "span": [
+        33,
+        34
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        35,
+        36
+      ]
+    },
+    {
+      "kind": "\\",
+      "span": [
+        37,
+        38
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        38,
+        39
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        39,
+        40
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ")",
+      "span": [
+        40,
+        41
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        42,
+        44
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        45,
+        46
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        47,
+        49
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        50,
+        54
+      ],
+      "value": "poly"
+    },
+    {
+      "kind": "(",
+      "span": [
+        54,
+        55
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        55,
+        56
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        57,
+        58
+      ]
+    },
+    {
+      "kind": "forall",
+      "span": [
+        59,
+        65
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        66,
+        67
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ".",
+      "span": [
+        67,
+        68
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        69,
+        70
+      ],
+      "value": "a"
+    },
+    {
+      "kind": "=",
+      "span": [
+        71,
+        72
+      ]
+    },
+    {
+      "kind": "?",
+      "span": [
+        73,
+        74
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        74,
+        78
+      ],
+      "value": "hole"
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        0,
+        2
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        3,
+        10
+      ],
+      "value": "closure"
+    },
+    {
+      "kind": "(",
+      "span": [
+        10,
+        11
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        11,
+        12
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        13,
+        14
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        15,
+        16
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        16,
+        19
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        19,
+        20
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        21,
+        23
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        24,
+        27
+      ]
+    },
+    {
+      "kind": "!",
+      "span": [
+        28,
+        29
+      ]
+    },
+    {
+      "kind": "{",
+      "span": [
+        30,
+        31
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        31,
+        33
+      ],
+      "value": "io"
+    },
+    {
+      "kind": "}",
+      "span": [
+        33,
+        34
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        35,
+        36
+      ]
+    },
+    {
+      "kind": "\\",
+      "span": [
+        37,
+        38
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        38,
+        39
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        39,
+        40
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ")",
+      "span": [
+        40,
+        41
+      ]
+    },
+    {
+      "kind": "->",
+      "span": [
+        42,
+        44
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        45,
+        46
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        46,
+        46
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        47,
+        49
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        50,
+        54
+      ],
+      "value": "poly"
+    },
+    {
+      "kind": "(",
+      "span": [
+        54,
+        55
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        55,
+        56
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        57,
+        58
+      ]
+    },
+    {
+      "kind": "forall",
+      "span": [
+        59,
+        65
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        66,
+        67
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ".",
+      "span": [
+        67,
+        68
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        69,
+        70
+      ],
+      "value": "a"
+    },
+    {
+      "kind": "=",
+      "span": [
+        71,
+        72
+      ]
+    },
+    {
+      "kind": "?",
+      "span": [
+        73,
+        74
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        74,
+        78
+      ],
+      "value": "hole"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        78,
+        78
+      ]
+    }
+  ],
+  "trivia": []
+}

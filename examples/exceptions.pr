@@ -26,11 +26,11 @@ type User = MkUser { name: String, scores: List(Int) }
 fn lookup_user(users : List(User), want : String) : Result(User, String) =
   match find(\(u) -> u.name == want, users) of
     Some(u) => Ok(u)
-    None => Err(concat("no user ", want))
+    None => Err("no user {want}")
 
 fn top_score(u : User) : Result(Int, String) =
   match u.scores of
-    Nil => Err(concat(u.name, " has no scores"))
+    Nil => Err("{u.name} has no scores")
     Cons(s, _) => Ok(s)
 
 -- Two failable steps, one `?` each: the first Err returns from `headline`
@@ -38,7 +38,7 @@ fn top_score(u : User) : Result(Int, String) =
 fn headline(users : List(User), want : String) : Result(String, String) =
   let u = lookup_user(users, want)?
   let s = top_score(u)?
-  Ok(concat(u.name, concat(" scored ", show_int(s))))
+  Ok("{u.name} scored {s}")
 
 fn report(r : Result(String, String)) =
   match r of
@@ -46,7 +46,7 @@ fn report(r : Result(String, String)) =
     Err(e) => println(e)
 
 effect Abort
-  abort(String) : Unit
+  never abort(String) : Unit
 
 fn grade(n : Int) : String ! {Abort} =
   if n < 0 then
@@ -60,7 +60,7 @@ fn grade(n : Int) : String ! {Abort} =
 
 fn safe_grade(n : Int) : String =
   handle grade(n) with
-    never abort(msg) => concat("invalid: ", msg)
+    never abort(msg) => "invalid: {msg}"
     return r => r
 
 fn main() =
@@ -78,4 +78,4 @@ fn main() =
   report(headline(users, "zoe"))
   -- 4: the custom throw.
   println(safe_grade(72))
-  println(safe_grade(0 - 5))
+  println(safe_grade(-5))

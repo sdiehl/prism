@@ -11,26 +11,29 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use super::{atomic_write, shard_path, HashHex, Written, CERTS_DIR};
+use super::{atomic_write_if_absent, shard_path, HashHex, Written, CERTS_DIR};
 
+// Publish by the link-if-absent commit, exactly like the object layer: the commit
+// point itself refuses to replace an existing file, so a writer that loses the
+// race falls through to the byte comparison instead of renaming over the winner.
+// A check followed by a replacing rename would leave that window open.
 pub(super) fn put(root: &Path, subject: &HashHex<'_>, bytes: &[u8]) -> io::Result<Written> {
     let path = shard_path(&root.join(CERTS_DIR), subject);
-    if path.exists() {
-        let existing = fs::read(&path)?;
-        if existing == bytes {
-            return Ok(Written::Hit);
-        }
-        return Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            format!(
-                "certificate at {} already exists with different bytes for subject {subject} \
-                 (certificates are immutable)",
-                path.display()
-            ),
-        ));
+    if !path.exists() && atomic_write_if_absent(&path, bytes)? {
+        return Ok(Written::New);
     }
-    atomic_write(&path, bytes)?;
-    Ok(Written::New)
+    let existing = fs::read(&path)?;
+    if existing == bytes {
+        return Ok(Written::Hit);
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        format!(
+            "certificate at {} already exists with different bytes for subject {subject} \
+             (certificates are immutable)",
+            path.display()
+        ),
+    ))
 }
 
 pub(super) fn get(root: &Path, subject: &HashHex<'_>) -> io::Result<Option<Vec<u8>>> {

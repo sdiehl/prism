@@ -68,14 +68,38 @@ pub fn lay_universe(p : Layer(a), x : a) : List(a) =
   Cons(x, concat_map(\(c) -> lay_universe(p, c), lay_kids(p, x)))
 
 -- | The number of nodes in the tree.
+--
+-- ```prism
+-- # let countdown = Layer { kids = \(n) -> if n > 0 then [n - 1] else [], rebuild = \(n, _cs) -> n }
+-- lay_size(countdown, 3)
+-- ```
+-- ```output
+-- 4
+-- ```
 pub fn lay_size(p : Layer(a), x : a) : Int = length(lay_universe(p, x))
 
 -- | The height of the tree: `1` at a leaf.
+--
+-- ```prism
+-- # let countdown = Layer { kids = \(n) -> if n > 0 then [n - 1] else [], rebuild = \(n, _cs) -> n }
+-- lay_depth(countdown, 3)
+-- ```
+-- ```output
+-- 4
+-- ```
 pub fn lay_depth(p : Layer(a), x : a) : Int =
   1 + foldl(\(acc, c) -> max(acc, lay_depth(p, c)), 0, lay_kids(p, x))
 
 -- | Every node satisfying `q`, root first, depth first. The gather half of an
 -- analysis pass: one predicate replaces a hand-written collecting recursion.
+--
+-- ```prism
+-- # let countdown = Layer { kids = \(n) -> if n > 0 then [n - 1] else [], rebuild = \(n, _cs) -> n }
+-- lay_collect(countdown, even, 3)
+-- ```
+-- ```output
+-- [2, 0]
+-- ```
 pub fn lay_collect(
   p : Layer(a),
   q : (a) -> Bool ! {| e},
@@ -156,6 +180,14 @@ pub fn lay_at_index(p : Layer(a), i : Int, x : a) : Option(a) =
 -- of each ancestor, root first, ending at `i` itself. `None` when the index is
 -- past the end. The path is what a pass reports when it must point at a node
 -- without carrying the node.
+--
+-- ```prism
+-- # let countdown = Layer { kids = \(n) -> if n > 0 then [n - 1] else [], rebuild = \(n, _cs) -> n }
+-- lay_path_to(countdown, 3, 3)
+-- ```
+-- ```output
+-- Some([0, 1, 2, 3])
+-- ```
 pub fn lay_path_to(p : Layer(a), i : Int, x : a) : Option(List(Int)) =
   lay_path_go(p, i, 0, x)
 

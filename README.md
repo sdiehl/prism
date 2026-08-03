@@ -6,7 +6,7 @@
 
 <p align="center">A small functional language with algebraic effects, multishot continuations, and native codegen.</p>
 
-Prism is an impure functional programming language whose type system tracks side effects. Effect sets are inferred, extensible rows that compose through ordinary calls instead of monads, and they track observability rather than implementation: an effect handled inside a function vanishes from its type, so internally effectful code can still be analyzed, optimized, and reused as pure code. The language also has rank-N polymorphism, typeclasses, first-class lenses, fusing streams, deterministic reference counting, and native codegen through LLVM.
+Prism is an impure functional programming language whose type system tracks side effects. Effect sets are inferred, extensible rows that compose through ordinary calls instead of monads, and they track observability rather than implementation: an effect handled inside a function vanishes from its type, so internally effectful code can still be analyzed, optimized, and reused as pure code. The language also has rank-N polymorphism, typeclasses, derived lenses and optic paths, fusing streams, deterministic reference counting, and native codegen through LLVM.
 
 The compiler is built around deterministic simulation testing at the language level. Prism programs elaborate to a strict A-normal-form call-by-push-value core, definitions and packages are content-addressed by hash, project builds can explain their lineage, and suspended continuations carry the code identity they may resume against. The compiler also builds to WebAssembly, so the playground and gallery run in the browser; the interpreter is a CEK machine modeled in Lean and serves as the differential oracle every native backend must match byte-for-byte.
 
@@ -38,7 +38,7 @@ curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s 22     # Debian/Ubuntu
 Then install prism (macOS Apple Silicon; Linux x86_64, aarch64):
 
 ```shell
-curl --proto '=https' --tlsv1.2 -fsSL https://sdiehl.github.io/prism/install.sh | PRISM_VERSION=v0.15.0 sh
+curl --proto '=https' --tlsv1.2 -fsSL https://sdiehl.github.io/prism/install.sh | PRISM_VERSION=v0.16.0 sh
 ```
 
 The installer verifies the release tarball's SHA-256 against the release manifest (and its build-provenance attestation when an authenticated `gh` is available) before unpacking, and installs to `~/.local/bin` without sudo. If Nix is present it uses the flake instead, with hashes verified by the Nix store.
@@ -48,14 +48,14 @@ Also available: `brew install sdiehl/prism/prism`, `docker run ghcr.io/sdiehl/pr
 ```shell
 # Debian / Ubuntu (LLVM repository, then package)
 curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s 22
-curl -fLO https://github.com/sdiehl/prism/releases/download/v0.15.0/prism_0.15.0_amd64.deb && sudo apt install ./prism_0.15.0_amd64.deb
+curl -fLO https://github.com/sdiehl/prism/releases/download/v0.16.0/prism_0.16.0_amd64.deb && sudo apt install ./prism_0.16.0_amd64.deb
 
 # Fedora / RHEL
-sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.15.0/prism-0.15.0-1.x86_64.rpm
+sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.16.0/prism-0.16.0-1.x86_64.rpm
 
 # Arch (prebuilt package or local PKGBUILD)
-sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.15.0/prism-0.15.0-1-x86_64.pkg.tar.zst
-curl -fLO https://github.com/sdiehl/prism/releases/download/v0.15.0/PKGBUILD && makepkg -si
+sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.16.0/prism-0.16.0-1-x86_64.pkg.tar.zst
+curl -fLO https://github.com/sdiehl/prism/releases/download/v0.16.0/PKGBUILD && makepkg -si
 
 # Alpine / musl: no native package (the binary is glibc-linked). Use the image:
 docker run ghcr.io/sdiehl/prism --version
@@ -82,6 +82,7 @@ prism program.pr -o out              # ...with a custom output path
 prism program.pr -O2                 # ...at optimization level 2
 prism run program.pr                 # interpret instead of compiling
 prism build                          # compile the enclosing project (needs a prism.toml), into target/
+prism build --watch --verbose        # rebuild on edits; show unit/Merkle impact and timing
 prism clean                          # remove the project's target/ directory
 prism check                          # type check the enclosing project
 prism check program.pr               # type check one source file

@@ -149,11 +149,12 @@ fn refusal(report: &str, input: &str) -> (usize, String) {
 // report must name the deep offset and hold only the deep expectation: the
 // shallow ones are recorded behind the mark and dropped. The last three fail
 // every alternative at one position, and the report must hold all of them, in
-// the order they were tried.
+// the canonical order the diagnostic carries (sorted, not trial order, so a
+// reordering of the parser's branches moves no artifact bytes).
 #[test]
 fn cursor_expectations_are_the_furthest_positions() {
     let report = harness(EXPECT_HARNESS, &fixture_dir().join(EXPECT_CORPUS));
-    let shallow = "(, [, int, ident";
+    let shallow = "(, [, ident, int";
     for (input, offset, want) in [
         ("[1 + 2", 6, "]"),
         ("(1 + 2", 6, ")"),

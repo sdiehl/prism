@@ -248,26 +248,19 @@ fn hash_state(st : State) : Int =
     )
 
 fn final_hash(seed : Int, n : Int) : Int =
-  match run_chaos(seed, n) of
-    (st, _) => hash_state(st)
+  let (st, _) = run_chaos(seed, n)
+  hash_state(st)
 
 fn schedule_str(seed : Int, n : Int) : String =
-  match run_chaos(seed, n) of
-    (_, tr) => str_join(" ", map(show, tr))
+  let (_, trace) = run_chaos(seed, n)
+  str_join(" ", map(show, trace))
 
 -- The final state as "id,value id,value ...", sorted by id. Identical on every
 -- schedule (that is the whole point), so the browser draws the formation from it
 -- once. Taken from seed index 0, the global reference run.
 fn state_str(seed : Int, n : Int) : String =
-  match run_chaos(seed, n) of
-    (st, _) =>
-      str_join(
-          " ",
-          map(
-              \(m) -> match m of { (id, v) => str_join(",", [show(id), show(v)]) },
-              st,
-            ),
-        )
+  let (st, _) = run_chaos(seed, n)
+  str_join(" ", map(\((id, v)) -> str_join(",", [show(id), show(v)]), st))
 
 -- A spread of distinct seeds, so consecutive schedules are genuinely different
 -- interleavings rather than near-neighbours.

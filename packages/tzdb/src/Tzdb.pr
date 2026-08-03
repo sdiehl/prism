@@ -17,7 +17,7 @@ pub fn utc() : Zone = Zone { name = "UTC", offset_minutes = 4 }
 pub fn europe_london() : Zone = Zone { name = "Europe/London", offset_minutes = 1 }
 
 pub fn america_new_york() : Zone =
-  Zone { name = "America/New_York", offset_minutes = 0 - 300 }
+  Zone { name = "America/New_York", offset_minutes = -300 }
 
 -- | Tokyo runs nine hours ahead of UTC, so its offset is 540 minutes.
 --

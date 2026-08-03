@@ -2,8 +2,8 @@
 
 use crate::core::builtins::Builtin;
 use crate::core::effect_abi::{
-    BOUNCE_TAG, EBIND, EBOUNCE, EOP, EPURE, ERESUME, OP_TAG, PURE_TAG, QAPPLY, RESUME_TAG, TQCONS,
-    TQCONS_TAG, TQNIL, TQNIL_TAG,
+    BOUNCE_TAG, EBIND, EBOUNCE, EFF_CTORS, EOP, EPURE, ERESUME, OP_TAG, PURE_TAG, QAPPLY,
+    RESUME_TAG, TQCONS, TQCONS_TAG, TQNIL, TQNIL_TAG,
 };
 use crate::types::ty::EffRow;
 use crate::types::Type;
@@ -18,8 +18,14 @@ use super::super::{
 
 const ABI_ROW: &str = "rho_eff@";
 
+/// Whether a tail answering with this constructor is answering with an effect
+/// cell.
+///
+/// Every cell constructor counts: a resumption and a bounce are cells the
+/// runtime drives exactly as it drives a pure or an operation cell.
+#[must_use]
 pub fn is_monadic_tail_constructor(name: Sym) -> bool {
-    matches!(name.as_str(), EPURE | EOP)
+    EFF_CTORS.contains(&name.as_str())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,14 +70,41 @@ const fn lowered(kind: LoweredType) -> CoreType {
     CoreType::Lowered(kind)
 }
 
+#[must_use]
 pub const fn word() -> CoreType {
     lowered(LoweredType::Word)
 }
 
+#[must_use]
 pub const fn eff(row: EffRow) -> CoreType {
     lowered(LoweredType::Eff(row))
 }
 
+/// Whether a type is the phase-private effect cell, whatever its row.
+///
+/// This is the one structural witness that a computation was built by the
+/// monadic builder, and the only way a later phase can tell the two conventions
+/// apart: the thunk that suspends it carries no other mark.
+#[must_use]
+pub const fn is_eff(ty: &CoreType) -> bool {
+    matches!(ty, CoreType::Lowered(LoweredType::Eff(_)))
+}
+
+/// Whether a computation answering with this result type answers at the monadic
+/// convention.
+///
+/// A lambda answers through its own body, so the function case is part of the
+/// same question rather than a second one: a thunk suspending `\(x) -> Eff` is
+/// as much the monadic builder's output as one suspending `Eff` directly.
+#[must_use]
+pub fn answers_with_effect_cell(result: &CoreType) -> bool {
+    match result {
+        CoreType::Function(signature) => is_eff(signature.body().result()),
+        result => is_eff(result),
+    }
+}
+
+#[must_use]
 pub const fn queue(row: EffRow) -> CoreType {
     lowered(LoweredType::Queue(row))
 }
@@ -88,6 +121,7 @@ const fn pure(result: CoreType) -> CompSig {
     CompSig::new(result, EffRow::Empty)
 }
 
+#[must_use]
 pub fn kont(row: EffRow) -> CoreType {
     let result = eff(row.clone());
     CoreType::Thunk(Box::new(CompSig::new(
@@ -100,6 +134,7 @@ pub fn kont(row: EffRow) -> CoreType {
     )))
 }
 
+#[must_use]
 pub fn bounce(row: EffRow) -> CoreType {
     let result = eff(row.clone());
     CoreType::Thunk(Box::new(CompSig::new(
@@ -116,6 +151,7 @@ fn abi_row() -> Sym {
     Sym::from(ABI_ROW)
 }
 
+#[must_use]
 pub fn row_instantiation(row: EffRow) -> Vec<CoreInstantiation> {
     vec![CoreInstantiation::Row(row)]
 }
@@ -209,10 +245,12 @@ pub fn insert(env: &mut VerifyEnv) {
     );
 }
 
+#[must_use]
 pub fn binder(name: &str, ty: CoreType) -> TypedBinder {
     TypedBinder::new(Sym::from(name), ty)
 }
 
+#[must_use]
 pub fn var(name: &str, ty: CoreType) -> TypedValue {
     TypedValue::new(
         ty,
@@ -228,6 +266,7 @@ const fn int(value: i64) -> TypedValue {
     TypedValue::new(source(Type::Int), TypedValueKind::Int(value))
 }
 
+#[must_use]
 pub fn lowered_repr(value: TypedValue, ty: CoreType) -> TypedValue {
     TypedValue::new(
         ty,
@@ -243,6 +282,7 @@ pub fn lowered_repr(value: TypedValue, ty: CoreType) -> TypedValue {
 /// The two conversion checks are the verifier's canonical ABI rule. Keeping
 /// them here makes a failed conversion an ordinary lowering decline rather
 /// than constructing a node that can only fail independent verification.
+#[must_use]
 pub fn try_word_bridge(value: TypedValue, expected: CoreType) -> Option<TypedValue> {
     if value.ty() == &expected {
         return Some(value);
@@ -256,6 +296,7 @@ pub fn try_word_bridge(value: TypedValue, expected: CoreType) -> Option<TypedVal
     Some(lowered_repr(lowered_repr(value, word), expected))
 }
 
+#[must_use]
 pub fn pack_queue_word(value: TypedValue) -> Option<TypedValue> {
     if !matches!(value.ty(), CoreType::Lowered(LoweredType::Queue(_))) {
         return None;
@@ -269,6 +310,7 @@ pub fn pack_queue_word(value: TypedValue) -> Option<TypedValue> {
     ))
 }
 
+#[must_use]
 pub fn unpack_queue_word(value: TypedValue, row: EffRow) -> Option<TypedValue> {
     if value.ty() != &word() {
         return None;
@@ -282,6 +324,7 @@ pub fn unpack_queue_word(value: TypedValue, row: EffRow) -> Option<TypedValue> {
     ))
 }
 
+#[must_use]
 pub fn empty_queue(row: EffRow) -> TypedValue {
     lowered_repr(
         TypedValue::new(source(Type::Unit), TypedValueKind::Unit),
@@ -307,6 +350,7 @@ fn ctor(
     )
 }
 
+#[must_use]
 pub fn epure(value: TypedValue, row: EffRow) -> TypedComp {
     let result = eff(row.clone());
     TypedComp::new(
@@ -321,6 +365,7 @@ pub fn epure(value: TypedValue, row: EffRow) -> TypedComp {
     )
 }
 
+#[must_use]
 pub fn eop(
     id: TypedValue,
     skip: TypedValue,
@@ -341,6 +386,7 @@ pub fn eop(
     )
 }
 
+#[must_use]
 pub fn eresume(queue: TypedValue, value: TypedValue, row: EffRow) -> TypedComp {
     let result = eff(row.clone());
     TypedComp::new(
@@ -355,6 +401,7 @@ pub fn eresume(queue: TypedValue, value: TypedValue, row: EffRow) -> TypedComp {
     )
 }
 
+#[must_use]
 pub fn qapply(queue: TypedValue, value: TypedValue, row: EffRow) -> TypedComp {
     TypedComp::new(
         CompSig::new(eff(row.clone()), row.clone()),
@@ -396,10 +443,12 @@ fn ctor_pattern(
     }
 }
 
+#[must_use]
 pub fn epure_pattern(row: EffRow, value: TypedBinder) -> TypedPattern {
     ctor_pattern(EPURE, row_instantiation(row), vec![value])
 }
 
+#[must_use]
 pub fn eop_pattern(
     row: EffRow,
     id: TypedBinder,
@@ -414,10 +463,12 @@ pub fn eop_pattern(
     )
 }
 
+#[must_use]
 pub fn eresume_pattern(row: EffRow, queue: TypedBinder, value: TypedBinder) -> TypedPattern {
     ctor_pattern(ERESUME, row_instantiation(row), vec![queue, value])
 }
 
+#[must_use]
 pub fn ebind_fn() -> TypedCoreFn {
     let row = abi_row();
     let residual = EffRow::Var(row);
@@ -490,6 +541,7 @@ pub fn ebind_fn() -> TypedCoreFn {
     )
 }
 
+#[must_use]
 pub fn qapply_fn() -> TypedCoreFn {
     let row = abi_row();
     let residual = EffRow::Var(row);

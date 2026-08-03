@@ -32,7 +32,7 @@ fn cancel_before_start() : Int ! {Async(Int), IO} =
       v
     Was_Cancelled =>
       println("unstarted observed Cancelled")
-      0 - 1
+      -1
 
 fn main() =
   println(run_async(scene))

@@ -19,7 +19,7 @@ fn observe(name : String, w : Fiber) : Int ! {Async(Int), IO} =
       v
     Was_Cancelled =>
       println("{name} observed Cancelled")
-      0 - 1
+      -1
 
 fn scene() : Int ! {Async(Int), IO} =
   let w = fork(looper)
@@ -30,6 +30,6 @@ fn scene() : Int ! {Async(Int), IO} =
   cancel(w)
   await(one)
   await(two)
-  0 - 1
+  -1
 
 fn main() = println(run_async(scene))

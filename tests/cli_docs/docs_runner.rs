@@ -2,13 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-const INTENTIONAL_DOC_VARIANTS: &[&str] = &[
-    "effectful_traverse.pr",
-    "effects.pr",
-    "player_manual.pr",
-    "stable.pr",
-    "ufcs.pr",
-];
+const INTENTIONAL_DOC_VARIANTS: &[&str] = &["player_manual.pr"];
 
 const WASM_VISIBLE_DOC_EXAMPLES: &[&str] = &[
     "docs/examples/app_stack.pr",

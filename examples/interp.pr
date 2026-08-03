@@ -40,13 +40,13 @@ type Value
 type Env = ENil | EBind(String, Value, Env)
 
 effect Crash
-  oops(String) : Value
+  never oops(String) : Value
 
 fn lookup(env, name) : Value ! {Crash} =
   match env of
     ENil => oops("unbound variable {name}")
     EBind(k, v, rest) =>
-      if str_eq(k, name) then
+      if k == name then
         v
       else
         lookup(rest, name)
@@ -56,15 +56,15 @@ fn lookup(env, name) : Value ! {Crash} =
 fn prim(op, a, b) : Value ! {Crash} =
   match (a, b) of
     (IntV(x), IntV(y)) =>
-      if str_eq(op, "+") then
+      if op == "+" then
         IntV(x + y)
-      elif str_eq(op, "-") then
+      elif op == "-" then
         IntV(x - y)
-      elif str_eq(op, "*") then
+      elif op == "*" then
         IntV(x * y)
-      elif str_eq(op, "<") then
+      elif op == "<" then
         BoolV(x < y)
-      elif str_eq(op, "==") then
+      elif op == "==" then
         BoolV(x == y)
       else
         oops("unknown operator {op}")

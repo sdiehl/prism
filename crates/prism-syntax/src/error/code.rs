@@ -22,6 +22,7 @@ pub struct ErrorCode {
 }
 
 impl ErrorCode {
+    #[must_use]
     pub const fn new(phase: ErrorPhase, spelling: &'static str) -> Self {
         Self { phase, spelling }
     }
@@ -37,36 +38,42 @@ impl ErrorCode {
     }
 }
 
-pub const LEX_INVALID: &str = "E7000";
-pub const LEX_EMPTY_HOLE: &str = "E7001";
-pub const LEX_UNTERMINATED_HOLE: &str = "E7002";
-pub const LEX_UNTERMINATED_STRING: &str = "E7003";
-pub const LEX_NUMBER_SEPARATOR: &str = "E7004";
-pub const PARSE_SYNTAX: &str = "E7100";
-pub const PARSE_EOF: &str = "E7101";
-pub const RESOLVE_MODULE: &str = "E7200";
-pub const RESOLVE_PROJECT: &str = "E7201";
-pub const RESOLVE_PACKAGE: &str = "E7202";
-pub const RESOLVE_LINEAGE: &str = "E7203";
-pub const RESOLVE_COMMAND: &str = "E7204";
-pub const PATCH_REFUSAL: &str = "E7205";
-pub const CODEGEN_BACKEND: &str = "E7400";
-pub const CODEGEN_DOCS: &str = "E7401";
-pub const CODEGEN_FORMAT: &str = "E7402";
-pub const CODEGEN_DUMP: &str = "E7403";
-pub const CODEGEN_VERIFICATION: &str = "E7404";
-pub const RUNTIME_EVALUATION: &str = "E7500";
-pub const RUNTIME_REPLAY: &str = "E7501";
-pub const RUNTIME_DEBUGGER: &str = "E7502";
-pub const IO: &str = "E7600";
-pub const TYPE_MISMATCH_LEGACY: &str = "E1098";
-pub const TYPE_OTHER_LEGACY: &str = "E1998";
+pub(crate) const LEX_INVALID: &str = "E7000";
+pub(crate) const LEX_EMPTY_HOLE: &str = "E7001";
+pub(crate) const LEX_UNTERMINATED_HOLE: &str = "E7002";
+pub(crate) const LEX_UNTERMINATED_STRING: &str = "E7003";
+pub(crate) const LEX_NUMBER_SEPARATOR: &str = "E7004";
+pub(crate) const PARSE_SYNTAX: &str = "E7100";
+pub(crate) const PARSE_EOF: &str = "E7101";
+/// A parse refused because nesting exhausted the parser's recursion budget.
+///
+/// A structured refusal at the current token, never a stack abort. Reserved for
+/// the Prism-language parser (the generated parser bounds depth differently);
+/// the stdlib side mirrors the string in `Syntax.Parse.Support`.
+pub const PARSE_DEPTH: &str = "E7102";
+pub(crate) const RESOLVE_MODULE: &str = "E7200";
+pub(crate) const RESOLVE_PROJECT: &str = "E7201";
+pub(crate) const RESOLVE_PACKAGE: &str = "E7202";
+pub(crate) const RESOLVE_LINEAGE: &str = "E7203";
+pub(crate) const RESOLVE_COMMAND: &str = "E7204";
+pub(crate) const PATCH_REFUSAL: &str = "E7205";
+pub(crate) const CODEGEN_BACKEND: &str = "E7400";
+pub(crate) const CODEGEN_DOCS: &str = "E7401";
+pub(crate) const CODEGEN_FORMAT: &str = "E7402";
+pub(crate) const CODEGEN_DUMP: &str = "E7403";
+pub(crate) const CODEGEN_VERIFICATION: &str = "E7404";
+pub(crate) const RUNTIME_EVALUATION: &str = "E7500";
+pub(crate) const RUNTIME_REPLAY: &str = "E7501";
+pub(crate) const RUNTIME_DEBUGGER: &str = "E7502";
+pub(crate) const IO: &str = "E7600";
+pub(crate) const TYPE_MISMATCH_LEGACY: &str = "E1098";
+pub(crate) const TYPE_OTHER_LEGACY: &str = "E1998";
 /// Dedicated diagnostic identity for a named typed hole.
 pub const TYPED_HOLE: ErrorCode = ErrorCode::new(ErrorPhase::Type, "E1021");
 /// An exhaustive handler omitted a declared operation of an effect it names.
 pub const INCOMPLETE_HANDLER: ErrorCode = ErrorCode::new(ErrorPhase::Type, "E5011");
-pub const SCOPE_UNBOUND: &str = "E2000";
-pub const SCOPE_OTHER_LEGACY: &str = "E2099";
+pub(crate) const SCOPE_UNBOUND: &str = "E2000";
+pub(crate) const SCOPE_OTHER_LEGACY: &str = "E2099";
 /// The checked declarations could not be converted into the typed-Core
 /// verification environment.
 pub const TYPED_CORE_ENVIRONMENT: ErrorCode = ErrorCode::new(ErrorPhase::Internal, "E9995");
@@ -87,8 +94,8 @@ pub const TYPED_CORE_VERIFICATION: ErrorCode = ErrorCode::new(ErrorPhase::Intern
 /// has no surface syntax, so this only fires on a compiler bug that built a
 /// malformed obligation.
 pub const SMT_LOGIC_WELLFORMED: ErrorCode = ErrorCode::new(ErrorPhase::Internal, "E9990");
-pub const INTERNAL_TYPE: &str = "E9998";
-pub const INTERNAL: &str = "E9999";
+pub(crate) const INTERNAL_TYPE: &str = "E9998";
+pub(crate) const INTERNAL: &str = "E9999";
 
 impl fmt::Display for ErrorCode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -112,6 +119,7 @@ mod tests {
             LEX_NUMBER_SEPARATOR,
             PARSE_SYNTAX,
             PARSE_EOF,
+            PARSE_DEPTH,
             RESOLVE_MODULE,
             RESOLVE_PROJECT,
             RESOLVE_PACKAGE,

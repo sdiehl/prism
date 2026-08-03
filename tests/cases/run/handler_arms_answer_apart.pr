@@ -1,0 +1,40 @@
+-- A handler whose clauses answer with a transformer the caller applies later.
+-- The refuting clause's transformer never performs and the disputing one's
+-- resumes, so the two answers differ by a row inside the answered function
+-- type even though the checker unified them. Every tier must still print the
+-- same errors in the same order.
+
+effect V(e)
+  never refute(e) : a
+  dispute(e) : Unit
+
+fn capture(action : () -> a ! {V(e) | r}) : (Option(a), List(e)) =
+  let f =
+    handle action() with
+      never refute(err) => \(errs) -> (None, reverse(Cons(err, errs)))
+      dispute(err) resume k => \(errs) -> k(())(Cons(err, errs))
+      return value => \(errs) -> (Some(value), reverse(errs))
+  f(Nil)
+
+fn disputing() : Unit ! {V(String)} =
+  dispute("too small")
+  dispute("odd")
+
+fn refuting() : Int ! {V(String)} =
+  dispute("first")
+  refute("fatal")
+
+fn show_errors(errs) =
+  match errs of
+    Nil => "none"
+    Cons(e, rest) => concat(e, concat(" ", show_errors(rest)))
+
+fn main() =
+  match capture(\() -> disputing()) of
+    (kept, errs) =>
+      println(show_errors(errs))
+      println(is_some(kept))
+  match capture(\() -> refuting()) of
+    (kept, errs) =>
+      println(show_errors(errs))
+      println(is_some(kept))

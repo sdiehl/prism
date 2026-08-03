@@ -1,0 +1,177 @@
+-- | The support layer of a production parser: the three-way parse outcome,
+-- the recursion budget, and the token classification every grammar family
+-- shares.
+--
+-- `Syntax.Cursor` owns the mechanics (peek, advance, expect, expectation
+-- merging); this module owns parser policy. The cursor's `Reply` expresses an
+-- unmet expectation and nothing else, which is right for a token fault and
+-- wrong for the two other refusals a real parser needs: a deliberate
+-- diagnostic whose message names a rewrite rather than a token menu, and a
+-- depth refusal when nesting exhausts the recursion budget. `Parsed` carries
+-- all three, and a deliberate refusal travels as a `Diagnostic` value, never
+-- as a sentinel expectation name.
+
+import Syntax.Source (..)
+
+import Syntax.Token (..)
+
+import Syntax.Diagnostic (..)
+
+import Syntax.Cursor (..)
+
+import Data.String (contains, index_of)
+
+-- | One parse step: the value and the cursor after it, an unmet expectation
+-- held in the cursor's failure record, or a finished diagnostic that no
+-- expectation set can express.
+pub type Parsed(a) = PTook(a, Cursor) | PStuck(Cursor) | PFault(Diagnostic)
+
+-- | Lift a cursor reply into a parse outcome.
+pub fn from_reply(r : Reply(a)) : Parsed(a) =
+  match r of
+    Took(x, c) => PTook(x, c)
+    Stuck(c) => PStuck(c)
+
+-- | Finish a parse outcome as the diagnostic it refuses with: the cursor's
+-- own merged-expectation diagnostic for a stuck parse, the carried diagnostic
+-- for a fault, and None for a success.
+pub fn parsed_fault(p : Parsed(a)) : Option(Diagnostic) =
+  match p of
+    PTook(_, _) => None
+    PStuck(c) => Some(cursor_diagnostic(c))
+    PFault(d) => Some(d)
+
+-- -------------------------------------------------------------------------
+-- Deliberate refusals and the recursion budget
+-- -------------------------------------------------------------------------
+
+-- | A deliberate parse refusal: the general parse code, the given span, the
+-- given message, and no generic expectation set, because the message names
+-- the exact rewrite or bound rather than a token menu. Migration diagnostics
+-- are built with this.
+--
+-- ```prism
+-- # import Syntax.Cursor (..)
+-- refuse(span_at(3), "the retired form").code
+-- ```
+-- ```output
+-- E7100
+-- ```
+pub fn refuse(s : Span, msg : String) : Diagnostic =
+  Diagnostic {
+    code = parse_syntax_code(),
+    phase = DPParse,
+    span = s,
+    message = msg,
+    expected = Nil,
+    related = Nil
+  }
+
+-- | The recursion budget a whole-file parse starts with. Deep enough that no
+-- authored program meets it, small enough that a generated hostile input is
+-- refused with a diagnostic instead of exhausting the stack; the supported
+-- bound is pinned by test, one point below and one beyond.
+pub fn depth_budget() : Int = 2048
+
+-- | Spend one level of the budget, or refuse structurally: a nesting depth
+-- past the budget is a diagnostic at the current token, never an abort.
+--
+-- ```prism
+-- # import Syntax.Cursor (..)
+-- match descend(1, cursor_of(Nil, 0)) of
+--   PTook(d, _) => d
+--   _ => -1
+-- ```
+-- ```output
+-- 0
+-- ```
+pub fn descend(depth : Int, c : Cursor) : Parsed(Int) =
+  if depth > 0 then
+    PTook(depth - 1, c)
+  else
+    PFault(
+        Diagnostic {
+          code = "E7102",
+          phase = DPParse,
+          span = cursor_span(c),
+          message = "nesting exceeds the parser's depth budget",
+          expected = Nil,
+          related = Nil
+        },
+      )
+
+-- -------------------------------------------------------------------------
+-- Token classification
+-- -------------------------------------------------------------------------
+
+-- | The decoded text a token carries, empty for a fixed token.
+pub fn token_text(t : Token) : String =
+  match t.value of
+    None => ""
+    Some(v) => v
+
+-- | The decoded text at the read position without consuming it, empty at the
+-- end or on a fixed token: the one lookahead a contextual keyword needs.
+pub fn peek_word(c : Cursor) : String =
+  match cursor_peek(c) of
+    None => ""
+    Some(t) => token_text(t)
+
+-- | Match Rust's stable `f64` debug spelling used by syntax artifacts. The
+-- Prism lexer has already round-tripped the value through `show_float`, which
+-- omits the `.0` on integral finite values.
+pub fn surface_float(s : String) : String =
+  let ep = index_of("e+", s)
+  let cap_ep = index_of("E+", s)
+  if ep >= 0 then
+    concat(substring(s, 0, ep + 1), substring(s, ep + 2, byte_len(s) - ep - 2))
+  elif cap_ep >= 0 then
+    concat(
+        substring(s, 0, cap_ep + 1),
+        substring(s, cap_ep + 2, byte_len(s) - cap_ep - 2),
+      )
+  elif contains(".", s) || contains("e", s) || contains("E", s) then
+    s
+  else
+    concat(s, ".0")
+
+-- | Canonical decimal spelling of an already-validated integer token.
+pub fn surface_int(s : String) : String =
+  match parse_int(s) of
+    Some(n) => show_int(n)
+    None => s
+
+-- | Whether the token at the read position is the fixed spelling `s`.
+pub fn at_fixed(c : Cursor, s : String) : Bool =
+  match cursor_peek(c) of
+    None => false
+    Some(t) => t.kind == TFixed(s)
+
+-- | Whether the token at the read position is of kind `k`.
+pub fn at_kind(c : Cursor, k : TokenKind) : Bool =
+  match cursor_kind(c) of
+    None => false
+    Some(kk) => kk == k
+
+-- | Require the fixed spelling `s`, as a parse outcome.
+pub fn take_fixed(c : Cursor, s : String) : Parsed(Token) =
+  from_reply(cursor_expect_fixed(c, s))
+
+-- | Require a token of kind `k`, as a parse outcome.
+pub fn take_kind(c : Cursor, k : TokenKind) : Parsed(Token) =
+  from_reply(cursor_expect(c, k))
+
+-- | Require a token of kind `k` and return its decoded text.
+pub fn take_word(c : Cursor, k : TokenKind) : Parsed(String) =
+  match take_kind(c, k) of
+    PTook(t, c2) => PTook(token_text(t), c2)
+    PStuck(c2) => PStuck(c2)
+    PFault(d) => PFault(d)
+
+-- | Consume the fixed spelling `s` if it is there, reporting whether it was:
+-- the optional-token step every trailing separator and modifier needs.
+pub fn skip_fixed(c : Cursor, s : String) : (Bool, Cursor) =
+  if at_fixed(c, s) then
+    (true, cursor_advance(c))
+  else
+    (false, c)

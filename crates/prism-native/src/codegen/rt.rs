@@ -408,14 +408,14 @@ const ALL: &[&str] = &[
 
 /// The C compiler version string probed at build time, an artifact-identity row.
 #[must_use]
-pub fn build_cc_version() -> &'static str {
+pub const fn build_cc_version() -> &'static str {
     env!("PRISM_BUILD_CC_VERSION")
 }
 
 /// The macOS deployment target the runtime objects were compiled against
 /// (empty off macOS), pinned so linked programs and runtime agree.
 #[must_use]
-pub fn macos_deployment_target() -> &'static str {
+pub const fn macos_deployment_target() -> &'static str {
     env!("PRISM_MACOSX_DEPLOYMENT_TARGET")
 }
 
@@ -429,7 +429,9 @@ mod tests {
     use super::{native_kont, ALL};
 
     const KONT_RUNTIME_FILES: &[&str] = &["prism_kont.h", "prism_kont.c"];
-    const KONT_TEST_SCHEME: &str = "prism-core-hash-v1";
+    // The harness builds a synthetic table, but its scheme row has to be the one
+    // the reader accepts, so it tracks the constant rather than restating it.
+    const KONT_TEST_SCHEME: &str = prism_core::core::HASH_SCHEME;
     const KONT_TEST_BUNDLE: &str = "0123456789abcdef";
     const KONT_TEST_HASH: &str = "9d18022b96cb1349a4de4ab500879606121e86d736be1fc2da3f69385c9fcd35";
     const KONT_TEST_SYMBOL: &str = super::super::MAIN_SYMBOL;

@@ -216,7 +216,7 @@ fn int_at(size : Int) =
   elif pick == 1 then
     1
   elif pick == 2 then
-    0 - 1
+    -1
   elif pick == 3 then
     rand()
   else

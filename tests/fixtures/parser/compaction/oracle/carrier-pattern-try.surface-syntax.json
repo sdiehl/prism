@@ -1,0 +1,93 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "fca98aaf31336db542d102dc32b9f4547be83ad4cb72ec95cf4b943cb5873cda",
+    "text": "fn corpus(r) =\n  let (x, y) = r?\n  x\n"
+  },
+  "items": [
+    {
+      "body": {
+        "arms": [
+          {
+            "body": {
+              "kind": "var",
+              "name": "x",
+              "span": [
+                35,
+                36
+              ]
+            },
+            "pat": {
+              "items": [
+                {
+                  "kind": "var",
+                  "name": "x",
+                  "span": [
+                    22,
+                    23
+                  ]
+                },
+                {
+                  "kind": "var",
+                  "name": "y",
+                  "span": [
+                    25,
+                    26
+                  ]
+                }
+              ],
+              "kind": "tuple",
+              "span": [
+                21,
+                27
+              ]
+            }
+          }
+        ],
+        "kind": "match",
+        "scrutinee": {
+          "args": [
+            {
+              "kind": "var",
+              "name": "r",
+              "span": [
+                30,
+                31
+              ]
+            }
+          ],
+          "head": {
+            "kind": "marker",
+            "marker": "try",
+            "span": [
+              30,
+              30
+            ]
+          },
+          "kind": "call",
+          "span": [
+            30,
+            32
+          ]
+        },
+        "span": [
+          17,
+          36
+        ],
+        "synth": true
+      },
+      "kind": "fn",
+      "name": "corpus",
+      "params": [
+        {
+          "name": "r"
+        }
+      ],
+      "span": [
+        0,
+        36
+      ]
+    }
+  ]
+}

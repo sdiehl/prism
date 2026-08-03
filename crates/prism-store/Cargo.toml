@@ -18,3 +18,6 @@ serde_json = { version = "1", features = ["unbounded_depth"] }
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,49 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "2ccb9f1cc577c47e458c15407c56aef98b8cb5574057da3165a5e310063bcf27",
+    "text": "fn corpus(x : (Int) -> Int ! {Io}) = x\n"
+  },
+  "items": [
+    {
+      "body": {
+        "kind": "var",
+        "name": "x",
+        "span": [
+          37,
+          38
+        ]
+      },
+      "kind": "fn",
+      "name": "corpus",
+      "params": [
+        {
+          "name": "x",
+          "ty": {
+            "effects": {
+              "labels": [
+                {
+                  "name": "Io"
+                }
+              ]
+            },
+            "kind": "fun",
+            "params": [
+              {
+                "kind": "int"
+              }
+            ],
+            "ret": {
+              "kind": "int"
+            }
+          }
+        }
+      ],
+      "span": [
+        0,
+        38
+      ]
+    }
+  ]
+}

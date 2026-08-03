@@ -86,6 +86,7 @@ pub fn expr_children(e : Sp(Expr)) : List(Sp(Expr)) =
     EDefault(a, d) => [a, d]
     ETransact(a, b) => [a, b]
     EProbe(_, a) => [a]
+    EReflect(_, _) => []
     EOptChain(r, _) => [r]
     ERange(parts, stop) => append(parts, [stop])
     ECompose(_, a, b) => [a, b]
@@ -368,6 +369,7 @@ fn wk_node(e : Expr, cs : List(Sp(Expr))) : Option(Expr) =
       match cs of
         Cons(a, Nil) => Some(EProbe(n, a))
         _ => None
+    EReflect(_, _) => wk_leaf(e, cs)
     EOptChain(_, n) =>
       match cs of
         Cons(r, Nil) => Some(EOptChain(r, n))

@@ -25,11 +25,13 @@ pub type Sig = BTreeSet<MaskOp>;
 /// Signatures of the thunk-valued variables in scope.
 pub type Loc = BTreeMap<Sym, Sig>;
 
+#[derive(Debug)]
 pub struct ThunkFlow {
     pub ret: BTreeMap<Sym, Sig>,
     pub param: BTreeMap<Sym, Vec<Sig>>,
 }
 
+#[must_use]
 pub fn analyze(fns: &[TypedCoreFn], lat: &Latent) -> ThunkFlow {
     let mut flow = ThunkFlow {
         ret: fns.iter().map(|f| (f.name(), Sig::new())).collect(),
@@ -45,12 +47,7 @@ pub fn analyze(fns: &[TypedCoreFn], lat: &Latent) -> ThunkFlow {
             .collect();
         let mut ret = BTreeMap::new();
         for f in fns {
-            let loc: Loc = f
-                .params()
-                .iter()
-                .map(TypedBinder::name)
-                .zip(flow.param[&f.name()].iter().cloned())
-                .collect();
+            let loc = param_loc(f, &flow);
             ret.insert(f.name(), props(f.body(), &loc, lat, &flow, &mut upd));
         }
         // `ret`/`upd` are rebuilt each pass from the same function list, so
@@ -81,31 +78,58 @@ fn merge(into: &mut Sig, from: &Sig) -> bool {
 }
 
 /// The op signature of a value: a lambda thunk performs the ops latent in its
-/// body; a variable carries whatever signature flowed to it. Anything else
-/// reports nothing here and is rejected by the trackability guard before
-/// lowering commits.
+/// body; a variable carries whatever signature flowed to it.
+///
+/// Anything else reports nothing here and is rejected by the trackability guard
+/// before lowering commits.
+#[must_use]
 pub fn value_sig(v: &TypedValue, loc: &Loc, lat: &Latent) -> Sig {
     match &peel(v).kind {
-        TypedValueKind::Thunk(c) => {
-            let body = match c.kind() {
-                TypedCompKind::Lam(_, b) => b.as_ref(),
-                _ => c.as_ref(),
-            };
-            let mut s = Sig::new();
-            latent(body, lat, &mut s);
-            s
-        }
+        TypedValueKind::Thunk(c) => body_sig(c, lat),
         TypedValueKind::Var { name, .. } => loc.get(name).cloned().unwrap_or_default(),
         _ => Sig::new(),
     }
 }
 
+/// The op signature of the computation a thunk suspends: what forcing it (and,
+/// for a lambda thunk, applying the result) can still perform.
+///
+/// The same answer [`value_sig`] gives for the value that thunk stands in,
+/// asked of a caller that holds the body rather than the value.
+#[must_use]
+pub fn body_sig(c: &TypedComp, lat: &Latent) -> Sig {
+    let body = match c.kind() {
+        TypedCompKind::Lam(_, b) => b.as_ref(),
+        _ => c,
+    };
+    let mut s = Sig::new();
+    latent(body, lat, &mut s);
+    s
+}
+
+/// The thunk signatures a declaration's body starts from: one entry per
+/// thunk-valued parameter, carrying what flowed into that slot.
+///
+/// Seeding a scope any other way would let the two solvers and the rewrite
+/// disagree about what a parameter performs.
+pub fn param_loc(f: &TypedCoreFn, flow: &ThunkFlow) -> Loc {
+    f.params()
+        .iter()
+        .map(TypedBinder::name)
+        .zip(flow.param.get(&f.name()).into_iter().flatten().cloned())
+        .collect()
+}
+
 /// Whether any effectful thunk escapes into a position the rewrite cannot
-/// thread evidence to: buried in a constructor or tuple (extracted later by a
+/// thread evidence to.
+///
+/// Those positions are: buried in a constructor or tuple (extracted later by a
 /// `case` the flow does not follow), or handed to a dynamic application or
-/// effect op (whose callee is not a statically known function). When this
-/// holds the program is not evidence-eligible and falls back to the free
-/// monad.
+/// effect op (whose callee is not a statically known function).
+///
+/// When this holds the program is not evidence-eligible and falls back to the
+/// free monad.
+#[must_use]
 pub fn escapes(fns: &[TypedCoreFn], lat: &Latent, flow: &ThunkFlow) -> bool {
     !escaping_fns(fns, lat, flow).is_empty()
 }
@@ -115,15 +139,7 @@ pub fn escapes(fns: &[TypedCoreFn], lat: &Latent, flow: &ThunkFlow) -> bool {
 /// monadic region from these.
 pub fn escaping_fns(fns: &[TypedCoreFn], lat: &Latent, flow: &ThunkFlow) -> BTreeSet<Sym> {
     fns.iter()
-        .filter(|f| {
-            let loc: Loc = f
-                .params()
-                .iter()
-                .map(TypedBinder::name)
-                .zip(flow.param[&f.name()].iter().cloned())
-                .collect();
-            esc(f.body(), &loc, lat, flow)
-        })
+        .filter(|f| esc(f.body(), &param_loc(f, flow), lat, flow))
         .map(TypedCoreFn::name)
         .collect()
 }
@@ -217,8 +233,11 @@ fn in_thunk(v: &TypedValue, loc: &Loc, lat: &Latent, flow: &ThunkFlow) -> bool {
 }
 
 /// The signature of the thunk a computation returns, in a context where `loc`
-/// gives the signatures of the thunk-valued variables in scope. Read-only twin
-/// of `props`'s result path, used by the rewrite to track let-bound thunks.
+/// gives the signatures of the thunk-valued variables in scope.
+///
+/// Read-only twin of `props`'s result path, used by the rewrite to track
+/// let-bound thunks.
+#[must_use]
 pub fn result_sig(c: &TypedComp, loc: &Loc, lat: &Latent, flow: &ThunkFlow) -> Sig {
     match c.kind() {
         TypedCompKind::Return(v) => value_sig(v, loc, lat),

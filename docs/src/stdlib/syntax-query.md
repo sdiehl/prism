@@ -12,7 +12,7 @@ Every field is a pure function of the artifact bytes. Nothing here reads ambient
 
 ### `DeclHead`
 
-```prism,def,h-e8894712dd372e0e1131a3ef99f33d3ef9ef72a9fce239d65ac3fe6dc22b003d
+```prism,def,h-75fe6fd31ba6e33fa4c9aa0de993e7fa73e1d06a8da7f5bc3ffe013fa32a5042
 type DeclHead = DeclHead {
   keyword: String,
   name: String,
@@ -24,7 +24,7 @@ The head of a top-level declaration: its leading keyword, the first name it bind
 
 ### `KindCount`
 
-```prism,def,h-f1804acf512ead0e930e8327502e81edef9135371299414481e6e5bdd2c4416d
+```prism,def,h-9242b126e23904eeaa44487707ce4483989a87598690d9b2f5bb14442e074050
 type KindCount = KindCount { kind: String, count: Int } deriving (Eq, Show)
 ```
 
@@ -32,7 +32,7 @@ One bucket of the token-kind histogram: a wire kind and how many raw tokens carr
 
 ### `QueryReport`
 
-```prism,def,h-d5b225803fabda4680bdea3bea85d652a02a915d167db233dae0799da9db63de
+```prism,def,h-8f1649119cefa45c00d5d1a9ce2fdd709f301561b1f6efb5c921687dd00f0df5
 type QueryReport = QueryReport {
   digest: String,
   imports: List(String),
@@ -48,7 +48,7 @@ The full source inventory of an artifact.
 
 ### `query`
 
-```prism,sig,h-195a4fc01fe5b1c62322c5f206bec71fd4531ce6f8301ffbd1928476248d067e
+```prism,sig,h-5627a331300ebb6ee24f4ea9ecddecbb580251477f7a641dbfa45b8eff74e548
 query : (Syntax.Codec.TokensDoc) -> Syntax.Query.QueryReport
 ```
 
@@ -56,7 +56,7 @@ The full source inventory of a decoded artifact.
 
 ### `query_lines`
 
-```prism,sig,h-86d3de8ebdb9ce97a9a28bf0d5ebaa2288efb792e5e3cf467591433b3097c487
+```prism,sig,h-c3bdc971bbb8a03dd58168e2b62021d8f74923b418d00dac5d150c5be04f1385
 query_lines : (Syntax.Query.QueryReport) -> List(String)
 ```
 
@@ -64,7 +64,7 @@ The inventory rendered as one stable line per fact: a `digest` line, then an `im
 
 ### `query_text`
 
-```prism,sig,h-18f37e9f744afb0849eccebbf3ac51f3cade726437e2d34717e3583dfb0b1771
+```prism,sig,h-c031ab19999b07e029c842f025f535aaf1b92d9211d34389b24f64e04fe93903
 query_text : (Syntax.Query.QueryReport) -> String
 ```
 

@@ -738,6 +738,8 @@ pub enum ErrKind {
     },
     #[error("probe name must match [A-Za-z0-9_.:-]+")]
     InvalidProbeName,
+    #[error("cannot reflect `{decl} {name}`: a quotation names a declaration of the same file")]
+    ReflectUnknownTarget { decl: String, name: String },
     #[error("usage fact `{fact}` is reserved but not implemented")]
     CoeffectFactUnimplemented { fact: String },
     #[error("`@ noalloc` certifies a function declaration: write it after a `fn`'s return type")]
@@ -937,6 +939,7 @@ impl ErrKind {
             Self::NotDeclaredError { .. } => "E6049",
             Self::CatchArmArity { .. } => "E6050",
             Self::InvalidProbeName { .. } => "E6051",
+            Self::ReflectUnknownTarget { .. } => "E6071",
             Self::CoeffectFactUnimplemented { .. } => "E6052",
             Self::CoeffectRowMisplaced { .. } => "E6053",
             Self::OnceUsedMoreThanOnce { .. } => "E6059",
@@ -1347,6 +1350,7 @@ mod tests {
             NotDeclaredError { name },
             CatchArmArity { name, arity, got },
             InvalidProbeName,
+            ReflectUnknownTarget { decl, name },
             CoeffectFactUnimplemented { fact },
             CoeffectRowMisplaced,
             OnceUsedMoreThanOnce { fn_name, param },

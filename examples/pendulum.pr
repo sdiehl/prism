@@ -56,18 +56,14 @@ fn accel(th1, th2, w1, w2) =
 -- old and predicted accelerations. It is second-order and time-symmetric, so
 -- energy drifts by only a fraction of a percent over the demo window (checked in
 -- main below), and, being a fixed pure function, it is exactly reproducible.
-fn verlet(s) =
-  match s of
-    (th1, th2, w1, w2) =>
-      match accel(th1, th2, w1, w2) of
-        (a1, a2) =>
-          let nth1 = th1 + dt * w1 + 0.5 * dt * dt * a1
-          let nth2 = th2 + dt * w2 + 0.5 * dt * dt * a2
-          match accel(nth1, nth2, w1 + dt * a1, w2 + dt * a2) of
-            (b1, b2) =>
-              let nw1 = w1 + 0.5 * dt * (a1 + b1)
-              let nw2 = w2 + 0.5 * dt * (a2 + b2)
-              (nth1, nth2, nw1, nw2)
+fn verlet((th1, th2, w1, w2)) =
+  let (a1, a2) = accel(th1, th2, w1, w2)
+  let nth1 = th1 + dt * w1 + 0.5 * dt * dt * a1
+  let nth2 = th2 + dt * w2 + 0.5 * dt * dt * a2
+  let (b1, b2) = accel(nth1, nth2, w1 + dt * a1, w2 + dt * a2)
+  let nw1 = w1 + 0.5 * dt * (a1 + b1)
+  let nw2 = w2 + 0.5 * dt * (a2 + b2)
+  (nth1, nth2, nw1, nw2)
 
 -- Advance the state by k integrator steps (constant stack, tail-recursive).
 fn iterate(s, k) =
@@ -89,58 +85,43 @@ fn frame_at(n) = iterate(init, n * substeps)
 -- Cartesian bob positions from the angles: the pivot is the origin, y points
 -- down (the direction gravity pulls), so a rod hanging straight down is at
 -- angle 0. Returns (x1, y1, x2, y2), the two bob centers.
-fn positions(s) =
-  match s of
-    (th1, th2, _, _) =>
-      let x1 = l * sin(th1)
-      let y1 = l * cos(th1)
-      (x1, y1, x1 + l * sin(th2), y1 + l * cos(th2))
+fn positions((th1, th2, _, _)) =
+  let x1 = l * sin(th1)
+  let y1 = l * cos(th1)
+  (x1, y1, x1 + l * sin(th2), y1 + l * cos(th2))
 
 -- Total mechanical energy (kinetic + potential). Conserved by the true dynamics;
 -- how nearly the integrator conserves it is the honest measure of its quality.
-fn energy(s) =
-  match s of
-    (th1, th2, w1, w2) =>
-      let d = th1 - th2
-      let ke = w1 * w1 + 0.5 * w2 * w2 + w1 * w2 * cos(d)
-      let pe = -g * (2.0 * cos(th1) + cos(th2))
-      ke * l * l + pe * l
+fn energy((th1, th2, w1, w2)) =
+  let d = th1 - th2
+  let ke = w1 * w1 + 0.5 * w2 * w2 + w1 * w2 * cos(d)
+  let pe = -g * (2.0 * cos(th1) + cos(th2))
+  ke * l * l + pe * l
 
 fn obs(s) =
-  match positions(s) of
-    (x1, y1, x2, y2) =>
-      str_join(",", [
-          show_float_prec(x1, 5),
-          show_float_prec(y1, 5),
-          show_float_prec(x2, 5),
-          show_float_prec(y2, 5),
-        ])
+  let (x1, y1, x2, y2) = positions(s)
+  str_join(",", [
+      show_float_prec(x1, 5),
+      show_float_prec(y1, 5),
+      show_float_prec(x2, 5),
+      show_float_prec(y2, 5),
+    ])
 
 -- The full trajectory as text for the browser: a header line with the maximum
 -- reach (l + l, so the renderer can scale the pivot's disk to the canvas),
 -- followed by one line per frame, each `x1,y1,x2,y2` bob positions. `replayable`
 -- again: the transcript is a pure function of the frame count.
 replayable fn run_trace(n) =
-  concat(
-      concat(show_float_prec(l + l, 5), "\n"),
-      str_join("\n", map(obs, frames_upto(n))),
-    )
+  "{show_float_prec(l + l, 5)}\n{str_join("\n", map(obs, frames_upto(n)))}"
 
 -- A one-line summary of the bob-2 tip position at frame n, for the terminal run.
 fn sample(n) =
-  match positions(frame_at(n)) of
-    (_, _, x2, y2) =>
-      str_join(" ", [
-          concat("step ", show(n)),
-          concat(
-              "tip=(",
-              concat(
-                  show_float_prec(x2, 4),
-                  concat(", ", concat(show_float_prec(y2, 4), ")")),
-                ),
-            ),
-          concat("E=", show_float_prec(energy(frame_at(n)), 6)),
-        ])
+  let (_, _, x2, y2) = positions(frame_at(n))
+  str_join(" ", [
+      "step {n}",
+      "tip=({show_float_prec(x2, 4)}, {show_float_prec(y2, 4)})",
+      "E={show_float_prec(energy(frame_at(n)), 6)}",
+    ])
 
 -- @scrubber:main-below
 -- The terminal corpus run: a deterministic trajectory summary. The sampled tip

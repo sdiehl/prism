@@ -11,7 +11,7 @@
 //! the lexer does not reserve) has legitimate members the lexer never tokenizes:
 //! literal fragments in the lexical section (`i64`, `u64`, `e`, `n`, `t`, `r`)
 //! and contextual words recognized positionally, not reserved (`Type`, `Row`,
-//! `view`, `make`). Checking it would need an allow-list of those, so it is left
+//! `view`, `make`, `reflect`). Checking it would need an allow-list of those, so it is left
 //! out; the drift that bites is a new reserved word going undocumented.
 
 use std::fs;

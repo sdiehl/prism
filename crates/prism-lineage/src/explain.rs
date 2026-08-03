@@ -35,6 +35,7 @@ pub enum SelectedOutput {
 }
 
 impl SelectedOutput {
+    #[must_use]
     pub fn node_id(&self) -> super::graph::NodeId {
         match self {
             Self::Stdout(o) => o.node_id(),
@@ -44,6 +45,7 @@ impl SelectedOutput {
         }
     }
 
+    #[must_use]
     pub fn describe(&self) -> String {
         match self {
             Self::Stdout(o) => format!("stdout ({}:{})", o.digest_scheme, o.digest),

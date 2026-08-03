@@ -1,0 +1,28 @@
+{
+  "schema": "prism-syntax-diagnostics-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "44734e02edb8c607e2ea3eaad246e86eefb97873f6a793e6403d7a6b4a258ee5",
+    "text": "fn f() !\n"
+  },
+  "diagnostics": [
+    {
+      "code": "E7100",
+      "phase": "parse",
+      "span": [
+        7,
+        8
+      ],
+      "message": "unexpected '!' at line 1:8, expected 'requires', 'ensures', 'given', '=', ':', identifier",
+      "expected": [
+        ":",
+        "=",
+        "ensures",
+        "given",
+        "ident",
+        "requires"
+      ],
+      "related": []
+    }
+  ]
+}

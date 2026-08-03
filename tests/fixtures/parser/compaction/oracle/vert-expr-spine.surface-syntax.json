@@ -1,0 +1,130 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "35e4be2ed50a0e7a06c18acc1ca39521e896e3f330958d91b6b3f62113445af5",
+    "text": "fn corpus(f, g, x, y) = f(1)?.value + g(2) * 3 ^ 4\n"
+  },
+  "items": [
+    {
+      "body": {
+        "kind": "bin",
+        "lhs": {
+          "expr": {
+            "args": [
+              {
+                "kind": "int",
+                "span": [
+                  26,
+                  27
+                ],
+                "value": "1"
+              }
+            ],
+            "head": {
+              "kind": "var",
+              "name": "f",
+              "span": [
+                24,
+                25
+              ]
+            },
+            "kind": "call",
+            "span": [
+              24,
+              28
+            ]
+          },
+          "kind": "opt-chain",
+          "name": "value",
+          "span": [
+            24,
+            35
+          ]
+        },
+        "op": "+",
+        "rhs": {
+          "kind": "bin",
+          "lhs": {
+            "args": [
+              {
+                "kind": "int",
+                "span": [
+                  40,
+                  41
+                ],
+                "value": "2"
+              }
+            ],
+            "head": {
+              "kind": "var",
+              "name": "g",
+              "span": [
+                38,
+                39
+              ]
+            },
+            "kind": "call",
+            "span": [
+              38,
+              42
+            ]
+          },
+          "op": "*",
+          "rhs": {
+            "kind": "bin",
+            "lhs": {
+              "kind": "int",
+              "span": [
+                45,
+                46
+              ],
+              "value": "3"
+            },
+            "op": "^",
+            "rhs": {
+              "kind": "int",
+              "span": [
+                49,
+                50
+              ],
+              "value": "4"
+            },
+            "span": [
+              45,
+              50
+            ]
+          },
+          "span": [
+            38,
+            50
+          ]
+        },
+        "span": [
+          24,
+          50
+        ]
+      },
+      "kind": "fn",
+      "name": "corpus",
+      "params": [
+        {
+          "name": "f"
+        },
+        {
+          "name": "g"
+        },
+        {
+          "name": "x"
+        },
+        {
+          "name": "y"
+        }
+      ],
+      "span": [
+        0,
+        50
+      ]
+    }
+  ]
+}

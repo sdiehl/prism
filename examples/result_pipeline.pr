@@ -1,0 +1,62 @@
+-- A Result pipeline: errors are ordinary values, `?` keeps the happy path
+-- straight, and IO stays at the reporting boundary. Use named errors when the
+-- caller needs to distinguish failure modes; use `errors.pr` when errors should
+-- instead compose in the effect row.
+
+type StatsError = EmptyInput | DivisionByZero | InvalidRange deriving (Show)
+
+fn safe_div(n, d) : Result(Int, StatsError) =
+  if d == 0 then
+    Err(DivisionByZero)
+  else
+    Ok(n / d)
+
+-- Statistics: pure, total, failure-explicit.
+fn mean(xs) : Result(Int, StatsError) =
+  if is_nil(xs) then
+    Err(EmptyInput)
+  else
+    safe_div(sum(xs), length(xs))
+
+fn variance(xs) : Result(Int, StatsError) =
+  let m = mean(xs)?
+  let diffs = map(\(x) -> (x - m) * (x - m), xs)
+  safe_div(sum(diffs), length(xs))
+
+-- Count values whose squared deviation exceeds threshold * variance.
+fn count_outliers(threshold, xs) : Result(Int, StatsError) =
+  let m = mean(xs)?
+  let v = variance(xs)?
+  Ok(count(\(x) -> abs(x - m) * abs(x - m) > threshold * v, xs))
+
+-- Normalize x into [0, 100]. Err on an inverted range.
+fn normalize(lo, hi, x) : Result(Int, StatsError) =
+  if lo >= hi then
+    Err(InvalidRange)
+  else
+    Ok((clamp(lo, hi, x) - lo) * 100 / (hi - lo))
+
+-- Lift a fallible transform over a list, substituting default on failure.
+fn lift(f, default, xs) = map(\(x) -> result_or(default, f(x)), xs)
+
+-- Pipeline: filter valid range, mean, scale.
+fn score_pipeline(lo, hi, scale, xs) : Result(Int, StatsError) =
+  let valid = filter(\(x) -> lo <= x && x <= hi, xs)
+  let m = mean(valid)?
+  safe_div(10000, m * scale)
+
+-- IO lives here and nowhere above.
+fn report(v : Result(Int, StatsError)) : Unit ! {IO} =
+  match v of
+    Ok(x) => println(x)
+    Err(e) => println("error: {e}")
+
+fn main() : Unit ! {IO} =
+  let data = range(1, 11)
+  report(mean(data))
+  report(variance(data))
+  report(count_outliers(2, data))
+  report(mean(Nil))
+  let normed = lift(normalize(0, 10), -1, data)
+  report(mean(normed))
+  report(score_pipeline(2, 8, 100, data))

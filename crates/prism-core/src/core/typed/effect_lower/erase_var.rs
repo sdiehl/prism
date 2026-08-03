@@ -5,9 +5,8 @@
 //! triple-match on the unforgeable op/runner names), and rewrite it to a
 //! mutable cell: `get` becomes `RefGet`, `set` becomes `RefSet`, and the block
 //! is wrapped in `RefNew(init)` under a fresh `{n}@cell` binder. A function is
-//! erased only when no genuinely multishot op is reachable from it
-//! (transitively over calls and thunks), with an op's declared grade capping
-//! the classification.
+//! erased only when the [`EffectPlan`] says no genuinely multishot op is
+//! reachable from it, with an op's declared grade capping the classification.
 //!
 //! The typed-specific step is effect-row discharge: the handler this pass
 //! removes was the proof that the private `Var@x@n` effect never escaped, so
@@ -18,45 +17,53 @@
 //! canonical [`crate::core::cbpv::CheckedHandler`] classification, recomputed
 //! on an erased clone of each typed handler.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use crate::core::OpGrades;
 use crate::types::ty::EffRow;
-use prism_common::fixpoint::least_fixpoint;
 use prism_common::fresh::Fresh;
 use prism_common::sym::Sym;
 use prism_syntax::ast::Grade;
 use prism_syntax::names;
 
-use super::super::inline::calls_in;
 use super::super::specialize_support::Rewrite;
 use super::super::verify::VerifyEnv;
 use super::super::{
     CompSig, CoreInstantiation, CoreType, TypedBinder, TypedComp, TypedCompKind, TypedCoreFn,
     TypedHandleOp, TypedValue,
 };
+use super::plan::EffectPlan;
 use super::subtract::SubtractEffect;
-use super::walk::{collect_ops, each_subterm};
+use super::walk::each_subterm;
 use super::{as_var, binder_var, union_effects, unit_value};
 
 /// Rewrite closed local `var`/State handlers to mutable-cell ops, per
 /// function, leaving any function from which a genuinely multishot op is
 /// reachable untouched (the cell would share state across resumptions that
 /// pure State keeps independent).
-pub fn erase_local_vars(
+pub(crate) fn erase_local_vars(
     fns: &[TypedCoreFn],
     grades: &OpGrades,
+    plan: &EffectPlan,
     env: &VerifyEnv,
 ) -> Vec<TypedCoreFn> {
     let multishot = multishot_ops(fns, grades);
     // No genuinely multishot handler anywhere: every var is safe to erase.
-    // This common path computes no reachability.
     let unsafe_fns: BTreeSet<Sym> = if multishot.is_empty() {
         BTreeSet::new()
     } else {
-        let reach = reach_map(fns);
+        // Reachability includes what flowed into thunk-valued parameters, so an
+        // op arriving inside a thunk and forced (a call no by-name graph sees)
+        // declines the function it reaches, one function at a time.
+        //
+        // Deliberately not widened by the plan's opaque-thunk flag. This tree is
+        // the pre-erasure one, where every `var` block is itself an effectful
+        // thunk handed to a runner, so that flag is true of precisely the state
+        // this pass exists to remove: reading it here refuses the erasure
+        // because the erasure has not happened yet, and costs an unrelated
+        // component its cheap tier.
         fns.iter()
-            .filter(|f| reach[&f.name()].intersection(&multishot).next().is_some())
+            .filter(|f| plan.ops(f.name()).intersection(&multishot).next().is_some())
             .map(TypedCoreFn::name)
             .collect()
     };
@@ -123,35 +130,6 @@ fn collect_multishot(c: &TypedComp, grades: &OpGrades, out: &mut BTreeSet<Sym>) 
         }
     }
     each_subterm(c, &mut |sc| collect_multishot(sc, grades, out));
-}
-
-// Every op each function can perform or handle, transitively over calls and
-// thunks: the least fixpoint of `own_ops(f) union reach(callee)` over the call
-// graph. `collect_ops` and `calls_in` both descend thunks.
-fn reach_map(fns: &[TypedCoreFn]) -> BTreeMap<Sym, BTreeSet<Sym>> {
-    let own: BTreeMap<Sym, BTreeSet<Sym>> = fns
-        .iter()
-        .map(|f| {
-            let mut ops = BTreeSet::new();
-            collect_ops(f.body(), &mut ops);
-            (f.name(), ops)
-        })
-        .collect();
-    let calls: BTreeMap<Sym, BTreeSet<Sym>> = fns
-        .iter()
-        .map(|f| (f.name(), calls_in(f.body()).into_iter().collect()))
-        .collect();
-    let seed: BTreeMap<Sym, BTreeSet<Sym>> =
-        fns.iter().map(|f| (f.name(), BTreeSet::new())).collect();
-    least_fixpoint(seed, |name, cur| {
-        let mut s = own[name].clone();
-        for callee in &calls[name] {
-            if let Some(r) = cur.get(callee) {
-                s.extend(r.iter().copied());
-            }
-        }
-        s
-    })
 }
 
 struct Eraser<'a> {

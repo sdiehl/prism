@@ -20,7 +20,7 @@ type Term = Var(Int) | Lam(Term) | App(Term, Term)
 type Val = Clo(Term, List(Val))
 
 effect Scope
-  bad(Int) : Val
+  never bad(Int) : Val
 
 fn lookup(env, i) : Val ! {Scope} =
   match nth(i, env) of

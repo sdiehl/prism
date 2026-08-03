@@ -20,9 +20,10 @@ pub use ty::{
 };
 
 /// One constructor's checked shape: its datatype, parameters and their kinds,
-/// argument types, runtime tag, and field names. Produced by the checker and
-/// consumed by elaboration and code generation, so it lives in the shared
-/// type vocabulary rather than inside either.
+/// argument types, runtime tag, and field names.
+///
+/// Produced by the checker and consumed by elaboration and code generation, so
+/// it lives in the shared type vocabulary rather than inside either.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CtorInfo {
     pub type_name: Sym,

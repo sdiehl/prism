@@ -6,19 +6,21 @@ use std::collections::BTreeSet;
 use prism_common::sym::Sym;
 use prism_syntax::names::ENTRY_POINT;
 
-use super::analysis::open_resume_escapes;
-use super::latent::Latent;
-use super::walk;
-use super::{raw_effects, TypedComp, TypedCompKind, TypedCoreFn};
+use super::decline::Decline;
+use super::plan::{open_resume_escapes, EffectPlan};
+use super::walk::each_subterm;
+use super::{TypedComp, TypedCompKind, TypedCoreFn};
 
 /// Per-lowering reporter for a typed fast-path matcher whose accepted input
 /// violates its own post-condition.
+#[derive(Debug)]
 pub struct DriftLog {
     quiet: bool,
     warned: RefCell<BTreeSet<&'static str>>,
 }
 
 impl DriftLog {
+    #[must_use]
     pub const fn new(quiet: bool) -> Self {
         Self {
             quiet,
@@ -44,26 +46,27 @@ impl DriftLog {
     }
 }
 
-pub fn genuine_effects(latent: &Latent) -> BTreeSet<Sym> {
-    latent
-        .iter()
-        .filter_map(|(name, operations)| (!operations.is_empty()).then_some(*name))
-        .collect()
-}
-
 /// Produce the user-visible performance warning from the typed tree whose
 /// convention plan drives this lowering.
+#[must_use]
 pub fn free_monad_warning(
     functions: &[TypedCoreFn],
     monadified: &BTreeSet<Sym>,
-    latent: &Latent,
+    plan: &EffectPlan,
+    declined: Option<Decline>,
 ) -> Option<String> {
     let mut names: Vec<&str> = monadified.iter().map(|name| name.as_str()).collect();
     names.sort_unstable();
     if names.is_empty() {
         return None;
     }
-    let causes = free_monad_causes(functions, monadified, latent);
+    let mut causes = free_monad_causes(functions, monadified, plan);
+    // A refused confined region is the most specific cause there is: it names
+    // the one site that cost the program the narrower lowering, which the
+    // plan-level facts above can only describe in aggregate.
+    if let Some(declined) = declined {
+        causes.push(declined.to_string());
+    }
     let why = if causes.is_empty() {
         "a handler reifies its continuation (not tail-resumptive)".to_string()
     } else {
@@ -78,27 +81,26 @@ pub fn free_monad_warning(
     ))
 }
 
+// Why the fallback fired, read off the plan rather than re-derived: the causes
+// a user is shown are the same facts that decided the tier.
 fn free_monad_causes(
     functions: &[TypedCoreFn],
     monadified: &BTreeSet<Sym>,
-    latent: &Latent,
+    plan: &EffectPlan,
 ) -> Vec<String> {
-    let effectful = genuine_effects(latent);
+    let latent = plan.latent();
     let mut causes = Vec::new();
     for function in functions
         .iter()
         .filter(|function| monadified.contains(&function.name()))
     {
-        let mut thunks = Vec::new();
-        walk::thunks_in_comp(function.body(), &mut thunks);
-        let captures_effect = thunks.iter().any(|body| {
-            let mut calls = BTreeSet::new();
-            all_calls(body, &mut calls);
-            !calls.is_disjoint(&effectful) || raw_effects(body)
-        });
-        if captures_effect {
+        // Only a capture the thunk signatures cannot follow is a cause. A
+        // tracked capture keeps its region confined, so naming it here would
+        // blame the user for a shape that costs them nothing.
+        if plan.opaque_captures().contains(&function.name()) {
             causes.push(format!(
-                "`{}` captures an effectful computation in a first-class closure",
+                "`{}` captures an effectful computation in a first-class closure \
+                 the signatures cannot follow",
                 function.name()
             ));
         }
@@ -122,24 +124,12 @@ fn free_monad_causes(
     causes
 }
 
-fn all_calls(comp: &TypedComp, calls: &mut BTreeSet<Sym>) {
-    if let TypedCompKind::Call { callee, .. } = comp.kind() {
-        calls.insert(*callee);
-    }
-    walk::each_subcomp(comp, &mut |child| all_calls(child, calls));
-}
-
 fn contains_mask(comp: &TypedComp) -> bool {
     if matches!(comp.kind(), TypedCompKind::Mask(..)) {
         return true;
     }
     let mut found = false;
-    walk::each_value(comp, &mut |value| {
-        let mut thunks = Vec::new();
-        walk::thunks_in_value(value, &mut thunks);
-        found |= thunks.iter().any(|thunk| contains_mask(thunk));
-    });
-    walk::each_subcomp(comp, &mut |child| found |= contains_mask(child));
+    each_subterm(comp, &mut |child| found |= contains_mask(child));
     found
 }
 

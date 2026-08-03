@@ -395,25 +395,24 @@ impl<'a> CheckedHir<'a> {
     }
 }
 
-// Lint in debug and test builds; a violation is a compiler bug (checking
-// recorded an inconsistent fact), never a user error. Not `const`: under test
-// and debug the body calls the non-const `lint_hir`; clippy only sees the
-// trivial release body.
-#[allow(clippy::missing_const_for_fn)]
+// Lint in every configuration, release included: the profile that certifies a
+// release is the release profile, so a check only debug builds run is a check
+// the certified artifact never had. The cost allows it. One pass over the
+// recorded fact tables, a map lookup per resolution step and per dictionary,
+// once per elaborated program, against the checking that produced those facts
+// in the first place. A violation is a compiler bug (checking recorded an
+// inconsistent fact), never a user error.
 fn linted(hir: CheckedHir<'_>) -> CheckedHir<'_> {
-    #[cfg(any(test, debug_assertions))]
-    {
-        let violations = lint::lint_hir(&hir);
-        assert!(
-            violations.is_empty(),
-            "lint_hir: malformed checked HIR (compiler bug):\n{}",
-            violations
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("\n")
-        );
-    }
+    let violations = lint::lint_hir(&hir);
+    assert!(
+        violations.is_empty(),
+        "lint_hir: malformed checked HIR (compiler bug):\n{}",
+        violations
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
     hir
 }
 

@@ -1,0 +1,118 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "4b0696b97458edb95cb6b7d212bc3616233654b914d4ca8a95c0f9038f5e91bb",
+    "text": "fn corpus(a : f(Int), b : Maybe, c : Pkg.T, d : (Int), e : #(Int, Bool), f : () -> Int !, g : () -> Int ! {io, Pkg.Io}, h : Int @ {once, portable}) = 0\n"
+  },
+  "items": [
+    {
+      "body": {
+        "kind": "int",
+        "span": [
+          150,
+          151
+        ],
+        "value": "0"
+      },
+      "kind": "fn",
+      "name": "corpus",
+      "params": [
+        {
+          "name": "a",
+          "ty": {
+            "args": [
+              {
+                "kind": "int"
+              }
+            ],
+            "head": "f",
+            "kind": "app"
+          }
+        },
+        {
+          "name": "b",
+          "ty": {
+            "kind": "con",
+            "name": "Maybe"
+          }
+        },
+        {
+          "name": "c",
+          "ty": {
+            "kind": "con",
+            "name": "Pkg.T"
+          }
+        },
+        {
+          "name": "d",
+          "ty": {
+            "kind": "int"
+          }
+        },
+        {
+          "name": "e",
+          "ty": {
+            "items": [
+              {
+                "kind": "int"
+              },
+              {
+                "kind": "bool"
+              }
+            ],
+            "kind": "unboxed-tuple"
+          }
+        },
+        {
+          "name": "f",
+          "ty": {
+            "effects": {
+              "labels": []
+            },
+            "kind": "fun",
+            "ret": {
+              "kind": "int"
+            }
+          }
+        },
+        {
+          "name": "g",
+          "ty": {
+            "effects": {
+              "labels": [
+                {
+                  "name": "io"
+                },
+                {
+                  "name": "Pkg.Io"
+                }
+              ]
+            },
+            "kind": "fun",
+            "ret": {
+              "kind": "int"
+            }
+          }
+        },
+        {
+          "name": "h",
+          "ty": {
+            "facts": [
+              "once",
+              "portable"
+            ],
+            "kind": "usage",
+            "ty": {
+              "kind": "int"
+            }
+          }
+        }
+      ],
+      "span": [
+        0,
+        151
+      ]
+    }
+  ]
+}

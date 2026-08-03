@@ -264,6 +264,32 @@ pub fn cursor_restore(saved : Cursor, c : Cursor) : Cursor =
 -- ```
 pub fn cursor_expected(c : Cursor) : List(String) = c.wanted
 
+-- Insert one name into a sorted, deduplicated list.
+fn ins_name(n : String, acc : List(String)) : List(String) =
+  match acc of
+    Nil => [n]
+    Cons(h, t) =>
+      if n < h then
+        Cons(n, acc)
+      elif n == h then
+        acc
+      else
+        Cons(h, ins_name(n, t))
+
+-- | The canonical expectation set of a refusal: the recorded names
+-- deduplicated and byte-lexicographically sorted, so the set a diagnostic
+-- carries does not depend on the order alternatives were tried, and a
+-- harmless reordering of a parser's branches moves no artifact bytes.
+--
+-- ```prism
+-- let c = cursor_note_name(cursor_of(Nil, 3), "int")
+-- str_join(", ", cursor_canonical(cursor_note_name(c, "ident")))
+-- ```
+-- ```output
+-- ident, int
+-- ```
+pub fn cursor_canonical(c : Cursor) : List(String) = foldr(ins_name, [], c.wanted)
+
 -- | The span the failure record points at: the token at the furthest position
 -- reached, or the end-of-input caret.
 pub fn cursor_far_span(c : Cursor) : Span = span_index(c, c.far)
@@ -288,26 +314,36 @@ pub fn cursor_message(c : Cursor) : String =
           let all = str_join(", ", c.wanted)
           "expected one of {all}, found {found}"
 
+-- | The compiler's general parse-fault code, the one home for the string on
+-- this side of the seam.
+pub fn parse_syntax_code() : String = "E7100"
+
+-- | The compiler's exhausted-stream code: the token stream itself ended while
+-- the parser wanted more.
+pub fn parse_eof_code() : String = "E7101"
+
 -- | The stable code an unmet expectation carries: the parser's end-of-input
 -- code when the furthest position reached is past the last token, and its
 -- general syntax code otherwise. Both match the compiler's own parse codes.
 pub fn cursor_code(c : Cursor) : String =
   if c.far >= cursor_count(c) then
-    "E7101"
+    parse_eof_code()
   else
-    "E7100"
+    parse_syntax_code()
 
 -- | The refusal an unmet expectation produces: a parse-phase diagnostic at the
--- furthest position reached, carrying the merged expectation set. A cursor
--- failure is a diagnostic and never a bespoke error value, so a hand-written
--- parser's refusals join the same document the compiler's own do.
+-- furthest position reached, carrying the canonical expectation set. The
+-- message keeps the order alternatives were tried, for a reader; the set is
+-- sorted, for the artifact. A cursor failure is a diagnostic and never a
+-- bespoke error value, so a hand-written parser's refusals join the same
+-- document the compiler's own do.
 pub fn cursor_diagnostic(c : Cursor) : Diagnostic =
   Diagnostic {
     code = cursor_code(c),
     phase = DPParse,
     span = cursor_far_span(c),
     message = cursor_message(c),
-    expected = c.wanted,
+    expected = cursor_canonical(c),
     related = Nil
   }
 

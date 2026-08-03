@@ -8,7 +8,7 @@ import Data.Checked (..)
 
 fn main() =
   let i_max = to_i64(2 ^ 63 - 1)
-  let i_min = to_i64(0 - 2 ^ 63)
+  let i_min = to_i64(-2 ^ 63)
   let u_max = to_u64(2 ^ 64 - 1)
   let one = to_i64(1)
   -- I64: the three families agree with each other at the upper edge.
@@ -23,7 +23,7 @@ fn main() =
   println(show(wrapping_neg(i_min) == i_min))
   println(show(checked_div(i_min, 0i64 - one) == None))
   println(show(checked_div(to_i64(7), to_i64(2)) == Some(to_i64(3))))
-  println(show(checked_mod(to_i64(0 - 7), to_i64(2)) == Some(to_i64(0 - 1))))
+  println(show(checked_mod(to_i64(-7), to_i64(2)) == Some(to_i64(-1))))
   -- U64: unsigned underflow clamps to zero and wraps to the max.
   println(show(checked_sub(to_u64(0), to_u64(1)) == None))
   println(show(saturating_sub(to_u64(0), to_u64(1)) == to_u64(0)))
@@ -37,5 +37,5 @@ fn main() =
   println(show(checked_div(5, 0) == None))
   -- Checked Int narrowing agrees with the lane bounds.
   println(show(int_to_i64(2 ^ 100) == None))
-  println(show(int_to_u64(0 - 1) == None))
+  println(show(int_to_u64(-1) == None))
   println(show(int_to_i64(42) == Some(to_i64(42))))

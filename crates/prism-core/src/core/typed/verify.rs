@@ -6,16 +6,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::marker::PhantomData;
 
 use crate::types::ty::{EffRow, Label};
 use crate::types::{repr_of_type, Type};
 use prism_common::sym::Sym;
 use prism_syntax::names::{self, ALLOC_OP, IO_EFFECT};
-
-// Red zone / segment size for the verifier's per-node recursion, matching the
-// builder guards in `core/typed/build.rs`.
-const VERIFY_MIN_STACK: usize = 4 * 1024 * 1024;
-const VERIFY_GROW_STACK: usize = 8 * 1024 * 1024;
 
 use super::build::lower_value_type;
 use super::{
@@ -24,7 +20,12 @@ use super::{
     TypedCompKind, TypedCore, TypedCoreFn, TypedHandleOp, TypedHandler, TypedPattern, TypedValue,
     TypedValueKind,
 };
+use super::{CORE_GROW_STACK, CORE_MIN_STACK};
 use crate::core::builtins::Builtin;
+use crate::core::CoreOp::{
+    Add, Addf, Div, Divf, Eq, Eqf, Ge, Gef, Gt, Gtf, Le, Lef, Lt, Ltf, Mul, Mulf, Ne, Nef, Rem,
+    Sub, Subf,
+};
 use crate::core::{CoreOp, IoOp, NegLane};
 
 /// The declared shape of a data constructor.
@@ -37,6 +38,7 @@ pub struct ConstructorSig {
 }
 
 impl ConstructorSig {
+    #[must_use]
     pub const fn new(
         quantifiers: Vec<CoreQuantifier>,
         tag: usize,
@@ -51,6 +53,7 @@ impl ConstructorSig {
         }
     }
 
+    #[must_use]
     pub fn quantifiers(&self) -> &[CoreQuantifier] {
         &self.quantifiers
     }
@@ -66,6 +69,7 @@ pub struct OperationSig {
 }
 
 impl OperationSig {
+    #[must_use]
     pub const fn new(
         quantifiers: Vec<CoreQuantifier>,
         params: Vec<CoreType>,
@@ -80,18 +84,22 @@ impl OperationSig {
         }
     }
 
+    #[must_use]
     pub fn quantifiers(&self) -> &[CoreQuantifier] {
         &self.quantifiers
     }
 
+    #[must_use]
     pub fn params(&self) -> &[CoreType] {
         &self.params
     }
 
+    #[must_use]
     pub const fn result(&self) -> &CoreType {
         &self.result
     }
 
+    #[must_use]
     pub const fn effect(&self) -> &Label {
         &self.effect
     }
@@ -135,18 +143,22 @@ impl VerifyEnv {
         self.builtin_overrides.insert(op.wire(), sig);
     }
 
+    #[must_use]
     pub fn constructor(&self, name: Sym) -> Option<&ConstructorSig> {
         self.constructors.get(&name)
     }
 
+    #[must_use]
     pub fn operation(&self, name: Sym) -> Option<&OperationSig> {
         self.operations.get(&name)
     }
 
+    #[must_use]
     pub const fn operations(&self) -> &BTreeMap<Sym, OperationSig> {
         &self.operations
     }
 
+    #[must_use]
     pub fn builtin_override(&self, op: Builtin) -> Option<&CoreFnSig> {
         self.builtin_overrides.get(&op.wire())
     }
@@ -316,7 +328,7 @@ struct Checker<'a, P> {
     allowed_rows: BTreeSet<Sym>,
     path: Vec<String>,
     violations: Vec<CoreViolation>,
-    phase: std::marker::PhantomData<P>,
+    phase: PhantomData<P>,
 }
 
 impl<'a, P: TypedCorePhase> Checker<'a, P> {
@@ -333,7 +345,7 @@ impl<'a, P: TypedCorePhase> Checker<'a, P> {
             allowed_rows: BTreeSet::new(),
             path: vec!["body".into()],
             violations: Vec::new(),
-            phase: std::marker::PhantomData,
+            phase: PhantomData,
         }
     }
 
@@ -713,7 +725,7 @@ impl<'a, P: TypedCorePhase> Checker<'a, P> {
     fn comp(&mut self, comp: &TypedComp) {
         // The verifier recurses per typed node; grow stack segments inside the
         // recursion, same discipline as the builder it checks.
-        stacker::maybe_grow(VERIFY_MIN_STACK, VERIFY_GROW_STACK, || {
+        stacker::maybe_grow(CORE_MIN_STACK, CORE_GROW_STACK, || {
             self.comp_inner(comp);
         });
     }
@@ -1161,10 +1173,6 @@ impl<'a, P: TypedCorePhase> Checker<'a, P> {
     }
 
     fn primitive(&mut self, comp: &TypedComp, op: CoreOp, lhs: &TypedValue, rhs: &TypedValue) {
-        use CoreOp::{
-            Add, Addf, Div, Divf, Eq, Eqf, Ge, Gef, Gt, Gtf, Le, Lef, Lt, Ltf, Mul, Mulf, Ne, Nef,
-            Rem, Sub, Subf,
-        };
         self.value(lhs);
         self.value(rhs);
         let (operand, result) = match op {
@@ -1998,20 +2006,26 @@ enum ProductKind {
     UnboxedTuple,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MonoConstructor {
     pub tag: usize,
     pub fields: Vec<CoreType>,
     pub result: CoreType,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MonoOperation {
     pub params: Vec<CoreType>,
     pub result: CoreType,
     pub effect: Label,
 }
 
+/// The Core calling convention of a checked scheme: its quantifiers, its
+/// lowered parameter types, and the computation signature it answers with.
+///
+/// # Errors
+/// A message naming what the scheme peels down to, when that is not a function
+/// type.
 pub fn scheme_to_fn_sig(mut ty: Type) -> Result<CoreFnSig, String> {
     let mut quantifiers = Vec::new();
     loop {
@@ -2036,6 +2050,12 @@ pub fn scheme_to_fn_sig(mut ty: Type) -> Result<CoreFnSig, String> {
     }
 }
 
+/// Substitute `arguments` through a function signature, yielding the
+/// monomorphic signature the call site must match.
+///
+/// # Errors
+/// A message when `arguments` do not match the signature's quantifiers in
+/// count or in kind.
 pub fn instantiate_fn(
     signature: &CoreFnSig,
     arguments: &[CoreInstantiation],
@@ -2050,6 +2070,13 @@ pub fn instantiate_fn(
     Ok(CoreFnSig::new(Vec::new(), params, body))
 }
 
+/// Substitute `arguments` through a value's type, looking through a thunk to
+/// the function it suspends. A value that quantifies nothing accepts only an
+/// empty instantiation.
+///
+/// # Errors
+/// A message when `arguments` do not match the type's quantifiers in count or
+/// in kind.
 pub fn instantiate_value_scheme(
     ty: &CoreType,
     arguments: &[CoreInstantiation],
@@ -2075,6 +2102,12 @@ pub fn instantiate_value_scheme(
     }
 }
 
+/// Substitute `arguments` through a constructor signature, yielding the field
+/// and result types this occurrence commits to.
+///
+/// # Errors
+/// A message when `arguments` do not match the constructor's quantifiers in
+/// count or in kind.
 pub fn instantiate_constructor(
     signature: &ConstructorSig,
     arguments: &[CoreInstantiation],
@@ -2091,6 +2124,12 @@ pub fn instantiate_constructor(
     })
 }
 
+/// Substitute `arguments` through an operation signature, yielding the
+/// parameter, result, and effect label this occurrence commits to.
+///
+/// # Errors
+/// A message when `arguments` do not match the operation's quantifiers in
+/// count or in kind.
 pub fn instantiate_operation(
     signature: &OperationSig,
     arguments: &[CoreInstantiation],
@@ -2130,6 +2169,7 @@ fn require_instantiation(
     Ok(())
 }
 
+#[must_use]
 pub fn substitute_core_type(
     ty: &CoreType,
     quantifiers: &[CoreQuantifier],
@@ -2168,6 +2208,7 @@ pub fn substitute_core_type(
     }
 }
 
+#[must_use]
 pub fn substitute_fn_sig(
     signature: &CoreFnSig,
     quantifiers: &[CoreQuantifier],
@@ -2279,6 +2320,7 @@ fn rename_fn_quantifier(signature: &CoreFnSig, index: usize, fresh: Sym) -> Core
     )
 }
 
+#[must_use]
 pub fn rename_bound_core(ty: &CoreType, old: &CoreQuantifier, fresh: Sym) -> CoreType {
     match ty {
         CoreType::Source(ty) => CoreType::Source(match old {
@@ -2336,6 +2378,7 @@ fn rename_bound_row(row: &EffRow, old: &CoreQuantifier, fresh: Sym) -> EffRow {
     }
 }
 
+#[must_use]
 pub fn substitute_sig(
     signature: &CompSig,
     quantifiers: &[CoreQuantifier],
@@ -2347,6 +2390,7 @@ pub fn substitute_sig(
     )
 }
 
+#[must_use]
 pub fn substitute_type(
     ty: &Type,
     quantifiers: &[CoreQuantifier],
@@ -2363,6 +2407,7 @@ pub fn substitute_type(
     normalize_type_rows(&substituted)
 }
 
+#[must_use]
 pub fn substitute_row(
     row: &EffRow,
     quantifiers: &[CoreQuantifier],
@@ -2544,6 +2589,7 @@ fn substitute_row_with(
     }
 }
 
+#[must_use]
 pub fn substitute_label(
     label: &Label,
     quantifiers: &[CoreQuantifier],
@@ -2674,6 +2720,12 @@ fn merge_shell_states(
     merged
 }
 
+/// The canonical union of two effect rows, which the verifier uses wherever a
+/// node's row is the join of its subterms'.
+///
+/// # Errors
+/// A message showing both tails, when they are distinct open ones: the union of
+/// two unknown remainders is not something the checker can prove.
 pub fn union_rows(left: &EffRow, right: &EffRow) -> Result<EffRow, String> {
     let tail = match (left.tail(), right.tail()) {
         (a, b) if a == b => a.clone(),
@@ -2727,6 +2779,7 @@ fn core_subtype(actual: &CoreType, expected: &CoreType) -> bool {
     }
 }
 
+#[must_use]
 pub fn lowered_representation_conversion(actual: &CoreType, expected: &CoreType) -> bool {
     let runtime_word = |ty: &CoreType| {
         matches!(
@@ -2745,6 +2798,7 @@ pub fn lowered_representation_conversion(actual: &CoreType, expected: &CoreType)
     }
 }
 
+#[must_use]
 pub fn representation_preserving(actual: &CoreType, expected: &CoreType) -> bool {
     if matches!(
         (actual, expected),

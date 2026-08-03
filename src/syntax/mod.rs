@@ -3,6 +3,7 @@
 //! here with the rest of the front end.
 
 pub use prism_syntax::ast;
+pub use prism_syntax::reflect;
 pub use prism_syntax::{ExprParser, ProgramParser, TypeSigParser};
 
 pub mod desugar;

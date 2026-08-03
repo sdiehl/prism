@@ -1,0 +1,76 @@
+{
+  "schema": "prism-parser-compaction-entry-receipt-v1",
+  "oracle_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+  "corpus_version": 2,
+  "entry_id": "prism.parse_type",
+  "visibility": "public",
+  "scope": "named accepted direct-entry projection and complete token consumption",
+  "matching_wrapper_case": "type-forall",
+  "fragment": "forall a. a",
+  "token_slice": [
+    {
+      "kind": "forall",
+      "span": [
+        14,
+        20
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        21,
+        22
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ".",
+      "span": [
+        22,
+        23
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        24,
+        25
+      ],
+      "value": "a"
+    }
+  ],
+  "stop": 25,
+  "initial_depth": 2048,
+  "outcome": "accepted",
+  "unconsumed_position": 4,
+  "value_projection": {
+    "kind": "forall",
+    "ty": {
+      "kind": "var",
+      "name": "a"
+    },
+    "vars": [
+      "a"
+    ]
+  },
+  "wrapper_value_projection": {
+    "kind": "forall",
+    "ty": {
+      "kind": "var",
+      "name": "a"
+    },
+    "vars": [
+      "a"
+    ]
+  },
+  "value_projection_blake3": "5b96772cc1993b1ac58edfb37b848c8e8594c7b2f0796db1ee8feedba25138d4",
+  "ordered_spend_trace": [
+    "parse_type"
+  ],
+  "status": "exact",
+  "subject": {
+    "backend": "handwritten Prism",
+    "harness_source_blake3": "5011fafe2da58c198d45b5168be436f88a7a8d831f5cf75830044890fc64ed51",
+    "harness_executable_blake3": "098628ebf5b68efc58e4e9d5a57ba5171e7b16d0efa1df571b40347bd4e1fd5a"
+  }
+}

@@ -76,19 +76,22 @@ fn index_dir(root: &Path) -> PathBuf {
     root.join(INDEX_DIR)
 }
 
-// The advisory lock serializing index writers: an exclusive `flock` on the lock
-// file. A second writer -- in this process or another -- blocks in `acquire`
-// until the holder releases, and the kernel drops the lock when the holder's
-// file handle closes, including on a crash, so a killed writer never leaves a
-// stale lock to deadlock or race a steal against. Readers do not lock (see the
-// module header). Holding the open handle is holding the lock; `Drop` (closing
-// the file) releases it.
-struct Lock {
+// The advisory lock serializing writers of the store's mutable layers: an
+// exclusive `flock` on one lock file. Every read-modify-write over a rewritten
+// file (the indexes here, the verification records) takes it, so two writers
+// cannot both load a file, each add their own entry, and each write back a copy
+// missing the other's. A second writer -- in this process or another -- blocks in
+// `acquire` until the holder releases, and the kernel drops the lock when the
+// holder's file handle closes, including on a crash, so a killed writer never
+// leaves a stale lock to deadlock or race a steal against. Readers do not lock
+// (see the module header). Holding the open handle is holding the lock; `Drop`
+// (closing the file) releases it.
+pub(super) struct Lock {
     _file: fs::File,
 }
 
 impl Lock {
-    fn acquire(root: &Path) -> io::Result<Self> {
+    pub(super) fn acquire(root: &Path) -> io::Result<Self> {
         let dir = index_dir(root);
         fs::create_dir_all(&dir)?;
         let file = fs::OpenOptions::new()

@@ -1,0 +1,189 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "7fff1bd832943cde268457ee87ae9c239215cbfb17ed2577a97675acd26767ac",
+    "text": "fn corpus(x : Int @ once) = x\n"
+  },
+  "raw": [
+    {
+      "kind": "fn",
+      "span": [
+        0,
+        2
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        3,
+        9
+      ],
+      "value": "corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        9,
+        10
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        10,
+        11
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ":",
+      "span": [
+        12,
+        13
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        14,
+        17
+      ]
+    },
+    {
+      "kind": "@",
+      "span": [
+        18,
+        19
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        20,
+        24
+      ],
+      "value": "once"
+    },
+    {
+      "kind": ")",
+      "span": [
+        24,
+        25
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        26,
+        27
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        28,
+        29
+      ],
+      "value": "x"
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        0,
+        2
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        3,
+        9
+      ],
+      "value": "corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        9,
+        10
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        10,
+        11
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ":",
+      "span": [
+        12,
+        13
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        14,
+        17
+      ]
+    },
+    {
+      "kind": "@",
+      "span": [
+        18,
+        19
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        20,
+        24
+      ],
+      "value": "once"
+    },
+    {
+      "kind": ")",
+      "span": [
+        24,
+        25
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        26,
+        27
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        28,
+        29
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        29,
+        29
+      ]
+    }
+  ],
+  "trivia": []
+}

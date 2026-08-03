@@ -10,7 +10,7 @@ One document per source file: the embedded source identity and every syntax-boun
 
 ### `DiagPhase`
 
-```prism,def,h-a1572000dff0d7abd1620803041f08f531118fcac561b6ebb35e2e5d6aec7a34
+```prism,def,h-e414102dfc871ddc5c848aefdf20f81e8d10ee0b98ced69a14434cb8faa88839
 type DiagPhase = DPLex | DPParse
 ```
 
@@ -18,7 +18,7 @@ The phase that raised a diagnostic.
 
 ### `Diagnostic`
 
-```prism,def,h-157128a616c232189e53a3d392645139a2fda783f5b94fd6523a67535c72f06a
+```prism,def,h-9949442920ded62525925a7e4e8cd2e5bc59dffccab706988352a8d10fd27319
 type Diagnostic = Diagnostic {
   code: String,
   phase: DiagPhase,
@@ -33,7 +33,7 @@ One diagnostic: the stable append-only code, the raising phase, the primary half
 
 ### `DiagnosticsDoc`
 
-```prism,def,h-620835021b84faecb5627f819d70ebc77ee56be0a8f1770a7950ba554923aeba
+```prism,def,h-fe92b42c220df81559fa3eb6176f97bce8b1da97dea3160a8681c2fc9d3b049e
 type DiagnosticsDoc = DiagnosticsDoc {
   schema: String,
   compiler: String,
@@ -48,7 +48,7 @@ A decoded diagnostics document: the envelope identity, the embedded source every
 
 ### `diagnostics_schema`
 
-```prism,sig,h-4eb3a0640ff32dd005c2db367af638d6a79803ebef48de7522fe388fed278098
+```prism,sig,h-8428091c6894f1c2578b5fd9df53da7dc2f8ab4becbf6067cb54f57a167d28bb
 diagnostics_schema : () -> String
 ```
 
@@ -56,7 +56,7 @@ The schema tag this vocabulary decodes.
 
 ### `doc_accepted`
 
-```prism,sig,h-b9aac1f085c437113cd20329940de8ad06e5ac8c00c71e63c475e11cc8d516af
+```prism,sig,h-05df7d505eb771ff5f73125539f7344e30768646c7034bc3961ac85c3cadad34
 doc_accepted : (Syntax.Diagnostic.DiagnosticsDoc) -> Bool
 ```
 

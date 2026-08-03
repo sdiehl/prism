@@ -32,11 +32,10 @@ pub fn report() =
         \() -> let _ = println("  fire: count") in length(map_values(get(scores))),
       )
     let banner = memo(
-        \() -> let _ = println("  fire: banner") in concat("total ", concat(show_int(get(total)), " over three players")),
+        \() -> let _ = println("  fire: banner") in "total {get(total)} over three players",
       )
     println(banner_line(get(banner), get(count)))
 
-fn banner_line(banner, count) =
-  concat(banner, concat(" (", concat(show_int(count), " memos)")))
+fn banner_line(banner : String, count : Int) = "{banner} ({count} memos)"
 
 pub fn main() = report()

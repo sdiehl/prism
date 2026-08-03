@@ -16,7 +16,7 @@ Two operations are deliberately absent because their result length is not expres
 
 ### `Vec`
 
-```prism,def,h-f24d280aed47c1366806aadc22d74b8e901d39622bc4f958fc9d36af625d6e1b
+```prism,def,h-bb2869c035116c1878252d868349bf046bbb63a8897add03868e536098fda218
 type Vec(a, n : Nat) = MkVec(List(a))
 ```
 
@@ -26,7 +26,7 @@ A vector of `a` with a type-level length `n`.
 
 ### `vempty`
 
-```prism,sig,h-c7d3005db929db4b343b3e31b6afde8f05630d60c16ff442a403d45e236afc1d
+```prism,sig,h-ae7c430e3263563cc54e9071f27bddee6b005814116ad2ea834478af08f70913
 vempty : forall a. () -> Data.Vec.Vec(a, 0)
 ```
 
@@ -34,7 +34,7 @@ The empty vector, length `0`.
 
 ### `vsingle`
 
-```prism,sig,h-6e89eed381da08ee9fe3319487ca933ba432e90f99a9e1156a946c105150e4c2
+```prism,sig,h-24bf4e1a2433b73e69fd7adcfda014ec489aebf4cd5730b51bda55a0ca120106
 vsingle : forall a. (a) -> Data.Vec.Vec(a, 1)
 ```
 
@@ -50,7 +50,7 @@ vto_list(vsingle(42))
 
 ### `vto_list`
 
-```prism,sig,h-8023a90574cbbeda33899928939899d74d25d0ccf100e81db4b41578b095ad46
+```prism,sig,h-ceb9fc56418b5addf1c2ae81edf6007beec73b3c27d18921e846dd66f0dda1f3
 vto_list : forall a b. (Data.Vec.Vec(a, b)) -> List(a)
 ```
 
@@ -66,7 +66,7 @@ vto_list(vsingle(7))
 
 ### `vmap`
 
-```prism,sig,h-7b7632aaf1e96834bdd43880112b67a1e90c7475d0703e32aab7ff70db483a7b
+```prism,sig,h-1182ca0ee4e1ee5742b5965b916988b9f13d4dab09c80ae0e6c22ef635012a3b
 vmap : forall a b c. ((a) -> b, Data.Vec.Vec(a, c)) -> Data.Vec.Vec(b, c)
 ```
 
@@ -82,7 +82,7 @@ vto_list(vmap(\(x) -> x * 2, vsingle(21)))
 
 ### `vzip`
 
-```prism,sig,h-195446ba2eddaa10d3e9f2579e673b2ea1297a5ce9f1823e995234eaf431c94f
+```prism,sig,h-8cee3ba56567fc142cb8cdd267a8777e028354bff81ea5181e14e173008209c5
 vzip : forall a b c. (Data.Vec.Vec(a, b), Data.Vec.Vec(c, b)) -> Data.Vec.Vec((a, c), b)
 ```
 
@@ -104,7 +104,7 @@ vzip(vsingle(1), vempty())
 
 ### `vhead`
 
-```prism,sig,h-3aa41390f85176568317e6faa676d2d8a82062296a75873170bd1887b745a5a5
+```prism,sig,h-8f96b61b7c6c022bf4a280917947cbc53e9854ff411af6932813491588ab0cb1
 vhead : forall a b. (Data.Vec.Vec(a, b)) -> a ! {Fail}
 ```
 

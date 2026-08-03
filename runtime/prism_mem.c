@@ -140,9 +140,7 @@ long prism_arena_enter(void) {
  * behind the arity slot, not children; everything else (constructors, tuples,
  * closures, boxes, arrays) stores ordinary tagged values. */
 static int prism_cell_has_children(const long *p) {
-    long tag = p[PRISM_TAG_W];
-    return tag != PRISM_STR_TAG && tag != PRISM_BIG_TAG && tag != PRISM_BUF_TAG &&
-           tag != PRISM_TBUF_TAG;
+    return !prism_tag_has_payload(p[PRISM_TAG_W]);
 }
 
 /* A fresh refcounted copy of an arena cell's header (fields filled by the
@@ -342,9 +340,7 @@ void prism_rc_dec(long v) {
     if (--p[PRISM_RC_W] != 0) return;
     while (p) {
         long *next = (long *)p[PRISM_RC_W];
-        long dtag = p[PRISM_TAG_W];
-        if (dtag != PRISM_STR_TAG && dtag != PRISM_BIG_TAG && dtag != PRISM_BUF_TAG &&
-            dtag != PRISM_TBUF_TAG) {
+        if (prism_cell_has_children(p)) {
             long n = p[PRISM_ARITY_W];
             for (long i = 0; i < n; i++) {
                 long c = p[PRISM_HDR_WORDS + i];
@@ -467,9 +463,9 @@ long prism_reuse_token(long v) {
      * region owns it), so it can never become a reuse shell; its rc word must
      * also stay untouched. Constructing over it falls back to fresh allocation. */
     if (p[PRISM_RC_W] & PRISM_ARENA_OWNED) return 0;
-    if (p[PRISM_TAG_W] == PRISM_STR_TAG || p[PRISM_TAG_W] == PRISM_BIG_TAG ||
-        p[PRISM_TAG_W] == PRISM_BUF_TAG || p[PRISM_TAG_W] == PRISM_TBUF_TAG)
-        return 0;
+    /* An inline-payload cell has no fields to release and its arity is a payload
+     * measure, not a capacity the reuse path may build over. */
+    if (!prism_cell_has_children(p)) return 0;
     if (p[PRISM_RC_W] == 1) {
         long n = p[PRISM_ARITY_W];
         for (long i = 0; i < n; i++) prism_rc_dec(p[PRISM_HDR_WORDS + i]);
@@ -512,14 +508,11 @@ long prism_field(void *p, long i) {
     PRISM_RT_CHECK(p, "prism_field");
 #ifdef PRISM_RT_DEBUG
     {
-        long tag = ((long *)p)[PRISM_TAG_W];
         long arity = ((long *)p)[PRISM_ARITY_W];
-        /* String/bignum/buffer cells carry an inline byte/limb payload, not child
-         * fields, so their arity slot is a length or payload-word count, not a
-         * field count: skip the bounds check for them (prism_field is not a valid
-         * accessor there). */
-        if (tag != PRISM_STR_TAG && tag != PRISM_BIG_TAG && tag != PRISM_BUF_TAG &&
-            (i < 0 || i >= arity)) {
+        /* An inline-payload cell's arity slot is a length or payload-word count,
+         * not a field count, so the bound would be meaningless: skip the check
+         * for them (prism_field is not a valid accessor there). */
+        if (prism_cell_has_children((const long *)p) && (i < 0 || i >= arity)) {
             fprintf(stderr, "prism_rt: prism_field index %ld out of bounds (arity %ld)\n", i,
                     arity);
             abort();

@@ -1,0 +1,89 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "45049afec8520373c07f94bb548c5770a0e6925be7aee54ba55b6068b16ea5ed",
+    "text": "fn corpus(v) = match v of\n  Point {x, ..} => x\n  _ => 0\n"
+  },
+  "items": [
+    {
+      "body": {
+        "arms": [
+          {
+            "body": {
+              "kind": "var",
+              "name": "x",
+              "span": [
+                45,
+                46
+              ]
+            },
+            "pat": {
+              "fields": [
+                {
+                  "name": "x",
+                  "pat": {
+                    "kind": "var",
+                    "name": "x",
+                    "span": [
+                      35,
+                      36
+                    ]
+                  }
+                }
+              ],
+              "kind": "record",
+              "name": "Point",
+              "rest": true,
+              "span": [
+                28,
+                41
+              ]
+            }
+          },
+          {
+            "body": {
+              "kind": "int",
+              "span": [
+                54,
+                55
+              ],
+              "value": "0"
+            },
+            "pat": {
+              "kind": "wild",
+              "span": [
+                49,
+                50
+              ]
+            }
+          }
+        ],
+        "kind": "match",
+        "scrutinee": {
+          "kind": "var",
+          "name": "v",
+          "span": [
+            21,
+            22
+          ]
+        },
+        "span": [
+          15,
+          55
+        ]
+      },
+      "kind": "fn",
+      "name": "corpus",
+      "params": [
+        {
+          "name": "v"
+        }
+      ],
+      "span": [
+        0,
+        55
+      ]
+    }
+  ]
+}

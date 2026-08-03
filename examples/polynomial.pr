@@ -62,13 +62,13 @@ fn term(coef : Int, exp : Int) : String =
     if coef == 1 then
       "y"
     else
-      concat(show(coef), "y")
+      "{coef}y"
   else
-    let pe = concat("y^", show(exp))
+    let pe = "y^{exp}"
     if coef == 1 then
       pe
     else
-      concat(show(coef), pe)
+      "{coef}{pe}"
 
 fn terms_from(arities : List(Int), exp : Int) : List(String) =
   if exp < 0 then
@@ -88,8 +88,7 @@ fn show_poly(p : Poly) : String =
       str_join(" + ", terms_from(p.arities, unwrap_or(0, maximum(p.arities))))
 
 -- Show "lhs rhs" so the two sides of each homomorphism line up visibly.
-fn pair_str(label : String, a : Int, b : Int) : String =
-  concat(label, concat(show(a), concat(" ", show(b))))
+fn pair_str(label : String, a : Int, b : Int) : String = "{label}{a} {b}"
 
 fn main() : Unit ! {IO} =
   let p = Poly { arities = [2, 1, 0] }

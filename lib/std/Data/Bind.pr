@@ -36,9 +36,23 @@ pub type Index = MkIndex(Int) deriving (Eq, Ord, Show)
 pub type Level = MkLevel(Int) deriving (Eq, Ord, Show)
 
 -- | Brand a raw outward distance as an `Index`. One of the two ways in.
+--
+-- ```prism
+-- bind_index_int(bind_index(2))
+-- ```
+-- ```output
+-- 2
+-- ```
 pub fn bind_index(n : Int) : Index = MkIndex(n)
 
 -- | Brand a raw inward distance as a `Level`. One of the two ways in.
+--
+-- ```prism
+-- bind_level_int(bind_level(2))
+-- ```
+-- ```output
+-- 2
+-- ```
 pub fn bind_level(n : Int) : Level = MkLevel(n)
 
 -- | The raw distance carried by an `Index`. One of the two ways out.
@@ -89,7 +103,16 @@ pub type BindEnv(a) = BindEnv { slots: List((String, a)) }
 -- | No binders in scope.
 pub let bind_empty : BindEnv(a) = BindEnv { slots = Nil }
 
--- | Push one binder, which becomes index `0`.
+-- | Push one binder, which becomes index `0`. Pushing a shadowing name keeps the
+-- older slot addressable at its previous index.
+--
+-- ```prism
+-- let env = bind_push(bind_push(bind_empty, "x", 1), "x", 2)
+-- (bind_at(env, bind_index(0)), bind_at(env, bind_index(1)))
+-- ```
+-- ```output
+-- (Some(2), Some(1))
+-- ```
 pub fn bind_push(env : BindEnv(a), name : String, payload : a) : BindEnv(a) =
   BindEnv { slots = Cons((name, payload), env.slots) }
 
@@ -108,6 +131,13 @@ pub fn bind_push_all(env : BindEnv(a), entries : List((String, a))) : BindEnv(a)
     Cons(e, rest) => bind_push_all(bind_push(env, fst(e), snd(e)), rest)
 
 -- | Push binders that carry no payload beyond their own name.
+--
+-- ```prism
+-- bind_names(bind_push_names(bind_empty, ["x", "y"]))
+-- ```
+-- ```output
+-- [y, x]
+-- ```
 pub fn bind_push_names(
   env : BindEnv(String),
   names : List(String)
@@ -123,6 +153,13 @@ pub fn bind_depth(env : BindEnv(a)) : Int = length(env.slots)
 pub fn bind_names(env : BindEnv(a)) : List(String) = map(fst, env.slots)
 
 -- | Drop the `n` innermost binders, leaving what was in scope before them.
+--
+-- ```prism
+-- bind_names(bind_drop(bind_push_names(bind_empty, ["x", "y", "z"]), 2))
+-- ```
+-- ```output
+-- [x]
+-- ```
 pub fn bind_drop(env : BindEnv(a), n : Int) : BindEnv(a) =
   BindEnv { slots = drop(n, env.slots) }
 
@@ -141,6 +178,15 @@ fn bind_scan(
 
 -- | The index of the innermost binder named `name`, or `None` when the name is
 -- free here.
+--
+-- ```prism
+-- match bind_index_of(bind_push_names(bind_empty, ["x", "y"]), "y") of
+--   None => -1
+--   Some(i) => bind_index_int(i)
+-- ```
+-- ```output
+-- 0
+-- ```
 pub fn bind_index_of(env : BindEnv(a), name : String) : Option(Index) =
   bind_scan(env.slots, name, 0)
 
@@ -181,6 +227,13 @@ pub fn bind_name_at(env : BindEnv(a), i : Index) : Option(String) =
     Some(e) => Some(fst(e))
 
 -- | The payload a level points at.
+--
+-- ```prism
+-- bind_at_level(bind_push_all(bind_empty, [("x", 10), ("y", 20)]), bind_level(0))
+-- ```
+-- ```output
+-- Some(10)
+-- ```
 pub fn bind_at_level(env : BindEnv(a), l : Level) : Option(a) =
   bind_at(env, bind_index_at(bind_depth(env), l))
 
@@ -214,6 +267,15 @@ pub type Nameless
 pub fn bind_token(s : String) : String =
   concat(show_int(byte_len(s)), concat(":", s))
 
+-- | The character closing every run of digits a rendering writes.
+--
+-- Skeletons concatenate with no separator, so a digit run sitting beside a
+-- neighbour that also opens with a digit reads as one number and the boundary
+-- between them is lost. A binder index therefore closes with this character, and
+-- a caller emitting its own numeric tags through `NLit` closes them the same way
+-- to keep the whole rendering uniquely decodable.
+pub let bind_num_end : String = ";"
+
 fn bind_nl_seq(
   free : (String) -> String,
   env : BindEnv(String),
@@ -235,7 +297,11 @@ fn bind_nl_go(
     NLit(s) => Cons(s, acc)
     NRef(x) =>
       match bind_index_of(env, x) of
-        Some(i) => Cons(concat("b", show_int(bind_index_int(i))), acc)
+        Some(i) =>
+          Cons(
+              concat("b", concat(show_int(bind_index_int(i)), bind_num_end)),
+              acc,
+            )
         None => Cons(free(x), acc)
     NScope(xs, body) => bind_nl_go(free, bind_push_names(env, xs), body, acc)
     NSeq(ts) => bind_nl_seq(free, env, ts, acc)
@@ -243,16 +309,16 @@ fn bind_nl_go(
 -- | Render a skeleton with binder references as outward distance and free names
 -- spelled by `free`.
 --
--- A bound reference becomes `b` followed by its index. A free name is handed to
--- `free`, which is where a caller substitutes whatever identity it has for a
--- name it does not own: a content hash, a slot in the recursive group being
+-- A bound reference becomes `b`, its index, and `bind_num_end`. A free name is
+-- handed to `free`, which is where a caller substitutes whatever identity it has
+-- for a name it does not own: a content hash, a slot in the recursive group being
 -- hashed, or the name itself.
 --
 -- ```prism
 -- bind_nameless(\(x) -> x, NScope(["a"], NSeq([NTok("lam"), NRef("a")])))
 -- ```
 -- ```output
--- 3:lamb0
+-- 3:lamb0;
 -- ```
 pub fn bind_nameless(free : (String) -> String, t : Nameless) : String =
   str_join("", reverse(bind_nl_go(free, bind_empty, t, Nil)))
@@ -261,6 +327,13 @@ pub fn bind_nameless(free : (String) -> String, t : Nameless) : String =
 --
 -- This is the rendering to compare two terms with when nothing outside them
 -- matters, which is exactly alpha-equivalence.
+--
+-- ```prism
+-- bind_nameless_show(NSeq([NRef("free"), NScope(["x"], NRef("x"))]))
+-- ```
+-- ```output
+-- f4:freeb0;
+-- ```
 pub fn bind_nameless_show(t : Nameless) : String =
   bind_nameless(\(x) -> concat("f", bind_token(x)), t)
 

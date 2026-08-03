@@ -16,8 +16,14 @@ use std::hint::black_box;
 const CORPUS: &[(&str, &str)] = &[
     ("accum", include_str!("../examples/accum.pr")),
     ("classes", include_str!("../examples/classes.pr")),
-    ("effects", include_str!("../examples/effects.pr")),
-    ("stream_fuse", include_str!("../examples/stream_fuse.pr")),
+    (
+        "result_pipeline",
+        include_str!("../examples/result_pipeline.pr"),
+    ),
+    (
+        "stream_fuse",
+        include_str!("../examples/fixtures/compiler/stream_fuse.pr"),
+    ),
     ("calc", include_str!("../examples/calc.pr")),
     ("json", include_str!("../examples/json.pr")),
     ("rbtree", include_str!("../examples/rbtree.pr")),

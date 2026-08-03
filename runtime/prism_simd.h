@@ -1,8 +1,8 @@
 /* Public interface of the baseline 128-bit SIMD runtime in prism_simd.c.
  *
  * Each entry mirrors one wired `simd_*` builtin. A vector is a two-word cell
- * (arity 0, so the reference-count collector never recurses into the raw
- * lanes); the codegen passes and receives it as an ordinary `long` cell
+ * with no children, so the reference-count collector never recurses into the
+ * raw lanes; the codegen passes and receives it as an ordinary `long` cell
  * pointer. The scalar interpreter (`src/eval/builtin.rs`) is the parity oracle,
  * and every function here reproduces its exact per-lane formula, including NaN,
  * signed zero, and subnormals. */

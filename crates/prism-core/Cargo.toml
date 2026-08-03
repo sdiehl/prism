@@ -29,3 +29,6 @@ native = ["dep:toml"]
 # the root crate's dev-dependency so integration tests reach them, never on
 # in a production build.
 test-hooks = []
+
+[lints]
+workspace = true

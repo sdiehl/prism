@@ -22,8 +22,8 @@ type Addr = Addr { city: Option(City) }
 
 fn main() =
   let xs = [10, 20, 30]
-  println(xs.at_list(0) ?? 0 - 1)
-  println(xs.at_list(9) ?? 0 - 1)
+  println(xs.at_list(0) ?? -1)
+  println(xs.at_list(9) ?? -1)
   let cfg = map_from_list([("host", 80)])
   println(cfg.at_map("host") ?? 8080)
   println(cfg.at_map("port") ?? 8080)
@@ -32,8 +32,8 @@ fn main() =
   println(force(None) ?? force(None) ?? 99)
   -- Optional chaining: the whole path short-circuits if any link is `None`.
   let full = Some(Addr { city = Some(City { zip = 42 }) })
-  println(full?.city?.zip ?? 0 - 1)
+  println(full?.city?.zip ?? -1)
   let middle = Some(Addr { city = None })
-  println(middle?.city?.zip ?? 0 - 1)
+  println(middle?.city?.zip ?? -1)
   let outer = (None : Option(Addr))
-  println(outer?.city?.zip ?? 0 - 1)
+  println(outer?.city?.zip ?? -1)

@@ -5,7 +5,8 @@ use super::inline::as_compound_assign;
 use super::ops::{needs_paren_at, Level};
 use super::pat::fmt_pat;
 use super::{
-    text_width, Arm, CatchArm, Expr, Fmt, HandlerArm, Mode, Qualifier, Sugar, INDENT, LINE_WIDTH, S,
+    fits_at, indent_col, text_width, Arm, CatchArm, Expr, Fmt, HandlerArm, Mode, Qualifier, Sugar,
+    ARM_BODY_GAP, HEAD_FRAMING_RESERVE, INDENT, S,
 };
 use crate::ast::HandlerMode;
 use crate::kw;
@@ -14,7 +15,7 @@ impl Fmt<'_> {
     pub(super) fn fmt_expr(&self, e: &S<Expr>, indent: usize, mode: Mode) -> String {
         if !wants_break(&e.node) {
             if let Some(s) = self.fmt_expr_inline(e, mode) {
-                if indent * INDENT.len() + text_width(&s) <= LINE_WIDTH {
+                if fits_at(indent_col(indent), &s) {
                     return s;
                 }
             }
@@ -27,7 +28,7 @@ impl Fmt<'_> {
     pub(super) fn fmt_head(&self, e: &S<Expr>, indent: usize) -> String {
         if !wants_break(&e.node) {
             if let Some(s) = self.fmt_expr_inline(e, Mode::Flat) {
-                if indent * INDENT.len() + text_width(&s) + 16 <= LINE_WIDTH {
+                if fits_at(indent_col(indent) + HEAD_FRAMING_RESERVE, &s) {
                     return s;
                 }
             }
@@ -46,7 +47,7 @@ impl Fmt<'_> {
     ) -> String {
         if !forces_break(b) && !self.has_comments(from, b.span.end) {
             if let Some(s) = self.fmt_expr_inline(b, Mode::Layout) {
-                if used + 1 + text_width(&s) <= LINE_WIDTH {
+                if fits_at(used + ARM_BODY_GAP, &s) {
                     return format!(" {s}");
                 }
             }
@@ -206,15 +207,13 @@ impl Fmt<'_> {
                 let b_inline = self.fmt_expr_inline(&a.body, mode);
                 if let Some(ref b) = b_inline {
                     let one_line = format!("{p} {} {b}", kw::FAT_ARROW);
-                    if text_width(&ind1) + text_width(&one_line) + usize::from(!is_last)
-                        <= LINE_WIDTH
-                    {
+                    if fits_at(text_width(&ind1) + text_width(trail), &one_line) {
                         return format!("{ind1}{one_line}{trail}");
                     }
                 }
                 let ind2 = INDENT.repeat(indent + 2);
                 if let Some(ref b) = b_inline {
-                    if text_width(&ind2) + text_width(b) + text_width(trail) <= LINE_WIDTH {
+                    if fits_at(text_width(&ind2) + text_width(trail), b) {
                         return format!("{ind1}{p} {}\n{ind2}{b}{trail}", kw::FAT_ARROW);
                     }
                 }

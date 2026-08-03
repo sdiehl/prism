@@ -393,6 +393,35 @@ let snap_version : String = "1"
 
 let snap_sep : String = "\t"
 
+-- Build a snapshot header: the format name, its version, the caller tag, and a
+-- `blake3` digest of the body, joined by `snap_sep`. Both snapshot formats (the
+-- result-only one below and the trace-replay one further down) frame their body
+-- with this, differing only in the name and version they pass, so one rule
+-- decides what a header is.
+fn snap_header_of(nm, ver, tag, body) =
+  concat(
+      nm,
+      concat(
+          snap_sep,
+          concat(
+              ver,
+              concat(snap_sep, concat(tag, concat(snap_sep, blake3(body)))),
+            ),
+        ),
+    )
+
+-- The inverse of `snap_header_of`: true when `header` frames exactly this
+-- format, version, tag, and body. A header of the wrong shape is false, never an
+-- error, so every caller can treat it as a cold start.
+fn snap_header_ok_of(nm, ver, header, tag, body) =
+  match split(char_at(snap_sep, 0), header) of
+    Cons(hnm, Cons(hver, Cons(htg, Cons(hdg, Nil)))) =>
+      str_eq(hnm, nm)
+        && str_eq(hver, ver)
+        && str_eq(htg, tag)
+        && str_eq(hdg, blake3(body))
+    _ => false
+
 -- Parse the decimal-comma byte rendering (`bytes_str`) back to a body, skipping
 -- any piece that is not an integer (notably the trailing empty piece after the
 -- final comma), so a padded or truncated tail cannot inject a stray byte.
@@ -506,13 +535,7 @@ fn snap_try(body) =
 -- silently. The content store's production path gets this for free (an entry is
 -- addressed by its content hash); the file substrate reconstructs it here.
 fn snap_header_ok(header, tag, body) =
-  match split(char_at(snap_sep, 0), header) of
-    Cons(nm, Cons(ver, Cons(tg, Cons(dg, Nil)))) =>
-      str_eq(nm, snap_name)
-        && str_eq(ver, snap_version)
-        && str_eq(tg, tag)
-        && str_eq(dg, blake3(body))
-    _ => false
+  snap_header_ok_of(snap_name, snap_version, header, tag, body)
 
 fn snap_body(content, tag) =
   let nl = index_of_from(char_at("\n", 0), content, 0)
@@ -529,23 +552,18 @@ fn snap_body(content, tag) =
 -- wrong-version snapshot is a silent cold start (an empty cache), never an error
 -- and never a partial load: the header (name, version, tag, body digest) is
 -- checked before the body, and the body decodes under a Fail handler.
+--
+-- The trace-replay format further down has its own load/save family under the
+-- `t_` prefix. The two share the header framing (`snap_header_of`) and nothing
+-- else: a traced snapshot stores a fifth list per memo and answers to a
+-- different format name, so neither family can read the other's file.
 fn snap_load(path, tag) =
   if prim_file_exists(path) then
     snap_body(prim_read_file(path), tag)
   else
     map_empty
 
-fn snap_header(tag, body) =
-  concat(
-      snap_name,
-      concat(
-          snap_sep,
-          concat(
-              snap_version,
-              concat(snap_sep, concat(tag, concat(snap_sep, blake3(body)))),
-            ),
-        ),
-    )
+fn snap_header(tag, body) = snap_header_of(snap_name, snap_version, tag, body)
 
 fn snap_save(path, tag, s) =
   let body = bytes_str(snap_encode(s))
@@ -1097,6 +1115,12 @@ fn t_snap_len_ok(
     && length(dhs) == length(bys)
     && length(bys) == length(trs)
 
+-- Decode the five lists and rebuild the warm cache, the traced counterpart of
+-- `snap_decode`. It is a separate function rather than a reuse because the
+-- traced format is a different format: five parallel lists instead of four,
+-- `TWarm` instead of `Warm`, and its own name and version, so a snapshot of one
+-- can never be read as the other. A length mismatch cold-starts wholesale, and
+-- the Fail handler at the call site covers a truncated or malformed body.
 fn t_snap_decode(body : String) : Map(String, TWarm) =
   match decode(snap_parse_bytes(body)) of
     (ks, r1) =>
@@ -1118,27 +1142,20 @@ fn t_snap_try(body) =
     never fail() => map_empty
     return m => m
 
+-- The header and its check are the shared framing under the traced format's own
+-- name and version, so corruption is a cold start here for the same reason it is
+-- for the result-only format, and a snapshot written by one format fails the
+-- other's name check on the first field.
 fn t_snap_header(tag, body) =
-  concat(
-      t_snap_name,
-      concat(
-          snap_sep,
-          concat(
-              t_snap_version,
-              concat(snap_sep, concat(tag, concat(snap_sep, blake3(body)))),
-            ),
-        ),
-    )
+  snap_header_of(t_snap_name, t_snap_version, tag, body)
 
 fn t_snap_header_ok(header, tag, body) =
-  match split(char_at(snap_sep, 0), header) of
-    Cons(nm, Cons(ver, Cons(tg, Cons(dg, Nil)))) =>
-      str_eq(nm, t_snap_name)
-        && str_eq(ver, t_snap_version)
-        && str_eq(tg, tag)
-        && str_eq(dg, blake3(body))
-    _ => false
+  snap_header_ok_of(t_snap_name, t_snap_version, header, tag, body)
 
+-- Split content into header and body and decode under the traced format, the
+-- counterpart of `snap_body`: the header is checked before the body is looked
+-- at, and a missing newline, a failed header, or a failed decode is an empty
+-- cache, never an error and never a partial load.
 fn t_snap_body(content, tag) =
   let nl = index_of_from(char_at("\n", 0), content, 0)
   if nl < 0 then
@@ -1150,6 +1167,10 @@ fn t_snap_body(content, tag) =
     else
       map_empty
 
+-- Load the traced warm cache from `path`, or from the content-addressed store at
+-- `root` keyed by `tag`. The two substrates differ only in exists/read/write, as
+-- they do for the result-only format, so a warm hit is byte-identical whichever
+-- one persisted it.
 fn t_snap_load(path, tag) =
   if prim_file_exists(path) then
     t_snap_body(prim_read_file(path), tag)

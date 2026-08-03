@@ -1,0 +1,52 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "0aaf4aef3dce84bc85065dd3dee67cab64f51d85242d340706ddeb98f3dd1750",
+    "text": "type Corpus = Corpus(List(Int), {io, Pkg.Io | e}, 3)\n"
+  },
+  "items": [
+    {
+      "ctors": [
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "kind": "int"
+                }
+              ],
+              "kind": "con",
+              "name": "List"
+            },
+            {
+              "kind": "row",
+              "row": {
+                "labels": [
+                  {
+                    "name": "io"
+                  },
+                  {
+                    "name": "Pkg.Io"
+                  }
+                ],
+                "tail": "e"
+              }
+            },
+            {
+              "kind": "nat",
+              "value": 3
+            }
+          ],
+          "name": "Corpus"
+        }
+      ],
+      "kind": "data",
+      "name": "Corpus",
+      "span": [
+        0,
+        52
+      ]
+    }
+  ]
+}

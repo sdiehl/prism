@@ -33,6 +33,7 @@ impl NewtypeEraseStats {
 /// This is total on arbitrary typed trees. A marked constructor whose declared
 /// shape is not the required one-field newtype shape is left untouched; the
 /// independent verifier remains responsible for rejecting an invalid input.
+#[must_use]
 pub fn erase_newtypes<P>(
     core: TypedCore<P>,
     constructors: &BTreeSet<Sym>,

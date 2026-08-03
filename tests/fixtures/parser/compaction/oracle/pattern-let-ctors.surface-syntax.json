@@ -1,0 +1,128 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "3ce0157c0a9c056c7df3a6561753ffe779952a8c8de82e427136177dae5d651f",
+    "text": "fn one(v) = let A(x) = v in x\nfn two(v) = let Pkg.A(x) = v in x\n"
+  },
+  "items": [
+    {
+      "body": {
+        "arms": [
+          {
+            "body": {
+              "kind": "var",
+              "name": "x",
+              "span": [
+                28,
+                29
+              ]
+            },
+            "pat": {
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "x",
+                  "span": [
+                    18,
+                    19
+                  ]
+                }
+              ],
+              "kind": "ctor",
+              "name": "A",
+              "span": [
+                16,
+                20
+              ]
+            }
+          }
+        ],
+        "kind": "match",
+        "scrutinee": {
+          "kind": "var",
+          "name": "v",
+          "span": [
+            23,
+            24
+          ]
+        },
+        "span": [
+          12,
+          12
+        ],
+        "synth": true
+      },
+      "kind": "fn",
+      "name": "one",
+      "params": [
+        {
+          "name": "v"
+        }
+      ],
+      "span": [
+        0,
+        29
+      ]
+    },
+    {
+      "body": {
+        "arms": [
+          {
+            "body": {
+              "kind": "var",
+              "name": "x",
+              "span": [
+                62,
+                63
+              ]
+            },
+            "pat": {
+              "args": [
+                {
+                  "kind": "var",
+                  "name": "x",
+                  "span": [
+                    52,
+                    53
+                  ]
+                }
+              ],
+              "kind": "ctor",
+              "name": "Pkg.A",
+              "span": [
+                46,
+                54
+              ]
+            }
+          }
+        ],
+        "kind": "match",
+        "scrutinee": {
+          "kind": "var",
+          "name": "v",
+          "span": [
+            57,
+            58
+          ]
+        },
+        "span": [
+          42,
+          42
+        ],
+        "synth": true
+      },
+      "kind": "fn",
+      "name": "two",
+      "params": [
+        {
+          "name": "v"
+        }
+      ],
+      "span": [
+        30,
+        63
+      ]
+    }
+  ]
+}

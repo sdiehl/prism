@@ -9,7 +9,7 @@ use std::fmt::Write as _;
 
 use super::breaks::{block_trailing_call, forces_break};
 use super::pat::fmt_pat_inline;
-use super::{text_width, Fmt, Mode, INDENT, LINE_WIDTH};
+use super::{text_width, tuple_parens, Fmt, Mode, INDENT, LINE_WIDTH};
 use crate::ast::{
     ClassDecl, Constraint, Ctor, DataDecl, Decl, EffLabel, EffectDecl, Expr, Fip, ImportDecl,
     InstanceDecl, Kind, Param, PatternDecl, Row, Total, Ty, S,
@@ -38,6 +38,7 @@ pub(super) fn fmt_import(i: &ImportDecl) -> String {
     s
 }
 
+#[must_use]
 pub fn fmt_effect(e: &EffectDecl) -> String {
     let ops: Vec<String> = e
         .ops
@@ -81,6 +82,7 @@ pub fn fmt_labels(ls: &[EffLabel]) -> String {
     parts.join(", ")
 }
 
+#[must_use]
 pub fn fmt_class(c: &ClassDecl) -> String {
     let sigs: Vec<String> = c
         .methods
@@ -286,7 +288,7 @@ pub fn fmt_ty(t: &Ty) -> String {
         },
         Ty::Tuple(ts) => {
             let ts: Vec<String> = ts.iter().map(fmt_ty).collect();
-            format!("({})", ts.join(", "))
+            tuple_parens(&ts)
         }
         Ty::UnboxedTuple(ts) => {
             let ts: Vec<String> = ts.iter().map(fmt_ty).collect();

@@ -6,6 +6,10 @@ import Theme as Themes
 
 import Code as SourceCode
 
+import Example as Examples
+
+import Example (Example, Doc)
+
 import Backend as TypstBackend
 
 import Backend (TypstDocument)
@@ -81,6 +85,20 @@ pub fn code_block(language : String, source : String) : Pict =
 pub fn prism_code(source : String) : Pict = SourceCode.prism_code(source)
 
 pub fn inline_code(source : String) : Inline = SourceCode.inline_code(source)
+
+-- | Every example a reflected declaration's docstring fences, each over the
+-- output the doctest runner proves it prints.
+pub fn doctest(reflected : String) : Pict = Examples.doctest(reflected)
+
+-- | A reflected declaration with its comment block removed.
+pub fn definition(reflected : String) : Pict = Examples.definition(reflected)
+
+pub fn read_doc(reflected : String) : Doc = Examples.read_doc(reflected)
+
+pub fn examples_of(reflected : String) : List(Example) =
+  Examples.examples_of(reflected)
+
+pub fn example_pict(e : Example) : Pict = Examples.example_pict(e)
 
 pub let prism_theme : Theme = Themes.prism_theme
 

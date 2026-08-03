@@ -1,0 +1,156 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "6604ed563d03dafd3f88333113a7c4ff73ca81f6ee7f2a5d25f7d9c9cccfc62e",
+    "text": "fn corpus(x) =\n  if x > 0 then\n    x + 1\n  elif x < 0 then\n    x - 1\n  x\n"
+  },
+  "items": [
+    {
+      "body": {
+        "body": {
+          "kind": "var",
+          "name": "x",
+          "span": [
+            71,
+            72
+          ]
+        },
+        "kind": "let",
+        "name": "_",
+        "span": [
+          17,
+          72
+        ],
+        "value": {
+          "cond": {
+            "kind": "bin",
+            "lhs": {
+              "kind": "var",
+              "name": "x",
+              "span": [
+                20,
+                21
+              ]
+            },
+            "op": ">",
+            "rhs": {
+              "kind": "int",
+              "span": [
+                24,
+                25
+              ],
+              "value": "0"
+            },
+            "span": [
+              20,
+              25
+            ]
+          },
+          "else": {
+            "cond": {
+              "kind": "bin",
+              "lhs": {
+                "kind": "var",
+                "name": "x",
+                "span": [
+                  48,
+                  49
+                ]
+              },
+              "op": "<",
+              "rhs": {
+                "kind": "int",
+                "span": [
+                  52,
+                  53
+                ],
+                "value": "0"
+              },
+              "span": [
+                48,
+                53
+              ]
+            },
+            "else": {
+              "kind": "unit",
+              "span": [
+                68,
+                68
+              ]
+            },
+            "kind": "if",
+            "span": [
+              17,
+              68
+            ],
+            "then": {
+              "kind": "bin",
+              "lhs": {
+                "kind": "var",
+                "name": "x",
+                "span": [
+                  63,
+                  64
+                ]
+              },
+              "op": "-",
+              "rhs": {
+                "kind": "int",
+                "span": [
+                  67,
+                  68
+                ],
+                "value": "1"
+              },
+              "span": [
+                63,
+                68
+              ]
+            }
+          },
+          "kind": "if",
+          "span": [
+            17,
+            68
+          ],
+          "then": {
+            "kind": "bin",
+            "lhs": {
+              "kind": "var",
+              "name": "x",
+              "span": [
+                35,
+                36
+              ]
+            },
+            "op": "+",
+            "rhs": {
+              "kind": "int",
+              "span": [
+                39,
+                40
+              ],
+              "value": "1"
+            },
+            "span": [
+              35,
+              40
+            ]
+          }
+        }
+      },
+      "kind": "fn",
+      "name": "corpus",
+      "params": [
+        {
+          "name": "x"
+        }
+      ],
+      "span": [
+        0,
+        72
+      ]
+    }
+  ]
+}

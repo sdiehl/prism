@@ -7,12 +7,14 @@ use prism_common::sym::Sym;
 use prism_syntax::names;
 
 use super::super::verify::VerifyEnv;
-use super::super::{TypedComp, TypedCompKind, TypedCoreFn, TypedValue, TypedValueKind};
+use super::super::{TypedComp, TypedCoreFn};
 use super::evidence::OpIds;
-use super::walk::{each_subcomp, each_value};
+use super::plan::collect_calls;
+use super::walk::each_subterm;
 
 /// The direct effects retained by each declaration around its reified
 /// operation runtime.
+#[derive(Debug)]
 pub struct ResidualRows(BTreeMap<Sym, EffRow>);
 
 pub trait Rows {
@@ -31,9 +33,15 @@ impl Rows for EffRow {
     }
 }
 
-/// Collect each declaration's direct-effect row. Algebraic operations become
-/// `EOp` cells and leave these rows; intrinsic IO and any other direct effect
-/// remain observable while the runtime drives those cells.
+/// Collect each declaration's direct-effect row.
+///
+/// Algebraic operations become `EOp` cells and leave these rows; intrinsic IO
+/// and any other direct effect remain observable while the runtime drives those
+/// cells.
+///
+/// # Errors
+/// A message naming an operation that has no typed signature in `env`, which
+/// leaves its effect label unattributable.
 pub fn plan(
     functions: &[TypedCoreFn],
     ops: &OpIds,
@@ -97,74 +105,7 @@ pub fn plan(
     Ok(ResidualRows(planned))
 }
 
-fn collect_calls(comp: &TypedComp, calls: &mut BTreeSet<Sym>) {
-    if let TypedCompKind::Call { callee, .. } = comp.kind() {
-        calls.insert(*callee);
-    }
-    each_value(comp, &mut |value| collect_value_calls(value, calls));
-    each_subcomp(comp, &mut |child| collect_calls(child, calls));
-}
-
-fn collect_value_calls(value: &TypedValue, calls: &mut BTreeSet<Sym>) {
-    match &value.kind {
-        TypedValueKind::Thunk(body) => collect_calls(body, calls),
-        TypedValueKind::Reinterpret(inner)
-        | TypedValueKind::LoweredRepr { value: inner, .. }
-        | TypedValueKind::NewtypeRepr { value: inner, .. } => collect_value_calls(inner, calls),
-        TypedValueKind::Ctor { fields, .. }
-        | TypedValueKind::Tuple(fields)
-        | TypedValueKind::UnboxedTuple(fields) => {
-            for field in fields {
-                collect_value_calls(field, calls);
-            }
-        }
-        TypedValueKind::UnboxedRecord(fields) => {
-            for (_, field) in fields {
-                collect_value_calls(field, calls);
-            }
-        }
-        TypedValueKind::Var { .. }
-        | TypedValueKind::Unit
-        | TypedValueKind::Int(_)
-        | TypedValueKind::I64(_)
-        | TypedValueKind::U64(_)
-        | TypedValueKind::Bool(_)
-        | TypedValueKind::Float(_)
-        | TypedValueKind::Str(_) => {}
-    }
-}
-
 fn collect_comp(comp: &TypedComp, rows: &mut Vec<EffRow>) {
     rows.push(comp.sig().effects().clone());
-    each_value(comp, &mut |value| collect_value(value, rows));
-    each_subcomp(comp, &mut |child| collect_comp(child, rows));
-}
-
-fn collect_value(value: &TypedValue, rows: &mut Vec<EffRow>) {
-    match &value.kind {
-        TypedValueKind::Thunk(body) => collect_comp(body, rows),
-        TypedValueKind::Reinterpret(inner)
-        | TypedValueKind::LoweredRepr { value: inner, .. }
-        | TypedValueKind::NewtypeRepr { value: inner, .. } => collect_value(inner, rows),
-        TypedValueKind::Ctor { fields, .. }
-        | TypedValueKind::Tuple(fields)
-        | TypedValueKind::UnboxedTuple(fields) => {
-            for field in fields {
-                collect_value(field, rows);
-            }
-        }
-        TypedValueKind::UnboxedRecord(fields) => {
-            for (_, field) in fields {
-                collect_value(field, rows);
-            }
-        }
-        TypedValueKind::Var { .. }
-        | TypedValueKind::Unit
-        | TypedValueKind::Int(_)
-        | TypedValueKind::I64(_)
-        | TypedValueKind::U64(_)
-        | TypedValueKind::Bool(_)
-        | TypedValueKind::Float(_)
-        | TypedValueKind::Str(_) => {}
-    }
+    each_subterm(comp, &mut |child| collect_comp(child, rows));
 }

@@ -1,0 +1,82 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "50f262bbb998c34d941acfe2f375a0f637366fc0515ede230279a24c6322d930",
+    "text": "fn closure() : (Int) -> Int ! {io} = \\(x) -> x\nfn poly() : forall a. a = ?hole\n"
+  },
+  "items": [
+    {
+      "body": {
+        "body": {
+          "kind": "var",
+          "name": "x",
+          "span": [
+            45,
+            46
+          ]
+        },
+        "kind": "lam",
+        "params": [
+          {
+            "name": "x"
+          }
+        ],
+        "span": [
+          37,
+          46
+        ]
+      },
+      "kind": "fn",
+      "name": "closure",
+      "ret": {
+        "effects": {
+          "labels": [
+            {
+              "name": "io"
+            }
+          ]
+        },
+        "kind": "fun",
+        "params": [
+          {
+            "kind": "int"
+          }
+        ],
+        "ret": {
+          "kind": "int"
+        }
+      },
+      "span": [
+        0,
+        46
+      ]
+    },
+    {
+      "body": {
+        "kind": "hole",
+        "name": "hole",
+        "span": [
+          73,
+          78
+        ]
+      },
+      "kind": "fn",
+      "name": "poly",
+      "ret": {
+        "kind": "forall",
+        "ty": {
+          "kind": "var",
+          "name": "a"
+        },
+        "vars": [
+          "a"
+        ]
+      },
+      "span": [
+        47,
+        78
+      ]
+    }
+  ]
+}

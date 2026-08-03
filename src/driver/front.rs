@@ -16,10 +16,10 @@ use crate::core::{
 };
 use crate::error::Error;
 use crate::flags::WarnDupes;
-use crate::parse::{parse, ParseResult};
 use crate::resolve::{resolve_loaded_modules, resolve_modules_in, Module, Root};
 use crate::syntax::ast::{Core as CorePhase, Program};
 use crate::syntax::desugar::{desugar, retarget_cooperative};
+use crate::syntax::reflect::parse_unit;
 use crate::types::{check as typecheck, check_allow_holes, Checked};
 
 use crate::tc::WarningOrigin;
@@ -472,11 +472,11 @@ fn prepare_front(
     opts: FrontOpts,
 ) -> Result<PreparedFront, Error> {
     let timer = cfg.timing.as_ref();
-    let ParseResult { program, .. } = timing::timed_res(
+    let program = timing::timed_res(
         timer,
         Phase::Parse,
         src,
-        || parse(src),
+        || parse_unit(src),
         |_| RowExtras::default(),
     )?;
     let program = timing::timed_res(

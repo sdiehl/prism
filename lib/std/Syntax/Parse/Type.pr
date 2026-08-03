@@ -1,0 +1,43 @@
+-- | Stable public facade for the generated surface-type parser.
+--
+-- Structural ownership lives in Syntax.Parse.GeneratedType. The generated
+-- parser preserves its exact LR completion receipt internally; this facade
+-- erases that private state only at the established Parsed(Ty) boundary.
+
+import Syntax.Ast (..)
+
+import Syntax.Cursor (..)
+
+import Syntax.Parse.Support (..)
+
+import Syntax.Parse.GeneratedType (..)
+
+-- | Parse one complete surface type.
+pub fn parse_type(c : Cursor, depth : Int) : Parsed(Ty) =
+  strip_type_done(generated_parse_type(c, depth))
+
+-- | Parse through the arrow layer while leaving a trailing effect suffix for
+-- declaration return-annotation disambiguation.
+pub fn parse_type_head(c : Cursor, depth : Int) : Parsed(Ty) =
+  strip_type_done(generated_parse_type_head(c, depth))
+
+-- | Parse a type-constructor argument, including row and natural arguments.
+pub fn parse_type_arg(c : Cursor, depth : Int) : Parsed(Ty) =
+  strip_type_done(generated_parse_type_arg(c, depth))
+
+-- | Parse an effect suffix including its leading `!`.
+pub fn parse_effect_row(c : Cursor, depth : Int) : Parsed(Row) =
+  generated_parse_effect_row(c, depth)
+
+-- | Parse one effect label with optional constructor arguments.
+pub fn parse_eff_label(c : Cursor, depth : Int) : Parsed(EffLabel) =
+  generated_parse_eff_label(c, depth)
+
+fn strip_type_done(p : Parsed(GeneratedChild(Ty))) : Parsed(Ty) =
+  match p of
+    PStuck(c) => PStuck(c)
+    PFault(d) => PFault(d)
+    PTook(done, c) =>
+      match done of
+        TypeDone(t, receipt) =>
+          PTook(t, generated_type_note_if_live(c, receipt))

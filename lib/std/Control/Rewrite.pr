@@ -56,6 +56,15 @@ pub fn rw_then(s1 : Rewrite(a, e), s2 : Rewrite(a, e)) : Rewrite(a, e) =
 -- The bias is the point; a rule list is an `rw_or_else` chain and the first
 -- matching rule wins, exactly as a hand-written match would. Terminates whenever
 -- both do.
+--
+-- ```prism
+-- # let positive = \(n) -> if n > 0 then Some(n + 1) else None
+-- # let times_ten = \(n) -> Some(n * 10)
+-- (rw_or_else(positive, times_ten)(2), rw_or_else(positive, times_ten)(-2))
+-- ```
+-- ```output
+-- (Some(3), Some(-20))
+-- ```
 pub fn rw_or_else(s1 : Rewrite(a, e), s2 : Rewrite(a, e)) : Rewrite(a, e) =
   \(x) -> match s1(x) of { Some(y) => Some(y), None => s2(x) }
 
@@ -122,7 +131,7 @@ fn rw_first(
 
 -- | Run `s` on the leftmost child that accepts, leaving the others alone.
 -- Declines when no child accepts, so at a leaf it always declines. That decline
--- is load-bearing: it is how the fixpoint schemes below learn there is no redex
+-- is essential because it tells the fixpoint schemes below there is no redex
 -- left. One pass over the children, so it terminates whenever `s` does.
 pub fn rw_one(p : Layer(a), s : Rewrite(a, e)) : Rewrite(a, e) =
   \(x) -> match rw_first(s, Nil, lay_kids(p, x)) of { None => None, Some(cs) => Some(lay_rebuild(p, x, cs)) }
@@ -155,6 +164,15 @@ pub fn rw_top_down(p : Layer(a), s : Rewrite(a, e)) : Rewrite(a, e) =
 -- case: a total pass built from a partial rule. Cannot decline, because `rw_try`
 -- turns every refusal into "leave this node alone"; a rule that applies nowhere
 -- returns the tree unchanged. Terminates whenever `s` does.
+--
+-- ```prism
+-- # import Json (..)
+-- # let bump = \(j) -> match j of { JInt(n) => Some(JInt(n + 1)), _ => None }
+-- rw_everywhere(json_layer(), bump, JArr([JInt(1), JBool(true), JInt(2)]))
+-- ```
+-- ```output
+-- Json.JArr([Json.JInt(2), Json.JBool(true), Json.JInt(3)])
+-- ```
 pub fn rw_everywhere(p : Layer(a), s : Rewrite(a, e), x : a) : a ! { | e} =
   rw_apply(rw_bottom_up(p, rw_try(s)), x)
 
@@ -197,6 +215,15 @@ pub type RwFix(a) = RwFix { tree: a, steps: Int, converged: Bool }
 -- deliberately no unfueled closer, because a rewrite loop that may not terminate
 -- should be a value a test can assert on rather than a hang. Zero or negative
 -- fuel yields the input unchanged, converged only if `s` declines on it.
+--
+-- ```prism
+-- # let down = \(n) -> if n > 0 then Some(n - 1) else None
+-- let r = rw_repeat(down, 10, 3)
+-- (r.tree, r.steps, r.converged)
+-- ```
+-- ```output
+-- (0, 3, true)
+-- ```
 pub fn rw_repeat(s : Rewrite(a, e), fuel : Int, x : a) : RwFix(a) ! { | e} =
   rw_repeat_go(s, fuel, x, 0)
 

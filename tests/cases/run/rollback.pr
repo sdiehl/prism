@@ -17,7 +17,7 @@ fn main() =
       b := b + 1
       a
     else
-      0 - 1
+      -1
   println(a)
   println(b)
   println(r1)
@@ -27,7 +27,7 @@ fn main() =
       b := b + 50
       fail()
     else
-      0 - 2
+      -2
   println(a)
   println(b)
   println(r2)

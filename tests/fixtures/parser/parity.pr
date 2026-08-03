@@ -1,0 +1,29 @@
+-- Differential witness: consume the Rust parser's canonical surface artifact,
+-- parse its embedded source again through the Prism-owned frontend, and compare
+-- the exact re-encoded AST bytes (including spans and synth bits).
+
+import Syntax.Lex (..)
+
+import Syntax.Codec (..)
+
+import Syntax.Parse (..)
+
+fn main() =
+  match decode_surface(read_file(arg(0))) of
+    Err(e) => println("decode {codec_error_message(e)}")
+    Ok(want) =>
+      match parse_source(want.source.text) of
+        Err(ParseLex(e)) => println("lex {lex_code(e)} {lex_message(e)}")
+        Err(ParseSyntax(d)) => println("parse {d.code} {d.message}")
+        Ok(items) =>
+          let got = SurfaceDoc {
+            schema = want.schema,
+            compiler = want.compiler,
+            source = want.source,
+            items = items
+          }
+          if encode_surface(got) == encode_surface(want) then
+            println("ok")
+          else
+            write_file(arg(1), encode_surface(got))
+            println("mismatch {arg(1)}")

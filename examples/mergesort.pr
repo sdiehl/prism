@@ -17,8 +17,8 @@ fn msort(xs) =
   if n <= 1 then
     xs
   else
-    let halves = split_at(n / 2, xs)
-    merge(msort(fst(halves)), msort(snd(halves)))
+    let (left, right) = split_at(n / 2, xs)
+    merge(msort(left), msort(right))
 
 fn print_list(xs : List(Int)) =
   match xs of

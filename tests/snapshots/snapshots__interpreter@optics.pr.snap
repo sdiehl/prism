@@ -1,0 +1,14 @@
+---
+source: tests/snapshots.rs
+expression: out
+---
+Vec2 { x = 1, y = 4 }
+Player { name = "hero", pos = Vec2 { x = 7, y = 4 }, hp = 30, bag = [] }
+[Player { name = "a", pos = Vec2 { x = 0, y = 0 }, hp = 15, bag = [] }, Player { name = "b", pos = Vec2 { x = 0, y = 0 }, hp = 10, bag = [] }]
+World { party = [Player { name = "a", pos = Vec2 { x = 1, y = 2 }, hp = 100, bag = [] }, Player { name = "b", pos = Vec2 { x = 1, y = 2 }, hp = 0, bag = [] }], turn = 1 }
+Circle { radius = 20 }
+Square { side = 3 }
+[Player { name = "a", pos = Vec2 { x = 1, y = 2 }, hp = 15, bag = [] }, Player { name = "b", pos = Vec2 { x = 1, y = 2 }, hp = 0, bag = [] }]
+[5, 0]
+[5]
+=> ()

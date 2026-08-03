@@ -121,6 +121,7 @@ impl FoldPlan {
     /// accumulators together: one may thread an `Int` while another threads a
     /// list. `None` when one producer's own operations pin its single threaded
     /// accumulator to two types, which no producer can satisfy.
+    #[must_use]
     pub fn accumulator_for(&self, ops: &BTreeSet<Sym>) -> Option<Accumulator> {
         let mut pinned: Option<&CoreType> = None;
         for ty in ops.iter().filter_map(|op| self.pins.get(op)) {
@@ -134,8 +135,10 @@ impl FoldPlan {
 }
 
 /// Stable whole-program authorities shared by State recognition and threading.
+///
 /// A strategy may select only some operations, but it must keep the prepared
 /// program's numbering and analyses at every gate and rewrite site.
+#[derive(Debug)]
 pub struct StateAnalysis<'a> {
     ids: &'a OpIds,
     latent: &'a Latent,
@@ -144,6 +147,7 @@ pub struct StateAnalysis<'a> {
 }
 
 impl<'a> StateAnalysis<'a> {
+    #[must_use]
     pub const fn new(
         ids: &'a OpIds,
         latent: &'a Latent,
@@ -220,6 +224,7 @@ pub struct ProducerPlan {
 impl ProducerPlan {
     /// The threaded parameter list: the producer's own, then its evidence, then
     /// the accumulator.
+    #[must_use]
     pub fn params(&self, declared: &[TypedBinder]) -> Vec<TypedBinder> {
         let mut params = declared.to_vec();
         params.extend(self.evidence.iter().cloned());
@@ -988,6 +993,7 @@ fn resolve(v: &TypedValue, subst: &BTreeMap<Sym, TypedValue>) -> TypedValue {
 /// The producer-side rewrite: walk a producer body and fold every operation head
 /// into the active evidence, so the body becomes a computation returning the
 /// accumulator.
+#[derive(Debug)]
 pub struct Threader<'a> {
     pub plan: &'a FoldPlan,
     /// The whole program's operation numbering. A fused subset keeps its global
@@ -2890,12 +2896,15 @@ fn body_folds(c: &TypedComp, ops: &BTreeSet<Sym>, latent: &Latent) -> bool {
 }
 
 /// Whether running a computation performs any fused operation, so the
-/// accumulator must be threaded through it: a `do op`, a call to an
-/// operation-latent function, or a force of a thunk whose flow signature carries
-/// a fused operation, in any executed position.
+/// accumulator must be threaded through it.
+///
+/// That is a `do op`, a call to an operation-latent function, or a force of a
+/// thunk whose flow signature carries a fused operation, in any executed
+/// position.
 ///
 /// [`latent`](super::latent) cannot see a force of a thunk-valued variable, so
 /// this augments it with the flow `loc`.
+#[must_use]
 pub fn produces(
     c: &TypedComp,
     loc: &Loc,
@@ -2988,6 +2997,7 @@ fn value_coincident(
 /// This sits below the gate deliberately: it is the first thing
 /// `try_lower_state` asks after fold-uniformity, and it asks nothing the gate
 /// answered.
+#[must_use]
 pub fn threads(plan: &FoldPlan, fns: &[TypedCoreFn], analysis: &StateAnalysis<'_>) -> bool {
     let StateAnalysis {
         ids, latent, flow, ..

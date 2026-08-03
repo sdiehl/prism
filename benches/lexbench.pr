@@ -19,6 +19,8 @@ import Syntax.Lex (..)
 
 import Syntax.Layout (..)
 
+import Syntax.Parse (..)
+
 fn raw_count(text : String) : Int =
   match lex_raw(text) of
     Ok(r) => length(r.tokens)
@@ -29,11 +31,20 @@ fn layout_count(text : String) : Int =
     Ok(ts) => length(ts)
     Err(e) => 0 - lex_offset(e) - 1
 
+-- The parse layer: source through the Prism-owned parser, counting top-level
+-- items, the same number the Rust driver's `parse` layer prints.
+fn parse_count(text : String) : Int =
+  match parse_source(text) of
+    Ok(items) => length(items)
+    Err(_e) => -1
+
 fn main() =
   let text = read_file(arg(0))
   let n =
     if arg(1) == "layout" then
       layout_count(text)
+    elif arg(1) == "parse" then
+      parse_count(text)
     else
       raw_count(text)
   println(show_int(n))

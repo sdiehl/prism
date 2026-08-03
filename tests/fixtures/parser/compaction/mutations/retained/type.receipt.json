@@ -1,0 +1,436 @@
+{
+  "schema": "prism-parser-compaction-bounded-mutation-run-v1",
+  "oracle_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+  "oracle_executable_path": "/Users/sdiehl/Git/prism/target/debug/prism",
+  "handwritten_harness_path": "/Users/sdiehl/Git/prism/target/parser-compaction-check",
+  "draw_cap_per_mutator": 64,
+  "status": "bounded-review-run-not-full-lane-acceptance",
+  "lanes": [
+    {
+      "lane": "type",
+      "seed": "0x5459504556310001",
+      "draw_cap_per_mutator": 64,
+      "counts": {
+        "scheduled": 512,
+        "applicable": 305,
+        "inapplicable": 207,
+        "lex_failed": 0,
+        "oracle_accepted": 34,
+        "oracle_rejected": 271,
+        "discarded": 0,
+        "novel": 170,
+        "handwritten_exact": 189,
+        "handwritten_mismatch": 116
+      },
+      "mismatches": [
+        "type-008-e9988fca7127",
+        "type-010-05ecccada704",
+        "type-012-cb16bba51ccf",
+        "type-013-edebac5659bc",
+        "type-014-d3cfcfbd464b",
+        "type-017-2935a81c4bda",
+        "type-020-8e40d83e8f47",
+        "type-021-99b92a0b05b9",
+        "type-022-93dd02c92856",
+        "type-025-2935a81c4bda",
+        "type-027-65db5c5415fa",
+        "type-028-9219610f9ab8",
+        "type-029-a53c0cdd46f7",
+        "type-030-1d8642e4e438",
+        "type-031-20358b02ea16",
+        "type-032-d9cb45cc4321",
+        "type-034-9219610f9ab8",
+        "type-035-5599187f1786",
+        "type-036-d67699340cae",
+        "type-037-2935a81c4bda",
+        "type-038-a7e635c6a6ab",
+        "type-040-b0ba2e4b747e",
+        "type-042-2935a81c4bda",
+        "type-044-5599187f1786",
+        "type-045-2935a81c4bda",
+        "type-051-20358b02ea16",
+        "type-052-8e40d83e8f47",
+        "type-054-8e40d83e8f47",
+        "type-055-af9dbe06a990",
+        "type-056-9dc957bc78fa",
+        "type-058-65db5c5415fa",
+        "type-061-05ecccada704",
+        "type-064-a3ec50f39aec",
+        "type-065-4ba06853d428",
+        "type-066-fe33e9a3f398",
+        "type-067-10b2ef9b9ccd",
+        "type-068-36a481cba041",
+        "type-071-a9f106f09e27",
+        "type-073-6f5cf522afd9",
+        "type-075-3ad17dc9f15a",
+        "type-078-c0ab8591a012",
+        "type-081-36a481cba041",
+        "type-083-4ba06853d428",
+        "type-084-a7b3f3ee740c",
+        "type-085-d5a0212ddd56",
+        "type-086-4ba06853d428",
+        "type-088-a3ec50f39aec",
+        "type-092-ede971be6419",
+        "type-094-f9a89dfb7d56",
+        "type-099-77b07d26221b",
+        "type-100-16c66091e7e3",
+        "type-101-122a872cb737",
+        "type-104-f702ce68ed44",
+        "type-107-2794348ae9a6",
+        "type-116-ede971be6419",
+        "type-121-e5f745da3b32",
+        "type-126-4bbee25d992f",
+        "type-129-0d6ee1bbebae",
+        "type-135-ca5866b02d61",
+        "type-138-ca5866b02d61",
+        "type-150-e6522d01ac11",
+        "type-151-4893f12560f1",
+        "type-152-be13ae961e63",
+        "type-154-4613f1c5e228",
+        "type-158-e6522d01ac11",
+        "type-169-53e669fffdf7",
+        "type-184-e6522d01ac11",
+        "type-185-ca5866b02d61",
+        "type-187-10d376cc76e1",
+        "type-191-a11c7df063f9",
+        "type-195-1e78d86e9f49",
+        "type-201-3904197641e7",
+        "type-203-80251e587e7a",
+        "type-213-da698894a52f",
+        "type-221-73b3cd38ac8d",
+        "type-228-f4d176d779ab",
+        "type-244-405b80b92427",
+        "type-262-ee207774e836",
+        "type-276-3b5fb6cfc9ce",
+        "type-289-cbaadde84b7b",
+        "type-291-e4d37f29ddc6",
+        "type-297-193e44c148a4",
+        "type-314-a70a536b9baa",
+        "type-321-90e56a3afd82",
+        "type-323-07c8499a10d3",
+        "type-324-226d360b457f",
+        "type-330-951db2157fb9",
+        "type-331-c25d2b38c3ae",
+        "type-332-a18ef1c71b69",
+        "type-334-90e56a3afd82",
+        "type-335-44d0de16fd67",
+        "type-340-336987757d05",
+        "type-345-c747d32924c2",
+        "type-347-b7a95561eb7f",
+        "type-348-08d9c8e52ba2",
+        "type-349-5d68b59b89ec",
+        "type-350-fea384c4df28",
+        "type-354-c25d2b38c3ae",
+        "type-355-2bcfde9c0ff6",
+        "type-356-7fe686cbca87",
+        "type-357-70870b074007",
+        "type-358-c25d2b38c3ae",
+        "type-359-7f81d46d5c23",
+        "type-361-951db2157fb9",
+        "type-364-1ecfd130d97e",
+        "type-366-90e56a3afd82",
+        "type-367-90e56a3afd82",
+        "type-373-2bcfde9c0ff6",
+        "type-375-2bcfde9c0ff6",
+        "type-378-c620caf5e26f",
+        "type-379-808c5adb636f",
+        "type-380-a18ef1c71b69",
+        "type-381-292f939fc15f",
+        "type-383-5f4ce831b1d9",
+        "type-397-323c40cb2423",
+        "type-401-9bfe3bba049c"
+      ],
+      "useful": [
+        {
+          "candidate_id": "type-000-45b34b961732",
+          "schedule_index": 0,
+          "mutator": "delete-token",
+          "base_case": "type-unboxed-record",
+          "source": "fn corpus(x : {x : Int}) = x\n",
+          "source_blake3": "45b34b961732d1e7abe9b5ec99f73f8d9a7793fee9e2bf861f06c0baa2b7a0cf",
+          "operation": {
+            "token_index": 5,
+            "span": [
+              14,
+              15
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "19a21717a816075f6f97eb1d20ea21cde865e1579b859f41d96d3dca96629304",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "type-001-6fe1a337c16e",
+          "schedule_index": 1,
+          "mutator": "delete-token",
+          "base_case": "type-missing-close",
+          "source": "fn corpus(x : [Int = x\n",
+          "source_blake3": "6fe1a337c16e39da76798eb7023f0476c8bf1535bd700408c50a201f333ceb11",
+          "operation": {
+            "token_index": 7,
+            "span": [
+              18,
+              19
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "eda741c2fb8fc145dc324e728986e97880a839919ef0ef81712e6e7825985351",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "type-002-7b61749ee733",
+          "schedule_index": 2,
+          "mutator": "delete-token",
+          "base_case": "type-shapes",
+          "source": "fn corpus(a : f(Int), b : Maybe, c : Pkg.T, d : (Int), e : #(Int, Bool), f : () -> Int !, g : ()  Int ! {io, Pkg.Io}, h : Int @ {once, portable}) = 0\n",
+          "source_blake3": "7b61749ee733994dcd454bb4c273c722dc5dcd373cafe474859ae474ea248cbc",
+          "operation": {
+            "token_index": 45,
+            "span": [
+              97,
+              99
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "4eda66032d1d233a2ddb2449e6a94821710002cd515f38fd0f1112703181457c",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "type-003-907fb4eb9195",
+          "schedule_index": 3,
+          "mutator": "delete-token",
+          "base_case": "ret-retired-bare",
+          "source": "fn corpus() :  Int = 0\n",
+          "source_blake3": "907fb4eb919523505a3acfdef684c7ccad819e8f7ac02f9d3610dbae20730d2e",
+          "operation": {
+            "token_index": 5,
+            "span": [
+              14,
+              15
+            ]
+          },
+          "oracle_result_kind": "surface",
+          "novelty_blake3": "b0ee09521611968e60af6528d85519c194d23ad10675b0d64029e23488fd428b",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "type-004-37ff6c3089f4",
+          "schedule_index": 4,
+          "mutator": "delete-token",
+          "base_case": "type-args",
+          "source": "type Corpus = Corpus(List(Int), {io, Pkg.Io | e}, )\n",
+          "source_blake3": "37ff6c3089f4a798c0e5c2b3caa7b15a1cbbfd41bc0c4ab4d31b275984d20b5d",
+          "operation": {
+            "token_index": 18,
+            "span": [
+              50,
+              51
+            ]
+          },
+          "oracle_result_kind": "surface",
+          "novelty_blake3": "bd23344a4bd2a5270d7605259e395c71bdc017358cf3b9f7519c2deae23b04ca",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "type-005-27d1a0c3d956",
+          "schedule_index": 5,
+          "mutator": "delete-token",
+          "base_case": "type-arrow-effect",
+          "source": "fn corpus(x : (Int -> Int ! {Io}) = x\n",
+          "source_blake3": "27d1a0c3d95618fccc7f1668bc98a338b510f3ef919f7b3037742c268ff3e3da",
+          "operation": {
+            "token_index": 7,
+            "span": [
+              18,
+              19
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "bd75193debef8afcf2323d04026a807cc0a1e0a23f860ce10bf2e461c5fb5de8",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "type-006-e2f400de39a1",
+          "schedule_index": 6,
+          "mutator": "delete-token",
+          "base_case": "type-primitive-int",
+          "source": "fn corpus(x : ) = x\n",
+          "source_blake3": "e2f400de39a15e58b46916904ec24ba7a0973950b4f93962e7714a6a91674dd9",
+          "operation": {
+            "token_index": 5,
+            "span": [
+              14,
+              17
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "c04f4a0e3dc6ca485cf1b219927e2b64b82308aa046c12a8c4238f9a10f97479",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "type-007-d6959fd4c393",
+          "schedule_index": 7,
+          "mutator": "delete-token",
+          "base_case": "type-usage",
+          "source": "fn corpus(x : Int  once) = x\n",
+          "source_blake3": "d6959fd4c3933954d9e93cffcb3cf234b917df4169b192bc2c7b983b52287674",
+          "operation": {
+            "token_index": 6,
+            "span": [
+              18,
+              19
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "1799f3357dc3670436cb0510a3d7da21b544ab991a7f800ba8987ff15452acfb",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "type-008-e9988fca7127",
+          "schedule_index": 8,
+          "mutator": "delete-token",
+          "base_case": "type-dim-chain",
+          "source": "type Corpus = Corpus(1  n + 2)\n",
+          "source_blake3": "e9988fca7127562df330312ee7230184b2f51a6bf26c51001a3371e2aa101d5c",
+          "operation": {
+            "token_index": 6,
+            "span": [
+              23,
+              24
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "27489f99956516aded4312c467a15a2d3856e370dfa2847725760b962dbfb331",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "type-009-78e2a94299ab",
+          "schedule_index": 9,
+          "mutator": "delete-token",
+          "base_case": "type-forall",
+          "source": "fn corpus(x : forall . a) = x\n",
+          "source_blake3": "78e2a94299ab75d9a24d6f71ea936f4173e46d026f44e570a194d66dfd017148",
+          "operation": {
+            "token_index": 6,
+            "span": [
+              21,
+              22
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "911d49488e1851bdff5fafb3be36e3df446be372a55267b5cfefa86d3632f988",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "type-010-05ecccada704",
+          "schedule_index": 10,
+          "mutator": "delete-token",
+          "base_case": "ret-retired-bare",
+          "source": "fn corpus()  ! Int = 0\n",
+          "source_blake3": "05ecccada704ae518c4d5f4d2649c6fa3b1b04181633e9cbb8a899bdafbdcaee",
+          "operation": {
+            "token_index": 4,
+            "span": [
+              12,
+              13
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "acf0cc4cb0934a32172c4b6863fdf08adfc7950d2bb0369d300d6741322da2d2",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "type-011-7f666fae7b8f",
+          "schedule_index": 11,
+          "mutator": "delete-token",
+          "base_case": "type-forall",
+          "source": "fn corpus(x : forall a a) = x\n",
+          "source_blake3": "7f666fae7b8f35b5a44904e9d79b6eb6822c553e90cbd7a3466a74bcbb71b361",
+          "operation": {
+            "token_index": 7,
+            "span": [
+              22,
+              23
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "18bec69cadf987a09754f2181985191d9772fa4b4aa29cd6eb0379d83e6c1f04",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "type-012-cb16bba51ccf",
+          "schedule_index": 12,
+          "mutator": "delete-token",
+          "base_case": "ret-annotations",
+          "source": "fn closure() : (Int) -> Int  {io} = \\(x) -> x\nfn poly() : forall a. a = ?hole\n",
+          "source_blake3": "cb16bba51ccf6636fde67add95b72f89c808f2a420eb229def5e199ab66b6855",
+          "operation": {
+            "token_index": 10,
+            "span": [
+              28,
+              29
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "c73a6bd0d03118f4f93d0058c6e2590d594e181c79f292a910ed7da0513420b9",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "type-013-edebac5659bc",
+          "schedule_index": 13,
+          "mutator": "delete-token",
+          "base_case": "type-tuple",
+          "source": "fn corpus(x : (, Bool)) = x\n",
+          "source_blake3": "edebac5659bc299d2afa5175b1d31fc8feb156c4eb9b303f429dcf83bdac7012",
+          "operation": {
+            "token_index": 6,
+            "span": [
+              15,
+              18
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "8b091b590834c172bba07c897213e3ef19646bbbf29baf653ac8268568711cbd",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "type-014-d3cfcfbd464b",
+          "schedule_index": 14,
+          "mutator": "delete-token",
+          "base_case": "type-primitives-params",
+          "source": "fn corpus(a : I64, b : U64, c : Unit, d : Float, e : Char, f : String,  : Int := 0) = 0\n",
+          "source_blake3": "d3cfcfbd464bc2254e5a8b3eff6106e3a58d3e1284d3affc9de433c3f258b62a",
+          "operation": {
+            "token_index": 27,
+            "span": [
+              71,
+              72
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "040f621dc75fad974be4bb5986a13b652df8b87e0589b4782f595a6df78b10cd",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "type-015-697561b7a8d4",
+          "schedule_index": 15,
+          "mutator": "delete-token",
+          "base_case": "type-args",
+          "source": "type Corpus = Corpus((Int), {io, Pkg.Io | e}, 3)\n",
+          "source_blake3": "697561b7a8d437d52248dcdf3b8016866d7f2a117815479042fbe54a3e879ed2",
+          "operation": {
+            "token_index": 5,
+            "span": [
+              21,
+              25
+            ]
+          },
+          "oracle_result_kind": "surface",
+          "novelty_blake3": "44ccfd910c607a2fdc9268402e3c3b8ce23d57cc3030630cf356cc138e62fa63",
+          "handwritten_status": "exact"
+        }
+      ],
+      "useful_total": 214
+    }
+  ]
+}

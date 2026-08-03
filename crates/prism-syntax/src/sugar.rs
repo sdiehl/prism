@@ -4,7 +4,7 @@ use marginalia::Span;
 
 use crate::ast::{
     call, evar, sp, sp_sugar, Arm, BinOp, Converter, Expr, Marker, Migration, MigrationDir, NodeId,
-    Param, Pattern, PatternDecl, Rung, Spanned, StableDecl, Sugar, Total, Ty, S,
+    Param, Pattern, PatternDecl, ReflectKind, Rung, Spanned, StableDecl, Sugar, Total, Ty, S,
 };
 use crate::kw;
 use crate::names;
@@ -93,6 +93,33 @@ pub fn mig_dir(e: S<Expr>) -> MigrationDir {
     match &e.node {
         Expr::Var(v) if v == kw::AUTO => MigrationDir::Auto,
         _ => MigrationDir::Expr(e),
+    }
+}
+
+/// Build a `reflect fn f` / `reflect type T` quotation, given the contextual
+/// word that introduced it.
+///
+/// `reflect` is an ident rather than a reserved word, so the grammar can only
+/// recognize the form by the `fn` / `type` that follows and must check the word
+/// itself here; every arity of the form checks it the same way.
+///
+/// # Errors
+/// Fails when the leading word is not `reflect`, which means the input is some
+/// other juxtaposition of an identifier and a declaration keyword.
+pub fn reflect_expr(
+    word: &str,
+    kind: ReflectKind,
+    name: String,
+    span: Span,
+) -> Result<S<Expr>, (Span, String)> {
+    if word == kw::REFLECT {
+        Ok(sp(Expr::Sugar(Sugar::Reflect(kind, name)), span))
+    } else {
+        let form = kind.as_str();
+        Err((
+            span,
+            format!("expected `{}` before `{form}`, found `{word}`", kw::REFLECT),
+        ))
     }
 }
 
@@ -377,18 +404,21 @@ pub fn params(ps: Vec<Param>) -> Vec<Param> {
 // checking then rejects refutable patterns with its normal error.
 #[must_use]
 pub fn let_pat(pat: S<Pattern>, v: S<Expr>, rest: S<Expr>, l: usize) -> S<Expr> {
-    sp_sugar(
-        Expr::Match(
-            Box::new(v),
-            vec![Arm {
-                pat,
-                guard: None,
-                body: rest,
-                alt: false,
-            }],
+    match unwrap_try(v) {
+        Ok(scrut) => try_stmt(Some(pat), scrut, rest, l),
+        Err(v) => sp_sugar(
+            Expr::Match(
+                Box::new(v),
+                vec![Arm {
+                    pat,
+                    guard: None,
+                    body: rest,
+                    alt: false,
+                }],
+            ),
+            Span::empty(l),
         ),
-        Span::empty(l),
-    )
+    }
 }
 
 // An interpolated literal parses to an `Interp`-marker call alternating literal
@@ -448,24 +478,24 @@ pub(super) fn unwrap_try(e: S<Expr>) -> Result<S<Expr>, S<Expr>> {
     }
 }
 
-// `let x = e?` and bare `e?` statements: the rest of the block becomes the Ok
-// arm and an Err rethrows, a two-arm match whose `synth` flag (set by
+// `let pat = e?` and bare `e?` statements: the rest of the block becomes the
+// Ok arm and an Err rethrows, a two-arm match whose `synth` flag (set by
 // `sp_sugar`) marks it for the formatter.
-fn try_stmt(binder: Option<String>, scrut: S<Expr>, rest: S<Expr>, l: usize) -> S<Expr> {
+fn try_stmt(binder: Option<S<Pattern>>, scrut: S<Expr>, rest: S<Expr>, l: usize) -> S<Expr> {
     let s = scrut.span;
-    let pat = |node| Spanned {
+    let scrut_pat = |node| Spanned {
         id: NodeId::DUMMY,
         synth: false,
         node,
         span: s,
     };
-    let ok = pat(Pattern::Ctor(
+    let ok = scrut_pat(Pattern::Ctor(
         "Ok".into(),
-        vec![pat(binder.map_or(Pattern::Wild, Pattern::Var))],
+        vec![binder.unwrap_or_else(|| scrut_pat(Pattern::Wild))],
     ));
-    let err = pat(Pattern::Ctor(
+    let err = scrut_pat(Pattern::Ctor(
         "Err".into(),
-        vec![pat(Pattern::Var(names::ERR.into()))],
+        vec![scrut_pat(Pattern::Var(names::ERR.into()))],
     ));
     let rethrow = call(evar("Err", s), vec![evar(names::ERR, s)], s);
     let arms = vec![
@@ -499,7 +529,19 @@ pub fn seq_stmt(e: S<Expr>, rest: S<Expr>, l: usize, r: usize) -> S<Expr> {
 #[must_use]
 pub fn let_stmt(x: String, v: S<Expr>, rest: S<Expr>, l: usize, r: usize) -> S<Expr> {
     match unwrap_try(v) {
-        Ok(scrut) => try_stmt(Some(x), scrut, rest, l),
+        Ok(scrut) => {
+            // Preserve the historical identifier-binder span: statement `?`
+            // has always attached it to the scrutinee, and the handwritten
+            // parser mirrors this construction.
+            let s = scrut.span;
+            let binder = Spanned {
+                id: NodeId::DUMMY,
+                synth: false,
+                node: Pattern::Var(x),
+                span: s,
+            };
+            try_stmt(Some(binder), scrut, rest, l)
+        }
         Err(v) => sp(Expr::Let(x, Box::new(v), Box::new(rest)), Span::new(l, r)),
     }
 }

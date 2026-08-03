@@ -8,7 +8,7 @@ type Node = Node { kid: Option(Leaf) }
 
 fn main() =
   let full = Some(Node { kid = Some(Leaf { n = 7 }) })
-  println(full?.kid?.n ?? 0 - 1)
+  println(full?.kid?.n ?? -1)
   let gap = Some(Node { kid = None })
-  println(gap?.kid?.n ?? 0 - 1)
+  println(gap?.kid?.n ?? -1)
   println((None : Option(Node))?.kid?.n ?? 99)

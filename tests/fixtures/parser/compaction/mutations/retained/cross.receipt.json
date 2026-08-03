@@ -1,0 +1,344 @@
+{
+  "schema": "prism-parser-compaction-bounded-mutation-run-v1",
+  "oracle_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+  "oracle_executable_path": "/Users/sdiehl/Git/prism/target/debug/prism",
+  "handwritten_harness_path": "/Users/sdiehl/Git/prism/target/parser-compaction-check",
+  "draw_cap_per_mutator": 16,
+  "status": "bounded-review-run-not-full-lane-acceptance",
+  "lanes": [
+    {
+      "lane": "cross",
+      "seed": "0x43524f5356310001",
+      "draw_cap_per_mutator": 16,
+      "counts": {
+        "scheduled": 128,
+        "applicable": 84,
+        "inapplicable": 44,
+        "lex_failed": 0,
+        "oracle_accepted": 19,
+        "oracle_rejected": 65,
+        "discarded": 0,
+        "novel": 79,
+        "handwritten_exact": 60,
+        "handwritten_mismatch": 24
+      },
+      "mismatches": [
+        "cross-001-c8aa889e878f",
+        "cross-003-65db5c5415fa",
+        "cross-004-65db5c5415fa",
+        "cross-006-447aa08303ac",
+        "cross-007-2935a81c4bda",
+        "cross-008-566be7c1ca47",
+        "cross-009-05ecccada704",
+        "cross-011-d06ff9ca32c6",
+        "cross-013-8e40d83e8f47",
+        "cross-066-d40d81f68de7",
+        "cross-067-670f5337d077",
+        "cross-069-4ba06853d428",
+        "cross-073-a87edf41d7ab",
+        "cross-075-bffe81562b7e",
+        "cross-078-d5a0212ddd56",
+        "cross-079-c350e5724dea",
+        "cross-135-be13ae961e63",
+        "cross-204-da4b2b3708ca",
+        "cross-271-191b29f023ff",
+        "cross-320-fea384c4df28",
+        "cross-323-90e56a3afd82",
+        "cross-329-922800841574",
+        "cross-331-54547717186c",
+        "cross-332-e05c480ca383"
+      ],
+      "useful": [
+        {
+          "candidate_id": "cross-000-80a9a1b38680",
+          "schedule_index": 0,
+          "mutator": "delete-token",
+          "base_case": "pattern-record-separator-wrong-close",
+          "source": "fn corpus(v) = match v of\n   {x ] => 0\n  _ => 1\n",
+          "source_blake3": "80a9a1b386801b178bb172ed7b9aaae446a66724972aee33d6f266399f834114",
+          "operation": {
+            "token_index": 9,
+            "span": [
+              28,
+              29
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "dc35cbe3973def67788230fb68886e5dd97a18028534f1a858c195204719fe18",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "cross-001-c8aa889e878f",
+          "schedule_index": 1,
+          "mutator": "delete-token",
+          "base_case": "ret-annotations",
+          "source": "fn closure()  (Int) -> Int ! {io} = \\(x) -> x\nfn poly() : forall a. a = ?hole\n",
+          "source_blake3": "c8aa889e878f07984c24952638f8e56be66d12db3bf6451348476ddc5903329a",
+          "operation": {
+            "token_index": 4,
+            "span": [
+              13,
+              14
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "d86de163570bdf3531b906a72a9c1ad9052e00642b572012f5af095107fe47bc",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "cross-002-9a2961387728",
+          "schedule_index": 2,
+          "mutator": "delete-token",
+          "base_case": "pattern-record-spread",
+          "source": "fn corpus(v) = match v of\n  Point {x ..} => x\n  _ => 0\n",
+          "source_blake3": "9a29613877283e2224a27394538940ecb5c82fc4e473df5aa59597fcf6a02c1c",
+          "operation": {
+            "token_index": 12,
+            "span": [
+              36,
+              37
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "9c7287054bcdaabca64f50291ee539e791dd3c26b3282c704795faf879d999e6",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "cross-003-65db5c5415fa",
+          "schedule_index": 3,
+          "mutator": "delete-token",
+          "base_case": "type-dim-retired",
+          "source": "type Corpus = Corpus(Box( + 1))\n",
+          "source_blake3": "65db5c5415face498b0ebaa4865fe7c23d598fbf59b36a8c729cdf7546a08c0a",
+          "operation": {
+            "token_index": 7,
+            "span": [
+              25,
+              26
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "7521c017bbafc3548bc56a257ab5b7e4b2097cdfe3409a8cdfa7ba865aba78e5",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "cross-004-65db5c5415fa",
+          "schedule_index": 4,
+          "mutator": "delete-token",
+          "base_case": "type-dim-retired",
+          "source": "type Corpus = Corpus(Box( + 1))\n",
+          "source_blake3": "65db5c5415face498b0ebaa4865fe7c23d598fbf59b36a8c729cdf7546a08c0a",
+          "operation": {
+            "token_index": 7,
+            "span": [
+              25,
+              26
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "7521c017bbafc3548bc56a257ab5b7e4b2097cdfe3409a8cdfa7ba865aba78e5",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "cross-005-8ba9b1f95271",
+          "schedule_index": 5,
+          "mutator": "delete-token",
+          "base_case": "vert-open-if",
+          "source": "fn corpus(x) =\n   x > 0 then\n    x + 1\n  elif x < 0 then\n    x - 1\n  x\n",
+          "source_blake3": "8ba9b1f95271fadc6054d4871dd1a96fc1874d0bf458a70ad89519ee525ebe3c",
+          "operation": {
+            "token_index": 6,
+            "span": [
+              17,
+              19
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "d923c4649f52705015097b6e87c1293cce3e92217cd8047beaf2e603d78e0bde",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "cross-006-447aa08303ac",
+          "schedule_index": 6,
+          "mutator": "delete-token",
+          "base_case": "vert-mods-invalid",
+          "source": "assume  corpus(x) = x\n",
+          "source_blake3": "447aa08303ace76615c62ee5e02ee9fa0ebf7faf23418180f6b6dad097800cad",
+          "operation": {
+            "token_index": 1,
+            "span": [
+              7,
+              9
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "37b13025ced75c68e05dec82d0acc7d8b77c5d59f77b315eef502aad0096f62a",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "cross-007-2935a81c4bda",
+          "schedule_index": 7,
+          "mutator": "delete-token",
+          "base_case": "type-ret-wrong-close",
+          "source": "fn corpus()  ] = 0\n",
+          "source_blake3": "2935a81c4bda0b2a9ecc4f8e08671ff3107b9513fde07715fc35a300d816b46d",
+          "operation": {
+            "token_index": 4,
+            "span": [
+              12,
+              13
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "002455504e880d2ceee01818200ba207f26528ee471abc8695af95c062d06d87",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "cross-008-566be7c1ca47",
+          "schedule_index": 8,
+          "mutator": "delete-token",
+          "base_case": "vertical-index-neg",
+          "source": "fn corpus(x, i) = -xi]\n",
+          "source_blake3": "566be7c1ca477b1a1e48b11ace5abba064a81e7a1bdef27388b61c75cfc97dfd",
+          "operation": {
+            "token_index": 10,
+            "span": [
+              20,
+              21
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "976d3a28b392d674dd3c0116db3b429b433004b94fb2bfee5fa74a05ed9429bb",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "cross-009-05ecccada704",
+          "schedule_index": 9,
+          "mutator": "delete-token",
+          "base_case": "ret-retired-bare",
+          "source": "fn corpus()  ! Int = 0\n",
+          "source_blake3": "05ecccada704ae518c4d5f4d2649c6fa3b1b04181633e9cbb8a899bdafbdcaee",
+          "operation": {
+            "token_index": 4,
+            "span": [
+              12,
+              13
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "acf0cc4cb0934a32172c4b6863fdf08adfc7950d2bb0369d300d6741322da2d2",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "cross-010-28d99a833d2c",
+          "schedule_index": 10,
+          "mutator": "delete-token",
+          "base_case": "vert-mods-invalid",
+          "source": " fn corpus(x) = x\n",
+          "source_blake3": "28d99a833d2c70d4b28253f8dc12b5d6b304f611c306149b558bd9e28501e87c",
+          "operation": {
+            "token_index": 0,
+            "span": [
+              0,
+              6
+            ]
+          },
+          "oracle_result_kind": "surface",
+          "novelty_blake3": "f1f3771857e304d18cc802468d1065fddd321edcd1a520e27cd3e0137e54a309",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "cross-011-d06ff9ca32c6",
+          "schedule_index": 11,
+          "mutator": "delete-token",
+          "base_case": "vert-open-if",
+          "source": "fn corpus(x) =\n  if  > 0 then\n    x + 1\n  elif x < 0 then\n    x - 1\n  x\n",
+          "source_blake3": "d06ff9ca32c605217522a6242352c7e12a31b0af4f2efb636610c5558b01295c",
+          "operation": {
+            "token_index": 7,
+            "span": [
+              20,
+              21
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "dbf0dc60803fc046a536cf22507a5d748a67476aea8d44d45873f82e6c8431b2",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "cross-012-132156297ea8",
+          "schedule_index": 12,
+          "mutator": "delete-token",
+          "base_case": "pattern-ctor-param",
+          "source": "fn corpus(A()) = 0\n",
+          "source_blake3": "132156297ea85a7a4bcc7ad94b6969a06a26f441096e39ea8baccd3a61aeba9b",
+          "operation": {
+            "token_index": 5,
+            "span": [
+              12,
+              13
+            ]
+          },
+          "oracle_result_kind": "surface",
+          "novelty_blake3": "4ebd394425b68f510838efbfdffc5e5a201ad120132c69f96b5cb9fe41da6b8f",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "cross-013-8e40d83e8f47",
+          "schedule_index": 13,
+          "mutator": "delete-token",
+          "base_case": "type-effect-misuse",
+          "source": "fn corpus(x : Int ! {Io) = x\n",
+          "source_blake3": "8e40d83e8f475f7598adcb4b9c8fe6e2217efdce3ad6a0a539fc9a136be9e88d",
+          "operation": {
+            "token_index": 9,
+            "span": [
+              23,
+              24
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "d496d516670e37aa12da6ba4f9eddc0b22fd028a12923892f2e3ca883aa98029",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "cross-014-f93dfe85fde3",
+          "schedule_index": 14,
+          "mutator": "delete-token",
+          "base_case": "vertical-modifiers",
+          "source": "fn plain(x) = x\ntest fn tested(x) = x\ntotal fn tot(x) = x\nassume total fn (x) = x\ntest total fn tested_total(x) = x\nfip fn inplace(x) = x\nfbip fn borrowed(x) = x\n",
+          "source_blake3": "f93dfe85fde372b6987ae424c02b1388caa3fb2d5e954687eefc2d74b2242ae4",
+          "operation": {
+            "token_index": 26,
+            "span": [
+              74,
+              81
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "d3f2cca2a3a4b07f07247dc37eab8810f4ba5a9d686a9d2fbb4796eb25b392c5",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "cross-015-050c5731e644",
+          "schedule_index": 15,
+          "mutator": "delete-token",
+          "base_case": "pattern-tuple-let",
+          "source": "fn corpus(v) = let (, y) = v in 0\n",
+          "source_blake3": "050c5731e6447de25ff635f42d077b3455c9014f47361db9fd21f4f2da8c6644",
+          "operation": {
+            "token_index": 8,
+            "span": [
+              20,
+              21
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "0cf813373d46bf036979703349eab38ca12d8a9160ee0423d0ab0ec5081aac67",
+          "handwritten_status": "exact"
+        }
+      ],
+      "useful_total": 81
+    }
+  ]
+}

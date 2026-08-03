@@ -184,7 +184,7 @@ fn signum(n) =
   if n > 0 then
     1
   elif n < 0 then
-    0 - 1
+    -1
   else
     0
 
@@ -268,7 +268,8 @@ fn int_pow(base, n) =
   else
     int_pow_go(base, n, 1)
 
--- | `n!`, the factorial of `n`.
+-- | `n!`, the factorial of `n`. A negative `n` has no factorial, and the guard
+-- answers `1` for the whole non-positive side rather than recursing forever.
 --
 -- ```prism
 -- factorial(5)
@@ -277,7 +278,7 @@ fn int_pow(base, n) =
 -- 120
 -- ```
 fn factorial(n) =
-  if n == 0 then
+  if n <= 0 then
     1
   else
     n * factorial(n - 1)
@@ -1214,7 +1215,7 @@ fn args() : List(String) = args_go(0, args_count())
 -- ```
 fn int_cmp(a, b) =
   if a < b then
-    0 - 1
+    -1
   elif a > b then
     1
   else
@@ -1390,7 +1391,7 @@ instance ordInt : Ord(Int)
 instance ordI64 : Ord(I64)
   fn cmp(x, y) =
     if x < y then
-      0 - 1
+      -1
     elif x > y then
       1
     else
@@ -1399,7 +1400,7 @@ instance ordI64 : Ord(I64)
 instance ordU64 : Ord(U64)
   fn cmp(x, y) =
     if x < y then
-      0 - 1
+      -1
     elif x > y then
       1
     else
@@ -1417,7 +1418,7 @@ instance ordChar : Ord(Char)
 instance ordFloat : Ord(Float)
   fn cmp(x, y) =
     if x < y then
-      0 - 1
+      -1
     elif x > y then
       1
     else

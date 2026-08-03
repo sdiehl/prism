@@ -52,11 +52,11 @@ fn product_algebra(layer : ListF(Int, Int)) : Int =
     NilF => 1
     ConsF(x, product) => x * product
 
-fn range_layer(bounds : (Int, Int)) : ListF(Int, (Int, Int)) =
-  if fst(bounds) >= snd(bounds) then
+fn range_layer((lo, hi) : (Int, Int)) : ListF(Int, (Int, Int)) =
+  if lo >= hi then
     NilF
   else
-    ConsF(fst(bounds), (fst(bounds) + 1, snd(bounds)))
+    ConsF(lo, (lo + 1, hi))
 
 fn countdown_layer(n : Int) : ListF(Int, Int) =
   if n <= 0 then
@@ -70,11 +70,11 @@ fn remove_algebra(
 ) : MuList(Int) =
   match layer of
     NilF => Roll(NilF)
-    ConsF(x, pair) =>
+    ConsF(x, (original, removed)) =>
       if x == target then
-        fst(pair)
+        original
       else
-        Roll(ConsF(x, snd(pair)))
+        Roll(ConsF(x, removed))
 
 fn remove_first(target : Int, value : MuList(Int)) : MuList(Int) =
   para(\(layer) -> remove_algebra(target, layer), value)

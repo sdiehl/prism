@@ -1,6 +1,6 @@
 [package]
 name = "prism"
-version = "0.15.0"
+version = "0.16.0"
 authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
 categories = ["compilers"]
 default-run = "prism"
@@ -116,7 +116,13 @@ required-features = ["native"]
 name = "demo"
 path = "examples/demo.rs"
 
-[lints.rust]
+# The whole workspace inherits one lint policy (each member declares
+# `[lints] workspace = true`), so member crates are held to the same standard
+# as the root package rather than rustc defaults.
+[lints]
+workspace = true
+
+[workspace.lints.rust]
 # `deny` rather than `forbid` so audited exception sites can opt in with
 # `#[allow(unsafe_code)]`: the LLVM `getelementptr` builder in inkwell is `unsafe`,
 # and the interpreter calls the vendored native libm through FFI. Every `unsafe`
@@ -126,11 +132,15 @@ missing_debug_implementations = "warn"
 unreachable_pub = "warn"
 rust_2018_idioms = { level = "warn", priority = -1 }
 
-[lints.clippy]
+[workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 cargo = { level = "warn", priority = -1 }
+# The dependency tree carries two `syn` major versions (lalrpop's toolchain vs
+# serde's derive); that split is upstream, not something this workspace can pin
+# away, so the one cargo-group lint it trips is decided here for every member.
+multiple_crate_versions = "allow"
 
 # Faster incremental builds and links for the dev/test loop: line-number-only
 # debuginfo (backtraces keep file:line, only debugger variable inspection is
@@ -164,7 +174,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.15.0"
+version = "0.16.0"
 authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
 edition = "2021"
 license = "MIT"

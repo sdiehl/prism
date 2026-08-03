@@ -12,15 +12,23 @@ Elements are `I64` for the reason keys are in `Data.IntMap`: branching is a bit 
 
 ### `intset_empty`
 
-```prism,sig,h-b3108b04b12fdfe75cf5e7144d9514d69a5fcb7688ae5b6a633d9e14cb4d74e3
+```prism,sig,h-8f731050b711689c817b8da694a863ece70d5b8770fd56007f09666464d65af9
 intset_empty : Data.IntMap.IntMap(Unit)
 ```
 
 The empty set.
 
+```prism,mod=Data.IntSet
+intset_is_empty(intset_empty)
+```
+
+```output
+true
+```
+
 ### `intset_singleton`
 
-```prism,sig,h-983d49969c90d14b377d75e37372e04a61bee974be75243d9f7fea8f704a994c
+```prism,sig,h-75a2e73310eb98c74b565a2f699897ead3d296eca51899a1d0d32f7f39c5575d
 intset_singleton : (I64) -> Data.IntMap.IntMap(Unit)
 ```
 
@@ -36,7 +44,7 @@ intset_to_list(intset_singleton(7i64))
 
 ### `intset_insert`
 
-```prism,sig,h-b3757dff5e5684ad0023c7740b77d3a85945db5471f06afd7921003c5489d6a7
+```prism,sig,h-f1d5889da30203784a4333c5a0bce7f01ca3704ce6bdc8c7a5a70d60d0f13137
 intset_insert : (I64, Data.IntMap.IntMap(Unit)) -> Data.IntMap.IntMap(Unit)
 ```
 
@@ -52,7 +60,7 @@ intset_to_list(intset_insert(2i64, intset_insert(1i64, intset_empty)))
 
 ### `intset_member`
 
-```prism,sig,h-130d33b57afabb9df91d054df3c9e6d18e32e281a300add0ba412cf30d08878b
+```prism,sig,h-d7e75bc12aaff77f8c0661851f85860099958f164babec9f122f2514bf98c82b
 intset_member : (I64, Data.IntMap.IntMap(Unit)) -> Bool
 ```
 
@@ -68,7 +76,7 @@ true
 
 ### `intset_delete`
 
-```prism,sig,h-4cb4c06e85c02bb21444d1e91f4e106699f9fc83c1054499747f5c48111c0b44
+```prism,sig,h-23ab67718351abc482adadf588552dfe033f0bec843d14eafbeca299b34af882
 intset_delete : (I64, Data.IntMap.IntMap(Unit)) -> Data.IntMap.IntMap(Unit)
 ```
 
@@ -84,7 +92,7 @@ intset_to_list(intset_delete(2i64, intset_from_list([1i64, 2i64, 3i64])))
 
 ### `intset_size`
 
-```prism,sig,h-145dc18413003288ddbfaf05111761461f2567746a473b0ddab01d513b2dadc8
+```prism,sig,h-23f3d4b46f2be712f2feab545ef1b2d9e7c0d565fcdb071dd3bbd0eca2aaa3a9
 intset_size : (Data.IntMap.IntMap(Unit)) -> Int
 ```
 
@@ -100,7 +108,7 @@ intset_size(intset_from_list([1i64, 2i64, 2i64, 3i64]))
 
 ### `intset_is_empty`
 
-```prism,sig,h-4600163e29ba59b43eae20f1acd6aaac2201efaa47ee229d877d9bf536038a58
+```prism,sig,h-55cdfebb61f9bfca98d5b58be38127c525db8573b3e5d99aef7ecba6e0a3748e
 intset_is_empty : (Data.IntMap.IntMap(Unit)) -> Bool
 ```
 
@@ -116,7 +124,7 @@ true
 
 ### `intset_to_list`
 
-```prism,sig,h-93590f32b49df4b8837a2164927332441017809d879b6c9a9c7ad709457e368f
+```prism,sig,h-901ac1ec9a6d13ed1295b912e72fa707e2c4e75d4d0e65edee972bf96730a997
 intset_to_list : (Data.IntMap.IntMap(Unit)) -> List(I64)
 ```
 
@@ -132,7 +140,7 @@ intset_to_list(intset_from_list([3i64, 1i64, 2i64, 1i64]))
 
 ### `intset_from_list`
 
-```prism,sig,h-71ee4c43901579e4a71835c3c3684052a137c0d60594a46ec3141c1f05c57dc6
+```prism,sig,h-645c3cac4b00f0faf9d86480cf59127a468b04a839f5d263b85cc9f420c2e78d
 intset_from_list : (List(I64)) -> Data.IntMap.IntMap(Unit)
 ```
 
@@ -148,7 +156,7 @@ intset_to_list(intset_from_list([3i64, 1i64, 2i64, 1i64]))
 
 ### `intset_union`
 
-```prism,sig,h-db7e4d5ea21e787d71a4527939e631e2742dee03fff62ab6f9bd9545cc9dc307
+```prism,sig,h-8b549e1729f777fa2a3755ee93eec8d8ce2d69126add02f2db6845f16eede3a2
 intset_union : (Data.IntMap.IntMap(Unit), Data.IntMap.IntMap(Unit)) -> Data.IntMap.IntMap(Unit)
 ```
 
@@ -164,7 +172,7 @@ intset_to_list(intset_union(intset_from_list([1i64, 2i64]), intset_from_list([2i
 
 ### `intset_intersection`
 
-```prism,sig,h-42b74c0f036c0056ef95ea4794f5a68a0b20c59d0feb4a19bdb05921e980cd4f
+```prism,sig,h-55b68d98914c14e88bec75e97706526a4aaa22f29ca5a24bd8f212960b8dbd09
 intset_intersection : (Data.IntMap.IntMap(Unit), Data.IntMap.IntMap(Unit)) -> Data.IntMap.IntMap(Unit)
 ```
 
@@ -185,7 +193,7 @@ intset_to_list(
 
 ### `intset_difference`
 
-```prism,sig,h-a0e173e88a3773fd13e74d2d57497acf5027eab4ced360a21114c32ebab80857
+```prism,sig,h-a92a03ef6adf1b4362cf0b595bd419eff9678bfb0643b630784b82dd953c3100
 intset_difference : (Data.IntMap.IntMap(Unit), Data.IntMap.IntMap(Unit)) -> Data.IntMap.IntMap(Unit)
 ```
 
@@ -203,7 +211,7 @@ intset_to_list(
 
 ### `intset_filter`
 
-```prism,sig,h-651cdc3dab15f598a61459de2b2f30b8f3aa241a26d84500fb791ee12b632472
+```prism,sig,h-c6695b16b4217e012298ea5ad6dc9bd0feb8111257de966140e1445d9fee843e
 intset_filter : forall e0. ((I64) -> Bool ! {e0}, Data.IntMap.IntMap(Unit)) -> Data.IntMap.IntMap(Unit) ! {e0}
 ```
 
@@ -219,7 +227,7 @@ intset_to_list(intset_filter(\(x) -> x > 1i64, intset_from_list([1i64, 2i64, 3i6
 
 ### `intset_fold`
 
-```prism,sig,h-4e56456c7fb5d8ea1952b7d08f1c8aef9dbc6e265cce99af2f652dbd948271d9
+```prism,sig,h-d91a0be482ee1f6ef299bdfa9b1c57f5a5d510e90f775d56b2bc01162e6c341f
 intset_fold : forall e0 a. ((a, I64) -> a ! {e0}, a, Data.IntMap.IntMap(Unit)) -> a ! {e0}
 ```
 
@@ -235,7 +243,7 @@ intset_fold(\(acc, x) -> acc + x, 0i64, intset_from_list([1i64, 2i64, 3i64]))
 
 ### `intset_map`
 
-```prism,sig,h-adc5909e7f47044579a23f7d6caa8da594cb7622061c6af53c0fae02cf305c89
+```prism,sig,h-d14889c57029651eafc68e78eb5909ae92d25f35ab6528d5c300d6e9a6b60d24
 intset_map : forall e0. ((I64) -> I64 ! {e0}, Data.IntMap.IntMap(Unit)) -> Data.IntMap.IntMap(Unit) ! {e0}
 ```
 

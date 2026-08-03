@@ -677,13 +677,12 @@ fn a_sequence_hole_is_a_loud_error_not_a_renumbering() {
     let log = Log::at(&path);
     let d_header = log.head().unwrap().expect("header digests");
     let line0 = format!(
-        "0\t1\t{d_header}\tgithub.com/prism-lang/x\thttp\t1.0\tprism-core-hash-v1\tsource-bundle\taaaa"
+        "0\t1\t{d_header}\tgithub.com/prism-lang/x\thttp\t1.0\t{HASH_SCHEME}\tsource-bundle\taaaa"
     );
     fs::write(&path, format!("{header}\n{line0}\n")).unwrap();
     let d0 = log.head().unwrap().expect("line 0 digests");
-    let line2 = format!(
-        "2\t3\t{d0}\tgithub.com/prism-lang/x\ttz\t1.0\tprism-core-hash-v1\tsource-bundle\tcccc"
-    );
+    let line2 =
+        format!("2\t3\t{d0}\tgithub.com/prism-lang/x\ttz\t1.0\t{HASH_SCHEME}\tsource-bundle\tcccc");
     fs::write(&path, format!("{header}\n{line0}\n{line2}\n")).unwrap();
     let err = log.entries().unwrap_err().to_string();
     assert!(err.contains("sequence hole"), "unexpected error: {err}");
@@ -794,7 +793,7 @@ fn a_legacy_log_is_rejected_outright() {
         fs::write(
             &path,
             format!(
-                "{legacy_header}\n0\t1\tgithub.com/prism-lang/x\thttp\t1.0\tprism-core-hash-v1\tsource-bundle\taaaa\n"
+                "{legacy_header}\n0\t1\tgithub.com/prism-lang/x\thttp\t1.0\t{HASH_SCHEME}\tsource-bundle\taaaa\n"
             ),
         )
         .unwrap();

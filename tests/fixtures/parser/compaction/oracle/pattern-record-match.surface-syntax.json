@@ -1,0 +1,99 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "ff6312b2715e1bcc771ac334d285a717c8b2c323eaabd6dcb9431b4a49fc20b1",
+    "text": "fn corpus(v) = match v of\n  Point {x, y = 0} => 0\n  _ => 1\n"
+  },
+  "items": [
+    {
+      "body": {
+        "arms": [
+          {
+            "body": {
+              "kind": "int",
+              "span": [
+                48,
+                49
+              ],
+              "value": "0"
+            },
+            "pat": {
+              "fields": [
+                {
+                  "name": "x",
+                  "pat": {
+                    "kind": "var",
+                    "name": "x",
+                    "span": [
+                      35,
+                      36
+                    ]
+                  }
+                },
+                {
+                  "name": "y",
+                  "pat": {
+                    "kind": "int",
+                    "span": [
+                      42,
+                      43
+                    ],
+                    "value": "0"
+                  }
+                }
+              ],
+              "kind": "record",
+              "name": "Point",
+              "span": [
+                28,
+                44
+              ]
+            }
+          },
+          {
+            "body": {
+              "kind": "int",
+              "span": [
+                57,
+                58
+              ],
+              "value": "1"
+            },
+            "pat": {
+              "kind": "wild",
+              "span": [
+                52,
+                53
+              ]
+            }
+          }
+        ],
+        "kind": "match",
+        "scrutinee": {
+          "kind": "var",
+          "name": "v",
+          "span": [
+            21,
+            22
+          ]
+        },
+        "span": [
+          15,
+          58
+        ]
+      },
+      "kind": "fn",
+      "name": "corpus",
+      "params": [
+        {
+          "name": "v"
+        }
+      ],
+      "span": [
+        0,
+        58
+      ]
+    }
+  ]
+}

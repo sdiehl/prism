@@ -10,6 +10,8 @@ const MINTED_ID_SCHEME: &str = "sha256";
 #[serde(transparent)]
 pub struct NodeId(pub String);
 
+/// A node identity minted over `bytes`: the scheme tag and the payload digest.
+#[must_use]
 pub fn minted_id(bytes: &[u8]) -> NodeId {
     NodeId(format!(
         "{MINTED_ID_SCHEME}:{}",

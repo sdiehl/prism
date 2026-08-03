@@ -57,13 +57,13 @@ impl<I: Isa> Cg<'_, I> {
     // m - n < m, so the chain of adapters-of-adapters strictly shrinks.
     // Every lambda arity plus every arity an `App` actually calls. The planning
     // fixpoint and the final dispatcher emission both iterate exactly this set.
-    pub fn apply_arities(&self) -> BTreeSet<usize> {
+    pub(crate) fn apply_arities(&self) -> BTreeSet<usize> {
         let mut a: BTreeSet<usize> = self.lams.iter().map(|l| l.params.len()).collect();
         a.extend(self.used_apply.iter().copied());
         a
     }
 
-    pub fn plan_dispatch(&mut self, n: usize) {
+    pub(crate) fn plan_dispatch(&mut self, n: usize) {
         if n == 0 {
             return;
         }
@@ -91,7 +91,7 @@ impl<I: Isa> Cg<'_, I> {
     // only emitted functions. Applying zero arguments only ever lands on an
     // arity-0 thunk, so for n == 0 the sole reachable case is m == 0;
     // positive-arity tags route to `_dead` like any non-applicable value.
-    pub fn apply_dispatch(&mut self, n: usize) -> String {
+    pub(crate) fn apply_dispatch(&mut self, n: usize) -> String {
         let lams: Vec<(usize, LamInfo)> = self
             .lams
             .iter()
@@ -204,7 +204,11 @@ impl<I: Isa> Cg<'_, I> {
     }
 }
 
-pub fn partial_app_body(name: &str, n_given: usize, arity: usize) -> (Vec<Sym>, Vec<Sym>, Comp) {
+pub(crate) fn partial_app_body(
+    name: &str,
+    n_given: usize,
+    arity: usize,
+) -> (Vec<Sym>, Vec<Sym>, Comp) {
     let cap_names: Vec<Sym> = (0..n_given).map(|i| Sym::new(&closure_cap(i))).collect();
     let rem_names: Vec<Sym> = (0..arity - n_given)
         .map(|i| Sym::new(&closure_rem(i)))

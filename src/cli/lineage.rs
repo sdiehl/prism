@@ -892,10 +892,10 @@ fn lineage_diff_cmd(old: &Path, new: &Path, json: bool) -> CmdResult {
 }
 
 // `lineage verify SIDECAR --replay`: close the record/verify loop by replay. The
-// program and trace are resolved from the sidecar's request and its sibling
-// `.replay`; a fresh replay recomputes the trace and stdout digests, and the input
-// files are rehashed from disk. Any disagreement is a named error. Shared by the
-// `lineage verify` command and the check-world replay gate.
+// program and trace are resolved from the sidecar's request and its recorded
+// replay relation; a fresh replay recomputes the trace and stdout digests, and the
+// input files are rehashed from disk. Any disagreement is a named error. Shared by
+// the `lineage verify` command and the check-world replay gate.
 pub fn verify_run_sidecar(
     sidecar: &Path,
     cfg: &crate::Config,
@@ -910,8 +910,8 @@ pub fn verify_run_sidecar(
     let entry = crate::lineage::run_entry(&graph)
         .map_err(|e| (e, String::new(), path.display().to_string()))?;
     let program = base.join(&entry);
-    // Resolve the durable trace from the graph's own self-description (verifying its
-    // digest), falling back to the sibling `.replay` only for pre-relation sidecars.
+    // Resolve the durable trace from the graph's own self-description, verifying its
+    // digest; a sidecar that records no replay relation is refused, never guessed at.
     let trace_path = crate::lineage::resolve_replay_file(&graph, &path, &base)
         .map_err(|e| (e, String::new(), path.display().to_string()))?;
     let trace_src = crate::cli::read(&trace_path).map_err(|e| {

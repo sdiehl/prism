@@ -32,7 +32,7 @@ let det_keys : List(I64) =
     ]
 
 -- The extremes of the key lane, where the sign bit is the branch bit.
-let i64_min : I64 = to_i64(0 - 9223372036854775808)
+let i64_min : I64 = to_i64(-9223372036854775808)
 
 let i64_max : I64 = to_i64(9223372036854775807)
 

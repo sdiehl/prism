@@ -1,0 +1,513 @@
+{
+  "schema": "prism-parser-compaction-handwritten-status-v1",
+  "oracle_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+  "corpus_version": 2,
+  "subject": "recorded handwritten Prism parser executable",
+  "subject_provenance": {
+    "compiler_path": "/Users/sdiehl/Git/prism/target/debug/prism",
+    "compiler_blake3": "2ec1c73be1e302a3ce70ae347137c881105e191d992b761b4ceebf2e07cd6118",
+    "harness_executable_path": "/Users/sdiehl/Git/prism/target/parser-compaction-check",
+    "harness_executable_blake3": "098628ebf5b68efc58e4e9d5a57ba5171e7b16d0efa1df571b40347bd4e1fd5a",
+    "harness_source_path": "tests/fixtures/parser/compaction_check.pr",
+    "harness_source_blake3": "5011fafe2da58c198d45b5168be436f88a7a8d831f5cf75830044890fc64ed51",
+    "git_head": "bed252bcf630032f4e5ae44f0f15db493d6e1b9a",
+    "git_head_tree": "48ed7792de92480d9b4a97cd8f11cd59e06097a1",
+    "tracked_worktree_status": [
+      " M scripts/parser-compaction-corpus.py",
+      " M tests/fixtures/parser/compaction/entries/prism-let-pattern.receipt.json",
+      " M tests/fixtures/parser/compaction/entries/prism-type.receipt.json",
+      " M tests/fixtures/parser/compaction/entries/rust-typesig.receipt.json",
+      " M tests/fixtures/parser/compaction/mutation-seeds.json"
+    ],
+    "worktree_diff_blake3": "740eeb046cd558ede86877dcf0be26d258f7776e4ae62c1b9e41746da41ee5c2",
+    "index_diff_blake3": "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+    "parser_source_snapshot_blake3": "4497556709ff29943265ba0598a9eb457ae75b86624fb6018de181f5e30e447b",
+    "parser_sources": [
+      {
+        "path": "lib/std/Syntax/Cursor.pr",
+        "blake3": "297e8901e9caf25a27529a020d36b3c4ccf69bcb9356d2a3a515a56ef48138c4"
+      },
+      {
+        "path": "lib/std/Syntax/Layout.pr",
+        "blake3": "6983f788c5af0f7f3294a77c4cefe10d336cf65e547a7f036aa1619b3aebde5a"
+      },
+      {
+        "path": "lib/std/Syntax/Lex.pr",
+        "blake3": "9e51013c3284a0acb579c2254a6fee9fefc385a0f001e6178cba58b40eee4d9e"
+      },
+      {
+        "path": "lib/std/Syntax/Parse/Build.pr",
+        "blake3": "7d0357a7e6c77238ac2a06652096f2611658c27615251e8b1c848211e0a6f39a"
+      },
+      {
+        "path": "lib/std/Syntax/Parse/Decl.pr",
+        "blake3": "ce99b4f035b82eda30b434bccfa7fd445353d2a4578fd8c52c3ecd05e8255cca"
+      },
+      {
+        "path": "lib/std/Syntax/Parse/DeclClass.pr",
+        "blake3": "09a078fe76ab12b1fdf5f163da4a9b01eb7fe135aa947acbf3442fb0c9ceb64a"
+      },
+      {
+        "path": "lib/std/Syntax/Parse/DeclStable.pr",
+        "blake3": "435be130f63bc1c27da057eb732408f65276e4a77c272a693c9ff9ac9b4de0db"
+      },
+      {
+        "path": "lib/std/Syntax/Parse/Expr.pr",
+        "blake3": "221df6febf7d14b2996e3d50fb47c4270d1a4e4e2305fd5201d81f0e9f05b507"
+      },
+      {
+        "path": "lib/std/Syntax/Parse/GeneratedControl.pr",
+        "blake3": "20e631719b7fb19d2941efb70c27e9a2d9b14ca6cc73454e723970a5c424b1c4"
+      },
+      {
+        "path": "lib/std/Syntax/Parse/GeneratedPattern.pr",
+        "blake3": "dd30af2f790490d6527d56c60f5132fa035888135214713c992a50e8ef73f2db"
+      },
+      {
+        "path": "lib/std/Syntax/Parse/GeneratedType.pr",
+        "blake3": "b24eb2be5dcde05354db783fd9ddff3436b8bed3c59f5309580d3090f0a128b3"
+      },
+      {
+        "path": "lib/std/Syntax/Parse/Pattern.pr",
+        "blake3": "7651825c7e84c9007ddffbbe893ba847ef5acc329cc4253bf5704c97ce9d8f95"
+      },
+      {
+        "path": "lib/std/Syntax/Parse/PatternSemantics.pr",
+        "blake3": "7a1580bd99d0bc37eb55999fc52822188234494a532ea4a19a769470148ab2c5"
+      },
+      {
+        "path": "lib/std/Syntax/Parse/Support.pr",
+        "blake3": "ff1987d3b782fd1e9d60a424b1dc512856294982df82fa34692f7b01c91aed50"
+      },
+      {
+        "path": "lib/std/Syntax/Parse/Type.pr",
+        "blake3": "db7ae6151c8a48fb07af285bc2a5e36de9c829e8ac7cb85ff53b738023aced98"
+      },
+      {
+        "path": "lib/std/Syntax/Parse/TypeSemantics.pr",
+        "blake3": "11a703c9f38fdad35e13912824517544150400400ae3bfa6489f3832bdee08f0"
+      },
+      {
+        "path": "lib/std/Syntax/Parse.pr",
+        "blake3": "01c7271d6652fac5bba77e0e83bd3b95dbfda4837425dc6c935c4a74dd1ddae9"
+      }
+    ],
+    "note": "The executable digests identify the actual comparison subject. Git fields describe the concurrent worktree when replay ran; they do not claim that the compiler binary was rebuilt after every dirty-tree edit."
+  },
+  "gate_ready": false,
+  "cases": [
+    {
+      "case_id": "carrier-pattern-try",
+      "oracle_full_blake3": "7898b3fdac5953d66c5d178df7704ce2643a353a3c56403b9b4434487980adf5",
+      "oracle_projection_blake3": "7898b3fdac5953d66c5d178df7704ce2643a353a3c56403b9b4434487980adf5",
+      "handwritten_full_blake3": "476d3625774b08a65761923ab3bebd5f7e5235d7a3bd701efa1a71df73350673",
+      "exception_key": null,
+      "status": "mismatch",
+      "handwritten_projection_blake3": "476d3625774b08a65761923ab3bebd5f7e5235d7a3bd701efa1a71df73350673"
+    },
+    {
+      "case_id": "decl-four-prefix",
+      "oracle_full_blake3": "c774a1e68a53f5b5c59d835eda0183c6ee1f514efa51c006faae028ec622e659",
+      "oracle_projection_blake3": "1c9460c8bfb2b2ac6cea8cade5d7a35b481a0d7832b2efe8433a18aed2a94aad",
+      "handwritten_full_blake3": "6379a3886cf2368979f8c38f7065f8f6a5daab5da413425fe1130a7f16d20444",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "1c9460c8bfb2b2ac6cea8cade5d7a35b481a0d7832b2efe8433a18aed2a94aad"
+    },
+    {
+      "case_id": "decl-newline-test",
+      "oracle_full_blake3": "8f9d2a9fe89634d87adefbece722edc750dbf4a035a5e2e61289fad0b2ee57a1",
+      "oracle_projection_blake3": "de7cac833cb9914e1f1e70f69d48f2eaa049846a7399aab3b2490083946068ed",
+      "handwritten_full_blake3": "a70096fb453d7c3be599e0e72297918cfbb5824ab08d3221524c2eedd0ec54a4",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "de7cac833cb9914e1f1e70f69d48f2eaa049846a7399aab3b2490083946068ed"
+    },
+    {
+      "case_id": "decl-valid-plus-foo",
+      "oracle_full_blake3": "4cba5ca624eb332378dd99977bb6111bff9b824f69a26ef1176ad7b115c04ad4",
+      "oracle_projection_blake3": "db34191eda1faf7c722eca5589e1a67eb48745c27a8330c06a05d6a56e312f67",
+      "handwritten_full_blake3": "a228e59b6d310979b5dfc9c49f6f65a526fdc411e0ccdb398e3745fce19a1ba9",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "db34191eda1faf7c722eca5589e1a67eb48745c27a8330c06a05d6a56e312f67"
+    },
+    {
+      "case_id": "pattern-alt-match",
+      "oracle_full_blake3": "d2ad6572680e76c701505c8138f1579ae5690f9e610259607b114ebf8892dff3",
+      "oracle_projection_blake3": "d2ad6572680e76c701505c8138f1579ae5690f9e610259607b114ebf8892dff3",
+      "handwritten_full_blake3": "d2ad6572680e76c701505c8138f1579ae5690f9e610259607b114ebf8892dff3",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "d2ad6572680e76c701505c8138f1579ae5690f9e610259607b114ebf8892dff3"
+    },
+    {
+      "case_id": "pattern-atoms",
+      "oracle_full_blake3": "2ea91724d359291bc24d8823fc0c7c668faf6fd33c03f9a94cb878aab724c8af",
+      "oracle_projection_blake3": "2ea91724d359291bc24d8823fc0c7c668faf6fd33c03f9a94cb878aab724c8af",
+      "handwritten_full_blake3": "2ea91724d359291bc24d8823fc0c7c668faf6fd33c03f9a94cb878aab724c8af",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "2ea91724d359291bc24d8823fc0c7c668faf6fd33c03f9a94cb878aab724c8af"
+    },
+    {
+      "case_id": "pattern-comma-wrong-close",
+      "oracle_full_blake3": "e3d4ce6e28c5b75559185ebb63bbb3ac022a117dc29813f0deee08be9f5a11f9",
+      "oracle_projection_blake3": "e92ea3ef0240a49a46a935e5e10a07e63d8f674a7f98aa36b0f101e6e2649dac",
+      "handwritten_full_blake3": "5ccdd3c3b3fa07753e7368c95cef402fbbc77a44603ff358e09e7fc0540ccfec",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "e92ea3ef0240a49a46a935e5e10a07e63d8f674a7f98aa36b0f101e6e2649dac"
+    },
+    {
+      "case_id": "pattern-ctor-param",
+      "oracle_full_blake3": "c50d5fb7d07bd6be70c185797d6788bea2d3634d9bf22d11905e3a15005dc610",
+      "oracle_projection_blake3": "c50d5fb7d07bd6be70c185797d6788bea2d3634d9bf22d11905e3a15005dc610",
+      "handwritten_full_blake3": "c50d5fb7d07bd6be70c185797d6788bea2d3634d9bf22d11905e3a15005dc610",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "c50d5fb7d07bd6be70c185797d6788bea2d3634d9bf22d11905e3a15005dc610"
+    },
+    {
+      "case_id": "pattern-let-ctors",
+      "oracle_full_blake3": "706c5da08972daf00a468d5349a6fb8f7a8644d09a1aa93396002a43768fedba",
+      "oracle_projection_blake3": "706c5da08972daf00a468d5349a6fb8f7a8644d09a1aa93396002a43768fedba",
+      "handwritten_full_blake3": "706c5da08972daf00a468d5349a6fb8f7a8644d09a1aa93396002a43768fedba",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "706c5da08972daf00a468d5349a6fb8f7a8644d09a1aa93396002a43768fedba"
+    },
+    {
+      "case_id": "pattern-list-match",
+      "oracle_full_blake3": "c084cd2f1613abd06fba515a95e1d841b9249101573cdcf39d812e9b78bdbeae",
+      "oracle_projection_blake3": "c084cd2f1613abd06fba515a95e1d841b9249101573cdcf39d812e9b78bdbeae",
+      "handwritten_full_blake3": "c084cd2f1613abd06fba515a95e1d841b9249101573cdcf39d812e9b78bdbeae",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "c084cd2f1613abd06fba515a95e1d841b9249101573cdcf39d812e9b78bdbeae"
+    },
+    {
+      "case_id": "pattern-missing-a-separator",
+      "oracle_full_blake3": "e88c5068e9f3ff8b038854399c8cf8b8f430ff9880cf252628dc320e1deb6200",
+      "oracle_projection_blake3": "94c5863bc26c5cd380a2eefa187002166c2e535c2383c19e200b477439e94791",
+      "handwritten_full_blake3": "9a5c9e2f15cc8cef80bee8d7fa42c7065ef995d48c244fe430ca9399b81a0ca8",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "94c5863bc26c5cd380a2eefa187002166c2e535c2383c19e200b477439e94791"
+    },
+    {
+      "case_id": "pattern-missing-close",
+      "oracle_full_blake3": "29405320ba75857644f35a8aa90ea61f8904560e0b5174916e72f6e5c055a679",
+      "oracle_projection_blake3": "c5fa744c59fe826d2d99bb53898c03849c8202990a010fa6862d320051a8b06f",
+      "handwritten_full_blake3": "89d0060f1a50a06e49cdba59ffa34f66b20f779d05379c45d4f843ffaf693c9b",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "c5fa744c59fe826d2d99bb53898c03849c8202990a010fa6862d320051a8b06f"
+    },
+    {
+      "case_id": "pattern-record-match",
+      "oracle_full_blake3": "aabd3d738e55eb7565440f85d5ab8718beb121c0826d5501e2bec5f1fcce7060",
+      "oracle_projection_blake3": "aabd3d738e55eb7565440f85d5ab8718beb121c0826d5501e2bec5f1fcce7060",
+      "handwritten_full_blake3": "aabd3d738e55eb7565440f85d5ab8718beb121c0826d5501e2bec5f1fcce7060",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "aabd3d738e55eb7565440f85d5ab8718beb121c0826d5501e2bec5f1fcce7060"
+    },
+    {
+      "case_id": "pattern-record-separator-wrong-close",
+      "oracle_full_blake3": "47cf88a7fe793913da6de65f53cb1327da1afb0895595c9b6128ac5dce2a966d",
+      "oracle_projection_blake3": "d3ec95eaf188c4fb81e182b4a8edc19211a84160d64aa12c06e8f26807ae67ac",
+      "handwritten_full_blake3": "79e6be8116869e225333c7647b235bc983d4207d29965fdef8b8c999e2a7cb1f",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "d3ec95eaf188c4fb81e182b4a8edc19211a84160d64aa12c06e8f26807ae67ac"
+    },
+    {
+      "case_id": "pattern-record-spread",
+      "oracle_full_blake3": "59c185c28daaad1d877995d7fef4017f463f938c8509d02ff6a82f190a3e4c83",
+      "oracle_projection_blake3": "59c185c28daaad1d877995d7fef4017f463f938c8509d02ff6a82f190a3e4c83",
+      "handwritten_full_blake3": "59c185c28daaad1d877995d7fef4017f463f938c8509d02ff6a82f190a3e4c83",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "59c185c28daaad1d877995d7fef4017f463f938c8509d02ff6a82f190a3e4c83"
+    },
+    {
+      "case_id": "pattern-tuple-let",
+      "oracle_full_blake3": "32022858985644dec9f487647bc5d6fe0798a51fd9dbf1594e921060be8de274",
+      "oracle_projection_blake3": "32022858985644dec9f487647bc5d6fe0798a51fd9dbf1594e921060be8de274",
+      "handwritten_full_blake3": "32022858985644dec9f487647bc5d6fe0798a51fd9dbf1594e921060be8de274",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "32022858985644dec9f487647bc5d6fe0798a51fd9dbf1594e921060be8de274"
+    },
+    {
+      "case_id": "ret-annotations",
+      "oracle_full_blake3": "939ccc134b3002fe4839e955b2c5ccb651e6a64b194dc7b0977d554a9831f4ec",
+      "oracle_projection_blake3": "939ccc134b3002fe4839e955b2c5ccb651e6a64b194dc7b0977d554a9831f4ec",
+      "handwritten_full_blake3": "939ccc134b3002fe4839e955b2c5ccb651e6a64b194dc7b0977d554a9831f4ec",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "939ccc134b3002fe4839e955b2c5ccb651e6a64b194dc7b0977d554a9831f4ec"
+    },
+    {
+      "case_id": "ret-retired-bare",
+      "oracle_full_blake3": "cda4dbdafafc461506afc98e835e49e4ecafb009d7df49401501a63e2d2371ac",
+      "oracle_projection_blake3": "05634a3396b9cd0e9c0ea12124bd2f2ff9da8209f6bc1556a065643f8ae82d2b",
+      "handwritten_full_blake3": "cda4dbdafafc461506afc98e835e49e4ecafb009d7df49401501a63e2d2371ac",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "05634a3396b9cd0e9c0ea12124bd2f2ff9da8209f6bc1556a065643f8ae82d2b"
+    },
+    {
+      "case_id": "ret-retired-braced",
+      "oracle_full_blake3": "675704eb89f010bffa891f8af3f0437e900794b6ec1e714cc26c15a6c539e2c0",
+      "oracle_projection_blake3": "f73dfb67ec2ce329e75d28f79ed0fd5ae160a3c2ed339f5239e0744880f3a4af",
+      "handwritten_full_blake3": "675704eb89f010bffa891f8af3f0437e900794b6ec1e714cc26c15a6c539e2c0",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "f73dfb67ec2ce329e75d28f79ed0fd5ae160a3c2ed339f5239e0744880f3a4af"
+    },
+    {
+      "case_id": "type-args",
+      "oracle_full_blake3": "cecd1e206509e431eb16c411235a223d65df5ea5163c42740e2f7bf96d29de8c",
+      "oracle_projection_blake3": "cecd1e206509e431eb16c411235a223d65df5ea5163c42740e2f7bf96d29de8c",
+      "handwritten_full_blake3": "cecd1e206509e431eb16c411235a223d65df5ea5163c42740e2f7bf96d29de8c",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "cecd1e206509e431eb16c411235a223d65df5ea5163c42740e2f7bf96d29de8c"
+    },
+    {
+      "case_id": "type-arrow-effect",
+      "oracle_full_blake3": "d679a1fb4e52892076914864e02294c3817fd39e27a094084ae92537e10a410f",
+      "oracle_projection_blake3": "d679a1fb4e52892076914864e02294c3817fd39e27a094084ae92537e10a410f",
+      "handwritten_full_blake3": "d679a1fb4e52892076914864e02294c3817fd39e27a094084ae92537e10a410f",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "d679a1fb4e52892076914864e02294c3817fd39e27a094084ae92537e10a410f"
+    },
+    {
+      "case_id": "type-dim-chain",
+      "oracle_full_blake3": "dbd09b0decce11feca19741827416b6296a359b27fd9144534ba39459fc4102b",
+      "oracle_projection_blake3": "8236242e8fcf67de722065be1b1350202ed33dd7fd62331b78a79821971a7d4e",
+      "handwritten_full_blake3": "dbd09b0decce11feca19741827416b6296a359b27fd9144534ba39459fc4102b",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "8236242e8fcf67de722065be1b1350202ed33dd7fd62331b78a79821971a7d4e"
+    },
+    {
+      "case_id": "type-dim-retired",
+      "oracle_full_blake3": "dc651ac7813ccca656aa15dcca4fe36748a380fe833df379817b3446608edb2d",
+      "oracle_projection_blake3": "bcb34d8de0e199955cb0dbc553c783d9525d2a3f50d9cefe449e80e180951e67",
+      "handwritten_full_blake3": "dc651ac7813ccca656aa15dcca4fe36748a380fe833df379817b3446608edb2d",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "bcb34d8de0e199955cb0dbc553c783d9525d2a3f50d9cefe449e80e180951e67"
+    },
+    {
+      "case_id": "type-effect-misuse",
+      "oracle_full_blake3": "bfe653a3e73d86394b36574618914e1fe459e833dadf4c47f874a98ef118cf9e",
+      "oracle_projection_blake3": "a7154f6d0b90929c8088047b6d5b47eee24f9d0bf1974bc9ad82c81c1ae95d9a",
+      "handwritten_full_blake3": "bfe653a3e73d86394b36574618914e1fe459e833dadf4c47f874a98ef118cf9e",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "a7154f6d0b90929c8088047b6d5b47eee24f9d0bf1974bc9ad82c81c1ae95d9a"
+    },
+    {
+      "case_id": "type-forall",
+      "oracle_full_blake3": "3b6c492b18d32e47179dc90bbccdfc0257d1e7836997d57d5d31ea06602a730f",
+      "oracle_projection_blake3": "3b6c492b18d32e47179dc90bbccdfc0257d1e7836997d57d5d31ea06602a730f",
+      "handwritten_full_blake3": "3b6c492b18d32e47179dc90bbccdfc0257d1e7836997d57d5d31ea06602a730f",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "3b6c492b18d32e47179dc90bbccdfc0257d1e7836997d57d5d31ea06602a730f"
+    },
+    {
+      "case_id": "type-function-usage-misuse",
+      "oracle_full_blake3": "511b1d07e0bf09c58ecb59a4e672dd2db53633a71089e4352920f18f618d4e41",
+      "oracle_projection_blake3": "db6f8ea5a82355bd96d2e676dc83b1ae21bd4cab9b2f480e451ec56a536761f6",
+      "handwritten_full_blake3": "511b1d07e0bf09c58ecb59a4e672dd2db53633a71089e4352920f18f618d4e41",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "db6f8ea5a82355bd96d2e676dc83b1ae21bd4cab9b2f480e451ec56a536761f6"
+    },
+    {
+      "case_id": "type-kinds-alias",
+      "oracle_full_blake3": "323533877245678f6b7b06bad8200ba29f37f036389150eee14b2e744b52ccfb",
+      "oracle_projection_blake3": "323533877245678f6b7b06bad8200ba29f37f036389150eee14b2e744b52ccfb",
+      "handwritten_full_blake3": "323533877245678f6b7b06bad8200ba29f37f036389150eee14b2e744b52ccfb",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "323533877245678f6b7b06bad8200ba29f37f036389150eee14b2e744b52ccfb"
+    },
+    {
+      "case_id": "type-missing-close",
+      "oracle_full_blake3": "66bda682797399818405ae7f212480bff01ea89844daa1b03153e693a7b45d7a",
+      "oracle_projection_blake3": "393479df775a650de90656aef8c9ddc4fbc90de787e92d0356274a14fb7d4567",
+      "handwritten_full_blake3": "afbe9271f8c3d2094270d85e1673c7aeb5c7587f5d1723092434e18ff2e0072a",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "393479df775a650de90656aef8c9ddc4fbc90de787e92d0356274a14fb7d4567"
+    },
+    {
+      "case_id": "type-primitive-int",
+      "oracle_full_blake3": "f541f37a04f0a4d2fe0be79e29d628d57a69c3dddb2908b74d43be79660b8b2c",
+      "oracle_projection_blake3": "f541f37a04f0a4d2fe0be79e29d628d57a69c3dddb2908b74d43be79660b8b2c",
+      "handwritten_full_blake3": "f541f37a04f0a4d2fe0be79e29d628d57a69c3dddb2908b74d43be79660b8b2c",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "f541f37a04f0a4d2fe0be79e29d628d57a69c3dddb2908b74d43be79660b8b2c"
+    },
+    {
+      "case_id": "type-primitives-params",
+      "oracle_full_blake3": "8608da1ec202757256bea95f822c6c5664fd780f0c522e32eb61a94f9b20d256",
+      "oracle_projection_blake3": "8608da1ec202757256bea95f822c6c5664fd780f0c522e32eb61a94f9b20d256",
+      "handwritten_full_blake3": "8608da1ec202757256bea95f822c6c5664fd780f0c522e32eb61a94f9b20d256",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "8608da1ec202757256bea95f822c6c5664fd780f0c522e32eb61a94f9b20d256"
+    },
+    {
+      "case_id": "type-ret-wrong-close",
+      "oracle_full_blake3": "740501acd4cf4c8634f6f048e314728bd0fff1fa4e4bc5b2357d0ef4be308070",
+      "oracle_projection_blake3": "5465f656b16ab0ed8a67fc6d883eafcf09416e89004edee9f11252043739e911",
+      "handwritten_full_blake3": "964257874d8a1ef3be651e2d1292abc5e616055c6986d8dfdf4ccda9a8cd927d",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "5465f656b16ab0ed8a67fc6d883eafcf09416e89004edee9f11252043739e911"
+    },
+    {
+      "case_id": "type-shapes",
+      "oracle_full_blake3": "1e276b6f68bb6f70e1f5df9fc4fc28681eb9b9db47f31ca8a525adc9be82a985",
+      "oracle_projection_blake3": "1e276b6f68bb6f70e1f5df9fc4fc28681eb9b9db47f31ca8a525adc9be82a985",
+      "handwritten_full_blake3": "1e276b6f68bb6f70e1f5df9fc4fc28681eb9b9db47f31ca8a525adc9be82a985",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "1e276b6f68bb6f70e1f5df9fc4fc28681eb9b9db47f31ca8a525adc9be82a985"
+    },
+    {
+      "case_id": "type-tuple",
+      "oracle_full_blake3": "30cf90ce08e6f382a62bac669facab8f8abeef6bd6a6efa050a3ed2e554f4e93",
+      "oracle_projection_blake3": "30cf90ce08e6f382a62bac669facab8f8abeef6bd6a6efa050a3ed2e554f4e93",
+      "handwritten_full_blake3": "30cf90ce08e6f382a62bac669facab8f8abeef6bd6a6efa050a3ed2e554f4e93",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "30cf90ce08e6f382a62bac669facab8f8abeef6bd6a6efa050a3ed2e554f4e93"
+    },
+    {
+      "case_id": "type-unboxed-record",
+      "oracle_full_blake3": "054120ce8070984c79fe4619a748f8c9de3360cdbddf54977796083f6dee0750",
+      "oracle_projection_blake3": "054120ce8070984c79fe4619a748f8c9de3360cdbddf54977796083f6dee0750",
+      "handwritten_full_blake3": "054120ce8070984c79fe4619a748f8c9de3360cdbddf54977796083f6dee0750",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "054120ce8070984c79fe4619a748f8c9de3360cdbddf54977796083f6dee0750"
+    },
+    {
+      "case_id": "type-usage",
+      "oracle_full_blake3": "8223cd37d5b471e6a10bae7a7527a67544bbb462f3362b095d11453c53c78691",
+      "oracle_projection_blake3": "8223cd37d5b471e6a10bae7a7527a67544bbb462f3362b095d11453c53c78691",
+      "handwritten_full_blake3": "8223cd37d5b471e6a10bae7a7527a67544bbb462f3362b095d11453c53c78691",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "8223cd37d5b471e6a10bae7a7527a67544bbb462f3362b095d11453c53c78691"
+    },
+    {
+      "case_id": "vert-expr-spine",
+      "oracle_full_blake3": "b774391e8ef7bf5df6cec396a4e1fad9dc6b7ca185e026cbc6a1311e5ddd6d68",
+      "oracle_projection_blake3": "b774391e8ef7bf5df6cec396a4e1fad9dc6b7ca185e026cbc6a1311e5ddd6d68",
+      "handwritten_full_blake3": "b774391e8ef7bf5df6cec396a4e1fad9dc6b7ca185e026cbc6a1311e5ddd6d68",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "b774391e8ef7bf5df6cec396a4e1fad9dc6b7ca185e026cbc6a1311e5ddd6d68"
+    },
+    {
+      "case_id": "vert-mods-invalid",
+      "oracle_full_blake3": "260842439b1c5b2756317f1693e004a951e2cdf0341cce59b36d95945e7db367",
+      "oracle_projection_blake3": "96abc7f1bff345b89fb90e6a83645276d8ebdf81e2b11e99d1e0a8095f792442",
+      "handwritten_full_blake3": "260842439b1c5b2756317f1693e004a951e2cdf0341cce59b36d95945e7db367",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "96abc7f1bff345b89fb90e6a83645276d8ebdf81e2b11e99d1e0a8095f792442"
+    },
+    {
+      "case_id": "vert-mods-long",
+      "oracle_full_blake3": "5e891e18cc054820b313fe299eca1d665398ecaead21af8542d8d57fd5eb9b18",
+      "oracle_projection_blake3": "5e891e18cc054820b313fe299eca1d665398ecaead21af8542d8d57fd5eb9b18",
+      "handwritten_full_blake3": "5e891e18cc054820b313fe299eca1d665398ecaead21af8542d8d57fd5eb9b18",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "5e891e18cc054820b313fe299eca1d665398ecaead21af8542d8d57fd5eb9b18"
+    },
+    {
+      "case_id": "vert-open-if",
+      "oracle_full_blake3": "98311cecab332adc2c9545114238acb0e3165bc9ac6f6498378ff411667cdd85",
+      "oracle_projection_blake3": "98311cecab332adc2c9545114238acb0e3165bc9ac6f6498378ff411667cdd85",
+      "handwritten_full_blake3": "98311cecab332adc2c9545114238acb0e3165bc9ac6f6498378ff411667cdd85",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "98311cecab332adc2c9545114238acb0e3165bc9ac6f6498378ff411667cdd85"
+    },
+    {
+      "case_id": "vert-try-bare",
+      "oracle_full_blake3": "3e7a28908b0801334a8cd16b727e3073ba4acf1043d8f2042e5a1f5e6929325d",
+      "oracle_projection_blake3": "3e7a28908b0801334a8cd16b727e3073ba4acf1043d8f2042e5a1f5e6929325d",
+      "handwritten_full_blake3": "3e7a28908b0801334a8cd16b727e3073ba4acf1043d8f2042e5a1f5e6929325d",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "3e7a28908b0801334a8cd16b727e3073ba4acf1043d8f2042e5a1f5e6929325d"
+    },
+    {
+      "case_id": "vert-try-bound",
+      "oracle_full_blake3": "1ea970a0e043a03688e9bafc0ae07e68b84e55d8ee9a9e713ad41ba9f51bffd6",
+      "oracle_projection_blake3": "1ea970a0e043a03688e9bafc0ae07e68b84e55d8ee9a9e713ad41ba9f51bffd6",
+      "handwritten_full_blake3": "1ea970a0e043a03688e9bafc0ae07e68b84e55d8ee9a9e713ad41ba9f51bffd6",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "1ea970a0e043a03688e9bafc0ae07e68b84e55d8ee9a9e713ad41ba9f51bffd6"
+    },
+    {
+      "case_id": "vertical-closed-if",
+      "oracle_full_blake3": "78374494ee06161bc3d3cf9f7b5d5f8c75fdaec5928bfc840b7c6e85ace1939b",
+      "oracle_projection_blake3": "78374494ee06161bc3d3cf9f7b5d5f8c75fdaec5928bfc840b7c6e85ace1939b",
+      "handwritten_full_blake3": "78374494ee06161bc3d3cf9f7b5d5f8c75fdaec5928bfc840b7c6e85ace1939b",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "78374494ee06161bc3d3cf9f7b5d5f8c75fdaec5928bfc840b7c6e85ace1939b"
+    },
+    {
+      "case_id": "vertical-index-neg",
+      "oracle_full_blake3": "becb27e1c3c5ff708a2518fdb5cdfb6aaa44bb30fbd27b2c6ac5d019c85f9aa4",
+      "oracle_projection_blake3": "becb27e1c3c5ff708a2518fdb5cdfb6aaa44bb30fbd27b2c6ac5d019c85f9aa4",
+      "handwritten_full_blake3": "becb27e1c3c5ff708a2518fdb5cdfb6aaa44bb30fbd27b2c6ac5d019c85f9aa4",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "becb27e1c3c5ff708a2518fdb5cdfb6aaa44bb30fbd27b2c6ac5d019c85f9aa4"
+    },
+    {
+      "case_id": "vertical-modifiers",
+      "oracle_full_blake3": "4d859b50bcbdbee438b2451cfeb5f11df8a90f5e00c87ba723d0485bd9d172cb",
+      "oracle_projection_blake3": "4d859b50bcbdbee438b2451cfeb5f11df8a90f5e00c87ba723d0485bd9d172cb",
+      "handwritten_full_blake3": "4d859b50bcbdbee438b2451cfeb5f11df8a90f5e00c87ba723d0485bd9d172cb",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "4d859b50bcbdbee438b2451cfeb5f11df8a90f5e00c87ba723d0485bd9d172cb"
+    },
+    {
+      "case_id": "vertical-open-end",
+      "oracle_full_blake3": "ad7bb0d9e325110a7b2026fa82d2b4a1266ce77f91d13fb3216ca8396dcc3e6b",
+      "oracle_projection_blake3": "ad7bb0d9e325110a7b2026fa82d2b4a1266ce77f91d13fb3216ca8396dcc3e6b",
+      "handwritten_full_blake3": "ad7bb0d9e325110a7b2026fa82d2b4a1266ce77f91d13fb3216ca8396dcc3e6b",
+      "exception_key": null,
+      "status": "exact",
+      "handwritten_projection_blake3": "ad7bb0d9e325110a7b2026fa82d2b4a1266ce77f91d13fb3216ca8396dcc3e6b"
+    }
+  ],
+  "summary": {
+    "exact": 44,
+    "mismatch_or_failure": 1,
+    "mismatches": [
+      "carrier-pattern-try"
+    ]
+  },
+  "pending_reason": "A mismatch is evidence, not an exception. Curated tranche 2 has no reviewed exception ledger and is not a parity gate."
+}

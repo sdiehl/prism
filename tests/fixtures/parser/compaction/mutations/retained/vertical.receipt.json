@@ -1,0 +1,420 @@
+{
+  "schema": "prism-parser-compaction-bounded-mutation-run-v1",
+  "oracle_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+  "oracle_executable_path": "/Users/sdiehl/Git/prism/target/debug/prism",
+  "handwritten_harness_path": "/Users/sdiehl/Git/prism/target/parser-compaction-check",
+  "draw_cap_per_mutator": 64,
+  "status": "bounded-review-run-not-full-lane-acceptance",
+  "lanes": [
+    {
+      "lane": "vertical",
+      "seed": "0x5645525456310001",
+      "draw_cap_per_mutator": 64,
+      "counts": {
+        "scheduled": 512,
+        "applicable": 310,
+        "inapplicable": 202,
+        "lex_failed": 0,
+        "oracle_accepted": 102,
+        "oracle_rejected": 208,
+        "discarded": 0,
+        "novel": 133,
+        "handwritten_exact": 210,
+        "handwritten_mismatch": 100
+      },
+      "mismatches": [
+        "vertical-000-09d14df7411f",
+        "vertical-002-031e326adb2d",
+        "vertical-003-447aa08303ac",
+        "vertical-004-4742c12b0215",
+        "vertical-009-447aa08303ac",
+        "vertical-012-731e916c05f3",
+        "vertical-014-5014cacee083",
+        "vertical-016-c785f9515e9c",
+        "vertical-022-3f38a7e6bb64",
+        "vertical-023-38df4370a7f7",
+        "vertical-026-3bb1eac996dd",
+        "vertical-031-bba8c77a050f",
+        "vertical-035-ba79d513025c",
+        "vertical-037-3d9358f2c86a",
+        "vertical-038-b7d1b56c1965",
+        "vertical-039-4742c12b0215",
+        "vertical-043-607537c0c6c5",
+        "vertical-044-7e8abed6bb8b",
+        "vertical-049-d89a05b05134",
+        "vertical-058-4a88fcb9b974",
+        "vertical-061-ec782a2c9e04",
+        "vertical-065-0ada144d581d",
+        "vertical-066-295192ea1ec8",
+        "vertical-068-295192ea1ec8",
+        "vertical-070-461c33783f51",
+        "vertical-071-68a5e7bdebb1",
+        "vertical-072-fea510d8c427",
+        "vertical-073-6b56beb80e3a",
+        "vertical-076-63c9254645ef",
+        "vertical-077-68a5e7bdebb1",
+        "vertical-079-ed3d2ab481e1",
+        "vertical-081-f53e0bdc289f",
+        "vertical-085-295192ea1ec8",
+        "vertical-086-295192ea1ec8",
+        "vertical-087-61d5e5f9a503",
+        "vertical-088-fefe3b0842b8",
+        "vertical-089-295192ea1ec8",
+        "vertical-090-0ada144d581d",
+        "vertical-091-6dc6af63f5ce",
+        "vertical-093-295192ea1ec8",
+        "vertical-094-295192ea1ec8",
+        "vertical-096-fea510d8c427",
+        "vertical-103-0ada144d581d",
+        "vertical-104-ed3d2ab481e1",
+        "vertical-105-56316498cc78",
+        "vertical-107-4fa442b77ea1",
+        "vertical-109-1035afa92b95",
+        "vertical-110-3bb1eac996dd",
+        "vertical-112-6b56beb80e3a",
+        "vertical-116-aa1878163343",
+        "vertical-122-295192ea1ec8",
+        "vertical-123-dea05147a957",
+        "vertical-124-7e7ef53ca8de",
+        "vertical-125-295192ea1ec8",
+        "vertical-126-295192ea1ec8",
+        "vertical-127-1035afa92b95",
+        "vertical-129-200c52ff7d35",
+        "vertical-131-200c52ff7d35",
+        "vertical-138-9e2d4ba4bf09",
+        "vertical-140-e5b783052cf7",
+        "vertical-147-b9b4fa713439",
+        "vertical-149-37fde66e7228",
+        "vertical-152-a665f18166d3",
+        "vertical-156-200c52ff7d35",
+        "vertical-159-16af385abff4",
+        "vertical-160-b9b4fa713439",
+        "vertical-164-b9b4fa713439",
+        "vertical-167-37fde66e7228",
+        "vertical-169-37fde66e7228",
+        "vertical-170-fe2ac04d798f",
+        "vertical-173-200c52ff7d35",
+        "vertical-177-200c52ff7d35",
+        "vertical-181-c1ee10e817e1",
+        "vertical-185-9e2d4ba4bf09",
+        "vertical-190-fe2ac04d798f",
+        "vertical-191-200c52ff7d35",
+        "vertical-320-0ba2908f9177",
+        "vertical-330-e2734b097ef3",
+        "vertical-336-11b06c0da24d",
+        "vertical-339-af7483b01f58",
+        "vertical-341-f34bf0145581",
+        "vertical-348-7bb8f93445b4",
+        "vertical-350-59e1f4740b38",
+        "vertical-360-6f49cce17810",
+        "vertical-362-0f4a974ffc81",
+        "vertical-364-988215cc464e",
+        "vertical-369-0f4a974ffc81",
+        "vertical-370-7262504cf179",
+        "vertical-371-460219796964",
+        "vertical-373-b429036d8774",
+        "vertical-375-497de6f8da77",
+        "vertical-382-7262504cf179",
+        "vertical-453-6f5887523d01",
+        "vertical-454-8095a7f81bab",
+        "vertical-455-56b8bc7f1501",
+        "vertical-459-bd11968d6c90",
+        "vertical-481-fa6a11dce6ea",
+        "vertical-487-53ffe499ca2c",
+        "vertical-502-83f10dd6b41b",
+        "vertical-510-3a072f20b2fd"
+      ],
+      "useful": [
+        {
+          "candidate_id": "vertical-000-09d14df7411f",
+          "schedule_index": 0,
+          "mutator": "delete-token",
+          "base_case": "vert-open-if",
+          "source": "fn corpus(x) =\n  if x > 0 then\n    x + 1\n  elif x  0 then\n    x - 1\n  x\n",
+          "source_blake3": "09d14df7411fe74d69e77651a96d239421be1486ef840972c6fa608ccc329dbc",
+          "operation": {
+            "token_index": 16,
+            "span": [
+              50,
+              51
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "0fd86b15a88b4811322bc4148d2b995c7a38361ce4bddd238d87f2bce5999f6a",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "vertical-001-982ed2db1820",
+          "schedule_index": 1,
+          "mutator": "delete-token",
+          "base_case": "vertical-open-end",
+          "source": "fn corpus(x) =\n  if x \n    x\n",
+          "source_blake3": "982ed2db182086633516fe08505fd6ccb0bfca6bf342b5048d6ad99da2ef19cd",
+          "operation": {
+            "token_index": 8,
+            "span": [
+              22,
+              26
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "e8d9c391b05b29246c52d87c6547f2d1d238f34668e7d62429a0dad8255a7682",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "vertical-002-031e326adb2d",
+          "schedule_index": 2,
+          "mutator": "delete-token",
+          "base_case": "vert-open-if",
+          "source": "fn corpus(x) =\n  if x > 0 then\n     + 1\n  elif x < 0 then\n    x - 1\n  x\n",
+          "source_blake3": "031e326adb2d6bcb68854ca19a28f43ecb0c1f604b325f77fbccb392180a3779",
+          "operation": {
+            "token_index": 11,
+            "span": [
+              35,
+              36
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "3a7a51354b1a96f5ed0e23413389ea4aae194edb0dccbfc65cf505182c657bfe",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "vertical-003-447aa08303ac",
+          "schedule_index": 3,
+          "mutator": "delete-token",
+          "base_case": "vert-mods-invalid",
+          "source": "assume  corpus(x) = x\n",
+          "source_blake3": "447aa08303ace76615c62ee5e02ee9fa0ebf7faf23418180f6b6dad097800cad",
+          "operation": {
+            "token_index": 1,
+            "span": [
+              7,
+              9
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "37b13025ced75c68e05dec82d0acc7d8b77c5d59f77b315eef502aad0096f62a",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "vertical-004-4742c12b0215",
+          "schedule_index": 4,
+          "mutator": "delete-token",
+          "base_case": "vertical-index-neg",
+          "source": "fn corpus(x, i) = -x[i\n",
+          "source_blake3": "4742c12b02151eccaf96a5653d91c93e0b285cfb9f214e609569bb35a87ac3ba",
+          "operation": {
+            "token_index": 12,
+            "span": [
+              22,
+              23
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "5b879b9b26d7b3a96e60c11c9e4af50d32bfa3da7e636afbb44df0eeff6aa4b8",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "vertical-005-af1c214c5ba1",
+          "schedule_index": 5,
+          "mutator": "delete-token",
+          "base_case": "vertical-modifiers",
+          "source": "fn plain(x) = x\ntest fn tested(x) = x\ntotal fn tot(x) = x\nassume total fn trusted(x) = x\ntest total fn (x) = x\nfip fn inplace(x) = x\nfbip fn borrowed(x) = x\n",
+          "source_blake3": "af1c214c5ba1fefe8e2e203efbdb372d03a1e4038b553c2863ab7a41ec7b69d4",
+          "operation": {
+            "token_index": 35,
+            "span": [
+              103,
+              115
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "d3f2cca2a3a4b07f07247dc37eab8810f4ba5a9d686a9d2fbb4796eb25b392c5",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "vertical-006-7395ddaaec23",
+          "schedule_index": 6,
+          "mutator": "delete-token",
+          "base_case": "decl-valid-plus-foo",
+          "source": "test assume  foo fn corpus(x) = x\n",
+          "source_blake3": "7395ddaaec230a6aaa1c892990c1c31dca772de393b19f7c1528e689b6639119",
+          "operation": {
+            "token_index": 2,
+            "span": [
+              12,
+              17
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "4e79309ddc7b3ea2a319200b965d5a57d421feb3389428ae5062256512a4e111",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "vertical-007-f840596db79d",
+          "schedule_index": 7,
+          "mutator": "delete-token",
+          "base_case": "vertical-index-neg",
+          "source": "fn corpus(x, i) = x[i]\n",
+          "source_blake3": "f840596db79d6a4ca37394a2131c142d17ed115b96c8f40c92b9ac5dabe7fe72",
+          "operation": {
+            "token_index": 8,
+            "span": [
+              18,
+              19
+            ]
+          },
+          "oracle_result_kind": "surface",
+          "novelty_blake3": "6d4ae4d78c1b5ac19cc510e84fbb3c85b9a5489ddef38749140e14fed53a4e63",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "vertical-008-28d99a833d2c",
+          "schedule_index": 8,
+          "mutator": "delete-token",
+          "base_case": "vert-mods-invalid",
+          "source": " fn corpus(x) = x\n",
+          "source_blake3": "28d99a833d2c70d4b28253f8dc12b5d6b304f611c306149b558bd9e28501e87c",
+          "operation": {
+            "token_index": 0,
+            "span": [
+              0,
+              6
+            ]
+          },
+          "oracle_result_kind": "surface",
+          "novelty_blake3": "f1f3771857e304d18cc802468d1065fddd321edcd1a520e27cd3e0137e54a309",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "vertical-009-447aa08303ac",
+          "schedule_index": 9,
+          "mutator": "delete-token",
+          "base_case": "vert-mods-invalid",
+          "source": "assume  corpus(x) = x\n",
+          "source_blake3": "447aa08303ace76615c62ee5e02ee9fa0ebf7faf23418180f6b6dad097800cad",
+          "operation": {
+            "token_index": 1,
+            "span": [
+              7,
+              9
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "37b13025ced75c68e05dec82d0acc7d8b77c5d59f77b315eef502aad0096f62a",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "vertical-011-3645100443c6",
+          "schedule_index": 11,
+          "mutator": "delete-token",
+          "base_case": "vert-open-if",
+          "source": "fn corpus(x) =\n  if x > 0 \n    x + 1\n  elif x < 0 then\n    x - 1\n  x\n",
+          "source_blake3": "3645100443c6c62c63ae35a80a8d53e00231092f16b0cbfd8dffb31a381d0ec1",
+          "operation": {
+            "token_index": 10,
+            "span": [
+              26,
+              30
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "c0133baa0947ed36ad334aebdbe8b1732a985d1ed2c7d6256696a5ee0adde373",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "vertical-012-731e916c05f3",
+          "schedule_index": 12,
+          "mutator": "delete-token",
+          "base_case": "vertical-closed-if",
+          "source": "fn corpus(x) = if x then  else 0\n",
+          "source_blake3": "731e916c05f31bab180b5468fc98c23f815bbc39442272fbcc547cc0b1688412",
+          "operation": {
+            "token_index": 9,
+            "span": [
+              25,
+              26
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "517be39e0dbc43577c690e2113a6809a0884b94120287987550b58897b6e3529",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "vertical-014-5014cacee083",
+          "schedule_index": 14,
+          "mutator": "delete-token",
+          "base_case": "vertical-closed-if",
+          "source": "fn corpus(x) = if x then 1 else \n",
+          "source_blake3": "5014cacee083077c3ab60a42d4ed7e1b94e5d50d61a043dce068472b92f2f5ef",
+          "operation": {
+            "token_index": 11,
+            "span": [
+              32,
+              33
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "517be39e0dbc43577c690e2113a6809a0884b94120287987550b58897b6e3529",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "vertical-015-38ea74880a00",
+          "schedule_index": 15,
+          "mutator": "delete-token",
+          "base_case": "vert-expr-spine",
+          "source": "fn corpus(f, g, x, y) = f()?.value + g(2) * 3 ^ 4\n",
+          "source_blake3": "38ea74880a0062dfd6c35dd056a0b2627f621bf048e360d73e1e6c2351b7d18e",
+          "operation": {
+            "token_index": 14,
+            "span": [
+              26,
+              27
+            ]
+          },
+          "oracle_result_kind": "surface",
+          "novelty_blake3": "d1c1a048c593b4f6da6b2553d233847ad210f64037c1edfc48db51ed0ce52e4b",
+          "handwritten_status": "exact"
+        },
+        {
+          "candidate_id": "vertical-016-c785f9515e9c",
+          "schedule_index": 16,
+          "mutator": "delete-token",
+          "base_case": "vertical-open-end",
+          "source": "fn corpus(x) =\n  if  then\n    x\n",
+          "source_blake3": "c785f9515e9c6d9f13c63201f153137df9ef8fb9c7ac6504226d89963873055c",
+          "operation": {
+            "token_index": 7,
+            "span": [
+              20,
+              21
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "300eebdd47206c25ac458af506c38426fa40d6bb9b7fbd5cdd47d8987cc7c074",
+          "handwritten_status": "mismatch"
+        },
+        {
+          "candidate_id": "vertical-018-4b293ccd01c1",
+          "schedule_index": 18,
+          "mutator": "delete-token",
+          "base_case": "vertical-open-end",
+          "source": "fn corpus(x) =\n   x then\n    x\n",
+          "source_blake3": "4b293ccd01c170810e7ed3c6dcd9692783b6e8d31df92c7f28b2a76fbb305edc",
+          "operation": {
+            "token_index": 6,
+            "span": [
+              17,
+              19
+            ]
+          },
+          "oracle_result_kind": "diagnostics",
+          "novelty_blake3": "a1dedf0d059500bd21ce90924f958fcfd63beb30f10f555da2d2cd56def80afd",
+          "handwritten_status": "exact"
+        }
+      ],
+      "useful_total": 177
+    }
+  ]
+}

@@ -45,10 +45,17 @@ exponent ->  ( "e" | "E" ) [ "+" | "-" ] digits
 -- not collide with the unary-minus operator.
 digits   ->  digit { [ "_" ] digit }
 char     ->  "'" ( graphic | escape | "\\'" ) "'"
-string   ->  "\"" { strchar | escape | interp } "\""
+string   ->  cooked | raw
+cooked   ->  "\"" { strchar | escape | interp } "\""
 interp   ->  "{" expr "}"
 escape   ->  "\\" ( "n" | "t" | "r" | "\\" | "{" | "}" | "\"" )
 comment  ->  "--" { any character other than newline }
+
+-- A raw string spans lines and takes its body verbatim: no escapes, no
+-- interpolation, and no way to write the closing delimiter inside it. The
+-- newline each delimiter sits against is not part of the text, and the
+-- indentation every non-blank line shares is the source's, not the string's.
+raw      ->  "r\"\"\"" { any character, up to the first "\"\"\"" } "\"\"\""
 
 -- An interpolated string "a{e}b{e}c" is lexed into the pieces below, each
 -- carrying its literal segment; the holes are re-lexed as expressions.
@@ -187,6 +194,7 @@ expr    ->  "if" expr "then" expr { "elif" expr "then" expr } "else" expr
          |  "while" expr "do" expr                    -- while loop
          |  "loop" expr                               -- unconditional loop
          |  "probe" string "do" expr                  -- named instrumentation; body runs only when enabled
+         |  "reflect" ( "fn" | "type" ) ident         -- quote a declaration of this file as a string
          |  "return" expr                             -- early return
          |  varid ":=" expr                          -- assignment
          |  varid ( "+=" | "-=" | "*=" | "%=" ) expr  -- compound assignment

@@ -1,0 +1,117 @@
+-- Direct depth-policy probe for parser-compaction tranche 3.
+--
+-- This executable deliberately emits only completion/diagnostic metadata.
+-- It never serializes the potentially enormous AST at D-/D+, which keeps
+-- boundary calibration independent from self-parse throughput.
+
+import Syntax.Source (..)
+
+import Syntax.Token (..)
+
+import Syntax.Diagnostic (..)
+
+import Syntax.Cursor (..)
+
+import Syntax.Parse.Support (..)
+
+import Syntax.Parse.Type (parse_type)
+
+import Syntax.Parse.Pattern (parse_pattern)
+
+import Syntax.Parse.Expr (parse_expr)
+
+import Syntax.Parse.Decl (parse_program)
+
+import Syntax.Codec (..)
+
+import Data.List (..)
+
+import Json (..)
+
+fn phase_name(phase : DiagPhase) : String =
+  match phase of
+    DPLex => "lex"
+    DPParse => "parse"
+
+fn span_json(span : Span) : Json = JArr([JInt(span.lo), JInt(span.hi)])
+
+fn diagnostic_json(d : Diagnostic) : Json =
+  JObj([
+      ("code", JStr(d.code)),
+      ("phase", JStr(phase_name(d.phase))),
+      ("span", span_json(d.span)),
+      ("message", JStr(d.message)),
+      ("expected", JArr(map(JStr, d.expected))),
+      ("related", JArr(map(span_json, d.related))),
+    ])
+
+fn depth_result(result : Parsed(a)) : Json =
+  match result of
+    PFault(d) =>
+      JObj([("outcome", JStr("fault")), ("diagnostic", diagnostic_json(d))])
+    PStuck(c) =>
+      JObj([
+          ("outcome", JStr("stuck")),
+          ("diagnostic", diagnostic_json(cursor_diagnostic(c))),
+        ])
+    PTook(_, c) =>
+      JObj([
+          ("outcome", JStr("accepted")),
+          ("position", JInt(c.pos)),
+          ("token_count", JInt(cursor_count(c))),
+          ("complete", JBool(cursor_at_end(c))),
+        ])
+
+fn token_in(t : Token, lo : Int, hi : Int) : Bool =
+  lo <= t.span.lo && t.span.hi <= hi
+
+fn parse_probe(
+  kind : String,
+  doc : TokensDoc,
+  lo : Int,
+  hi : Int,
+  stop : Int,
+  budget : Int
+) : Json =
+  if kind == "program" then
+    depth_result(parse_program(cursor_of(doc.parse, stop), budget))
+  else
+    let tokens = filter(\(t) -> token_in(t, lo, hi), doc.raw)
+    let cursor = cursor_of(tokens, hi)
+    if kind == "type" then
+      depth_result(parse_type(cursor, budget))
+    elif kind == "pattern" then
+      depth_result(parse_pattern(cursor, budget))
+    elif kind == "expr" then
+      depth_result(parse_expr(cursor, budget))
+    else
+      JObj([
+          ("outcome", JStr("harness-error")),
+          ("message", JStr("unknown depth entry")),
+        ])
+
+fn int_arg(text : String) : Int =
+  match parse_int(text) of
+    Some(value) => value
+    None => 0 - 1
+
+fn main() =
+  match decode_tokens(read_file(arg(1))) of
+    Err(e) =>
+      println(canonical_json(JObj([
+          ("outcome", JStr("harness-error")),
+          ("message", JStr(codec_error_message(e))),
+        ])))
+    Ok(doc) =>
+      println(
+          canonical_json(
+              parse_probe(
+                  arg(0),
+                  doc,
+                  int_arg(arg(2)),
+                  int_arg(arg(3)),
+                  int_arg(arg(4)),
+                  int_arg(arg(5)),
+                ),
+            ),
+        )

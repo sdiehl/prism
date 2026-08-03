@@ -14,7 +14,7 @@ The re-lex is a lexical check and nothing more. It catches an edit that unbalanc
 
 ### `Edit`
 
-```prism,def,h-db216047df99c6e916621922ee45fd759b3f4cc87b9eccf807dda7cd30c05657
+```prism,def,h-b4eb83007d87481124be61640bb0bd4fb90e1d349ef9bade513114ef28b9e23c
 type Edit = Edit { span: Span, text: String }
 ```
 
@@ -22,7 +22,7 @@ One edit: the byte span it replaces and the text that replaces it. An insertion 
 
 ### `EditError`
 
-```prism,def,h-331b5b62d181c9574dfcaaecb389e5f5f81a890123ad1af09deeb0736683e8eb
+```prism,def,h-a8175b060502718edcb5b67b067a2115ad4a3f7f9043027853ba128163d00992
 type EditError
   = EdBadSpan(Span)
   | EdPastEnd(Span, Int)
@@ -37,7 +37,7 @@ Why an edit set was refused. Every case names the offending span, so a tool can 
 
 ### `ed_insert_at`
 
-```prism,sig,h-d6dcb2826ede198b597a957d9c11ef9f3cda531f9d07c80dd1cb2b235bc1f609
+```prism,sig,h-aee0b92dcf3fc50fd4844632ba637c4b85332c98d07f398341a536f8abb1129e
 ed_insert_at : (Int, String) -> Syntax.Edit.Edit
 ```
 
@@ -45,7 +45,7 @@ An insertion at one offset.
 
 ### `ed_delete`
 
-```prism,sig,h-21cee13e932e43049bcdd01aa22328cc9edd073ca09814cb14f9217a29637f82
+```prism,sig,h-e71d0902dbdd4191535f04934ae80cf079f32d5c83f3192ff113e94856e2849a
 ed_delete : (Syntax.Source.Span) -> Syntax.Edit.Edit
 ```
 
@@ -53,7 +53,7 @@ A deletion of one span.
 
 ### `ed_replace`
 
-```prism,sig,h-6d17887fb95b128434ebbc6f5cf1336bd9d282eced602511ad1288bace16b91c
+```prism,sig,h-57f87f44c33bccb66f2af4b8adbd8082bd3703cd5da4de29af57ef2452b87aaa
 ed_replace : (Syntax.Source.Span, String) -> Syntax.Edit.Edit
 ```
 
@@ -61,7 +61,7 @@ A replacement of one span.
 
 ### `ed_span_text`
 
-```prism,sig,h-c8672450e03a1b757d7d8005f7dfff306f572d158ec86ffb084e08750ba3fbf9
+```prism,sig,h-1621e85513a1ab7e0cf7d62e404820e109050f5cb38220dafe4a078dc1d7649f
 ed_span_text : (String, Syntax.Source.Span) -> Option(String)
 ```
 
@@ -69,7 +69,7 @@ The current text under a span, or `None` when the span does not address this tex
 
 ### `ed_message`
 
-```prism,sig,h-183301460a5963b348c776084a21314bdc1502b1288b568330d6fb748f5b4597
+```prism,sig,h-e7ca838504fb8bf83cf29cd351ebaaf42b7a8910359ccd2ba8eb1804634c07ec
 ed_message : (Syntax.Edit.EditError) -> String
 ```
 
@@ -77,7 +77,7 @@ A human-readable account of a refusal.
 
 ### `ed_sort`
 
-```prism,sig,h-e4f9df224d255f2515a0429417724c7a5892d124ce96ff08a07db5c02bfdca88
+```prism,sig,h-130b12cc11aeb950c186782b369ff4bf46331bd42a76d2adc5017aa00bb54bf8
 ed_sort : (List(Syntax.Edit.Edit)) -> List(Syntax.Edit.Edit)
 ```
 
@@ -85,7 +85,7 @@ The edits sorted by start offset, stably: two edits starting at the same offset 
 
 ### `ed_apply`
 
-```prism,sig,h-970984224d6fb12f17a02f75c959fe74a8e7c05745b2ac15ae609b150ae87d02
+```prism,sig,h-5796f41a619040f5b19f2d1b2f8cc41dd9955a30bc5b8cfaa4c5e85710e90c2d
 ed_apply : (String, List(Syntax.Edit.Edit)) -> Result(String, Syntax.Edit.EditError)
 ```
 
@@ -95,7 +95,7 @@ The result is the spliced text when every edit is well formed, the edits do not 
 
 ### `ed_count`
 
-```prism,sig,h-a9746e0b1ed320713fe257d618a7f3f81d9f140dcba9d0652dda2c440fc1317a
+```prism,sig,h-6618145f5e357175335de026afcd637500edfda7642c23eee7a4a1523db00221
 ed_count : (List(Syntax.Edit.Edit)) -> Int
 ```
 

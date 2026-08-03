@@ -12,7 +12,7 @@ type Task = Task { state: St }
 fn bump(state : St) : Int =
   match state of
     Doing { progress = progress } => progress
-    _ => 0 - 1
+    _ => -1
 
 fn main() =
   let t =

@@ -23,7 +23,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 
 use crate::core::hash::hex;
-use crate::error::{Error, LexError, ParseError, SourceMap};
+use crate::error::{Error, LexError, ParseError, SourceMap, SyntaxFault};
 use crate::lex::{lex, lex_raw, LexSpanned};
 use crate::parse::parse;
 use crate::syntax::ast::{
@@ -153,12 +153,13 @@ const fn rebase_lex(e: &LexError, base: usize) -> LexError {
 }
 
 fn rebase_parse(e: ParseError, base: usize) -> ParseError {
+    let rebase = |mut f: Box<SyntaxFault>| {
+        f.span = Span::new(f.span.start + base, f.span.end + base);
+        f
+    };
     match e {
-        ParseError::Syntax { span, msg } => ParseError::Syntax {
-            span: Span::new(span.start + base, span.end + base),
-            msg,
-        },
-        ParseError::UnexpectedEof => ParseError::UnexpectedEof,
+        ParseError::Syntax(f) => ParseError::Syntax(rebase(f)),
+        ParseError::UnexpectedEof(f) => ParseError::UnexpectedEof(rebase(f)),
     }
 }
 
@@ -990,6 +991,9 @@ fn sugar_node(s: &Sugar<crate::syntax::ast::Surface>) -> Value {
         Sugar::Probe(name, body) => {
             json!({"kind": "probe", "name": name, "body": expr_value(body)})
         }
+        Sugar::Reflect(kind, name) => {
+            json!({"kind": "reflect", "decl": kind.as_str(), "name": name})
+        }
         Sugar::OptChain(base, name) => {
             json!({"kind": "opt-chain", "expr": expr_value(base), "name": name})
         }
@@ -1205,16 +1209,13 @@ pub(super) fn dump_syntax_diagnostics(full: &str) -> String {
         }
         Ok(_) => {
             if let Err(e) = parse(user) {
-                let (span, expected) = match &e {
-                    ParseError::Syntax { span, .. } => ([span.start, span.end], Vec::new()),
-                    ParseError::UnexpectedEof => ([user.len(), user.len()], Vec::new()),
-                };
+                let span = e.span();
                 diagnostics.push(DiagnosticRow {
                     code: e.code(),
                     phase: DIAG_PHASE_PARSE,
-                    span,
+                    span: [span.start, span.end],
                     message: e.to_string(),
-                    expected,
+                    expected: e.expected().to_vec(),
                     related: Vec::new(),
                 });
             }

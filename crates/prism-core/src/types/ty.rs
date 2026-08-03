@@ -124,6 +124,7 @@ impl EffRow {
         Self::Extend(Label::bare(l), Box::new(Self::Empty))
     }
 
+    #[must_use]
     pub fn from_set(labels: &Effects) -> Self {
         Self::canonical(labels.iter().map(|l| Label::bare(*l)), Self::Empty)
     }
@@ -231,6 +232,7 @@ impl EffRow {
         }
     }
 
+    #[must_use]
     pub fn subst_row_exist(&self, v: u32, with: &Self) -> Self {
         match self {
             Self::Exist(w) if *w == v => with.clone(),
@@ -245,6 +247,7 @@ impl EffRow {
         }
     }
 
+    #[must_use]
     pub fn subst_row_var(&self, name: Sym, with: &Self) -> Self {
         match self {
             Self::Var(n) if *n == name => with.clone(),
@@ -259,6 +262,7 @@ impl EffRow {
         }
     }
 
+    #[must_use]
     pub fn is_mono_row(&self) -> bool {
         match self {
             Self::Var(_) => false,
@@ -267,6 +271,7 @@ impl EffRow {
         }
     }
 
+    #[must_use]
     pub fn labels(&self) -> Vec<&Label> {
         let mut v = Vec::new();
         let mut cur = self;
@@ -278,6 +283,7 @@ impl EffRow {
     }
 
     // The bare label names of the row (dropping any args), as a set.
+    #[must_use]
     pub fn label_names(&self) -> Effects {
         let mut v = Effects::new();
         let mut cur = self;
@@ -288,6 +294,7 @@ impl EffRow {
         v
     }
 
+    #[must_use]
     pub fn tail(&self) -> &Self {
         let mut cur = self;
         loop {

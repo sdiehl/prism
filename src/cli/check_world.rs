@@ -22,8 +22,8 @@ use crate::error::Error;
 use crate::lineage::{
     BuildLineage, BuildLineageInput, BuildRequest, RequestKind, LINEAGE_EXTENSION, LINEAGE_FORMAT,
 };
+use crate::project::MANIFEST as PRISM_MANIFEST;
 
-const PRISM_MANIFEST: &str = "prism.toml";
 const CHECK_WORLD_FORMAT: &str = "prism-check-world-v1";
 const CHECK_WORLD_BACKEND: &str = "check";
 const CHECK_WORLD_COMPATIBLE: &str = "compatible";

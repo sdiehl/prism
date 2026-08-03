@@ -20,7 +20,7 @@
 //!   | scheme tag | kind |  bundle digest   |     body     |
 //!   +------------+------+------------------+--------------+
 //!
-//!   scheme tag     length-prefixed "prism-core-hash-v1"; a foreign scheme is
+//!   scheme tag     length-prefixed "prism-core-hash-v2"; a foreign scheme is
 //!                  rejected before anything else
 //!   kind           uvarint, WireKind::Kont
 //!   bundle digest  length-prefixed: the code-identity hash of the program this

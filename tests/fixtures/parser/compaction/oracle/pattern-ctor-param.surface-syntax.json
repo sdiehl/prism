@@ -1,0 +1,49 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "dbdf399b2237bc278312c66a68342ddbff1901a440056a270e2986dbe61b51b2",
+    "text": "fn corpus(A(x)) = 0\n"
+  },
+  "items": [
+    {
+      "body": {
+        "kind": "int",
+        "span": [
+          18,
+          19
+        ],
+        "value": "0"
+      },
+      "kind": "fn",
+      "name": "corpus",
+      "params": [
+        {
+          "name": "arg@0",
+          "pat": {
+            "args": [
+              {
+                "kind": "var",
+                "name": "x",
+                "span": [
+                  12,
+                  13
+                ]
+              }
+            ],
+            "kind": "ctor",
+            "name": "A",
+            "span": [
+              10,
+              14
+            ]
+          }
+        }
+      ],
+      "span": [
+        0,
+        19
+      ]
+    }
+  ]
+}

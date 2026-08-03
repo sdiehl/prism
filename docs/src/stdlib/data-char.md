@@ -10,7 +10,7 @@ Operates on the byte/codepoint returned by `byte_at`/`char_at`. Base includes th
 
 ### `is_digit`
 
-```prism,sig,h-499ac215cd52d3268eff12f0f6abf139e1c9164994ba50515b0ec4bd9bdfd9bd
+```prism,sig,h-32e6d43f466a22b1ae6cb893e8e96842226ac80a073810c64c0b17461dfd57c2
 is_digit : (Int) -> Bool
 ```
 
@@ -26,7 +26,7 @@ true
 
 ### `is_upper`
 
-```prism,sig,h-22a64a1fa706766c6162c4ed890f841fd6fdd429c488627d33d640fcc02cd94f
+```prism,sig,h-a3e7d8bd34dee0ea6c2b1aeec0f541f282ebb8a9a099ec6bd609e8247601fb3b
 is_upper : (Int) -> Bool
 ```
 
@@ -42,7 +42,7 @@ true
 
 ### `is_lower`
 
-```prism,sig,h-504a097d77402e701ed51889b8d2927db788ade6a579557a22aae593e334e224
+```prism,sig,h-001c37d571a58d872a5c68a2b6b3ec0026744cd9bab43592c4901270a26b22ed
 is_lower : (Int) -> Bool
 ```
 
@@ -50,7 +50,7 @@ True for an ASCII lower-case letter (`a`-`z`).
 
 ### `is_alpha`
 
-```prism,sig,h-b51f9f41f0bf153c8bed7dcb8bae44834d9cf5d894bae558f06161d54fdc243b
+```prism,sig,h-482920b4ade68f0596f23407bfc5c9432add6c7d4bc2aa57b82208e5923a829a
 is_alpha : (Int) -> Bool
 ```
 
@@ -66,7 +66,7 @@ true
 
 ### `is_alnum`
 
-```prism,sig,h-59c21a0e7e1a538c4380af20b86bf85d7d500aa8a135b378cc637fe0fbdbdf41
+```prism,sig,h-982af84587ae087412782a75794344cef11ed38e4cce89a36bba7560aec2fe2d
 is_alnum : (Int) -> Bool
 ```
 
@@ -74,7 +74,7 @@ True for an ASCII letter or digit.
 
 ### `is_space`
 
-```prism,sig,h-2fd5ed9d4b880d7f61cde6b0a96e9b0c5f66cf4cdafc030480ec358c4b615f64
+```prism,sig,h-3bdea29a7ce6f5fce9f4ed6b044675347341da8e2e42fe11df7060a54122b08c
 is_space : (Int) -> Bool
 ```
 
@@ -90,7 +90,7 @@ true
 
 ### `to_lower_c`
 
-```prism,sig,h-7621d65659a704009528ba12eac220d2c34bf980b4c1e322ae8f5a7fdac31e1c
+```prism,sig,h-a0c48ad9b4a642688afbe7ee6cc093673af0231556badd844f84ff14ba4de204
 to_lower_c : (Int) -> Int
 ```
 
@@ -106,7 +106,7 @@ chr(to_lower_c(char_at("A", 0)))
 
 ### `to_upper_c`
 
-```prism,sig,h-de5ea33bdd4d20748795f39ef5b0457e8bf19aed8be665f0af78d3af92c7f87e
+```prism,sig,h-e5cff331c0c7e8c85acb5234b90508f4f7b67833070b1955e2ae982446acc0a3
 to_upper_c : (Int) -> Int
 ```
 

@@ -12,7 +12,7 @@ The folds are strict, so the short-circuiting versions (`all`, `any`, `find`, `e
 
 ### `sum`
 
-```prism,sig,h-0345b1a4c31a8230a00c5ecb112b6c18ad2b0f8f9ff469e87dc996e01bfa3d83
+```prism,sig,h-64f82de317aaedbde792027914eb35a25347cffeb110152e14f10f0ab5d3c2f3
 sum : forall a. (a(Int)) -> Int
 ```
 
@@ -28,7 +28,7 @@ sum([1, 2, 3, 4])
 
 ### `product`
 
-```prism,sig,h-349ae69eaf5972419bb245b60b7a8b5c3716de91a7adeb34e18cc166b3a3295d
+```prism,sig,h-91b90e20c2545dbf975512e34bfa5f07103e87419ca0e20dc53f277c268c794e
 product : forall a. (a(Int)) -> Int
 ```
 
@@ -44,7 +44,7 @@ product([1, 2, 3, 4])
 
 ### `length`
 
-```prism,sig,h-a8cad35ce5571b0bdbf5778a77bb4857ceb7f232a00cd51a40de17faf3ad1abf
+```prism,sig,h-cec46ea74d881f52185bf96112c88d947ee2e8fc76a9c83fe6bf21aeaa049be1
 length : forall a b. (a(b)) -> Int
 ```
 
@@ -60,7 +60,7 @@ length([1, 2, 3])
 
 ### `is_empty`
 
-```prism,sig,h-ac86e4897bb32a3da6f3cd6ef4c7b69d6e1badea51ca59d546fdec9e3b0dc33c
+```prism,sig,h-b89bad67d3a6bc0e4f918b911f6d3d8f2aa281bb5cefdc4d07dd7e0ce99e31b3
 is_empty : forall a b. (a(b)) -> Bool
 ```
 
@@ -76,7 +76,7 @@ false
 
 ### `all`
 
-```prism,sig,h-e63f03a68bac48fff675d503b3338f55771f14bbc6f7a3ef27955f056617fc84
+```prism,sig,h-60badfdd43432e8c06df0394867270f139c4c8804586bda79aced07747f6531c
 all : forall a b. ((a) -> Bool, b(a)) -> Bool
 ```
 
@@ -92,7 +92,7 @@ true
 
 ### `any`
 
-```prism,sig,h-cc3dd29f141c603cbb74be60e386b243f3bc42ef92624c134285c2153c87837d
+```prism,sig,h-f50a9f10610bf6f0f45d5384815e1d8f816608b4be40c46738077c7cb292a666
 any : forall a b. ((a) -> Bool, b(a)) -> Bool
 ```
 
@@ -108,7 +108,7 @@ true
 
 ### `find`
 
-```prism,sig,h-555f152008ff5500a84bc2fdeb907210dcdecdfc547d6d1d687ef2176d0b35d0
+```prism,sig,h-b81bb2226c3931e1f010e10a6a0298513d8128f305f874a4591736bfac7dfd42
 find : forall a b. ((a) -> Bool, b(a)) -> Option(a)
 ```
 
@@ -124,7 +124,7 @@ Some(2)
 
 ### `elem`
 
-```prism,sig,h-957f4a4324ce7ac62e74f5b423650befe149e674e02a6f8d27c80b8c3b2ac744
+```prism,sig,h-7c64d4f2a0a1a9d6059a48c97554e35b73539c7bd47a4bc40f81dcbe66912d48
 elem : forall a b. (a, b(a)) -> Bool
 ```
 
@@ -140,7 +140,7 @@ true
 
 ### `to_list`
 
-```prism,sig,h-379a3b22ab74dd9532f3118499795214d346e9c13ae71696930be1e74241e316
+```prism,sig,h-fd475483c34d0a3ea1fc8035dd5116997fcf6c0f951194c43b930a249fd0b0af
 to_list : forall a b. (a(b)) -> List(b)
 ```
 

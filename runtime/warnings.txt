@@ -1,0 +1,33 @@
+# The canonical C warning set for the Prism runtime. One flag per line; a line
+# whose first character is `#` is a comment. Every consumer reads this file
+# instead of restating the list:
+#
+#   - the cargo build of the runtime (crates/prism-native/build.rs), which
+#     applies each flag only if the host compiler accepts it, so an unfamiliar
+#     compiler loses warnings rather than failing to build;
+#   - the `c-runtime-warnings` pre-commit hook.
+#
+# `-Werror` is deliberately NOT listed here. It belongs to the lint gates, which
+# run on a pinned toolchain; the ordinary cargo build takes the same warnings
+# without them being fatal, so a new compiler's novel diagnostic surfaces
+# without breaking anyone's build.
+#
+# The vendored libm is exempt from all of this and compiles with warnings off:
+# it is third-party code and not ours to lint.
+-Wall
+-Wextra
+-Wpedantic
+-Wshadow
+-Wstrict-prototypes
+-Wconversion
+-Wsign-conversion
+-Wcast-qual
+-Wcast-align
+-Wpointer-arith
+-Wwrite-strings
+-Wfloat-equal
+-Wundef
+-Wredundant-decls
+-Wvla
+-Wdouble-promotion
+-Wformat=2

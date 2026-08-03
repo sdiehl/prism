@@ -1,0 +1,28 @@
+{
+  "schema": "prism-syntax-diagnostics-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "6ee65b86054ecafa46d359a5818d469d105d54b9034f7cb9c3bba27430c35705",
+    "text": "test\nfn corpus(x) = x\n"
+  },
+  "diagnostics": [
+    {
+      "code": "E7100",
+      "phase": "parse",
+      "span": [
+        4,
+        4
+      ],
+      "message": "unexpected end of statement at line 1:5, expected 'fn', 'fip', 'fbip', 'replayable', string literal, identifier",
+      "expected": [
+        "fbip",
+        "fip",
+        "fn",
+        "ident",
+        "replayable",
+        "str"
+      ],
+      "related": []
+    }
+  ]
+}

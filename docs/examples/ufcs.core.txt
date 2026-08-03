@@ -1,6 +1,6 @@
 fn main() =
-  return 5 to t@739
-  inc(t@739) to t@740
-  double(t@740) to t@741
-  print t@741 to t@742
+  return 5 to t@735
+  inc(t@735) to t@736
+  double(t@736) to t@737
+  print t@737 to t@738
   print_nl

@@ -33,7 +33,6 @@ fn scene() : Int ! {Async(Int), Random} =
 replayable fn draw() : Int = run_async(scene)
 
 fn main() =
-  match record(\(_u) -> draw()) of
-    (recorded, trace) =>
-      let replayed = replay(trace, \(_u) -> draw())
-      println("recorded run reproduced: {recorded == replayed}")
+  let (recorded, trace) = record(\(_u) -> draw())
+  let replayed = replay(trace, \(_u) -> draw())
+  println("recorded run reproduced: {recorded == replayed}")

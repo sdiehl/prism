@@ -1,0 +1,195 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "b687cdfb8b9838e9faf0b2e883d03d62b31c07be43aed72f23067537866bd63e",
+    "text": "foo bar baz qux fn corpus(x) = x\n"
+  },
+  "raw": [
+    {
+      "kind": "ident",
+      "span": [
+        0,
+        3
+      ],
+      "value": "foo"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        4,
+        7
+      ],
+      "value": "bar"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        8,
+        11
+      ],
+      "value": "baz"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        12,
+        15
+      ],
+      "value": "qux"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        16,
+        18
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        19,
+        25
+      ],
+      "value": "corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        25,
+        26
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        26,
+        27
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ")",
+      "span": [
+        27,
+        28
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        29,
+        30
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        31,
+        32
+      ],
+      "value": "x"
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        0,
+        3
+      ],
+      "value": "foo"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        4,
+        7
+      ],
+      "value": "bar"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        8,
+        11
+      ],
+      "value": "baz"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        12,
+        15
+      ],
+      "value": "qux"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        16,
+        18
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        19,
+        25
+      ],
+      "value": "corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        25,
+        26
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        26,
+        27
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ")",
+      "span": [
+        27,
+        28
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        29,
+        30
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        31,
+        32
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        32,
+        32
+      ]
+    }
+  ],
+  "trivia": []
+}

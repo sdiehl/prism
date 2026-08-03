@@ -34,6 +34,28 @@ use prism_common::sym::Sym;
 
 pub use prism_common::digest::{Digest, HASH_PREFIX_HEX, SCHEME};
 
+/// Terminator closing every run of digits the encoder writes.
+///
+/// The encoding must be uniquely decodable wherever two nodes are concatenated,
+/// and nodes are concatenated with no separator (a value list, an argument list,
+/// a record's field/value pairs). Without a terminator two adjacent digit runs
+/// read as one number and the boundary between them is lost: `[Int(1), Unit]`
+/// and `[Int(11)]` both encoded as `i11`, so two different definitions shared a
+/// content hash.
+///
+/// Together with [`UNIT_TAG`] this buys a one-sentence injectivity argument: no
+/// node opens with a digit, and every digit run is explicitly closed, so the
+/// bytes decode left to right without ever consulting what follows. A few sites
+/// are provably safe without the terminator because a fixed letter or bracket
+/// comes next, but exempting them turns that one sentence back into a case
+/// analysis over neighbours, so every numeric field closes with this character.
+const NUM_END: char = ';';
+
+/// Tag for `Value::Unit`, which carries no number. It was once a bare `1`, which
+/// let it be swallowed by whatever digits preceded it; a letter keeps the
+/// property that no node begins with a digit, independent of [`NUM_END`].
+const UNIT_TAG: char = 'n';
+
 /// Map from a definition's canonical symbol to its content hash.
 pub type Hashes = BTreeMap<Sym, Digest>;
 
@@ -175,6 +197,7 @@ fn hash_component(
     }
 }
 
+#[must_use]
 pub fn hex(s: &str) -> Digest {
     Digest::from(blake3::hash(s.as_bytes()).to_hex().to_string())
 }
@@ -196,7 +219,9 @@ fn encode(
         out: String::new(),
         var_ids: BTreeMap::new(),
     };
-    let _ = write!(e.out, "fn{}d{}", f.params.len(), f.dict_arity);
+    // The `d` already closes the parameter arity; the dictionary arity takes the
+    // terminator under the uniform rule, not because this site needs it.
+    let _ = write!(e.out, "fn{}d{}{NUM_END}", f.params.len(), f.dict_arity);
     e.comp(&f.body);
     e.out
 }
@@ -259,16 +284,17 @@ impl Enc<'_> {
     fn refer(&mut self, s: Sym) {
         self.out.push('%');
         if let Some(pos) = self.env.iter().rposition(|b| *b == s) {
-            let _ = write!(self.out, "b{}", self.env.len() - 1 - pos);
+            let _ = write!(self.out, "b{}{NUM_END}", self.env.len() - 1 - pos);
         } else if self.member_set.contains(&s) {
             match self.idx {
                 Some(m) => {
-                    let _ = write!(self.out, "r{}", m[&s]);
+                    let _ = write!(self.out, "r{}{NUM_END}", m[&s]);
                 }
+                // Already ends in a non-digit, so it needs no terminator.
                 None => self.out.push_str("r?"),
             }
         } else if let Some(h) = self.hashes.get(&s) {
-            let _ = write!(self.out, "h{h}");
+            let _ = write!(self.out, "h{h}{NUM_END}");
         } else {
             self.out.push('g');
             self.tok(s.as_str());
@@ -290,22 +316,22 @@ impl Enc<'_> {
                 self.refer(*x);
             }
             Value::Int(n) => {
-                let _ = write!(self.out, "i{n}");
+                let _ = write!(self.out, "i{n}{NUM_END}");
             }
             Value::I64(n) => {
-                let _ = write!(self.out, "j{n}");
+                let _ = write!(self.out, "j{n}{NUM_END}");
             }
             Value::U64(n) => {
-                let _ = write!(self.out, "u{n}");
+                let _ = write!(self.out, "u{n}{NUM_END}");
             }
             // Bit pattern, so NaN payloads and -0.0 are committed exactly.
             Value::Float(f) => {
-                let _ = write!(self.out, "f{}", f.to_bits());
+                let _ = write!(self.out, "f{}{NUM_END}", f.to_bits());
             }
             Value::Bool(b) => {
-                let _ = write!(self.out, "o{}", u8::from(*b));
+                let _ = write!(self.out, "o{}{NUM_END}", u8::from(*b));
             }
-            Value::Unit => self.out.push('1'),
+            Value::Unit => self.out.push(UNIT_TAG),
             Value::Str(s) => {
                 self.out.push('s');
                 self.tok(s);
@@ -317,7 +343,7 @@ impl Enc<'_> {
             Value::Ctor(n, tag, args) => {
                 self.out.push('c');
                 self.tok(n.as_str());
-                let _ = write!(self.out, "/{tag}");
+                let _ = write!(self.out, "/{tag}{NUM_END}");
                 self.vals(args);
             }
             Value::Tuple(args) => {
@@ -423,7 +449,7 @@ impl Enc<'_> {
                 self.scoped(&[*x], |e| e.comp(n));
             }
             Comp::Lam(xs, b) => {
-                let _ = write!(self.out, "{}", xs.len());
+                let _ = write!(self.out, "{}{NUM_END}", xs.len());
                 self.scoped(xs, |e| e.comp(b));
             }
             Comp::App(f, args) => {
@@ -662,6 +688,66 @@ mod tests {
         assert_ne!(
             hash_program(&core, &m1)[&sym("f")],
             hash_program(&core, &m2)[&sym("f")],
+        );
+    }
+
+    fn returning(v: Value) -> Core {
+        Core {
+            fns: vec![CoreFn {
+                name: sym("f"),
+                params: vec![],
+                dict_arity: 0,
+                body: Comp::Return(v),
+            }],
+        }
+    }
+
+    // Distinct definitions must not share a hash, which requires the encoding to
+    // be uniquely decodable at every point two nodes are concatenated. The
+    // witness is a numeric tag beside a neighbour that also opens with a digit:
+    // the two digit runs read as one number and the boundary between them is
+    // lost. `Unit` is the sharpest case, having once been a bare `1`, but the
+    // property is the point and every numeric tag has to hold it.
+    #[test]
+    fn adjacent_numeric_tags_do_not_run_together() {
+        let m = BTreeMap::new();
+        let distinct = |a: Value, b: Value| {
+            assert_ne!(
+                hash_program(&returning(Value::Tuple(vec![a.clone(), Value::Unit])), &m)[&sym("f")],
+                hash_program(&returning(Value::Tuple(vec![b.clone()])), &m)[&sym("f")],
+                "({a:?}, Unit) and ({b:?}) collide: a digit run swallowed its neighbour"
+            );
+        };
+        distinct(Value::Int(1), Value::Int(11));
+        distinct(Value::I64(2), Value::I64(21));
+        distinct(Value::U64(3), Value::U64(31));
+    }
+
+    // The other half of the property, and the half `UNIT_TAG` alone does not buy:
+    // a length-prefixed token also opens with a digit, and one sits directly
+    // against a value in a record's field list. Without the terminator the merged
+    // digit run splits two ways, the shorter split leaves bytes over, and the
+    // following field absorbs exactly those bytes, so two records that agree on
+    // nothing but their byte string share a hash.
+    #[test]
+    fn a_number_cannot_absorb_the_next_field_name() {
+        let m = BTreeMap::new();
+        let rec = |fields: Vec<(&str, Value)>| {
+            returning(Value::UnboxedRecord(
+                fields.into_iter().map(|(n, v)| (sym(n), v)).collect(),
+            ))
+        };
+        // Both once encoded `R{1:xi512:aas9:abcdefgi1}`: the first reads the run
+        // as `5` and a 12-byte name, the second as `51` and a 2-byte one.
+        let wide = rec(vec![("x", Value::Int(5)), ("aas9:abcdefg", Value::Int(1))]);
+        let narrow = rec(vec![
+            ("x", Value::Int(51)),
+            ("aa", Value::Str("abcdefgi1".into())),
+        ]);
+        assert_ne!(
+            hash_program(&wide, &m)[&sym("f")],
+            hash_program(&narrow, &m)[&sym("f")],
+            "a field name was swallowed by the digits of the value before it"
         );
     }
 

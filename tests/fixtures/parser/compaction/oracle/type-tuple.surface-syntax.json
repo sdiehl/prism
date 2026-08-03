@@ -1,0 +1,42 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "ae76a53483c902439232b1daf99908c6d8a94d775c1df0313999375b1e7d98ba",
+    "text": "fn corpus(x : (Int, Bool)) = x\n"
+  },
+  "items": [
+    {
+      "body": {
+        "kind": "var",
+        "name": "x",
+        "span": [
+          29,
+          30
+        ]
+      },
+      "kind": "fn",
+      "name": "corpus",
+      "params": [
+        {
+          "name": "x",
+          "ty": {
+            "items": [
+              {
+                "kind": "int"
+              },
+              {
+                "kind": "bool"
+              }
+            ],
+            "kind": "tuple"
+          }
+        }
+      ],
+      "span": [
+        0,
+        30
+      ]
+    }
+  ]
+}

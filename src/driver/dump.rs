@@ -25,6 +25,7 @@ use crate::parse::parse;
 use crate::resolve::{default_roots, Root};
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Expr, Program, Span, S};
+use crate::syntax::reflect::parse_unit;
 use crate::types::{show_effects, Checked, Dict, Type};
 use serde::Serialize;
 
@@ -42,7 +43,8 @@ use super::module_graph::module_graph;
 use super::report::types_section;
 use super::{
     check_on, elaborated, frontend, hash_meta, lowered_core, prelude_fn_names, stdlib_hash,
-    strip_prelude, tooltip_checked_on, typed_effect_facts, Config, WireKind, NAMESPACE_FORMAT,
+    strip_prelude, tooltip_checked_on, typed_effect_facts, typed_effect_plan, Config, WireKind,
+    NAMESPACE_FORMAT,
 };
 
 /// Format tag shared by all three usage-summary projections (`usage-summary`,
@@ -60,6 +62,13 @@ const USAGE_DISCIPLINE_NONE: &str = "-";
 // The usage-summary columns, in order, naming both the TSV/markdown headers and the
 // JSON fields.
 const USAGE_SUMMARY_COLUMNS: [&str; 5] = ["name", "noalloc", "discipline", "borrow", "row"];
+
+// Serialize a seam document to pretty JSON, propagating a serialization failure
+// as a dump error. These envelopes are versioned artifacts consumers parse; an
+// empty string on failure would read as a valid (empty) dump.
+fn pretty_json<T: Serialize>(doc: &T) -> Result<String, Error> {
+    serde_json::to_string_pretty(doc).map_err(|e| Error::CodegenDump(e.to_string()))
+}
 
 /// # Errors
 /// Fails on front-end errors or an unknown phase name.
@@ -123,7 +132,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // and effect rows plus, for every node the checker recorded a fact for,
         // its resolution, dictionary evidence, numeric lane, and zonked type, as
         // versioned deterministic JSON.
-        "hir" => Ok(hir_fixture(&check_on(src, roots)?)),
+        "hir" => hir_fixture(&check_on(src, roots)?),
         // The resolved-program boundary a Prism-written front end starts from.
         // The declaration interface the checker reads (datatypes and
         // their constructor layouts, effects and operation grades, classes,
@@ -139,7 +148,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                 compiler: COMPILER_VERSION,
                 body: tc_input_body(&program, &checked, src),
             };
-            Ok(serde_json::to_string_pretty(&doc).unwrap_or_default())
+            pretty_json(&doc)
         }
         // The traversable-body seam a Prism-written checker walks: each user
         // function's resolved Core-phase body as a node-id-carrying tree. Every
@@ -159,7 +168,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                 },
                 functions: resolved_syntax_body(&program, src),
             };
-            Ok(serde_json::to_string_pretty(&doc).unwrap_or_default())
+            pretty_json(&doc)
         }
         // The checker's output facts as the versioned front-end seam.
         // Per-declaration principal schemes and effect rows, and every per-node
@@ -174,7 +183,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                 compiler: COMPILER_VERSION,
                 body: tc_facts_body(&checked),
             };
-            Ok(serde_json::to_string_pretty(&doc).unwrap_or_default())
+            pretty_json(&doc)
         }
         // The elaborator's input boundary, composing the resolved
         // declarations (`tc-input`) with the checker facts (`tc-facts`) a Prism
@@ -188,13 +197,13 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                 input: tc_input_body(&program, &checked, src),
                 facts: tc_facts_body(&checked),
             };
-            Ok(serde_json::to_string_pretty(&doc).unwrap_or_default())
+            pretty_json(&doc)
         }
         // The module's verification interface (logical declarations and
         // contract summaries with digests). Runs the solver-free logical checker
         // on the resolved surface program; a malformed contract is a source error.
         "verify" => {
-            let program = crate::resolve::resolve_modules_in(parse(src)?.program, roots)?;
+            let program = crate::resolve::resolve_modules_in(parse_unit(src)?, roots)?;
             Ok(crate::verify::check_program(&program)?.render())
         }
         // The verification conditions, one canonical SMT query per
@@ -202,7 +211,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // `total fn` with a `decreases` measure, under distinct banners so the two
         // certificate families stay separate. Solver-free.
         "smt" => {
-            let program = crate::resolve::resolve_modules_in(parse(src)?.program, roots)?;
+            let program = crate::resolve::resolve_modules_in(parse_unit(src)?, roots)?;
             Ok(
                 crate::verify::vc::render(&program)?
                     + &crate::verify::ranking::render_smt(&program),
@@ -211,7 +220,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // Per-function totality status (checked-trivial, checked-structural,
         // trusted assumption, or pending with a precise reason). Solver-free.
         "totality" => {
-            let program = crate::resolve::resolve_modules_in(parse(src)?.program, roots)?;
+            let program = crate::resolve::resolve_modules_in(parse_unit(src)?, roots)?;
             Ok(crate::verify::totality::render(&program))
         }
         "core" => {
@@ -400,7 +409,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                 },
                 "defs": entries,
             });
-            Ok(serde_json::to_string_pretty(&doc).unwrap_or_default())
+            pretty_json(&doc)
         }
         // The whole standard library's fingerprint. Ignores `src`/`roots`: the
         // stdlib is embedded, so the file argument is only a CLI placeholder.
@@ -450,6 +459,14 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
             let (strategy, _) = typed_effect_facts(src, roots, cfg)?;
             Ok(format!("{strategy}\n"))
         }
+        // The facts behind that tier: for each function of the prepared
+        // program, the operations it can perform (over calls and over the
+        // thunks that flow into it), which functions still perform an
+        // operation, which let an effectful thunk escape untrackably, and
+        // which capture one in a first-class closure. One artifact per
+        // program, so a rung is read off the analysis the cascade consulted
+        // rather than inferred from which passes fired.
+        "effect-plan" => typed_effect_plan(src, roots, cfg),
         // Closure-capture facts: for each of the program's own lambdas and
         // thunks, the bindings it closes over and the scoped operations it
         // performs, each classified portable / nonportable / unknown for a move
@@ -495,7 +512,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         }
         "usage-summary-json" => {
             let (rows, tier) = usage_summary_data(src, roots, cfg)?;
-            Ok(usage_summary_json(&rows, &tier))
+            usage_summary_json(&rows, &tier)
         }
         #[cfg(feature = "native")]
         "llvm" => {
@@ -716,7 +733,7 @@ fn md_cell(s: &str) -> String {
 
 // The JSON projection behind `dump usage-summary-json`: the shared rows as a serde
 // document, pretty-printed deterministically.
-fn usage_summary_json(rows: &[UsageRow], tier: &str) -> String {
+fn usage_summary_json(rows: &[UsageRow], tier: &str) -> Result<String, Error> {
     let doc = UsageSummaryJson {
         format: USAGE_SUMMARY_FORMAT,
         tier,
@@ -731,7 +748,7 @@ fn usage_summary_json(rows: &[UsageRow], tier: &str) -> String {
             })
             .collect(),
     };
-    serde_json::to_string_pretty(&doc).unwrap_or_default()
+    pretty_json(&doc)
 }
 
 // The schema tag heading every checked-HIR fixture. It versions the envelope so
@@ -880,13 +897,13 @@ struct HirStep {
 
 // Render a checked program's HIR fixture. Declarations come out in source order;
 // nodes come out in ascending NodeId order (the BTreeMap key is the decimal id).
-fn hir_fixture(checked: &Checked) -> String {
+fn hir_fixture(checked: &Checked) -> Result<String, Error> {
     let fixture = HirFixture {
         schema: HIR_FIXTURE_SCHEMA,
         decls: hir_decls(checked),
         nodes: hir_nodes(checked),
     };
-    serde_json::to_string_pretty(&fixture).unwrap_or_default()
+    pretty_json(&fixture)
 }
 
 // The checked declarations in source order, each carrying its principal scheme and

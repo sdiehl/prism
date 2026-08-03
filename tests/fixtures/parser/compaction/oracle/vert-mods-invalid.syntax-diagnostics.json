@@ -1,0 +1,21 @@
+{
+  "schema": "prism-syntax-diagnostics-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "f7bf7e6c303612a6f84e7aa91a95a0644c93dfaf3656b2fe580dc323a71551a1",
+    "text": "assume fn corpus(x) = x\n"
+  },
+  "diagnostics": [
+    {
+      "code": "E7100",
+      "phase": "parse",
+      "span": [
+        0,
+        6
+      ],
+      "message": "`assume` is not a declaration modifier; expected `test`, `total`, or `assume total` before `fn`",
+      "expected": [],
+      "related": []
+    }
+  ]
+}

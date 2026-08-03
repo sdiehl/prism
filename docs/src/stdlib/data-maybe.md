@@ -10,7 +10,7 @@ The type is wired in; Base includes this module, so these are in unqualified sco
 
 ### `is_some`
 
-```prism,sig,h-f919dce3d02f2ebb9f0a2fda1643e11610d8769b43cb55dfc2eda088b8638ff3
+```prism,sig,h-723c41a9f28cd1d140e453374e3fa23972ecbcbf0d34d49dc1394ac7cce66d4d
 is_some : forall a. (Option(a)) -> Bool
 ```
 
@@ -26,7 +26,7 @@ true
 
 ### `is_none`
 
-```prism,sig,h-8bd9c3366852121741891bf7b35abe6c372731c38e960114a329c4b108a2cf78
+```prism,sig,h-4be6ccc5ae05ecc85f3a918125e99a97db16a38a041109bcb5488610ecb02759
 is_none : forall a. (Option(a)) -> Bool
 ```
 
@@ -42,7 +42,7 @@ true
 
 ### `unwrap_or`
 
-```prism,sig,h-06ee44271bf67b6203da1f7447794b1526ff2ba2226ca702844cf6b22a422adb
+```prism,sig,h-b9255037359b98ab790750679691acbf15d6592fcd7b2021c46822b4d541fa8a
 unwrap_or : forall a. (a, Option(a)) -> a
 ```
 
@@ -64,7 +64,7 @@ unwrap_or(0, 5)
 
 ### `map_option`
 
-```prism,sig,h-de68390a4df823a234307c8cb212e9f89fc8774574eadd05bacf40b7d6d3fb5c
+```prism,sig,h-24050c6d046bd5a6627b3c5fb9e4bf104b3a4f8bc1f4fb05971570fca6166438
 map_option : forall e0 a b. ((b) -> a ! {e0}, Option(b)) -> Option(a) ! {e0}
 ```
 
@@ -80,7 +80,7 @@ Some(42)
 
 ### `and_then`
 
-```prism,sig,h-3d5b82c828a9306b4dfae2f58223015ea26d25f654290c0de7f03dfd392c174a
+```prism,sig,h-293f76b55755af40e3683aaad35dce659d9745df83e5899275f08f8188af694c
 and_then : forall e0 a b. ((a) -> Option(b) ! {e0}, Option(a)) -> Option(b) ! {e0}
 ```
 
@@ -96,7 +96,7 @@ Some(40)
 
 ### `map_or`
 
-```prism,sig,h-dbe0b22a2ff441cabd068950e096805b61b14357c86da80df1e18138409c8761
+```prism,sig,h-196184fb3bcb715564d1390729c4f5f215f7f72338cdd0686e9b7a2b3bb38f31
 map_or : forall e0 a b. (a, (b) -> a ! {e0}, Option(b)) -> a ! {e0}
 ```
 
@@ -112,7 +112,7 @@ map_or(0, \(x) -> x + 1, Some(41))
 
 ### `option_or`
 
-```prism,sig,h-9a71df49b613ae9aaf86bf63854b60ac0cd1e5146e140f57e8ef1073d97ff0b1
+```prism,sig,h-673fefc9d150e960c88d2d6d75b6eb52753780e559ed47f102cfdee0f2c862ff
 option_or : forall a. (Option(a), Option(a)) -> Option(a)
 ```
 
@@ -128,7 +128,7 @@ Some(1)
 
 ### `option_to_list`
 
-```prism,sig,h-f773538e1b8b76a8d1048e3c0c88d18611d20f58533afdaa455cdc64febcb530
+```prism,sig,h-a8d5280cac4becf2eb99aa52974d73b8c2b39193b087c949130a02493c8f9ae4
 option_to_list : forall a. (Option(a)) -> List(a)
 ```
 
@@ -144,7 +144,7 @@ option_to_list(Some(7))
 
 ### `both`
 
-```prism,sig,h-3c914dc595511a05d72e6de684900ad69d74baf452047c395edb6cb9458def9b
+```prism,sig,h-92fc4184a69cc9009b8104f4ae9498feccfe2901b0426623c45dbfbdc00d4142
 both : forall a b. (Option(a), Option(b)) -> Option((a, b))
 ```
 
@@ -160,7 +160,7 @@ Pair two options: `Some` only when both hold values.
 
 ### `option_fold_r`
 
-```prism,sig,h-eff829fdfa2f4214b1c10a58f54ea974effe5472547167d3f9176f965a7c92ba
+```prism,sig,h-fc93a4ba962883557f60eb4273b1fa12b3f08f94b580622b8f78c9ddb6ca2854
 option_fold_r : forall e0 a b. ((a, b) -> b ! {e0}, b, Option(a)) -> b ! {e0}
 ```
 
@@ -176,7 +176,7 @@ option_fold_r(\(x, z) -> x + z, 10, Some(5))
 
 ### `option_fold_l`
 
-```prism,sig,h-9b7849a0e12492ae40880827062e08f51df66ccac5c4dd7872d4b1bc06323873
+```prism,sig,h-352c3996d3e8867e9ba296ee88e621aea682c9139f238e26f69e352d393a5601
 option_fold_l : forall e0 a b. ((a, b) -> a ! {e0}, a, Option(b)) -> a ! {e0}
 ```
 
@@ -192,7 +192,7 @@ option_fold_l(\(z, x) -> z + x, 10, Some(5))
 
 ### `option_bind`
 
-```prism,sig,h-1485e3ef93783a42857fc5d613b20fa2f0f9a84236e4b0be71e4fb319cceef60
+```prism,sig,h-595bf9c41332eb4fcf73b4a3236aad151b0906f4cb1c036c0c9d1f0f2c008f9d
 option_bind : forall e0 a b. (Option(a), (a) -> Option(b) ! {e0}) -> Option(b) ! {e0}
 ```
 
@@ -208,7 +208,7 @@ Some(40)
 
 ### `option_ap`
 
-```prism,sig,h-b33c70cd579d304e6df8f2d105232fd7386b4707d274b4b97e0d6e57219f807f
+```prism,sig,h-9959d3f44a8c2a6e27c9cf1089c714b153e82c21432b3ee13ff817d68c6df9f7
 option_ap : forall e0 a b. (Option((b) -> a ! {e0}), Option(b)) -> Option(a) ! {e0}
 ```
 

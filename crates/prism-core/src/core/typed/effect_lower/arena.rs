@@ -72,12 +72,13 @@ const ARENA_OUT: &str = "arena_out";
 /// The type quantifier of the `arena_exit` verifier signature.
 const ARENA_EXIT_QUANTIFIER: &str = "arena_a@";
 
-/// Seed the verifier signatures of the region hook builtins this pass emits:
-/// `arena_enter : () -> Int` (the activation-depth token) and
-/// `arena_exit : forall a. (Int, a) -> a` (token and result threaded through,
-/// so the bracket is data-dependent and no flow-respecting simplification can
-/// separate or drop it). Neither is surface-callable, so overrides are their
-/// only signature source.
+/// Seed the verifier signatures of the region hook builtins this pass emits.
+///
+/// `arena_enter : () -> Int` is the activation-depth token; `arena_exit :
+/// forall a. (Int, a) -> a` threads token and result through, so the bracket is
+/// data-dependent and no flow-respecting simplification can separate or drop
+/// it. Neither is surface-callable, so overrides are their only signature
+/// source.
 pub fn insert_builtin_sigs(env: &mut VerifyEnv) {
     let int = CoreType::Source(Type::Int);
     env.insert_builtin_override(

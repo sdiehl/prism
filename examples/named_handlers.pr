@@ -28,7 +28,7 @@ fn sources() =
     return r => r
   println(conf.read())
   println(data.read())
-  println(concat(conf.read(), concat(":", data.read())))
+  println("{conf.read()}:{data.read()}")
 
 -- a bare read() still goes to the innermost ordinary handler. The named
 -- instance only answers calls addressed through it.
@@ -40,7 +40,7 @@ fn mixed() =
     handle read() with
       read() resume k => k("inner")
       return r => r
-  println(concat(inner, concat("/", named.read())))
+  println("{inner}/{named.read()}")
 
 -- multishot through a named instance. The continuation after h.ask() is
 -- resumed twice. (3 * 10) + (4 * 10) = 70

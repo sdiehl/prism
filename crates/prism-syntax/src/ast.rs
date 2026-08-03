@@ -197,8 +197,91 @@ impl Fip {
     }
 }
 
+impl Program {
+    /// Visit every expression a surface program roots: declaration bodies with
+    /// their parameter defaults, `where` bindings and contract clauses, instance
+    /// methods, pattern views and builders, and the expressions inside `stable`
+    /// blocks.
+    ///
+    /// The single exhaustive statement of where expressions hang off a program,
+    /// as [`Expr::each_child_mut`] is for where they hang off each other. A pass
+    /// that rewrites nodes anywhere in a program composes the two and so cannot
+    /// silently miss a declaration kind when one is added.
+    pub fn each_root_expr_mut(&mut self, f: &mut impl FnMut(&mut SExpr)) {
+        for i in &mut self.instances {
+            for m in &mut i.methods {
+                m.each_root_expr_mut(f);
+            }
+        }
+        for p in &mut self.patterns {
+            f(&mut p.view);
+            if let Some(make) = &mut p.make {
+                f(make);
+            }
+        }
+        for d in self.fns.iter_mut().chain(&mut self.logic_fns) {
+            d.each_root_expr_mut(f);
+        }
+        for sd in &mut self.stable {
+            for rung in &mut sd.rungs {
+                for field in &mut rung.fields {
+                    if let Some(default) = &mut field.default {
+                        f(default);
+                    }
+                }
+            }
+            for cv in &mut sd.converters {
+                f(&mut cv.base);
+                for (_, e) in &mut cv.overrides {
+                    f(e);
+                }
+            }
+            for mig in &mut sd.migrations {
+                if let MigrationRoute::Version(v) = &mut mig.route {
+                    for dir in [&mut v.upgrade, &mut v.downgrade] {
+                        if let MigrationDir::Expr(e) = dir {
+                            f(e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl Decl {
+    /// Visit every expression the declaration roots: its body, any parameter
+    /// defaults, `where` bindings, and the contract clauses.
+    pub fn each_root_expr_mut(&mut self, f: &mut impl FnMut(&mut SExpr)) {
+        for p in &mut self.params {
+            if let Some(default) = &mut p.default {
+                f(default);
+            }
+        }
+        f(&mut self.body);
+        for (_, e) in &mut self.wheres {
+            f(e);
+        }
+        for e in &mut self.requires {
+            f(e);
+        }
+        for (_, e) in &mut self.ensures {
+            f(e);
+        }
+        if let Some(e) = &mut self.decreases {
+            f(e);
+        }
+    }
+}
+
 // `patterns`, `imports`, and `exports` are omitted from the debug dump when
 // empty, matching the derived output for import-free, pattern-free programs.
+#[expect(
+    clippy::missing_fields_in_debug,
+    reason = "the omissions are the point: empty collections and the prelude \
+              boundary stay out so an AST dump of a module-free program is \
+              byte-identical to one written before those fields existed"
+)]
 impl<P: Phase + fmt::Debug> fmt::Debug for Program<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut d = f.debug_struct("Program");
@@ -646,7 +729,12 @@ pub struct EffOp {
 
 // Several independent surface flags (`konst`, `replayable`, `no_alloc`); a
 // flat set of one-shot booleans, not a state machine.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is an independent surface annotation the parser sets \
+              on its own; folding them into an enum would invent states no \
+              source spelling can produce"
+)]
 #[derive(Clone)]
 pub struct Decl<P: Phase = Surface> {
     pub name: String,
@@ -1034,6 +1122,12 @@ pub trait Phase: Sized {
 
     #[doc(hidden)]
     fn each_arm_child<F: FnMut(&S<Expr<Self>>)>(a: &Self::Arm, f: &mut F);
+
+    #[doc(hidden)]
+    fn each_sugar_child_mut<F: FnMut(&mut S<Expr<Self>>)>(s: &mut Self::Sugar, f: &mut F);
+
+    #[doc(hidden)]
+    fn each_arm_child_mut<F: FnMut(&mut S<Expr<Self>>)>(a: &mut Self::Arm, f: &mut F);
 }
 
 #[derive(Clone, Debug)]
@@ -1120,11 +1214,92 @@ impl Phase for Surface {
                     }
                 }
             }
-            Sugar::Break | Sugar::Continue => {}
+            Sugar::Break | Sugar::Continue | Sugar::Reflect(..) => {}
         }
     }
 
     fn each_arm_child<F: FnMut(&S<Expr<Self>>)>(a: &Self::Arm, f: &mut F) {
+        match a {
+            SugarArm::Once(_, _, body) | SugarArm::Val(_, body) | SugarArm::Never(_, _, body) => {
+                f(body);
+            }
+        }
+    }
+
+    fn each_sugar_child_mut<F: FnMut(&mut S<Expr<Self>>)>(s: &mut Self::Sugar, f: &mut F) {
+        match s {
+            Sugar::NamedHandle(_, body, arms) => {
+                f(body);
+                for a in arms {
+                    a.each_child_mut(f);
+                }
+            }
+            Sugar::VarDecl(_, v, b) => {
+                f(v);
+                f(b);
+            }
+            Sugar::Assign(_, v) | Sugar::OptChain(v, _) | Sugar::Probe(_, v) | Sugar::Return(v) => {
+                f(v);
+            }
+            Sugar::IndexAssign(recv, key, v) => {
+                f(recv);
+                f(key);
+                f(v);
+            }
+            Sugar::Throw(_, args) => {
+                for a in args {
+                    f(a);
+                }
+            }
+            Sugar::TryCatch(body, arms) => {
+                f(body);
+                for a in arms {
+                    f(&mut a.body);
+                }
+            }
+            Sugar::For(_, seq, quals, body) => {
+                f(seq);
+                for q in quals {
+                    q.each_child_mut(f);
+                }
+                f(body);
+            }
+            Sugar::While(cond, body) => {
+                if let Some(cond) = cond {
+                    f(cond);
+                }
+                f(body);
+            }
+            Sugar::Comp(head, _, seq, quals) => {
+                f(head);
+                f(seq);
+                for q in quals {
+                    q.each_child_mut(f);
+                }
+            }
+            Sugar::Default(a, b) | Sugar::Transact(a, b) | Sugar::Compose(_, a, b) => {
+                f(a);
+                f(b);
+            }
+            Sugar::Range(prefix, hi) => {
+                for a in prefix {
+                    f(a);
+                }
+                f(hi);
+            }
+            Sugar::ReadPath(base, steps) => {
+                f(base);
+                for s in steps {
+                    if let Some(e) = s.sub_expr_mut() {
+                        f(e);
+                    }
+                }
+            }
+            Sugar::Break | Sugar::Continue | Sugar::Reflect(..) => {}
+        }
+    }
+
+    fn each_arm_child_mut<F: FnMut(&mut S<Expr<Self>>)>(a: &mut Self::Arm, f: &mut F) {
         match a {
             SugarArm::Once(_, _, body) | SugarArm::Val(_, body) | SugarArm::Never(_, _, body) => {
                 f(body);
@@ -1150,6 +1325,22 @@ impl Phase for Core {
         reason = "a `&Never` cannot be constructed; the empty match documents vacuity"
     )]
     fn each_arm_child<F: FnMut(&S<Expr<Self>>)>(a: &Self::Arm, _f: &mut F) {
+        match *a {}
+    }
+
+    #[expect(
+        clippy::uninhabited_references,
+        reason = "a `&mut Never` cannot be constructed; the empty match documents vacuity"
+    )]
+    fn each_sugar_child_mut<F: FnMut(&mut S<Expr<Self>>)>(s: &mut Self::Sugar, _f: &mut F) {
+        match *s {}
+    }
+
+    #[expect(
+        clippy::uninhabited_references,
+        reason = "a `&mut Never` cannot be constructed; the empty match documents vacuity"
+    )]
+    fn each_arm_child_mut<F: FnMut(&mut S<Expr<Self>>)>(a: &mut Self::Arm, _f: &mut F) {
         match *a {}
     }
 }
@@ -1191,6 +1382,14 @@ impl<P: Phase> HandlerArm<P> {
         match self {
             Self::Return(_, body) | Self::Op(_, _, _, body) => f(body),
             Self::Sugar(a) => P::each_arm_child(a, f),
+        }
+    }
+
+    /// Mutable counterpart of [`Self::each_child`].
+    pub fn each_child_mut(&mut self, f: &mut impl FnMut(&mut S<Expr<P>>)) {
+        match self {
+            Self::Return(_, body) | Self::Op(_, _, _, body) => f(body),
+            Self::Sugar(a) => P::each_arm_child_mut(a, f),
         }
     }
 }
@@ -1252,6 +1451,35 @@ pub enum Sugar<P: Phase> {
     // `s.[ path ]`: read every focus the path selects into a `List`, the read
     // twin of the `{ s | path = .. }` update. Desugars to a `map`/`concat` fold.
     ReadPath(Box<S<Expr<P>>>, Vec<PathStep<P>>),
+    // `reflect fn f` / `reflect type T`: the canonical rendering of that
+    // declaration, as a compile-time `String`. The payload is the name as its
+    // author wrote it: the quotation is replaced by the rendering before name
+    // resolution, over one compilation unit at a time, so the target is a
+    // declaration of the same file and the rendering is the author's text rather
+    // than the resolver's rewrite of it. A compile-time constant with no runtime
+    // value, effect, or capability of its own.
+    Reflect(ReflectKind, String),
+}
+
+/// Which declaration form a `reflect` quotation names.
+///
+/// The keyword that follows `reflect` is what makes the form recognizable at
+/// all, so it is also the only thing that says where to look the target up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ReflectKind {
+    Fn,
+    Type,
+}
+
+impl ReflectKind {
+    /// The keyword that introduces this declaration form.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Fn => kw::FN,
+            Self::Type => kw::TYPE,
+        }
+    }
 }
 
 // One step of an update path, read left to right. `Field(f)` descends into a
@@ -1460,6 +1688,87 @@ impl<P: Phase> Expr<P> {
             | Self::Marker(_) => {}
         }
     }
+
+    /// Mutable counterpart of [`Self::each_child`], and the reason a pass that
+    /// rewrites whole expression nodes in place needs no traversal of its own.
+    pub fn each_child_mut(&mut self, f: &mut impl FnMut(&mut S<Self>)) {
+        match self {
+            Self::Bin(_, a, b) | Self::Let(_, a, b) | Self::Pipe(a, b) | Self::Index(a, b) => {
+                f(a);
+                f(b);
+            }
+            Self::Neg(a)
+            | Self::Lam(_, a)
+            | Self::FieldAccess(a, _)
+            | Self::UnboxedField(a, _)
+            | Self::Inst(a, _)
+            | Self::Ann(a, _)
+            | Self::Mask(_, a) => f(a),
+            Self::If(a, b, c) | Self::IndexSet(a, b, c) => {
+                f(a);
+                f(b);
+                f(c);
+            }
+            Self::Call(head, args) => {
+                f(head);
+                for a in args {
+                    f(a);
+                }
+            }
+            Self::Match(scrut, arms) => {
+                f(scrut);
+                for a in arms {
+                    if let Some(g) = &mut a.guard {
+                        f(g);
+                    }
+                    f(&mut a.body);
+                }
+            }
+            Self::List(items) | Self::Tuple(items) | Self::UnboxedTuple(items) => {
+                for a in items {
+                    f(a);
+                }
+            }
+            Self::RecordCreate(_, fields) | Self::UnboxedRecord(fields) => {
+                for (_, value) in fields {
+                    f(value);
+                }
+            }
+            Self::RecordUpdate(base, _, fields) => {
+                f(base);
+                for (_, value) in fields {
+                    f(value);
+                }
+            }
+            Self::RecordUpdatePath(base, updates) => {
+                f(base);
+                for (steps, op) in updates {
+                    for step in steps {
+                        if let Some(e) = step.sub_expr_mut() {
+                            f(e);
+                        }
+                    }
+                    f(op.expr_mut());
+                }
+            }
+            Self::Handle(body, arms, _) => {
+                f(body);
+                for a in arms {
+                    a.each_child_mut(f);
+                }
+            }
+            Self::Sugar(s) => P::each_sugar_child_mut(s, f),
+            Self::Int(_)
+            | Self::Float(_)
+            | Self::Char(_)
+            | Self::Bool(_)
+            | Self::Unit
+            | Self::Str(_)
+            | Self::Var(_)
+            | Self::Hole(_)
+            | Self::Marker(_) => {}
+        }
+    }
 }
 
 // Parse-time markers stuffed into the expression tree, all removed by desugar.
@@ -1483,6 +1792,13 @@ pub enum Qualifier<P: Phase = Surface> {
 
 impl<P: Phase> Qualifier<P> {
     pub fn each_child(&self, f: &mut impl FnMut(&S<Expr<P>>)) {
+        match self {
+            Self::Guard(e) | Self::Bind(_, e) => f(e),
+        }
+    }
+
+    /// Mutable counterpart of [`Self::each_child`].
+    pub fn each_child_mut(&mut self, f: &mut impl FnMut(&mut S<Expr<P>>)) {
         match self {
             Self::Guard(e) | Self::Bind(_, e) => f(e),
         }
@@ -1554,6 +1870,7 @@ pub const fn sp<P: Phase>(node: Expr<P>, span: Span) -> S<Expr<P>> {
 }
 
 // Sugar nodes the formatter restores to surface syntax (pattern lets, `?`).
+#[must_use]
 pub const fn sp_sugar(node: Expr, span: Span) -> S<Expr> {
     Spanned {
         id: NodeId::DUMMY,
@@ -1563,6 +1880,7 @@ pub const fn sp_sugar(node: Expr, span: Span) -> S<Expr> {
     }
 }
 
+#[must_use]
 pub fn evar<P: Phase>(name: &str, span: Span) -> S<Expr<P>> {
     sp(Expr::Var(name.into()), span)
 }

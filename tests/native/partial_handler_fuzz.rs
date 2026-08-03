@@ -13,7 +13,7 @@ use prism::{default_roots, Config, EffectTier};
 
 use crate::support::{check_native_parity, require_cc, TempDir};
 
-const TIERS: &[EffectTier] = &[EffectTier::Auto, EffectTier::State, EffectTier::FreeMonad];
+const TIERS: &[EffectTier] = &EffectTier::ALL;
 const GENERATED_CASES: usize = 6;
 const SEED: u64 = 0x7061_7274_6961_6c21;
 

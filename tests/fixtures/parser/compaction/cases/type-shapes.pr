@@ -1,0 +1,1 @@
+fn corpus(a : f(Int), b : Maybe, c : Pkg.T, d : (Int), e : #(Int, Bool), f : () -> Int !, g : () -> Int ! {io, Pkg.Io}, h : Int @ {once, portable}) = 0

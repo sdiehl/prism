@@ -36,6 +36,7 @@ use super::super::{
     TypedValueKind,
 };
 use super::as_var;
+use super::plan::EffectPlan;
 
 // Canonical control dispositions threaded through a loop body.
 const CTL_NORMAL: i64 = 0;
@@ -49,14 +50,14 @@ const STEP_MORE_PARAM: &str = "m";
 const STEP_DONE_PARAM: &str = "d";
 
 /// The `Step` witness at one threading site.
-pub fn step_type(more: &Type, done: &Type) -> Type {
+pub(crate) fn step_type(more: &Type, done: &Type) -> Type {
     Type::Con(Sym::new(STEP), vec![more.clone(), done.clone()])
 }
 
 /// Register the `SMore`/`SDone` constructor schemes the control and state
 /// paths share, so a threaded loop verifies before erasure. Idempotent: the
 /// state path's early-termination protocol declares the same family.
-pub fn insert_step_constructors(env: &mut VerifyEnv) {
+pub(crate) fn insert_step_constructors(env: &mut VerifyEnv) {
     let more = Sym::new(STEP_MORE_PARAM);
     let done = Sym::new(STEP_DONE_PARAM);
     let quantifiers = vec![CoreQuantifier::Type(more), CoreQuantifier::Type(done)];
@@ -151,13 +152,13 @@ impl StepAt {
 }
 
 /// Whether `op` is one of the three loop-control ops this pass erases.
-pub fn is_control_op(op: Sym) -> bool {
+pub(crate) fn is_control_op(op: Sym) -> bool {
     let s = op.as_str();
     names::is_break_op(s) || names::is_continue_op(s) || names::is_return_op(s)
 }
 
 /// The disposition a `do` carries, or `None` if it is not a `break`/`continue`.
-pub fn ctl_signal(op: Sym) -> Option<i64> {
+pub(crate) fn ctl_signal(op: Sym) -> Option<i64> {
     if names::is_break_op(op.as_str()) {
         Some(CTL_BREAK)
     } else if names::is_continue_op(op.as_str()) {
@@ -170,7 +171,7 @@ pub fn ctl_signal(op: Sym) -> Option<i64> {
 /// Recognize the `continue` handler template the desugar wraps around a loop
 /// body. Matching is on the op name alone: binders are alpha-renamed, but the
 /// op name is unforgeable in source.
-pub fn match_continue(c: &TypedComp) -> Option<&TypedComp> {
+pub(crate) fn match_continue(c: &TypedComp) -> Option<&TypedComp> {
     let TypedCompKind::Handle { body, ops, .. } = c.kind() else {
         return None;
     };
@@ -182,7 +183,7 @@ pub fn match_continue(c: &TypedComp) -> Option<&TypedComp> {
 
 /// Recognize the `return` handler template the desugar wraps around a function
 /// body.
-pub fn match_return(c: &TypedComp) -> Option<&TypedComp> {
+pub(crate) fn match_return(c: &TypedComp) -> Option<&TypedComp> {
     let TypedCompKind::Handle { body, ops, .. } = c.kind() else {
         return None;
     };
@@ -195,7 +196,7 @@ pub fn match_return(c: &TypedComp) -> Option<&TypedComp> {
 /// Whether a computation performs a `do fn@return`. Unlike `break`/`continue`,
 /// `return` crosses every loop to the function boundary, so this descends
 /// through loop handlers too.
-pub fn signals_return(c: &TypedComp) -> bool {
+pub(crate) fn signals_return(c: &TypedComp) -> bool {
     if matches!(c.kind(), TypedCompKind::Do { operation, .. } if names::is_return_op(operation.as_str()))
     {
         return true;
@@ -208,7 +209,7 @@ pub fn signals_return(c: &TypedComp) -> bool {
 /// Whether a computation performs a `do break`/`do continue` this loop catches.
 /// A nested loop absorbs its body's control ops (they target the innermost
 /// loop), so a control-catching handle is opaque here.
-pub fn signals_ctl(c: &TypedComp) -> bool {
+pub(crate) fn signals_ctl(c: &TypedComp) -> bool {
     match c.kind() {
         TypedCompKind::Do { operation, .. } => ctl_signal(*operation).is_some(),
         TypedCompKind::Handle { ops, .. }
@@ -227,7 +228,7 @@ pub fn signals_ctl(c: &TypedComp) -> bool {
 /// Whether a computation performs a control op a `return`-crossing loop must
 /// drive return-aware: a `break`/`continue` this loop catches, or a `return`
 /// propagating through it.
-pub fn signals_loop(c: &TypedComp) -> bool {
+pub(crate) fn signals_loop(c: &TypedComp) -> bool {
     signals_ctl(c) || signals_return(c)
 }
 
@@ -245,13 +246,13 @@ fn contains_control_signal(c: &TypedComp) -> bool {
 }
 
 /// Whether `name` is one of the prelude loop drivers a recognized spine calls.
-pub fn is_loop_driver(name: Sym) -> bool {
+pub(crate) fn is_loop_driver(name: Sym) -> bool {
     name.as_str() == REPEAT_WHILE || name.as_str() == FOREVER
 }
 
 /// The int-valued control disposition, as the immediate the threaded body
 /// yields.
-pub const fn ctl_value(disposition: i64) -> TypedValue {
+pub(crate) const fn ctl_value(disposition: i64) -> TypedValue {
     TypedValue::new(
         CoreType::Source(Type::Int),
         TypedValueKind::Int(disposition),
@@ -259,7 +260,7 @@ pub const fn ctl_value(disposition: i64) -> TypedValue {
 }
 
 /// `return <int>` for a threaded body's disposition.
-pub fn ctl_return(disposition: i64) -> TypedComp {
+pub(crate) fn ctl_return(disposition: i64) -> TypedComp {
     let v = ctl_value(disposition);
     TypedComp::new(
         CompSig::new(v.ty().clone(), EffRow::Empty),
@@ -269,64 +270,55 @@ pub fn ctl_return(disposition: i64) -> TypedComp {
 
 /// The pass's deterministic fresh-name source (`{n}@hint`, one shared counter
 /// per erasure run).
-pub struct ControlFresh(Fresh);
+pub(crate) struct ControlFresh(Fresh);
 
 impl ControlFresh {
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self(Fresh::new())
     }
 
-    pub fn binder(&mut self, hint: &str, ty: CoreType) -> TypedBinder {
+    pub(crate) fn binder(&mut self, hint: &str, ty: CoreType) -> TypedBinder {
         TypedBinder::new(Sym::from(names::lowered(hint, self.0.bump())), ty)
     }
 }
 
 /// The normal disposition every non-signalling tail yields.
-pub const fn normal() -> i64 {
+pub(crate) const fn normal() -> i64 {
     CTL_NORMAL
 }
 
 /// The break disposition a driver dispatches on.
-pub const fn breaks() -> i64 {
+pub(crate) const fn breaks() -> i64 {
     CTL_BREAK
 }
 
 /// The continue disposition a body short-circuits with.
 #[cfg(test)]
-pub const fn continues() -> i64 {
+pub(crate) const fn continues() -> i64 {
     CTL_CONTINUE
 }
 
 /// The types of the variables in scope, threaded through the erasure so a
 /// generated driver can give each captured free variable its declared type.
-pub type TypeEnv = BTreeMap<Sym, CoreType>;
+pub(crate) type TypeEnv = BTreeMap<Sym, CoreType>;
 
 /// The result of one erasure run: the rewritten functions (with any generated
 /// loop drivers appended) and whether a `return` erasure threaded `Step`, so
 /// the caller knows to add the `SMore`/`SDone` constructors to its tables.
-pub struct Erased {
+pub(crate) struct Erased {
     pub fns: Vec<TypedCoreFn>,
     pub used_step: bool,
 }
 
 /// Rewrite recognized `break`/`continue`/`return` control handlers to direct
 /// control flow, leaving unmatched handlers for the general lowering.
-pub fn erase_control(fns: &[TypedCoreFn]) -> Erased {
-    // Functions that can perform an effect other than loop control: erasing a
-    // control handler whose region reaches such an effect could change how it
-    // interacts with an outer (possibly multishot) handler, so those loops are
-    // left alone. An un-erased `var` surfaces here as a foreign latent effect,
-    // so the multishot protection composes.
-    let foreign: BTreeSet<Sym> = super::latent::latent_ops(fns)
-        .into_iter()
-        .filter(|(_, ops)| ops.iter().any(|op| !is_control_op(*op)))
-        .map(|(n, _)| n)
-        .collect();
+pub(crate) fn erase_control(fns: &[TypedCoreFn], plan: &EffectPlan) -> Erased {
     let mut eraser = Eraser {
         fresh: ControlFresh::new(),
         generated: Vec::new(),
         used_step: false,
-        foreign,
+        plan,
+        owner: None,
         globals: fns.iter().map(TypedCoreFn::name).collect(),
     };
     let mut out: Vec<TypedCoreFn> = fns
@@ -337,6 +329,7 @@ pub fn erase_control(fns: &[TypedCoreFn]) -> Erased {
                 .iter()
                 .map(|p| (p.name(), p.ty().clone()))
                 .collect();
+            eraser.owner = Some(f.name());
             let body = eraser.erase(f.body(), &mut env);
             TypedCoreFn::new(
                 f.name(),
@@ -354,30 +347,33 @@ pub fn erase_control(fns: &[TypedCoreFn]) -> Erased {
     }
 }
 
-struct Eraser {
+struct Eraser<'a> {
     fresh: ControlFresh,
     generated: Vec<TypedCoreFn>,
     used_step: bool,
-    foreign: BTreeSet<Sym>,
+    plan: &'a EffectPlan,
+    /// The function whose body is being erased. Its thunk-valued parameters are
+    /// part of what a value application under it can perform, which is why the
+    /// escape question is asked relative to an owner at all.
+    owner: Option<Sym>,
     /// The program's top-level names: a free variable naming one is a callee,
     /// not a captured local, so it never becomes a driver parameter.
     globals: BTreeSet<Sym>,
 }
 
-impl Eraser {
-    // Whether `c` can perform an effect other than loop control: a `do` of a
-    // non-control op, or a call to a function with such a latent effect.
-    // Descends into thunks and sub-handlers (conservative).
+impl Eraser<'_> {
+    // Whether `c` can perform an effect other than loop control in its
+    // enclosing context, which is the plan's escape set for it. Outside any
+    // function there is no owner to measure against, so the answer is the one
+    // that declines to erase.
     fn has_foreign_effect(&self, c: &TypedComp) -> bool {
-        match c.kind() {
-            TypedCompKind::Do { operation, .. } => !is_control_op(*operation),
-            TypedCompKind::Call { callee, .. } if self.foreign.contains(callee) => true,
-            _ => {
-                let mut found = false;
-                super::walk::each_subterm(c, &mut |sc| found |= self.has_foreign_effect(sc));
-                found
-            }
-        }
+        let Some(owner) = self.owner else {
+            return true;
+        };
+        self.plan
+            .escapes_in(owner, c)
+            .iter()
+            .any(|operation| !is_control_op(*operation))
     }
 
     // Conditions are inlined into fresh monomorphic recursive drivers. Until
@@ -1067,7 +1063,7 @@ fn comp_result_type(c: &TypedComp) -> Option<Type> {
     }
 }
 
-impl Eraser {
+impl Eraser<'_> {
     // Thread `Step` through a computation `c : T` so it yields `SMore(v : T)`
     // (no return fired) or `SDone(v : R)` (a `return v` is propagating), where
     // `R` is the enclosing FUNCTION's result type. The two payloads are
@@ -1516,7 +1512,7 @@ fn step_at_of(c: &TypedComp) -> Option<StepAt> {
     }
 }
 
-impl Eraser {
+impl Eraser<'_> {
     // Thread `ctl : Int` through a Unit-valued loop body so it yields `0` (ran
     // to the end), `1` (`continue`), or `2` (`break`). Each is an immediate,
     // so no per-iteration heap. `None` for a shape it cannot thread (control
@@ -1706,7 +1702,7 @@ fn int_case(scrutinee: TypedValue, arms: Vec<(TypedPattern, TypedComp)>) -> Type
     )
 }
 
-impl Eraser {
+impl Eraser<'_> {
     // Emit a fresh tail-recursive driver for a recognized loop and return the
     // call that replaces it. The driver inlines the condition and the threaded
     // body, closing over the loop's free variables (the erased `var` cells and
@@ -1887,7 +1883,7 @@ impl Eraser {
 /// driver, returning the inlined condition and body (the body with its own
 /// `continue` wrapper peeled, since this loop's `continue` threads into the
 /// same `ctl`).
-pub fn match_break(c: &TypedComp) -> Option<(TypedComp, TypedComp)> {
+pub(crate) fn match_break(c: &TypedComp) -> Option<(TypedComp, TypedComp)> {
     let TypedCompKind::Handle { body, ops, .. } = c.kind() else {
         return None;
     };
@@ -1996,12 +1992,13 @@ mod tests {
     use super::super::super::{CoreFnSig, TypedCore, TypedCoreFn};
     use super::*;
 
-    fn test_eraser() -> Eraser {
+    fn test_eraser(plan: &EffectPlan) -> Eraser<'_> {
         Eraser {
             fresh: ControlFresh::new(),
             generated: Vec::new(),
             used_step: false,
-            foreign: BTreeSet::new(),
+            plan,
+            owner: Some(Sym::from(names::ENTRY_POINT)),
             globals: BTreeSet::new(),
         }
     }
@@ -2100,7 +2097,8 @@ mod tests {
 
     #[test]
     fn guard_fn_return_declines_a_non_step_continuation() {
-        let mut eraser = test_eraser();
+        let empty = EffectPlan::analyze(&[]);
+        let mut eraser = test_eraser(&empty);
         let at = StepAt::new(Type::Int, Type::Str);
         let s = TypedBinder::new(Sym::new("s"), at.ty());
         let x = TypedBinder::new(Sym::new("x"), CoreType::Source(Type::Int));
@@ -2117,7 +2115,8 @@ mod tests {
         assert_eq!(refreshed.name(), stale.name());
         assert_eq!(refreshed.ty(), &CoreType::Source(Type::Int));
 
-        let mut eraser = test_eraser();
+        let empty = EffectPlan::analyze(&[]);
+        let mut eraser = test_eraser(&empty);
         let mut env = TypeEnv::new();
         env.insert(refreshed.name(), refreshed.ty().clone());
         let occurrence = eraser.erase_value(&binder_value(&stale), &mut env);
@@ -2185,7 +2184,8 @@ mod tests {
         let input = TypedCore::<Elaborated>::new(vec![function]);
         assert_eq!(verify(&input, &env), Ok(()));
 
-        let erased = erase_control(input.functions());
+        let plan = EffectPlan::analyze(input.functions());
+        let erased = erase_control(input.functions(), &plan);
         let output = TypedCore::<Elaborated>::new(erased.fns);
         assert_eq!(verify(&output, &env), Ok(()));
         assert_eq!(output.erase(), input.erase());
@@ -2216,7 +2216,8 @@ mod tests {
                 args: Vec::new(),
             },
         );
-        let mut eraser = test_eraser();
+        let empty = EffectPlan::analyze(&[]);
+        let mut eraser = test_eraser(&empty);
         let mut env = TypeEnv::new();
 
         assert!(eraser.prepare_driver_condition(&pure, &mut env).is_some());

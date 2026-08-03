@@ -1,8 +1,10 @@
 //! Call-graph dependency analysis over `prog.fns`: the strongly-connected
 //! components that order type inference, and the self-recursion test that gates
-//! the polymorphic-recursion hint. This is structural (who references whom), not
-//! an effect analysis: effect rows are discovered by principal inference, so the
-//! old syntactic effect set-pass that once lived here is gone.
+//! the polymorphic-recursion hint.
+//!
+//! This is structural (who references whom), not an effect analysis: effect
+//! rows are discovered by principal inference, so the old syntactic effect
+//! set-pass that once lived here is gone.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::iter;
@@ -12,12 +14,14 @@ use prism_syntax::ast::{Core, Decl, Expr, HandlerArm, Pattern, Program, S};
 
 /// The strongly-connected components of `prog.fns`'s call graph, in dependency
 /// order (every component a callee belongs to precedes the components that call
-/// it). Each component is a recursion group: a singleton for an acyclic
-/// definition (with a self-edge for self-recursion), or several members for a
-/// mutually recursive cluster. Checking a component only after its callees lets
-/// a forward reference (notably one into a stdlib module merged after the
-/// prelude) see a generalized type rather than a structure-free stub, and lets a
-/// mutually recursive group be inferred against shared monomorphic variables.
+/// it).
+///
+/// Each component is a recursion group: a singleton for an acyclic definition
+/// (with a self-edge for self-recursion), or several members for a mutually
+/// recursive cluster. Checking a component only after its callees lets a
+/// forward reference (notably one into a stdlib module merged after the
+/// prelude) see a generalized type rather than a structure-free stub, and lets
+/// a mutually recursive group be inferred against shared monomorphic variables.
 ///
 /// Members within a component are returned in declaration order. References are
 /// collected with lexical scope: a name bound by a parameter, lambda, `let`,
@@ -53,10 +57,12 @@ pub fn dep_sccs(prog: &Program<Core>) -> Vec<Vec<usize>> {
 }
 
 /// Whether a declaration's body refers to its own name: direct self-recursion,
-/// i.e. a singleton strongly-connected component with a self-edge. Used only to
-/// decide whether a body's type error warrants the polymorphic-recursion remedy
-/// hint. A parameter that shadows the function's own name is not a recursive
-/// call, so the parameters seed the in-scope names here too.
+/// i.e. a singleton strongly-connected component with a self-edge.
+///
+/// Used only to decide whether a body's type error warrants the
+/// polymorphic-recursion remedy hint. A parameter that shadows the function's
+/// own name is not a recursive call, so the parameters seed the in-scope names
+/// here too.
 #[must_use]
 pub fn is_self_recursive(d: &Decl<Core>) -> bool {
     let names: BTreeMap<&str, usize> = iter::once((d.name.as_str(), 0)).collect();

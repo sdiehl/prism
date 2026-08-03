@@ -120,6 +120,6 @@ fn main() = println(even2(2))",
 #[test]
 fn identical_definitions_share_a_hash() {
     let m =
-        hashes("fn fact(n) = if n == 0 then 1 else n * fact(n - 1)\nfn main() = println(fact(5))");
+        hashes("fn fact(n) = if n <= 0 then 1 else n * fact(n - 1)\nfn main() = println(fact(5))");
     assert_eq!(m["fact"], m["factorial"]);
 }

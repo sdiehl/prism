@@ -2,11 +2,16 @@ name: CI
 
 on:
   # Gated once per change: pull requests run the full parity/perf ratchet before
-  # work lands, and pushes to main re-run it post-merge. Feature-branch pushes no
-  # longer trigger their own run, so an open PR is no longer built twice.
+  # work lands, and pushes to main re-run it post-merge. Release branches (vX.Y.Z)
+  # get the same full run on every push, because their work accumulates for weeks
+  # without a pull request to gate it and the squash lands on main in one commit;
+  # waiting until then to learn the tree is red is too late. Ordinary feature
+  # branches still do not trigger their own run, so an open PR is not built twice.
   pull_request:
   push:
-    branches: [main]
+    branches:
+      - main
+      - "v*"
   workflow_dispatch:
 
 # A newer commit on the same ref supersedes an in-flight run, so rapid pushes do
@@ -228,7 +233,7 @@ jobs:
       - name: sccache
         uses: mozilla-actions/sccache-action@v0.0.10
 
-      # `--workspace` is load-bearing: the root is itself a package and there is no
+      # `--workspace` is required because the root is itself a package and there is no
       # `default-members`, so without it cargo selects only `prism` and the member
       # crates are linted as path dependencies, where `-D warnings` does not reach
       # them. That let a permanently-false `cfg` silently drop three tests.
@@ -284,6 +289,15 @@ jobs:
 
       - name: Check package world
         run: ./target/release/prism pkg check-world packages --strict
+
+      # The committed generated artifacts whose currency no ordinary test
+      # asserts. Several of them (the frozen parser corpus, the production
+      # manifest, the generated Type parser, the book figures) had no CI gate at
+      # all, so one could be deleted or go stale and still pass every job here
+      # while the local run failed. `just` exists only inside the nix shell, so
+      # this calls the script the recipe wraps. It builds the binaries it needs.
+      - name: Check generated artifacts
+        run: ./scripts/artifacts-check.sh
 
       # Ordinary tests/checks must not rewrite committed generated artifacts. The
       # accept/regeneration recipes (`just snap`, `just docs-gen`, `just hash`,
@@ -478,12 +492,28 @@ jobs:
         with:
           lake-package-directory: models
           build-args: --wfail
+          # The package sets `builtinLint`, which the action auto-detects and
+          # turns into a `lake lint` stage over every library, including the
+          # `sorry`-bearing scaffold that is deliberately outside the default
+          # targets. That sweep does not terminate inside the job's budget and
+          # is killed, so the gate we do want (`lake build --wfail` over the
+          # default targets) is reported as a failure for a reason unrelated to
+          # the model. This job asserts the build; nothing here asks for a lint.
+          lint: "false"
 
       # The fixture oracle above is curated. Exercise the same compiler-to-JSON
       # boundary on deterministic generated pure/effectful programs as well, with
       # final-value mains so a Unit result from println cannot pass vacuously.
+      # Each case costs two full prelude compiles (an in-process interpret plus
+      # `dump core-json` and `oracle eval -` subprocesses), measured at 6.2s per
+      # case in this profile on an M-series laptop and 7-18s per case on this
+      # runner. The default corpus of 256 therefore needs roughly an hour, and
+      # the previous 30-minute cap killed the step mid-sweep rather than
+      # reporting a divergence. Budget for the slow end of the observed range;
+      # trimming PRISM_LEAN_FUZZ_CASES instead would buy time by shrinking the
+      # corpus this job exists to sweep.
       - name: Generated Lean differential fuzz
-        timeout-minutes: 30
+        timeout-minutes: 90
         run: cargo test --test lean_fuzz generated_programs_match_lean_final_values -- --ignored --exact --nocapture
 
       # Runs the whole fixture corpus through both the verified CEK machine (via

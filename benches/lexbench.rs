@@ -1,10 +1,11 @@
-//! Single-shot lexer driver: read one file, run one layer over it, print the
-//! token count and the nanoseconds the layer took.
+//! Single-shot syntax driver: read one file, run one layer over it, print the
+//! layer's count (tokens for the lex layers, top-level items for `parse`) and
+//! the nanoseconds the layer took.
 //!
 //! Its twin is `benches/lexbench.pr`, which does the same work in the same shape
-//! with the Prism-language lexer. `scripts/lexperf.py` runs the pair over one
-//! corpus and reports the Prism-to-Rust throughput and peak-memory ratio per
-//! layer.
+//! with the Prism-language lexer (and, once it exists, the Prism-language
+//! parser). `scripts/lexperf.py` runs the pair over one corpus and reports the
+//! Prism-to-Rust throughput and peak-memory ratio per layer.
 //!
 //! Only this side reports its own elapsed time. Reading a clock from Prism means
 //! installing an effect handler around the measured region, and a handler
@@ -21,14 +22,38 @@ use std::process::exit;
 use std::time::Instant;
 
 use prism::lex::{lex, lex_raw};
+use prism::parse::parse;
+use prism::parse::ParseResult;
 
 const LAYER_RAW: &str = "raw";
 const LAYER_LAYOUT: &str = "layout";
-const USAGE: &str = "usage: lexbench <file> <raw|layout>";
+const LAYER_PARSE: &str = "parse";
+const USAGE: &str = "usage: lexbench <file> <raw|layout|parse>";
 // A misuse of the driver, distinct from a source file that legitimately fails
 // to lex.
 const EXIT_USAGE: i32 = 2;
 const EXIT_LEX: i32 = 1;
+
+// The number of top-level items across every declaration family, imports
+// included: the length of the item list the Prism-side parser returns, so a
+// parser disagreement shows up as a count mismatch rather than a timing
+// artifact.
+const fn item_count(r: &ParseResult) -> usize {
+    let p = &r.program;
+    p.imports.len()
+        + p.types.len()
+        + p.effects.len()
+        + p.errors.len()
+        + p.aliases.len()
+        + p.synonyms.len()
+        + p.classes.len()
+        + p.instances.len()
+        + p.canonicals.len()
+        + p.patterns.len()
+        + p.stable.len()
+        + p.fns.len()
+        + p.logic_fns.len()
+}
 
 fn main() {
     let mut args = env::args().skip(1);
@@ -40,6 +65,19 @@ fn main() {
         eprintln!("{path}: {e}");
         exit(EXIT_USAGE);
     });
+    if layer == LAYER_PARSE {
+        let start = Instant::now();
+        let result = parse(&src);
+        let elapsed = start.elapsed().as_nanos();
+        match result {
+            Ok(r) => println!("{} {elapsed}", item_count(&r)),
+            Err(e) => {
+                eprintln!("{path}: {e}");
+                exit(EXIT_LEX);
+            }
+        }
+        return;
+    }
     let start = Instant::now();
     let tokens = match layer.as_str() {
         LAYER_RAW => lex_raw(&src),

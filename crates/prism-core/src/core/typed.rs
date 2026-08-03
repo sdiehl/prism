@@ -29,7 +29,7 @@ pub use simplify::simplify;
 // Exposed for typed-lowering compatibility tests. The production route accepts
 // only strategies whose erased result is exact at the compatibility boundary.
 pub use effect_lower::abi::LoweredReprProof;
-pub use effect_lower::{lower_effects, TypedLowering};
+pub use effect_lower::{lower_effects, prepare as prepare_effects, EffectPlan, TypedLowering};
 pub use rc::insert_rc;
 pub use reuse::reuse;
 pub use verify::{
@@ -52,8 +52,8 @@ use super::{CheckedHandler, Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, IoOp,
 // guard the builder and the proof checker use bounds it, per top-level
 // function, so the depth a program may reach does not depend on which thread
 // happened to call it.
-const ERASE_MIN_STACK: usize = 4 * 1024 * 1024;
-const ERASE_GROW_STACK: usize = 8 * 1024 * 1024;
+pub(crate) const CORE_MIN_STACK: usize = 4 * 1024 * 1024;
+pub(crate) const CORE_GROW_STACK: usize = 8 * 1024 * 1024;
 
 /// A value type in typed Core.
 ///
@@ -130,6 +130,7 @@ impl CompSig {
         &self.effects
     }
 
+    #[must_use]
     pub const fn new(result: CoreType, effects: EffRow) -> Self {
         Self { result, effects }
     }
@@ -163,6 +164,7 @@ impl CoreFnSig {
         &self.body
     }
 
+    #[must_use]
     pub const fn new(
         quantifiers: Vec<CoreQuantifier>,
         params: Vec<CoreType>,
@@ -203,6 +205,7 @@ impl TypedBinder {
         &self.ty
     }
 
+    #[must_use]
     pub const fn new(name: Sym, ty: CoreType) -> Self {
         Self {
             name,
@@ -300,6 +303,7 @@ impl TypedValue {
         &self.kind
     }
 
+    #[must_use]
     pub const fn new(ty: CoreType, kind: TypedValueKind) -> Self {
         Self { ty, kind }
     }
@@ -455,6 +459,7 @@ impl TypedHandleOp {
         &self.body
     }
 
+    #[must_use]
     pub const fn new(
         name: Sym,
         instantiation: Vec<CoreInstantiation>,
@@ -502,6 +507,7 @@ impl TypedForward {
         &self.effect
     }
 
+    #[must_use]
     pub const fn new(operation: Sym, effect: Label) -> Self {
         Self { operation, effect }
     }
@@ -528,6 +534,10 @@ impl TypedHandler {
         &self.forwarded
     }
 
+    /// A handler over `arms`, which must name each operation at most once.
+    ///
+    /// # Errors
+    /// The duplicated operation name, when two arms handle the same operation.
     pub fn new(arms: Vec<TypedHandleOp>) -> Result<Self, Sym> {
         let mut names = std::collections::BTreeSet::new();
         let duplicate = arms
@@ -581,6 +591,7 @@ impl TypedComp {
         &self.kind
     }
 
+    #[must_use]
     pub const fn new(sig: CompSig, kind: TypedCompKind) -> Self {
         Self { sig, kind }
     }
@@ -811,6 +822,7 @@ impl TypedCoreFn {
         self.dict_arity
     }
 
+    #[must_use]
     pub const fn new(
         name: Sym,
         params: Vec<TypedBinder>,
@@ -828,7 +840,7 @@ impl TypedCoreFn {
     }
 
     fn erase(self) -> CoreFn {
-        stacker::maybe_grow(ERASE_MIN_STACK, ERASE_GROW_STACK, || CoreFn {
+        stacker::maybe_grow(CORE_MIN_STACK, CORE_GROW_STACK, || CoreFn {
             name: self.name,
             params: self.params.into_iter().map(|binder| binder.name).collect(),
             body: self.body.erase(),
@@ -891,6 +903,7 @@ impl<P> TypedCore<P> {
         &self.fns
     }
 
+    #[must_use]
     pub const fn new(fns: Vec<TypedCoreFn>) -> Self {
         Self {
             fns,

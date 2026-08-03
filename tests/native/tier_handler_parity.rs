@@ -1,10 +1,10 @@
 // Cross-tier handler-equivalence oracle: the generative generalization of the
 // duplicate-handler-clause bug. The effect-lowering cascade is a pure cost
 // decision, so a handler-using program must produce byte-identical output no
-// matter which rung fires: evidence fusion (auto), state fusion (state), or
-// whole-program free-monad reification (free-monad). The original divergence (a
-// duplicate clause only the free-monad lowering observed) would surface here as
-// one tier disagreeing with the interpreter.
+// matter which rung fires. Every knob position in `EffectTier::ALL` is swept, so
+// the set grows with the ladder. The original divergence (a duplicate clause
+// only the free-monad lowering observed) would surface here as one tier
+// disagreeing with the interpreter.
 //
 // This is a curated set of well-typed, deterministic handler programs, each
 // commented with the handler shape it exercises, run under every forced tier and
@@ -23,9 +23,9 @@ use prism::{default_roots, Config, EffectTier};
 
 use crate::support::{check_native_parity, parallel_check, require_cc};
 
-// The tiers the cascade enumerates, slowest cap last. Every program's native
-// output on each of these must equal the interpreter's single reference output.
-const TIERS: &[EffectTier] = &[EffectTier::Auto, EffectTier::State, EffectTier::FreeMonad];
+// Every forceable floor, slowest last. Each program's native output on each of
+// these must equal the interpreter's single reference output.
+const TIERS: &[EffectTier] = &EffectTier::ALL;
 
 // `Config::from_env` with the effect-lowering tier capped, exactly as
 // native/tier_parity.rs forces a tier (equivalent to setting `PRISM_EFFECT_TIER`).

@@ -1,0 +1,287 @@
+-- Replay one frozen Rust parser-compaction artifact through the handwritten
+-- Prism parser. The driver supplies either `surface` or `diagnostics` and the
+-- authoritative artifact path. Successful output is a complete versioned
+-- artifact built with the Rust envelope and the Prism parse result; the Python
+-- harness compares full accepted bytes and the specified malformed projection.
+-- A HARNESS_ERROR line is a hard harness failure, never an oracle result.
+
+import Syntax.Source (..)
+
+import Syntax.Token (..)
+
+import Syntax.Ast (..)
+
+import Syntax.Diagnostic (..)
+
+import Syntax.Lex (..)
+
+import Syntax.Parse (..)
+
+import Syntax.Codec (..)
+
+import Syntax.Cursor (..)
+
+import Syntax.Parse.Support (..)
+
+import Syntax.Parse.Type (parse_type)
+
+import Syntax.Parse.Pattern (parse_let_pattern)
+
+import Data.List (..)
+
+import Json (..)
+
+fn lex_diagnostic(e : LexError) : Diagnostic =
+  let at = lex_offset(e)
+  Diagnostic {
+    code = lex_code(e),
+    phase = DPLex,
+    span = Span { lo = at, hi = at },
+    message = lex_message(e),
+    expected = [],
+    related = []
+  }
+
+fn replay_surface(text : String) =
+  match decode_surface(text) of
+    Err(e) => println("HARNESS_ERROR decode surface: {codec_error_message(e)}")
+    Ok(doc) =>
+      match parse_source(doc.source.text) of
+        Err(ParseLex(e)) =>
+          println("HARNESS_ERROR handwritten lex refusal: {lex_message(e)}")
+        Err(ParseSyntax(d)) =>
+          println("HARNESS_ERROR handwritten parse refusal: {d.code}")
+        Ok(items) =>
+          println(
+              encode_surface(
+                  SurfaceDoc {
+                    schema = doc.schema,
+                    compiler = doc.compiler,
+                    source = doc.source,
+                    items = items
+                  },
+                ),
+            )
+
+fn replay_diagnostics(text : String) =
+  match decode_diagnostics(text) of
+    Err(e) => println("HARNESS_ERROR decode diagnostics: {codec_error_message(e)}")
+    Ok(doc) =>
+      match parse_source(doc.source.text) of
+        Ok(_) => println("HARNESS_ERROR handwritten parser accepted")
+        Err(ParseLex(e)) =>
+          println(
+              encode_diagnostics(
+                  DiagnosticsDoc {
+                    schema = doc.schema,
+                    compiler = doc.compiler,
+                    source = doc.source,
+                    diagnostics = [lex_diagnostic(e)]
+                  },
+                ),
+            )
+        Err(ParseSyntax(d)) =>
+          println(
+              encode_diagnostics(
+                  DiagnosticsDoc {
+                    schema = doc.schema,
+                    compiler = doc.compiler,
+                    source = doc.source,
+                    diagnostics = [d]
+                  },
+                ),
+            )
+
+fn entry_span(s : Span) : Json = JArr([JInt(s.lo), JInt(s.hi)])
+
+fn entry_tail_fields(t : Option(String)) : List((String, Json)) =
+  match t of
+    None => []
+    Some(name) => [("tail", JStr(name))]
+
+fn entry_args_fields(args : List(Ty)) : List((String, Json)) =
+  match args of
+    Nil => []
+    _ => [("args", JArr(map(entry_ty, args)))]
+
+fn entry_efflabel(label : EffLabel) : Json =
+  JObj(append([("name", JStr(label.name))], entry_args_fields(label.args)))
+
+fn entry_row(row : Row) : Json =
+  JObj(
+      append(
+          [("labels", JArr(map(entry_efflabel, row.labels)))],
+          entry_tail_fields(row.tail),
+        ),
+    )
+
+fn entry_cfield(field : CField) : Json =
+  JObj([("name", JStr(field.name)), ("ty", entry_ty(field.ty))])
+
+-- Canonical direct-entry projection: the same type-subtree vocabulary already
+-- embedded in prism-surface-syntax-v1, never Rust/Prism debug text.
+fn entry_ty(ty : Ty) : Json =
+  match ty of
+    TyInt => JObj([("kind", JStr("int"))])
+    TyI64 => JObj([("kind", JStr("i64"))])
+    TyU64 => JObj([("kind", JStr("u64"))])
+    TyBool => JObj([("kind", JStr("bool"))])
+    TyUnit => JObj([("kind", JStr("unit"))])
+    TyFloat => JObj([("kind", JStr("float"))])
+    TyChar => JObj([("kind", JStr("char"))])
+    TyStr => JObj([("kind", JStr("str"))])
+    TyVar(name) => JObj([("kind", JStr("var")), ("name", JStr(name))])
+    TyApp(head, args) =>
+      JObj(append([("kind", JStr("app")), ("head", JStr(head))], entry_args_fields(args)))
+    TyState(cell) => JObj([("kind", JStr("state")), ("cell", JInt(cell))])
+    TyForall(vars, body) =>
+      JObj([
+          ("kind", JStr("forall")),
+          ("ty", entry_ty(body)),
+          ("vars", JArr(map(JStr, vars))),
+        ])
+    TyFun(params, effects, ret) =>
+      JObj([
+          ("kind", JStr("fun")),
+          ("params", JArr(map(entry_ty, params))),
+          ("effects", entry_row(effects)),
+          ("ret", entry_ty(ret)),
+        ])
+    TyCon(name, args) =>
+      JObj(append([("kind", JStr("con")), ("name", JStr(name))], entry_args_fields(args)))
+    TyTuple(items) =>
+      JObj([("kind", JStr("tuple")), ("items", JArr(map(entry_ty, items)))])
+    TyUnboxedTuple(items) =>
+      JObj([("kind", JStr("unboxed-tuple")), ("items", JArr(map(entry_ty, items)))])
+    TyUnboxedRecord(fields) =>
+      JObj([
+          ("kind", JStr("unboxed-record")),
+          ("fields", JArr(map(entry_cfield, fields))),
+        ])
+    TyRowLit(row) => JObj([("kind", JStr("row")), ("row", entry_row(row))])
+    TyNat(value) => JObj([("kind", JStr("nat")), ("value", JInt(value))])
+    TyUsage(body, facts) =>
+      JObj([
+          ("kind", JStr("usage")),
+          ("ty", entry_ty(body)),
+          ("facts", JArr(map(JStr, facts))),
+        ])
+
+fn entry_suffix_fields(suffix : Suffix) : List((String, Json)) =
+  match suffix of
+    SufNone => []
+    SufI64 => [("suffix", JStr("i64"))]
+    SufU64 => [("suffix", JStr("u64"))]
+
+fn entry_pat_args_fields(args : List(Sp(Pat))) : List((String, Json)) =
+  match args of
+    Nil => []
+    _ => [("args", JArr(map(entry_pat, args)))]
+
+fn entry_pat_fields(pat : Pat) : List((String, Json)) =
+  match pat of
+    PWild => [("kind", JStr("wild"))]
+    PVar(name) => [("kind", JStr("var")), ("name", JStr(name))]
+    PInt(value, suffix) =>
+      append(
+          [("kind", JStr("int")), ("value", JStr(value))],
+          entry_suffix_fields(suffix),
+        )
+    PFloat(value) => [("kind", JStr("float")), ("value", JStr(value))]
+    PChar(value) => [("kind", JStr("char")), ("value", JStr(value))]
+    PBool(value) => [("kind", JStr("bool")), ("value", JBool(value))]
+    PCtor(name, args) =>
+      append(
+          [("kind", JStr("ctor")), ("name", JStr(name))],
+          entry_pat_args_fields(args),
+        )
+    PTuple(items) =>
+      [("kind", JStr("tuple")), ("items", JArr(map(entry_pat, items)))]
+    PRecord(name, fields, rest) =>
+      [
+        ("kind", JStr("record")),
+        ("name", JStr(name)),
+        (
+          "fields",
+          JArr(
+              map(
+                  \(field) ->
+                    JObj([
+                        ("name", JStr(field.name)),
+                        ("pat", entry_pat(field.pat)),
+                      ]),
+                  fields,
+                ),
+            ),
+        ),
+        ("rest", JBool(rest)),
+      ]
+    POr(alts) =>
+      [("kind", JStr("or")), ("alts", JArr(map(entry_pat, alts)))]
+
+-- Canonical direct-entry projection: the existing spanned pattern subtree.
+fn entry_pat(pat : Sp(Pat)) : Json =
+  let base = append(entry_pat_fields(pat.node), [("span", entry_span(pat.span))])
+  JObj(
+      if pat.synth then
+        append(base, [("synth", JBool(true))])
+      else
+        base,
+    )
+
+fn entry_token_in(t : Token, lo : Int, hi : Int) : Bool =
+  lo <= t.span.lo && t.span.hi <= hi
+
+fn entry_type(doc : TokensDoc, lo : Int, hi : Int) =
+  let tokens = filter(\(t) -> entry_token_in(t, lo, hi), doc.raw)
+  match parse_type(cursor_of(tokens, hi), depth_budget()) of
+    PStuck(c) => println("HARNESS_ERROR parse_type stuck: {cursor_diagnostic(c).code}")
+    PFault(d) => println("HARNESS_ERROR parse_type fault: {d.code}")
+    PTook(ty, c) =>
+      match cursor_expect_end(c) of
+        Stuck(rest) =>
+          println("HARNESS_ERROR parse_type left token: {cursor_diagnostic(rest).code}")
+        Took(_, _) => println(canonical_json(entry_ty(ty)))
+
+fn entry_let_pattern(doc : TokensDoc, lo : Int, hi : Int) =
+  let tokens = filter(\(t) -> entry_token_in(t, lo, hi), doc.raw)
+  match parse_let_pattern(cursor_of(tokens, hi), depth_budget()) of
+    PStuck(c) => println("HARNESS_ERROR parse_let_pattern stuck: {cursor_diagnostic(c).code}")
+    PFault(d) => println("HARNESS_ERROR parse_let_pattern fault: {d.code}")
+    PTook(pat, c) =>
+      match cursor_expect_end(c) of
+        Stuck(rest) =>
+          println("HARNESS_ERROR parse_let_pattern left token: {cursor_diagnostic(rest).code}")
+        Took(_, _) => println(canonical_json(entry_pat(pat)))
+
+fn replay_entry(kind : String, text : String, lo : Int, hi : Int) =
+  match decode_tokens(text) of
+    Err(e) => println("HARNESS_ERROR decode tokens: {codec_error_message(e)}")
+    Ok(doc) =>
+      if kind == "type" then
+        entry_type(doc, lo, hi)
+      elif kind == "let-pattern" then
+        entry_let_pattern(doc, lo, hi)
+      else
+        println("HARNESS_ERROR unknown entry kind: {kind}")
+
+fn entry_int_arg(text : String) : Int =
+  match parse_int(text) of
+    Some(value) => value
+    None => 0 - 1
+
+fn main() =
+  let mode = arg(0)
+  if mode == "surface" then
+    replay_surface(read_file(arg(1)))
+  elif mode == "diagnostics" then
+    replay_diagnostics(read_file(arg(1)))
+  elif mode == "entry" then
+    replay_entry(
+        arg(1),
+        read_file(arg(2)),
+        entry_int_arg(arg(3)),
+        entry_int_arg(arg(4)),
+      )
+  else
+    println("HARNESS_ERROR unknown mode: {mode}")

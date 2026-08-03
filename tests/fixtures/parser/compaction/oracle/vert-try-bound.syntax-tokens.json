@@ -1,0 +1,226 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "1f25221b494122f833e84f6be9197577a503e094dc73f8c1f65aa80ea66344a4",
+    "text": "fn corpus(r) =\n  let x = r?\n  x\n"
+  },
+  "raw": [
+    {
+      "kind": "fn",
+      "span": [
+        0,
+        2
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        3,
+        9
+      ],
+      "value": "corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        9,
+        10
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        10,
+        11
+      ],
+      "value": "r"
+    },
+    {
+      "kind": ")",
+      "span": [
+        11,
+        12
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        13,
+        14
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        17,
+        20
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        21,
+        22
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "=",
+      "span": [
+        23,
+        24
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        25,
+        26
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "?",
+      "span": [
+        26,
+        27
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        30,
+        31
+      ],
+      "value": "x"
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        0,
+        2
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        3,
+        9
+      ],
+      "value": "corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        9,
+        10
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        10,
+        11
+      ],
+      "value": "r"
+    },
+    {
+      "kind": ")",
+      "span": [
+        11,
+        12
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        13,
+        14
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        17,
+        17
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        17,
+        20
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        21,
+        22
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "=",
+      "span": [
+        23,
+        24
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        25,
+        26
+      ],
+      "value": "r"
+    },
+    {
+      "kind": "?",
+      "span": [
+        26,
+        27
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        27,
+        27
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        30,
+        31
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        31,
+        31
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        31,
+        31
+      ]
+    }
+  ],
+  "trivia": []
+}

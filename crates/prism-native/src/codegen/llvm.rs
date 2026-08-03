@@ -941,6 +941,10 @@ fn defined_functions(module: &Module<'_>) -> BTreeMap<String, String> {
         .collect()
 }
 
+/// The emitted LLVM function bodies of the whole program, keyed by symbol.
+///
+/// # Errors
+/// Fails when a construct reaches codegen unlowered or unsupported.
 pub fn whole_function_map(
     core: &LoweredCore,
     ctors: &BTreeMap<String, CtorInfo>,
@@ -950,6 +954,11 @@ pub fn whole_function_map(
     })
 }
 
+/// The same map built one backend SCC at a time, so a function's body is
+/// independent of which other SCCs share the build.
+///
+/// # Errors
+/// Fails when a construct reaches codegen unlowered or unsupported.
 pub fn scc_function_map(
     core: &LoweredCore,
     ctors: &BTreeMap<String, CtorInfo>,
@@ -1082,6 +1091,7 @@ pub enum ClosurePlanShard {
 /// A fully discovered closure plan shared by every independently cacheable
 /// adapter and dispatch shard in one build. Keeping this opaque prevents shard
 /// emission from rediscovering the whole program.
+#[derive(Debug)]
 pub struct PlannedClosures {
     plan: ClosurePlan,
 }

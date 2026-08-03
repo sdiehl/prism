@@ -16,7 +16,7 @@ RFC 3339 formatting and parsing are pure, total, UTC-only string code: no locale
 
 ### `Duration`
 
-```prism,def,h-7e016327a17fe1a6bce054c482ea3242432b3330e502ba25eee3664506fb2780
+```prism,def,h-c77898707947855c775c691d19fd70b42fa8705e826c2261e3d36a86e3ee7abb
 type Duration = Duration(Int)
 ```
 
@@ -24,7 +24,7 @@ A signed span of time, in nanoseconds.
 
 ### `Instant`
 
-```prism,def,h-d107ff19263e790386d1d46011d60c50c3055d2fb9a2de6cfb69e86122fee1dd
+```prism,def,h-1cf55eef641807e4fa4727f93e0a18bd52bd880bfb440dcced38058f0246e438
 type Instant = Instant(Int)
 ```
 
@@ -32,7 +32,7 @@ A monotonic clock reading, in nanoseconds from an unspecified origin.
 
 ### `Wall`
 
-```prism,def,h-82d43b86d98a8309c88519db947db79feffc05d6ad867afa21b4f29b037ca199
+```prism,def,h-8bfeab573d594bc28f8d2fd1c8307833989223c52c2b5a623f7b5c1a562d3de5
 type Wall = Wall(Int)
 ```
 
@@ -42,7 +42,7 @@ A wall-clock reading: nanoseconds since the Unix epoch, in UTC.
 
 ### `nanos_per_sec`
 
-```prism,sig,h-5a3a1b91cc92d22d2d9b6cbafb1a6bba2298e6d71856d5976256972b473db0f4
+```prism,sig,h-ca046e9adc29d576f62cbfddf075bb7612b93a1dd48d370565e9ad35c4c7fb12
 nanos_per_sec : () -> Int
 ```
 
@@ -58,7 +58,7 @@ nanos_per_sec()
 
 ### `nanos_per_milli`
 
-```prism,sig,h-3e9da0b72233cbc671737eff6c08561e4160f1bab33815f46a19f46c8fe89bc1
+```prism,sig,h-1c15b66d20ddebe65b1b6f39d787e002e13a0c2c1d40335856b912524ce470ad
 nanos_per_milli : () -> Int
 ```
 
@@ -66,7 +66,7 @@ Nanoseconds in one millisecond.
 
 ### `nanos_per_micro`
 
-```prism,sig,h-b53a496fc633478f0f6dc42e2a9a870cf5ba9b49de5524d4a70ef4e76fe00968
+```prism,sig,h-cb91037f61b9144f23877a26d7e35f47e059446eafeceafef6c24bb8341a210c
 nanos_per_micro : () -> Int
 ```
 
@@ -74,7 +74,7 @@ Nanoseconds in one microsecond.
 
 ### `dur_nanos`
 
-```prism,sig,h-50694bb9d968bf720a3e0aeb25ee3414a5e1e44862fb56904a25388d5ba9372d
+```prism,sig,h-d3ee489d298442866cafca780a4cd133bbb178f64464aa774f33491eb24fb6aa
 dur_nanos : (Time.Duration) -> Int
 ```
 
@@ -90,7 +90,7 @@ dur_nanos(seconds(2))
 
 ### `nanos`
 
-```prism,sig,h-4bb4086ff342601ecd846e994f9e6e087b34a595b09ef086eeb71b21372b8b9c
+```prism,sig,h-986586db14b0892b3d0e4bdfe81dbb0f370f8a656055c7a22a19526d498f9a68
 nanos : (Int) -> Time.Duration
 ```
 
@@ -98,7 +98,7 @@ A duration of `n` nanoseconds.
 
 ### `micros`
 
-```prism,sig,h-abd0792b27aae91049b4bf33ac4dd035d7f0cf4838dca01d1e860a60ccb1bd96
+```prism,sig,h-2a5409398ec4c12dea1978dd88122ac25828c90588b6230fd72919355c5d759e
 micros : (Int) -> Time.Duration
 ```
 
@@ -114,7 +114,7 @@ dur_nanos(micros(3))
 
 ### `millis`
 
-```prism,sig,h-28200c6d0e094e1561895f4174976ef2874d509413f0220e62bdef617fbf3607
+```prism,sig,h-82e211382037ad76eac4b2fa925b411bb6515e79606f2cbda9bce35bfc100746
 millis : (Int) -> Time.Duration
 ```
 
@@ -122,7 +122,7 @@ A duration of `n` milliseconds.
 
 ### `seconds`
 
-```prism,sig,h-dda6e020c39f4f9dd65f05e8237d08494096e8570e1f138d1679150239159c25
+```prism,sig,h-20931cd91a86f56646d5432c73d7b7609779f221ad6aeab9477677dfdc38a68c
 seconds : (Int) -> Time.Duration
 ```
 
@@ -138,7 +138,7 @@ dur_nanos(seconds(1))
 
 ### `minutes`
 
-```prism,sig,h-6360729a62ed435f269d8d043428efa9f890df340a3d2ef17c405020bbc51a7e
+```prism,sig,h-6627d604f09021e53b1c861619836f2354a457c5b3c42d867121200aba81151e
 minutes : (Int) -> Time.Duration
 ```
 
@@ -154,7 +154,7 @@ dur_as_secs(minutes(2))
 
 ### `hours`
 
-```prism,sig,h-c86843060ed6cca21ad0732f36dcd16516688f1c755346b7f194273e9a979e0a
+```prism,sig,h-55f53b280ffdbde5228d242208f34aaecb8049e905a1ae97443363c8e7a65043
 hours : (Int) -> Time.Duration
 ```
 
@@ -170,7 +170,7 @@ dur_as_secs(hours(1))
 
 ### `dur_as_secs`
 
-```prism,sig,h-0f135a31bdeb3ae2bbb90a2deb900365ccebffb040fe4a477efe15717220b40b
+```prism,sig,h-024ae768dc04438d136c56ccf9ac312408afd897b1bdfa0a1cc9ab6e50c3bbe3
 dur_as_secs : (Time.Duration) -> Int
 ```
 
@@ -186,7 +186,7 @@ dur_as_secs(dur_add(seconds(90), millis(500)))
 
 ### `dur_as_millis`
 
-```prism,sig,h-980f5a3c79f98ec5d7732a3472156e7009147ccc2bb390a83de1db726cf24d3e
+```prism,sig,h-3bf15df7c992b5bf72efb98b3ed770c97a122f94485a1d347ca70e582d776182
 dur_as_millis : (Time.Duration) -> Int
 ```
 
@@ -202,7 +202,7 @@ dur_as_millis(seconds(2))
 
 ### `dur_add`
 
-```prism,sig,h-aae31de146d51d19a6211b7f2fa1bc54318e1fcd255889ef6417d06eb864df0d
+```prism,sig,h-e1f741105e6a05852f12864f784587465fe94011b45d30fc28e0e871d0d469d1
 dur_add : (Time.Duration, Time.Duration) -> Time.Duration
 ```
 
@@ -218,7 +218,7 @@ dur_nanos(dur_add(seconds(1), millis(500)))
 
 ### `dur_sub`
 
-```prism,sig,h-a985f26b9e4a6dff4c9fe8cc49a34af1366b5508e26f757c03a9c0fa2cdbad80
+```prism,sig,h-c3c1f8ecd38c6af800d3434be48ef191ad6b829f245d1047009a482ade5a5928
 dur_sub : (Time.Duration, Time.Duration) -> Time.Duration
 ```
 
@@ -234,7 +234,7 @@ dur_nanos(dur_sub(seconds(2), millis(500)))
 
 ### `dur_scale`
 
-```prism,sig,h-fa09df9664d13fce70b778bfdadf3f9284cc5b5feec9aab3601f7c01b96614f0
+```prism,sig,h-f9f9857e200caab087bbb5f89400326d28d960cb4cf091f9d439d43a5c558d81
 dur_scale : (Time.Duration, Int) -> Time.Duration
 ```
 
@@ -250,7 +250,7 @@ dur_nanos(dur_scale(seconds(1), 3))
 
 ### `dur_negate`
 
-```prism,sig,h-8b5bb2869b26a58d16b9b5e35c8bae6bda4a18f69c47da70708e2128d6c75553
+```prism,sig,h-d9b3d8fe36b897b8f8ef4e1f5f385579391f6118fc627267bbd399f521d74370
 dur_negate : (Time.Duration) -> Time.Duration
 ```
 
@@ -266,7 +266,7 @@ dur_nanos(dur_negate(seconds(1)))
 
 ### `dur_cmp`
 
-```prism,sig,h-079d85906375b4a86c39e0bae086f77032e54c84f8e7f780bd2d3dab5b2ff568
+```prism,sig,h-56be1ef5f68358dccd1ab8642a4c28e0a2053b172124cc4d3bcd98c3a7ebe425
 dur_cmp : (Time.Duration, Time.Duration) -> Int
 ```
 
@@ -282,7 +282,7 @@ dur_cmp(seconds(1), seconds(2))
 
 ### `dur_eq`
 
-```prism,sig,h-e847bf930629bce4d6108921e518b654115113bd63837f35f6c00b9d9b88af0d
+```prism,sig,h-11c15433a7e966c5c04996d3152a6bd1ef09caa4babe426a81ec2a82fe3fb86c
 dur_eq : (Time.Duration, Time.Duration) -> Bool
 ```
 
@@ -298,7 +298,7 @@ true
 
 ### `instant_nanos`
 
-```prism,sig,h-c48597abd494d09397625045ec13d60cf3023ebee0e4a1ff776e216141ebc307
+```prism,sig,h-a317b3f2470cc9a791dfe1cf5eded3594566c310b025eddba3255c559b2d9a14
 instant_nanos : (Time.Instant) -> Int
 ```
 
@@ -314,7 +314,7 @@ instant_nanos(Instant(500))
 
 ### `elapsed`
 
-```prism,sig,h-bfb9a0270af48b7f028de05c74d6d3d741c01ed90f082719636a9b8b13a31392
+```prism,sig,h-f6c8e3eb352b763967c6a869ea640fac939f3c71d93ff861ff309377fd13cd57
 elapsed : (Time.Instant, Time.Instant) -> Time.Duration
 ```
 
@@ -330,7 +330,7 @@ dur_nanos(elapsed(Instant(100), Instant(450)))
 
 ### `instant_add`
 
-```prism,sig,h-e4c31d82b94747aa7503853ce496d12a36f4faaac83f4cbb92bde2c77428122b
+```prism,sig,h-690590dd00ea3adf75fe9de2a4fae2322e2a11de4cbc862237e7e3574ab531ff
 instant_add : (Time.Instant, Time.Duration) -> Time.Instant
 ```
 
@@ -346,7 +346,7 @@ instant_nanos(instant_add(Instant(100), micros(1)))
 
 ### `wall_nanos`
 
-```prism,sig,h-c9719d4836df7f1a3d8a1f8afba8cbdac35443cd8c2ecb47a18b5adb79d0fb02
+```prism,sig,h-c15f3ee564a8b42d7d960d7cfe5d388620deb4c9f7f62f1a67083186b21587cf
 wall_nanos : (Time.Wall) -> Int
 ```
 
@@ -362,7 +362,7 @@ wall_nanos(wall_of_nanos(1500000000))
 
 ### `wall_of_nanos`
 
-```prism,sig,h-35956d516b90d73e79f8bc9e4539b793e01c0c1b1066e7fd579a899a2a3dfe26
+```prism,sig,h-2443f513217fb86eb2bc3065c6b2a7aad3b259f6ada584ee0becb0bd05bf1456
 wall_of_nanos : (Int) -> Time.Wall
 ```
 
@@ -370,7 +370,7 @@ A wall reading from nanoseconds since the Unix epoch.
 
 ### `wall_unix_secs`
 
-```prism,sig,h-1656b3c14bada8632393916bad397a1e67376efefe8d204bfd1e759e5ceea1c4
+```prism,sig,h-ea03be1ed87999a3b5d8fe6de1d1c3182c304ed5c7c438c2b7683b40c8ee2fa2
 wall_unix_secs : (Time.Wall) -> Int
 ```
 
@@ -386,7 +386,7 @@ wall_unix_secs(wall_of_nanos(1500000000))
 
 ### `wall_add`
 
-```prism,sig,h-04a6b3518830c193c927fd9b8ff3a08bb3496c258b409b17fb95ae558dcc26bc
+```prism,sig,h-7be7671af33bd489679ffe0b2162b11ad076b2757233897befc7df84109c8e40
 wall_add : (Time.Wall, Time.Duration) -> Time.Wall
 ```
 
@@ -402,7 +402,7 @@ wall_nanos(wall_add(wall_of_nanos(0), seconds(1)))
 
 ### `wall_diff`
 
-```prism,sig,h-465b56090d0f6b7592e1f9ebdb859db3fca3b195bd8c30cafd517a6d7b6b1dbb
+```prism,sig,h-d7f756a0b75f9aa13d1773d4c87ffd742414a6492b60dc05914339c7689179f3
 wall_diff : (Time.Wall, Time.Wall) -> Time.Duration
 ```
 
@@ -418,7 +418,7 @@ dur_nanos(wall_diff(wall_of_nanos(0), wall_of_nanos(500)))
 
 ### `wall_cmp`
 
-```prism,sig,h-a5983e29c09398a459aa75c6427d1f12f85539e65d03dbaa32d10c189ef19b4a
+```prism,sig,h-13db068cb9bbd9aeadc1cef02be4f3735f0713531bd58cc97a33d033563af623
 wall_cmp : (Time.Wall, Time.Wall) -> Int
 ```
 
@@ -434,7 +434,7 @@ wall_cmp(wall_of_nanos(1), wall_of_nanos(2))
 
 ### `mono_clock`
 
-```prism,sig,h-7394f8439e257867cabac4e0ce73d070b0b6c49408f4601b2d520db6a5a67936
+```prism,sig,h-13ab8dd83222552a44382b98eaca1ede090cceae4a044033fad37236eaec0ce7
 mono_clock : () -> Time.Instant ! {Concurrent.Clock}
 ```
 
@@ -446,7 +446,7 @@ run_clock_real(\() -> mono_clock())
 
 ### `wall_clock`
 
-```prism,sig,h-213c7ecf236ba43aacd75e2fe7933f25491dddb26e1feaf1445ef452b4364a40
+```prism,sig,h-4b55a833467087280da3f470de1742837c12a00dd6f167935c53ca66623cedd4
 wall_clock : () -> Time.Wall ! {Concurrent.Clock}
 ```
 
@@ -458,7 +458,7 @@ format_rfc3339(run_clock_real(\() -> wall_clock()))
 
 ### `run_clock_real`
 
-```prism,sig,h-ac3ed8016ce803af3723c957b79299f9feb15e4e6054b0f04f29fa3b98da3cd1
+```prism,sig,h-9b233eabbfac992d5f37f497c62e5e75fd47635a41eb0d34e3c997b12282b752
 run_clock_real : forall e0 a. (() -> a ! {Concurrent.Clock, IO, e0}) -> a ! {IO, e0}
 ```
 
@@ -470,7 +470,7 @@ run_clock_real(\() -> wall_unix_secs(wall_clock()))
 
 ### `format_rfc3339`
 
-```prism,sig,h-0090ab1abb7645499c9c6ed5ffb047927fba7f223e17ec7621e5e51505601de2
+```prism,sig,h-cc22aac7a3e541701510d8bade88a13f3460b6ceac1cca82c614a18f643ce01a
 format_rfc3339 : (Time.Wall) -> String
 ```
 
@@ -486,7 +486,7 @@ format_rfc3339(wall_of_nanos(0))
 
 ### `parse_rfc3339`
 
-```prism,sig,h-4f76facf9f9018ec5fb286b558b0910d5fea2ac1fafd2c703d0648e9d73d326e
+```prism,sig,h-d0dde151c6527d30eab56a46b81f0c93039eeb4a739316fa8f0c5adf639a333a
 parse_rfc3339 : (String) -> Option(Time.Wall)
 ```
 

@@ -9,4 +9,3 @@ spectra = { path = "../../packages/spectra" }
 
 [spectra]
 output = "spectra-intro.pdf"
-reflection = "off"

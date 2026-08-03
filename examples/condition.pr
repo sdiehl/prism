@@ -30,7 +30,7 @@ fn use_value(n) =
 -- Policy (b): abort restart. Drop the continuation, escape to a sentinel.
 fn abort_to(n) =
   handle checked_div(n, 0) with
-    never raise_cond(_) => 0 - 1
+    never raise_cond(_) => -1
     return r => r
 
 -- A bare signal goes to the innermost handler (resumes 100); the same code also

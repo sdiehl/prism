@@ -1,0 +1,2 @@
+type Corpus(a, e : Row) = Corpus(a)
+alias Pair(a, b) = (a, b)

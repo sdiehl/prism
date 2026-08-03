@@ -12,7 +12,7 @@
 //!   | scheme tag | kind | contract digest  |     body     |
 //!   +------------+------+------------------+--------------+
 //!
-//!   scheme tag       length-prefixed string, "prism-core-hash-v1"; a foreign
+//!   scheme tag       length-prefixed string, "prism-core-hash-v2"; a foreign
 //!                    scheme is rejected before anything else
 //!   kind             uvarint, the cert kind (WireKind::Cert)
 //!   contract digest  length-prefixed hex, the SUBJECT hash this certificate

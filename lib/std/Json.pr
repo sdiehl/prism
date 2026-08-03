@@ -779,6 +779,13 @@ pub fn to_json_string(x : a) : String given ToJson(a) = encode(to_json(x))
 
 -- | The immediate `Json` children of a value: an array's elements, an object's
 -- field values in field order, and nothing at a scalar.
+--
+-- ```prism
+-- json_children(JObj([("x", JInt(1)), ("ok", JBool(true))]))
+-- ```
+-- ```output
+-- [Json.JInt(1), Json.JBool(true)]
+-- ```
 pub fn json_children(j : Json) : List(Json) =
   match j of
     JArr(items) => items
@@ -792,6 +799,13 @@ fn json_field_value(kv : (String, Json)) : Json =
 -- | Put a replacement child list back, in `json_children` order, keeping an
 -- object's field names. Fails closed: a list of the wrong length yields the
 -- value unchanged rather than a truncated or padded one.
+--
+-- ```prism
+-- json_rebuild(JObj([("x", JInt(1))]), [JInt(2)])
+-- ```
+-- ```output
+-- Json.JObj([(x, Json.JInt(2))])
+-- ```
 pub fn json_rebuild(j : Json, cs : List(Json)) : Json =
   match j of
     JArr(items) =>

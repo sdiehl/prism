@@ -1,0 +1,537 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "44563c9675b58b09bdfaab9218a567cca8f10709c9406d9aee1a906253365eec",
+    "text": "fn corpus(a : I64, b : U64, c : Unit, d : Float, e : Char, f : String, g : Int := 0) = 0\n"
+  },
+  "raw": [
+    {
+      "kind": "fn",
+      "span": [
+        0,
+        2
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        3,
+        9
+      ],
+      "value": "corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        9,
+        10
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        10,
+        11
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ":",
+      "span": [
+        12,
+        13
+      ]
+    },
+    {
+      "kind": "I64",
+      "span": [
+        14,
+        17
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        17,
+        18
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        19,
+        20
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ":",
+      "span": [
+        21,
+        22
+      ]
+    },
+    {
+      "kind": "U64",
+      "span": [
+        23,
+        26
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        26,
+        27
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        28,
+        29
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ":",
+      "span": [
+        30,
+        31
+      ]
+    },
+    {
+      "kind": "Unit",
+      "span": [
+        32,
+        36
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        36,
+        37
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        38,
+        39
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ":",
+      "span": [
+        40,
+        41
+      ]
+    },
+    {
+      "kind": "Float",
+      "span": [
+        42,
+        47
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        47,
+        48
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        49,
+        50
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ":",
+      "span": [
+        51,
+        52
+      ]
+    },
+    {
+      "kind": "Char",
+      "span": [
+        53,
+        57
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        57,
+        58
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        59,
+        60
+      ],
+      "value": "f"
+    },
+    {
+      "kind": ":",
+      "span": [
+        61,
+        62
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        63,
+        69
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        69,
+        70
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        71,
+        72
+      ],
+      "value": "g"
+    },
+    {
+      "kind": ":",
+      "span": [
+        73,
+        74
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        75,
+        78
+      ]
+    },
+    {
+      "kind": ":=",
+      "span": [
+        79,
+        81
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        82,
+        83
+      ],
+      "value": "0"
+    },
+    {
+      "kind": ")",
+      "span": [
+        83,
+        84
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        85,
+        86
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        87,
+        88
+      ],
+      "value": "0"
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        0,
+        2
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        3,
+        9
+      ],
+      "value": "corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        9,
+        10
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        10,
+        11
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ":",
+      "span": [
+        12,
+        13
+      ]
+    },
+    {
+      "kind": "I64",
+      "span": [
+        14,
+        17
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        17,
+        18
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        19,
+        20
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ":",
+      "span": [
+        21,
+        22
+      ]
+    },
+    {
+      "kind": "U64",
+      "span": [
+        23,
+        26
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        26,
+        27
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        28,
+        29
+      ],
+      "value": "c"
+    },
+    {
+      "kind": ":",
+      "span": [
+        30,
+        31
+      ]
+    },
+    {
+      "kind": "Unit",
+      "span": [
+        32,
+        36
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        36,
+        37
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        38,
+        39
+      ],
+      "value": "d"
+    },
+    {
+      "kind": ":",
+      "span": [
+        40,
+        41
+      ]
+    },
+    {
+      "kind": "Float",
+      "span": [
+        42,
+        47
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        47,
+        48
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        49,
+        50
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ":",
+      "span": [
+        51,
+        52
+      ]
+    },
+    {
+      "kind": "Char",
+      "span": [
+        53,
+        57
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        57,
+        58
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        59,
+        60
+      ],
+      "value": "f"
+    },
+    {
+      "kind": ":",
+      "span": [
+        61,
+        62
+      ]
+    },
+    {
+      "kind": "String",
+      "span": [
+        63,
+        69
+      ]
+    },
+    {
+      "kind": ",",
+      "span": [
+        69,
+        70
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        71,
+        72
+      ],
+      "value": "g"
+    },
+    {
+      "kind": ":",
+      "span": [
+        73,
+        74
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        75,
+        78
+      ]
+    },
+    {
+      "kind": ":=",
+      "span": [
+        79,
+        81
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        82,
+        83
+      ],
+      "value": "0"
+    },
+    {
+      "kind": ")",
+      "span": [
+        83,
+        84
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        85,
+        86
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        87,
+        88
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        88,
+        88
+      ]
+    }
+  ],
+  "trivia": []
+}

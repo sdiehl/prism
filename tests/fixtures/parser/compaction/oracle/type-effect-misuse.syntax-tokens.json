@@ -1,0 +1,217 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "d8672c9cf0c514ccce4c692b9fe5de545fb3ed8c9db676c5e129d0a76ae187bb",
+    "text": "fn corpus(x : Int ! {Io}) = x\n"
+  },
+  "raw": [
+    {
+      "kind": "fn",
+      "span": [
+        0,
+        2
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        3,
+        9
+      ],
+      "value": "corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        9,
+        10
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        10,
+        11
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ":",
+      "span": [
+        12,
+        13
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        14,
+        17
+      ]
+    },
+    {
+      "kind": "!",
+      "span": [
+        18,
+        19
+      ]
+    },
+    {
+      "kind": "{",
+      "span": [
+        20,
+        21
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        21,
+        23
+      ],
+      "value": "Io"
+    },
+    {
+      "kind": "}",
+      "span": [
+        23,
+        24
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        24,
+        25
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        26,
+        27
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        28,
+        29
+      ],
+      "value": "x"
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        0,
+        2
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        3,
+        9
+      ],
+      "value": "corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        9,
+        10
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        10,
+        11
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ":",
+      "span": [
+        12,
+        13
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        14,
+        17
+      ]
+    },
+    {
+      "kind": "!",
+      "span": [
+        18,
+        19
+      ]
+    },
+    {
+      "kind": "{",
+      "span": [
+        20,
+        21
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        21,
+        23
+      ],
+      "value": "Io"
+    },
+    {
+      "kind": "}",
+      "span": [
+        23,
+        24
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        24,
+        25
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        26,
+        27
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        28,
+        29
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        29,
+        29
+      ]
+    }
+  ],
+  "trivia": []
+}

@@ -188,6 +188,82 @@ fn parse_string(lex: &mut Lexer<'_, Token>) -> Result<String, LexFail> {
     Err(sc.unterminated())
 }
 
+/// The opening delimiter of a raw multiline string, `r"""`. The `#[token]`
+/// attribute below must spell it literally, since the derive macro takes only a
+/// literal; `open_matches_token` pins the two together.
+pub(crate) const RAW_OPEN: &str = "r\"\"\"";
+
+/// The closing delimiter, `"""`: the opener without its `r`.
+pub(crate) const RAW_CLOSE: &str = "\"\"\"";
+
+/// Whether a raw multiline string opens at `at` in `src`. The lexer folds the
+/// raw form into the ordinary string token, since a raw literal denotes an
+/// ordinary string; this is how the two passes that must tell them apart do so:
+/// the interpolation splitter (a raw body has no holes) and the formatter (a raw
+/// body is reprinted as written).
+pub(crate) fn starts_raw(src: &str, at: usize) -> bool {
+    src.get(at..).is_some_and(|s| s.starts_with(RAW_OPEN))
+}
+
+// A raw multiline string runs verbatim to the next `"""`: no escapes, no
+// interpolation, and no way to spell the closing delimiter inside the body.
+fn parse_raw_string(lex: &mut Lexer<'_, Token>) -> Result<String, LexFail> {
+    let rem = lex.remainder();
+    let Some(end) = rem.find(RAW_CLOSE) else {
+        return Err(LexFail::Str {
+            offset: lex.span().start,
+        });
+    };
+    lex.bump(end + RAW_CLOSE.len());
+    Ok(dedent(&rem[..end]))
+}
+
+// The leading run of spaces and tabs, i.e. a line's indentation.
+fn indent_of(line: &str) -> &str {
+    let width = line
+        .find(|c: char| c != ' ' && c != '\t')
+        .unwrap_or(line.len());
+    &line[..width]
+}
+
+// The longest prefix both indents share, so a body mixing spaces and tabs is
+// stripped only as far as the two agree rather than by a count that would cut
+// one line's tab off against another's space.
+fn common_indent<'a>(a: &'a str, b: &str) -> &'a str {
+    let width = a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
+    &a[..width]
+}
+
+// The body of a raw literal, laid out the way it reads in source: the newline
+// each delimiter sits against is not part of the text, and the indentation the
+// whole block shares is the source's, not the string's. What survives is the
+// bytes and the newlines between them.
+fn dedent(body: &str) -> String {
+    let opened = body.strip_prefix(indent_of(body)).unwrap_or(body);
+    let body = opened.strip_prefix('\n').unwrap_or(body);
+    let closed = body.trim_end_matches([' ', '\t']);
+    let body = closed.strip_suffix('\n').unwrap_or(body);
+    // `split` rather than `lines`, so a body that ends in a newline keeps it and
+    // a stray `\r` stays the byte the author wrote.
+    let blank = |line: &&str| line.trim().is_empty();
+    let margin = body
+        .split('\n')
+        .filter(|line| !blank(line))
+        .map(indent_of)
+        .reduce(common_indent)
+        .unwrap_or_default();
+    body.split('\n')
+        .map(|line| {
+            if blank(&line) {
+                ""
+            } else {
+                line.strip_prefix(margin).unwrap_or(line)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn parse_char(lex: &Lexer<'_, Token>) -> Option<char> {
     let s = lex.slice();
     let inner = &s[1..s.len() - 1];
@@ -246,8 +322,11 @@ fn strip_separators(s: &str) -> String {
     s.chars().filter(|&c| c != '_').collect()
 }
 
-// Logos callbacks must take `&mut Lexer` even when read-only.
-#[allow(clippy::needless_pass_by_ref_mut)]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "the callback signature is fixed by the logos derive; this one \
+              only reads the lexer"
+)]
 fn parse_float(lex: &mut Lexer<'_, Token>) -> Result<f64, LexFail> {
     let s = lex.slice();
     if let Some(off) = bad_separator(s) {
@@ -258,8 +337,11 @@ fn parse_float(lex: &mut Lexer<'_, Token>) -> Result<f64, LexFail> {
     strip_separators(s).parse().map_err(|_| LexFail::Invalid)
 }
 
-// Logos callbacks must take `&mut Lexer` even when read-only.
-#[allow(clippy::needless_pass_by_ref_mut)]
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "the callback signature is fixed by the logos derive; this one \
+              only reads the lexer"
+)]
 fn parse_int(lex: &mut Lexer<'_, Token>) -> Result<IntLit, LexFail> {
     let s = lex.slice();
     let (digits, suffix) = match (s.strip_suffix("i64"), s.strip_suffix("u64")) {
@@ -548,6 +630,10 @@ pub enum Token {
     )]
     Float(f64),
 
+    // The raw multiline form is the same token: it denotes an ordinary string,
+    // and only its spelling differs. The literal here is `RAW_OPEN`, which the
+    // derive macro cannot name.
+    #[token("r\"\"\"", parse_raw_string, priority = 4)]
     #[token("\"", parse_string)]
     StringLit(String),
 
@@ -586,149 +672,174 @@ pub enum Token {
     InterpEnd(String),
 }
 
-impl Token {
-    const fn text(&self) -> &'static str {
-        match self {
-            Self::Fn => kw::FN,
-            Self::Fip => kw::FIP,
-            Self::Fbip => kw::FBIP,
-            Self::Replayable => kw::REPLAYABLE,
-            Self::Logic => kw::LOGIC,
-            Self::Requires => kw::REQUIRES,
-            Self::Ensures => kw::ENSURES,
-            Self::Pub => kw::PUB,
-            Self::Import => kw::IMPORT,
-            Self::As => kw::AS,
-            Self::Type => kw::TYPE,
-            Self::Newtype => kw::NEWTYPE,
-            Self::Stable => kw::STABLE,
-            Self::Opaque => kw::OPAQUE,
-            Self::Effect => kw::EFFECT,
-            Self::KwError => kw::ERROR,
-            Self::Throw => kw::THROW,
-            Self::Try => kw::TRY,
-            Self::Catch => kw::CATCH,
-            Self::Transact => kw::TRANSACT,
-            Self::Probe => kw::PROBE,
-            Self::Alias => kw::ALIAS,
-            Self::Class => kw::CLASS,
-            Self::Instance => kw::INSTANCE,
-            Self::Canonical => kw::CANONICAL,
-            Self::Pattern => kw::PATTERN,
-            Self::Deriving => kw::DERIVING,
-            Self::Where => kw::WHERE,
-            Self::Given => kw::GIVEN,
-            Self::Handle => kw::HANDLE,
-            Self::With => kw::WITH,
-            Self::Handler => kw::HANDLER,
-            Self::Mask => kw::MASK,
-            Self::Val => kw::VAL,
-            Self::Return => kw::RETURN,
-            Self::Let => kw::LET,
-            Self::Var => kw::VAR,
-            Self::Borrow => kw::BORROW,
-            Self::In => kw::IN,
-            Self::For => kw::FOR,
-            Self::While => kw::WHILE,
-            Self::Loop => kw::LOOP,
-            Self::Break => kw::BREAK,
-            Self::Continue => kw::CONTINUE,
-            Self::Do => kw::DO,
-            Self::If => kw::IF,
-            Self::Then => kw::THEN,
-            Self::Else => kw::ELSE,
-            Self::Elif => kw::ELIF,
-            Self::Match => kw::MATCH,
-            Self::Of => kw::OF,
-            Self::Each => kw::EACH,
-            Self::Forall => kw::FORALL,
-            Self::True => kw::TRUE,
-            Self::False => kw::FALSE,
-            Self::Using => kw::USING,
-            Self::KwInt => kw::TY_INT,
-            Self::KwBool => kw::TY_BOOL,
-            Self::KwUnit => kw::TY_UNIT,
-            Self::KwFloat => kw::TY_FLOAT,
-            Self::KwChar => kw::TY_CHAR,
-            Self::KwString => kw::TY_STRING,
-            Self::KwI64 => kw::TY_I64,
-            Self::KwU64 => kw::TY_U64,
-            Self::Arrow => kw::ARROW,
-            Self::LArrow => kw::LARROW,
-            Self::FatArrow => kw::FAT_ARROW,
-            Self::EqDot => kw::EQ_DOT,
-            Self::NeDot => kw::NE_DOT,
-            Self::LeDot => kw::LE_DOT,
-            Self::GeDot => kw::GE_DOT,
-            Self::LtDot => kw::LT_DOT,
-            Self::GtDot => kw::GT_DOT,
-            Self::EqEq => kw::EQ_EQ,
-            Self::Ne => kw::NE,
-            Self::Le => kw::LE,
-            Self::Ge => kw::GE,
-            Self::Lt => kw::LT,
-            Self::Gt => kw::GT,
-            Self::Eq => kw::EQ,
-            Self::AmpAmp => kw::AMP_AMP,
-            Self::PipePipe => kw::PIPE_PIPE,
-            Self::PipeRight => kw::PIPE_RIGHT,
-            Self::CompRight => kw::COMP_RIGHT,
-            Self::CompLeft => kw::COMP_LEFT,
-            Self::Bar => kw::BAR,
-            Self::Lambda => kw::LAMBDA,
-            Self::PlusDot => kw::PLUS_DOT,
-            Self::MinusDot => kw::MINUS_DOT,
-            Self::PlusEq => kw::PLUS_EQ,
-            Self::MinusEq => kw::MINUS_EQ,
-            Self::StarEq => kw::STAR_EQ,
-            Self::PercentEq => kw::PERCENT_EQ,
-            Self::Plus => kw::PLUS,
-            Self::Minus => kw::MINUS,
-            Self::StarDot => kw::STAR_DOT,
-            Self::Star => kw::STAR,
-            Self::SlashDot => kw::SLASH_DOT,
-            Self::Slash => kw::SLASH,
-            Self::Percent => kw::PERCENT,
-            Self::Caret => kw::CARET,
-            Self::LParen => kw::LPAREN,
-            Self::RParen => kw::RPAREN,
-            Self::LBrace => kw::LBRACE,
-            Self::RBrace => kw::RBRACE,
-            Self::LBracket => kw::LBRACKET,
-            Self::RBracket => kw::RBRACKET,
-            Self::Comma => kw::COMMA,
-            Self::ColonEq => kw::COLON_EQ,
-            Self::Colon => kw::COLON,
-            Self::Bang => kw::BANG,
-            Self::At => kw::AT,
-            Self::Hash => kw::HASH,
-            Self::DotDot => kw::DOT_DOT,
-            Self::Dot => kw::DOT,
-            Self::QuestionQuestion => kw::QUESTION_QUESTION,
-            Self::QuestionDot => kw::QUESTION_DOT,
-            Self::Question => kw::QUESTION,
-            Self::Tilde => kw::TILDE,
-            // Value-carrying and layout-virtual tokens have no fixed spelling;
-            // they are enumerated (rather than caught by `_`) so a newly added
-            // token cannot ship without an explicit spelling decision here.
-            Self::Float(_)
-            | Self::StringLit(_)
-            | Self::CharLit(_)
-            | Self::Int(_)
-            | Self::Ident(_)
-            | Self::UIdent(_)
-            | Self::QualName(_)
-            | Self::Comment(_)
-            | Self::VOpen
-            | Self::VClose
-            | Self::VSemi
-            | Self::VHead
-            | Self::InterpStart(_)
-            | Self::InterpMid(_)
-            | Self::InterpEnd(_) => "",
+// The fixed tokens: every variant whose source spelling is one fixed string,
+// each paired with the `kw` const that spells it. `Token::text` and the drift
+// guards in this module's tests both expand from this one list, so a spelling
+// cannot be recorded in one place and forgotten in the other. The enum's own
+// `#[token("...")]` attributes cannot join it (the logos macro needs a literal,
+// not a const), which is exactly what `spellings_round_trip` checks.
+macro_rules! fixed_token_table {
+    ($($variant:ident => $spelling:ident,)*) => {
+        impl Token {
+            const fn text(&self) -> &'static str {
+                match self {
+                    $(Self::$variant => kw::$spelling,)*
+                    // Value-carrying and layout-virtual tokens have no fixed
+                    // spelling; they are enumerated (rather than caught by `_`) so
+                    // a newly added token cannot ship without an explicit spelling
+                    // decision, either a row of the table or a name here.
+                    Self::Float(_)
+                    | Self::StringLit(_)
+                    | Self::CharLit(_)
+                    | Self::Int(_)
+                    | Self::Ident(_)
+                    | Self::UIdent(_)
+                    | Self::QualName(_)
+                    | Self::Comment(_)
+                    | Self::VOpen
+                    | Self::VClose
+                    | Self::VSemi
+                    | Self::VHead
+                    | Self::InterpStart(_)
+                    | Self::InterpMid(_)
+                    | Self::InterpEnd(_) => "",
+                }
+            }
         }
-    }
 
+        // Every fixed token paired with its canonical spelling, for the drift
+        // guards. Generated from the same table as `Token::text`, so the guards
+        // see every fixed token by construction rather than by hand.
+        #[cfg(test)]
+        fn fixed_tokens() -> Vec<(Token, &'static str)> {
+            vec![$((Token::$variant, kw::$spelling)),*]
+        }
+    };
+}
+
+fixed_token_table! {
+    Fn => FN,
+    Fip => FIP,
+    Fbip => FBIP,
+    Replayable => REPLAYABLE,
+    Logic => LOGIC,
+    Requires => REQUIRES,
+    Ensures => ENSURES,
+    Pub => PUB,
+    Import => IMPORT,
+    As => AS,
+    Type => TYPE,
+    Newtype => NEWTYPE,
+    Stable => STABLE,
+    Opaque => OPAQUE,
+    Effect => EFFECT,
+    KwError => ERROR,
+    Throw => THROW,
+    Try => TRY,
+    Catch => CATCH,
+    Transact => TRANSACT,
+    Probe => PROBE,
+    Alias => ALIAS,
+    Class => CLASS,
+    Instance => INSTANCE,
+    Canonical => CANONICAL,
+    Pattern => PATTERN,
+    Deriving => DERIVING,
+    Where => WHERE,
+    Given => GIVEN,
+    Handle => HANDLE,
+    With => WITH,
+    Handler => HANDLER,
+    Mask => MASK,
+    Val => VAL,
+    Return => RETURN,
+    Let => LET,
+    Var => VAR,
+    Borrow => BORROW,
+    In => IN,
+    For => FOR,
+    While => WHILE,
+    Loop => LOOP,
+    Break => BREAK,
+    Continue => CONTINUE,
+    Do => DO,
+    If => IF,
+    Then => THEN,
+    Else => ELSE,
+    Elif => ELIF,
+    Match => MATCH,
+    Of => OF,
+    Each => EACH,
+    Forall => FORALL,
+    True => TRUE,
+    False => FALSE,
+    Using => USING,
+    KwInt => TY_INT,
+    KwBool => TY_BOOL,
+    KwUnit => TY_UNIT,
+    KwFloat => TY_FLOAT,
+    KwChar => TY_CHAR,
+    KwString => TY_STRING,
+    KwI64 => TY_I64,
+    KwU64 => TY_U64,
+    Arrow => ARROW,
+    LArrow => LARROW,
+    FatArrow => FAT_ARROW,
+    EqDot => EQ_DOT,
+    NeDot => NE_DOT,
+    LeDot => LE_DOT,
+    GeDot => GE_DOT,
+    LtDot => LT_DOT,
+    GtDot => GT_DOT,
+    EqEq => EQ_EQ,
+    Ne => NE,
+    Le => LE,
+    Ge => GE,
+    Lt => LT,
+    Gt => GT,
+    Eq => EQ,
+    AmpAmp => AMP_AMP,
+    PipePipe => PIPE_PIPE,
+    PipeRight => PIPE_RIGHT,
+    CompRight => COMP_RIGHT,
+    CompLeft => COMP_LEFT,
+    Bar => BAR,
+    Lambda => LAMBDA,
+    PlusDot => PLUS_DOT,
+    MinusDot => MINUS_DOT,
+    PlusEq => PLUS_EQ,
+    MinusEq => MINUS_EQ,
+    StarEq => STAR_EQ,
+    PercentEq => PERCENT_EQ,
+    Plus => PLUS,
+    Minus => MINUS,
+    StarDot => STAR_DOT,
+    Star => STAR,
+    SlashDot => SLASH_DOT,
+    Slash => SLASH,
+    Percent => PERCENT,
+    Caret => CARET,
+    LParen => LPAREN,
+    RParen => RPAREN,
+    LBrace => LBRACE,
+    RBrace => RBRACE,
+    LBracket => LBRACKET,
+    RBracket => RBRACKET,
+    Comma => COMMA,
+    ColonEq => COLON_EQ,
+    Colon => COLON,
+    Bang => BANG,
+    At => AT,
+    Hash => HASH,
+    DotDot => DOT_DOT,
+    Dot => DOT,
+    QuestionQuestion => QUESTION_QUESTION,
+    QuestionDot => QUESTION_DOT,
+    Question => QUESTION,
+    Tilde => TILDE,
+}
+
+impl Token {
     /// The canonical wire name of this token kind, the spelling the versioned
     /// syntax artifacts use. Fixed tokens use their exact source spelling (via
     /// `Self::text`); value-carrying and virtual tokens use the grammar's
@@ -837,15 +948,54 @@ impl Classify for Token {
 
 #[cfg(test)]
 mod tests {
-    use super::Token;
+    use super::{fixed_tokens, Token};
     use Token::{Ident, InterpEnd, InterpStart};
 
     use std::collections::HashSet;
 
     use crate::ast::{BigInt, IntLit, Suffix};
     use crate::error::LexError;
-    use crate::kw;
     use crate::lex::highlight::tok_class;
+
+    // One raw literal is one ordinary string token: the body arrives with the
+    // delimiter newlines and the shared indentation gone, the braces and
+    // backslashes it contains are text rather than a hole or an escape, and the
+    // source spelling reaches nobody but the formatter.
+    #[test]
+    fn a_raw_literal_is_a_string_token() {
+        let raw = |s: &str| {
+            let (toks, _) = crate::lex::lex_raw(s).unwrap_or_else(|e| panic!("`{s}`: {e:?}"));
+            match toks.as_slice() {
+                [(_, Token::StringLit(v), _)] => v.clone(),
+                other => panic!("`{s}` did not lex to a single string: {other:?}"),
+            }
+        };
+        assert_eq!(raw("r\"\"\"\n  a\n  b\n  \"\"\""), "a\nb");
+        // A line indented past the margin keeps the difference; a blank line
+        // contributes no margin of its own and comes back empty.
+        assert_eq!(raw("r\"\"\"\n  a\n\n    b\n  \"\"\""), "a\n\n  b");
+        // The newline before the closing delimiter is the delimiter's, so a
+        // trailing newline in the value takes a blank line to spell.
+        assert_eq!(raw("r\"\"\"\n  a\n\n  \"\"\""), "a\n");
+        assert_eq!(raw("r\"\"\"one\"\"\""), "one");
+        assert_eq!(raw("r\"\"\"{x} and \\n\"\"\""), "{x} and \\n");
+        assert!(matches!(
+            crate::lex::lex_raw("r\"\"\"never closed"),
+            Err(LexError::UnterminatedString { .. })
+        ));
+    }
+
+    // The `#[token]` attribute takes a literal, so the delimiter is spelled
+    // twice; this is the seam that keeps the two spellings one delimiter.
+    #[test]
+    fn the_raw_delimiter_is_spelled_once() {
+        let src = include_str!("token.rs");
+        assert!(
+            src.contains(&format!("#[token({:?}, parse_raw_string", super::RAW_OPEN)),
+            "the raw-string token attribute no longer spells `RAW_OPEN`"
+        );
+        assert_eq!(super::RAW_OPEN, format!("r{}", super::RAW_CLOSE));
+    }
 
     // Digit separators are cosmetic: they strip out to the same value in every
     // lane, and scientific notation always lexes to a Float. The exponent sign is
@@ -916,133 +1066,6 @@ mod tests {
             kinds.iter().any(|t| matches!(t, Ident(s) if s == "f")),
             "the hole expression `f(..)` re-lexes to its own tokens"
         );
-    }
-
-    // Every fixed token paired with its canonical spelling. This is the bridge
-    // the logos `#[token("...")]` attributes cannot express directly (the macro
-    // needs a literal), so the test below makes each attribute verified against
-    // the `kw` const rather than silently free to drift from it.
-    fn fixed_tokens() -> Vec<(Token, &'static str)> {
-        vec![
-            (Token::Fn, kw::FN),
-            (Token::Fip, kw::FIP),
-            (Token::Fbip, kw::FBIP),
-            (Token::Replayable, kw::REPLAYABLE),
-            (Token::Logic, kw::LOGIC),
-            (Token::Requires, kw::REQUIRES),
-            (Token::Ensures, kw::ENSURES),
-            (Token::Pub, kw::PUB),
-            (Token::Import, kw::IMPORT),
-            (Token::As, kw::AS),
-            (Token::Type, kw::TYPE),
-            (Token::Newtype, kw::NEWTYPE),
-            (Token::Stable, kw::STABLE),
-            (Token::Opaque, kw::OPAQUE),
-            (Token::Effect, kw::EFFECT),
-            (Token::KwError, kw::ERROR),
-            (Token::Throw, kw::THROW),
-            (Token::Try, kw::TRY),
-            (Token::Catch, kw::CATCH),
-            (Token::Transact, kw::TRANSACT),
-            (Token::Probe, kw::PROBE),
-            (Token::Alias, kw::ALIAS),
-            (Token::Class, kw::CLASS),
-            (Token::Instance, kw::INSTANCE),
-            (Token::Canonical, kw::CANONICAL),
-            (Token::Pattern, kw::PATTERN),
-            (Token::Deriving, kw::DERIVING),
-            (Token::Where, kw::WHERE),
-            (Token::Given, kw::GIVEN),
-            (Token::Handle, kw::HANDLE),
-            (Token::With, kw::WITH),
-            (Token::Handler, kw::HANDLER),
-            (Token::Mask, kw::MASK),
-            (Token::Val, kw::VAL),
-            (Token::Return, kw::RETURN),
-            (Token::Let, kw::LET),
-            (Token::Var, kw::VAR),
-            (Token::Borrow, kw::BORROW),
-            (Token::In, kw::IN),
-            (Token::For, kw::FOR),
-            (Token::While, kw::WHILE),
-            (Token::Loop, kw::LOOP),
-            (Token::Break, kw::BREAK),
-            (Token::Continue, kw::CONTINUE),
-            (Token::Do, kw::DO),
-            (Token::If, kw::IF),
-            (Token::Then, kw::THEN),
-            (Token::Else, kw::ELSE),
-            (Token::Elif, kw::ELIF),
-            (Token::Match, kw::MATCH),
-            (Token::Of, kw::OF),
-            (Token::Each, kw::EACH),
-            (Token::Forall, kw::FORALL),
-            (Token::True, kw::TRUE),
-            (Token::False, kw::FALSE),
-            (Token::Using, kw::USING),
-            (Token::KwInt, kw::TY_INT),
-            (Token::KwBool, kw::TY_BOOL),
-            (Token::KwUnit, kw::TY_UNIT),
-            (Token::KwFloat, kw::TY_FLOAT),
-            (Token::KwChar, kw::TY_CHAR),
-            (Token::KwString, kw::TY_STRING),
-            (Token::KwI64, kw::TY_I64),
-            (Token::KwU64, kw::TY_U64),
-            (Token::Arrow, kw::ARROW),
-            (Token::LArrow, kw::LARROW),
-            (Token::FatArrow, kw::FAT_ARROW),
-            (Token::EqDot, kw::EQ_DOT),
-            (Token::NeDot, kw::NE_DOT),
-            (Token::LeDot, kw::LE_DOT),
-            (Token::GeDot, kw::GE_DOT),
-            (Token::LtDot, kw::LT_DOT),
-            (Token::GtDot, kw::GT_DOT),
-            (Token::EqEq, kw::EQ_EQ),
-            (Token::Ne, kw::NE),
-            (Token::Le, kw::LE),
-            (Token::Ge, kw::GE),
-            (Token::Lt, kw::LT),
-            (Token::Gt, kw::GT),
-            (Token::Eq, kw::EQ),
-            (Token::AmpAmp, kw::AMP_AMP),
-            (Token::PipePipe, kw::PIPE_PIPE),
-            (Token::PipeRight, kw::PIPE_RIGHT),
-            (Token::CompRight, kw::COMP_RIGHT),
-            (Token::CompLeft, kw::COMP_LEFT),
-            (Token::Bar, kw::BAR),
-            (Token::Lambda, kw::LAMBDA),
-            (Token::PlusDot, kw::PLUS_DOT),
-            (Token::MinusDot, kw::MINUS_DOT),
-            (Token::PlusEq, kw::PLUS_EQ),
-            (Token::MinusEq, kw::MINUS_EQ),
-            (Token::StarEq, kw::STAR_EQ),
-            (Token::PercentEq, kw::PERCENT_EQ),
-            (Token::Plus, kw::PLUS),
-            (Token::Minus, kw::MINUS),
-            (Token::StarDot, kw::STAR_DOT),
-            (Token::Star, kw::STAR),
-            (Token::SlashDot, kw::SLASH_DOT),
-            (Token::Slash, kw::SLASH),
-            (Token::Percent, kw::PERCENT),
-            (Token::LParen, kw::LPAREN),
-            (Token::RParen, kw::RPAREN),
-            (Token::LBrace, kw::LBRACE),
-            (Token::RBrace, kw::RBRACE),
-            (Token::LBracket, kw::LBRACKET),
-            (Token::RBracket, kw::RBRACKET),
-            (Token::Comma, kw::COMMA),
-            (Token::ColonEq, kw::COLON_EQ),
-            (Token::Colon, kw::COLON),
-            (Token::Bang, kw::BANG),
-            (Token::At, kw::AT),
-            (Token::Hash, kw::HASH),
-            (Token::DotDot, kw::DOT_DOT),
-            (Token::Dot, kw::DOT),
-            (Token::QuestionQuestion, kw::QUESTION_QUESTION),
-            (Token::QuestionDot, kw::QUESTION_DOT),
-            (Token::Question, kw::QUESTION),
-            (Token::Tilde, kw::TILDE),
-        ]
     }
 
     // The canonical spelling of every fixed token must (a) lex back to exactly

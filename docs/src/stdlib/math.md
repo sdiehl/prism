@@ -10,7 +10,7 @@ Purely additive: the transcendental functions (`sin`, `cos`, `exp`, `ln`, `sqrt`
 
 ### `sqrt2`
 
-```prism,sig,h-d5cd9bc7e836b1dc407061b735d9d92892a09f9160f38d61731e8a53ac833aa0
+```prism,sig,h-5a0693c848e1ed5bafdfff23c1465dc9d4e84e46189bfab61f4744854ccc6bd2
 sqrt2 : Float
 ```
 
@@ -18,7 +18,7 @@ The square root of 2.
 
 ### `sqrt1_2`
 
-```prism,sig,h-474dff8eca5c4a41ec80d891f31b16d46f528618dfa180771f75b92d392a5f2e
+```prism,sig,h-fdb715d1d6a614e7e9c310b2243bf1cfdc68d45250d7c983552ca623f6a8c210
 sqrt1_2 : Float
 ```
 
@@ -26,7 +26,7 @@ The reciprocal of the square root of 2 (`1 / sqrt2`).
 
 ### `ln2`
 
-```prism,sig,h-12fd5c4a2cf1f786bc68bef84c5bb773d908694fe01fe4bd7fd9ec325a0bfcfa
+```prism,sig,h-d0b596cde4d5e9741413c11be22202283e60c6fdeea14123a76dbb3661e72463
 ln2 : Float
 ```
 
@@ -34,7 +34,7 @@ The natural logarithm of 2.
 
 ### `ln10`
 
-```prism,sig,h-65df9a3b98cb16a1fd5fd5c22ae383dde60030626fc6f4313c15868db9e89e72
+```prism,sig,h-a46cbf3c197f1fa740d56a0f39c28b51da9ecf87a8693261c31618e6afa475c6
 ln10 : Float
 ```
 
@@ -42,7 +42,7 @@ The natural logarithm of 10.
 
 ### `log2e`
 
-```prism,sig,h-6648119aa3b8bbd5f3b4995266e3756088e0ff57de04a70fce3fe62b9feaac58
+```prism,sig,h-b61c8d1007ab7b11a5ab6a71943440dcf7d89abe79058198466adad79999b3ba
 log2e : Float
 ```
 
@@ -50,7 +50,7 @@ The base-2 logarithm of `e`.
 
 ### `log10e`
 
-```prism,sig,h-a3ab7dd9c4094c24e69d6cdfd18acc21fdcc2b894dbcd0d9cca82341ac6b9f7c
+```prism,sig,h-455b9099cf1643df665a3bc352b0292cea3dcab09b4f6b62a22896727f460bcf
 log10e : Float
 ```
 
@@ -58,15 +58,23 @@ The base-10 logarithm of `e`.
 
 ### `phi`
 
-```prism,sig,h-4bbc00d59af8aa91ee9a756a8c8456591901bac8fe9886bd8fd0857af4f5d62a
+```prism,sig,h-95df0c8e9a5afeaee80905260de641bb95cdf536b1afe899e5aa4f7790aacdc5
 phi : Float
 ```
 
 The golden ratio, `(1 + sqrt(5)) / 2`.
 
+```prism,mod=Math
+[sqrt2 > 1.4, phi > 1.6, inv_pi < 0.32]
+```
+
+```output
+[true, true, true]
+```
+
 ### `half_pi`
 
-```prism,sig,h-da51ca5dd2aff83ca7a6332b43158d78c2a90bcf25b2735b7dca4ea95f3c3319
+```prism,sig,h-704c895211ef46f465c5a78dcd8d39508b9c0be567eb6f9b6e92c5bf09e355b7
 half_pi : Float
 ```
 
@@ -74,7 +82,7 @@ Half of pi (`pi / 2`).
 
 ### `quarter_pi`
 
-```prism,sig,h-6493c29355f4461b1ca4ff1d01453cc34e8cb548fe90efdd798772741561aa45
+```prism,sig,h-814c595ac5e04793e141aac35d7d225ba709d359f800215f63830011fb02ddc1
 quarter_pi : Float
 ```
 
@@ -82,7 +90,7 @@ A quarter of pi (`pi / 4`).
 
 ### `inv_pi`
 
-```prism,sig,h-6275d43edb4cb477a07318a94642c6cc3c51053a8aa85809ea8e0de599b393f9
+```prism,sig,h-7ad70b8437d07835e818d7a37bb751c8a07a0fc361d9ad615dc31d4d1d4735f2
 inv_pi : Float
 ```
 

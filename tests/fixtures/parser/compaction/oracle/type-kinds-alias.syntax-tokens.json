@@ -1,0 +1,434 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "f8e4eb55f2927de1126100349433585bb629ebe283db058982c90195de0dd991",
+    "text": "type Corpus(a, e : Row) = Corpus(a)\nalias Pair(a, b) = (a, b)\n"
+  },
+  "raw": [
+    {
+      "kind": "type",
+      "span": [
+        0,
+        4
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        5,
+        11
+      ],
+      "value": "Corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        11,
+        12
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        12,
+        13
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        13,
+        14
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        15,
+        16
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ":",
+      "span": [
+        17,
+        18
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        19,
+        22
+      ],
+      "value": "Row"
+    },
+    {
+      "kind": ")",
+      "span": [
+        22,
+        23
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        24,
+        25
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        26,
+        32
+      ],
+      "value": "Corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        32,
+        33
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        33,
+        34
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        34,
+        35
+      ]
+    },
+    {
+      "kind": "alias",
+      "span": [
+        36,
+        41
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        42,
+        46
+      ],
+      "value": "Pair"
+    },
+    {
+      "kind": "(",
+      "span": [
+        46,
+        47
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        47,
+        48
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        48,
+        49
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        50,
+        51
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ")",
+      "span": [
+        51,
+        52
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        53,
+        54
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        55,
+        56
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        56,
+        57
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        57,
+        58
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        59,
+        60
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ")",
+      "span": [
+        60,
+        61
+      ]
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "type",
+      "span": [
+        0,
+        4
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        5,
+        11
+      ],
+      "value": "Corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        11,
+        12
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        12,
+        13
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        13,
+        14
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        15,
+        16
+      ],
+      "value": "e"
+    },
+    {
+      "kind": ":",
+      "span": [
+        17,
+        18
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        19,
+        22
+      ],
+      "value": "Row"
+    },
+    {
+      "kind": ")",
+      "span": [
+        22,
+        23
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        24,
+        25
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        26,
+        32
+      ],
+      "value": "Corpus"
+    },
+    {
+      "kind": "(",
+      "span": [
+        32,
+        33
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        33,
+        34
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ")",
+      "span": [
+        34,
+        35
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        35,
+        35
+      ]
+    },
+    {
+      "kind": "alias",
+      "span": [
+        36,
+        41
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        42,
+        46
+      ],
+      "value": "Pair"
+    },
+    {
+      "kind": "(",
+      "span": [
+        46,
+        47
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        47,
+        48
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        48,
+        49
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        50,
+        51
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ")",
+      "span": [
+        51,
+        52
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        53,
+        54
+      ]
+    },
+    {
+      "kind": "(",
+      "span": [
+        55,
+        56
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        56,
+        57
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
+      "span": [
+        57,
+        58
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        59,
+        60
+      ],
+      "value": "b"
+    },
+    {
+      "kind": ")",
+      "span": [
+        60,
+        61
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        61,
+        61
+      ]
+    }
+  ],
+  "trivia": []
+}

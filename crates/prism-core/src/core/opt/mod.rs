@@ -25,6 +25,10 @@ mod lint;
 
 const PASS_FINGERPRINT_SCHEMA: &[u8] = b"prism-core-pass-fingerprint-v1";
 
+// How far a misspelling may sit from a pass name before the suggestion is more
+// confusing than no suggestion.
+const SUGGESTION_MAX_DISTANCE: usize = 3;
+
 pub use lint::lint;
 
 /// Optimization level: the knob that selects which passes run.
@@ -88,6 +92,17 @@ pub enum CorePass {
 }
 
 impl CorePass {
+    /// Every pass, in declaration order. The one table the name lookup and the
+    /// misspelling suggestion read, so a new variant reaches both.
+    pub const ALL: [Self; 6] = [
+        Self::Fuse,
+        Self::EraseNewtypes,
+        Self::Specialize,
+        Self::Simplify,
+        Self::Inline,
+        Self::Cse,
+    ];
+
     /// The pass's spelling in dumps, stats, and the `--passes` spec.
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -105,16 +120,7 @@ impl CorePass {
     /// unknown name.
     #[must_use]
     pub fn from_name(s: &str) -> Option<Self> {
-        [
-            Self::Fuse,
-            Self::EraseNewtypes,
-            Self::Specialize,
-            Self::Simplify,
-            Self::Inline,
-            Self::Cse,
-        ]
-        .into_iter()
-        .find(|p| p.name() == s)
+        Self::ALL.into_iter().find(|p| p.name() == s)
     }
 
     /// Which stage of the pipeline this pass runs in.
@@ -233,16 +239,12 @@ fn split_section(segment: &str) -> (PassStage, &str) {
 
 // An "unknown pass" message, suggesting the closest known name when one is near.
 fn unknown_pass(name: &str) -> String {
-    let suggestion = [
-        CorePass::EraseNewtypes,
-        CorePass::Specialize,
-        CorePass::Simplify,
-    ]
-    .into_iter()
-    .map(|p| (edit_distance(name, p.name()), p.name()))
-    .filter(|(d, _)| *d <= 3)
-    .min()
-    .map(|(_, n)| n);
+    let suggestion = CorePass::ALL
+        .into_iter()
+        .map(|p| (edit_distance(name, p.name()), p.name()))
+        .filter(|(d, _)| *d <= SUGGESTION_MAX_DISTANCE)
+        .min()
+        .map(|(_, n)| n);
     suggestion.map_or_else(
         || format!("unknown pass `{name}`"),
         |n| format!("unknown pass `{name}` (did you mean `{n}`?)"),
@@ -289,6 +291,7 @@ impl PassStats {
         &self.entries
     }
 
+    #[must_use]
     pub fn report(&self) -> String {
         let mut s = String::from("core-opt ticks:\n");
         for (pass, ticks) in &self.entries {
@@ -327,9 +330,12 @@ pub fn pipeline(level: OptLevel) -> Vec<CorePass> {
         // O2 = O1 with stream fusion up front and a second inline/simplify round
         // before CSE. Fusion runs first (pre-lowering) so recognized pull-stream
         // pipelines collapse to loops before anything else shapes the Core; it is
-        // default-on here only because its full battery (the ON/OFF differential
-        // oracle, parity, Core Lint on fused output) is green, and `--no-fuse`
-        // turns it back off. The second inline round: the first inlining can turn
+        // default-on here because its invisibility oracles are gated (a fuse-on
+        // native build diffed against the interpreter in
+        // `tests/native/fuse_parity.rs`, and the `-O2` versus `--no-fuse` leg of
+        // the whole-corpus optimizer-equivalence sweep, which runs under Core
+        // Lint), and `--no-fuse` takes it back out. The second inline round: the
+        // first inlining can turn
         // a two-hop call chain into a single site that only the second round can
         // paste, so a wrapper that inlined into another wrapper is flattened here.
         // Both passes are fixed-point/idempotent, so the extra round is a no-op
@@ -414,20 +420,26 @@ pub fn next_dump_run() -> usize {
     DUMP_RUN.fetch_add(1, Ordering::Relaxed)
 }
 
+// Sink values that ask for a dump without naming a place, and the base directory
+// they resolve to. An off spelling never reaches here: `DynFlags` resolves it to
+// no sink at all.
+const DUMP_HERE_SPELLINGS: [&str; 3] = ["1", "on", "true"];
+const DUMP_DEFAULT_DIR: &str = "target/core-dumps";
+
 // Render `core` to the `PRISM_DUMP_CORE` sink, labeled with the stage it follows.
 // `stdout`/`stderr` stream a banner plus
-// the block; any other value (or a bare flag) is a base directory under which a
-// `run-N/` subdir holds one ordinal-prefixed file per stage, so directory order
-// matches run order. Dump-only: the rendered form is for reading and diffing, not
-// reloading.
+// the block; a bare on spelling, or any other value, is a base directory under
+// which a `run-N/` subdir holds one ordinal-prefixed file per stage, so directory
+// order matches run order. Dump-only: the rendered form is for reading and
+// diffing, not reloading.
 pub fn dump_core(sink: &std::ffi::OsStr, run: usize, ord: usize, label: &str, core: &Core) {
     let text = pp_core_pretty(core);
     match sink.to_string_lossy().as_ref() {
         "stdout" => print!("=== core[run {run}]: {label} ===\n{text}\n"),
         "stderr" => eprint!("=== core[run {run}]: {label} ===\n{text}\n"),
         other => {
-            let base = if matches!(other, "" | "1" | "on" | "true") {
-                "target/core-dumps"
+            let base = if DUMP_HERE_SPELLINGS.contains(&other) {
+                DUMP_DEFAULT_DIR
             } else {
                 other
             };

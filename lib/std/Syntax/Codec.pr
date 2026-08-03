@@ -1,8 +1,9 @@
--- | Codecs for the versioned syntax artifacts. Decoding turns the compiler's
--- exports into the typed `Syntax` vocabularies, rejecting wrong schema tags,
--- malformed shapes, and spans that invert or reach past the embedded source
--- with one structured error; encoding is the exact inverse, re-emitting
--- identical bytes.
+-- | Codecs for the versioned syntax artifacts.
+--
+-- Decoding turns the compiler's exports into the typed `Syntax` vocabularies,
+-- rejecting wrong schema tags, malformed shapes, and spans that invert or reach
+-- past the embedded source with one structured error; encoding is the exact
+-- inverse, re-emitting identical bytes.
 --
 -- The printer here matches the compiler's export format precisely: two-space
 -- indent, one element per line, a space after each key's colon, `[]` and `{}`
@@ -287,6 +288,256 @@ pub type SurfaceDoc = SurfaceDoc {
 }
 
 -- -------------------------------------------------------------------------
+-- Wire tags
+--
+-- The `kind` word each node kind carries on the wire, one accessor per tag:
+-- the encoder emits it and the decoder matches it through the same name, so
+-- the two sides cannot drift. Tags are per-family, and the same word means
+-- different things in different families (`int` is a type, an expression and a
+-- pattern), so each name carries its family.
+-- -------------------------------------------------------------------------
+
+fn tag_kind_type() : String = "type"
+
+fn tag_kind_row() : String = "row"
+
+fn tag_kind_nat() : String = "nat"
+
+fn tag_ty_int() : String = "int"
+
+fn tag_ty_i64() : String = "i64"
+
+fn tag_ty_u64() : String = "u64"
+
+fn tag_ty_bool() : String = "bool"
+
+fn tag_ty_unit() : String = "unit"
+
+fn tag_ty_float() : String = "float"
+
+fn tag_ty_char() : String = "char"
+
+fn tag_ty_str() : String = "str"
+
+fn tag_ty_var() : String = "var"
+
+fn tag_ty_app() : String = "app"
+
+fn tag_ty_state() : String = "state"
+
+fn tag_ty_forall() : String = "forall"
+
+fn tag_ty_fun() : String = "fun"
+
+fn tag_ty_con() : String = "con"
+
+fn tag_ty_tuple() : String = "tuple"
+
+fn tag_ty_unboxed_tuple() : String = "unboxed-tuple"
+
+fn tag_ty_unboxed_record() : String = "unboxed-record"
+
+fn tag_ty_row() : String = "row"
+
+fn tag_ty_nat() : String = "nat"
+
+fn tag_ty_usage() : String = "usage"
+
+fn tag_suffix_i64() : String = "i64"
+
+fn tag_suffix_u64() : String = "u64"
+
+fn tag_expr_int() : String = "int"
+
+fn tag_expr_float() : String = "float"
+
+fn tag_expr_char() : String = "char"
+
+fn tag_expr_bool() : String = "bool"
+
+fn tag_expr_unit() : String = "unit"
+
+fn tag_expr_str() : String = "str"
+
+fn tag_expr_var() : String = "var"
+
+fn tag_expr_hole() : String = "hole"
+
+fn tag_expr_bin() : String = "bin"
+
+fn tag_expr_neg() : String = "neg"
+
+fn tag_expr_if() : String = "if"
+
+fn tag_expr_let() : String = "let"
+
+fn tag_expr_lam() : String = "lam"
+
+fn tag_expr_call() : String = "call"
+
+fn tag_expr_pipe() : String = "pipe"
+
+fn tag_expr_match() : String = "match"
+
+fn tag_expr_list() : String = "list"
+
+fn tag_expr_tuple() : String = "tuple"
+
+fn tag_expr_field() : String = "field"
+
+fn tag_expr_unboxed_tuple() : String = "unboxed-tuple"
+
+fn tag_expr_unboxed_record() : String = "unboxed-record"
+
+fn tag_expr_unboxed_field() : String = "unboxed-field"
+
+fn tag_expr_record() : String = "record"
+
+fn tag_expr_record_update() : String = "record-update"
+
+fn tag_expr_path_update() : String = "path-update"
+
+fn tag_expr_handle() : String = "handle"
+
+fn tag_expr_mask() : String = "mask"
+
+fn tag_expr_inst() : String = "inst"
+
+fn tag_expr_index() : String = "index"
+
+fn tag_expr_index_set() : String = "index-set"
+
+fn tag_expr_ann() : String = "ann"
+
+fn tag_expr_marker() : String = "marker"
+
+fn tag_expr_named_handle() : String = "named-handle"
+
+fn tag_expr_var_decl() : String = "var-decl"
+
+fn tag_expr_assign() : String = "assign"
+
+fn tag_expr_index_assign() : String = "index-assign"
+
+fn tag_expr_throw() : String = "throw"
+
+fn tag_expr_try_catch() : String = "try-catch"
+
+fn tag_expr_for() : String = "for"
+
+fn tag_expr_while() : String = "while"
+
+fn tag_expr_loop() : String = "loop"
+
+fn tag_expr_break() : String = "break"
+
+fn tag_expr_continue() : String = "continue"
+
+fn tag_expr_return() : String = "return"
+
+fn tag_expr_comprehension() : String = "comprehension"
+
+fn tag_expr_default() : String = "default"
+
+fn tag_expr_transact() : String = "transact"
+
+fn tag_expr_probe() : String = "probe"
+
+fn tag_expr_reflect() : String = "reflect"
+
+fn tag_expr_opt_chain() : String = "opt-chain"
+
+fn tag_expr_range() : String = "range"
+
+fn tag_expr_compose() : String = "compose"
+
+fn tag_expr_read_path() : String = "read-path"
+
+fn tag_harm_return() : String = "return"
+
+fn tag_harm_op() : String = "op"
+
+fn tag_harm_once() : String = "once"
+
+fn tag_harm_val() : String = "val"
+
+fn tag_harm_never() : String = "never"
+
+fn tag_qual_guard() : String = "guard"
+
+fn tag_qual_bind() : String = "bind"
+
+fn tag_pstep_field() : String = "field"
+
+fn tag_pstep_each() : String = "each"
+
+fn tag_pstep_case() : String = "case"
+
+fn tag_pstep_index() : String = "index"
+
+fn tag_pstep_where() : String = "where"
+
+fn tag_pop_set() : String = "set"
+
+fn tag_pop_modify() : String = "modify"
+
+fn tag_pat_wild() : String = "wild"
+
+fn tag_pat_var() : String = "var"
+
+fn tag_pat_int() : String = "int"
+
+fn tag_pat_float() : String = "float"
+
+fn tag_pat_char() : String = "char"
+
+fn tag_pat_bool() : String = "bool"
+
+fn tag_pat_ctor() : String = "ctor"
+
+fn tag_pat_tuple() : String = "tuple"
+
+fn tag_pat_record() : String = "record"
+
+fn tag_pat_or() : String = "or"
+
+fn tag_item_import() : String = "import"
+
+fn tag_item_data() : String = "data"
+
+fn tag_item_newtype() : String = "newtype"
+
+fn tag_item_effect() : String = "effect"
+
+fn tag_item_error() : String = "error"
+
+fn tag_item_effect_alias() : String = "effect-alias"
+
+fn tag_item_type_synonym() : String = "type-synonym"
+
+fn tag_item_class() : String = "class"
+
+fn tag_item_instance() : String = "instance"
+
+fn tag_item_canonical() : String = "canonical"
+
+fn tag_item_pattern() : String = "pattern"
+
+fn tag_item_stable() : String = "stable"
+
+fn tag_item_fn() : String = "fn"
+
+fn tag_item_const() : String = "const"
+
+fn tag_item_logic_fn() : String = "logic-fn"
+
+fn tag_migration_auto() : String = "auto"
+
+fn tag_phase_lex() : String = "lex"
+
+fn tag_phase_parse() : String = "parse"
+
+-- -------------------------------------------------------------------------
 -- Encode helpers
 -- -------------------------------------------------------------------------
 
@@ -378,9 +629,9 @@ fn sp_obj(fs : List((String, Json)), s : Span, synth : Bool) : Json =
 
 fn enc_kind(k : Kind) : Json =
   match k of
-    KType => JStr("type")
-    KRow => JStr("row")
-    KNat => JStr("nat")
+    KType => JStr(tag_kind_type())
+    KRow => JStr(tag_kind_row())
+    KNat => JStr(tag_kind_nat())
     KFun(a, b) => node_obj([("from", enc_kind(a)), ("to", enc_kind(b))])
 
 fn enc_efflabel(l : EffLabel) : Json =
@@ -400,44 +651,52 @@ fn enc_cfield(c : CField) : Json =
 
 fn enc_ty(t : Ty) : Json =
   match t of
-    TyInt => node_obj([kf("int")])
-    TyI64 => node_obj([kf("i64")])
-    TyU64 => node_obj([kf("u64")])
-    TyBool => node_obj([kf("bool")])
-    TyUnit => node_obj([kf("unit")])
-    TyFloat => node_obj([kf("float")])
-    TyChar => node_obj([kf("char")])
-    TyStr => node_obj([kf("str")])
-    TyVar(n) => node_obj([kf("var"), ("name", JStr(n))])
+    TyInt => node_obj([kf(tag_ty_int())])
+    TyI64 => node_obj([kf(tag_ty_i64())])
+    TyU64 => node_obj([kf(tag_ty_u64())])
+    TyBool => node_obj([kf(tag_ty_bool())])
+    TyUnit => node_obj([kf(tag_ty_unit())])
+    TyFloat => node_obj([kf(tag_ty_float())])
+    TyChar => node_obj([kf(tag_ty_char())])
+    TyStr => node_obj([kf(tag_ty_str())])
+    TyVar(n) => node_obj([kf(tag_ty_var()), ("name", JStr(n))])
     TyApp(h, args) =>
       node_obj(flatten([
-          [kf("app"), ("head", JStr(h))],
+          [kf(tag_ty_app()), ("head", JStr(h))],
           omit_list("args", map(enc_ty, args)),
         ]))
-    TyState(n) => node_obj([kf("state"), ("cell", JInt(n))])
+    TyState(n) => node_obj([kf(tag_ty_state()), ("cell", JInt(n))])
     TyForall(vars, b) =>
-      node_obj([kf("forall"), arrf("vars", map(JStr, vars)), ("ty", enc_ty(b))])
+      node_obj([
+          kf(tag_ty_forall()),
+          arrf("vars", map(JStr, vars)),
+          ("ty", enc_ty(b)),
+        ])
     TyFun(ps, row, ret) =>
       node_obj(flatten([
-          [kf("fun")],
+          [kf(tag_ty_fun())],
           omit_list("params", map(enc_ty, ps)),
           [("effects", enc_row(row)), ("ret", enc_ty(ret))],
         ]))
     TyCon(n, args) =>
       node_obj(flatten([
-          [kf("con"), ("name", JStr(n))],
+          [kf(tag_ty_con()), ("name", JStr(n))],
           omit_list("args", map(enc_ty, args)),
         ]))
-    TyTuple(items) => node_obj([kf("tuple"), arrf("items", map(enc_ty, items))])
+    TyTuple(items) =>
+      node_obj([kf(tag_ty_tuple()), arrf("items", map(enc_ty, items))])
     TyUnboxedTuple(items) =>
-      node_obj([kf("unboxed-tuple"), arrf("items", map(enc_ty, items))])
+      node_obj([kf(tag_ty_unboxed_tuple()), arrf("items", map(enc_ty, items))])
     TyUnboxedRecord(fs) =>
-      node_obj([kf("unboxed-record"), arrf("fields", map(enc_cfield, fs))])
-    TyRowLit(row) => node_obj([kf("row"), ("row", enc_row(row))])
-    TyNat(n) => node_obj([kf("nat"), ("value", JInt(n))])
+      node_obj([
+          kf(tag_ty_unboxed_record()),
+          arrf("fields", map(enc_cfield, fs)),
+        ])
+    TyRowLit(row) => node_obj([kf(tag_ty_row()), ("row", enc_row(row))])
+    TyNat(n) => node_obj([kf(tag_ty_nat()), ("value", JInt(n))])
     TyUsage(b, facts) =>
       node_obj([
-          kf("usage"),
+          kf(tag_ty_usage()),
           ("ty", enc_ty(b)),
           arrf("facts", map(JStr, facts)),
         ])
@@ -467,146 +726,170 @@ fn enc_constraint(c : Constraint) : Json =
 fn suffix_frag(s : Suffix) : List((String, Json)) =
   match s of
     SufNone => []
-    SufI64 => [("suffix", JStr("i64"))]
-    SufU64 => [("suffix", JStr("u64"))]
+    SufI64 => [("suffix", JStr(tag_suffix_i64()))]
+    SufU64 => [("suffix", JStr(tag_suffix_u64()))]
 
 fn enc_expr(e : Sp(Expr)) : Json =
   sp_obj(enc_expr_node(e.node), e.span, e.synth)
 
 fn enc_expr_node(e : Expr) : List((String, Json)) =
   match e of
-    EInt(v, suf) => append([kf("int"), ("value", JStr(v))], suffix_frag(suf))
-    EFloat(v) => [kf("float"), ("value", JStr(v))]
-    EChar(v) => [kf("char"), ("value", JStr(v))]
-    EBool(b) => [kf("bool"), ("value", JBool(b))]
-    EUnit => [kf("unit")]
-    EStr(v) => [kf("str"), ("value", JStr(v))]
-    EVar(n) => [kf("var"), ("name", JStr(n))]
-    EHole(n) => [kf("hole"), ("name", JStr(n))]
+    EInt(v, suf) =>
+      append([kf(tag_expr_int()), ("value", JStr(v))], suffix_frag(suf))
+    EFloat(v) => [kf(tag_expr_float()), ("value", JStr(v))]
+    EChar(v) => [kf(tag_expr_char()), ("value", JStr(v))]
+    EBool(b) => [kf(tag_expr_bool()), ("value", JBool(b))]
+    EUnit => [kf(tag_expr_unit())]
+    EStr(v) => [kf(tag_expr_str()), ("value", JStr(v))]
+    EVar(n) => [kf(tag_expr_var()), ("name", JStr(n))]
+    EHole(n) => [kf(tag_expr_hole()), ("name", JStr(n))]
     EBin(op, l, r) =>
-      [kf("bin"), ("op", JStr(op)), ("lhs", enc_expr(l)), ("rhs", enc_expr(r))]
-    ENeg(a) => [kf("neg"), ("expr", enc_expr(a))]
+      [
+          kf(tag_expr_bin()),
+          ("op", JStr(op)),
+          ("lhs", enc_expr(l)),
+          ("rhs", enc_expr(r)),
+        ]
+    ENeg(a) => [kf(tag_expr_neg()), ("expr", enc_expr(a))]
     EIf(c, t, f) =>
       [
-          kf("if"),
+          kf(tag_expr_if()),
           ("cond", enc_expr(c)),
           ("then", enc_expr(t)),
           ("else", enc_expr(f)),
         ]
     ELet(n, v, b) =>
       [
-          kf("let"),
+          kf(tag_expr_let()),
           ("name", JStr(n)),
           ("value", enc_expr(v)),
           ("body", enc_expr(b)),
         ]
     ELam(ps, b) =>
       flatten([
-          [kf("lam")],
+          [kf(tag_expr_lam())],
           omit_list("params", map(enc_param, ps)),
           [("body", enc_expr(b))],
         ])
     ECall(h, args) =>
       flatten([
-          [kf("call"), ("head", enc_expr(h))],
+          [kf(tag_expr_call()), ("head", enc_expr(h))],
           omit_list("args", map(enc_expr, args)),
         ])
-    EPipe(l, r) => [kf("pipe"), ("lhs", enc_expr(l)), ("rhs", enc_expr(r))]
+    EPipe(l, r) =>
+      [kf(tag_expr_pipe()), ("lhs", enc_expr(l)), ("rhs", enc_expr(r))]
     EMatch(s, arms) =>
       [
-          kf("match"),
+          kf(tag_expr_match()),
           ("scrutinee", enc_expr(s)),
           arrf("arms", map(enc_arm, arms)),
         ]
-    EList(items) => [kf("list"), arrf("items", map(enc_expr, items))]
-    ETuple(items) => [kf("tuple"), arrf("items", map(enc_expr, items))]
-    EField(b, n) => [kf("field"), ("expr", enc_expr(b)), ("name", JStr(n))]
+    EList(items) => [kf(tag_expr_list()), arrf("items", map(enc_expr, items))]
+    ETuple(items) => [kf(tag_expr_tuple()), arrf("items", map(enc_expr, items))]
+    EField(b, n) =>
+      [kf(tag_expr_field()), ("expr", enc_expr(b)), ("name", JStr(n))]
     EUnboxedTuple(items) =>
-      [kf("unboxed-tuple"), arrf("items", map(enc_expr, items))]
+      [kf(tag_expr_unboxed_tuple()), arrf("items", map(enc_expr, items))]
     EUnboxedRecord(fs) =>
-      [kf("unboxed-record"), arrf("fields", map(enc_named, fs))]
+      [kf(tag_expr_unboxed_record()), arrf("fields", map(enc_named, fs))]
     EUnboxedField(b, n) =>
-      [kf("unboxed-field"), ("expr", enc_expr(b)), ("name", JStr(n))]
+      [kf(tag_expr_unboxed_field()), ("expr", enc_expr(b)), ("name", JStr(n))]
     ERecord(n, fs) =>
-      [kf("record"), ("name", JStr(n)), arrf("fields", map(enc_named, fs))]
+      [
+          kf(tag_expr_record()),
+          ("name", JStr(n)),
+          arrf("fields", map(enc_named, fs)),
+        ]
     ERecordUpdate(b, n, fs) =>
       [
-          kf("record-update"),
+          kf(tag_expr_record_update()),
           ("base", enc_expr(b)),
           ("name", JStr(n)),
           arrf("fields", map(enc_named, fs)),
         ]
     EPathUpdate(b, us) =>
       [
-          kf("path-update"),
+          kf(tag_expr_path_update()),
           ("base", enc_expr(b)),
           arrf("updates", map(enc_pupdate, us)),
         ]
     EHandle(b, arms, partial) =>
       flatten([
-          [kf("handle"), ("body", enc_expr(b))],
+          [kf(tag_expr_handle()), ("body", enc_expr(b))],
           omit_list("arms", map(enc_harm, arms)),
           flag_field("partial", partial),
         ])
-    EMask(eff, b) => [kf("mask"), ("effect", JStr(eff)), ("body", enc_expr(b))]
+    EMask(eff, b) =>
+      [kf(tag_expr_mask()), ("effect", JStr(eff)), ("body", enc_expr(b))]
     EInst(b, args) =>
-      [kf("inst"), ("expr", enc_expr(b)), arrf("args", map(JStr, args))]
-    EIndex(b, i) => [kf("index"), ("expr", enc_expr(b)), ("index", enc_expr(i))]
+      [
+          kf(tag_expr_inst()),
+          ("expr", enc_expr(b)),
+          arrf("args", map(JStr, args)),
+        ]
+    EIndex(b, i) =>
+      [kf(tag_expr_index()), ("expr", enc_expr(b)), ("index", enc_expr(i))]
     EIndexSet(b, i, v) =>
       [
-          kf("index-set"),
+          kf(tag_expr_index_set()),
           ("expr", enc_expr(b)),
           ("index", enc_expr(i)),
           ("value", enc_expr(v)),
         ]
-    EAnn(b, t) => [kf("ann"), ("expr", enc_expr(b)), ("ty", enc_ty(t))]
-    EMarker(m) => [kf("marker"), ("marker", JStr(m))]
+    EAnn(b, t) => [kf(tag_expr_ann()), ("expr", enc_expr(b)), ("ty", enc_ty(t))]
+    EMarker(m) => [kf(tag_expr_marker()), ("marker", JStr(m))]
     ENamedHandle(n, b, arms) =>
       flatten([
-          [kf("named-handle"), ("name", JStr(n)), ("body", enc_expr(b))],
+          [
+              kf(tag_expr_named_handle()),
+              ("name", JStr(n)),
+              ("body", enc_expr(b)),
+            ],
           omit_list("arms", map(enc_harm, arms)),
         ])
     EVarDecl(n, v, b) =>
       [
-          kf("var-decl"),
+          kf(tag_expr_var_decl()),
           ("name", JStr(n)),
           ("value", enc_expr(v)),
           ("body", enc_expr(b)),
         ]
-    EAssign(n, v) => [kf("assign"), ("name", JStr(n)), ("value", enc_expr(v))]
+    EAssign(n, v) =>
+      [kf(tag_expr_assign()), ("name", JStr(n)), ("value", enc_expr(v))]
     EIndexAssign(b, i, v) =>
       [
-          kf("index-assign"),
+          kf(tag_expr_index_assign()),
           ("expr", enc_expr(b)),
           ("index", enc_expr(i)),
           ("value", enc_expr(v)),
         ]
     EThrow(n, args) =>
       flatten([
-          [kf("throw"), ("name", JStr(n))],
+          [kf(tag_expr_throw()), ("name", JStr(n))],
           omit_list("args", map(enc_expr, args)),
         ])
     ETryCatch(b, arms) =>
       [
-          kf("try-catch"),
+          kf(tag_expr_try_catch()),
           ("body", enc_expr(b)),
           arrf("arms", map(enc_catch, arms)),
         ]
     EFor(bnd, seq, quals, b) =>
       flatten([
-          [kf("for"), ("binder", JStr(bnd)), ("seq", enc_expr(seq))],
+          [kf(tag_expr_for()), ("binder", JStr(bnd)), ("seq", enc_expr(seq))],
           omit_list("quals", map(enc_qual, quals)),
           [("body", enc_expr(b))],
         ])
-    EWhile(c, b) => [kf("while"), ("cond", enc_expr(c)), ("body", enc_expr(b))]
-    ELoop(b) => [kf("loop"), ("body", enc_expr(b))]
-    EBreak => [kf("break")]
-    EContinue => [kf("continue")]
-    EReturn(v) => [kf("return"), ("value", enc_expr(v))]
+    EWhile(c, b) =>
+      [kf(tag_expr_while()), ("cond", enc_expr(c)), ("body", enc_expr(b))]
+    ELoop(b) => [kf(tag_expr_loop()), ("body", enc_expr(b))]
+    EBreak => [kf(tag_expr_break())]
+    EContinue => [kf(tag_expr_continue())]
+    EReturn(v) => [kf(tag_expr_return()), ("value", enc_expr(v))]
     EComp(h, bnd, seq, quals) =>
       flatten([
           [
-              kf("comprehension"),
+              kf(tag_expr_comprehension()),
               ("head", enc_expr(h)),
               ("binder", JStr(bnd)),
               ("seq", enc_expr(seq)),
@@ -614,24 +897,35 @@ fn enc_expr_node(e : Expr) : List((String, Json)) =
           omit_list("quals", map(enc_qual, quals)),
         ])
     EDefault(b, f) =>
-      [kf("default"), ("expr", enc_expr(b)), ("fallback", enc_expr(f))]
+      [kf(tag_expr_default()), ("expr", enc_expr(b)), ("fallback", enc_expr(f))]
     ETransact(b, f) =>
-      [kf("transact"), ("body", enc_expr(b)), ("fallback", enc_expr(f))]
-    EProbe(n, b) => [kf("probe"), ("name", JStr(n)), ("body", enc_expr(b))]
+      [
+          kf(tag_expr_transact()),
+          ("body", enc_expr(b)),
+          ("fallback", enc_expr(f)),
+        ]
+    EProbe(n, b) =>
+      [kf(tag_expr_probe()), ("name", JStr(n)), ("body", enc_expr(b))]
+    EReflect(d, n) =>
+      [kf(tag_expr_reflect()), ("decl", JStr(d)), ("name", JStr(n))]
     EOptChain(b, n) =>
-      [kf("opt-chain"), ("expr", enc_expr(b)), ("name", JStr(n))]
+      [kf(tag_expr_opt_chain()), ("expr", enc_expr(b)), ("name", JStr(n))]
     ERange(prefix, e) =>
-      [kf("range"), arrf("prefix", map(enc_expr, prefix)), ("end", enc_expr(e))]
+      [
+          kf(tag_expr_range()),
+          arrf("prefix", map(enc_expr, prefix)),
+          ("end", enc_expr(e)),
+        ]
     ECompose(dir, l, r) =>
       [
-          kf("compose"),
+          kf(tag_expr_compose()),
           ("dir", JStr(dir)),
           ("lhs", enc_expr(l)),
           ("rhs", enc_expr(r)),
         ]
     EReadPath(b, steps) =>
       [
-          kf("read-path"),
+          kf(tag_expr_read_path()),
           ("base", enc_expr(b)),
           arrf("path", map(enc_pstep, steps)),
         ]
@@ -648,10 +942,14 @@ fn sp_expr_arm(a : Arm) : Json =
 fn enc_harm(a : HandlerArm) : Json =
   match a of
     HReturn(b, body) =>
-      node_obj([kf("return"), ("binder", JStr(b)), ("body", enc_expr(body))])
+      node_obj([
+          kf(tag_harm_return()),
+          ("binder", JStr(b)),
+          ("body", enc_expr(body)),
+        ])
     HOp(op, ps, rk, body) =>
       node_obj([
-          kf("op"),
+          kf(tag_harm_op()),
           ("op", JStr(op)),
           arrf("params", map(JStr, ps)),
           ("resume", JStr(rk)),
@@ -659,16 +957,20 @@ fn enc_harm(a : HandlerArm) : Json =
         ])
     HOnce(op, ps, body) =>
       node_obj([
-          kf("once"),
+          kf(tag_harm_once()),
           ("op", JStr(op)),
           arrf("params", map(JStr, ps)),
           ("body", enc_expr(body)),
         ])
     HVal(n, body) =>
-      node_obj([kf("val"), ("name", JStr(n)), ("body", enc_expr(body))])
+      node_obj([
+          kf(tag_harm_val()),
+          ("name", JStr(n)),
+          ("body", enc_expr(body)),
+        ])
     HNever(op, ps, body) =>
       node_obj([
-          kf("never"),
+          kf(tag_harm_never()),
           ("op", JStr(op)),
           arrf("params", map(JStr, ps)),
           ("body", enc_expr(body)),
@@ -683,22 +985,22 @@ fn enc_catch(a : CatchArm) : Json =
 
 fn enc_qual(q : Qual) : Json =
   match q of
-    QGuard(e) => node_obj([kf("guard"), ("expr", enc_expr(e))])
+    QGuard(e) => node_obj([kf(tag_qual_guard()), ("expr", enc_expr(e))])
     QBind(n, e) =>
-      node_obj([kf("bind"), ("name", JStr(n)), ("value", enc_expr(e))])
+      node_obj([kf(tag_qual_bind()), ("name", JStr(n)), ("value", enc_expr(e))])
 
 fn enc_pstep(s : PathStep) : Json =
   match s of
-    PSField(n) => node_obj([kf("field"), ("name", JStr(n))])
-    PSEach => node_obj([kf("each")])
-    PSCase(n) => node_obj([kf("case"), ("name", JStr(n))])
-    PSIndex(e) => node_obj([kf("index"), ("expr", enc_expr(e))])
-    PSWhere(e) => node_obj([kf("where"), ("expr", enc_expr(e))])
+    PSField(n) => node_obj([kf(tag_pstep_field()), ("name", JStr(n))])
+    PSEach => node_obj([kf(tag_pstep_each())])
+    PSCase(n) => node_obj([kf(tag_pstep_case()), ("name", JStr(n))])
+    PSIndex(e) => node_obj([kf(tag_pstep_index()), ("expr", enc_expr(e))])
+    PSWhere(e) => node_obj([kf(tag_pstep_where()), ("expr", enc_expr(e))])
 
 fn enc_pop(o : PathOp) : Json =
   match o of
-    POSet(e) => node_obj([kf("set"), ("expr", enc_expr(e))])
-    POModify(e) => node_obj([kf("modify"), ("expr", enc_expr(e))])
+    POSet(e) => node_obj([kf(tag_pop_set()), ("expr", enc_expr(e))])
+    POModify(e) => node_obj([kf(tag_pop_modify()), ("expr", enc_expr(e))])
 
 fn enc_pupdate(u : PathUpdate) : Json =
   node_obj([arrf("path", map(enc_pstep, u.path)), ("op", enc_pop(u.op))])
@@ -710,25 +1012,26 @@ fn enc_pfield(f : PatField) : Json =
 
 fn enc_pat_node(p : Pat) : List((String, Json)) =
   match p of
-    PWild => [kf("wild")]
-    PVar(n) => [kf("var"), ("name", JStr(n))]
-    PInt(v, suf) => append([kf("int"), ("value", JStr(v))], suffix_frag(suf))
-    PFloat(v) => [kf("float"), ("value", JStr(v))]
-    PChar(v) => [kf("char"), ("value", JStr(v))]
-    PBool(b) => [kf("bool"), ("value", JBool(b))]
+    PWild => [kf(tag_pat_wild())]
+    PVar(n) => [kf(tag_pat_var()), ("name", JStr(n))]
+    PInt(v, suf) =>
+      append([kf(tag_pat_int()), ("value", JStr(v))], suffix_frag(suf))
+    PFloat(v) => [kf(tag_pat_float()), ("value", JStr(v))]
+    PChar(v) => [kf(tag_pat_char()), ("value", JStr(v))]
+    PBool(b) => [kf(tag_pat_bool()), ("value", JBool(b))]
     PCtor(n, args) =>
       flatten([
-          [kf("ctor"), ("name", JStr(n))],
+          [kf(tag_pat_ctor()), ("name", JStr(n))],
           omit_list("args", map(enc_pat, args)),
         ])
-    PTuple(items) => [kf("tuple"), arrf("items", map(enc_pat, items))]
+    PTuple(items) => [kf(tag_pat_tuple()), arrf("items", map(enc_pat, items))]
     PRecord(n, fs, rest) =>
       flatten([
-          [kf("record"), ("name", JStr(n))],
+          [kf(tag_pat_record()), ("name", JStr(n))],
           omit_list("fields", map(enc_pfield, fs)),
           flag_field("rest", rest),
         ])
-    POr(alts) => [kf("or"), arrf("alts", map(enc_pat, alts))]
+    POr(alts) => [kf(tag_pat_or()), arrf("alts", map(enc_pat, alts))]
 
 fn enc_ctor(c : Ctor) : Json =
   match c.shape of
@@ -784,12 +1087,12 @@ fn enc_converter(c : Converter) : Json =
 
 fn enc_mdir(d : MigrationDir) : Json =
   match d of
-    DAuto => JStr("auto")
+    DAuto => JStr(tag_migration_auto())
     DExpr(e) => enc_expr(e)
 
 fn enc_mroute(r : MigrationRoute) : Json =
   match r of
-    MAuto => JStr("auto")
+    MAuto => JStr(tag_migration_auto())
     MVersion(up, down) =>
       node_obj([("upgrade", enc_mdir(up)), ("downgrade", enc_mdir(down))])
 
@@ -823,7 +1126,7 @@ fn enc_decl(d : Decl, kind : String) : List((String, Json)) =
       [("span", span_json(d.span))],
     ])
 
-fn enc_method_decl(d : Decl) : Json = node_obj(enc_decl(d, "fn"))
+fn enc_method_decl(d : Decl) : Json = node_obj(enc_decl(d, tag_item_fn()))
 
 fn enc_item(it : Item) : Json =
   match it of
@@ -836,7 +1139,7 @@ fn enc_item(it : Item) : Json =
       span = span,
     } =>
       node_obj(flatten([
-          [kf("import")],
+          [kf(tag_item_import())],
           opt_str_field("alias", ma),
           opt_field("names", names, \(ns) -> JArr(map(JStr, ns))),
           [arrf("path", map(JStr, path))],
@@ -856,7 +1159,10 @@ fn enc_item(it : Item) : Json =
       dep = dep,
     } =>
       node_obj(flatten([
-          [kf(if nt then "newtype" else "data"), ("name", JStr(name))],
+          [
+              kf(if nt then tag_item_newtype() else tag_item_data()),
+              ("name", JStr(name)),
+            ],
           omit_strs("params", params),
           omit_list("param_kinds", map(enc_kind, pks)),
           omit_list("ctors", map(enc_ctor, ctors)),
@@ -874,7 +1180,7 @@ fn enc_item(it : Item) : Json =
       dep = dep,
     } =>
       node_obj(flatten([
-          [kf("effect"), ("name", JStr(name))],
+          [kf(tag_item_effect()), ("name", JStr(name))],
           omit_strs("params", params),
           omit_list("ops", map(enc_effop, ops)),
           [("span", span_json(span))],
@@ -889,7 +1195,7 @@ fn enc_item(it : Item) : Json =
       dep = dep,
     } =>
       node_obj(flatten([
-          [kf("error"), ("name", JStr(name))],
+          [kf(tag_item_error()), ("name", JStr(name))],
           omit_list("params", map(enc_ty, params)),
           [("span", span_json(span))],
           vis_frag(vis),
@@ -903,7 +1209,7 @@ fn enc_item(it : Item) : Json =
       dep = dep,
     } =>
       node_obj(flatten([
-          [kf("effect-alias"), ("name", JStr(name))],
+          [kf(tag_item_effect_alias()), ("name", JStr(name))],
           omit_list("labels", map(enc_efflabel, labels)),
           [("span", span_json(span))],
           vis_frag(vis),
@@ -918,7 +1224,7 @@ fn enc_item(it : Item) : Json =
       dep = dep,
     } =>
       node_obj(flatten([
-          [kf("type-synonym"), ("name", JStr(name))],
+          [kf(tag_item_type_synonym()), ("name", JStr(name))],
           omit_strs("params", params),
           [("ty", enc_ty(ty)), ("span", span_json(span))],
           vis_frag(vis),
@@ -934,7 +1240,7 @@ fn enc_item(it : Item) : Json =
       dep = dep,
     } =>
       node_obj(flatten([
-          [kf("class"), ("name", JStr(name)), ("param", JStr(param))],
+          [kf(tag_item_class()), ("name", JStr(name)), ("param", JStr(param))],
           omit_strs("supers", supers),
           omit_list("methods", map(enc_method, methods)),
           [("span", span_json(span))],
@@ -951,7 +1257,7 @@ fn enc_item(it : Item) : Json =
     } =>
       node_obj(flatten([
           [
-              kf("instance"),
+              kf(tag_item_instance()),
               ("name", JStr(name)),
               ("class", JStr(cls)),
               ("head", enc_ty(head)),
@@ -962,7 +1268,7 @@ fn enc_item(it : Item) : Json =
         ]))
     ICanonical { cls = cls, head = head, name = name, span = span } =>
       node_obj([
-          kf("canonical"),
+          kf(tag_item_canonical()),
           ("class", JStr(cls)),
           ("head", enc_ty(head)),
           ("name", JStr(name)),
@@ -979,7 +1285,7 @@ fn enc_item(it : Item) : Json =
       dep = dep,
     } =>
       node_obj(flatten([
-          [kf("pattern"), ("name", JStr(name))],
+          [kf(tag_item_pattern()), ("name", JStr(name))],
           omit_strs("params", params),
           [("for", JStr(forty)), ("view", enc_expr(viewfn))],
           opt_field("make", makefn, enc_expr),
@@ -997,7 +1303,7 @@ fn enc_item(it : Item) : Json =
       dep = dep,
     } =>
       node_obj(flatten([
-          [kf("stable"), ("name", JStr(name))],
+          [kf(tag_item_stable()), ("name", JStr(name))],
           omit_list("rungs", map(enc_rung, rungs)),
           omit_list("converters", map(enc_converter, converters)),
           omit_list("migrations", map(enc_migration, migrations)),
@@ -1054,11 +1360,11 @@ fn flagf(fields : List((String, Json)), key : String) : Bool =
 fn dec_kind(j : Json, path : String) : Kind ! {Decode} =
   match j of
     JStr(s) =>
-      if s == "type" then
+      if s == tag_kind_type() then
         KType
-      elif s == "row" then
+      elif s == tag_kind_row() then
         KRow
-      elif s == "nat" then
+      elif s == tag_kind_nat() then
         KNat
       else
         fail_decode(CodecError { path = path, reason = "unknown kind `{s}`" })
@@ -1097,25 +1403,25 @@ fn dec_ty_kind(
   fields : List((String, Json)),
   path : String
 ) : Ty ! {Decode} =
-  if kind == "int" then
+  if kind == tag_ty_int() then
     TyInt
-  elif kind == "i64" then
+  elif kind == tag_ty_i64() then
     TyI64
-  elif kind == "u64" then
+  elif kind == tag_ty_u64() then
     TyU64
-  elif kind == "bool" then
+  elif kind == tag_ty_bool() then
     TyBool
-  elif kind == "unit" then
+  elif kind == tag_ty_unit() then
     TyUnit
-  elif kind == "float" then
+  elif kind == tag_ty_float() then
     TyFloat
-  elif kind == "char" then
+  elif kind == tag_ty_char() then
     TyChar
-  elif kind == "str" then
+  elif kind == tag_ty_str() then
     TyStr
-  elif kind == "var" then
+  elif kind == tag_ty_var() then
     TyVar(str_at(fields, "name", path))
-  elif kind == "app" then
+  elif kind == tag_ty_app() then
     let h = str_at(fields, "head", path)
     TyApp(h, list_at(fields, "args", path, dec_ty))
   else
@@ -1126,29 +1432,29 @@ fn dec_ty_kind2(
   fields : List((String, Json)),
   path : String
 ) : Ty ! {Decode} =
-  if kind == "state" then
+  if kind == tag_ty_state() then
     TyState(req_at(fields, "cell", path, int_of))
-  elif kind == "forall" then
+  elif kind == tag_ty_forall() then
     let vars = strs_at(fields, "vars", path)
     TyForall(vars, req_at(fields, "ty", path, dec_ty))
-  elif kind == "fun" then
+  elif kind == tag_ty_fun() then
     let ps = list_at(fields, "params", path, dec_ty)
     let row = req_at(fields, "effects", path, dec_row)
     TyFun(ps, row, req_at(fields, "ret", path, dec_ty))
-  elif kind == "con" then
+  elif kind == tag_ty_con() then
     let n = str_at(fields, "name", path)
     TyCon(n, list_at(fields, "args", path, dec_ty))
-  elif kind == "tuple" then
+  elif kind == tag_ty_tuple() then
     TyTuple(list_at(fields, "items", path, dec_ty))
-  elif kind == "unboxed-tuple" then
+  elif kind == tag_ty_unboxed_tuple() then
     TyUnboxedTuple(list_at(fields, "items", path, dec_ty))
-  elif kind == "unboxed-record" then
+  elif kind == tag_ty_unboxed_record() then
     TyUnboxedRecord(list_at(fields, "fields", path, dec_cfield))
-  elif kind == "row" then
+  elif kind == tag_ty_row() then
     TyRowLit(req_at(fields, "row", path, dec_row))
-  elif kind == "nat" then
+  elif kind == tag_ty_nat() then
     TyNat(req_at(fields, "value", path, int_of))
-  elif kind == "usage" then
+  elif kind == tag_ty_usage() then
     let b = req_at(fields, "ty", path, dec_ty)
     TyUsage(b, strs_at(fields, "facts", path))
   else
@@ -1176,9 +1482,9 @@ fn dec_ensure(j : Json, path : String) : Ensure ! {Decode} =
 fn dec_suffix(fields : List((String, Json))) : Suffix =
   match jget(fields, "suffix") of
     Some(JStr(s)) =>
-      if s == "i64" then
+      if s == tag_suffix_i64() then
         SufI64
-      elif s == "u64" then
+      elif s == tag_suffix_u64() then
         SufU64
       else
         SufNone
@@ -1285,26 +1591,26 @@ fn dec_expr_node(
   fields : List((String, Json)),
   path : String
 ) : Expr ! {Decode} =
-  if kind == "int" then
+  if kind == tag_expr_int() then
     EInt(str_at(fields, "value", path), dec_suffix(fields))
-  elif kind == "float" then
+  elif kind == tag_expr_float() then
     EFloat(str_at(fields, "value", path))
-  elif kind == "char" then
+  elif kind == tag_expr_char() then
     EChar(str_at(fields, "value", path))
-  elif kind == "bool" then
+  elif kind == tag_expr_bool() then
     EBool(req_at(fields, "value", path, bool_of))
-  elif kind == "unit" then
+  elif kind == tag_expr_unit() then
     EUnit
-  elif kind == "str" then
+  elif kind == tag_expr_str() then
     EStr(str_at(fields, "value", path))
-  elif kind == "var" then
+  elif kind == tag_expr_var() then
     EVar(str_at(fields, "name", path))
-  elif kind == "hole" then
+  elif kind == tag_expr_hole() then
     EHole(str_at(fields, "name", path))
-  elif kind == "bin" then
+  elif kind == tag_expr_bin() then
     let op = str_at(fields, "op", path)
     e2(fields, path, "lhs", "rhs", \(l, r) -> EBin(op, l, r))
-  elif kind == "neg" then
+  elif kind == tag_expr_neg() then
     e1(fields, path, "expr", ENeg)
   else
     dec_expr_node2(kind, fields, path)
@@ -1314,28 +1620,28 @@ fn dec_expr_node2(
   fields : List((String, Json)),
   path : String
 ) : Expr ! {Decode} =
-  if kind == "if" then
+  if kind == tag_expr_if() then
     e3(fields, path, "cond", "then", "else", EIf)
-  elif kind == "let" then
+  elif kind == tag_expr_let() then
     s2e(fields, path, "name", "value", "body", ELet)
-  elif kind == "lam" then
+  elif kind == tag_expr_lam() then
     let ps = list_at(fields, "params", path, dec_param)
     ELam(ps, req_at(fields, "body", path, dec_expr))
-  elif kind == "call" then
+  elif kind == tag_expr_call() then
     let h = req_at(fields, "head", path, dec_expr)
     ECall(h, list_at(fields, "args", path, dec_expr))
-  elif kind == "pipe" then
+  elif kind == tag_expr_pipe() then
     e2(fields, path, "lhs", "rhs", EPipe)
-  elif kind == "match" then
+  elif kind == tag_expr_match() then
     let s = req_at(fields, "scrutinee", path, dec_expr)
     EMatch(s, list_at(fields, "arms", path, dec_arm))
-  elif kind == "list" then
+  elif kind == tag_expr_list() then
     EList(list_at(fields, "items", path, dec_expr))
-  elif kind == "tuple" then
+  elif kind == tag_expr_tuple() then
     ETuple(list_at(fields, "items", path, dec_expr))
-  elif kind == "field" then
+  elif kind == tag_expr_field() then
     es(fields, path, "expr", "name", EField)
-  elif kind == "unboxed-tuple" then
+  elif kind == tag_expr_unboxed_tuple() then
     EUnboxedTuple(list_at(fields, "items", path, dec_expr))
   else
     dec_expr_node3(kind, fields, path)
@@ -1345,35 +1651,35 @@ fn dec_expr_node3(
   fields : List((String, Json)),
   path : String
 ) : Expr ! {Decode} =
-  if kind == "unboxed-record" then
+  if kind == tag_expr_unboxed_record() then
     EUnboxedRecord(list_at(fields, "fields", path, dec_named))
-  elif kind == "unboxed-field" then
+  elif kind == tag_expr_unboxed_field() then
     es(fields, path, "expr", "name", EUnboxedField)
-  elif kind == "record" then
+  elif kind == tag_expr_record() then
     let n = str_at(fields, "name", path)
     ERecord(n, list_at(fields, "fields", path, dec_named))
-  elif kind == "record-update" then
+  elif kind == tag_expr_record_update() then
     let b = req_at(fields, "base", path, dec_expr)
     let n = str_at(fields, "name", path)
     ERecordUpdate(b, n, list_at(fields, "fields", path, dec_named))
-  elif kind == "path-update" then
+  elif kind == tag_expr_path_update() then
     let b = req_at(fields, "base", path, dec_expr)
     EPathUpdate(b, list_at(fields, "updates", path, dec_pupdate))
-  elif kind == "handle" then
+  elif kind == tag_expr_handle() then
     let b = req_at(fields, "body", path, dec_expr)
     EHandle(
         b,
         list_at(fields, "arms", path, dec_harm),
         flagf(fields, "partial"),
       )
-  elif kind == "mask" then
+  elif kind == tag_expr_mask() then
     se(fields, path, "effect", "body", EMask)
-  elif kind == "inst" then
+  elif kind == tag_expr_inst() then
     let b = req_at(fields, "expr", path, dec_expr)
     EInst(b, strs_at(fields, "args", path))
-  elif kind == "index" then
+  elif kind == tag_expr_index() then
     e2(fields, path, "expr", "index", EIndex)
-  elif kind == "index-set" then
+  elif kind == tag_expr_index_set() then
     e3(fields, path, "expr", "index", "value", EIndexSet)
   else
     dec_expr_node4(kind, fields, path)
@@ -1383,33 +1689,33 @@ fn dec_expr_node4(
   fields : List((String, Json)),
   path : String
 ) : Expr ! {Decode} =
-  if kind == "ann" then
+  if kind == tag_expr_ann() then
     let b = req_at(fields, "expr", path, dec_expr)
     EAnn(b, req_at(fields, "ty", path, dec_ty))
-  elif kind == "marker" then
+  elif kind == tag_expr_marker() then
     EMarker(str_at(fields, "marker", path))
-  elif kind == "named-handle" then
+  elif kind == tag_expr_named_handle() then
     let n = str_at(fields, "name", path)
     let b = req_at(fields, "body", path, dec_expr)
     ENamedHandle(n, b, list_at(fields, "arms", path, dec_harm))
-  elif kind == "var-decl" then
+  elif kind == tag_expr_var_decl() then
     s2e(fields, path, "name", "value", "body", EVarDecl)
-  elif kind == "assign" then
+  elif kind == tag_expr_assign() then
     se(fields, path, "name", "value", EAssign)
-  elif kind == "index-assign" then
+  elif kind == tag_expr_index_assign() then
     e3(fields, path, "expr", "index", "value", EIndexAssign)
-  elif kind == "throw" then
+  elif kind == tag_expr_throw() then
     let n = str_at(fields, "name", path)
     EThrow(n, list_at(fields, "args", path, dec_expr))
-  elif kind == "try-catch" then
+  elif kind == tag_expr_try_catch() then
     let b = req_at(fields, "body", path, dec_expr)
     ETryCatch(b, list_at(fields, "arms", path, dec_catch))
-  elif kind == "for" then
+  elif kind == tag_expr_for() then
     let bnd = str_at(fields, "binder", path)
     let seq = req_at(fields, "seq", path, dec_expr)
     let quals = list_at(fields, "quals", path, dec_qual)
     EFor(bnd, seq, quals, req_at(fields, "body", path, dec_expr))
-  elif kind == "while" then
+  elif kind == tag_expr_while() then
     e2(fields, path, "cond", "body", EWhile)
   else
     dec_expr_node5(kind, fields, path)
@@ -1419,28 +1725,30 @@ fn dec_expr_node5(
   fields : List((String, Json)),
   path : String
 ) : Expr ! {Decode} =
-  if kind == "loop" then
+  if kind == tag_expr_loop() then
     e1(fields, path, "body", ELoop)
-  elif kind == "break" then
+  elif kind == tag_expr_break() then
     EBreak
-  elif kind == "continue" then
+  elif kind == tag_expr_continue() then
     EContinue
-  elif kind == "return" then
+  elif kind == tag_expr_return() then
     e1(fields, path, "value", EReturn)
-  elif kind == "comprehension" then
+  elif kind == tag_expr_comprehension() then
     let h = req_at(fields, "head", path, dec_expr)
     let bnd = str_at(fields, "binder", path)
     let seq = req_at(fields, "seq", path, dec_expr)
     EComp(h, bnd, seq, list_at(fields, "quals", path, dec_qual))
-  elif kind == "default" then
+  elif kind == tag_expr_default() then
     e2(fields, path, "expr", "fallback", EDefault)
-  elif kind == "transact" then
+  elif kind == tag_expr_transact() then
     e2(fields, path, "body", "fallback", ETransact)
-  elif kind == "probe" then
+  elif kind == tag_expr_probe() then
     se(fields, path, "name", "body", EProbe)
-  elif kind == "opt-chain" then
+  elif kind == tag_expr_reflect() then
+    EReflect(str_at(fields, "decl", path), str_at(fields, "name", path))
+  elif kind == tag_expr_opt_chain() then
     es(fields, path, "expr", "name", EOptChain)
-  elif kind == "range" then
+  elif kind == tag_expr_range() then
     let prefix = list_at(fields, "prefix", path, dec_expr)
     ERange(prefix, req_at(fields, "end", path, dec_expr))
   else
@@ -1451,10 +1759,10 @@ fn dec_expr_node6(
   fields : List((String, Json)),
   path : String
 ) : Expr ! {Decode} =
-  if kind == "compose" then
+  if kind == tag_expr_compose() then
     let dir = str_at(fields, "dir", path)
     e2(fields, path, "lhs", "rhs", \(l, r) -> ECompose(dir, l, r))
-  elif kind == "read-path" then
+  elif kind == tag_expr_read_path() then
     let b = req_at(fields, "base", path, dec_expr)
     EReadPath(b, list_at(fields, "path", path, dec_pstep))
   else
@@ -1476,22 +1784,22 @@ fn dec_arm(j : Json, path : String) : Arm ! {Decode} =
 fn dec_harm(j : Json, path : String) : HandlerArm ! {Decode} =
   let fields = obj_at(j, path)
   let kind = str_at(fields, "kind", path)
-  if kind == "return" then
+  if kind == tag_harm_return() then
     let b = str_at(fields, "binder", path)
     HReturn(b, req_at(fields, "body", path, dec_expr))
-  elif kind == "op" then
+  elif kind == tag_harm_op() then
     let op = str_at(fields, "op", path)
     let ps = strs_at(fields, "params", path)
     let rk = str_at(fields, "resume", path)
     HOp(op, ps, rk, req_at(fields, "body", path, dec_expr))
-  elif kind == "once" then
+  elif kind == tag_harm_once() then
     let op = str_at(fields, "op", path)
     let ps = strs_at(fields, "params", path)
     HOnce(op, ps, req_at(fields, "body", path, dec_expr))
-  elif kind == "val" then
+  elif kind == tag_harm_val() then
     let n = str_at(fields, "name", path)
     HVal(n, req_at(fields, "body", path, dec_expr))
-  elif kind == "never" then
+  elif kind == tag_harm_never() then
     let op = str_at(fields, "op", path)
     let ps = strs_at(fields, "params", path)
     HNever(op, ps, req_at(fields, "body", path, dec_expr))
@@ -1515,9 +1823,9 @@ fn dec_catch(j : Json, path : String) : CatchArm ! {Decode} =
 fn dec_qual(j : Json, path : String) : Qual ! {Decode} =
   let fields = obj_at(j, path)
   let kind = str_at(fields, "kind", path)
-  if kind == "guard" then
+  if kind == tag_qual_guard() then
     QGuard(req_at(fields, "expr", path, dec_expr))
-  elif kind == "bind" then
+  elif kind == tag_qual_bind() then
     let n = str_at(fields, "name", path)
     QBind(n, req_at(fields, "value", path, dec_expr))
   else
@@ -1531,15 +1839,15 @@ fn dec_qual(j : Json, path : String) : Qual ! {Decode} =
 fn dec_pstep(j : Json, path : String) : PathStep ! {Decode} =
   let fields = obj_at(j, path)
   let kind = str_at(fields, "kind", path)
-  if kind == "field" then
+  if kind == tag_pstep_field() then
     PSField(str_at(fields, "name", path))
-  elif kind == "each" then
+  elif kind == tag_pstep_each() then
     PSEach
-  elif kind == "case" then
+  elif kind == tag_pstep_case() then
     PSCase(str_at(fields, "name", path))
-  elif kind == "index" then
+  elif kind == tag_pstep_index() then
     PSIndex(req_at(fields, "expr", path, dec_expr))
-  elif kind == "where" then
+  elif kind == tag_pstep_where() then
     PSWhere(req_at(fields, "expr", path, dec_expr))
   else
     fail_decode(
@@ -1552,9 +1860,9 @@ fn dec_pstep(j : Json, path : String) : PathStep ! {Decode} =
 fn dec_pop(j : Json, path : String) : PathOp ! {Decode} =
   let fields = obj_at(j, path)
   let kind = str_at(fields, "kind", path)
-  if kind == "set" then
+  if kind == tag_pop_set() then
     POSet(req_at(fields, "expr", path, dec_expr))
-  elif kind == "modify" then
+  elif kind == tag_pop_modify() then
     POModify(req_at(fields, "expr", path, dec_expr))
   else
     fail_decode(
@@ -1593,15 +1901,15 @@ fn dec_pat_node(
   fields : List((String, Json)),
   path : String
 ) : Pat ! {Decode} =
-  if kind == "wild" then
+  if kind == tag_pat_wild() then
     PWild
-  elif kind == "var" then
+  elif kind == tag_pat_var() then
     PVar(str_at(fields, "name", path))
-  elif kind == "int" then
+  elif kind == tag_pat_int() then
     PInt(str_at(fields, "value", path), dec_suffix(fields))
-  elif kind == "float" then
+  elif kind == tag_pat_float() then
     PFloat(str_at(fields, "value", path))
-  elif kind == "char" then
+  elif kind == tag_pat_char() then
     PChar(str_at(fields, "value", path))
   else
     dec_pat_node2(kind, fields, path)
@@ -1611,21 +1919,21 @@ fn dec_pat_node2(
   fields : List((String, Json)),
   path : String
 ) : Pat ! {Decode} =
-  if kind == "bool" then
+  if kind == tag_pat_bool() then
     PBool(req_at(fields, "value", path, bool_of))
-  elif kind == "ctor" then
+  elif kind == tag_pat_ctor() then
     let n = str_at(fields, "name", path)
     PCtor(n, list_at(fields, "args", path, dec_pat))
-  elif kind == "tuple" then
+  elif kind == tag_pat_tuple() then
     PTuple(list_at(fields, "items", path, dec_pat))
-  elif kind == "record" then
+  elif kind == tag_pat_record() then
     let n = str_at(fields, "name", path)
     PRecord(
         n,
         list_at(fields, "fields", path, dec_pfield),
         flagf(fields, "rest"),
       )
-  elif kind == "or" then
+  elif kind == tag_pat_or() then
     POr(list_at(fields, "alts", path, dec_pat))
   else
     fail_decode(
@@ -1703,7 +2011,7 @@ fn dec_converter(j : Json, path : String) : Converter ! {Decode} =
 fn dec_mdir(j : Json, path : String) : MigrationDir ! {Decode} =
   match j of
     JStr(s) =>
-      if s == "auto" then
+      if s == tag_migration_auto() then
         DAuto
       else
         fail_decode(
@@ -1717,7 +2025,7 @@ fn dec_mdir(j : Json, path : String) : MigrationDir ! {Decode} =
 fn dec_mroute(j : Json, path : String) : MigrationRoute ! {Decode} =
   match j of
     JStr(s) =>
-      if s == "auto" then
+      if s == tag_migration_auto() then
         MAuto
       else
         fail_decode(
@@ -1778,17 +2086,17 @@ fn dec_item_kind(
   fields : List((String, Json)),
   path : String
 ) : Item ! {Decode} =
-  if kind == "import" then
+  if kind == tag_item_import() then
     dec_import(fields, path)
-  elif kind == "data" || kind == "newtype" then
+  elif kind == tag_item_data() || kind == tag_item_newtype() then
     dec_data(kind, fields, path)
-  elif kind == "effect" then
+  elif kind == tag_item_effect() then
     dec_effect(fields, path)
-  elif kind == "error" then
+  elif kind == tag_item_error() then
     dec_error(fields, path)
-  elif kind == "effect-alias" then
+  elif kind == tag_item_effect_alias() then
     dec_effalias(fields, path)
-  elif kind == "type-synonym" then
+  elif kind == tag_item_type_synonym() then
     dec_synonym(fields, path)
   else
     dec_item_kind2(kind, fields, path)
@@ -1798,17 +2106,19 @@ fn dec_item_kind2(
   fields : List((String, Json)),
   path : String
 ) : Item ! {Decode} =
-  if kind == "class" then
+  if kind == tag_item_class() then
     dec_class(fields, path)
-  elif kind == "instance" then
+  elif kind == tag_item_instance() then
     dec_instance(fields, path)
-  elif kind == "canonical" then
+  elif kind == tag_item_canonical() then
     dec_canonical(fields, path)
-  elif kind == "pattern" then
+  elif kind == tag_item_pattern() then
     dec_pattern(fields, path)
-  elif kind == "stable" then
+  elif kind == tag_item_stable() then
     dec_stable(fields, path)
-  elif kind == "fn" || kind == "const" || kind == "logic-fn" then
+  elif (kind == tag_item_fn()
+      || kind == tag_item_const()
+      || kind == tag_item_logic_fn()) then
     dec_fndecl(kind, fields, path)
   else
     fail_decode(
@@ -1841,7 +2151,7 @@ fn dec_data(
   let vis = opt_at(fields, "vis", path, str_of)
   let dep = opt_at(fields, "deprecated", path, str_of)
   IData {
-    nt = kind == "newtype",
+    nt = kind == tag_item_newtype(),
     name = name,
     params = params,
     param_kinds = pks,
@@ -2032,17 +2342,17 @@ fn decode_diagnostics_doc(text : String) : DiagnosticsDoc ! {Decode} =
   }
 
 fn phase_of(s : String, path : String) : DiagPhase ! {Decode} =
-  if s == "lex" then
+  if s == tag_phase_lex() then
     DPLex
-  elif s == "parse" then
+  elif s == tag_phase_parse() then
     DPParse
   else
     fail_decode(CodecError { path = path, reason = "unknown phase `{s}`" })
 
 fn phase_name(p : DiagPhase) : String =
   match p of
-    DPLex => "lex"
-    DPParse => "parse"
+    DPLex => tag_phase_lex()
+    DPParse => tag_phase_parse()
 
 fn diag_of(j : Json, path : String) : Diagnostic ! {Decode} =
   let fields = obj_at(j, path)

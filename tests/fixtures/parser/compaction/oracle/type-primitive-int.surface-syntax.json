@@ -1,0 +1,34 @@
+{
+  "schema": "prism-surface-syntax-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "09fd8f00171d1cf4d88c53269bb17654b7b293a91678159e68eb5838afefad57",
+    "text": "fn corpus(x : Int) = x\n"
+  },
+  "items": [
+    {
+      "body": {
+        "kind": "var",
+        "name": "x",
+        "span": [
+          21,
+          22
+        ]
+      },
+      "kind": "fn",
+      "name": "corpus",
+      "params": [
+        {
+          "name": "x",
+          "ty": {
+            "kind": "int"
+          }
+        }
+      ],
+      "span": [
+        0,
+        22
+      ]
+    }
+  ]
+}

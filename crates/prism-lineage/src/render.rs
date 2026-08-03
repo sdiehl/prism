@@ -12,7 +12,7 @@ use prism_common::digest::HASH_PREFIX_HEX;
 
 use super::diff::DiffReport;
 use super::explain::{Explanation, WorldExplanation};
-use super::graph::{self, LineageGraph, LineageRoot, NodeKind, Variant};
+use super::graph::{LineageGraph, LineageRoot, NodeKind, Variant};
 
 // Abbreviate a content-hash id to the same width the human dumps use, so a
 // rendered timeline shows the leading nibbles the resident also shows. Ids arrive
@@ -39,7 +39,7 @@ pub fn render_human(graph: &LineageGraph) -> String {
         let _ = writeln!(
             out,
             "why: artifact exists because `{}` produced `{}` with the recorded inputs",
-            graph::request_kind_tag(request.kind),
+            request.kind.tag(),
             request.entry
         );
     }
@@ -310,7 +310,7 @@ pub fn render_explanation(explanation: &Explanation) -> String {
     let _ = writeln!(
         out,
         "  produced by `{}` of `{}`",
-        graph::request_kind_tag(explanation.request.kind),
+        explanation.request.kind.tag(),
         explanation.request.entry
     );
     if let Some(source) = &explanation.source {

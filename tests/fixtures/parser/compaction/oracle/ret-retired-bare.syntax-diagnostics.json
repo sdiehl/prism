@@ -1,0 +1,21 @@
+{
+  "schema": "prism-syntax-diagnostics-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "2d2815fa9f65d34071ae6c020556c840415f1bfc58c377791603b1edd1f31d90",
+    "text": "fn corpus() : ! Int = 0\n"
+  },
+  "diagnostics": [
+    {
+      "code": "E7100",
+      "phase": "parse",
+      "span": [
+        12,
+        19
+      ],
+      "message": "the effect row now follows the result type: write `: Result ! {Effects}` instead of `: !{Effects} Result`",
+      "expected": [],
+      "related": []
+    }
+  ]
+}

@@ -29,6 +29,10 @@ pub const FROZEN: &str = "frozen";
 pub const MIGRATIONS: &str = "migrations";
 pub const VERSION: &str = "version";
 pub const AUTO: &str = "auto";
+// The three ground kinds as they are spelled in a `: Kind` parameter
+// annotation. `Type` is the default and so is never printed by the formatter,
+// but the parser still accepts it, so all three live together here.
+pub const KIND_TYPE: &str = "Type";
 pub const KIND_ROW: &str = "Row";
 pub const KIND_NAT: &str = "Nat";
 pub const OPAQUE: &str = "opaque";
@@ -39,6 +43,10 @@ pub const TRY: &str = "try";
 pub const CATCH: &str = "catch";
 pub const TRANSACT: &str = "transact";
 pub const PROBE: &str = "probe";
+// `reflect fn f` / `reflect type T`: a contextual ident, never a reserved word,
+// so a program may still use `reflect` as an ordinary name. Only the `fn` or
+// `type` that must follow makes the form recognizable.
+pub const REFLECT: &str = "reflect";
 pub const ALIAS: &str = "alias";
 pub const CLASS: &str = "class";
 pub const INSTANCE: &str = "instance";
@@ -98,6 +106,7 @@ pub const OR_THIS_TAG: usize = 1;
 /// Every consumer (codegen layout, reuse pairing) treats the pair as a unit:
 /// the one datatype whose native form carries no cell, so the two names share
 /// one predicate instead of being re-tested at each site.
+#[must_use]
 pub fn is_or_null_ctor(name: &str) -> bool {
     name == CTOR_NULL || name == CTOR_THIS
 }

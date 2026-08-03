@@ -16,8 +16,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::error::Error;
-use crate::parse::parse;
 use crate::syntax::ast::Program;
+use crate::syntax::reflect::parse_unit;
 
 #[derive(Debug)]
 pub struct Module {
@@ -306,9 +306,8 @@ fn fetch_module(path: &[String], roots: &[Root]) -> Result<(String, Program), Er
     let mut self_collision = false;
     for r in roots {
         let Some(src) = r.fetch(path)? else { continue };
-        let program = parse(&src)
-            .map_err(|e| Error::ResolveModule(format!("in module `{dotted}`: {e}")))?
-            .program;
+        let program = parse_unit(&src)
+            .map_err(|e| Error::ResolveModule(format!("in module `{dotted}`: {e}")))?;
         if program.imports.iter().any(|imp| imp.path == path) {
             self_collision = true;
             continue;

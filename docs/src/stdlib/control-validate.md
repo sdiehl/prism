@@ -12,7 +12,7 @@ Unlike Haskell's `ValidateT`, Prism does not give ordinary effectful sequencing 
 
 ### `Validate`
 
-```prism,def,h-127e7d9447336f534652144371c4fe5fd3f5b6a135a3c7b010869d3858476452
+```prism,def,h-75c61dbbd7df2da4c631e26abaa02ac8febbb505a833c94b3f6a54d19c359a2a
 effect Validate(e)
   never refute(e) : a
   dispute(e) : Unit
@@ -24,15 +24,23 @@ Errors raised while validating values of type `e`.
 
 ### `run_validate`
 
-```prism,sig,h-bf5a15120e838aa17eceede852e67043910fdf490a6ceab29571b6a9faf81239
+```prism,sig,h-5e8e3c7400ba30adff2408f67f35c11926fa8f7c70adebf787153c6bf542817f
 run_validate : forall e0 a b. (() -> a ! {Control.Validate.Validate(b), e0}) -> Data.Validation.Validation(b, a) ! {e0}
 ```
 
 Run a validation computation. Any fatal or non-fatal errors make the result `Invalid`; only a completed computation with no errors is `Valid`.
 
+```prism,mod=Control.Validate
+run_validate(\() -> disputes(["too small", "odd"]))
+```
+
+```output
+Data.Validation.Invalid([too small, odd])
+```
+
 ### `exec_validate`
 
-```prism,sig,h-0914623c104327c23c6ed2b2d9e2f236148834c97e35c334964f8ffa1b0ad3b5
+```prism,sig,h-d13256fe4fd4393460895e6c7697124c9cadebf1e34bdc72e1414edca6acfd77
 exec_validate : forall e0 a b. (() -> a ! {Control.Validate.Validate(b), e0}) -> List(b) ! {e0}
 ```
 
@@ -40,7 +48,7 @@ Run a validation computation and return its errors, or `Nil` on success.
 
 ### `disputes`
 
-```prism,sig,h-0b6797b5ec05ac1ce1036dc8f2b8167aea7957267c7ac1fe3c9199605b072343
+```prism,sig,h-e832528d51d0eae1ed81a2010de8dd2234a3ba713b4e5bbc8e10debbbbe9fdcb
 disputes : forall a. (List(a)) -> Unit ! {Control.Validate.Validate(a)}
 ```
 
@@ -48,8 +56,16 @@ Raise each error as a non-fatal dispute, in list order.
 
 ### `tolerate`
 
-```prism,sig,h-5d095ef1c0d2086b694ca30291e1c20d7cc0a8fc62fb5512ecb90c48ad0a35ce
+```prism,sig,h-27011220a8020b98052bbd83a0fff90c0a118ddb361af566eb229f35f3863672
 tolerate : forall e0 a b. (() -> a ! {Control.Validate.Validate(b), Control.Validate.Validate(b), e0}) -> Option(a) ! {Control.Validate.Validate(b), e0}
 ```
 
 Make fatal errors in `action` recoverable. A refuted branch becomes `None`; a branch that completes returns `Some(value)`, even if it raised disputes. All captured errors are re-raised as disputes in the outer validation, so the final run still fails unless another handler consumes them.
+
+```prism,mod=Control.Validate
+exec_validate(\() -> tolerate(\() -> refute("bad field")))
+```
+
+```output
+[bad field]
+```

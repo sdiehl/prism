@@ -1,0 +1,3 @@
+fn corpus(v) = match v of
+  Point {x, ..} => x
+  _ => 0

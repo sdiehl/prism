@@ -1,0 +1,74 @@
+{
+  "schema": "prism-parser-compaction-entry-receipt-v1",
+  "oracle_commit": "46886c1fa7064e4809020c1b788b3ee3531d6a63",
+  "corpus_version": 2,
+  "entry_id": "rust.TypeSigParser",
+  "visibility": "public",
+  "scope": "named accepted direct-entry projection and complete token consumption",
+  "matching_wrapper_case": "type-forall",
+  "fragment": "forall a. a",
+  "token_slice": [
+    {
+      "kind": "forall",
+      "span": [
+        14,
+        20
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        21,
+        22
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ".",
+      "span": [
+        22,
+        23
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        24,
+        25
+      ],
+      "value": "a"
+    }
+  ],
+  "stop": 25,
+  "initial_depth": null,
+  "outcome": "accepted",
+  "unconsumed_position": 4,
+  "value_projection": {
+    "kind": "forall",
+    "ty": {
+      "kind": "var",
+      "name": "a"
+    },
+    "vars": [
+      "a"
+    ]
+  },
+  "wrapper_value_projection": {
+    "kind": "forall",
+    "ty": {
+      "kind": "var",
+      "name": "a"
+    },
+    "vars": [
+      "a"
+    ]
+  },
+  "value_projection_blake3": "5b96772cc1993b1ac58edfb37b848c8e8594c7b2f0796db1ee8feedba25138d4",
+  "ordered_spend_trace": [],
+  "status": "exact",
+  "subject": {
+    "backend": "Rust/LALRPOP",
+    "adapter_source_blake3": "64e962d53f6c8f8f000524f66f2b1a5d13105448cb243292955507a9c36ea1ec",
+    "adapter_executable_blake3": "48d37d7d2fcec473d374d873307dd412ba2e0085a519a34bc94536d2d5ef50e0"
+  }
+}

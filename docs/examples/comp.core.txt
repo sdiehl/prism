@@ -1,14 +1,14 @@
 fn main() =
-  return 1 to t@735
-  return 6 to t@736
-  srange(t@735, t@736) to t@737
+  return 1 to t@731
+  return 6 to t@732
+  srange(t@731, t@732) to t@733
   thunk { \x.
-    return x to t@738
-    return x to t@739
-    t@738 * t@739
-  } to t@740
-  smap(t@737, t@740) to t@741
-  scollect(t@741) to t@742
-  Data.Foldable.sum$sp2(t@742) to t@744
-  print t@744 to t@745
+    return x to t@734
+    return x to t@735
+    t@734 * t@735
+  } to t@736
+  smap(t@733, t@736) to t@737
+  scollect(t@737) to t@738
+  Data.Foldable.sum$sp2(t@738) to t@740
+  print t@740 to t@741
   print_nl

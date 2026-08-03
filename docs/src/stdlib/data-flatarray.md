@@ -12,7 +12,7 @@ The buffers underneath follow the array's rc==1 in-place / shared-copy disciplin
 
 ### `FlatArray`
 
-```prism,def,h-88a9dbc4cd593e854c810e0fd697c3dc7cfe05095734ec0b699841779d8f0283
+```prism,def,h-5df9d0661f86eafd6aeae2d3dbf87b1779d0884846ada41a5a8d103aa6540c0c
 type FlatArray(a) = FloatArr(FloatBuf) | IntArr(IntBuf)
 ```
 
@@ -22,7 +22,7 @@ A dense array of unboxed one-word elements. The payload variant is chosen by the
 
 ### `FlatElem`
 
-```prism,def,h-2e352f9167118cc4af3eacac5fa9d1dba7a1ebe843d837abda11f193a0cbc7aa
+```prism,def,h-cfac2908a46f306c9d4a25d2785683bc2e2c71ae8f975ce147866d050d2485c9
 class FlatElem(a)
   fa_new : (Int, a) -> FlatArray(a)
   fa_get : (FlatArray(a), Int) -> a ! {Fail}
@@ -43,13 +43,13 @@ fa_get(fa_set(fa_new(3, 0.0), 1, 9.0), 1)
 
 ### `flatFloat`
 
-```prism,def,h-82a473a2c2358553282458e7ebdc2e7fb142aa46a98b6ee022240885ab29927d
+```prism,def,h-b57e6e582b0b9082cd4a59c44524b932892d9372116e21df05223ec739da94ef
 instance flatFloat : FlatElem(Float)
 ```
 
 ### `flatI64`
 
-```prism,def,h-223303210a287dfacdafa4509bcbc4e64a53f8580498b02abf1d3fd374a75543
+```prism,def,h-0b1e24fd63a87e2c3884e8aeb2e3e59e88c690221b3727fa9a8f60076e79ef1c
 instance flatI64 : FlatElem(I64)
 ```
 
@@ -57,7 +57,7 @@ instance flatI64 : FlatElem(I64)
 
 ### `fa_len`
 
-```prism,sig,h-0c78456be04f47e9b8a639f0dbf21d1aebf4b5cd0b4a64d9a838358b91e5ccaf
+```prism,sig,h-2424a832724829151297f9dad20c90da34288235b6b5335e300c239617e46679
 fa_len : forall a. (Data.FlatArray.FlatArray(a)) -> Int
 ```
 

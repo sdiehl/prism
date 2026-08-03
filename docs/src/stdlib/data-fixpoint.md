@@ -14,7 +14,7 @@ Termination. Every update joins into the previous value (`fix_least` never repla
 
 ### `Semilattice`
 
-```prism,def,h-21de280de9f13148195870531c2f0fdd2fbfb969f781f4465795245e5fb898b8
+```prism,def,h-9f2bffed8a9a478d33ed6e9cce61f20f18297a4f6219327152b1cd37b087be2f
 class Semilattice(a)
   lat_bottom : () -> a
   lat_join : (a, a) -> a
@@ -35,7 +35,7 @@ Instance resolution keys on the head type constructor, so a carrier admits exact
 
 ### `latUnit`
 
-```prism,def,h-dfea11703d95762e24331cb23387b0641c934df6a38ccc58b07be7db11d6eec2
+```prism,def,h-12d7f1b406b0694438ab052f1c7c313943c778add346d0ec861255d9c5db1bb0
 instance latUnit : Semilattice(Unit)
 ```
 
@@ -43,7 +43,7 @@ The one-point lattice. Trivial on its own; it is the payload that turns the map 
 
 ### `latBool`
 
-```prism,def,h-4739ba7b91fe921e56f599c3238300c16785f41292c780ad77536f320b0e6473
+```prism,def,h-58fb088c4710165d70c542f1ef3eeb8df9c2b4bd97025052f21d7e9d091fb945
 instance latBool : Semilattice(Bool)
 ```
 
@@ -51,7 +51,7 @@ Disjunction, ordered `false` below `true`: the carrier a reachability or "is thi
 
 ### `latOption`
 
-```prism,def,h-e3bcc2619b8ecc95c7918e41e1c3a52f1ea93807ca756789d9b314736c9e6936
+```prism,def,h-89c73b22edefa2444671a0d347b04345d7638f2f2b4f06ff4902ecc62dd8aaa3
 instance latOption : Semilattice(Option(a))
 ```
 
@@ -59,7 +59,7 @@ The lifted lattice: `None` strictly below every `Some`, and two `Some`s joined u
 
 ### `latPair`
 
-```prism,def,h-3b82cfdf36e292e4b4f2aa875eb8ce1ca9b92805e4332832604dd7ccd07b27a0
+```prism,def,h-7b2ce22f61e66797cb2374416e00aff5c03a2febc4156d5911014681281914dd
 instance latPair : Semilattice((a, b))
 ```
 
@@ -67,7 +67,7 @@ The product lattice: componentwise join, componentwise order. Two analyses run a
 
 ### `latMap`
 
-```prism,def,h-e23d22ca8c5fab7daa31f9a2d5e7c884056f925cc50bebfb06a46e289d326462
+```prism,def,h-93d5cd965e9035c82761c88f142588fdcff34fcbca3b3ab8029588a0b339871d
 instance latMap : Semilattice(Map(k, v, ord))
 ```
 
@@ -77,7 +77,7 @@ The partial-map lattice: the empty map is bottom, an absent key is strictly belo
 
 ### `lat_joins`
 
-```prism,sig,h-b7629e1ff69c25202a012847b6287193974fc1e49d7324a82194f734ffd6bded
+```prism,sig,h-2c2de2be590f83a9f3074b16cc234251e50932e7b8e9192d3da307d3968df74e
 lat_joins : forall a. (List(a)) -> a
 ```
 
@@ -93,7 +93,7 @@ true
 
 ### `lat_equiv`
 
-```prism,sig,h-66041a58a39c91a9cb25bfb50e7f63f50d89de3efff321f428069b3118b2b360
+```prism,sig,h-d9e19bdebf71362529c9b30efefd037a995b99694c0b0df67353a01d88b23b0b
 lat_equiv : forall a. (a, a) -> Bool
 ```
 
@@ -109,23 +109,45 @@ true
 
 ### `fix_at`
 
-```prism,sig,h-bf0f7247abb6cd10e989bd2efa04dcc48eff420200eaaf9428ea657dedc0de2d
+```prism,sig,h-1570bacda3bdd1e964142bf2dfeb67765a4e97d78954a4aee093719f7a5cd7f0
 fix_at : forall a b c. (Map(b, c, a), b) -> c
 ```
 
 The value assigned to `key`, or bottom when the assignment says nothing about it. A transfer function reads its dependencies through this rather than matching on `map_lookup`, so an unmentioned node reads as the least element instead of an `Option` the caller has to decide about.
 
+```prism,mod=Data.Fixpoint
+(
+  fix_at(map_from_list([("seen", true)]), "seen"),
+  fix_at(map_from_list([("other", false)]), "missing"),
+)
+```
+
+```output
+(true, false)
+```
+
 ### `fix_budget`
 
-```prism,sig,h-43e04da46d8c71b1b11430cb641f0ae38fb08230280092b9019537beb6f45ccf
+```prism,sig,h-2e596cd9e30eba15482af2ff808f538a2e9c60e34cbf71d5a13242be1f8c3769
 fix_budget : forall a b c d. (Map(c, d, a), Map(c, List(c), b)) -> Int
 ```
 
 The default visit budget: `(n + 1) * (n + e + 1)` for `n` nodes and `e` dependency edges. It bounds the visits a solve over a carrier of height at most `n` can take, which covers the archetypal carrier (a set drawn from the node set itself) with room to spare. A taller carrier belongs in `fix_least_within` with a budget the caller can justify.
 
+```prism,mod=Data.Fixpoint
+fix_budget(
+  map_from_list([("a", false), ("b", false)]),
+  map_from_list([("a", ["b"])]),
+)
+```
+
+```output
+12
+```
+
 ### `fix_least`
 
-```prism,sig,h-138fa1f9b404eb439d836c6574313e6d784434f505fce5df597b7e8e0db92e8e
+```prism,sig,h-56af46602ca3b725cd455256261d2daaf4990e3ab97925960135f2fcc8731942
 fix_least : forall e0 a b c d. (Map(c, d, a), Map(c, List(c), b), (c, Map(c, d, a)) -> d ! {Fail, e0}) -> Map(c, d, a) ! {Fail, e0}
 ```
 
@@ -149,15 +171,30 @@ fix_least(
 
 ### `fix_least_within`
 
-```prism,sig,h-2dcbb6a9d44b46c05671bfb9abe7f60dd6613610e55c048a83b2fbd0a75c8497
+```prism,sig,h-cbbcee5b696259cb02e6b5ec9e827204dbf300942f4302d026f2cbbd0c98b5af
 fix_least_within : forall e0 a b c d. (Int, Map(c, d, a), Map(c, List(c), b), (c, Map(c, d, a)) -> d ! {Fail, e0}) -> Map(c, d, a) ! {Fail, e0}
 ```
 
 `fix_least` with an explicit visit budget. `fail()` when the budget is exhausted: the solve is abandoned rather than reported at whatever assignment it had reached, since a partial answer to a least-fixpoint question is a wrong answer, not an approximate one.
 
+```prism,mod=Data.Fixpoint
+succeeds(\() ->
+  fix_least_within(
+    0,
+    map_from_list([("a", false)]),
+    map_empty,
+    \(_key, _cur) -> true,
+  ),
+)
+```
+
+```output
+false
+```
+
 ### `fix_propagate`
 
-```prism,sig,h-b23de22f3feacc419e116a21eff852c51d49471f3d4af73c3cc61d62f9b5194c
+```prism,sig,h-792f0fb598f68aff38e339277423873b323d16ee51a619b372971aa8d70060e4
 fix_propagate : forall a b c d e. (Map(d, e, a), Map(d, List(d), b)) -> Map(d, e, c) ! {Fail}
 ```
 

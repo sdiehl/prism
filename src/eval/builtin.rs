@@ -38,6 +38,16 @@ pub(super) fn big_of_str(s: &str) -> Option<BigInt> {
     t.parse().ok()
 }
 
+/// The language's strict float grammar: trim ASCII whitespace, then require the
+/// whole remainder to be one Rust decimal/special float lexeme. In particular,
+/// Unicode-only whitespace, hexadecimal floats, and `nan(payload)` are refused.
+/// The C runtime validates the same boundary before calling `strtod`.
+fn float_of_str(s: &str) -> Option<f64> {
+    s.trim_matches(|c: char| c.is_ascii_whitespace())
+        .parse()
+        .ok()
+}
+
 /// Builds the `Result(Unit, String)` ADT value the file builtins return,
 /// matching the `Ok`/`Err` cells the native runtime constructs.
 fn file_result(r: std::io::Result<()>) -> Rv {
@@ -356,9 +366,7 @@ pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv
         (B::Atan2, [Rv::Float(a), Rv::Float(b)]) => Ok(Rv::Float(owned_math::atan2(*a, *b))),
         (B::Hypot, [Rv::Float(a), Rv::Float(b)]) => Ok(Rv::Float(owned_math::hypot(*a, *b))),
         (B::Fmod, [Rv::Float(a), Rv::Float(b)]) => Ok(Rv::Float(owned_math::fmod(*a, *b))),
-        // Strict full-consume parse: trailing garbage and hex yield 0.0, matching
-        // `prism_parse_float` in the runtime (see its note on the strtod divergence).
-        (B::ParseFloat, [Rv::Str(s)]) => Ok(Rv::Float(s.trim().parse::<f64>().unwrap_or(0.0))),
+        (B::ParseFloat, [Rv::Str(s)]) => Ok(Rv::Float(float_of_str(s).unwrap_or(0.0))),
         (B::Substring, [Rv::Str(s), Rv::Int(start), Rv::Int(len)]) => {
             let st = usize::try_from(*start).unwrap_or(0);
             let take = usize::try_from(*len).unwrap_or(0);
@@ -442,11 +450,11 @@ pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv
                 .and_then(|s| s.code())
                 .unwrap_or(-1),
         ))),
-        (B::Eprint, [Rv::Str(s)]) => {
-            eprint!("{s}");
-            let _ = std::io::stderr().flush();
-            Ok(Rv::Unit)
-        }
+        // `eprint` is intercepted in `step` (it is an output observation, emitted
+        // through the tape so the write is recorded), so it never reaches the
+        // value-returning builtin path. A second copy of the write here would be
+        // an unrecorded one.
+        (B::Eprint, _) => Err("eprint: unexpected argument".into()),
         (B::ArgsCount, []) => Ok(Rv::Int(i64::try_from(args.len()).unwrap_or(0))),
         // Clock reads, in nanoseconds, matching the C runtime. Both are recorded
         // capability observations (see `capability_obs`), so the live value here
@@ -945,4 +953,20 @@ const fn ord(o: Ordering) -> Rv {
         Ordering::Equal => 0,
         Ordering::Greater => 1,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::float_of_str;
+
+    #[test]
+    fn strict_float_parser_accepts_only_complete_rust_lexemes() {
+        assert_eq!(float_of_str(" \t\n\u{c}\r 1.25 "), Some(1.25));
+        assert!(float_of_str("+inf").is_some_and(f64::is_infinite));
+        assert!(float_of_str("\u{b}1.25").is_none());
+        assert!(float_of_str("\u{a0}1.25").is_none());
+        assert!(float_of_str("0x1p4").is_none());
+        assert!(float_of_str("nan(payload)").is_none());
+        assert!(float_of_str("1.25\0ignored").is_none());
+    }
 }

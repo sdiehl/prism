@@ -1,0 +1,1 @@
+fn corpus(a : I64, b : U64, c : Unit, d : Float, e : Char, f : String, g : Int := 0) = 0

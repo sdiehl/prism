@@ -1,11 +1,10 @@
 //! The gentle simplifier for typed Core: fixed-point local rewrites that
 //! preserve every result/effect witness through each reduction.
 //!
-//! Mirrors [`super::super::opt::simplify::simplify_counted`] rule-for-rule:
-//! case-of-known-constructor, trivial copy-propagation, dead-let elimination,
-//! constant folding, used-once-thunk inlining, and bounded case-of-case. The
-//! typed-specific difference is representation transparency: unlike legacy
-//! Core, a [`TypedValueKind::Reinterpret`], [`TypedValueKind::LoweredRepr`], or
+//! The rule set is case-of-known-constructor, trivial copy-propagation,
+//! dead-let elimination, constant folding, used-once-thunk inlining, and
+//! bounded case-of-case. Typed Core adds representation transparency: a
+//! [`TypedValueKind::Reinterpret`], [`TypedValueKind::LoweredRepr`], or
 //! [`TypedValueKind::NewtypeRepr`] wrapper still surrounds its inner value at
 //! this phase (it erases away only at [`TypedCore::erase`]). Every
 //! classification decision below therefore looks through such a wrapper via
@@ -15,6 +14,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::core::builtins::Builtin;
 use crate::core::CoreOp;
 use crate::types::ty::EffRow;
 use prism_common::sym::Sym;
@@ -28,7 +28,7 @@ use super::{
 };
 
 // A runaway guard: a correct fixed point converges far below this, so exceeding
-// it means a rewrite is fighting itself. Matches the legacy bound exactly.
+// it means a rewrite is fighting itself.
 const MAX_TICKS: u64 = 5_000_000;
 
 /// Rewrite counts for typed simplification.
@@ -45,6 +45,11 @@ impl SimplifyStats {
 }
 
 /// Simplify typed Core to a fixed point, preserving every witness.
+///
+/// # Errors
+/// [`TypedCoreSimplifyFailure::RunawayRewrite`] when the rewrite count passes
+/// the runaway guard, which means a rule is fighting itself rather than
+/// converging.
 pub fn simplify<P>(
     core: TypedCore<P>,
 ) -> Result<(TypedCore<P>, SimplifyStats), TypedCoreSimplifyFailure> {
@@ -297,6 +302,28 @@ fn const_fold(op: CoreOp, a: &TypedValue, b: &TypedValue) -> Option<TypedValueKi
         CoreOp::Rem if y != 0 => imm(x.wrapping_rem(y)),
         _ => None,
     }
+}
+
+// `byte_at` is a byte operation, not a Unicode-codepoint operation. Folding a
+// literal therefore indexes `str::as_bytes`, including UTF-8 continuation
+// bytes, and preserves the runtime's `-1` result for every invalid index.
+fn const_fold_byte_at(op: Builtin, args: &[TypedValue]) -> Option<TypedValueKind> {
+    if op != Builtin::ByteAt {
+        return None;
+    }
+    let [text, index] = args else {
+        return None;
+    };
+    let (TypedValueKind::Str(text), TypedValueKind::Int(index)) =
+        (&peel(text).kind, &peel(index).kind)
+    else {
+        return None;
+    };
+    let byte = usize::try_from(*index)
+        .ok()
+        .and_then(|index| text.as_bytes().get(index))
+        .map_or(-1, |byte| i64::from(*byte));
+    Some(TypedValueKind::Int(byte))
 }
 
 // The selected arm: bind each matched field with its declared type, then the
@@ -641,6 +668,32 @@ impl Rewrite for Simplifier {
                     TypedComp::new(comp.sig.clone(), TypedCompKind::Prim(*op, a2, b2))
                 }
             }
+            TypedCompKind::StrBuiltin {
+                op,
+                instantiation,
+                args,
+            } => {
+                let args2 = args
+                    .iter()
+                    .map(|arg| self.value(arg, env))
+                    .collect::<Vec<_>>();
+                if let Some(folded) = const_fold_byte_at(*op, &args2) {
+                    self.ticks += 1;
+                    TypedComp::new(
+                        comp.sig.clone(),
+                        TypedCompKind::Return(TypedValue::new(comp.sig.result.clone(), folded)),
+                    )
+                } else {
+                    TypedComp::new(
+                        comp.sig.clone(),
+                        TypedCompKind::StrBuiltin {
+                            op: *op,
+                            instantiation: instantiation.clone(),
+                            args: args2,
+                        },
+                    )
+                }
+            }
             _ => self.descend_comp(comp, env),
         }
     }
@@ -686,6 +739,10 @@ mod tests {
 
     fn int(n: i64) -> TypedValue {
         TypedValue::new(source(Type::Int), TypedValueKind::Int(n))
+    }
+
+    fn string(value: &str) -> TypedValue {
+        TypedValue::new(source(Type::Str), TypedValueKind::Str(value.to_string()))
     }
 
     fn ret(v: TypedValue) -> TypedComp {
@@ -762,6 +819,7 @@ mod tests {
             ctors,
             warning: _,
             strategy,
+            confined_decline: _,
         } = lower_effects(input, &env, &BTreeMap::new(), &flags, &OpGrades::new())
             .expect("fixture lowers through the production effect ABI");
         assert_eq!(strategy, EffectStrategy::SelectiveFreeMonad);
@@ -1072,6 +1130,60 @@ mod tests {
                 TypedValueKind::Float(4.0)
             ))
         );
+    }
+
+    // `byte_at` indexes UTF-8 bytes and returns `-1` outside the literal. These
+    // are the native runtime's exact semantics, including continuation bytes.
+    #[test]
+    fn const_folds_byte_at_over_literal_strings() {
+        let env = VerifyEnv::new();
+        for (index, expected) in [(-1, -1), (0, 0xc3), (1, 0xa9), (2, -1)] {
+            let body = TypedComp::new(
+                pure(source(Type::Int)),
+                TypedCompKind::StrBuiltin {
+                    op: Builtin::ByteAt,
+                    instantiation: Vec::new(),
+                    args: vec![string("é"), int(index)],
+                },
+            );
+            let (actual, ticks) = run_simplify(one_fn(body), &env);
+            assert_eq!(ticks, 1);
+            assert_eq!(
+                actual.functions()[0].body().kind(),
+                &TypedCompKind::Return(int(expected))
+            );
+        }
+    }
+
+    // A dynamic index retains the builtin while still simplifying its literal
+    // arguments; the fold fires only when both inputs are known.
+    #[test]
+    fn byte_at_with_dynamic_index_does_not_fold() {
+        let env = VerifyEnv::new();
+        let body = TypedComp::new(
+            pure(source(Type::Int)),
+            TypedCompKind::StrBuiltin {
+                op: Builtin::ByteAt,
+                instantiation: Vec::new(),
+                args: vec![string("abc"), var("index", source(Type::Int))],
+            },
+        );
+        let functions = vec![TypedCoreFn::new(
+            sym("f"),
+            vec![TypedBinder::new(sym("index"), source(Type::Int))],
+            body.clone(),
+            CoreFnSig::new(Vec::new(), vec![source(Type::Int)], body.sig),
+            0,
+        )];
+        let (actual, ticks) = run_simplify(functions, &env);
+        assert_eq!(ticks, 0);
+        assert!(matches!(
+            actual.functions()[0].body().kind(),
+            TypedCompKind::StrBuiltin {
+                op: Builtin::ByteAt,
+                ..
+            }
+        ));
     }
 
     // `let t = thunk(...) in let r = force t in r` inlines the thunk body

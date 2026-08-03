@@ -19,13 +19,17 @@ pub mod abi;
 pub mod analysis;
 pub mod arena;
 mod checks;
+pub mod decline;
 pub mod diagnostics;
 mod erase_control;
 mod erase_var;
 pub mod evidence;
+#[cfg(test)]
+pub mod fixtures;
 pub mod flow;
 pub mod latent;
 pub mod monadic;
+pub mod plan;
 pub mod residual;
 pub mod state;
 mod subtract;
@@ -36,7 +40,7 @@ use crate::core::effect_abi::{
     add_synthetic_ctor, EBIND, EBOUNCE, EOP, EPURE, ERESUME, QAPPLY, SDONE, SMORE, TQCONS, TQNIL,
 };
 use crate::core::{EffectStrategy, OpGrades};
-use crate::flags::{DynFlags, EffectTier};
+use crate::flags::DynFlags;
 use crate::types::ty::{EffRow, Label};
 use crate::types::{CtorInfo, Type};
 use prism_common::sym::Sym;
@@ -50,12 +54,16 @@ use super::{
     CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, EffectLowered, Elaborated, TypedBinder,
     TypedComp, TypedCompKind, TypedCore, TypedCoreFn, TypedPattern, TypedValue, TypedValueKind,
 };
+use decline::Decline;
 use diagnostics::DriftLog;
+pub use plan::{raw_effects, EffectPlan};
 
-/// A verified lowering: the `EffectLowered` program, the environment it
-/// verifies under, the constructor table extended with any synthetics the
-/// taken strategy introduced, the free-monad fallback warning (if any), and
-/// the strategy label the cascade decided.
+/// A verified lowering.
+///
+/// The `EffectLowered` program, the environment it verifies under, the
+/// constructor table extended with any synthetics the taken strategy
+/// introduced, the free-monad fallback warning (if any), and the strategy label
+/// the cascade decided.
 #[derive(Debug)]
 pub struct TypedLowering {
     pub core: TypedCore<EffectLowered>,
@@ -63,12 +71,21 @@ pub struct TypedLowering {
     pub ctors: BTreeMap<String, CtorInfo>,
     pub warning: Option<String>,
     pub strategy: EffectStrategy,
+    /// Why a confined region was refused before this strategy was taken, when
+    /// one was attempted and refused. The plan artifact renders it, so a tier
+    /// nobody expected can be read back to the shape that caused it.
+    pub confined_decline: Option<Decline>,
 }
+
+/// One monadification attempt: the lowering it produced, or the refusal that
+/// tells the caller to widen the plan.
+type Attempt = Result<Decision, Decline>;
 
 /// What the cascade decided.
 ///
 /// The cascade is the single source of truth for both classification and the
 /// lowering it selects, so a second classifier cannot drift from production.
+#[derive(Debug)]
 pub enum Decision {
     Lowered(Box<TypedLowering>),
 }
@@ -91,8 +108,10 @@ pub fn lower_effects(
 }
 
 /// The strategy the cascade recognizes for `core`, or `None` when it declines
-/// without classifying. Reads the one cascade rather than re-deciding, so a
-/// recognized strategy cannot drift from the lowering that produced it.
+/// without classifying.
+///
+/// Reads the one cascade rather than re-deciding, so a recognized strategy
+/// cannot drift from the lowering that produced it.
 ///
 /// # Errors
 /// As [`lower_effects`].
@@ -117,12 +136,19 @@ pub fn recognized_strategy(
 /// about this tree, not the source one, so anything that asks it has to start
 /// here. Answering from the un-prepared tree is a different question with a
 /// different answer.
+#[derive(Debug)]
 pub struct Prepared {
     pub fns: Vec<TypedCoreFn>,
     pub env: VerifyEnv,
     pub ctors: BTreeMap<String, CtorInfo>,
 }
 
+/// Narrow an elaborated program to what effect lowering must see: the
+/// functions reachable from the entry point, with the environment and
+/// constructor table they verify under.
+///
+/// # Errors
+/// As [`lower_effects`].
 pub fn prepare(
     core: TypedCore<Elaborated>,
     env: &VerifyEnv,
@@ -156,19 +182,23 @@ pub fn prepare(
 
     // Erase escape-checked local `var` state to mutable cells before strategy
     // selection, so a var-only program has no residual effects and classifies
-    // pure. The free-monad tier cap deliberately selects the general path.
-    // Loop-control erasure follows before classification so recognized control
-    // handlers do not leave raw effect nodes.
-    let (fns, used_step) = if flags.effect_tier == EffectTier::FreeMonad {
-        (fns, false)
-    } else {
-        let vars_gone = erase_var::erase_local_vars(&fns, grades, &env);
+    // pure. Loop-control erasure follows before classification so recognized
+    // control handlers do not leave raw effect nodes. Turning the erasures off
+    // is its own knob position, independent of the cascade floor, so a forced
+    // divergence names one of the two rather than both at once.
+    let (fns, used_step) = if flags.erasures {
+        let vars_gone = erase_var::erase_local_vars(&fns, grades, &EffectPlan::analyze(&fns), &env);
         // Erase loop-control effects to direct control flow next, so a
         // recognized loop's control ops are gone before the strategy cascade
         // classifies the residual: a pure imperative loop then classifies
-        // pure rather than reifying into the free monad.
-        let erased = erase_control::erase_control(&vars_gone);
+        // pure rather than reifying into the free monad. A plan is a fact
+        // about one tree, so this one is recomputed: on the vars-gone tree an
+        // erased `var` no longer reads as a latent effect that would make an
+        // otherwise pure loop body look foreign.
+        let erased = erase_control::erase_control(&vars_gone, &EffectPlan::analyze(&vars_gone));
         (erased.fns, erased.used_step)
+    } else {
+        (fns, false)
     };
     // The `SMore`/`SDone` constructors a `return` erasure threads must be on
     // the tables for every path below, the verifier's included.
@@ -186,6 +216,10 @@ pub fn prepare(
 
 /// Assign operation ids once from the whole prepared program. Strategies may
 /// lower disjoint subsets, but every subset keeps these ABI-visible numbers.
+///
+/// # Errors
+/// [`TypedCoreEffectLoweringFailure::Internal`] when the program declares more
+/// operations than an `i64` can number.
 pub fn operation_ids(
     fns: &[TypedCoreFn],
 ) -> Result<evidence::OpIds, TypedCoreEffectLoweringFailure> {
@@ -198,9 +232,11 @@ pub fn operation_ids(
     })
 }
 
-/// The threaded program with its witnesses intact, plus the environment it
-/// must verify under in its final phase, for the verifier-activation tests:
-/// this exposes the State phase builder directly while keeping its witnesses.
+/// The threaded program with its witnesses intact, plus the environment it must
+/// verify under in its final phase.
+///
+/// For the verifier-activation tests: this exposes the State phase builder
+/// directly while keeping its witnesses.
 ///
 /// # Errors
 /// As [`lower_effects`].
@@ -254,23 +290,25 @@ fn cascade(
     let ctors = &prepared.ctors;
 
     if !fns.iter().any(|f| raw_effects(f.body())) {
-        return lowered(fns, env, ctors, None, EffectStrategy::Pure);
+        return lowered(fns, env, ctors, None, EffectStrategy::Pure, None);
     }
 
     // The evidence rung: the Identity answer, tried first because it reifies
-    // the least. It fully succeeds or declines with no state to undo. The
-    // `State` tier cap skips it to request the State rung directly.
+    // the least. It fully succeeds or declines with no state to undo. A floor
+    // above it skips it to request a later rung directly.
     let ops = operation_ids(&fns)?;
     let latent = latent::latent_map(&fns);
     let thunk_flow = flow::analyze(&fns, &latent);
-    let state_analysis = state::StateAnalysis::new(&ops, &latent, &thunk_flow, env);
+    let plan = EffectPlan::from_parts(&fns, latent, thunk_flow);
+    let (latent, thunk_flow) = (plan.latent(), plan.flow());
+    let state_analysis = state::StateAnalysis::new(&ops, latent, thunk_flow, env);
     let drift = DriftLog::new(flags.quiet);
     let mut fresh = prism_common::fresh::Fresh::new();
-    if flags.effect_tier == EffectTier::Auto {
+    if flags.effect_tier.admits(EffectStrategy::Evidence) {
         if let Some(threaded) =
-            evidence::try_lower_ev(&fns, &latent, &thunk_flow, &ops, env, &drift, &mut fresh)
+            evidence::try_lower_ev(&fns, latent, thunk_flow, &ops, env, &drift, &mut fresh)
         {
-            return lowered(threaded, env, ctors, None, EffectStrategy::Evidence);
+            return lowered(threaded, env, ctors, None, EffectStrategy::Evidence, None);
         }
     }
 
@@ -282,7 +320,7 @@ fn cascade(
     // comes first, then the value-coincidence the threading runs under. Both
     // fall through to the next rung rather than failing, because a decline here
     // is a program this engine does not fit, not a defect.
-    if flags.effect_tier != EffectTier::FreeMonad {
+    if flags.effect_tier.admits(EffectStrategy::StateFusion) {
         if let Some(plan) = state::fold_uniform(&fns, &state_analysis) {
             if state::threads(&plan, &fns, &state_analysis) {
                 if let Some(threaded) =
@@ -297,6 +335,7 @@ fn cascade(
                         &lowered_ctors,
                         None,
                         EffectStrategy::StateFusion,
+                        None,
                     );
                 }
             }
@@ -305,10 +344,9 @@ fn cascade(
 
     let analysis = LoweringAnalysis {
         ops: &ops,
-        latent: &latent,
-        flow: &thunk_flow,
+        plan: &plan,
     };
-    if flags.effect_tier != EffectTier::FreeMonad {
+    if flags.effect_tier.admits(EffectStrategy::LocalPartial) {
         if let Some(local) = try_local_partial(&fns, env, ctors, &analysis, &drift, &mut fresh)? {
             return Ok(local);
         }
@@ -321,12 +359,26 @@ fn cascade(
     monadic_fallback(&fns, env, ctors, flags, &analysis, &mut fresh)
 }
 
+/// What every rung below the evidence engine reads: the operation numbering the
+/// whole prepared program shares, and the one plan that answers reachability and
+/// purity for it.
+#[derive(Debug)]
 pub struct LoweringAnalysis<'a> {
     pub ops: &'a evidence::OpIds,
-    pub latent: &'a latent::Latent,
-    pub flow: &'a flow::ThunkFlow,
+    pub plan: &'a EffectPlan,
 }
 
+impl LoweringAnalysis<'_> {
+    const fn latent(&self) -> &latent::Latent {
+        self.plan.latent()
+    }
+
+    const fn flow(&self) -> &flow::ThunkFlow {
+        self.plan.flow()
+    }
+}
+
+#[derive(Debug)]
 pub struct LocalPartialArtifacts {
     pub fns: Vec<TypedCoreFn>,
     pub env: VerifyEnv,
@@ -425,13 +477,14 @@ fn instantiate_local_entry_calls(
     rewrite.error.map_or(Ok(()), Err)
 }
 
+#[derive(Debug)]
 pub struct LocalSplit<'a> {
     pub region: &'a BTreeSet<Sym>,
     pub entries: &'a BTreeSet<Sym>,
 }
 
 #[cfg(any(test, feature = "test-hooks"))]
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LocalDeclinePoint {
     AfterRestFusion,
     AfterBoundaryAssembly,
@@ -473,8 +526,7 @@ fn try_local_partial(
     drift: &DriftLog,
     fresh: &mut prism_common::fresh::Fresh,
 ) -> Result<Option<Decision>, TypedCoreEffectLoweringFailure> {
-    let Some((region, entries)) = analysis::local_region(fns, analysis.latent, analysis.flow)
-    else {
+    let Some((region, entries)) = analysis::local_region(fns, analysis.plan) else {
         return Ok(None);
     };
     if region.contains(&Sym::from(ENTRY_POINT)) {
@@ -487,8 +539,8 @@ fn try_local_partial(
         .collect();
     let fused = if let Some(fused) = evidence::try_lower_ev(
         &rest,
-        analysis.latent,
-        analysis.flow,
+        analysis.latent(),
+        analysis.flow(),
         analysis.ops,
         env,
         drift,
@@ -497,7 +549,7 @@ fn try_local_partial(
         fused
     } else {
         let state_analysis =
-            state::StateAnalysis::new(analysis.ops, analysis.latent, analysis.flow, env);
+            state::StateAnalysis::new(analysis.ops, analysis.latent(), analysis.flow(), env);
         let Some(plan) = state::fold_uniform(&rest, &state_analysis) else {
             return Ok(None);
         };
@@ -531,10 +583,19 @@ fn try_local_partial(
         &artifacts.ctors,
         artifacts.warning,
         EffectStrategy::LocalPartial,
+        None,
     )
     .map(Some)
 }
 
+/// Assemble the confined-region artifact: the lowered region, the fused rest
+/// re-instantiated against the region's entry signatures, and the runtime the
+/// pair needs installed.
+///
+/// # Errors
+/// [`TypedCoreEffectLoweringFailure::Internal`] when the residual rows cannot
+/// be planned, the region cannot be lowered, or a call across the split cannot
+/// be re-instantiated at the entry's new signature.
 pub fn assemble_local_partial(
     fns: &[TypedCoreFn],
     mut fused: Vec<TypedCoreFn>,
@@ -563,8 +624,14 @@ pub fn assemble_local_partial(
     fused.push(abi::qapply_fn());
     monadic_names.extend([Sym::from(EBIND), Sym::from(QAPPLY)]);
     let refs: Vec<&TypedCoreFn> = fused.iter().collect();
-    if checks::check_convention_boundaries(&fused, &refs, &monadic_names, true, split.entries)
-        .is_err()
+    if checks::check_convention_boundaries(
+        &fused,
+        &refs,
+        &monadic_names,
+        checks::ThunkRule::AllMonadic,
+        split.entries,
+    )
+    .is_err()
     {
         return Ok(None);
     }
@@ -574,10 +641,19 @@ pub fn assemble_local_partial(
         fns: fused,
         env: lowered_env,
         ctors: lowered_ctors,
-        warning: diagnostics::free_monad_warning(fns, split.region, analysis.latent),
+        warning: diagnostics::free_monad_warning(fns, split.region, analysis.plan, None),
     }))
 }
 
+/// Run the free-monad rungs of the cascade.
+///
+/// The confined attempt goes first (unless the tier floor rules it out), then
+/// the whole-program one, which carries the confined refusal into its artifact
+/// and its warning.
+///
+/// # Errors
+/// [`TypedCoreEffectLoweringFailure::Internal`] when the whole-program builder
+/// declines too, since nothing is left to widen to.
 pub fn monadic_fallback(
     fns: &[TypedCoreFn],
     env: &VerifyEnv,
@@ -586,54 +662,116 @@ pub fn monadic_fallback(
     analysis: &LoweringAnalysis<'_>,
     fresh: &mut prism_common::fresh::Fresh,
 ) -> Result<Decision, TypedCoreEffectLoweringFailure> {
-    let plan = analysis::plan(fns, analysis.latent, analysis.flow);
-    let mut warning_members = diagnostics::genuine_effects(analysis.latent);
-    for function in fns {
-        let mut thunks = Vec::new();
-        walk::thunks_in_comp(function.body(), &mut thunks);
-        if thunks.iter().any(|thunk| raw_effects(thunk)) {
-            warning_members.insert(function.name());
+    // A floor above the selective rung widens the plan to the whole program.
+    // That direction is always legal, which is why it is the forceable one:
+    // narrowing a program whose handlers escape would not be a cost decision.
+    let force_whole = !flags.effect_tier.admits(EffectStrategy::SelectiveFreeMonad);
+    let mut declined = None;
+    if !force_whole {
+        // A confined region is an optimization, so failing to build one is a
+        // cost outcome, not an error: the same program still has the
+        // whole-program lowering below it. Everything the confined attempt
+        // refuses (a direct force of a thunk the region owns, a convention
+        // boundary that does not verify) is refused precisely because the
+        // widened plan is the correct answer for it. The refusal is carried
+        // into the widened attempt so the artifact and the warning can say
+        // which shape cost the program its confined region.
+        match attempt_monadic(fns, env, ctors, flags, analysis, fresh, false, None)? {
+            Ok(decision) => return Ok(decision),
+            Err(refusal) => declined = Some(refusal),
         }
     }
-    let warning = diagnostics::free_monad_warning(fns, &warning_members, analysis.latent);
+    attempt_monadic(fns, env, ctors, flags, analysis, fresh, true, declined)?.map_err(|refusal| {
+        TypedCoreEffectLoweringFailure::Internal {
+            msg: format!("typed free-monad builder declined at whole-program scope: {refusal}"),
+        }
+    })
+}
+
+/// One monadification attempt at the requested scope. `Ok(Err(_))` reports a
+/// refusal the caller can answer by widening the plan; only a refusal at
+/// whole-program scope, where nothing is left to widen to, is an error.
+///
+/// `declined` is the refusal an earlier, narrower attempt reported, threaded in
+/// so the widened lowering can explain itself.
+#[allow(clippy::too_many_arguments)]
+fn attempt_monadic(
+    fns: &[TypedCoreFn],
+    env: &VerifyEnv,
+    ctors: &BTreeMap<String, CtorInfo>,
+    flags: &DynFlags,
+    analysis: &LoweringAnalysis<'_>,
+    fresh: &mut prism_common::fresh::Fresh,
+    force_whole: bool,
+    declined: Option<Decline>,
+) -> Result<Attempt, TypedCoreEffectLoweringFailure> {
+    let plan = analysis::plan(fns, analysis.plan, force_whole);
+    // Named in the warning: every function that still performs an operation,
+    // plus every one whose capture the thunk signatures could not describe,
+    // which is the fact that widens the region. A capture the signatures do
+    // describe is reached through instead of swallowed, so naming it would
+    // report a cost the program does not pay.
+    let mut warning_members = analysis.plan.genuine().clone();
+    warning_members.extend(analysis.plan.opaque_captures().iter().copied());
+    let warning = diagnostics::free_monad_warning(fns, &warning_members, analysis.plan, declined);
     let residual = residual::plan(fns, analysis.ops, env)
         .map_err(|msg| TypedCoreEffectLoweringFailure::Internal { msg })?;
-    let mut output = match plan.scope {
+    let whole = plan.scope == analysis::MonadicScope::WholeProgram;
+    let output = match plan.scope {
         analysis::MonadicScope::Selective => monadic::lower_selective(
             fns,
             analysis.ops,
             fresh,
             &residual,
-            &plan,
-            analysis.latent,
-            flags.native_effects,
+            &monadic::Region {
+                plan: &plan,
+                latent: analysis.latent(),
+                flow: analysis.flow(),
+                native_enabled: flags.native_effects,
+            },
         ),
         analysis::MonadicScope::WholeProgram => {
             monadic::lower_whole(fns, analysis.ops, fresh, &residual)
+                .ok_or_else(|| Decline::program(decline::Refusal::UnsupportedForm))
         }
-    }
-    .ok_or_else(|| TypedCoreEffectLoweringFailure::Internal {
-        msg: "typed free-monad builder declined after its convention plan committed".into(),
-    })?;
+    };
+    let mut output = match output {
+        Ok(output) => output,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
     output.push(abi::ebind_fn());
     output.push(abi::qapply_fn());
 
-    let monadic_members = if plan.scope == analysis::MonadicScope::WholeProgram {
+    let monadic_members = if whole {
         output.iter().map(TypedCoreFn::name).collect()
     } else {
         plan.members.clone()
     };
     let boundary_functions: Vec<&TypedCoreFn> = output.iter().collect();
-    checks::check_convention_boundaries(
+    let rule = if whole {
+        checks::ThunkRule::AllMonadic
+    } else {
+        checks::ThunkRule::PerThunk
+    };
+    if let Err(refusal) = checks::check_convention_boundaries(
         &output,
         &boundary_functions,
         &monadic_members,
-        plan.scope == analysis::MonadicScope::WholeProgram,
+        rule,
         &plan.entries,
-    )
-    .map_err(|msg| TypedCoreEffectLoweringFailure::Internal { msg })?;
+    ) {
+        // A confined region that does not verify is refused and rebuilt at
+        // whole-program scope. At whole-program scope there is nothing left to
+        // widen to, so the same failure is the compiler's own bug.
+        if !whole {
+            return Ok(Err(refusal));
+        }
+        return Err(TypedCoreEffectLoweringFailure::Internal {
+            msg: format!("monadification: {refusal}"),
+        });
+    }
 
-    if flags.trampoline && plan.scope == analysis::MonadicScope::WholeProgram {
+    if flags.trampoline && whole {
         output = trampoline::trampolinize(&output, fresh).ok_or_else(|| {
             TypedCoreEffectLoweringFailure::Internal {
                 msg: "typed trampoline declined after free-monad boundary verification".into(),
@@ -642,22 +780,21 @@ pub fn monadic_fallback(
         output.push(trampoline::prism_drive_fn());
     }
 
-    let (lowered_env, lowered_ctors) = install_monadic_runtime(
-        &output,
-        env,
-        ctors,
-        flags.trampoline && plan.scope == analysis::MonadicScope::WholeProgram,
-    );
+    let (lowered_env, lowered_ctors) =
+        install_monadic_runtime(&output, env, ctors, flags.trampoline && whole);
     lowered(
         output,
         &lowered_env,
         &lowered_ctors,
         warning,
-        match plan.scope {
-            analysis::MonadicScope::Selective => EffectStrategy::SelectiveFreeMonad,
-            analysis::MonadicScope::WholeProgram => EffectStrategy::WholeProgramFreeMonad,
+        if whole {
+            EffectStrategy::WholeProgramFreeMonad
+        } else {
+            EffectStrategy::SelectiveFreeMonad
         },
+        declined,
     )
+    .map(Ok)
 }
 
 fn install_monadic_runtime(
@@ -701,6 +838,7 @@ fn install_step_runtime(
     }
 }
 
+#[must_use]
 pub fn functions_use_constructor(functions: &[TypedCoreFn], wanted: &str) -> bool {
     functions
         .iter()
@@ -760,6 +898,7 @@ fn lowered(
     ctors: &BTreeMap<String, CtorInfo>,
     warning: Option<String>,
     strategy: EffectStrategy,
+    confined_decline: Option<Decline>,
 ) -> Result<Decision, TypedCoreEffectLoweringFailure> {
     let out = TypedCore::<EffectLowered>::new(fns);
     if let Err(violations) = verify(&out, env) {
@@ -776,6 +915,7 @@ fn lowered(
         ctors: ctors.clone(),
         warning,
         strategy,
+        confined_decline,
     })))
 }
 
@@ -802,59 +942,9 @@ fn reachable(fns: &[TypedCoreFn]) -> BTreeSet<Sym> {
     visited
 }
 
-// Whether any source effect node (`Do`/`Handle`/`Mask`) survives anywhere in
-// `c`, including inside thunks and constructor/tuple fields. Representation
-// wrappers are transparent to this shape query.
-pub fn raw_effects(c: &TypedComp) -> bool {
-    match c.kind() {
-        TypedCompKind::Do { .. } | TypedCompKind::Handle { .. } | TypedCompKind::Mask(..) => true,
-        TypedCompKind::Return(v)
-        | TypedCompKind::Force(v)
-        | TypedCompKind::Error(v)
-        | TypedCompKind::FloatBuiltin(_, v)
-        | TypedCompKind::Neg(_, v)
-        | TypedCompKind::UnboxedProject(v, _)
-        | TypedCompKind::Dup(v)
-        | TypedCompKind::Drop(v)
-        | TypedCompKind::Reuse(_, v)
-        | TypedCompKind::RefNew(v)
-        | TypedCompKind::RefGet(v) => raw_effects_value(v),
-        TypedCompKind::Prim(_, a, b)
-        | TypedCompKind::RefSet(a, b)
-        | TypedCompKind::InitAt(a, b) => raw_effects_value(a) || raw_effects_value(b),
-        TypedCompKind::Bind(a, _, k) => raw_effects(a) || raw_effects(k),
-        TypedCompKind::Lam(_, b) => raw_effects(b),
-        TypedCompKind::App { callee, args, .. } => {
-            raw_effects(callee) || args.iter().any(raw_effects_value)
-        }
-        TypedCompKind::If(v, t, e) => raw_effects_value(v) || raw_effects(t) || raw_effects(e),
-        TypedCompKind::Call { args, .. }
-        | TypedCompKind::Io(_, args)
-        | TypedCompKind::StrBuiltin { args, .. } => args.iter().any(raw_effects_value),
-        TypedCompKind::Case(scrutinee, arms) => {
-            raw_effects_value(scrutinee) || arms.iter().any(|(_, b)| raw_effects(b))
-        }
-        TypedCompKind::WithReuse { freed, body, .. } => {
-            raw_effects_value(freed) || raw_effects(body)
-        }
-    }
-}
-
-fn raw_effects_value(v: &TypedValue) -> bool {
-    match &v.kind {
-        TypedValueKind::Thunk(c) => raw_effects(c),
-        TypedValueKind::Reinterpret(inner) | TypedValueKind::NewtypeRepr { value: inner, .. } => {
-            raw_effects_value(inner)
-        }
-        TypedValueKind::Ctor { fields, .. } | TypedValueKind::Tuple(fields) => {
-            fields.iter().any(raw_effects_value)
-        }
-        _ => false,
-    }
-}
-
 // A value looked through any Reinterpret/NewtypeRepr wrapper. Rewrites keep the
 // original wrapped value.
+#[must_use]
 pub fn peel(value: &TypedValue) -> &TypedValue {
     match &value.kind {
         TypedValueKind::Reinterpret(inner) | TypedValueKind::NewtypeRepr { value: inner, .. } => {
@@ -865,6 +955,7 @@ pub fn peel(value: &TypedValue) -> &TypedValue {
 }
 
 // The variable a value names once representation wrappers are peeled.
+#[must_use]
 pub fn as_var(value: &TypedValue) -> Option<Sym> {
     match &peel(value).kind {
         TypedValueKind::Var { name, .. } => Some(*name),
@@ -872,6 +963,7 @@ pub fn as_var(value: &TypedValue) -> Option<Sym> {
     }
 }
 
+#[must_use]
 pub fn binder_var(binder: &TypedBinder) -> TypedValue {
     TypedValue::new(
         binder.ty().clone(),
@@ -882,6 +974,7 @@ pub fn binder_var(binder: &TypedBinder) -> TypedValue {
     )
 }
 
+#[must_use]
 pub const fn unit_value() -> TypedValue {
     TypedValue::new(CoreType::Source(Type::Unit), TypedValueKind::Unit)
 }
@@ -890,6 +983,7 @@ pub const fn unit_value() -> TypedValue {
 // transparent to the phase-private representation wrapper without widening
 // production construction authority.
 #[cfg(any(test, feature = "test-hooks"))]
+#[must_use]
 pub fn test_lowered_repr(value: TypedValue, ty: CoreType) -> TypedValue {
     abi::lowered_repr(value, ty)
 }
@@ -906,6 +1000,7 @@ pub fn test_lowered_repr(value: TypedValue, ty: CoreType) -> TypedValue {
 // which is byte-identical to `union_rows` on every valid program because that
 // path is never taken there. The `debug_assert!` keeps the invariant loud in
 // development and tests.
+#[must_use]
 pub fn union_effects(left: &EffRow, right: &EffRow) -> EffRow {
     match union_rows(left, right) {
         Ok(row) => row,

@@ -16,6 +16,13 @@ pub effect Writer(w)
 
 -- | Run `action`, collecting every `tell` into a log, and return the
 -- computation's result paired with that log in emission order.
+--
+-- ```prism
+-- run_writer(\() -> tells(["started", "finished"]))
+-- ```
+-- ```output
+-- ((), [started, finished])
+-- ```
 pub fn run_writer(action : () -> a ! {Writer(w) | e}) : (a, List(w)) =
   let f =
     handle action() with
@@ -43,6 +50,13 @@ pub fn listen(action : () -> a ! {Writer(w) | e}) : (a, List(w)) ! {Writer(w) | 
 
 -- | Run `action`, rewrite its whole log with `f`, and re-emit the rewritten
 -- log, returning the result. The rewrite sees the log in emission order.
+--
+-- ```prism
+-- exec_writer(\() -> censor(reverse, \() -> tells(["a", "b"])))
+-- ```
+-- ```output
+-- [b, a]
+-- ```
 pub fn censor(
   f : (List(w)) -> List(w),
   action : () -> a ! {Writer(w) | e}

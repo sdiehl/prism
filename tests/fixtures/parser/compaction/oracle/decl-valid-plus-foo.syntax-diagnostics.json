@@ -1,0 +1,26 @@
+{
+  "schema": "prism-syntax-diagnostics-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "c63de9ac77fa0765944e744f2276252a1ab2f34fc193fba5c6f16b30d7a541cf",
+    "text": "test assume total foo fn corpus(x) = x\n"
+  },
+  "diagnostics": [
+    {
+      "code": "E7100",
+      "phase": "parse",
+      "span": [
+        18,
+        21
+      ],
+      "message": "unexpected identifier 'foo' at line 1:19, expected 'fn', 'fip', 'fbip', 'replayable'",
+      "expected": [
+        "fbip",
+        "fip",
+        "fn",
+        "replayable"
+      ],
+      "related": []
+    }
+  ]
+}

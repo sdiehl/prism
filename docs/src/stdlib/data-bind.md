@@ -12,7 +12,7 @@ The two coordinate systems are branded so they cannot be mixed up. An `Index` is
 
 ### `Index`
 
-```prism,def,h-577a50085e8aae10d8f6edb4cbb162de97e14ae36719ca9f42649091bfe7bbf4
+```prism,def,h-baa25167702a166773009bf40367017ab6ed5b14626e48855f921499ec0fd64a
 type Index = MkIndex(Int) deriving (Eq, Ord, Show)
 ```
 
@@ -22,7 +22,7 @@ The constructor is spelled `MkIndex` rather than `Index` on purpose: constructor
 
 ### `Level`
 
-```prism,def,h-f1861a78baa0018a22b9e384eb3d30c266a0fe5caeb54ddbae5cfb26aea96c73
+```prism,def,h-f57f93735209e779d9dffaa4f78d1875cd2131bc256d815f440b5e0db187267a
 type Level = MkLevel(Int) deriving (Eq, Ord, Show)
 ```
 
@@ -30,7 +30,7 @@ The inward distance from the root to a binder: `bind_level(0)` is the outermost 
 
 ### `BindEnv`
 
-```prism,def,h-cd7e36bec0f6f0e4e7744f4004c9a23bfdf83663cd6c19b96d15312a67f79fb8
+```prism,def,h-b9500a8ae84fac3009b166ef4861465cc080af80ad970d8bb125f9bf4a64a529
 type BindEnv(a) = BindEnv { slots: List((String, a)) }
 ```
 
@@ -40,7 +40,7 @@ Shadowing is by position, not by rewriting: pushing a name that is already in sc
 
 ### `Nameless`
 
-```prism,def,h-4426fb5b4679fb29c425de5ada85ed1c1b64d6338a562860292b8b82790ada92
+```prism,def,h-6ab7ee0d4278cbc1bbf133bd0958fab3ea4b26e306ef03579e7df35278d226c2
 type Nameless
   = NTok(String)
   | NLit(String)
@@ -58,23 +58,39 @@ The fold over it is the whole point: a term's own traversal decides which tokens
 
 ### `bind_index`
 
-```prism,sig,h-b538d1217dae420fbd4d5c74cf5bd005a00e7c70fc9fc700669c927284396cba
+```prism,sig,h-4b402f6c67eaaa61afd65e5398da245cd2f32bf476d03e8766db9442a4aae5a4
 bind_index : (Int) -> Data.Bind.Index
 ```
 
 Brand a raw outward distance as an `Index`. One of the two ways in.
 
+```prism,mod=Data.Bind
+bind_index_int(bind_index(2))
+```
+
+```output
+2
+```
+
 ### `bind_level`
 
-```prism,sig,h-c2984dd5e6ca3907bb20c3964b21e4b0baf263dd47e4546511af53f5dff6e9d5
+```prism,sig,h-893004f94c73ce6ff1cd928ebd011652cee971bc14d66a87697522da13af9383
 bind_level : (Int) -> Data.Bind.Level
 ```
 
 Brand a raw inward distance as a `Level`. One of the two ways in.
 
+```prism,mod=Data.Bind
+bind_level_int(bind_level(2))
+```
+
+```output
+2
+```
+
 ### `bind_index_int`
 
-```prism,sig,h-6db685499cd0d7fcac7025e0f0073dc63be8b19f21637fd30793ba6395c466a6
+```prism,sig,h-c0ee9f717dad3de09e1d7165cc8caf73db512665f5ea6f7f58424464a65832e2
 bind_index_int : (Data.Bind.Index) -> Int
 ```
 
@@ -82,7 +98,7 @@ The raw distance carried by an `Index`. One of the two ways out.
 
 ### `bind_level_int`
 
-```prism,sig,h-1c0139a5faf579db980b4ee814c8aa91b1f0dc7395deb32d7cbf3bda320bde91
+```prism,sig,h-28bc264d5ee1a9ca909691631827d2947f5a2371ffe170d9ff9a21da9f66af91
 bind_level_int : (Data.Bind.Level) -> Int
 ```
 
@@ -90,7 +106,7 @@ The raw distance carried by a `Level`. One of the two ways out.
 
 ### `bind_index_at`
 
-```prism,sig,h-6a97705d6b39ef5753c83c0bf68584a99629ba5f11b58e88354edbebc4316378
+```prism,sig,h-1f1acd479eba3deec6a33cec13aebc819f99c57944b8511ba466e850f3b9afa1
 bind_index_at : (Int, Data.Bind.Level) -> Data.Bind.Index
 ```
 
@@ -108,7 +124,7 @@ bind_index_int(bind_index_at(3, bind_level(0)))
 
 ### `bind_level_at`
 
-```prism,sig,h-7be0f24f53bef4a02a0e27647a1407f56a1efb8fbad249f7e83e42824041fcf2
+```prism,sig,h-e120dfd04c2d50ccd85302b86585dbd25c6a6792575b548a27fcda673c6f664a
 bind_level_at : (Int, Data.Bind.Index) -> Data.Bind.Level
 ```
 
@@ -124,7 +140,7 @@ bind_level_int(bind_level_at(3, bind_index_at(3, bind_level(2))))
 
 ### `bind_empty`
 
-```prism,sig,h-4d81929d43e743812b5c9404ef4aba5af3d0e99336a4287606488735e2425bab
+```prism,sig,h-57553aa96cd33e582f9591bd5bf7fe1e10a98edb21f7ba72580680c923628832
 bind_empty : forall a. Data.Bind.BindEnv(a)
 ```
 
@@ -132,15 +148,24 @@ No binders in scope.
 
 ### `bind_push`
 
-```prism,sig,h-ff08cff1c5c318b67996a4352f69f4918c6439ed36fc98e81207634c7e4e8d6e
+```prism,sig,h-4f37a5ace65e19c53c184c0d68d76a52d84e7f4bc0b01891312d849c5d65bd80
 bind_push : forall a. (Data.Bind.BindEnv(a), String, a) -> Data.Bind.BindEnv(a)
 ```
 
-Push one binder, which becomes index `0`.
+Push one binder, which becomes index `0`. Pushing a shadowing name keeps the older slot addressable at its previous index.
+
+```prism,mod=Data.Bind
+let env = bind_push(bind_push(bind_empty, "x", 1), "x", 2)
+(bind_at(env, bind_index(0)), bind_at(env, bind_index(1)))
+```
+
+```output
+(Some(2), Some(1))
+```
 
 ### `bind_push_all`
 
-```prism,sig,h-ad2559b8ce252933d0f9dba8545e8ddc90090ac68e362d25c6e45ffb31c55e08
+```prism,sig,h-e98a8935988fccf65d9ec5ae2ff640b8dd495737ec3c41efad5f1bd7bb287b33
 bind_push_all : forall a. (Data.Bind.BindEnv(a), List((String, a))) -> Data.Bind.BindEnv(a)
 ```
 
@@ -156,15 +181,23 @@ Some(x)
 
 ### `bind_push_names`
 
-```prism,sig,h-098d9ed48285ec5b5e4057bf5b6f8ea9b3cac27323258ed92b00d7a8e00048cd
+```prism,sig,h-0a96e17312b689937e1e05eff8c2cbff4eb4caff6dd792c9d539dd9ff1a8e43c
 bind_push_names : (Data.Bind.BindEnv(String), List(String)) -> Data.Bind.BindEnv(String)
 ```
 
 Push binders that carry no payload beyond their own name.
 
+```prism,mod=Data.Bind
+bind_names(bind_push_names(bind_empty, ["x", "y"]))
+```
+
+```output
+[y, x]
+```
+
 ### `bind_depth`
 
-```prism,sig,h-5c46a1dd326844a7ce9ef08e617f05bdfc7bbe31f45c48783c7018640ea2d276
+```prism,sig,h-d8225beadba0abee385c274ba949c566bc2952b097f06dbe391b904678cebe91
 bind_depth : forall a. (Data.Bind.BindEnv(a)) -> Int
 ```
 
@@ -172,7 +205,7 @@ How many binders are in scope. A use site here writes indices below this and lev
 
 ### `bind_names`
 
-```prism,sig,h-b9d17765a70914bf0609bea0986f334e9e72412e9a609640040126cabdb43486
+```prism,sig,h-b24005bc71a8e3270bf032811dc8aaf388f29164d31e4a286ccaec98a145b51c
 bind_names : forall a. (Data.Bind.BindEnv(a)) -> List(String)
 ```
 
@@ -180,23 +213,41 @@ Every name in scope, innermost first, with shadowed names still listed at their 
 
 ### `bind_drop`
 
-```prism,sig,h-5f5c0350c205a8d20613ceb30fae0b1a2279260a4566ec7f3abd589e77824e76
+```prism,sig,h-10b61ea29d2426725c01cee27764feb3bed6e64d905a763b89fa7fb985ead6ba
 bind_drop : forall a. (Data.Bind.BindEnv(a), Int) -> Data.Bind.BindEnv(a)
 ```
 
 Drop the `n` innermost binders, leaving what was in scope before them.
 
+```prism,mod=Data.Bind
+bind_names(bind_drop(bind_push_names(bind_empty, ["x", "y", "z"]), 2))
+```
+
+```output
+[x]
+```
+
 ### `bind_index_of`
 
-```prism,sig,h-98a5870091de6f35e6ee34e620ddb762214bf196627b037a2f23cd0613cdd535
+```prism,sig,h-a99ad8156bd95ca5c7abd0ecfdb61ce6be489376e53501ad27542633efeecdf7
 bind_index_of : forall a. (Data.Bind.BindEnv(a), String) -> Option(Data.Bind.Index)
 ```
 
 The index of the innermost binder named `name`, or `None` when the name is free here.
 
+```prism,mod=Data.Bind
+match bind_index_of(bind_push_names(bind_empty, ["x", "y"]), "y") of
+  None => -1
+  Some(i) => bind_index_int(i)
+```
+
+```output
+0
+```
+
 ### `bind_level_of`
 
-```prism,sig,h-57892a494521ed9ba3f0571ac6021c1946b34e3b101b3de9f8beddbb15e06e99
+```prism,sig,h-e085669ae7c9ad7314feca83a21517e65065c0d152a81a8c1e62b6124a725a0b
 bind_level_of : forall a. (Data.Bind.BindEnv(a), String) -> Option(Data.Bind.Level)
 ```
 
@@ -204,7 +255,7 @@ The level of the innermost binder named `name`, or `None` when the name is free 
 
 ### `bind_slot_at`
 
-```prism,sig,h-d81fede0e639bbbb5a59c64af70f07e12b99ab7b05efc4326b86ca8f242bd31f
+```prism,sig,h-683411dd115670a684bf14707fe0701f3982e9f6ac297f393f10cd284369713e
 bind_slot_at : forall a. (Data.Bind.BindEnv(a), Data.Bind.Index) -> Option((String, a))
 ```
 
@@ -212,7 +263,7 @@ The binder an index points at, name and payload, or `None` when the index escape
 
 ### `bind_at`
 
-```prism,sig,h-65a9a71cb620d4c38705e0aa6dd1b6f4e08f871b26c45777b83364faf9d27178
+```prism,sig,h-b2fdbcb683a29825cd3b36c5fd89d62fcf7d647cc29e167c1c5b99a05822113a
 bind_at : forall a. (Data.Bind.BindEnv(a), Data.Bind.Index) -> Option(a)
 ```
 
@@ -220,7 +271,7 @@ The payload an index points at.
 
 ### `bind_name_at`
 
-```prism,sig,h-b17f8fb38018de82abe92a8cf8b54863cfb5b953295fec36406e324c79299e16
+```prism,sig,h-5488cb1c6b8e070907e03d0552f56b12d7391e8fb4e3ec4f9dcff61071502ec9
 bind_name_at : forall a. (Data.Bind.BindEnv(a), Data.Bind.Index) -> Option(String)
 ```
 
@@ -228,15 +279,23 @@ The name an index points at, which is what an error message wants back.
 
 ### `bind_at_level`
 
-```prism,sig,h-2df2ed875662e4eeddebbf0338f46340112b624fa3a08a1ec5881c9d4dd395f8
+```prism,sig,h-7f15051a2b24bbc94f90b582db6709f23c603e51eecd8d43c40f80b6ac8a28a9
 bind_at_level : forall a. (Data.Bind.BindEnv(a), Data.Bind.Level) -> Option(a)
 ```
 
 The payload a level points at.
 
+```prism,mod=Data.Bind
+bind_at_level(bind_push_all(bind_empty, [("x", 10), ("y", 20)]), bind_level(0))
+```
+
+```output
+Some(10)
+```
+
 ### `bind_name_at_level`
 
-```prism,sig,h-4d114ec3d310d1d21b52753d818ccda355541e42b7e0fbaf8e8c386ddcfffb18
+```prism,sig,h-4e4eb231708a9546f13649575cab11b10f8e91d0e733c46e972e37a9acb074ea
 bind_name_at_level : forall a. (Data.Bind.BindEnv(a), Data.Bind.Level) -> Option(String)
 ```
 
@@ -244,7 +303,7 @@ The name a level points at.
 
 ### `bind_token`
 
-```prism,sig,h-6b507569d24b378086b493d4024af569690392ea3b65f06fd1635d59e04d2da1
+```prism,sig,h-169ec2abdc044217b60b0dd972de1a48fbe24a93fcfc8660ab0ea4c7ccd53c34
 bind_token : (String) -> String
 ```
 
@@ -258,27 +317,37 @@ bind_token("add")
 3:add
 ```
 
+### `bind_num_end`
+
+```prism,sig,h-b4a903dc52ebd23a67e8e41a5bfc0c6b82f7e3446307bf0729ad94e9dd4ebb59
+bind_num_end : String
+```
+
+The character closing every run of digits a rendering writes.
+
+Skeletons concatenate with no separator, so a digit run sitting beside a neighbour that also opens with a digit reads as one number and the boundary between them is lost. A binder index therefore closes with this character, and a caller emitting its own numeric tags through `NLit` closes them the same way to keep the whole rendering uniquely decodable.
+
 ### `bind_nameless`
 
-```prism,sig,h-b6806bebc8b7f3708c643a2ff79c5d1a452de8fe0f6746472fbd6cd24f8d1ff4
+```prism,sig,h-a881a852263884956de1dc0835d00ca4370e892c75c3146fbbbf01d015e6dde5
 bind_nameless : ((String) -> String, Data.Bind.Nameless) -> String
 ```
 
 Render a skeleton with binder references as outward distance and free names spelled by `free`.
 
-A bound reference becomes `b` followed by its index. A free name is handed to `free`, which is where a caller substitutes whatever identity it has for a name it does not own: a content hash, a slot in the recursive group being hashed, or the name itself.
+A bound reference becomes `b`, its index, and `bind_num_end`. A free name is handed to `free`, which is where a caller substitutes whatever identity it has for a name it does not own: a content hash, a slot in the recursive group being hashed, or the name itself.
 
 ```prism,mod=Data.Bind
 bind_nameless(\(x) -> x, NScope(["a"], NSeq([NTok("lam"), NRef("a")])))
 ```
 
 ```output
-3:lamb0
+3:lamb0;
 ```
 
 ### `bind_nameless_show`
 
-```prism,sig,h-2387be7f549765c9078799503e1db35aba2e1502cf9c4102f7bd66b6a822df50
+```prism,sig,h-578e922cc0068c5447741d5976bfa23aed6d1f6f309d6a4b951aa6c2a3bde978
 bind_nameless_show : (Data.Bind.Nameless) -> String
 ```
 
@@ -286,9 +355,17 @@ Render with free names spelled as length-prefixed tokens under an `f` tag.
 
 This is the rendering to compare two terms with when nothing outside them matters, which is exactly alpha-equivalence.
 
+```prism,mod=Data.Bind
+bind_nameless_show(NSeq([NRef("free"), NScope(["x"], NRef("x"))]))
+```
+
+```output
+f4:freeb0;
+```
+
 ### `bind_alpha_eq`
 
-```prism,sig,h-268cfe06bf0ed025048adda593bc27c75259b29f3c227a5593adca5018fec0cc
+```prism,sig,h-f6ba932037cd6a354cc5aebe286e3272a018799eb16e1cb7101875360719b725
 bind_alpha_eq : (Data.Bind.Nameless, Data.Bind.Nameless) -> Bool
 ```
 

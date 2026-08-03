@@ -12,3 +12,6 @@ description = "Prism compiler workspace member: common"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+
+[lints]
+workspace = true

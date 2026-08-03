@@ -25,6 +25,13 @@ pub let log2e : Float = 1.4426950408889634
 pub let log10e : Float = 0.4342944819032518
 
 -- | The golden ratio, `(1 + sqrt(5)) / 2`.
+--
+-- ```prism
+-- [sqrt2 > 1.4, phi > 1.6, inv_pi < 0.32]
+-- ```
+-- ```output
+-- [true, true, true]
+-- ```
 pub let phi : Float = 1.618033988749895
 
 -- | Half of pi (`pi / 2`).

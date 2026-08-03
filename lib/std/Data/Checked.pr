@@ -43,7 +43,7 @@
 -- 20-digit literals so they read as the powers they are and cannot be mistyped.
 let bound_i64_max : Int = 2 ^ 63 - 1
 
-let bound_i64_min : Int = 0 - 2 ^ 63
+let bound_i64_min : Int = -2 ^ 63
 
 let bound_u64_max : Int = 2 ^ 64 - 1
 
@@ -99,7 +99,7 @@ let i64_max_val : I64 = to_i64(bound_i64_max)
 
 let i64_min_val : I64 = to_i64(bound_i64_min)
 
-let i64_neg_one : I64 = to_i64(0 - 1)
+let i64_neg_one : I64 = to_i64(-1)
 
 -- | True when the exact `Int` result fits the `I64` lane.
 fn i64_in_range(exact : Int) : Bool =
@@ -258,7 +258,7 @@ pub fn int_to_i64(n : Int) : Option(I64) = i64_check(n)
 -- `U64` range. The inverse widening is the builtin `int_of_u64`, which is total.
 --
 -- ```prism
--- (int_to_u64(42), int_to_u64(0 - 1))
+-- (int_to_u64(42), int_to_u64(-1))
 -- ```
 -- ```output
 -- (Some(42), None)

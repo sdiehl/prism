@@ -1,0 +1,24 @@
+{
+  "schema": "prism-syntax-diagnostics-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "cb252a01969c5c3bd6d8aba52e04c0ea15b81dd3afadea10580d64eeb8428ffd",
+    "text": "fn f() =\n  if 0 then\n    0 elif 0 then\n      0\n"
+  },
+  "diagnostics": [
+    {
+      "code": "E7100",
+      "phase": "parse",
+      "span": [
+        27,
+        31
+      ],
+      "message": "unexpected 'elif' at line 3:7, expected end of block, end of statement",
+      "expected": [
+        "v;",
+        "v}"
+      ],
+      "related": []
+    }
+  ]
+}

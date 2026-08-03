@@ -1,0 +1,1 @@
+fn corpus(x : forall a. a) = x

@@ -1,0 +1,1 @@
+fn corpus(x : (Int) -> Int ! {Io}) = x

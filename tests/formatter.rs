@@ -6,6 +6,8 @@ mod fmt_contracts;
 mod fmt_control;
 #[path = "formatter/fmt_deriving.rs"]
 mod fmt_deriving;
+#[path = "formatter/fmt_list_patterns.rs"]
+mod fmt_list_patterns;
 #[path = "formatter/fmt_modifiers.rs"]
 mod fmt_modifiers;
 #[path = "formatter/fmt_parens.rs"]
@@ -16,5 +18,7 @@ mod fmt_records_optics;
 mod fmt_stable;
 #[path = "formatter/fmt_trivia.rs"]
 mod fmt_trivia;
+#[path = "formatter/fmt_tuples.rs"]
+mod fmt_tuples;
 #[path = "formatter/fmt_using.rs"]
 mod fmt_using;

@@ -1,0 +1,478 @@
+{
+  "schema": "prism-syntax-tokens-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "3ce0157c0a9c056c7df3a6561753ffe779952a8c8de82e427136177dae5d651f",
+    "text": "fn one(v) = let A(x) = v in x\nfn two(v) = let Pkg.A(x) = v in x\n"
+  },
+  "raw": [
+    {
+      "kind": "fn",
+      "span": [
+        0,
+        2
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        3,
+        6
+      ],
+      "value": "one"
+    },
+    {
+      "kind": "(",
+      "span": [
+        6,
+        7
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        7,
+        8
+      ],
+      "value": "v"
+    },
+    {
+      "kind": ")",
+      "span": [
+        8,
+        9
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        10,
+        11
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        12,
+        15
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        16,
+        17
+      ],
+      "value": "A"
+    },
+    {
+      "kind": "(",
+      "span": [
+        17,
+        18
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        18,
+        19
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ")",
+      "span": [
+        19,
+        20
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        21,
+        22
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        23,
+        24
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "in",
+      "span": [
+        25,
+        27
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        28,
+        29
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        30,
+        32
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        33,
+        36
+      ],
+      "value": "two"
+    },
+    {
+      "kind": "(",
+      "span": [
+        36,
+        37
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        37,
+        38
+      ],
+      "value": "v"
+    },
+    {
+      "kind": ")",
+      "span": [
+        38,
+        39
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        40,
+        41
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        42,
+        45
+      ]
+    },
+    {
+      "kind": "qual",
+      "span": [
+        46,
+        51
+      ],
+      "value": "Pkg.A"
+    },
+    {
+      "kind": "(",
+      "span": [
+        51,
+        52
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        52,
+        53
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ")",
+      "span": [
+        53,
+        54
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        55,
+        56
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        57,
+        58
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "in",
+      "span": [
+        59,
+        61
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        62,
+        63
+      ],
+      "value": "x"
+    }
+  ],
+  "parse": [
+    {
+      "kind": "v{",
+      "span": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        0,
+        2
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        3,
+        6
+      ],
+      "value": "one"
+    },
+    {
+      "kind": "(",
+      "span": [
+        6,
+        7
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        7,
+        8
+      ],
+      "value": "v"
+    },
+    {
+      "kind": ")",
+      "span": [
+        8,
+        9
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        10,
+        11
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        12,
+        15
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        16,
+        17
+      ],
+      "value": "A"
+    },
+    {
+      "kind": "(",
+      "span": [
+        17,
+        18
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        18,
+        19
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ")",
+      "span": [
+        19,
+        20
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        21,
+        22
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        23,
+        24
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "in",
+      "span": [
+        25,
+        27
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        28,
+        29
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        29,
+        29
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        30,
+        32
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        33,
+        36
+      ],
+      "value": "two"
+    },
+    {
+      "kind": "(",
+      "span": [
+        36,
+        37
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        37,
+        38
+      ],
+      "value": "v"
+    },
+    {
+      "kind": ")",
+      "span": [
+        38,
+        39
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        40,
+        41
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        42,
+        45
+      ]
+    },
+    {
+      "kind": "qual",
+      "span": [
+        46,
+        51
+      ],
+      "value": "Pkg.A"
+    },
+    {
+      "kind": "(",
+      "span": [
+        51,
+        52
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        52,
+        53
+      ],
+      "value": "x"
+    },
+    {
+      "kind": ")",
+      "span": [
+        53,
+        54
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        55,
+        56
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        57,
+        58
+      ],
+      "value": "v"
+    },
+    {
+      "kind": "in",
+      "span": [
+        59,
+        61
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        62,
+        63
+      ],
+      "value": "x"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        63,
+        63
+      ]
+    }
+  ],
+  "trivia": []
+}

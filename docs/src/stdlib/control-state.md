@@ -10,7 +10,7 @@ The canonical `State(s)` effect: a threaded piece of mutable-looking state, inte
 
 ### `State`
 
-```prism,def,h-6a459097c4c485e3a08209b00bddfbc4c348922f97c1d7b95ad3941460cf9af9
+```prism,def,h-6796da70d1dbbdd5098b18d7300ecf898d55f3b0a0e0a27f115d9ddac139dc91
 effect State(s)
   get() : s
   put(s) : Unit
@@ -22,15 +22,23 @@ Read (`get`) and overwrite (`put`) a threaded state of type `s`.
 
 ### `run_state`
 
-```prism,sig,h-9fbd2e64fffe4a19bcbe5b142cca583f2ad4fed0f0bb13d5f376bbc725fbe818
+```prism,sig,h-2c310b8ed4246f880cfc23c2a9cac5a8f75848871e33abb860b062f3e82cd5d9
 run_state : forall e0 a b. (a, () -> b ! {Control.State.State(a), e0}) -> (b, a) ! {e0}
 ```
 
 Run `action`, threading `init` as the initial state; returns `(result, final_state)`. The handler makes the block a state transformer `s -> (a, s)` and applies it to `init`.
 
+```prism,mod=Control.State
+run_state(1, \() -> state(\(s) -> (s * 2, s + 1)))
+```
+
+```output
+(2, 2)
+```
+
 ### `eval_state`
 
-```prism,sig,h-dc0fe0c563f6f445b2696ad167b7da2716ee3c0e3523909fb8379720f5d12ff7
+```prism,sig,h-bc6a7c45dc534ccf2f1a85eeb8200744632f9551dd22795def021eea83f327a8
 eval_state : forall e0 a b. (a, () -> b ! {Control.State.State(a), e0}) -> b ! {e0}
 ```
 
@@ -38,7 +46,7 @@ Run `action` for its result only, discarding the final state.
 
 ### `exec_state`
 
-```prism,sig,h-55c3678b44a31a9b4292baa49f63b31cdc9c09e0286fda8ba20fe1c3a272b405
+```prism,sig,h-c3f4b78f136436efe869e477fca6c8994c07e4d111059ddcb792fcc0f4562e92
 exec_state : forall e0 a b. (a, () -> b ! {Control.State.State(a), e0}) -> a ! {e0}
 ```
 
@@ -46,15 +54,23 @@ Run `action` for its final state only, discarding the result.
 
 ### `modify`
 
-```prism,sig,h-2916d78c22bdba4f09e4cfe63c233cb9b05074a4a542b0c46e10cf9acfd3f95a
+```prism,sig,h-02e3b60d00ebba5dd9565827264ae10d0592a50bb0970d5d0d24e9ce9d49cd89
 modify : forall a. ((a) -> a) -> Unit ! {Control.State.State(a)}
 ```
 
 Apply `f` to the current state, storing the result.
 
+```prism,mod=Control.State
+exec_state(3, \() -> modify(\(n) -> n * 2))
+```
+
+```output
+6
+```
+
 ### `state`
 
-```prism,sig,h-0fc2eeb5dddd177706efef48f4af480c4c387fc2ce18f31bdf8e836a7bb2019b
+```prism,sig,h-f0fe9c733628ddf01b37c948d006ce39f7c7fc0fabda59cf09046e71d6eb4d34
 state : forall a b. ((a) -> (b, a)) -> b ! {Control.State.State(a)}
 ```
 
@@ -62,7 +78,7 @@ Run one combined read-and-write step: `f` maps the current state to a result and
 
 ### `gets`
 
-```prism,sig,h-e0d322e20253a5be38469e3629543de046d09d84fedd7008729ae1e48fc5604b
+```prism,sig,h-293ad18391253e00b11314ae8aa2581febfd996d9163fce97ba7d79a27cb2820
 gets : forall a b. ((a) -> b) -> b ! {Control.State.State(a)}
 ```
 

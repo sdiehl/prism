@@ -17,7 +17,7 @@ Every serialized thing is one envelope, read left to right, each header part che
    | scheme tag | kind | contract digest |    body?    |
    +------------+------+-----------------+ - - - - - - +
 
-   scheme tag       length-prefixed string, always "prism-core-hash-v1";
+   scheme tag       length-prefixed string, always "prism-core-hash-v2";
                     a foreign scheme is rejected before anything else
    kind             uvarint naming what the digest identifies:
                     value 0, def 1, protocol 2, kont 3, cert 4
@@ -50,7 +50,7 @@ Every serialized thing is one envelope, read left to right, each header part che
 
 ### `Bytes`
 
-```prism,def,h-1e257de4af8d36e5e8a8eb79a4b892c7622554eaead4d315c8e65bae6dc70fd2
+```prism,def,h-eb83ea7dac4fb051f9e3420ad9e91e0eb24fe0d9fd604afa2bb10d2bc1c35d28
 type Bytes = Bytes(Buf, Int)
 ```
 
@@ -58,7 +58,7 @@ A compact, positional byte body: an unboxed byte buffer and a read cursor, `Byte
 
 ### `Loss`
 
-```prism,def,h-872469b0292502435111803b3451cf947d33a3fe080d8f17142fe575c9920de8
+```prism,def,h-2781b1f696c1da803da82db325a5e74ccf73291d36b6581a314f838cdb028f44
 type Loss = Loss(List(String))
 ```
 
@@ -66,7 +66,7 @@ What a downgrade could not carry down: the names of the fields dropped when lowe
 
 ### `Policy`
 
-```prism,def,h-5dc51c6827cc98bcca416e5723e8a170df1441af861548a417f6106c046a4e15
+```prism,def,h-e7a5c13c0613cbde8cde93e74eb744544e5b5c6a85eb61ce51a68a67c264c13d
 type Policy = Reject | LargestSafeSubset
 ```
 
@@ -76,7 +76,7 @@ How to reconcile a higher-version value that a reader cannot represent at its ow
 
 ### `Serialize`
 
-```prism,def,h-9d21f7df8da7066c58726f9df102fedbf15d7530cccad700d425e69d53425141
+```prism,def,h-eb46098664cacaba26764c57141c7627128048d26d908da519270ef6044256a3
 class Serialize(a)
   encode : (a) -> Bytes
   decode : (Bytes) -> (a, Bytes) ! {Fail | e}
@@ -96,7 +96,7 @@ The codec, derived structurally by `deriving (Serialize)`. `encode` writes a val
 
 ### `Stable`
 
-```prism,def,h-8f7d672da3bb5cc2779df057b9c82e0bc4884c26b8b96970a5b17d30771fa91a
+```prism,def,h-da77c06bffea86637836987368bc315d3aa37751f6c7d81d5317cbbfdf6b1859
 class Stable(a)
   shape_digest_of : (a) -> String
 ```
@@ -109,79 +109,79 @@ The one method, `shape_digest_of`, is the type's contract digest: the shape dige
 
 ### `serializeInt`
 
-```prism,def,h-7afa29e42e62ad3ed67f94387376f1a61b468189ab92fac280930fabec83806c
+```prism,def,h-97e0af036de0795a537a0bbd23e78a780a1f41c8f0631d16ae15b54f6417bfb3
 instance serializeInt : Serialize(Int)
 ```
 
 ### `serializeI64`
 
-```prism,def,h-89f6b2e173cfcc5da2f9e567578bd5894a1c11f8b0f09a17bc166a77d2b4af3e
+```prism,def,h-3225f6c191564fec632a80cf4fcb50f787b91e3206b0f00feab6ee2c425ea075
 instance serializeI64 : Serialize(I64)
 ```
 
 ### `serializeU64`
 
-```prism,def,h-6a9d02136aedfd59dc956fc38eab79046f383c3fc348aa915442a5ac799f68d0
+```prism,def,h-d7892b27a00d0811f5cc82555b967490dea91425b48e25c3f8422e88714ed52f
 instance serializeU64 : Serialize(U64)
 ```
 
 ### `serializeBool`
 
-```prism,def,h-4b115ebaea0af1d5868d90e051270d6ce476d9ab1263243b39f972ca3a4e4528
+```prism,def,h-630d81a13b74a95eb7567e4b18a6e7b2be6662750a5686f8a0c7b2c7d5570277
 instance serializeBool : Serialize(Bool)
 ```
 
 ### `serializeUnit`
 
-```prism,def,h-9c1fc8014699dc43e35fff141b4e8ca40182a0955ecdbe701d2f8dc11b8f9309
+```prism,def,h-18c3fe8466a599db95031fbee4f4415e387cc1556fd570c5994cf4083617793b
 instance serializeUnit : Serialize(Unit)
 ```
 
 ### `serializeChar`
 
-```prism,def,h-33cdf12df4cc3a5ed99e1e8035281daaae89485be29407cd90e1de68dd50f1ce
+```prism,def,h-b45ffa5726cf77639fc6478fddb919c2dd84fde9a017789bc13732c3069968ff
 instance serializeChar : Serialize(Char)
 ```
 
 ### `serializeString`
 
-```prism,def,h-f6c764e05f5ef60011e937912d7ad8c62316bd0d09723d1be5ee7c8e469198f9
+```prism,def,h-4393be89af3be81582f486b4f247c528dbee598778c5a443bda46a1e4d14d22a
 instance serializeString : Serialize(String)
 ```
 
 ### `serializeList`
 
-```prism,def,h-e48cc2ec3f0172ac967097954fa85fa946bb62917cde982b4a546d67501c2d77
+```prism,def,h-7b83846a4f033cb8bb9a93b02509fe5017a0bec7c6451161f213a804425f31c3
 instance serializeList : Serialize(List(a))
 ```
 
 ### `serializeBytes`
 
-```prism,def,h-497e69f340d966c3658dac974e79275e88884d7ca7e87d0714f6be36f9442abe
+```prism,def,h-f64f2e798da09214dedc68da2d6d9bb95db2534a3d3d0e435455295c5edac301
 instance serializeBytes : Serialize(Bytes)
 ```
 
 ### `serializeOption`
 
-```prism,def,h-e39c4a05de59884ae5eeccb86660b3c4605c5e0b7d3702fe251d932cee6a0bef
+```prism,def,h-2d72adc9332dabc24ab1f54e3d2819db958205211380c6ee272c7889ab70cb86
 instance serializeOption : Serialize(Option(a))
 ```
 
 ### `serializePair`
 
-```prism,def,h-2f8abfc6390eaf7b97f99ec6f0e84923f051bb70c91bb3ae59c3afdf04a20f3d
+```prism,def,h-770970b35026068912a4dec43ab83dd80eafaeab961ff63c3cbe1b97a053c957
 instance serializePair : Serialize((a, b))
 ```
 
 ### `serializeTriple`
 
-```prism,def,h-50404a199b751b8a5e8ca12a7464e320e363d6959dc9366ded316a9c855d69dc
+```prism,def,h-172b9ac493da7a1c5d8bc695cc94342cbb048f98e9dc75f0a207bebccb02eff7
 instance serializeTriple : Serialize((a, b, c))
 ```
 
 ### `serializeMap`
 
-```prism,def,h-753eabda3fd22e6bd0caaf507740ff95d0b3835927cff299722f9c5e1ed09f87
+```prism,def,h-989cf044223ab84dc2190fdad296dafb48c37b3b040d5daede24e273799a22a8
 instance serializeMap : Serialize(Map(k, v, ord))
 ```
 
@@ -189,13 +189,13 @@ instance serializeMap : Serialize(Map(k, v, ord))
 
 ### `bytes_of_buf`
 
-```prism,sig,h-b1fe7e2b47bbeece8cc4539c391b442b13e5724b660ee1f6602cc6dfbbc05b0e
+```prism,sig,h-b8fe7965a9c10fdd3229fc5c68e855e1d30963ad2bd561092251be0297a7f39a
 bytes_of_buf : (Buf) -> Wire.Bytes
 ```
 
 ### `bytes_buf`
 
-```prism,sig,h-0a3dbdf894312bbc6673f5d2b45653aec406e2200268863a0282a3f0bfc423e2
+```prism,sig,h-61f1df36fddcf96d6b482f739cc3dabad0cdc8f95028758d87afe0a48fa14e3f
 bytes_buf : (Wire.Bytes) -> Buf
 ```
 
@@ -203,7 +203,7 @@ Recover the buffer of a body's remaining bytes, compacting away a non-zero curso
 
 ### `bytes_at`
 
-```prism,sig,h-df73b372ec6f7a519e5e81691b1c2811f5765c4c7fc5bd44a3b4138f64b82b9c
+```prism,sig,h-19ba5106f6e22efc49a535471b674f0d6a2ac3d29ec1c7d8d4717850b9eb31ec
 bytes_at : (Wire.Bytes, Int) -> Int
 ```
 
@@ -219,13 +219,13 @@ bytes_at(bytes_of_list([10, 20, 30]), 1)
 
 ### `wire_empty`
 
-```prism,sig,h-452073dbf2139781fa303bcae9a56414285965fb0a9fc52dafbc321d3beb3c13
+```prism,sig,h-ac2748597956fda3b9528cc398e6471e64489bee05462dbf4a3775d785db133c
 wire_empty : Wire.Bytes
 ```
 
 ### `wire_cat`
 
-```prism,sig,h-936a50e4bc0ba50bf2d962dfcb09acc04f7b076ed3e83555701d60e1940f3da2
+```prism,sig,h-d5cafe27415db70101093c4213ab27905253b98e4d5bc875877cba5b8f9055d4
 wire_cat : (Wire.Bytes, Wire.Bytes) -> Wire.Bytes
 ```
 
@@ -241,7 +241,7 @@ bytes_to_list(wire_cat(bytes_of_list([1, 2]), bytes_of_list([3])))
 
 ### `wire_is_empty`
 
-```prism,sig,h-ad754ff7856da933e459cbc868957d835b7330f72d1bf624f26dce3f3b97598c
+```prism,sig,h-55822030d6d802a9371d65c2d8d3aedd18643924d8eb67739fa79de7046730ad
 wire_is_empty : (Wire.Bytes) -> Bool
 ```
 
@@ -257,7 +257,7 @@ true
 
 ### `wire_len`
 
-```prism,sig,h-b32aeb989cf2d63a504db7c7f7adbaa263b1bb438b208074fccfbcf03aabf7f8
+```prism,sig,h-a2ac26aab3054d03c1846bba5a30183d4815f7a0c7d13d4a4eadffe600f39c37
 wire_len : (Wire.Bytes) -> Int
 ```
 
@@ -273,7 +273,7 @@ wire_len(bytes_of_list([1, 2, 3]))
 
 ### `bytes_of_list`
 
-```prism,sig,h-749627ef9545d668471e3f8473205ae94df2abfce16ccc5a60babc58b59fe78a
+```prism,sig,h-73b33a7af2cebb0ed86c030109bcb5d70c81c8cf673e74c6c36311cca7f944ce
 bytes_of_list : (List(Int)) -> Wire.Bytes
 ```
 
@@ -289,13 +289,13 @@ bytes_to_list(bytes_of_list([1, 2, 3]))
 
 ### `bytes_to_list`
 
-```prism,sig,h-f7e479f2a75bc450edc123148aad4abd0ffdf420d6ee3790752fadf628faf673
+```prism,sig,h-3c737a5ca67f5b494e2705780d25bdc0d8c96109471f9bc6943793402cef1aa3
 bytes_to_list : (Wire.Bytes) -> List(Int)
 ```
 
 ### `wire_tag`
 
-```prism,sig,h-69ec8d8ae0a7c327142f39db0911d701a637f52efdc711f20ea4f43e4c8a8de8
+```prism,sig,h-01beb0215c68b9bc5b43e4fe235fb2b6d8a98af576ffa7085fe537e12f5534fc
 wire_tag : (Int) -> Wire.Bytes
 ```
 
@@ -311,7 +311,7 @@ bytes_to_list(wire_tag(300))
 
 ### `wire_get_tag`
 
-```prism,sig,h-8aed34b5fe8e9a41619572623cd08a6a4493eabddd653adeccf20c74d38652d5
+```prism,sig,h-18718f0126d3e475a9eca65dd75ae68e00ea98a6602d3694bf2c691299319fdf
 wire_get_tag : (Wire.Bytes) -> (Int, Wire.Bytes) ! {Fail}
 ```
 
@@ -327,7 +327,7 @@ fst(wire_get_tag(wire_tag(300)))
 
 ### `wire_scheme_tag`
 
-```prism,sig,h-1230acaecea06c7632adb155b4f65d14574b7f1c798aab98e3c44307f2cc517d
+```prism,sig,h-de5cc01ea5f3b64b0fb3471dcd1edaea9fb7799d9d58bbc074c34c13ca8fb749
 wire_scheme_tag : String
 ```
 
@@ -338,12 +338,12 @@ wire_scheme_tag
 ```
 
 ```output
-prism-core-hash-v1
+prism-core-hash-v2
 ```
 
 ### `wire_kind_value`
 
-```prism,sig,h-6f4e8b98e355756dab22c85f235f7d77f82e26a2da234845a2c92b6fe143a16e
+```prism,sig,h-aa8c1e94cb6af66a9948be0d0c22df3618af7865a09454b430d9ddb258c3d5e8
 wire_kind_value : Int
 ```
 
@@ -359,7 +359,7 @@ wire_kind_value
 
 ### `wire_kind_def`
 
-```prism,sig,h-c238746efcd770f31f6a62fd6b2c99030809736101e41a8e65df8b93c5a12c9f
+```prism,sig,h-c8c6ee05941930633d403d7b8387b9c5260b66c1b312eae8f7087a788a90713b
 wire_kind_def : Int
 ```
 
@@ -367,7 +367,7 @@ The reserved frame kind naming a definition by its digest.
 
 ### `wire_kind_protocol`
 
-```prism,sig,h-f0ef1f6cc1646d545dc09407b1d5ab48b769e61cc287e7ae66f88cf0c2b33193
+```prism,sig,h-90aa6d93dc21f7e5b51c8d260ed408069562c9744ce829d0b27e9ef063b5542d
 wire_kind_protocol : Int
 ```
 
@@ -375,7 +375,7 @@ The reserved frame kind naming a protocol by its digest.
 
 ### `wire_kind_kont`
 
-```prism,sig,h-8d5bded8ed42b81cff432808a559cb46f0dd9e9a3229e3ffb23020b7960a42ed
+```prism,sig,h-770cbd10d7b5aaa0ab7461e30c2915d4314ff1387dedbb4f630a5d936f1812f7
 wire_kind_kont : Int
 ```
 
@@ -383,7 +383,7 @@ The reserved frame kind naming a continuation by its digest.
 
 ### `wire_kind_cert`
 
-```prism,sig,h-7f02bc50861a58a772eb3a30a94d42257bbd4f5847ceaef4db4f1af4b47d8ce7
+```prism,sig,h-2aec7323ffcdcb86f5407deccd63ca8d6a6849b279732928257b9e4550b5a142
 wire_kind_cert : Int
 ```
 
@@ -391,7 +391,7 @@ The reserved frame kind naming a certificate by its digest.
 
 ### `wire_frame`
 
-```prism,sig,h-0ebdf4c5bd15055a83137fac4583e37f8e194d88f9d172a637725f6b77b6afc9
+```prism,sig,h-e52f5bca75a00c9a3aaf444531665762d30d70bafbce480110d28386c0870157
 wire_frame : (Int, String, Wire.Bytes) -> Wire.Bytes
 ```
 
@@ -407,7 +407,7 @@ bytes_to_list(wire_open(wire_frame(wire_kind_value, "dig", bytes_of_list([7, 8])
 
 ### `wire_ref`
 
-```prism,sig,h-09dc90c181dc48f4d9beed368ac240d1aed1497fc965c46e60bdb82156d6e2ca
+```prism,sig,h-e27c95aa85fd666c3b9b7db85d7956fe5673beed564700af63b0801d79447969
 wire_ref : (Int, String) -> Wire.Bytes
 ```
 
@@ -423,7 +423,7 @@ true
 
 ### `wire_open`
 
-```prism,sig,h-daf3e5dc496f7400ba12d2e4de897a44c31196b428fa800a963702c416bb2168
+```prism,sig,h-63260cb3ee7184a3b2de95fcf36e7f71588710e255dac17f484ef84e6c03f19a
 wire_open : (Wire.Bytes, Int, String) -> Wire.Bytes ! {Fail}
 ```
 
@@ -431,7 +431,7 @@ Open a frame, checking the scheme, kind, and digest before the body and returnin
 
 ### `wire_is_reference`
 
-```prism,sig,h-8d798d96135614e5fdeeba13e6c4f4698522cdc311494d0e7edc779afb44da50
+```prism,sig,h-0102a530a37de10d1cf1f4e1af17d25296704d567a37a53540e06f0d184e2e1c
 wire_is_reference : (Wire.Bytes, Int, String) -> Bool ! {Fail}
 ```
 
@@ -439,7 +439,7 @@ True when a well-formed frame for `kind`/`digest` carries no body (a pure refere
 
 ### `wire_open_value_any`
 
-```prism,sig,h-3f4035da92132f1ce9172bd35f9ed23ab762aaac2b9c591592382cf818dbf662
+```prism,sig,h-2fdcd0a7e8627b5c8c43337890c08435277e2b22c48e2e695af1e1cfe472b6ec
 wire_open_value_any : (Wire.Bytes) -> (String, Wire.Bytes) ! {Fail}
 ```
 
@@ -455,7 +455,7 @@ dig
 
 ### `wire_encode_value_with_digest`
 
-```prism,sig,h-83f1f1937bbf3b9d4674920d5190c1bde7c9198b7e28792180accca6ccd8777c
+```prism,sig,h-644d9ca061aa79a698e6601f6961374b67b07a261d14aa2f91bcdce439b77255
 wire_encode_value_with_digest : forall a. (String, a) -> Wire.Bytes
 ```
 
@@ -471,7 +471,7 @@ Encode a value as a `value`-kind frame carrying an explicitly supplied contract 
 
 ### `wire_decode_value_with_digest`
 
-```prism,sig,h-3f059e37b335d242b6cb9b8515f38e603221e2c873dc2b96bc53351501e60687
+```prism,sig,h-52019f23bbf4a24b99c8ef334b3230eb1abffe4c12c2aeb541db38630bb584de
 wire_decode_value_with_digest : forall a. (Wire.Bytes, String) -> a ! {Fail}
 ```
 
@@ -479,7 +479,7 @@ Decode a `value`-kind frame against an explicitly supplied contract digest: chec
 
 ### `wire_encode_stable`
 
-```prism,sig,h-c2bf010a678936a59a46e3c9a66ab98e86c8734326ec685eb742128ff9c13f6c
+```prism,sig,h-88321ffc55eec8ac4b5d530df9e7a6d105e7da82949f2ac64ea930ae21dce1e0
 wire_encode_stable : forall a. (a) -> Wire.Bytes
 ```
 
@@ -487,7 +487,7 @@ Encode a `Stable` value as a `value` frame under its own contract digest. The di
 
 ### `wire_decode_stable`
 
-```prism,sig,h-f6d01abb33a022b80b7daa9f7e62bd409fc707e40696e1599ae72e606c30e846
+```prism,sig,h-f832ada4ee65e0ede47d0563fe03e1c62e2278a00db1077db516c4e098ade1e8
 wire_decode_stable : forall a. (Wire.Bytes) -> a ! {Fail}
 ```
 
@@ -495,7 +495,7 @@ Decode a `Stable` value from a `value` frame, checking the frame's digest agains
 
 ### `no_loss`
 
-```prism,sig,h-5f7e5dcc4f215cfca689293341c41bbe670218ca7e5acef80880245b9575e105
+```prism,sig,h-4dc1171fad0f76f06cbf90a626071e6059193baccf4224468079d481bbeb9fec
 no_loss : Wire.Loss
 ```
 
@@ -503,7 +503,7 @@ The empty `Loss`: a downgrade that dropped nothing.
 
 ### `dropped`
 
-```prism,sig,h-990c364bb02382a9f0bc2f63c15a0e5e6e2618016da9d8b04ff69e2491270de2
+```prism,sig,h-985d0d52ff13a2da87ba5b4a58e39fe17a4ebc60779d28b453d6e5dd76ad54e0
 dropped : (List(String)) -> Wire.Loss
 ```
 
@@ -519,7 +519,7 @@ loss_names(dropped(["port", "tls"]))
 
 ### `loss_names`
 
-```prism,sig,h-65d1334d3b9011fbc03ff8105a87092b8d6f947af8e12166ae08878f7da860c0
+```prism,sig,h-279287625df6ae27bee4bf8800eff23119c51b579e113e7014cb077e452d1a85
 loss_names : (Wire.Loss) -> List(String)
 ```
 
@@ -527,7 +527,7 @@ The field names inside a `Loss`.
 
 ### `lossless`
 
-```prism,sig,h-1f7c7e90bb9e5fa19a4238c119782c55e107ff4c0c137ac6f1bfd58a6500ae43
+```prism,sig,h-859c58fa8410ef33e6bb986f9ebeed2232cfb868be5221832a3d32fbd17526f1
 lossless : (Wire.Loss) -> Bool
 ```
 
@@ -543,7 +543,7 @@ True when a `Loss` dropped nothing, so the downgrade was lossless. The safe subs
 
 ### `loss_union`
 
-```prism,sig,h-691e6bea2ef18787492eb8db645cc948f13da77fc9825d25b7279d6fe393bd25
+```prism,sig,h-1e267424b5e7bcc0a4375b10a1165e9a56a1095458ca87fecc24e4d95bbca8eb
 loss_union : (Wire.Loss, Wire.Loss) -> Wire.Loss
 ```
 
@@ -559,7 +559,7 @@ loss_names(loss_union(dropped(["a"]), dropped(["b"])))
 
 ### `compose_upgrade`
 
-```prism,sig,h-0a238edbce40624df52c011bdd6720cfc465d993caf6bed6940d6b65fe384f25
+```prism,sig,h-c320b318f1844e835ba3343ad78ab63d89cf43db71e4e3dcca0c684cc6cf32c4
 compose_upgrade : forall a b c. ((a) -> b, (b) -> c) -> (a) -> c
 ```
 
@@ -575,7 +575,7 @@ compose_upgrade(\(x) -> x + 1, \(y) -> y * 2)(3)
 
 ### `compose_downgrade`
 
-```prism,sig,h-1cc7ba9e22469d894dec8d4fc6d4a5ca8ac97167b3abf4fb03520a935f149c7a
+```prism,sig,h-b05bf195f231f98389562fde63c287253c81959e0952f0837c3c30de01e1ced0
 compose_downgrade : forall a b c. ((a) -> (b, Wire.Loss), (b) -> (c, Wire.Loss)) -> (a) -> (c, Wire.Loss)
 ```
 
@@ -591,7 +591,7 @@ compose_downgrade(\(z) -> (z - 1, dropped(["hi"])), \(m) -> (m, no_loss))(10)
 
 ### `reconcile`
 
-```prism,sig,h-c4a45feb7201bc1f2ab11f9c9b7b911b5350e58f0e0329eff098174ac7bd1252
+```prism,sig,h-9306cbdc9b7b4900daea4d56edf33c7afa4509ff04ac5c7a8305a04c2419ea34
 reconcile : forall a b. (Wire.Policy, (a) -> (b, Wire.Loss), a) -> (b, Wire.Loss) ! {Fail}
 ```
 

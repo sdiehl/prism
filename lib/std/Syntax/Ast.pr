@@ -1,8 +1,10 @@
 -- | The typed surface syntax that the `prism-surface-syntax-v1` artifact
--- decodes into. Constructor prefixes name the family (`I` items, `E`
--- expressions, `P` patterns, `Ty` types), and spanned nodes wrap in `Sp`. The
--- shapes mirror the compiler's exporter exactly, so a decoded document
--- re-encodes to identical bytes.
+-- decodes into.
+--
+-- Constructor prefixes name the family (`I` items, `E` expressions, `P`
+-- patterns, `Ty` types), and spanned nodes wrap in `Sp`. The shapes mirror the
+-- compiler's exporter exactly, so a decoded document re-encodes to identical
+-- bytes.
 
 import Syntax.Source (..)
 
@@ -115,6 +117,7 @@ pub type Expr
   | EDefault(Sp(Expr), Sp(Expr))
   | ETransact(Sp(Expr), Sp(Expr))
   | EProbe(String, Sp(Expr))
+  | EReflect(String, String)
   | EOptChain(Sp(Expr), String)
   | ERange(List(Sp(Expr)), Sp(Expr))
   | ECompose(String, Sp(Expr), Sp(Expr))

@@ -1,6 +1,7 @@
 -- | A Prism-language reimplementation of the compiler's raw token layer: exact
--- UTF-8 tokenization, literal payload decoding, and interpolation splitting,
--- expressed as ordinary Prism. The Rust `lex_raw` pipeline remains the
+-- UTF-8 tokenization, literal payload decoding, and interpolation splitting.
+--
+-- The whole layer is ordinary Prism. The Rust `lex_raw` pipeline remains the
 -- authoritative oracle; this module produces the same raw token stream (kind,
 -- byte span, and decoded value) and the same interleaved trivia (line comments
 -- and blank-line runs) so the two can be diffed. It is compared and reported,
@@ -503,6 +504,155 @@ fn lx_push_cp(text : String, p : Int, buf : Buf) : Buf =
 fn lx_slice(text : String, lo : Int, hi : Int) : String =
   string_of_buf(lx_push_bytes(text, lo, hi, buf_empty()))
 
+-- A space or a tab: the two bytes a line's indentation is made of. A newline is
+-- not one, since it is the separator the lines are counted from.
+fn lx_hspace(c : Int) : Bool = c == 32 || c == 9
+
+-- Whether the raw-string delimiter `"""` stands at `p`.
+fn lx_quote3(text : String, p : Int, n : Int) : Bool =
+  p + 3 <= n
+    && byte_at(text, p) == lx_b("\"")
+    && byte_at(text, p + 1) == lx_b("\"")
+    && byte_at(text, p + 2) == lx_b("\"")
+
+-- Whether a raw multiline string opens at `i`, with `r"""`.
+fn lx_raw_opens(text : String, i : Int, n : Int) : Bool =
+  i + 4 <= n && byte_at(text, i) == lx_b("r") && lx_quote3(text, i + 1, n)
+
+-- The offset of the delimiter closing a raw literal, the first `"""` at or
+-- after `p`. A raw body has no escape, so nothing inside it can be skipped.
+fn lx_raw_end(text : String, p : Int, n : Int) : Option(Int) =
+  if p + 3 > n then
+    None
+  elif lx_quote3(text, p, n) then
+    Some(p)
+  else
+    lx_raw_end(text, p + 1, n)
+
+-- The first offset in [p, e) holding neither a space nor a tab.
+fn lx_skip_h(text : String, p : Int, e : Int) : Int =
+  if p < e && lx_hspace(byte_at(text, p)) then
+    lx_skip_h(text, p + 1, e)
+  else
+    p
+
+-- The end of [p, e) with its trailing run of spaces and tabs dropped.
+fn lx_trim_h(text : String, p : Int, e : Int) : Int =
+  if e > p && lx_hspace(byte_at(text, e - 1)) then
+    lx_trim_h(text, p, e - 1)
+  else
+    e
+
+-- Where a raw body starts: past the newline the opening delimiter sits against,
+-- which belongs to the delimiter rather than to the text. A run of spaces or
+-- tabs may stand between the two; a body with no newline there starts at its
+-- first byte and keeps it.
+fn lx_raw_from(text : String, lo : Int, hi : Int) : Int =
+  let p = lx_skip_h(text, lo, hi)
+  if p < hi && byte_at(text, p) == 10 then
+    p + 1
+  else
+    lo
+
+-- Where a raw body ends, by the same rule read backwards.
+fn lx_raw_upto(text : String, lo : Int, hi : Int) : Int =
+  let e = lx_trim_h(text, lo, hi)
+  if e > lo && byte_at(text, e - 1) == 10 then
+    e - 1
+  else
+    hi
+
+-- The end of the line starting at `p`, which is the next newline or `e`.
+fn lx_line_end(text : String, p : Int, e : Int) : Int =
+  if p < e && byte_at(text, p) /= 10 then
+    lx_line_end(text, p + 1, e)
+  else
+    p
+
+-- Whether [p, q) holds nothing but whitespace, so it contributes no margin of
+-- its own and comes back from the dedent empty.
+fn lx_blank(text : String, p : Int, q : Int) : Bool =
+  if p >= q then
+    true
+  elif lx_ws(byte_at(text, p)) then
+    lx_blank(text, p + 1, q)
+  else
+    false
+
+-- How many leading bytes the indents at `a` and `b` share, so a body mixing
+-- spaces and tabs is stripped only as far as the two agree rather than by a
+-- count that would cut one line's tab off against another's space.
+fn lx_common(text : String, a : Int, b : Int, k : Int, lim : Int) : Int =
+  if k < lim && byte_at(text, a + k) == byte_at(text, b + k) then
+    lx_common(text, a, b, k + 1, lim)
+  else
+    k
+
+-- The indentation every nonblank line of [p, e) shares, carried as the offset
+-- of one such indent and its length. A body with no nonblank line has none.
+fn lx_margin(
+  text : String,
+  p : Int,
+  e : Int,
+  m : Option((Int, Int))
+) : Option((Int, Int)) =
+  let q = lx_line_end(text, p, e)
+  let m2 =
+    if lx_blank(text, p, q) then
+      m
+    else
+      let ind = lx_skip_h(text, p, q) - p
+      match m of
+        None => Some((p, ind))
+        Some(prev) =>
+          let (mo, ml) = prev
+          Some((mo, lx_common(text, mo, p, 0, if ml < ind then ml else ind)))
+  if q >= e then
+    m2
+  else
+    lx_margin(text, q + 1, e, m2)
+
+-- The lines of [p, e) with `ml` bytes of shared indentation removed from each,
+-- rejoined by the newlines that separated them.
+fn lx_raw_lines(
+  text : String,
+  p : Int,
+  e : Int,
+  ml : Int,
+  first : Bool,
+  buf : Buf
+) : Buf =
+  let q = lx_line_end(text, p, e)
+  let sep =
+    if first then
+      buf
+    else
+      buf_push(buf, 10)
+  let out =
+    if lx_blank(text, p, q) then
+      sep
+    else
+      lx_push_bytes(text, p + ml, q, sep)
+  if q >= e then
+    out
+  else
+    lx_raw_lines(text, q + 1, e, ml, false, out)
+
+-- The value of a raw literal whose body is [lo, hi): those bytes verbatim,
+-- less the newline each delimiter sits against and the indentation the block
+-- shares with the code around it. No escape is decoded and no brace opens a
+-- hole, so what the author typed is what the string holds.
+fn lx_raw_cook(text : String, lo : Int, hi : Int) : String =
+  let from = lx_raw_from(text, lo, hi)
+  let upto = lx_raw_upto(text, from, hi)
+  let ml =
+    match lx_margin(text, from, upto, None) of
+      None => 0
+      Some(m) =>
+        let (_, k) = m
+        k
+  string_of_buf(lx_raw_lines(text, from, upto, ml, true, buf_empty()))
+
 -- The decoded byte of a backslash escape, matching the compiler's fixed escape
 -- set: `n t r " \ { }`. Numeric and unicode escapes are deliberately absent, so
 -- the map stays one-to-one and the formatter round-trips. Any other escape is a
@@ -993,6 +1143,26 @@ fn lx_loop(
     let c = byte_at(text, i)
     if lx_ws(c) then
       lx_loop(text, n, lx_skip_ws(text, i, n), cursor, toks, trivs, tb)
+    elif lx_raw_opens(text, i, n) then
+      match lx_raw_end(text, i + 4, n) of
+        None => Err(LxUntermStr(i))
+        Some(q) =>
+          let endq = q + 3
+          let tok =
+            Token {
+              kind = TStr,
+              span = Span { lo = i, hi = endq },
+              value = Some(lx_raw_cook(text, i + 4, q))
+            }
+          lx_loop(
+              text,
+              n,
+              endq,
+              endq,
+              Cons(tok, toks),
+              lx_add_blank(trivs, text, cursor, i),
+              tb,
+            )
     elif c == lx_b("\"") then
       match lx_str_end(text, i, n) of
         Err(e) => Err(e)

@@ -10,7 +10,7 @@ Record/replay handlers for the capability effects.
 
 ### `record`
 
-```prism,sig,h-cef8c2f564dec484360261a7a53a32884fec2f2b106ef35a21ac1569793432e0
+```prism,sig,h-1234506928ab484634ae5b52274c5b2944bd01735ac15b4dbb2f08f118a61363
 record : forall e0 a. ((Unit) -> a ! {IO, e0}) -> (a, List(Replay@TraceEntry)) ! {IO, e0}
 ```
 
@@ -22,7 +22,7 @@ record(\(u) -> rng_rand() + rng_rand())
 
 ### `replay`
 
-```prism,sig,h-57bce7a2d56cafc58de03cc5614762039486d5d7272f06a64ecaa0a0fadccde1
+```prism,sig,h-d9c5ae431388113c8870d5714994d65372027e68b38ccd5ab86f3a023e5f6962
 replay : forall e0 a. (List(Replay@TraceEntry), (Unit) -> a ! {Fail, e0}) -> a ! {Fail, e0}
 ```
 
@@ -35,7 +35,7 @@ replay(trace, \(u) -> rng_rand()) == first
 
 ### `serialize`
 
-```prism,sig,h-bb78c5a9078b7621f3da82412ce1d0b6bb2ed98ebd63c9c0464e83cd36d22ac0
+```prism,sig,h-109d1e9388586a6594e85a9e99250102b01254091406955d0bf3b672b58e005c
 serialize : (List(Replay@TraceEntry)) -> String
 ```
 
@@ -48,7 +48,7 @@ write_file("run.trace", serialize(trace))
 
 ### `deserialize`
 
-```prism,sig,h-d65506ba0c83ad17894a90cb9cff4d39a894cdf3aba717b340739b00a0dc01f1
+```prism,sig,h-d9508c6df7701245cb3142a4173f5d60be0e85bf0b8d29f28c0574fdeedaa7bc
 deserialize : (String) -> List(Replay@TraceEntry)
 ```
 
@@ -66,7 +66,7 @@ I2:42S3:abc
 
 ### `durable`
 
-```prism,sig,h-a2d7a52a3be9221d23d4405432332c6d1629470c45ec9a860cb452e5f3d41dc1
+```prism,sig,h-bb98f99fb55eead52a1f3663e159c67587093671276f556ba1c7675bb0ef0248
 durable : forall e0 a. (String, (Unit) -> a ! {Fail, IO, e0}) -> a ! {Fail, IO, e0}
 ```
 

@@ -2,7 +2,7 @@
  *
  * The scalar interpreter defines the semantics (`simd_builtin` in
  * src/eval/builtin.rs); this file must reproduce it bit for bit. A vector is a
- * two-word cell whose arity word is 0, so `prism_rc_dec` frees it without
+ * two-word cell carrying no children, so `prism_rc_dec` frees it without
  * treating the raw lanes as child pointers (the `prism_box` discipline, two
  * words wide). Float lanes are the doubles' bit patterns; integer lanes are the
  * two's-complement values. `min`/`max` use a plain `a < b ? a : b`, the same
@@ -17,12 +17,31 @@
 
 #include <string.h>
 
-/* A fresh two-lane vector cell holding the two raw words. Arity 0 keeps the
- * lanes out of the child scan; the cell is otherwise an ordinary counted cell
- * that dup/drop and the leak balance treat like any other. */
+/* Payload width of a vector cell, in words: two 64-bit lanes, or four 32-bit
+ * lanes packed into the same two words. */
+#define PRISM_SIMD_WORDS 2
+/* Traversable children of a vector cell. The lanes are raw bit patterns, never
+ * tagged values, so this is honestly zero: the arity word is the field count the
+ * generic walker reads (`prism_cell_has_children` in prism_mem.c admits every
+ * non-payload tag and then iterates arity fields), and iterating zero fields is
+ * exactly right here. It is not a marker smuggled past the walker.
+ *
+ * The one consequence to know: unlike a string or buffer cell, whose distinct
+ * tag makes arity mean "payload size", a vector cell's arity deliberately does
+ * NOT equal its allocated width, so arity cannot be used as a capacity for it.
+ * The only reader that would is `prism_reuse_alloc`'s growth guard, and it
+ * fails closed (it aborts rather than build a wider cell over the two words).
+ * Codegen never emits a reuse token or a `prism_field` access for a vector,
+ * which is not an algebraic data type; lanes are read through
+ * `prism_simd_word` below. */
+#define PRISM_SIMD_CHILDREN 0
+
+/* A fresh two-lane vector cell holding the two raw words. It is otherwise an
+ * ordinary counted cell that dup/drop and the leak balance treat like any
+ * other. */
 static long prism_simd_vec(long w0, long w1) {
-    long *p = prism_alloc(2);
-    p[PRISM_ARITY_W] = 0;
+    long *p = prism_alloc(PRISM_SIMD_WORDS);
+    p[PRISM_ARITY_W] = PRISM_SIMD_CHILDREN;
     p[PRISM_HDR_WORDS + 0] = w0;
     p[PRISM_HDR_WORDS + 1] = w1;
     return (long)p;

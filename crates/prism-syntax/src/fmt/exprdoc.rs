@@ -37,7 +37,7 @@ use super::call::{call_shape, callee_parens, dot_recv_parens, is_with_call, Call
 use super::ops::{
     binop_prec, needs_left_paren, needs_paren_at, needs_right_paren, neg_operand_needs_paren, Level,
 };
-use super::{Fmt, Mode, INDENT, LINE_WIDTH};
+use super::{tuple_items, Fmt, Mode, INDENT, LINE_WIDTH};
 use crate::ast::{BinOp, Expr, S};
 use crate::kw;
 
@@ -53,7 +53,10 @@ const OP_NEST: usize = UNIT;
 // Indent by a column count. The layout engine's `indent` takes a signed delta;
 // our nests are always small positive column counts, so the widening cannot
 // wrap. Threading every nest through here keeps that the one conversion site.
-#[allow(clippy::cast_possible_wrap)]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "the nests are small multiples of INDENT, decades below isize::MAX"
+)]
 fn nest(cols: usize, d: Doc) -> Doc {
     indent(cols as isize, d)
 }
@@ -148,7 +151,7 @@ impl Fmt<'_> {
                 if self.has_comments(e.span.start, e.span.end) {
                     return None;
                 }
-                let items = self.seq_items(elems, base)?;
+                let items = tuple_items(self.seq_items(elems, base)?, true);
                 Some(seq_block(lparen(), rparen(), false, items))
             }
             Expr::FieldAccess(recv, field) => Some(concat([

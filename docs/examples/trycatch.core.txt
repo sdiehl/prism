@@ -1,21 +1,21 @@
 fn lookup(k) =
-  return k to t@735
-  return "a" to t@736
-  str_eq(t@735, t@736) to t@738
-  if t@738 then
+  return k to t@731
+  return "a" to t@732
+  str_eq(t@731, t@732) to t@734
+  if t@734 then
     return 1
   else
-    return k to t@737
-    do throw@NotFound(t@737)
+    return k to t@733
+    do throw@NotFound(t@733)
 fn main() =
   handle
-    return "z" to t@739
-    lookup(t@739)
+    return "z" to t@735
+    lookup(t@735)
   with
     throw@NotFound(k, k@) =>
       return 0
     return r@ =>
       return r@
-  to t@740
-  print t@740 to t@741
+  to t@736
+  print t@736 to t@737
   print_nl

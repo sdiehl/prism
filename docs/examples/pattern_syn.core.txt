@@ -1,37 +1,35 @@
 fn view@OnXAxis(v) =
-  return v to t@735
-  case t@735 of
-    Vec2(_, t@736) =>
-      return t@736
-  to t@737
-  return 0 to t@738
-  t@737 == t@738 to t@742
-  if t@742 then
-    return v to t@739
-    case t@739 of
-      Vec2(t@740, _) =>
-        return t@740
-    to t@741
-    return Some(t@741)
+  return v to t@731
+  case t@731 of
+    Vec2(_, t@732) =>
+      return t@732
+  to t@733
+  return 0 to t@734
+  t@733 == t@734 to t@738
+  if t@738 then
+    return v to t@735
+    case t@735 of
+      Vec2(t@736, _) =>
+        return t@736
+    to t@737
+    return Some(t@737)
   else
     return None
 fn make@OnXAxis(x) =
-  return x to t@743
-  return 0 to t@744
-  return Vec2(t@743, t@744)
+  return x to t@739
+  return 0 to t@740
+  return Vec2(t@739, t@740)
 fn describe(v) =
-  return v to t@745
-  case t@745 of
+  return v to t@741
+  case t@741 of
     scrut@0 =>
-      return scrut@0 to t@746
-      view@OnXAxis(t@746) to t@747
-      case t@747 of
+      return scrut@0 to t@742
+      view@OnXAxis(t@742) to t@743
+      case t@743 of
         Some(x) =>
           return x
         _ =>
-          return scrut@0 to t@748
-          case t@748 of
+          return scrut@0 to t@744
+          case t@744 of
             _ =>
-              return 0 to t@749
-              return 1 to t@750
-              t@749 - t@750
+              return -1

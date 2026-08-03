@@ -10,7 +10,7 @@ A set is named by its canonical root, and `uf_union` always keeps the smaller ke
 
 ### `uf_empty`
 
-```prism,sig,h-fdf830cc047b47be9183b26d79140e579460cfa1a2b98c769af2b6b94fdb474c
+```prism,sig,h-78a927fdf6d4d861736c18f59ada6aaa8a3183a64299f1860e595ced2274a36b
 uf_empty : forall a b. Map(a, a, b)
 ```
 
@@ -18,15 +18,23 @@ The empty forest: every key is its own singleton root.
 
 ### `uf_find`
 
-```prism,sig,h-ef04faf07972651b43020d0df89f8e416126e0bf85284b7ab26e7da3c7d9934d
+```prism,sig,h-3951a568fe1de299a6b9fc5ca70964433d700504702a796a4e9f794d8be0db9e
 uf_find : forall a b. (Map(b, b, a), b) -> b
 ```
 
 The canonical root of `x`'s set.
 
+```prism,mod=Data.UnionFind
+uf_find(uf_union(uf_union(uf_empty, 3, 2), 2, 1), 3)
+```
+
+```output
+1
+```
+
 ### `uf_union`
 
-```prism,sig,h-04817c643f386c75d3db72c9b65408d612af96f7fc0574844254c333db9f04ba
+```prism,sig,h-aaab0443f268fbfdb16e7b337c15f5f475786f89c30fadf0c7443ea318e88593
 uf_union : forall a b. (Map(b, b, a), b, b) -> Map(b, b, a)
 ```
 
@@ -42,7 +50,7 @@ true
 
 ### `uf_equiv`
 
-```prism,sig,h-f4b6187ac4e9f2df845422ed418933e2447a5c38c9d9ebfbed802c24ef9912ec
+```prism,sig,h-7b999122e67219301e16c8a75573b75ec23febb8cc19f4a5453e1acf2b3d3d48
 uf_equiv : forall a b. (Map(b, b, a), b, b) -> Bool
 ```
 

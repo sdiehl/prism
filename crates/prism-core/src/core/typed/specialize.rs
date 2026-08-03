@@ -32,6 +32,7 @@ pub struct SpecializeStats {
 
 impl SpecializeStats {
     /// Clones generated plus dictionary projections reduced.
+    #[must_use]
     pub const fn ticks(self) -> u64 {
         self.ticks
     }
@@ -39,6 +40,11 @@ impl SpecializeStats {
 
 /// Specialize constrained calls while retaining independently checkable
 /// type/effect witnesses.
+///
+/// # Errors
+/// The first [`TypedCoreSpecializationFailure`] a rewrite records: a dictionary
+/// arity or shape that contradicts the callee's Core signature, or a clone
+/// whose erasure would change the compatibility tree.
 pub fn specialize<P>(
     core: TypedCore<P>,
 ) -> Result<(TypedCore<P>, SpecializeStats), TypedCoreSpecializationFailure> {

@@ -433,6 +433,37 @@ fn run() : Int ! {} =
         assert!(fact.residual_effects().is_empty());
     }
 
+    // A binder that shadows the continuation's name is a different binding, so
+    // the continuation's exact summary must not answer for it. `helper`'s row is
+    // the only place `other` appears, so borrowing the summary would drop it.
+    #[test]
+    fn a_binder_shadowing_the_continuation_loses_its_precision() {
+        let (program, checked) = checked(
+            r"effect E
+  one() : Int
+
+effect F
+  other() : Int
+
+fn helper() : Int ! {F} = other()
+
+fn run() : Int ! {F} =
+  handle one() with partial {
+    one() resume k => (\(k) -> k())(helper),
+    return r => r
+  }",
+        );
+        let fact = residual(&program, &checked, "run");
+        assert!(
+            fact.residual_operations().is_empty(),
+            "the shadowed continuation's `one` must not be attributed to the inner `k`"
+        );
+        assert!(
+            fact.has_open_row(),
+            "an unknown callee's row stays opaque, {fact:?}"
+        );
+    }
+
     #[test]
     fn pure_mask_does_not_borrow_prior_same_effect_precision() {
         let (program, checked) = checked(
@@ -947,7 +978,14 @@ struct Tc<'a> {
     // Exact summaries for handler continuation binders. Calling `resume` runs
     // the already-recorded residual body, so its deliberately open function row
     // must not turn a known local summary into an opaque one.
-    precise_calls: BTreeMap<Sym, OperationUses>,
+    //
+    // Keyed on the row existential minted for the binder's type, never on its
+    // spelling: the existential is fresh per handler clause and appears in
+    // exactly one `Env` entry, so a nested clause cannot collide with an
+    // enclosing one and an inner binding that shadows the continuation's name
+    // cannot inherit its summary. `precise_call` performs the lookup through
+    // `Env`, the scoping authority.
+    precise_calls: BTreeMap<u32, OperationUses>,
     // Every handler expression must produce exactly one checked-HIR residual
     // fact. The marker set lets the HIR lint detect a missing or stale fact.
     handler_nodes: BTreeSet<NodeId>,

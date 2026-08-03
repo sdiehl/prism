@@ -15,7 +15,7 @@ use prism_common::sym::Sym;
 use super::super::specialize_support::Rewrite;
 use super::super::{CompSig, CoreFnSig, CoreInstantiation, CoreType, LoweredType};
 
-pub fn subtract_row(row: &EffRow, label: Sym) -> EffRow {
+pub(crate) fn subtract_row(row: &EffRow, label: Sym) -> EffRow {
     EffRow::canonical(
         row.labels()
             .into_iter()
@@ -28,19 +28,19 @@ pub fn subtract_row(row: &EffRow, label: Sym) -> EffRow {
 /// Discharge one private effect label from every sig in a region, leaving the
 /// term structure untouched. Erasure rewrites that also replace nodes (the
 /// var-to-cell pass) layer their node cases on top of these hooks.
-pub struct SubtractEffect {
+pub(crate) struct SubtractEffect {
     pub label: Sym,
 }
 
 impl SubtractEffect {
-    pub fn sig(&mut self, sig: &CompSig) -> CompSig {
+    pub(crate) fn sig(&mut self, sig: &CompSig) -> CompSig {
         CompSig::new(
             self.ty(sig.result()),
             subtract_row(sig.effects(), self.label),
         )
     }
 
-    pub fn ty(&mut self, ty: &CoreType) -> CoreType {
+    pub(crate) fn ty(&mut self, ty: &CoreType) -> CoreType {
         match ty {
             CoreType::Thunk(sig) => CoreType::Thunk(Box::new(self.sig(sig))),
             CoreType::Function(signature) => CoreType::Function(Box::new(CoreFnSig::new(

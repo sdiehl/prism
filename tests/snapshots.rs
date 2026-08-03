@@ -498,7 +498,7 @@ fn free_monad_warning_is_opt_in_and_proportionate() {
         "the fusion warning must be silent without --verbose"
     );
     // Zero false positives: a fully fused stream program says nothing.
-    let fused = stderr("examples/stream_fold.pr");
+    let fused = stderr("examples/fixtures/compiler/stream_fold.pr");
     assert!(
         !fused.contains("fell off the fused path"),
         "a fully fused program must emit no free-monad warning, got: {fused}"
@@ -738,15 +738,15 @@ fn var_pure_example() {
     assert_eq!(prism::types::show_effects(&d.effects), "{}");
 }
 
-// Deconstructors showcase, also in examples/. Same naming trick so the
-// gate's native-parity loop covers it; the fbip assertion checks constructor
-// reuse on a nested update path (no prelude, so the only reuse is main's).
+// Concise optic-path showcase, also in examples/. The fbip assertion checks
+// constructor reuse on a nested update path (no prelude, so the only reuse is
+// main's).
 #[test]
-fn lenses_example() {
+fn optics_example() {
     let root = env!("CARGO_MANIFEST_DIR");
-    let path = format!("{root}/examples/lenses.pr");
+    let path = format!("{root}/examples/optics.pr");
     let out = interp_output(Path::new(&path));
-    insta::assert_snapshot!("interpreter@lenses.pr", out);
+    insta::assert_snapshot!("interpreter@optics.pr", out);
     let src = "type A = A { x: Int }\ntype B = B { a: A }\n\
                fn main() =\n  let b = B { a = A { x = 1 } }\n  print({ b | a.x = 2 }.a.x)\n";
     let fbip = prism::dump("fbip", src).unwrap();
@@ -787,7 +787,7 @@ fn class_pattern_example() {
 #[test]
 fn stream_fuse_example() {
     let root = env!("CARGO_MANIFEST_DIR");
-    let path = format!("{root}/examples/stream_fuse.pr");
+    let path = format!("{root}/examples/fixtures/compiler/stream_fuse.pr");
     let out = interp_output(Path::new(&path));
     insta::assert_snapshot!("interpreter@stream_fuse.pr", out);
     let src = fs::read_to_string(&path).unwrap();
@@ -809,7 +809,7 @@ fn stream_fuse_example() {
 #[test]
 fn stream_fold_example() {
     let root = env!("CARGO_MANIFEST_DIR");
-    let path = format!("{root}/examples/stream_fold.pr");
+    let path = format!("{root}/examples/fixtures/compiler/stream_fold.pr");
     let out = interp_output(Path::new(&path));
     insta::assert_snapshot!("interpreter@stream_fold.pr", out);
     let src = fs::read_to_string(&path).unwrap();

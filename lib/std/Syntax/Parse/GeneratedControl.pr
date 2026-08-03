@@ -1,0 +1,223 @@
+-- Handwritten family-neutral runtime shared by generated parsers.
+-- This module has no grammar-derived policy; generator output targets its stable API.
+
+import Data.List (..)
+
+import Syntax.Token (..)
+
+import Syntax.Cursor (..)
+
+import Syntax.Parse.Support (..)
+
+pub type GeneratedSeparatedPhase = GSRequiredFirst | GSInitial | GSAfterSeparator
+
+pub type GeneratedSeparatedDecision = GSEnter | GSReject(Cursor)
+
+pub fn generated_bind(
+  parsed : Parsed(a),
+  next : (a, Cursor) -> Parsed(b)
+) : Parsed(b) =
+  match parsed of
+    PTook(value, c) => next(value, c)
+    PStuck(c) => PStuck(c)
+    PFault(d) => PFault(d)
+
+pub fn generated_spend(
+  c : Cursor,
+  depth : Int,
+  body : (Cursor, Int) -> Parsed(a)
+) : Parsed(a) =
+  match descend(depth, c) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(d, c1) => body(c1, d)
+
+pub fn generated_repeat(
+  c : Cursor,
+  depth : Int,
+  minimum : Int,
+  parse_item : (Cursor, Int) -> Parsed(a)
+) : Parsed(List(a)) =
+  if minimum > 0 then
+    match parse_item(c, depth) of
+      PTook(item, c1) => generated_repeat_more(c1, depth, parse_item, [item])
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+  else
+    generated_repeat_more(c, depth, parse_item, Nil)
+
+fn generated_repeat_more(
+  c : Cursor,
+  depth : Int,
+  parse_item : (Cursor, Int) -> Parsed(a),
+  rev : List(a)
+) : Parsed(List(a)) =
+  match parse_item(c, depth) of
+    PTook(item, c1) =>
+      if c1.pos == c.pos then
+        PTook(reverse(rev), c1)
+      else
+        generated_repeat_more(c1, depth, parse_item, Cons(item, rev))
+    PStuck(c1) =>
+      if c1.pos == c.pos then
+        PTook(reverse(rev), cursor_restore(c, c1))
+      else
+        PStuck(c1)
+    PFault(d) => PFault(d)
+
+pub fn generated_choice(
+  c : Cursor,
+  left : (Cursor) -> Parsed(a),
+  right : (Cursor) -> Parsed(a)
+) : Parsed(a) =
+  match left(c) of
+    PFault(d) => PFault(d)
+    PTook(l, lc) =>
+      match right(c) of
+        PFault(d) => PFault(d)
+        PTook(r, rc) =>
+          if rc.pos > lc.pos then
+            PTook(r, generated_merge_cursor(rc, lc, rc))
+          else
+            PTook(l, generated_merge_cursor(lc, lc, rc))
+        PStuck(rc) =>
+          if rc.far > lc.pos then
+            PStuck(generated_merge_cursor(rc, lc, rc))
+          else
+            PTook(l, generated_merge_cursor(lc, lc, rc))
+    PStuck(lc) =>
+      match right(c) of
+        PFault(d) => PFault(d)
+        PTook(r, rc) =>
+          if lc.far > rc.pos then
+            PStuck(generated_merge_cursor(lc, lc, rc))
+          else
+            PTook(r, generated_merge_cursor(rc, lc, rc))
+        PStuck(rc) =>
+          PStuck(
+              generated_merge_cursor(
+                  if lc.far >= rc.far then lc else rc,
+                  lc,
+                  rc,
+                ),
+            )
+
+fn generated_merge_cursor(at : Cursor, left : Cursor, right : Cursor) : Cursor =
+  if left.far > right.far then
+    Cursor { ..at, far = left.far, wanted = left.wanted }
+  elif right.far > left.far then
+    Cursor { ..at, far = right.far, wanted = right.wanted }
+  else
+    let noted =
+      foldl(cursor_note_name, Cursor { ..left, pos = left.far }, right.wanted)
+    Cursor { ..at, far = noted.far, wanted = noted.wanted }
+
+pub fn generated_separated(
+  c : Cursor,
+  depth : Int,
+  close : String,
+  start_phase : GeneratedSeparatedPhase,
+  parse_item : (Cursor, Int) -> Parsed(x),
+  item_value : (x) -> a,
+  item_receipt : (x) -> r,
+  before_item : (GeneratedSeparatedPhase, Cursor, String) -> GeneratedSeparatedDecision,
+  note_follow : (GeneratedSeparatedPhase, Cursor, r, String) -> Cursor,
+  rev : List(a)
+) : Parsed(List(a)) =
+  generated_separated_at(
+      c,
+      depth,
+      close,
+      parse_item,
+      item_value,
+      item_receipt,
+      before_item,
+      note_follow,
+      rev,
+      start_phase,
+      true,
+    )
+
+pub fn generated_delimited_until(
+  c : Cursor,
+  depth : Int,
+  close : String,
+  start_phase : GeneratedSeparatedPhase,
+  parse_item : (Cursor, Int) -> Parsed(x),
+  item_value : (x) -> a,
+  item_receipt : (x) -> r,
+  before_item : (GeneratedSeparatedPhase, Cursor, String) -> GeneratedSeparatedDecision,
+  note_follow : (GeneratedSeparatedPhase, Cursor, r, String) -> Cursor,
+  rev : List(a)
+) : Parsed(List(a)) =
+  generated_separated_at(
+      c,
+      depth,
+      close,
+      parse_item,
+      item_value,
+      item_receipt,
+      before_item,
+      note_follow,
+      rev,
+      start_phase,
+      false,
+    )
+
+fn generated_separated_at(
+  c : Cursor,
+  depth : Int,
+  close : String,
+  parse_item : (Cursor, Int) -> Parsed(x),
+  item_value : (x) -> a,
+  item_receipt : (x) -> r,
+  before_item : (GeneratedSeparatedPhase, Cursor, String) -> GeneratedSeparatedDecision,
+  note_follow : (GeneratedSeparatedPhase, Cursor, r, String) -> Cursor,
+  rev : List(a),
+  phase : GeneratedSeparatedPhase,
+  consume_close : Bool
+) : Parsed(List(a)) =
+  let required =
+    match phase of
+      GSRequiredFirst => true
+      _ => false
+  if not(required) && at_fixed(c, close) then
+    PTook(reverse(rev), if consume_close then cursor_advance(c) else c)
+  else
+    match before_item(phase, c, close) of
+      GSReject(failed) => PStuck(failed)
+      GSEnter =>
+        match parse_item(c, depth) of
+          PTook(item, c1) =>
+            let value = item_value(item)
+            let receipt = item_receipt(item)
+            if at_fixed(c1, ",") then
+              let next_phase =
+                match phase of
+                  GSRequiredFirst => GSInitial
+                  _ => GSAfterSeparator
+              generated_separated_at(
+                  cursor_advance(c1),
+                  depth,
+                  close,
+                  parse_item,
+                  item_value,
+                  item_receipt,
+                  before_item,
+                  note_follow,
+                  Cons(value, rev),
+                  next_phase,
+                  consume_close,
+                )
+            elif at_fixed(c1, close) then
+              PTook(
+                  reverse(Cons(value, rev)),
+                  if consume_close then cursor_advance(c1) else c1,
+                )
+            else
+              PStuck(note_follow(phase, c1, receipt, close))
+          PStuck(c1) =>
+            PStuck(
+                if c1.pos == c.pos then cursor_note(c1, TFixed(close)) else c1,
+              )
+          PFault(d) => PFault(d)

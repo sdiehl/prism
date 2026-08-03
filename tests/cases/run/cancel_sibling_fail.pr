@@ -116,9 +116,9 @@ fn queued_main_scene() : Int ! {Async(Int), IO, Fail} =
   v
 
 fn main() =
-  let fifo = default(\() -> run_async(fifo_scene), 0 - 1)
+  let fifo = default(\() -> run_async(fifo_scene), -1)
   println("fifo recovered with {fifo}")
-  let lifo = default(\() -> run_lifo(lifo_scene), 0 - 2)
+  let lifo = default(\() -> run_lifo(lifo_scene), -2)
   println("lifo recovered with {lifo}")
-  let queued = default(\() -> run_async(queued_main_scene), 0 - 3)
+  let queued = default(\() -> run_async(queued_main_scene), -3)
   println("queued main recovered with {queued}")

@@ -27,4 +27,4 @@ fn abs(x : Int) : Int
 fn main() : Unit ! {IO} =
   println(clamp(5, 0, 10))
   println(clamp(42, 0, 10))
-  println(abs(0 - 7))
+  println(abs(-7))

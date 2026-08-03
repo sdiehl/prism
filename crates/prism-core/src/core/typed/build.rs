@@ -20,16 +20,19 @@ use super::{
     LoweredType, OperationSig, TypedBinder, TypedComp, TypedCompKind, TypedCore, TypedCoreFn,
     TypedForward, TypedHandleOp, TypedHandler, TypedPattern, TypedValue, TypedValueKind, VerifyEnv,
 };
+use super::{CORE_GROW_STACK, CORE_MIN_STACK};
 use crate::core::builtins::Builtin;
+use crate::core::CoreOp::{
+    Add, Addf, Div, Divf, Eq, Eqf, Ge, Gef, Gt, Gtf, Le, Lef, Lt, Ltf, Mul, Mulf, Ne, Nef, Rem,
+    Sub, Subf,
+};
 use crate::core::{CheckedHandler, Comp, Core, CoreOp, CorePat, IoOp, NegLane, Value};
 
-// Red zone / segment size for the builder's recursion: the entry point takes one
-// grown segment, and `Builder::comp` grows further segments inside the recursion
-// so depth is bounded by memory, not by any single stack.
-const BUILDER_MIN_STACK: usize = 4 * 1024 * 1024;
-const BUILDER_GROW_STACK: usize = 8 * 1024 * 1024;
-
 /// Translate a checked source function scheme to its Core calling convention.
+///
+/// # Errors
+/// A message naming the scheme, when what it peels down to is not a function
+/// type and so has no calling convention.
 pub fn core_fn_sig(scheme: &Type, prefix: Vec<CoreType>) -> Result<CoreFnSig, String> {
     let (quantifiers, body) = peel_quantifiers(scheme);
     let Type::Fun(params, effects, result) = body else {
@@ -217,7 +220,7 @@ fn peel_quantifiers(mut ty: &Type) -> (Vec<CoreQuantifier>, &Type) {
     }
 }
 
-pub fn lower_value_type(ty: &Type) -> CoreType {
+pub(crate) fn lower_value_type(ty: &Type) -> CoreType {
     let (quantifiers, body) = peel_quantifiers(ty);
     match body {
         Type::Fun(params, effects, result) => {
@@ -285,6 +288,11 @@ const fn declared_argument(param: Sym, kind: &Kind) -> Type {
 
 /// Build the constructor, operation, and intrinsic signature environment from
 /// the same checked declarations the source elaborator consumes.
+///
+/// # Errors
+/// [`TypedCoreEnvironmentFailure::InvalidSignature`] when a wired-in builtin or
+/// intrinsic signature does not parse, or does not lower to a function
+/// signature.
 pub fn build_verify_env(
     ctors: &BTreeMap<String, CtorInfo>,
     eff_ops: &BTreeMap<String, EffOpInfo>,
@@ -439,6 +447,7 @@ pub fn build_verify_env(
     Ok(env)
 }
 
+#[must_use]
 pub fn dict_type(class: Sym, argument: Type) -> CoreType {
     CoreType::Source(Type::Con(
         Sym::from(&names::dict_ctor(class.as_str())),
@@ -454,7 +463,7 @@ pub fn dict_type(class: Sym, argument: Type) -> CoreType {
 /// accumulator quantifier is instantiated with at each call site, so this is the
 /// one home for it rather than a second copy that could drift from
 /// `lower_value_type`.
-pub fn source_type(ty: &CoreType) -> Result<Type, String> {
+pub(crate) fn source_type(ty: &CoreType) -> Result<Type, String> {
     match ty {
         CoreType::Source(ty) => Ok(ty.clone()),
         CoreType::Thunk(sig)
@@ -1623,7 +1632,7 @@ impl<'a> Builder<'a> {
         // statement block) is deep recursion. The entry-point guard in
         // `build_typed` buys one segment; growing here, inside the recursion,
         // chains segments so depth is bounded by memory, not by one stack.
-        stacker::maybe_grow(BUILDER_MIN_STACK, BUILDER_GROW_STACK, || {
+        stacker::maybe_grow(CORE_MIN_STACK, CORE_GROW_STACK, || {
             self.comp_inner(comp, expected)
         })
     }
@@ -1940,10 +1949,6 @@ impl<'a> Builder<'a> {
         rhs: Value,
         expected: Option<&CompSig>,
     ) -> Result<TypedComp, String> {
-        use CoreOp::{
-            Add, Addf, Div, Divf, Eq, Eqf, Ge, Gef, Gt, Gtf, Le, Lef, Lt, Ltf, Mul, Mulf, Ne, Nef,
-            Rem, Sub, Subf,
-        };
         let (operand, result) = match op {
             Add | Sub | Mul | Div | Rem => (CoreType::Source(Type::Int), Type::Int),
             Addf | Subf | Mulf | Divf => (CoreType::Source(Type::Float), Type::Float),
@@ -2714,7 +2719,7 @@ impl Solver {
     fn zonk_comp(&self, comp: TypedComp) -> TypedComp {
         // Zonking recurses per typed node; grow segments inside the recursion,
         // same discipline as `Builder::comp`.
-        stacker::maybe_grow(BUILDER_MIN_STACK, BUILDER_GROW_STACK, || {
+        stacker::maybe_grow(CORE_MIN_STACK, CORE_GROW_STACK, || {
             self.zonk_comp_inner(comp)
         })
     }
@@ -2898,15 +2903,21 @@ fn has_unreported_param_row(signature: &CoreFnSig) -> bool {
         .any(|name| !reported.contains(name))
 }
 
-/// Reconstruct checked witnesses for the legacy elaborator's compatibility
-/// tree. The returned program is ready for the independent proof checker; the
-/// only public escape from this module is semantic erasure.
+/// Reconstruct checked witnesses for the elaborator's compatibility tree. The
+/// returned program is ready for the independent proof checker; the only public
+/// escape from this module is semantic erasure.
+///
+/// # Errors
+/// A [`TypedCoreConstructionFailure`] when a node's witnesses cannot be
+/// reconstructed from the declared schemes, or a
+/// [`TypedCoreEnvironmentFailure`] when the environment those schemes come from
+/// is itself ill-formed.
 pub fn build_typed(
     core: Core,
     signatures: &BTreeMap<Sym, CoreFnSig>,
     verify_env: &VerifyEnv,
 ) -> Result<TypedCore<Elaborated>, Error> {
-    stacker::maybe_grow(BUILDER_MIN_STACK, BUILDER_GROW_STACK, || {
+    stacker::maybe_grow(CORE_MIN_STACK, CORE_GROW_STACK, || {
         build_typed_on_grown_stack(core, signatures, verify_env)
     })
 }

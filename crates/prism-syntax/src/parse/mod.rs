@@ -20,10 +20,11 @@ pub struct ParseResult {
 const MAX_EXPECTED_SHOWN: usize = 8;
 
 fn from_lex(src: &str, e: &LexError) -> ParseError {
-    ParseError::Syntax {
-        span: Span::new(e.offset(), e.offset()),
-        msg: format!("{e} at {}", SourceMap::new(src).at(e.offset())),
-    }
+    ParseError::syntax(
+        Span::new(e.offset(), e.offset()),
+        format!("{e} at {}", SourceMap::new(src).at(e.offset())),
+        Vec::new(),
+    )
 }
 
 /// # Errors
@@ -80,10 +81,11 @@ pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
     for (vis, item) in items {
         if let Item::Deprecated(span, msg) = item {
             if pending_dep.is_some() {
-                return Err(ParseError::Syntax {
+                return Err(ParseError::syntax(
                     span,
-                    msg: "a `deprecated` annotation must be followed by a declaration".into(),
-                });
+                    "a `deprecated` annotation must be followed by a declaration".into(),
+                    Vec::new(),
+                ));
             }
             pending_dep = Some((span, msg));
             continue;
@@ -95,10 +97,11 @@ pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
                     deprecated.insert(n.clone(), dmsg);
                 }
                 None => {
-                    return Err(ParseError::Syntax {
-                        span: dspan,
-                        msg: "a `deprecated` annotation must precede a named declaration".into(),
-                    });
+                    return Err(ParseError::syntax(
+                        dspan,
+                        "a `deprecated` annotation must precede a named declaration".into(),
+                        Vec::new(),
+                    ));
                 }
             }
         }
@@ -133,10 +136,11 @@ pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
         }
     }
     if let Some((span, _)) = pending_dep {
-        return Err(ParseError::Syntax {
+        return Err(ParseError::syntax(
             span,
-            msg: "a `deprecated` annotation must be followed by a declaration".into(),
-        });
+            "a `deprecated` annotation must be followed by a declaration".into(),
+            Vec::new(),
+        ));
     }
     Ok(ParseResult {
         program: Program {
@@ -179,6 +183,28 @@ fn export_name(item: &Item) -> Option<&str> {
     }
 }
 
+// LALRPOP reports a terminal by its grammar-source alias spelling, so the
+// lambda alias arrives escaped; every other alias is already the token wire
+// name the `syntax-tokens` artifact uses.
+fn wire_name(raw: &str) -> String {
+    let t = raw.trim_matches('"');
+    if t == r"\\" {
+        "\\".into()
+    } else {
+        t.into()
+    }
+}
+
+// The canonical expectation set: token wire names, deduplicated and sorted so
+// the set does not depend on grammar table order and survives harmless grammar
+// refactors byte-identically.
+fn canonical_expected(expected: &[String]) -> Vec<String> {
+    let mut names: Vec<String> = expected.iter().map(|e| wire_name(e)).collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
 fn expected_name(raw: &str) -> String {
     match raw.trim_matches('"') {
         "v{" => "start of block".into(),
@@ -217,19 +243,21 @@ fn from_lalrpop(
 ) -> ParseError {
     let map = SourceMap::new(src);
     match e {
-        InvalidToken { location } => ParseError::Syntax {
-            span: Span::new(*location, *location),
-            msg: "invalid token".into(),
-        },
+        InvalidToken { location } => ParseError::syntax(
+            Span::new(*location, *location),
+            "invalid token".into(),
+            Vec::new(),
+        ),
         UnrecognizedEof { location, expected } => {
             let mut msg = format!("unexpected end of input at {}", map.at(*location));
             if !expected.is_empty() {
                 msg = format!("{msg}, expected {}", expected_list(expected));
             }
-            ParseError::Syntax {
-                span: Span::new(*location, *location),
+            ParseError::eof(
+                Span::new(*location, *location),
                 msg,
-            }
+                canonical_expected(expected),
+            )
         }
         UnrecognizedToken { token, expected } => {
             let msg = format!(
@@ -238,18 +266,17 @@ fn from_lalrpop(
                 map.at(token.0),
                 expected_list(expected)
             );
-            ParseError::Syntax {
-                span: Span::new(token.0, token.2),
+            ParseError::syntax(
+                Span::new(token.0, token.2),
                 msg,
-            }
+                canonical_expected(expected),
+            )
         }
-        ExtraToken { token } => ParseError::Syntax {
-            span: Span::new(token.0, token.2),
-            msg: format!("extra token {}", token.1),
-        },
-        User { error: (span, msg) } => ParseError::Syntax {
-            span: *span,
-            msg: msg.clone(),
-        },
+        ExtraToken { token } => ParseError::syntax(
+            Span::new(token.0, token.2),
+            format!("extra token {}", token.1),
+            Vec::new(),
+        ),
+        User { error: (span, msg) } => ParseError::syntax(*span, msg.clone(), Vec::new()),
     }
 }

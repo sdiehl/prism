@@ -4,7 +4,7 @@ instance ordList : Ord(List(a)) given Ord(a)
       Nil =>
         match ys of
           Nil => 0
-          Cons(_, _) => 0 - 1
+          Cons(_, _) => -1
       Cons(x, xt) =>
         match ys of
           Nil => 1

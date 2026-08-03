@@ -325,7 +325,7 @@ fn check_frozen(sd: &StableDecl, r: &Rung, data: &DataDecl) -> Result<(), TypeEr
 }
 
 // The committed shape-digest prefix of a rung's record type, in the exact scheme
-// (`prism-core-hash-v1`) and truncation the stdlib goldens use.
+// (`prism-core-hash-v2`) and truncation the stdlib goldens use.
 pub(crate) fn rung_digest(data: &DataDecl) -> String {
     contract_digest(data)
 }

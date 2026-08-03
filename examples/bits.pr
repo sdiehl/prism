@@ -35,7 +35,7 @@ fn main() : Unit ! {IO} =
   -- 1100 & 1010 = 1000
   println(int_of_i64(i64_or(a, b)))
   -- 1100 | 1010 = 1110
-  println(int_of_i64(i64_shr(to_i64(0 - 256), to_i64(4))))
+  println(int_of_i64(i64_shr(to_i64(-256), to_i64(4))))
   -- arithmetic: -16
   println(int_of_u64(u64_shl(to_u64(15), to_u64(4))))
   -- 240

@@ -68,7 +68,7 @@ fn show_task(t) =
           "\" priority=",
           show_int(prio),
           " due=",
-          if str_eq(due, "") then "none" else due,
+          if due == "" then "none" else due,
         ])
     Done(id) => concat_all(["done #", show_int(id)])
     Listing(all) => concat_all(["list all=", if all then "true" else "false"])

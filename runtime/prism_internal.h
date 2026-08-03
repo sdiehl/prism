@@ -125,6 +125,18 @@ extern void *mi_calloc(size_t, size_t);
  * discipline apply to it unchanged. */
 #define PRISM_TBUF_TAG 0x54425546L
 
+/* The one membership test over the inline-payload tag family above. A cell with
+ * one of these tags stores bytes, limbs, or raw words behind its arity slot, so
+ * its arity is a payload measure and its payload words are never child values;
+ * every other tag is an ordinary cell whose arity is a genuine field count.
+ * The collector, the promotion walk, the reuse-token check, and the debug
+ * field-bounds check all decide the same question, so they all ask it here:
+ * admitting a new payload tag is one line, not four sites to keep in step. */
+static inline int prism_tag_has_payload(long tag) {
+    return tag == PRISM_STR_TAG || tag == PRISM_BIG_TAG || tag == PRISM_BUF_TAG ||
+           tag == PRISM_TBUF_TAG;
+}
+
 /* Unicode scalar-value bounds. The interpreter's show_char is char::from_u32,
  * which admits U+0000..U+D7FF and U+E000..U+10FFFF, rejecting the UTF-16
  * surrogate range and anything past the last code point; a rejected value shows

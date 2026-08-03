@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.16.0
+
+- Self-hosted parser: added `Syntax.Parse` for files and expressions, with generated type/pattern control and Rust as the oracle.
+- Parse diagnostics: added byte-exact spans, EOF/depth codes, and canonical expected-token sets.
+- Parser accountability: froze versioned oracle and coverage artifacts and recorded performance and parity gaps.
+- Content addressing: fixed ambiguous numeric encodings, moved to `prism-core-hash-v2`, and rejected old stores.
+- Reflection: added `reflect fn` and `reflect type` to quote same-file declarations with leading comments.
+- Strings: added dedented raw multiline `r"""..."""` literals with no escapes or interpolation.
+- Patterns: allowed restricted `let` patterns before postfix `?`, preserving them through lowering and formatting.
+- Formatter: fixed a one-element tuple losing its trailing comma in expression, pattern, and type position, which reparsed as a parenthesized value.
+- Formatter: added `.prismfmtignore`, exempting digest-pinned sources from a directory walk while an explicitly named path is still formatted.
+- Builds: added `prism build --watch`; verbose mode reports invalidation closure, Merkle impact, cache reuse, and timing.
+- Effect planning: centralized reachability and thunk-flow facts in a stable `effect-plan` dump.
+- Effect lowering: made every strategy rung forceable and recorded erasure as a separate artifact axis.
+- Effect confinement: kept tracked thunk captures in selective free-monad regions and named every reason for widening.
+- Tier invariance: expanded native parity and fuzz coverage across the complete lowering ladder and erasure modes.
+- Semantics: extended the unverified Typst sketch with Core typing, effect rows, handlers, masks, and grades.
+- Documentation: added a comparative beginner tutorial and tightened standard-library and compiler guidance.
+
 ## 0.15.0
 
 - Self-hosted front end: the lexer, interpolation, and layout are also Prism modules, differentially checked against the compiler's.

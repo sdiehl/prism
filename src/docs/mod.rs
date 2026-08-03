@@ -22,6 +22,7 @@ use crate::parse::{parse, ParseResult};
 use crate::resolve::{resolve_modules_in, Root};
 use crate::stdlib::STDLIB;
 use crate::syntax::desugar::desugar;
+use crate::syntax::reflect::parse_unit;
 use crate::types::{check_allow_holes, Checked};
 
 mod accept;
@@ -126,7 +127,7 @@ fn check_quiet(src: &str, roots: &[Root]) -> Result<Checked, Error> {
     // (`?name`) to teach the hole report itself. It type-checks with the hole
     // retained (and its tooltip shows the inferred type); running it is the
     // author's problem, which is what `no_run` is for.
-    let ParseResult { program, .. } = parse(src)?;
+    let program = parse_unit(src)?;
     let program = resolve_modules_in(program, roots)?;
     let program = desugar(program)?;
     Ok(check_allow_holes(&program)?)

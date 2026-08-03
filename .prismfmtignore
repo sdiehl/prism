@@ -1,0 +1,9 @@
+# Sources whose exact bytes are pinned by a digest, and so cannot be owned by
+# the formatter as well. Reformatting one does not merely restyle it: it moves
+# the byte offsets the corpus records for each fragment, and the recorded
+# oracle artifacts describe a source that no longer exists. Accepting the
+# rewrite is not an option either, because a case that already carries oracle
+# artifacts is immutable history and the corpus tool revalidates it rather than
+# re-pinning it. Naming one of these paths explicitly still formats it.
+tests/fixtures/parser/compaction
+tests/fixtures/parser/compaction_check.pr

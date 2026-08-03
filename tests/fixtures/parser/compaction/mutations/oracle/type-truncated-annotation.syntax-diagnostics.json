@@ -1,0 +1,25 @@
+{
+  "schema": "prism-syntax-diagnostics-v1",
+  "compiler": "0.15.0",
+  "source": {
+    "digest": "3c9d1748ed6ff4edf62aeb1d7cb99083ff28b8f3ee414009d5554d4aa1e409d2",
+    "text": "fn f(x:Int\n"
+  },
+  "diagnostics": [
+    {
+      "code": "E7100",
+      "phase": "parse",
+      "span": [
+        10,
+        10
+      ],
+      "message": "unexpected end of block at line 1:11, expected ')', ',', ':='",
+      "expected": [
+        ")",
+        ",",
+        ":="
+      ],
+      "related": []
+    }
+  ]
+}

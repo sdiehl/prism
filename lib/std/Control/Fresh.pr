@@ -11,9 +11,23 @@ pub effect Fresh
   fresh() : Int
 
 -- | Run `action` with a fresh-name counter starting at `0`, discharging `Fresh`.
+--
+-- ```prism
+-- run_fresh(\() -> [gensym("tmp"), gensym("tmp")])
+-- ```
+-- ```output
+-- [tmp0, tmp1]
+-- ```
 pub fn run_fresh(action : () -> a ! {Fresh | e}) : a = run_fresh_from(0, action)
 
 -- | Run `action` with the counter starting at `start`.
+--
+-- ```prism
+-- run_fresh_from(10, \() -> [fresh(), fresh()])
+-- ```
+-- ```output
+-- [10, 11]
+-- ```
 pub fn run_fresh_from(start : Int, action : () -> a ! {Fresh | e}) : a =
   let f =
     handle action() with

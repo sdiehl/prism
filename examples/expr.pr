@@ -10,40 +10,27 @@ fn eval(e) : Result(Int, Int) =
   match e of
     Lit(n) => Ok(n)
     Neg(a) =>
-      match eval(a) of
-        Ok(v) => Ok(0 - v)
-        Err(c) => Err(c)
+      let value = eval(a)?
+      Ok(-value)
     Add(a, b) =>
-      match eval(a) of
-        Ok(x) =>
-          match eval(b) of
-            Ok(y) => Ok(x + y)
-            Err(c) => Err(c)
-        Err(c) => Err(c)
+      let x = eval(a)?
+      let y = eval(b)?
+      Ok(x + y)
     Sub(a, b) =>
-      match eval(a) of
-        Ok(x) =>
-          match eval(b) of
-            Ok(y) => Ok(x - y)
-            Err(c) => Err(c)
-        Err(c) => Err(c)
+      let x = eval(a)?
+      let y = eval(b)?
+      Ok(x - y)
     Mul(a, b) =>
-      match eval(a) of
-        Ok(x) =>
-          match eval(b) of
-            Ok(y) => Ok(x * y)
-            Err(c) => Err(c)
-        Err(c) => Err(c)
+      let x = eval(a)?
+      let y = eval(b)?
+      Ok(x * y)
     Div(a, b) =>
-      match eval(b) of
-        Ok(d) =>
-          if d == 0 then
-            Err(0 - 1)
-          else
-            match eval(a) of
-              Ok(n) => Ok(n / d)
-              Err(c) => Err(c)
-        Err(c) => Err(c)
+      let d = eval(b)?
+      if d == 0 then
+        Err(-1)
+      else
+        let n = eval(a)?
+        Ok(n / d)
 
 fn depth(e) : Int =
   match e of
@@ -57,7 +44,7 @@ fn depth(e) : Int =
 fn show_result(r : Result(Int, a)) : Unit ! {IO} =
   match r of
     Ok(v) => println(v)
-    Err(_) => println(0 - 999)
+    Err(_) => println(-999)
 
 fn main() : Unit ! {IO} =
   let e1 = Div(Mul(Add(Lit(10), Lit(5)), Lit(3)), Lit(5))

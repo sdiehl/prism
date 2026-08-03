@@ -11,5 +11,5 @@ fn chain(x) =
     )
 
 fn main() =
-  println(result_or(0 - 1, chain(5)))
-  println(result_or(0 - 1, chain(0)))
+  println(result_or(-1, chain(5)))
+  println(result_or(-1, chain(0)))

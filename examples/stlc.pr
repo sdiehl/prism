@@ -41,7 +41,7 @@ type Term
 type Env = ENil | EBind(String, Ty, Env)
 
 effect TypeError
-  mismatch(String) : Ty
+  never mismatch(String) : Ty
 
 fn ty_eq(a, b) : Bool =
   match (a, b) of
@@ -63,7 +63,7 @@ fn lookup(env, name) : Ty ! {TypeError} =
   match env of
     ENil => mismatch("unbound variable {name}")
     EBind(k, t, rest) =>
-      if str_eq(k, name) then
+      if k == name then
         t
       else
         lookup(rest, name)
