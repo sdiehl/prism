@@ -1280,7 +1280,10 @@ def parse_productions(
 
 def parse_terminal_aliases(source: str) -> set[str]:
     aliases: set[str] = set()
-    line_pattern = re.compile(r'^\s*("(?:\\.|[^"])*")\s*=>\s*Token::')
+    # The two alternatives must stay disjoint: a backslash belongs to the escape
+    # branch only. Letting `[^"]` also match it makes every character ambiguous
+    # and the match exponential on an unterminated literal.
+    line_pattern = re.compile(r'^\s*("(?:\\.|[^"\\])*")\s*=>\s*Token::')
     for line in source.splitlines():
         match = line_pattern.match(line)
         if match:

@@ -1714,7 +1714,7 @@ fn finish_module<I: Isa>(isa: &I, cg: &Cg<'_, I>, fn_bodies: &str, dispatch: &st
 /// Escape a string for an MLIR string literal: printable ASCII verbatim,
 /// backslash, quote and non-printables as two-digit hex escapes.
 #[cfg(feature = "mlir")]
-pub fn escape_str(s: &str) -> String {
+pub(super) fn escape_str(s: &str) -> String {
     let mut escaped = String::new();
     for b in s.bytes() {
         match b {
@@ -1730,7 +1730,7 @@ pub fn escape_str(s: &str) -> String {
 /// Runtime declares for the string builtins, in table order: each is a
 /// `(symbol, arity)` pair taking and returning `i64`.
 #[cfg(feature = "mlir")]
-pub fn str_builtin_decls() -> impl Iterator<Item = (String, usize)> {
+pub(super) fn str_builtin_decls() -> impl Iterator<Item = (String, usize)> {
     BUILTINS
         .iter()
         .filter(|(_, _, kind)| *kind == BuiltinKind::Str)
