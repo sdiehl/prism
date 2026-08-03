@@ -6,9 +6,9 @@
       "pattern": 505,
       "type": 668
     },
-    "generator_code_lines": 2862,
-    "maintained_t_delta": 296,
-    "maintained_t_lines": 4028,
+    "generator_code_lines": 2867,
+    "maintained_t_delta": 301,
+    "maintained_t_lines": 4033,
     "maintained_t_verdict": "regressed",
     "pattern": {
       "facade": 20,

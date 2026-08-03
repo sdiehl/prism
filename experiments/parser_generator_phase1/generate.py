@@ -27,6 +27,7 @@ from typing import Callable, Iterable, Iterator, Mapping, Sequence
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 MANIFEST_PATH = ROOT / "docs/internal/PARSER_PRODUCTION_MANIFEST.json"
+FROZEN_STORE = HERE / "frozen"
 GRAMMAR_PATH = "crates/prism-syntax/src/grammar.lalrpop"
 PLAN_PATH = HERE / "generated/plan.json"
 ACTION_SCHEMA_PATH = HERE / "generated/action_schema.json"
@@ -126,27 +127,34 @@ def code_lines(text: str, comment_prefix: str) -> int:
     )
 
 
-def git(*args: str) -> str:
-    command = ["git", *args]
-    result = subprocess.run(
-        command,
-        cwd=ROOT,
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    if result.returncode != 0:
-        fail(f"{' '.join(command)} failed: {result.stderr.strip()}")
-    return result.stdout
+def blob_oid(data: bytes) -> str:
+    """The git blob OID of `data`, computed without git.
+
+    Same construction git uses, so the value is comparable to the OIDs the
+    manifest pins, and it stays available in a shallow clone or a source
+    tarball.
+    """
+    header = f"blob {len(data)}\0".encode("utf-8")
+    return hashlib.sha1(header + data, usedforsecurity=False).hexdigest()
 
 
-def read_frozen_blob(commit: str, path: str) -> str:
-    return git("show", f"{commit}:{path}")
+def read_frozen_blob(oid: str, path: str) -> str:
+    """Read a pinned oracle source from the vendored store.
 
-
-def blob_oid(commit: str, path: str) -> str:
-    return git("rev-parse", f"{commit}:{path}").strip()
+    The oracle is a commit on a pre-release branch, so it cannot be fetched
+    from the published history, which carries one squashed commit per release.
+    The blobs are vendored instead, each named by its own OID: re-hashing the
+    bytes and comparing against the filename is the integrity check, and it is
+    the same guarantee `git show <oracle>:<path>` used to give.
+    """
+    blob = FROZEN_STORE / oid
+    if not blob.is_file():
+        fail(f"frozen blob for {path} is missing: {blob.relative_to(ROOT)}")
+    data = blob.read_bytes()
+    actual = blob_oid(data)
+    if actual != oid:
+        fail(f"frozen blob for {path} hashes to {actual}, not {oid}")
+    return data.decode("utf-8")
 
 
 @dataclass(frozen=True)
@@ -2932,18 +2940,15 @@ def build() -> BuildResult:
     manifest_text = MANIFEST_PATH.read_text(encoding="utf-8")
     manifest = json.loads(manifest_text)
     commit = str(manifest["oracle_commit"])
-    grammar = read_frozen_blob(commit, GRAMMAR_PATH)
     source_pins: dict[str, str] = dict(manifest["sources"])
-    pin_errors: list[str] = []
-    frozen_sources: dict[str, str] = {}
-    for path, expected in sorted(source_pins.items()):
-        actual = blob_oid(commit, path)
-        if actual != expected:
-            pin_errors.append(f"{path}: expected {expected}, found {actual}")
-        frozen_sources[path] = read_frozen_blob(commit, path)
-    if pin_errors:
-        fail("source pin validation failed:\n  - " + "\n  - ".join(pin_errors))
-    grammar_oid = blob_oid(commit, GRAMMAR_PATH)
+    if GRAMMAR_PATH not in source_pins:
+        fail(f"manifest pins no OID for {GRAMMAR_PATH}")
+    grammar_oid = source_pins[GRAMMAR_PATH]
+    frozen_sources = {
+        path: read_frozen_blob(oid, path)
+        for path, oid in sorted(source_pins.items())
+    }
+    grammar = frozen_sources[GRAMMAR_PATH]
 
     productions = parse_productions(grammar, manifest["productions"])
     terminals = parse_terminal_aliases(grammar)

@@ -1,0 +1,840 @@
+-- | Recursive descent for Prism surface types.
+--
+-- The productions here deliberately follow the compiler grammar's precedence
+-- ladder rather than presenting a combinator layer:
+--
+--     Type   := forall ident+ . Type | Arrow ArrowEff?
+--     Arrow  := () -> Arrow | UType (-> Arrow)?
+--     UType  := AType (@ UsageRow)?
+--     AType  := primitive | name Args? | [Type] | (Type, ...) | #(...)
+--
+-- A cursor is passed and returned as a value. Every recursive edge that can
+-- increase authored nesting spends the shared parser depth budget, while
+-- punctuation loops stay tail-recursive and do not consume nesting depth.
+
+import Data.List (..)
+
+import Data.String (ends_with)
+
+import Syntax.Source (..)
+
+import Syntax.Token (..)
+
+import Syntax.Ast (..)
+
+import Syntax.Cursor (..)
+
+import Syntax.Parse.Support (..)
+
+-- The raw spelling of a usage row. Validation belongs after the whole row has
+-- been consumed so a deliberate diagnostic covers the same extent as Rust.
+type UsageParts = UsageParts {
+  facts: List(String),
+  open_tail: Bool
+}
+
+-- -------------------------------------------------------------------------
+-- Public entry points
+-- -------------------------------------------------------------------------
+
+-- | Parse one surface type, leaving the cursor at its first following token.
+-- `depth` is normally `depth_budget()` at a public parser entry point and the
+-- remaining budget when called from another production.
+pub fn parse_type(c : Cursor, depth : Int) : Parsed(Ty) =
+  match descend(depth, c) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(d, c1) => parse_type_body(c1, d)
+
+-- | Parse a type through the arrow layer but leave a trailing effect suffix
+-- unconsumed. Function declarations need this split because `: T ! {E}` is
+-- the declaration's effect when `T` is a value type, while the same suffix is
+-- the returned closure's effect when `T` is itself a function type.
+pub fn parse_type_head(c : Cursor, depth : Int) : Parsed(Ty) =
+  match descend(depth, c) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(d, c1) => parse_type_head_body(c1, d)
+
+-- | Parse one type-constructor argument. In addition to an ordinary type this
+-- position admits an effect-row literal and a type-level natural.
+pub fn parse_type_arg(c : Cursor, depth : Int) : Parsed(Ty) =
+  match descend(depth, c) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(d, c1) => parse_type_arg_body(c1, d)
+
+-- | Parse a function effect suffix, including its leading `!`. A bare `!` is
+-- the shorthand for an explicitly empty closed row.
+pub fn parse_effect_row(c : Cursor, depth : Int) : Parsed(Row) =
+  match take_fixed(c, "!") of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(_, c1) =>
+      if at_fixed(c1, "\{") then
+        parse_effect_braces(c1, depth)
+      else
+        PTook(empty_row(), c1)
+
+-- | Parse one effect label. Lowercase labels are bare; constructor and
+-- qualified labels may carry type-constructor arguments.
+pub fn parse_eff_label(c : Cursor, depth : Int) : Parsed(EffLabel) =
+  match cursor_peek(c) of
+    None => eff_label_miss(c)
+    Some(t) =>
+      match t.kind of
+        TIdent =>
+          PTook(
+              EffLabel { name = token_text(t), args = Nil },
+              cursor_advance(c),
+            )
+        TUid => parse_named_eff_label(c, depth)
+        TQual => parse_named_eff_label(c, depth)
+        _ => eff_label_miss(c)
+
+-- -------------------------------------------------------------------------
+-- Type, arrow, and usage precedence
+-- -------------------------------------------------------------------------
+
+fn parse_type_body(c : Cursor, depth : Int) : Parsed(Ty) =
+  if at_fixed(c, "forall") then
+    parse_forall(c, depth)
+  else
+    let saved = c
+    match parse_arrow(c, depth) of
+      PStuck(c1) => PStuck(cursor_note(c1, TFixed("forall")))
+      PFault(d) => PFault(d)
+      PTook(t, c1) => parse_arrow_effect(saved, t, c1, depth)
+
+fn parse_type_head_body(c : Cursor, depth : Int) : Parsed(Ty) =
+  if at_fixed(c, "forall") then
+    match take_fixed(c, "forall") of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(_, c1) =>
+        match take_word(c1, TIdent) of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(first, c2) =>
+            let (more, c3) = take_ident_run(c2, Nil)
+            match take_fixed(c3, ".") of
+              PStuck(c4) => PStuck(c4)
+              PFault(d) => PFault(d)
+              PTook(_, c4) =>
+                match parse_type_head(c4, depth) of
+                  PStuck(c5) => PStuck(c5)
+                  PFault(d) => PFault(d)
+                  PTook(body, c5) =>
+                    PTook(TyForall(Cons(first, more), body), c5)
+  else
+    parse_arrow(c, depth)
+
+fn parse_forall(c : Cursor, depth : Int) : Parsed(Ty) =
+  match take_fixed(c, "forall") of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(_, c1) =>
+      match take_word(c1, TIdent) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(first, c2) =>
+          let (more, c3) = take_ident_run(c2, Nil)
+          match take_fixed(c3, ".") of
+            PStuck(c4) => PStuck(c4)
+            PFault(d) => PFault(d)
+            PTook(_, c4) =>
+              match parse_type(c4, depth) of
+                PStuck(c5) => PStuck(c5)
+                PFault(d) => PFault(d)
+                PTook(body, c5) =>
+                  PTook(TyForall(Cons(first, more), body), c5)
+
+-- Consume a non-empty run's tail without manufacturing expectations: the
+-- first identifier was required by the caller, every later one is optional.
+fn take_ident_run(c : Cursor, rev : List(String)) : (List(String), Cursor) =
+  match cursor_peek(c) of
+    Some(t) =>
+      if t.kind == TIdent then
+        take_ident_run(cursor_advance(c), Cons(token_text(t), rev))
+      else
+        (reverse(rev), c)
+    None => (reverse(rev), c)
+
+-- Arrow is right associative. An empty domain exists only as the exact
+-- `() ->` prefix; ordinary atomic type parsing intentionally rejects `()`.
+fn parse_arrow(c : Cursor, depth : Int) : Parsed(Ty) =
+  if starts_empty_arrow(c) then
+    let c1 = cursor_advance(c)
+    let c2 = cursor_advance(c1)
+    let c3 = cursor_advance(c2)
+    match parse_arrow_nested(c3, depth) of
+      PStuck(c4) => PStuck(c4)
+      PFault(d) => PFault(d)
+      PTook(cod, c4) => PTook(TyFun(Nil, empty_row(), cod), c4)
+  else
+    match parse_usage_type(c, depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(dom, c1) =>
+        if at_fixed(c1, "->") then
+          match parse_arrow_nested(cursor_advance(c1), depth) of
+            PStuck(c2) => PStuck(c2)
+            PFault(d) => PFault(d)
+            PTook(cod, c2) => PTook(TyFun(domain_types(dom), empty_row(), cod), c2)
+        else
+          PTook(dom, c1)
+
+fn parse_arrow_nested(c : Cursor, depth : Int) : Parsed(Ty) =
+  match descend(depth, c) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(d, c1) => parse_arrow(c1, d)
+
+fn starts_empty_arrow(c : Cursor) : Bool =
+  kind_at(c, 0) == Some(TFixed("("))
+    && kind_at(c, 1) == Some(TFixed(")"))
+    && kind_at(c, 2) == Some(TFixed("->"))
+
+fn kind_at(c : Cursor, n : Int) : Option(TokenKind) =
+  match cursor_peek_at(c, n) of
+    None => None
+    Some(t) => Some(t.kind)
+
+fn domain_types(t : Ty) : List(Ty) =
+  match t of
+    TyTuple(ts) => ts
+    _ => [t]
+
+fn empty_row() : Row = Row { labels = Nil, tail = None }
+
+-- An effect suffix is parsed outside Arrow so it attaches to the complete
+-- function type, never to one of its atoms. The longer `! ... @ ...` shape is
+-- consumed before refusal to keep its diagnostic stable in every follow set.
+fn parse_arrow_effect(
+  saved : Cursor,
+  t : Ty,
+  c : Cursor,
+  depth : Int
+) : Parsed(Ty) =
+  if at_fixed(c, "!") then
+    match parse_effect_row(c, depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(row, c1) =>
+        if at_fixed(c1, "@") then
+          match parse_usage_parts(cursor_advance(c1)) of
+            PStuck(c2) => PStuck(c2)
+            PFault(d) => PFault(d)
+            PTook(_, c2) =>
+              PFault(
+                  refuse(
+                      cursor_since(saved, c2),
+                      "parenthesize the function type before `@`: write `((a) -> b ! \{E\}) @ fact`",
+                    ),
+                )
+        else
+          attach_effect(saved, t, row, c1)
+  else
+    PTook(t, c)
+
+fn attach_effect(saved : Cursor, t : Ty, row : Row, c : Cursor) : Parsed(Ty) =
+  match t of
+    TyFun(ps, _, cod) => PTook(TyFun(ps, row, cod), c)
+    _ =>
+      PFault(
+          refuse(
+              cursor_since(saved, c),
+              "effect row `! \{..\}` only applies to a function type",
+            ),
+        )
+
+fn parse_usage_type(c : Cursor, depth : Int) : Parsed(Ty) =
+  let saved = c
+  match parse_atomic_type(c, depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(t, c1) =>
+      if at_fixed(c1, "@") then
+        match parse_usage_parts(cursor_advance(c1)) of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(parts, c2) => validate_usage(saved, t, parts, c2)
+      else
+        PTook(t, c1)
+
+-- -------------------------------------------------------------------------
+-- Atomic types
+-- -------------------------------------------------------------------------
+
+fn parse_atomic_type(c : Cursor, depth : Int) : Parsed(Ty) =
+  match cursor_peek(c) of
+    None => atomic_type_miss(c)
+    Some(t) =>
+      match t.kind of
+        TFixed(s) => parse_fixed_atomic(s, c, depth)
+        TIdent => parse_type_name(c, depth, false)
+        TUid => parse_type_name(c, depth, true)
+        TQual => parse_type_name(c, depth, true)
+        _ => atomic_type_miss(c)
+
+fn parse_fixed_atomic(s : String, c : Cursor, depth : Int) : Parsed(Ty) =
+  if s == "Int" then
+    PTook(TyInt, cursor_advance(c))
+  elif s == "I64" then
+    PTook(TyI64, cursor_advance(c))
+  elif s == "U64" then
+    PTook(TyU64, cursor_advance(c))
+  elif s == "Bool" then
+    PTook(TyBool, cursor_advance(c))
+  elif s == "Unit" then
+    PTook(TyUnit, cursor_advance(c))
+  elif s == "Float" then
+    PTook(TyFloat, cursor_advance(c))
+  elif s == "Char" then
+    PTook(TyChar, cursor_advance(c))
+  elif s == "String" then
+    PTook(TyStr, cursor_advance(c))
+  elif s == "[" then
+    parse_list_type(c, depth)
+  elif s == "(" then
+    parse_paren_type(c, depth)
+  elif s == "#" then
+    parse_unboxed_type(c, depth)
+  else
+    atomic_type_miss(c)
+
+fn parse_type_name(c : Cursor, depth : Int, constructor : Bool) : Parsed(Ty) =
+  match cursor_peek(c) of
+    None => atomic_type_miss(c)
+    Some(t) =>
+      let name = token_text(t)
+      let c1 = cursor_advance(c)
+      if at_fixed(c1, "(") then
+        match parse_ctor_args(c1, depth) of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(args, c2) =>
+            if constructor then
+              PTook(TyCon(name, args), c2)
+            else
+              PTook(TyApp(name, args), c2)
+      elif constructor then
+        PTook(TyCon(name, Nil), c1)
+      else
+        PTook(TyVar(name), c1)
+
+fn parse_list_type(c : Cursor, depth : Int) : Parsed(Ty) =
+  let c1 = cursor_advance(c)
+  match parse_type(c1, depth) of
+    PStuck(c2) => PStuck(c2)
+    PFault(d) => PFault(d)
+    PTook(t, c2) =>
+      match take_fixed(c2, "]") of
+        PStuck(c3) => PStuck(c3)
+        PFault(d) => PFault(d)
+        PTook(_, c3) => PTook(TyCon("List", [t]), c3)
+
+fn parse_paren_type(c : Cursor, depth : Int) : Parsed(Ty) =
+  let c1 = cursor_advance(c)
+  match parse_type(c1, depth) of
+    PStuck(c2) => PStuck(c2)
+    PFault(d) => PFault(d)
+    PTook(first, c2) =>
+      if at_fixed(c2, ",") then
+        parse_type_list_tail(cursor_advance(c2), depth, [first], ")", TyTuple)
+      else
+        match take_fixed(c2, ")") of
+          PStuck(c3) => PStuck(c3)
+          PFault(d) => PFault(d)
+          PTook(_, c3) => PTook(first, c3)
+
+fn parse_unboxed_type(c : Cursor, depth : Int) : Parsed(Ty) =
+  let c1 = cursor_advance(c)
+  if at_fixed(c1, "(") then
+    parse_unboxed_tuple(cursor_advance(c1), depth)
+  elif at_fixed(c1, "\{") then
+    parse_unboxed_record(cursor_advance(c1), depth)
+  else
+    let c2 = cursor_note(cursor_note(c1, TFixed("(")), TFixed("\{"))
+    PStuck(c2)
+
+fn parse_unboxed_tuple(c : Cursor, depth : Int) : Parsed(Ty) =
+  if at_fixed(c, ")") then
+    PTook(TyUnboxedTuple(Nil), cursor_advance(c))
+  else
+    match parse_type(c, depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(first, c1) =>
+        if at_fixed(c1, ",") then
+          parse_type_list_tail(
+              cursor_advance(c1),
+              depth,
+              [first],
+              ")",
+              TyUnboxedTuple,
+            )
+        else
+          match take_fixed(c1, ")") of
+            PStuck(c2) => PStuck(c2)
+            PFault(d) => PFault(d)
+            PTook(_, c2) => PTook(TyUnboxedTuple([first]), c2)
+
+fn parse_unboxed_record(c : Cursor, depth : Int) : Parsed(Ty) =
+  if at_fixed(c, "\}") then
+    PTook(TyUnboxedRecord(Nil), cursor_advance(c))
+  else
+    match parse_record_field(c, depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(first, c1) =>
+        parse_record_fields_tail(c1, depth, [first])
+
+fn parse_record_field(c : Cursor, depth : Int) : Parsed(CField) =
+  match take_word(c, TIdent) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(name, c1) =>
+      match take_fixed(c1, ":") of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(_, c2) =>
+          match parse_type(c2, depth) of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(t, c3) => PTook(CField { name = name, ty = t }, c3)
+
+fn parse_record_fields_tail(
+  c : Cursor,
+  depth : Int,
+  rev : List(CField)
+) : Parsed(Ty) =
+  if at_fixed(c, "\}") then
+    PTook(TyUnboxedRecord(reverse(rev)), cursor_advance(c))
+  elif at_fixed(c, ",") then
+    let c1 = cursor_advance(c)
+    if at_fixed(c1, "\}") then
+      PTook(TyUnboxedRecord(reverse(rev)), cursor_advance(c1))
+    else
+      match parse_record_field(c1, depth) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(field, c2) => parse_record_fields_tail(c2, depth, Cons(field, rev))
+  else
+    PStuck(cursor_note(cursor_note(c, TFixed(",")), TFixed("\}")))
+
+-- The constructor argument and aggregate list loops intentionally admit both
+-- empty lists and trailing commas, matching the shared `Comma<T>` grammar rule.
+fn parse_ctor_args(c : Cursor, depth : Int) : Parsed(List(Ty)) =
+  let c1 = cursor_advance(c)
+  if at_fixed(c1, ")") then
+    PTook(Nil, cursor_advance(c1))
+  else
+    match parse_type_arg(c1, depth) of
+      PStuck(c2) => PStuck(c2)
+      PFault(d) => PFault(d)
+      PTook(first, c2) => parse_type_args_tail(c2, depth, [first])
+
+fn parse_type_args_tail(
+  c : Cursor,
+  depth : Int,
+  rev : List(Ty)
+) : Parsed(List(Ty)) =
+  if at_fixed(c, ")") then
+    PTook(reverse(rev), cursor_advance(c))
+  elif at_fixed(c, ",") then
+    let c1 = cursor_advance(c)
+    if at_fixed(c1, ")") then
+      PTook(reverse(rev), cursor_advance(c1))
+    else
+      match parse_type_arg(c1, depth) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(t, c2) => parse_type_args_tail(c2, depth, Cons(t, rev))
+  else
+    PStuck(cursor_note(cursor_note(c, TFixed(",")), TFixed(")")))
+
+-- A shared tail for parenthesized and unboxed type lists. `finish` is the AST
+-- constructor, making the punctuation loop independent of aggregate identity.
+fn parse_type_list_tail(
+  c : Cursor,
+  depth : Int,
+  rev : List(Ty),
+  close : String,
+  finish : (List(Ty)) -> Ty
+) : Parsed(Ty) =
+  if at_fixed(c, close) then
+    PTook(finish(reverse(rev)), cursor_advance(c))
+  else
+    match parse_type(c, depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(t, c1) =>
+        if at_fixed(c1, ",") then
+          parse_type_list_tail(
+              cursor_advance(c1),
+              depth,
+              Cons(t, rev),
+              close,
+              finish,
+            )
+        else
+          match take_fixed(c1, close) of
+            PStuck(c2) => PStuck(c2)
+            PFault(d) => PFault(d)
+            PTook(_, c2) => PTook(finish(reverse(Cons(t, rev))), c2)
+
+-- -------------------------------------------------------------------------
+-- Type arguments: rows, naturals, and declined dimension arithmetic
+-- -------------------------------------------------------------------------
+
+fn parse_type_arg_body(c : Cursor, depth : Int) : Parsed(Ty) =
+  if at_fixed(c, "\{") then
+    match parse_row_literal(c, depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(row, c1) => PTook(TyRowLit(row), c1)
+  elif starts_dimension_sum(c) then
+    parse_declined_dimension_sum(c)
+  elif at_kind(c, TInt) then
+    parse_nat(c)
+  else
+    parse_type_body(c, depth)
+
+fn starts_dimension_sum(c : Cursor) : Bool =
+  (at_kind(c, TInt) || at_kind(c, TIdent))
+    && kind_at(c, 1) == Some(TFixed("+"))
+
+fn parse_declined_dimension_sum(c : Cursor) : Parsed(Ty) =
+  let saved = c
+  let c1 = cursor_advance(c)
+  let c2 = cursor_advance(c1)
+  match parse_dim_tail(c2) of
+    PStuck(c3) => PStuck(c3)
+    PFault(d) => PFault(d)
+    PTook(_, c3) =>
+      PFault(
+          refuse(
+              cursor_since(saved, c3),
+              "arithmetic on dimensions is not supported: a dimension is a plain natural literal (`0`, `1`, `2`, ...) or a type variable, and dimensions unify by equality only",
+            ),
+        )
+
+fn parse_dim_tail(c : Cursor) : Parsed(Unit) =
+  if at_kind(c, TInt) || at_kind(c, TIdent) then
+    let c1 = cursor_advance(c)
+    if at_fixed(c1, "+") then
+      parse_dim_tail(cursor_advance(c1))
+    else
+      PTook((), c1)
+  else
+    PStuck(cursor_note(cursor_note(c, TInt), TIdent))
+
+fn parse_nat(c : Cursor) : Parsed(Ty) =
+  match cursor_peek(c) of
+    None => PStuck(cursor_note(c, TInt))
+    Some(t) =>
+      let raw = token_text(t)
+      let c1 = cursor_advance(c)
+      if ends_with("i64", raw) || ends_with("u64", raw) then
+        PFault(
+            refuse(
+                t.span,
+                "a dimension is a plain natural literal; drop the width suffix",
+              ),
+          )
+      else
+        match parse_int(raw) of
+          Some(n) =>
+            if n <= 18446744073709551615 then
+              PTook(TyNat(n), c1)
+            else
+              PFault(refuse(t.span, "dimension literal is too large"))
+          None => PFault(refuse(t.span, "dimension literal is too large"))
+
+fn parse_row_literal(c : Cursor, depth : Int) : Parsed(Row) =
+  let c1 = cursor_advance(c)
+  parse_eff_labels_and_tail(c1, depth)
+
+-- -------------------------------------------------------------------------
+-- Effect rows and labels
+-- -------------------------------------------------------------------------
+
+fn parse_effect_braces(c : Cursor, depth : Int) : Parsed(Row) =
+  parse_eff_labels_and_tail(cursor_advance(c), depth)
+
+fn parse_eff_labels_and_tail(c : Cursor, depth : Int) : Parsed(Row) =
+  if at_fixed(c, "\}") then
+    PTook(empty_row(), cursor_advance(c))
+  elif at_fixed(c, "|") then
+    parse_eff_tail(cursor_advance(c), Nil)
+  else
+    match parse_eff_label(c, depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(first, c1) =>
+        parse_eff_labels_more(c1, depth, [first])
+
+fn parse_eff_labels_more(
+  c : Cursor,
+  depth : Int,
+  rev : List(EffLabel)
+) : Parsed(Row) =
+  if at_fixed(c, "\}") then
+    PTook(Row { labels = reverse(rev), tail = None }, cursor_advance(c))
+  elif at_fixed(c, "|") then
+    parse_eff_tail(cursor_advance(c), rev)
+  elif at_fixed(c, ",") then
+    let c1 = cursor_advance(c)
+    if at_fixed(c1, "\}") then
+      PTook(Row { labels = reverse(rev), tail = None }, cursor_advance(c1))
+    elif at_fixed(c1, "|") then
+      -- The grammar's shared `Comma<T>` admits a trailing comma before the
+      -- separately parsed open tail as well as before the closer.
+      parse_eff_tail(cursor_advance(c1), rev)
+    else
+      match parse_eff_label(c1, depth) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(label, c2) =>
+          parse_eff_labels_more(c2, depth, Cons(label, rev))
+  else
+    PStuck(
+        cursor_note(
+            cursor_note(cursor_note(c, TFixed(",")), TFixed("|")),
+            TFixed("\}"),
+          ),
+      )
+
+fn parse_eff_tail(c : Cursor, rev : List(EffLabel)) : Parsed(Row) =
+  match take_word(c, TIdent) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(tail, c1) =>
+      match take_fixed(c1, "\}") of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(_, c2) =>
+          PTook(Row { labels = reverse(rev), tail = Some(tail) }, c2)
+
+fn parse_named_eff_label(c : Cursor, depth : Int) : Parsed(EffLabel) =
+  match cursor_peek(c) of
+    None => eff_label_miss(c)
+    Some(t) =>
+      let name = token_text(t)
+      let c1 = cursor_advance(c)
+      if at_fixed(c1, "(") then
+        match parse_ctor_args(c1, depth) of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(args, c2) =>
+            PTook(EffLabel { name = name, args = args }, c2)
+      else
+        PTook(EffLabel { name = name, args = Nil }, c1)
+
+fn eff_label_miss(c : Cursor) : Parsed(EffLabel) =
+  PStuck(note_eff_label(c))
+
+fn note_eff_label(c : Cursor) : Cursor =
+  cursor_note(cursor_note(cursor_note(c, TIdent), TUid), TQual)
+
+-- -------------------------------------------------------------------------
+-- Usage rows
+-- -------------------------------------------------------------------------
+
+fn parse_usage_parts(c : Cursor) : Parsed(UsageParts) =
+  if at_fixed(c, "\{") then
+    parse_usage_braces(cursor_advance(c))
+  else
+    match take_word(c, TIdent) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(fact, c1) =>
+        PTook(UsageParts { facts = [fact], open_tail = false }, c1)
+
+fn parse_usage_braces(c : Cursor) : Parsed(UsageParts) =
+  if at_fixed(c, "\}") then
+    PTook(
+        UsageParts { facts = Nil, open_tail = false },
+        cursor_advance(c),
+      )
+  elif at_fixed(c, "|") then
+    parse_usage_tail(cursor_advance(c), Nil)
+  else
+    match take_word(c, TIdent) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(first, c1) => parse_usage_more(c1, [first])
+
+fn parse_usage_more(c : Cursor, rev : List(String)) : Parsed(UsageParts) =
+  if at_fixed(c, "\}") then
+    PTook(
+        UsageParts { facts = reverse(rev), open_tail = false },
+        cursor_advance(c),
+      )
+  elif at_fixed(c, "|") then
+    parse_usage_tail(cursor_advance(c), rev)
+  elif at_fixed(c, ",") then
+    let c1 = cursor_advance(c)
+    if at_fixed(c1, "\}") then
+      PTook(
+          UsageParts { facts = reverse(rev), open_tail = false },
+          cursor_advance(c1),
+        )
+    elif at_fixed(c1, "|") then
+      parse_usage_tail(cursor_advance(c1), rev)
+    else
+      match take_word(c1, TIdent) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(fact, c2) => parse_usage_more(c2, Cons(fact, rev))
+  else
+    PStuck(
+        cursor_note(
+            cursor_note(cursor_note(c, TFixed(",")), TFixed("|")),
+            TFixed("\}"),
+          ),
+      )
+
+fn parse_usage_tail(
+  c : Cursor,
+  rev : List(String)
+) : Parsed(UsageParts) =
+  match take_word(c, TIdent) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(_, c1) =>
+      match take_fixed(c1, "\}") of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(_, c2) =>
+          PTook(
+              UsageParts { facts = reverse(rev), open_tail = true },
+              c2,
+            )
+
+fn validate_usage(
+  saved : Cursor,
+  base : Ty,
+  parts : UsageParts,
+  c : Cursor
+) : Parsed(Ty) =
+  let span = cursor_since(saved, c)
+  if parts.open_tail then
+    PFault(
+        refuse(
+            span,
+            "usage-row polymorphism (`@ \{fact | tail\}`) is reserved but not implemented",
+          ),
+      )
+  else
+    match validate_usage_facts(parts.facts, Nil) of
+      Ok(facts) => PTook(TyUsage(base, facts), c)
+      Err(msg) => PFault(refuse(span, msg))
+
+fn validate_usage_facts(
+  facts : List(String),
+  accepted : List(String)
+) : Result(List(String), String) =
+  match facts of
+    Nil =>
+      if is_nil(accepted) then
+        Err("a usage row cannot be empty")
+      else
+        Ok(accepted)
+    Cons(fact, rest) =>
+      if not(known_usage_fact(fact)) then
+        Err("unknown usage fact `{fact}`")
+      elif has_usage_fact(fact, accepted) then
+        Err("duplicate usage fact `{fact}`")
+      else
+        match conflicting_usage_fact(fact, accepted) of
+          Some(prior) =>
+            Err(
+                "usage facts `{prior}` and `{fact}` contradict each other (same axis)",
+              )
+          None =>
+            validate_usage_facts(rest, insert_usage_fact(fact, accepted))
+
+fn known_usage_fact(fact : String) : Bool =
+  fact == "aliased"
+    || fact == "bounded_stack"
+    || fact == "linear"
+    || fact == "local"
+    || fact == "many"
+    || fact == "noalloc"
+    || fact == "noescape"
+    || fact == "once"
+    || fact == "portable"
+    || fact == "unique"
+
+fn usage_axis(fact : String) : String =
+  if fact == "portable" then
+    "mobility"
+  elif fact == "local" || fact == "noescape" then
+    "escape"
+  elif fact == "once" || fact == "many" then
+    "multiplicity"
+  elif fact == "unique" || fact == "aliased" then
+    "aliasing"
+  elif fact == "noalloc" then
+    "allocation"
+  else
+    "fip"
+
+fn usage_axis_exclusive(fact : String) : Bool =
+  fact /= "linear" && fact /= "bounded_stack"
+
+fn conflicting_usage_fact(
+  fact : String,
+  accepted : List(String)
+) : Option(String) =
+  match accepted of
+    Nil => None
+    Cons(prior, rest) =>
+      if usage_axis_exclusive(fact)
+          && usage_axis(prior) == usage_axis(fact) then
+        Some(prior)
+      else
+        conflicting_usage_fact(fact, rest)
+
+fn has_usage_fact(fact : String, facts : List(String)) : Bool =
+  match facts of
+    Nil => false
+    Cons(x, rest) =>
+      if x == fact then
+        true
+      else
+        has_usage_fact(fact, rest)
+
+-- The Rust fact enum is alphabetically discriminated and its row constructor
+-- sorts by that order. A local insertion keeps the artifact list canonical
+-- without exposing a set type in the parser API.
+fn insert_usage_fact(fact : String, facts : List(String)) : List(String) =
+  match facts of
+    Nil => [fact]
+    Cons(x, rest) =>
+      if fact < x then
+        Cons(fact, facts)
+      else
+        Cons(x, insert_usage_fact(fact, rest))
+
+-- -------------------------------------------------------------------------
+-- Failure menus
+-- -------------------------------------------------------------------------
+
+fn atomic_type_miss(c : Cursor) : Parsed(Ty) =
+  let c1 = cursor_note(c, TFixed("Int"))
+  let c2 = cursor_note(c1, TFixed("I64"))
+  let c3 = cursor_note(c2, TFixed("U64"))
+  let c4 = cursor_note(c3, TFixed("Bool"))
+  let c5 = cursor_note(c4, TFixed("Unit"))
+  let c6 = cursor_note(c5, TFixed("Float"))
+  let c7 = cursor_note(c6, TFixed("Char"))
+  let c8 = cursor_note(c7, TFixed("String"))
+  let c9 = cursor_note(c8, TFixed("["))
+  let c10 = cursor_note(c9, TFixed("("))
+  let c11 = cursor_note(c10, TFixed("#"))
+  let c12 = cursor_note(c11, TIdent)
+  let c13 = cursor_note(c12, TUid)
+  PStuck(cursor_note(c13, TQual))

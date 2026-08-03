@@ -1,0 +1,1176 @@
+-- | Effects, classes, instances, canonical designations, and the shared
+-- `alias` declaration family for the Prism-owned parser.
+--
+-- These declarations share two pieces of grammar that do not belong in the
+-- top-level dispatcher: `given` constraints and member lists.  Effect, class,
+-- and instance members are layout-delimited; a real brace is recognized as the
+-- retired form and receives the same directed rewrite as the bootstrap parser.
+-- Instance methods are parsed here as complete function declarations so this
+-- module does not depend on private helpers in `Syntax.Parse.Decl`.
+
+import Data.List (..)
+
+import Syntax.Source (..)
+
+import Syntax.Token (..)
+
+import Syntax.Ast (..)
+
+import Syntax.Cursor (..)
+
+import Syntax.Parse.Support (..)
+
+import Syntax.Parse.Type (..)
+
+import Syntax.Parse.Pattern (..)
+
+import Syntax.Parse.Expr (..)
+
+-- -------------------------------------------------------------------------
+-- Shared token and layout helpers
+-- -------------------------------------------------------------------------
+
+fn at_sep(c : Cursor) : Bool = at_fixed(c, ",") || at_kind(c, TVSemi)
+
+fn skip_sep(c : Cursor) : Cursor =
+  if at_sep(c) then
+    cursor_advance(c)
+  else
+    c
+
+fn expect_layout_open(c : Cursor, family : String) : Parsed(Token) =
+  if at_fixed(c, "\{") then
+    let member =
+      if family == "effect" then
+        "operation"
+      elif family == "class" then
+        "method"
+      else
+        "member"
+    PFault(
+        refuse(
+            cursor_span(c),
+            "{family} bodies use layout: remove the braces and put each {member} on its own indented line",
+          ),
+      )
+  else
+    take_kind(c, TVOpen)
+
+fn take_uid(c : Cursor) : Parsed(String) = take_word(c, TUid)
+
+fn take_ident(c : Cursor) : Parsed(String) = take_word(c, TIdent)
+
+-- An unkinded type-parameter list, used by effects and aliases.  A trailing
+-- comma is accepted because the bootstrap grammar's `Comma` production does.
+fn parse_ty_params(c : Cursor) : Parsed(List(String)) =
+  if not(at_fixed(c, "(")) then
+    PTook(Nil, c)
+  else
+    parse_ty_params_go(cursor_advance(c), Nil)
+
+fn parse_ty_params_go(c : Cursor, rev : List(String)) : Parsed(List(String)) =
+  if at_fixed(c, ")") then
+    PTook(reverse(rev), cursor_advance(c))
+  else
+    match take_ident(c) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(name, c1) =>
+        if at_fixed(c1, ",") then
+          parse_ty_params_go(cursor_advance(c1), Cons(name, rev))
+        elif at_fixed(c1, ")") then
+          PTook(reverse(Cons(name, rev)), cursor_advance(c1))
+        else
+          PStuck(cursor_note_name(c1, ")"))
+
+-- -------------------------------------------------------------------------
+-- Given constraints
+-- -------------------------------------------------------------------------
+
+-- | Parse an optional `given Class(Type), ...` clause.  This is public because
+-- ordinary function declarations and the other declaration-family modules use
+-- exactly the same qualifier.
+pub fn parse_given_clause(c : Cursor, depth : Int) : Parsed(List(Constraint)) =
+  if not(at_fixed(c, "given")) then
+    PTook(Nil, c)
+  else
+    match parse_constraint(cursor_advance(c), depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(first, c1) => parse_given_more(c1, depth, [first])
+
+fn parse_given_more(
+  c : Cursor,
+  depth : Int,
+  acc : List(Constraint)
+) : Parsed(List(Constraint)) =
+  if at_fixed(c, ",") then
+    match parse_constraint(cursor_advance(c), depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(next, c1) => parse_given_more(c1, depth, append(acc, [next]))
+  else
+    PTook(acc, c)
+
+fn parse_constraint(c : Cursor, depth : Int) : Parsed(Constraint) =
+  let saved = c
+  match take_uid(c) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(cls, c1) =>
+      match take_fixed(c1, "(") of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(_, c2) =>
+          match parse_type(c2, depth) of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(ty, c3) =>
+              match take_fixed(c3, ")") of
+                PStuck(c4) => PStuck(c4)
+                PFault(d) => PFault(d)
+                PTook(_, c4) =>
+                  PTook(
+                      Constraint {
+                        cls = cls,
+                        ty = ty,
+                        span = cursor_since(saved, c4)
+                      },
+                      c4,
+                    )
+
+fn constraint_names(cs : List(Constraint)) : List(String) =
+  match cs of
+    Nil => Nil
+    Cons(c, rest) => Cons(c.cls, constraint_names(rest))
+
+-- -------------------------------------------------------------------------
+-- Effect declarations
+-- -------------------------------------------------------------------------
+
+-- | Parse an `effect` item. `c` points at the keyword, and `vis` is the
+-- already-decoded visibility prefix (`None`, `Some("pub")`, or
+-- `Some("opaque")`).
+pub fn parse_effect_item(
+  c : Cursor,
+  depth : Int,
+  vis : Option(String)
+) : Parsed(Item) =
+  let saved = c
+  match take_fixed(c, "effect") of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(_, c1) =>
+      match take_uid(c1) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(name, c2) =>
+          match parse_ty_params(c2) of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(params, c3) =>
+              match expect_layout_open(c3, "effect") of
+                PStuck(c4) => PStuck(c4)
+                PFault(d) => PFault(d)
+                PTook(_, c4) =>
+                  match parse_effect_ops(c4, depth, Nil) of
+                    PStuck(c5) => PStuck(c5)
+                    PFault(d) => PFault(d)
+                    PTook(ops, c5) =>
+                      match take_kind(c5, TVClose) of
+                        PStuck(c6) => PStuck(c6)
+                        PFault(d) => PFault(d)
+                        PTook(_, c6) =>
+                          PTook(
+                              IEffect {
+                                name = name,
+                                params = params,
+                                ops = ops,
+                                span = cursor_since(saved, c6),
+                                vis = vis,
+                                dep = None
+                              },
+                              c6,
+                            )
+
+fn parse_effect_ops(
+  c : Cursor,
+  depth : Int,
+  rev : List(EffOp)
+) : Parsed(List(EffOp)) =
+  if at_kind(c, TVClose) then
+    PTook(reverse(rev), c)
+  elif at_sep(c) then
+    parse_effect_ops(cursor_advance(c), depth, rev)
+  else
+    match parse_effect_op(c, depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(op, c1) =>
+        if c1.pos == c.pos then
+          PFault(
+              refuse(
+                  cursor_span(c),
+                  "effect operation parser made no progress",
+                ),
+            )
+        else
+          parse_effect_ops(skip_sep(c1), depth, Cons(op, rev))
+
+fn parse_effect_op(c : Cursor, depth : Int) : Parsed(EffOp) =
+  let first = peek_word(c)
+  let graded = at_kind(c, TIdent) && at_kind(cursor_advance(c), TIdent)
+  if graded then
+    if first == "never" then
+      parse_effect_op_named(cursor_advance(c), depth, Some("never"))
+    elif first == "once" then
+      parse_effect_op_named(cursor_advance(c), depth, Some("once"))
+    elif first == "many" then
+      parse_effect_op_named(cursor_advance(c), depth, None)
+    else
+      PFault(
+          refuse(
+              cursor_span(c),
+              "`{first}` is not a grade: an operation grade is `never`, `once`, or `many`, or omit it for `many`",
+            ),
+        )
+  else
+    parse_effect_op_named(c, depth, None)
+
+fn parse_effect_op_named(
+  c : Cursor,
+  depth : Int,
+  grade : Option(String)
+) : Parsed(EffOp) =
+  match take_ident(c) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(name, c1) =>
+      match take_fixed(c1, "(") of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(_, c2) =>
+          match parse_effect_params(c2, depth, Nil) of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(params, c3) =>
+              match take_fixed(c3, ":") of
+                PStuck(c4) => PStuck(c4)
+                PFault(d) => PFault(d)
+                PTook(_, c4) =>
+                  match parse_type(c4, depth) of
+                    PStuck(c5) => PStuck(c5)
+                    PFault(d) => PFault(d)
+                    PTook(ret, c5) =>
+                      PTook(
+                          EffOp {
+                            name = name,
+                            params = params,
+                            ret = ret,
+                            grade = grade
+                          },
+                          c5,
+                        )
+
+fn parse_effect_params(
+  c : Cursor,
+  depth : Int,
+  rev : List(Ty)
+) : Parsed(List(Ty)) =
+  if at_fixed(c, ")") then
+    PTook(reverse(rev), cursor_advance(c))
+  else
+    match parse_effect_param(c, depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(ty, c1) =>
+        if at_fixed(c1, ",") then
+          parse_effect_params(cursor_advance(c1), depth, Cons(ty, rev))
+        elif at_fixed(c1, ")") then
+          PTook(reverse(Cons(ty, rev)), cursor_advance(c1))
+        else
+          PStuck(cursor_note_name(c1, ")"))
+
+fn parse_effect_param(c : Cursor, depth : Int) : Parsed(Ty) =
+  if at_kind(c, TIdent) && at_fixed(cursor_advance(c), ":") then
+    parse_type(cursor_advance(cursor_advance(c)), depth)
+  else
+    parse_type(c, depth)
+
+-- -------------------------------------------------------------------------
+-- Alias declarations
+-- -------------------------------------------------------------------------
+
+-- | Parse the shared `alias` family. A brace RHS constructs an effect alias;
+-- every other RHS is a type synonym. The optional parameter list is retained
+-- only for a synonym, matching the bootstrap AST.
+pub fn parse_alias_item(
+  c : Cursor,
+  depth : Int,
+  vis : Option(String)
+) : Parsed(Item) =
+  let saved = c
+  match take_fixed(c, "alias") of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(_, c1) =>
+      match take_uid(c1) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(name, c2) =>
+          match parse_ty_params(c2) of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(params, c3) =>
+              match take_fixed(c3, "=") of
+                PStuck(c4) => PStuck(c4)
+                PFault(d) => PFault(d)
+                PTook(_, c4) =>
+                  if at_fixed(c4, "\{") then
+                    parse_effect_alias_rhs(saved, name, c4, depth, vis)
+                  else
+                    match parse_type(c4, depth) of
+                      PStuck(c5) => PStuck(c5)
+                      PFault(d) => PFault(d)
+                      PTook(ty, c5) =>
+                        PTook(
+                            ISynonym {
+                              name = name,
+                              params = params,
+                              ty = ty,
+                              span = cursor_since(saved, c5),
+                              vis = vis,
+                              dep = None
+                            },
+                            c5,
+                          )
+
+fn parse_effect_alias_rhs(
+  saved : Cursor,
+  name : String,
+  c : Cursor,
+  depth : Int,
+  vis : Option(String)
+) : Parsed(Item) =
+  match parse_alias_labels(cursor_advance(c), depth, Nil) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(labels, c1) =>
+      PTook(
+          IEffAlias {
+            name = name,
+            labels = labels,
+            span = cursor_since(saved, c1),
+            vis = vis,
+            dep = None
+          },
+          c1,
+        )
+
+fn parse_alias_labels(
+  c : Cursor,
+  depth : Int,
+  rev : List(EffLabel)
+) : Parsed(List(EffLabel)) =
+  if at_fixed(c, "\}") then
+    PTook(reverse(rev), cursor_advance(c))
+  else
+    match parse_eff_label(c, depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(label, c1) =>
+        if at_fixed(c1, ",") then
+          parse_alias_labels(cursor_advance(c1), depth, Cons(label, rev))
+        elif at_fixed(c1, "\}") then
+          PTook(reverse(Cons(label, rev)), cursor_advance(c1))
+        else
+          PStuck(cursor_note_name(c1, "\}"))
+
+-- -------------------------------------------------------------------------
+-- Classes
+-- -------------------------------------------------------------------------
+
+-- | Parse a class declaration, including marker classes without a body and
+-- layout bodies containing method signatures.
+pub fn parse_class_item(
+  c : Cursor,
+  depth : Int,
+  vis : Option(String)
+) : Parsed(Item) =
+  let saved = c
+  match take_fixed(c, "class") of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(_, c1) =>
+      match take_uid(c1) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(name, c2) =>
+          match take_fixed(c2, "(") of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(_, c3) =>
+              match take_ident(c3) of
+                PStuck(c4) => PStuck(c4)
+                PFault(d) => PFault(d)
+                PTook(param, c4) =>
+                  match take_fixed(c4, ")") of
+                    PStuck(c5) => PStuck(c5)
+                    PFault(d) => PFault(d)
+                    PTook(_, c5) =>
+                      match parse_given_clause(c5, depth) of
+                        PStuck(c6) => PStuck(c6)
+                        PFault(d) => PFault(d)
+                        PTook(supers, c6) =>
+                          parse_class_body(
+                              saved,
+                              name,
+                              param,
+                              constraint_names(supers),
+                              c6,
+                              depth,
+                              vis,
+                            )
+
+fn parse_class_body(
+  saved : Cursor,
+  name : String,
+  param : String,
+  supers : List(String),
+  c : Cursor,
+  depth : Int,
+  vis : Option(String)
+) : Parsed(Item) =
+  if at_fixed(c, "\{") then
+    match expect_layout_open(c, "class") of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(_, c1) => PStuck(c1)
+  elif not(at_kind(c, TVOpen)) then
+    PTook(
+        IClass {
+          name = name,
+          param = param,
+          supers = supers,
+          methods = Nil,
+          span = cursor_since(saved, c),
+          vis = vis,
+          dep = None
+        },
+        c,
+      )
+  else
+    match take_kind(c, TVOpen) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(_, c1) =>
+        match parse_class_methods(c1, depth, Nil) of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(methods, c2) =>
+            match take_kind(c2, TVClose) of
+              PStuck(c3) => PStuck(c3)
+              PFault(d) => PFault(d)
+              PTook(_, c3) =>
+                PTook(
+                    IClass {
+                      name = name,
+                      param = param,
+                      supers = supers,
+                      methods = methods,
+                      span = cursor_since(saved, c3),
+                      vis = vis,
+                      dep = None
+                    },
+                    c3,
+                  )
+
+fn parse_class_methods(
+  c : Cursor,
+  depth : Int,
+  rev : List(Method)
+) : Parsed(List(Method)) =
+  if at_kind(c, TVClose) then
+    PTook(reverse(rev), c)
+  elif at_sep(c) then
+    parse_class_methods(cursor_advance(c), depth, rev)
+  else
+    match take_ident(c) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(name, c1) =>
+        match take_fixed(c1, ":") of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(_, c2) =>
+            match parse_type(c2, depth) of
+              PStuck(c3) => PStuck(c3)
+              PFault(d) => PFault(d)
+              PTook(ty, c3) =>
+                parse_class_methods(
+                    skip_sep(c3),
+                    depth,
+                    Cons(Method { name = name, ty = ty }, rev),
+                  )
+
+-- -------------------------------------------------------------------------
+-- Instances and instance methods
+-- -------------------------------------------------------------------------
+
+-- | Parse an instance declaration, including marker instances and layout
+-- bodies of complete function declarations. Visibility is accepted for the
+-- uniform dispatcher API; the phase-independent instance AST has no visibility
+-- field, matching the bootstrap export.
+pub fn parse_instance_item(
+  c : Cursor,
+  depth : Int,
+  vis : Option(String)
+) : Parsed(Item) =
+  let saved = c
+  match take_fixed(c, "instance") of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(_, c1) =>
+      match take_ident(c1) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(name, c2) =>
+          match take_fixed(c2, ":") of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(_, c3) =>
+              match take_uid(c3) of
+                PStuck(c4) => PStuck(c4)
+                PFault(d) => PFault(d)
+                PTook(cls, c4) =>
+                  match take_fixed(c4, "(") of
+                    PStuck(c5) => PStuck(c5)
+                    PFault(d) => PFault(d)
+                    PTook(_, c5) =>
+                      match parse_type(c5, depth) of
+                        PStuck(c6) => PStuck(c6)
+                        PFault(d) => PFault(d)
+                        PTook(head, c6) =>
+                          match take_fixed(c6, ")") of
+                            PStuck(c7) => PStuck(c7)
+                            PFault(d) => PFault(d)
+                            PTook(_, c7) =>
+                              match parse_given_clause(c7, depth) of
+                                PStuck(c8) => PStuck(c8)
+                                PFault(d) => PFault(d)
+                                PTook(context, c8) =>
+                                  parse_instance_body(
+                                      saved,
+                                      name,
+                                      cls,
+                                      head,
+                                      context,
+                                      c8,
+                                      depth,
+                                      vis,
+                                    )
+
+fn parse_instance_body(
+  saved : Cursor,
+  name : String,
+  cls : String,
+  head : Ty,
+  context : List(Constraint),
+  c : Cursor,
+  depth : Int,
+  _vis : Option(String)
+) : Parsed(Item) =
+  if at_fixed(c, "\{") then
+    match expect_layout_open(c, "instance") of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(_, c1) => PStuck(c1)
+  elif not(at_kind(c, TVOpen)) then
+    PTook(
+        IInstance {
+          name = name,
+          cls = cls,
+          head = head,
+          context = context,
+          decls = Nil,
+          span = cursor_since(saved, c)
+        },
+        c,
+      )
+  else
+    match take_kind(c, TVOpen) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(_, c1) =>
+        match parse_instance_methods(c1, depth, Nil) of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(methods, c2) =>
+            match take_kind(c2, TVClose) of
+              PStuck(c3) => PStuck(c3)
+              PFault(d) => PFault(d)
+              PTook(_, c3) =>
+                PTook(
+                    IInstance {
+                      name = name,
+                      cls = cls,
+                      head = head,
+                      context = context,
+                      decls = methods,
+                      span = cursor_since(saved, c3)
+                    },
+                    c3,
+                  )
+
+fn parse_instance_methods(
+  c : Cursor,
+  depth : Int,
+  rev : List(Decl)
+) : Parsed(List(Decl)) =
+  if at_kind(c, TVClose) then
+    PTook(reverse(rev), c)
+  elif at_sep(c) then
+    parse_instance_methods(cursor_advance(c), depth, rev)
+  else
+    match parse_method_decl(c, depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(method, c1) =>
+        if c1.pos == c.pos then
+          PFault(
+              refuse(cursor_span(c), "instance method parser made no progress"),
+            )
+        else
+          parse_instance_methods(skip_sep(c1), depth, Cons(method, rev))
+
+-- Leading contextual modifiers are consumed only in their canonical order:
+-- `test`, then `total` or `assume total`.
+fn parse_method_mods(c : Cursor) : Parsed((Bool, Option(String), Cursor)) =
+  let is_test = peek_word(c) == "test"
+  let c1 =
+    if is_test then
+      cursor_advance(c)
+    else
+      c
+  if peek_word(c1) == "assume" then
+    let c2 = cursor_advance(c1)
+    if peek_word(c2) == "total" then
+      PTook((is_test, Some("assume"), cursor_advance(c2)), c)
+    else
+      PFault(
+          refuse(
+              cursor_span(c1),
+              "`assume` is not a declaration modifier by itself; write `assume total`",
+            ),
+        )
+  elif peek_word(c1) == "total" then
+    PTook((is_test, Some("prove"), cursor_advance(c1)), c)
+  else
+    PTook((is_test, None, c1), c)
+
+fn parse_method_decl(c : Cursor, depth : Int) : Parsed(Decl) =
+  let saved = c
+  match parse_method_mods(c) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(mods, _) =>
+      match mods of
+        (is_test, totality, c1) =>
+          let is_replayable = at_fixed(c1, "replayable")
+          let c2 =
+            if is_replayable then
+              cursor_advance(c1)
+            else
+              c1
+          let fip_word =
+            if at_fixed(c2, "fip") then
+              Some("fip")
+            elif at_fixed(c2, "fbip") then
+              Some("fbip")
+            else
+              None
+          let c3 =
+            match fip_word of
+              None => c2
+              Some(_) => cursor_advance(c2)
+          match take_fixed(c3, "fn") of
+            PStuck(c4) => PStuck(c4)
+            PFault(d) => PFault(d)
+            PTook(_, c4) =>
+              match take_ident(c4) of
+                PStuck(c5) => PStuck(c5)
+                PFault(d) => PFault(d)
+                PTook(name, c5) =>
+                  match take_fixed(c5, "(") of
+                    PStuck(c6) => PStuck(c6)
+                    PFault(d) => PFault(d)
+                    PTook(_, c6) =>
+                      match parse_method_params(c6, depth, 0, Nil) of
+                        PStuck(c7) => PStuck(c7)
+                        PFault(d) => PFault(d)
+                        PTook(params, c7) =>
+                          parse_method_after_params(
+                              saved,
+                              name,
+                              params,
+                              c7,
+                              depth,
+                              is_test,
+                              totality,
+                              fip_word,
+                              is_replayable,
+                            )
+
+fn parse_method_after_params(
+  saved : Cursor,
+  name : String,
+  params : List(Param),
+  c : Cursor,
+  depth : Int,
+  is_test : Bool,
+  totality : Option(String),
+  fip_word : Option(String),
+  is_replayable : Bool
+) : Parsed(Decl) =
+  match parse_return_ann(c, depth) of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(ann, c1) =>
+      match ann of
+        (ret0, eff, no_alloc) =>
+          match parse_given_clause(c1, depth) of
+            PStuck(c2) => PStuck(c2)
+            PFault(d) => PFault(d)
+            PTook(constraints, c2) =>
+              match parse_requires(c2, depth, Nil) of
+                PStuck(c3) => PStuck(c3)
+                PFault(d) => PFault(d)
+                PTook(reqs, c3) =>
+                  match parse_ensures(c3, depth, Nil) of
+                    PStuck(c4) => PStuck(c4)
+                    PFault(d) => PFault(d)
+                    PTook(enss, c4) =>
+                      match parse_decreases(c4, depth) of
+                        PStuck(c5) => PStuck(c5)
+                        PFault(d) => PFault(d)
+                        PTook(measure, c5) =>
+                          match take_fixed(c5, "=") of
+                            PStuck(c6) => PStuck(c6)
+                            PFault(d) => PFault(d)
+                            PTook(_, c6) =>
+                              match parse_expr_or_block(c6, depth) of
+                                PStuck(c7) => PStuck(c7)
+                                PFault(d) => PFault(d)
+                                PTook(body, c7) =>
+                                  match parse_where_block(c7, depth) of
+                                    PStuck(c8) => PStuck(c8)
+                                    PFault(d) => PFault(d)
+                                    PTook(wheres, c8) =>
+                                      PTook(
+                                          Decl {
+                                            name = name,
+                                            params = params,
+                                            ret = ret0,
+                                            eff = eff,
+                                            constraints = constraints,
+                                            body = body,
+                                            wheres = wheres,
+                                            reqs = reqs,
+                                            enss = enss,
+                                            measure = measure,
+                                            is_test = is_test,
+                                            totality = totality,
+                                            fip_word = fip_word,
+                                            is_replayable = is_replayable,
+                                            is_no_alloc = no_alloc,
+                                            span = cursor_since(saved, c8)
+                                          },
+                                          c8,
+                                        )
+
+fn parse_method_params(
+  c : Cursor,
+  depth : Int,
+  index : Int,
+  rev : List(Param)
+) : Parsed(List(Param)) =
+  if at_fixed(c, ")") then
+    PTook(reverse(rev), cursor_advance(c))
+  else
+    let borrowed = at_fixed(c, "borrow")
+    let c0 =
+      if borrowed then
+        cursor_advance(c)
+      else
+        c
+    match parse_pattern(c0, depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(pat, c1) =>
+        match parse_optional_type(c1, depth) of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(ty, c2) =>
+            match parse_optional_default(c2, depth) of
+              PStuck(c3) => PStuck(c3)
+              PFault(d) => PFault(d)
+              PTook(dflt, c3) =>
+                let param =
+                  match pat.node of
+                    PVar(n) =>
+                      Param {
+                        name = n,
+                        pat = None,
+                        ty = ty,
+                        is_borrow = borrowed,
+                        dflt = dflt
+                      }
+                    PWild =>
+                      Param {
+                        name = "_",
+                        pat = None,
+                        ty = ty,
+                        is_borrow = borrowed,
+                        dflt = dflt
+                      }
+                    _ =>
+                      Param {
+                        name = "arg@{index}",
+                        pat = Some(pat),
+                        ty = ty,
+                        is_borrow = borrowed,
+                        dflt = dflt
+                      }
+                if at_fixed(c3, ",") then
+                  parse_method_params(
+                      cursor_advance(c3),
+                      depth,
+                      index + 1,
+                      Cons(param, rev),
+                    )
+                elif at_fixed(c3, ")") then
+                  PTook(reverse(Cons(param, rev)), cursor_advance(c3))
+                else
+                  PStuck(cursor_note_name(c3, ")"))
+
+fn parse_optional_type(c : Cursor, depth : Int) : Parsed(Option(Ty)) =
+  if at_fixed(c, ":") then
+    match parse_type(cursor_advance(c), depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(ty, c1) => PTook(Some(ty), c1)
+  else
+    PTook(None, c)
+
+fn parse_optional_default(c : Cursor, depth : Int) : Parsed(Option(Sp(Expr))) =
+  if at_fixed(c, ":=") then
+    match parse_expr(cursor_advance(c), depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(e, c1) => PTook(Some(e), c1)
+  else
+    PTook(None, c)
+
+-- -------------------------------------------------------------------------
+-- Function return annotations
+-- -------------------------------------------------------------------------
+
+-- The result type and its declaration effect have a shared `!` token.  Parse
+-- the type through a capped view of the cursor, then attach the row to a
+-- function result (including beneath `forall`) or retain it as the
+-- declaration's ambient effect for every other result.
+fn parse_return_ann(
+  c : Cursor,
+  depth : Int
+) : Parsed((Option(Ty), Option(Row), Bool)) =
+  if not(at_fixed(c, ":")) then
+    PTook((None, None, false), c)
+  elif at_fixed(cursor_advance(c), "!") then
+    PFault(
+        refuse(
+            cursor_since(c, cursor_advance(cursor_advance(c))),
+            "the effect row now follows the result type: write `: Result ! \{Effects\}` instead of `: !\{Effects\} Result`",
+          ),
+      )
+  else
+    let start = cursor_advance(c)
+    match find_top_bang(start, start.pos, 0, 0, 0) of
+      None =>
+        match parse_type(start, depth) of
+          PStuck(c1) => PStuck(c1)
+          PFault(d) => PFault(d)
+          PTook(ty, c1) =>
+            match lift_noalloc(ty) of
+              (ret, no_alloc) => PTook((Some(ret), None, no_alloc), c1)
+      Some(stop) =>
+        let capped = cap_cursor(start, stop)
+        match parse_type(capped, depth) of
+          PStuck(c1) => PStuck(c1)
+          PFault(d) => PFault(d)
+          PTook(ty, c1) =>
+            if c1.pos /= stop then
+              PStuck(cursor_note_name(full_cursor(start, c1), "type"))
+            else
+              let c2 = full_cursor(start, c1)
+              match parse_effect_row(c2, depth) of
+                PStuck(c3) => PStuck(c3)
+                PFault(d) => PFault(d)
+                PTook(row, c3) =>
+                  match attach_decl_effect(ty, row) of
+                    (ret, eff) =>
+                      match lift_noalloc(ret) of
+                        (ret2, no_alloc) =>
+                          PTook((Some(ret2), eff, no_alloc), c3)
+
+fn lift_noalloc(ty : Ty) : (Ty, Bool) =
+  match ty of
+    TyUsage(inner, facts) =>
+      match facts of
+        Cons(fact, Nil) =>
+          if fact == "noalloc" then
+            (inner, true)
+          else
+            (ty, false)
+        _ => (ty, false)
+    _ => (ty, false)
+
+fn attach_decl_effect(ty : Ty, row : Row) : (Ty, Option(Row)) =
+  match ty of
+    TyFun(params, _, ret) => (TyFun(params, row, ret), None)
+    TyForall(vars, body) =>
+      match attach_decl_effect(body, row) of
+        (body2, None) => (TyForall(vars, body2), None)
+        (_, Some(eff)) => (ty, Some(eff))
+    _ => (ty, Some(row))
+
+fn cap_cursor(c : Cursor, stop : Int) : Cursor =
+  let toks = take(stop, array_to_list(c.toks))
+  let end_span =
+    match cursor_peek_at(c, stop - c.pos) of
+      None => c.stop
+      Some(t) => t.span.lo
+  Cursor {
+    toks = array_of_list(toks),
+    pos = c.pos,
+    stop = end_span,
+    far = min(c.far, stop),
+    wanted = c.wanted
+  }
+
+fn full_cursor(base : Cursor, parsed : Cursor) : Cursor =
+  Cursor { ..base, pos = parsed.pos }
+
+fn find_top_bang(
+  c : Cursor,
+  i : Int,
+  parens : Int,
+  brackets : Int,
+  braces : Int
+) : Option(Int) =
+  if i >= cursor_count(c) then
+    None
+  else
+    let t = array_get(c.toks, i)
+    match t.kind of
+      TVOpen =>
+        if parens == 0 && brackets == 0 && braces == 0 then
+          None
+        else
+          find_top_bang(c, i + 1, parens, brackets, braces)
+      TVSemi =>
+        if parens == 0 && brackets == 0 && braces == 0 then
+          None
+        else
+          find_top_bang(c, i + 1, parens, brackets, braces)
+      TVClose =>
+        if parens == 0 && brackets == 0 && braces == 0 then
+          None
+        else
+          find_top_bang(c, i + 1, parens, brackets, braces)
+      TFixed(s) =>
+        if s == "(" then
+          find_top_bang(c, i + 1, parens + 1, brackets, braces)
+        elif s == ")" then
+          if parens == 0 && brackets == 0 && braces == 0 then
+            None
+          else
+            find_top_bang(c, i + 1, max(0, parens - 1), brackets, braces)
+        elif s == "[" then
+          find_top_bang(c, i + 1, parens, brackets + 1, braces)
+        elif s == "]" then
+          if parens == 0 && brackets == 0 && braces == 0 then
+            None
+          else
+            find_top_bang(c, i + 1, parens, max(0, brackets - 1), braces)
+        elif s == "\{" then
+          find_top_bang(c, i + 1, parens, brackets, braces + 1)
+        elif s == "\}" then
+          if parens == 0 && brackets == 0 && braces == 0 then
+            None
+          else
+            find_top_bang(c, i + 1, parens, brackets, max(0, braces - 1))
+        elif s == "!" && parens == 0 && brackets == 0 && braces == 0 then
+          Some(i)
+        elif ((s == "="
+            || s == ","
+            || s == "given"
+            || s == "requires"
+            || s == "ensures"
+            || s == "where")
+            && parens == 0
+            && brackets == 0
+            && braces == 0) then
+          None
+        else
+          find_top_bang(c, i + 1, parens, brackets, braces)
+      TIdent =>
+        if (token_text(t) == "decreases"
+            && parens == 0
+            && brackets == 0
+            && braces == 0) then
+          None
+        else
+          find_top_bang(c, i + 1, parens, brackets, braces)
+      _ => find_top_bang(c, i + 1, parens, brackets, braces)
+
+-- -------------------------------------------------------------------------
+-- Function clauses
+-- -------------------------------------------------------------------------
+
+fn parse_requires(
+  c : Cursor,
+  depth : Int,
+  rev : List(Sp(Expr))
+) : Parsed(List(Sp(Expr))) =
+  if at_fixed(c, "requires") then
+    match parse_expr(cursor_advance(c), depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(e, c1) => parse_requires(c1, depth, Cons(e, rev))
+  else
+    PTook(reverse(rev), c)
+
+fn parse_ensures(
+  c : Cursor,
+  depth : Int,
+  rev : List(Ensure)
+) : Parsed(List(Ensure)) =
+  if at_fixed(c, "ensures") then
+    match take_fixed(cursor_advance(c), "|") of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(_, c1) =>
+        match take_ident(c1) of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(binder, c2) =>
+            match take_fixed(c2, "|") of
+              PStuck(c3) => PStuck(c3)
+              PFault(d) => PFault(d)
+              PTook(_, c3) =>
+                match parse_expr(c3, depth) of
+                  PStuck(c4) => PStuck(c4)
+                  PFault(d) => PFault(d)
+                  PTook(expr, c4) =>
+                    parse_ensures(
+                        c4,
+                        depth,
+                        Cons(Ensure { binder = binder, expr = expr }, rev),
+                      )
+  else
+    PTook(reverse(rev), c)
+
+fn parse_decreases(c : Cursor, depth : Int) : Parsed(Option(Sp(Expr))) =
+  if peek_word(c) == "decreases" then
+    match parse_expr(cursor_advance(c), depth) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(e, c1) => PTook(Some(e), c1)
+  else
+    PTook(None, c)
+
+fn parse_where_block(c : Cursor, depth : Int) : Parsed(List(NamedExpr)) =
+  if not(at_fixed(c, "where")) then
+    PTook(Nil, c)
+  else
+    match take_kind(cursor_advance(c), TVOpen) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(_, c1) => parse_where_bindings(c1, depth, Nil)
+
+fn parse_where_bindings(
+  c : Cursor,
+  depth : Int,
+  rev : List(NamedExpr)
+) : Parsed(List(NamedExpr)) =
+  if at_kind(c, TVClose) then
+    PTook(reverse(rev), cursor_advance(c))
+  elif at_kind(c, TVSemi) then
+    parse_where_bindings(cursor_advance(c), depth, rev)
+  else
+    match take_ident(c) of
+      PStuck(c1) => PStuck(c1)
+      PFault(d) => PFault(d)
+      PTook(name, c1) =>
+        match take_fixed(c1, "=") of
+          PStuck(c2) => PStuck(c2)
+          PFault(d) => PFault(d)
+          PTook(_, c2) =>
+            match parse_expr_or_block(c2, depth) of
+              PStuck(c3) => PStuck(c3)
+              PFault(d) => PFault(d)
+              PTook(value, c3) =>
+                parse_where_bindings(
+                    c3,
+                    depth,
+                    Cons(NamedExpr { name = name, value = value }, rev),
+                  )
+
+-- -------------------------------------------------------------------------
+-- Canonical instance designations
+-- -------------------------------------------------------------------------
+
+-- | Parse `canonical Class(Head) = instance_name`.
+pub fn parse_canonical_item(
+  c : Cursor,
+  depth : Int,
+  _vis : Option(String)
+) : Parsed(Item) =
+  let saved = c
+  match take_fixed(c, "canonical") of
+    PStuck(c1) => PStuck(c1)
+    PFault(d) => PFault(d)
+    PTook(_, c1) =>
+      match take_uid(c1) of
+        PStuck(c2) => PStuck(c2)
+        PFault(d) => PFault(d)
+        PTook(cls, c2) =>
+          match take_fixed(c2, "(") of
+            PStuck(c3) => PStuck(c3)
+            PFault(d) => PFault(d)
+            PTook(_, c3) =>
+              match parse_type(c3, depth) of
+                PStuck(c4) => PStuck(c4)
+                PFault(d) => PFault(d)
+                PTook(head, c4) =>
+                  match take_fixed(c4, ")") of
+                    PStuck(c5) => PStuck(c5)
+                    PFault(d) => PFault(d)
+                    PTook(_, c5) =>
+                      match take_fixed(c5, "=") of
+                        PStuck(c6) => PStuck(c6)
+                        PFault(d) => PFault(d)
+                        PTook(_, c6) =>
+                          match take_ident(c6) of
+                            PStuck(c7) => PStuck(c7)
+                            PFault(d) => PFault(d)
+                            PTook(name, c7) =>
+                              PTook(
+                                  ICanonical {
+                                    cls = cls,
+                                    head = head,
+                                    name = name,
+                                    span = cursor_since(saved, c7)
+                                  },
+                                  c7,
+                                )

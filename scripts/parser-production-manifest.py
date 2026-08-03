@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
-import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
@@ -15,6 +15,7 @@ from typing import NoReturn
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "docs" / "internal" / "PARSER_PRODUCTION_MANIFEST.json"
+FROZEN_STORE = ROOT / "experiments" / "parser_generator_phase1" / "frozen"
 EXPECTED_SCHEMA = "prism-parser-production-manifest-v1"
 EXPECTED_ORACLE = "46886c1fa7064e4809020c1b788b3ee3531d6a63"
 GRAMMAR_PATH = "crates/prism-syntax/src/grammar.lalrpop"
@@ -74,27 +75,27 @@ def fail(message: str) -> NoReturn:
     raise SystemExit(f"parser production manifest: {message}")
 
 
-def git(*args: str) -> str:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-    )
-    if result.returncode:
-        fail(result.stderr.strip() or f"git {' '.join(args)} failed")
-    return result.stdout
+def oracle_blob(sources: dict[str, str], path: str) -> str:
+    """Read a pinned oracle source from the vendored store.
 
-
-def oracle_blob(oracle: str, path: str) -> str:
-    return git("show", f"{oracle}:{path}")
-
-
-def oracle_oid(oracle: str, path: str) -> str:
-    oid = git("rev-parse", f"{oracle}:{path}").strip()
-    if git("cat-file", "-t", oid).strip() != "blob":
-        fail(f"{path} does not resolve to a blob at {oracle}")
-    return oid
+    The oracle is a commit on a pre-release branch, so it cannot be fetched
+    from the published history, which carries one squashed commit per release.
+    The blobs are vendored instead, each named by its own OID: re-hashing the
+    bytes and comparing against the filename is the integrity check, and it is
+    the same guarantee `git show <oracle>:<path>` used to give.
+    """
+    oid = sources.get(path)
+    if oid is None:
+        fail(f"manifest pins no OID for {path}")
+    blob = FROZEN_STORE / oid
+    if not blob.is_file():
+        fail(f"frozen blob for {path} is missing: {blob.relative_to(ROOT)}")
+    data = blob.read_bytes()
+    header = f"blob {len(data)}\0".encode("utf-8")
+    actual = hashlib.sha1(header + data, usedforsecurity=False).hexdigest()
+    if actual != oid:
+        fail(f"frozen blob for {path} hashes to {actual}, not {oid}")
+    return data.decode("utf-8")
 
 
 def production_inventory(text: str) -> dict[str, int]:
@@ -116,7 +117,7 @@ def production_inventory(text: str) -> dict[str, int]:
 
 
 def parser_inventory(
-    oracle: str,
+    sources: dict[str, str],
 ) -> tuple[dict[str, set[str]], set[str], set[str]]:
     by_path: dict[str, set[str]] = {}
     functions: set[str] = set()
@@ -124,7 +125,7 @@ def parser_inventory(
     for path in PARSER_PATHS:
         path_functions: set[str] = set()
         current: str | None = None
-        for line in oracle_blob(oracle, path).splitlines():
+        for line in oracle_blob(sources, path).splitlines():
             match = FUNCTION_HEAD.match(line)
             if match:
                 current = match.group(1)
@@ -138,9 +139,9 @@ def parser_inventory(
     return by_path, functions, spends
 
 
-def rust_symbol_inventory(oracle: str, path: str) -> set[str]:
+def rust_symbol_inventory(sources: dict[str, str], path: str) -> set[str]:
     symbols: set[str] = set()
-    for line in oracle_blob(oracle, path).splitlines():
+    for line in oracle_blob(sources, path).splitlines():
         match = RUST_DEFINITION_HEAD.match(line)
         if match:
             symbols.add(match.group(1))
@@ -195,15 +196,13 @@ def validate() -> tuple[Counter[str], Counter[str]]:
     for path, recorded_oid in sources.items():
         if not isinstance(recorded_oid, str):
             fail(f"non-string blob OID for {path}")
-        actual_oid = oracle_oid(oracle, path)
-        if recorded_oid != actual_oid:
-            fail(
-                f"blob OID mismatch for {path}: recorded {recorded_oid}, "
-                f"oracle has {actual_oid}"
-            )
+        # Reading the blob re-hashes it and rejects any byte that drifted from
+        # the recorded OID, so the store is validated by the same pass that
+        # loads it.
+        oracle_blob(sources, path)
 
-    grammar = production_inventory(oracle_blob(oracle, GRAMMAR_PATH))
-    parser_by_path, parser_functions, spending_entries = parser_inventory(oracle)
+    grammar = production_inventory(oracle_blob(sources, GRAMMAR_PATH))
+    parser_by_path, parser_functions, spending_entries = parser_inventory(sources)
     if spending_entries != FROZEN_SPENDING_ENTRIES:
         fail(
             "handwritten direct descend inventory drifted: "
@@ -216,8 +215,8 @@ def validate() -> tuple[Counter[str], Counter[str]]:
         fail("hooks must be an object")
     symbols_by_path = {
         GRAMMAR_PATH: set(grammar),
-        SUGAR_PATH: rust_symbol_inventory(oracle, SUGAR_PATH),
-        COEFFECT_PATH: rust_symbol_inventory(oracle, COEFFECT_PATH),
+        SUGAR_PATH: rust_symbol_inventory(sources, SUGAR_PATH),
+        COEFFECT_PATH: rust_symbol_inventory(sources, COEFFECT_PATH),
         **parser_by_path,
     }
     for hook_name, hook in hooks.items():
