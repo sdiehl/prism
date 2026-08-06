@@ -41,8 +41,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      # The documented runtime prerequisite: native codegen loads LLVM (and its
-      # z3 dependency) at runtime. Linux runners carry system LLVM already.
+      # The documented runtime prerequisite: native codegen shells out to clang.
+      # Linux runners carry system LLVM already.
       - name: Install LLVM runtime (macOS)
         if: runner.os == 'macOS'
         run: brew install llvm@22 || brew install llvm
@@ -54,6 +54,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: PRISM_NO_NIX=1 sh scripts/install.sh
+      # Informational, not a gate: this workflow runs against the *published*
+      # release, so it reports what the shipped artifact loads rather than
+      # failing on it. Anything outside /usr/lib and /System is a dyld abort
+      # waiting for a user without that prefix; release.yml is where that is
+      # enforced, at the commit that can still fix it.
+      - name: Report dylib dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: otool -L "$HOME/.local/bin/prism"
+
       - name: Installed binary runs
         run: |
           bin="$HOME/.local/bin/prism"

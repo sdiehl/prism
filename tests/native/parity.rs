@@ -813,3 +813,22 @@ fn read_int_eof_and_whitespace_match_interpreter() {
         "native read_int diverges on a whitespace-padded integer"
     );
 }
+
+// The System F example exercises the typechecker core end to end: its seven
+// witness lines are a pinned interpreter fixture, and its silent assertions
+// (substitution capture, alpha equivalence, occurs rejection, meta union then
+// solve) print only on violation, so any extra output here is a regression.
+#[test]
+fn systemf_witnesses_pinned() {
+    let full = source(Path::new("examples/systemf.pr"));
+    assert_eq!(
+        interpreted(&full),
+        "id                 : forall a. a -> a\n\
+         id[Int] 42         : Int\n\
+         implicit id true   : Bool\n\
+         higher rank        : (forall a. a -> a) -> Bool\n\
+         union-find         : (forall a. a) -> Int\n\
+         bad application    : error: application expects a function, got Int\n\
+         bad branches       : error: cannot unify Int with Bool\n"
+    );
+}

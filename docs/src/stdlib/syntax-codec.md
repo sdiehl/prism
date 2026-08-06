@@ -75,7 +75,7 @@ Render a codec error as one line.
 
 ### `decode_tokens`
 
-```prism,sig,h-0d18239d14f1a3c6054bde90517df2cd140fa0bdb02d521fb43c299c419361a6
+```prism,sig,h-c2828d832d261a938b9a5ea0af7a5b3574f990387660ad128ba415a4eb1c6afa
 decode_tokens : (String) -> Result(Syntax.Codec.TokensDoc, Syntax.Codec.CodecError)
 ```
 
@@ -115,7 +115,7 @@ Encode a surface document back to the exact artifact bytes the compiler emits: `
 
 ### `decode_surface`
 
-```prism,sig,h-d33b78621927258aafc35ebb9c9bfefa7800cdfc4943328aa3fb53124c807b79
+```prism,sig,h-f260726339ae4768ffbef3fa2779fee602691eb3132d9407028d0a65e0ed7c95
 decode_surface : (String) -> Result(Syntax.Codec.SurfaceDoc, Syntax.Codec.CodecError)
 ```
 
@@ -123,7 +123,7 @@ Decode a `prism-surface-syntax-v1` document from its exact bytes. A wrong or mis
 
 ### `decode_diagnostics`
 
-```prism,sig,h-612f9235919457c5816830c8563d1230a0aaa734e9d5bda6b00b11960500d546
+```prism,sig,h-928dbb7f1575c2ef583bd686e57375cc1fc75a680bd3d99d6fa83fc3d7159766
 decode_diagnostics : (String) -> Result(Syntax.Diagnostic.DiagnosticsDoc, Syntax.Codec.CodecError)
 ```
 
@@ -147,7 +147,7 @@ Run a decoding computation, turning a `fail_decode` into `Err` and a completed d
 
 ### `decode_resolved`
 
-```prism,sig,h-fe6eae9641966c6d7ee16b73192f39130cddc149a1cbe9a327c31954a0fa7ee0
+```prism,sig,h-8684747bc3c8b2d43336eff63db2df89e48df5e2af868ae2d198c9bc49db4e16
 decode_resolved : (String) -> Result(Syntax.Resolved.ResolvedDoc, Syntax.Codec.CodecError)
 ```
 

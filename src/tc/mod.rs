@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{ErrKind, TypeError};
 pub use crate::error::{HoleBinding, HoleCandidate, HoleReport};
 use crate::hir::{HandlerResidual, NodeFacts};
+use crate::names::{parse_var_get, parse_var_set};
 use crate::sym::Sym;
 use crate::syntax::ast::{Core, Decl, Expr, Grade, NodeId, Program, S};
 use crate::types::effects;
@@ -36,6 +37,15 @@ pub struct Env {
     free_exists: BTreeMap<u32, usize>,
     free_row_exists: BTreeMap<u32, usize>,
     free_type_vars: BTreeMap<Sym, usize>,
+    // Pinned `var`-cell existentials, contributed only by the desugared
+    // `get@x@n`/`set@x@n` operation schemes. They are indexed apart from
+    // `free_exists` because their anchoring is scoped: while the owning body is
+    // still being checked they must hold the cell monomorphic against local
+    // `let` generalization, but once a top-level declaration is finished the
+    // cell is discharged (the desugar's escape check guarantees it), and a
+    // solved cell type must not leak the owner's rigid variables into every
+    // later declaration's quantification.
+    var_op_exists: BTreeMap<u32, usize>,
 }
 
 impl Env {
@@ -46,24 +56,30 @@ impl Env {
 
     pub fn insert(&mut self, name: Sym, ty: Type) -> Option<Type> {
         let summary = type_summary(&ty);
+        let var_op = is_var_op_binding(&name);
         let old = self.types.insert(name, ty);
         if let Some(previous) = &old {
-            self.adjust_summary(&type_summary(previous), false);
+            self.adjust_summary(&type_summary(previous), var_op, false);
         }
-        self.adjust_summary(&summary, true);
+        self.adjust_summary(&summary, var_op, true);
         old
     }
 
     pub(crate) fn remove(&mut self, name: &Sym) -> Option<Type> {
         let old = self.types.remove(name);
         if let Some(previous) = &old {
-            self.adjust_summary(&type_summary(previous), false);
+            self.adjust_summary(&type_summary(previous), is_var_op_binding(name), false);
         }
         old
     }
 
-    fn adjust_summary(&mut self, summary: &TypeSummary, add: bool) {
-        adjust_counts(&mut self.free_exists, summary.exists.iter().copied(), add);
+    fn adjust_summary(&mut self, summary: &TypeSummary, var_op: bool, add: bool) {
+        let exists = if var_op {
+            &mut self.var_op_exists
+        } else {
+            &mut self.free_exists
+        };
+        adjust_counts(exists, summary.exists.iter().copied(), add);
         adjust_counts(
             &mut self.free_row_exists,
             summary.row_exists.iter().copied(),
@@ -78,6 +94,10 @@ impl Env {
 
     fn free_exists(&self) -> impl Iterator<Item = u32> + '_ {
         self.free_exists.keys().copied()
+    }
+
+    fn var_op_exists(&self) -> impl Iterator<Item = u32> + '_ {
+        self.var_op_exists.keys().copied()
     }
 
     fn free_row_exists(&self) -> impl Iterator<Item = u32> + '_ {
@@ -117,6 +137,14 @@ struct TypeSummary {
     exists: BTreeSet<u32>,
     row_exists: BTreeSet<u32>,
     type_vars: BTreeSet<Sym>,
+}
+
+// Whether an environment binding is a desugared `var`-cell operation
+// (`get@x@n`/`set@x@n`), whose pinned existential anchors generalization only
+// while the owning declaration is still being checked.
+fn is_var_op_binding(name: &Sym) -> bool {
+    let name = name.as_str();
+    parse_var_get(name).is_some() || parse_var_set(name).is_some()
 }
 
 fn type_summary(ty: &Type) -> TypeSummary {

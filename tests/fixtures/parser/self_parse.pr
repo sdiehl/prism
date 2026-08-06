@@ -1,15 +1,39 @@
 -- Fast bootstrap witness for the Prism-owned parser. The host compiler parses
 -- this tiny harness; every file named on the command line is then lexed, laid
--- out, and parsed exclusively by `Syntax.Parse`.
+-- out, and parsed exclusively by `Syntax.Parse`. A first argument of the form
+-- `budget=N` parses the remaining files under that explicit recursion budget,
+-- which is how the depth ledger probes the refusal contract without paying
+-- for thousands of nesting levels.
 
 import Syntax.Lex (..)
 
 import Syntax.Parse (..)
 
-fn report(path : String) : String =
-  match parse_source(read_file(path)) of
+import Data.String (starts_with)
+
+import Syntax.Parse.Support (depth_budget)
+
+fn budget_of(arg : String) : Option(Int) =
+  if starts_with("budget=", arg) then
+    parse_int(substring(arg, 7, str_len(arg) - 7))
+  else
+    None
+
+fn report(budget : Int, path : String) : String =
+  match parse_source_budgeted(budget, read_file(path)) of
     Ok(items) => "ok {path} {show_int(length(items))}"
     Err(ParseLex(e)) => "lex {path} {lex_code(e)} {lex_message(e)}"
     Err(ParseSyntax(d)) => "parse {path} {d.code} {d.message}"
 
-fn main() = println(lines_of(map(report, args())))
+fn reports(budget : Int, paths : List(String)) : List(String) =
+  match paths of
+    Nil => Nil
+    Cons(path, rest) => Cons(report(budget, path), reports(budget, rest))
+
+fn main() =
+  match args() of
+    Cons(first, rest) =>
+      match budget_of(first) of
+        Some(budget) => println(lines_of(reports(budget, rest)))
+        None => println(lines_of(reports(depth_budget(), args())))
+    Nil => println(lines_of(Nil))

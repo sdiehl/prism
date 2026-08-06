@@ -187,3 +187,37 @@ fn use_generic(x : Int) : Int = generic(x)
     assert!(checked.decls.iter().any(|decl| decl.name == "use_identity"));
     assert!(checked.decls.iter().any(|decl| decl.name == "use_generic"));
 }
+
+// A `pub import` re-export must survive into the module's checked interface:
+// the project build checks each consumer against dependency interfaces alone,
+// so an interface that omits re-exported entries strands every consumer of
+// the re-export with an unbound canonical name at build while `check` and
+// `run`, which flatten the whole program, resolve it fine. The forwarded
+// entries carry the canonical names the source module's interface proved.
+#[test]
+fn reexports_survive_module_interfaces() {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    let sub = "pub type Shade = Bright | Dim deriving (Eq, Show)\n";
+    let module = "import Sub (..)\n\npub import Sub (..)\n\npub fn shade_word(s : Shade) : String = show(s)\n";
+    let modules: BTreeMap<String, String> = [("Sub".to_string(), sub.to_string())].into();
+    let roots = vec![
+        Root::SourceBundle {
+            label: "reexport-interface".into(),
+            identity: None,
+            modules: Arc::new(modules),
+        },
+        Root::Embedded(prism::stdlib::STDLIB),
+    ];
+    let interface = module_interface(module, &with_prelude(module), &roots).unwrap();
+    let seed = interface.rehydrate().unwrap().typecheck_seed();
+    assert!(
+        seed.data.contains_key("Sub.Shade"),
+        "the re-exported type must rehydrate from the interface"
+    );
+    assert!(
+        seed.ctors.contains_key("Sub.Bright") && seed.ctors.contains_key("Sub.Dim"),
+        "the re-exported constructors must rehydrate from the interface"
+    );
+}

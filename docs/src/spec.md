@@ -234,7 +234,7 @@ The surface has grown a broad vocabulary: handlers and named handlers, `try`/`ca
 
 > Add syntax only when it exposes a semantic invariant, eliminates recurring structural boilerplate, or materially improves diagnostics.
 
-By that test effect rows, handlers, `try`/`catch`, `var` and the loop forms, and record update earn their place; so do [pattern alternation](#pattern-alternation) and [patterns in parameter position](#pattern-parameters), which remove arms and wrapper matches a reader would otherwise write out by hand and which are expanded away before the checker, adding nothing to the language below the surface. Further aliases for forms that already exist do not. The stable surface freezes at roughly this point: the approachable ML-like character (no user-defined operators, no macros, no do-notation, no drift toward a more symbolic calculus) is a property to preserve, not a stage to move past. The design rule is to deepen what the existing syntax means rather than widen the syntax itself.
+By that test effect rows, handlers, `try`/`catch`, `var` and the loop forms, and record update earn their place; so do [pattern alternation](#pattern-alternation) and [patterns in parameter position](#pattern-destructuring), which remove arms and wrapper matches a reader would otherwise write out by hand and which are expanded away before the checker, adding nothing to the language below the surface. Further aliases for forms that already exist do not. The stable surface freezes at roughly this point: the approachable ML-like character (no user-defined operators, no macros, no do-notation, no drift toward a more symbolic calculus) is a property to preserve, not a stage to move past. The design rule is to deepen what the existing syntax means rather than widen the syntax itself.
 
 ## 5. Functions {#functions}
 
@@ -593,19 +593,7 @@ A `type` declaration introduces an **algebraic data type**: a **sum** of constru
 
 A **`newtype`** is a data type with exactly one single-field constructor: a type distinct from its payload, with no runtime wrapper. An `alias` on a type expression is a transparent synonym, interchangeable with its definition. An `alias` whose body is a row literal is a **row alias**, the same transparency for a set of effect labels: usable wherever a row is written, expanded before checking, and composable with other aliases ([composing rows](#composing-rows)); a row alias takes no parameters.
 
-A `deriving (C, ...)` clause generates the named instances structurally ([type classes](#type-classes)). `Eq`, `Ord`, `Show`, `Hash`, `Lens`, and `Plate` are derivable everywhere: derived `Ord` compares fields lexicographically in declaration order and orders constructors by declaration, and derived `Hash` folds the value through the same blake3 Merkle construction that content-addresses code ([content-addressed core](compiler.md#content-addressed-core)), so structurally equal values carry one canonical digest on every backend.
-
-Derived `Plate` yields one layer of structure, taken apart and put back. `children(x)` is the list of `x`'s immediate subvalues _of `x`'s own type_, in constructor-declaration and field order, and nothing else; `rebuild(x, ks)` is `x` with exactly those positions replaced, left to right, by the elements of `ks`. A whole-tree traversal or rewrite (every subterm, a fold, a count, a bottom-up rewrite) is written once against that one pair rather than once per constructor, and a fifty-constructor syntax tree costs the same to walk as a two-constructor one. The derivation looks through list, optional, tuple, and record fields, and through the other data types declared in the program, to find the occurrences a field can lead to; that is what lets a traversal see through the carrier records a tree holds its nodes in (a match arm, a spanned wrapper, a qualifier) with no second match written for them.
-
-The two methods are inverse on one layer, and that law is what every combinator above them relies on: `rebuild(x, children(x))` is `x`, and the list handed to `rebuild` must have the same length and order as the one `children` returned. `children` is pure and total, returning structurally smaller values, so a recursion driven by it terminates on a finite value. `rebuild` carries `Fail` in its row for exactly one reason: a list of any other length is a programming error, not an input to be repaired, so it raises `Fail` rather than padding the missing positions or dropping the extra ones, either of which would silently hand back a value that is not the one asked for. On a correctly shaped list it performs no effect. Both methods come from one walk of the declaration, read forwards and backwards, so a derived pair satisfies the law by construction; a hand-written instance owes it.
-
-Being structural rather than compositional, this derivation differs from the others in two visible ways. It puts no constraint on the type's own parameters, because a `Plate(T(a))` yields `T` occurrences and never an `a`; and it asks nothing of a component's own instances, taking the component apart by its declaration rather than by dispatch, so a component with no `Plate` instance is traversed all the same. What it cannot take apart it refuses: a field that could still lead back to the derived type through something opaque (a function, a container with no declaration in the program) is an error at the `deriving` clause naming the field and the type it reached, never a silently dropped subterm. Nothing in the class is unforgeable, so a hand-written instance is an ordinary instance and is accepted, which is the escape hatch for an abstract type whose children the compiler cannot see.
-
-Five more classes derive against opt-in modules: `Serialize` and `Stable` (`import Wire`) for the wire codec, where `Stable` derives only when every component is itself `Stable` and a non-stable field is a compile error at the derive site; `Arbitrary` (`import Test`) for property-test generators built from the type's structure ([stable blocks](#stable-blocks)); and `ToJson` with `FromJson` (`import Json`) for conversion to and from the dynamic JSON tree.
-
-The JSON pair is for a type whose schema is its own declaration, and is derived as a pair, since a type that encodes but cannot decode is a document nobody can read back. One constructor becomes one object: a record constructor's keys are its declared field names, a positional one's are its argument positions (`_0`, `_1`), and a sum additionally names the variant it holds under the key `$`, which no field name can spell, so a document names its constructor rather than an index that quietly changes meaning when a constructor is inserted. A single-constructor type has nothing to discriminate and carries no tag. Constructor and field order are the declaration's, so a value has one tree, and the encoder sorts keys, so it has one string on every backend. Unlike `Plate` this derivation is compositional: each field is converted through its own instance, so a component with no instance is a compile error at the field. A decode that does not fit, a tree that is not an object, a `$` naming no constructor of the type, a missing key, or a field that will not itself decode, is one ordinary `Fail`, caught with `optional` or `default`; that failure carries no payload, so it reports that the document did not fit and not where, because `Fail` is nullary and a positioned failure would mean a different effect on the class signature and so on every hand-written instance too. None of this is the wire codec: a `Serialize` byte format is frozen and versioned by `Stable`, while a JSON document is read by something not compiled against this program, so the encoding is self-describing rather than compact and promises nothing across a change to the declaration.
-
-`deriving (Identifiable)` is shorthand for the identity starter pack, expanding to exactly `Eq`, `Ord`, `Hash`, and `Show` so an ID newtype is comparable, hashable, and printable from one keyword with no imports; a class listed alongside it is derived once, not twice, and `Arbitrary` is deliberately excluded (it lives behind `import Test` and is a testing concern), so a value that also wants a generator writes `deriving (Identifiable, Arbitrary)`.
+A `deriving (C, ...)` clause generates the named instances structurally from the declaration. `Eq`, `Ord`, `Show`, `Hash`, `Lens`, and `Plate` derive everywhere; `Serialize`, `Stable`, `ToJson`, `FromJson`, and `Arbitrary` derive against their opt-in modules; `Identifiable` abbreviates the identity bundle. Each mechanism, its laws, and the instance a clause stands for are specified in [deriving](#deriving).
 
 ### 6.10 Records {#record-types}
 
@@ -703,6 +691,377 @@ Because a row is an unordered set, `{State, Fail}` fixes no layering the way a t
 
 Classes remain single-parameter; multi-parameter classes are not supported.
 
+### 7.4 Deriving {#deriving}
+
+A `deriving (C, ...)` clause on a `type` or `newtype` declaration generates the named instances structurally from the declaration.[^deriving-lineage] Derived code is ordinary checked code: a derived instance and its hand-written equivalent are indistinguishable downstream, in coherence, in dispatch, and in behavior. Each subsection below shows a clause beside the instance it stands for, the same program written both ways; both tabs typecheck and print the same thing, which is the whole claim.
+
+Most derivations are **compositional**: they convert each component through the component's own instance, so a field whose type lacks the instance is a compile error at that field. `Plate` alone is **structural**, taking components apart by their declarations instead of by dispatch ([below](#deriving-plate)). `Eq`, `Ord`, `Show`, `Hash`, `Lens`, and `Plate` derive everywhere; `Serialize` and `Stable` derive against `import Wire`, `ToJson` and `FromJson` against `import Json`, and `Arbitrary` against `import Test`.
+
+[^deriving-lineage]: `deriving` continues the long tradition of datatype-generic programming in Haskell, where the language report blessed a small fixed list of derivable classes and decades of research grew around generalizing it: scrapped boilerplate, generic representation types, generic deriving. Prism keeps to the GHC tradition rather than going full generics: every derivation is a fixed, compiler-owned schema over the declaration, with no representation type, no user-programmable deriving, and nothing to import before a clause works. What is lost in extensibility is kept in coherence and determinism, one canonical instance per clause, identical on every backend. See Lämmel and Peyton Jones, "Scrap Your Boilerplate" (TLDI 2003); Magalhães, Dijkstra, Jeuring, and Löh, "A Generic Deriving Mechanism for Haskell" (Haskell Symposium 2010); and, for the ancestor `Plate` most directly continues, Mitchell and Runciman, "Uniform Boilerplate and List Processing" (Haskell Workshop 2007).
+
+#### deriving (Show) {#deriving-show}
+
+Canonical rendering ([type classes](#type-classes)). A nullary constructor prints as its name, a positional one as `Name(v, ...)`, a record one as `Name { f = v, ... }`, each field through its own `Show` instance.
+
+{{#tabs }}
+
+{{#tab name="Deriving" }}
+
+```prism
+type Color = Red | Green | Blue deriving (Show)
+
+fn main() = println(show(Green))
+```
+
+{{#endtab }}
+
+{{#tab name="Derived instance" }}
+
+```prism
+type Color = Red | Green | Blue
+
+instance showColor : Show(Color)
+  fn show(c) =
+    match c of
+      Red => "Red"
+      Green => "Green"
+      Blue => "Blue"
+
+fn main() = println(show(Green))
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
+#### deriving (Eq) {#deriving-eq}
+
+Two values are equal when they carry the same constructor and their fields are pairwise equal, each through its own `Eq` instance. A type with more than one constructor gains a final wildcard arm returning `false`.
+
+{{#tabs }}
+
+{{#tab name="Deriving" }}
+
+```prism
+type Point = Point { x : Int, y : Int } deriving (Eq)
+
+fn main() =
+  println(show(eq(Point { x = 3, y = 4 }, Point { x = 3, y = 4 })))
+```
+
+{{#endtab }}
+
+{{#tab name="Derived instance" }}
+
+```prism
+type Point = Point { x : Int, y : Int }
+
+instance eqPoint : Eq(Point)
+  fn eq(a, b) =
+    match (a, b) of
+      (Point(ax, ay), Point(bx, by)) => eq(ax, bx) && eq(ay, by)
+
+fn main() =
+  println(show(eq(Point { x = 3, y = 4 }, Point { x = 3, y = 4 })))
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
+#### deriving (Ord) {#deriving-ord}
+
+Lexicographic order: within a constructor, `cmp` the fields left to right and stop at the first non-zero result; across distinct constructors, declaration order decides. `Ord` requires `Eq` (`given`), and the derived instance backs `<`, `<=`, `>`, and `>=`.
+
+{{#tabs }}
+
+{{#tab name="Deriving" }}
+
+```prism
+type Point = Point { x : Int, y : Int } deriving (Eq, Ord)
+
+fn main() =
+  println(show(cmp(Point { x = 1, y = 2 }, Point { x = 1, y = 3 })))
+```
+
+{{#endtab }}
+
+{{#tab name="Derived instance" }}
+
+```prism
+type Point = Point { x : Int, y : Int }
+
+instance eqPoint : Eq(Point)
+  fn eq(a, b) =
+    match (a, b) of
+      (Point(ax, ay), Point(bx, by)) => eq(ax, bx) && eq(ay, by)
+
+instance ordPoint : Ord(Point)
+  fn cmp(a, b) =
+    match (a, b) of
+      (Point(ax, ay), Point(bx, by)) =>
+        match cmp(ax, bx) of
+          0 => cmp(ay, by)
+          c => c
+
+fn main() =
+  println(show(cmp(Point { x = 1, y = 2 }, Point { x = 1, y = 3 })))
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
+#### deriving (Hash) {#deriving-hash}
+
+A structural content hash: the value folds through the same blake3 Merkle construction that content-addresses code ([content-addressed core](compiler.md#content-addressed-core)), so structurally equal values carry one canonical digest on every backend. Each constructor hashes as the blake3 of its token, the length-prefixed name and declaration tag, followed by its fields' own digests; fixed-width field digests make the concatenation unambiguous. Renaming a constructor therefore moves the hash, exactly as it moves the identity of code.
+
+{{#tabs }}
+
+{{#tab name="Deriving" }}
+
+```prism
+type Point = Point { x : Int, y : Int } deriving (Hash)
+
+fn main() =
+  println(show(hash(Point { x = 3, y = 4 }) == hash(Point { x = 3, y = 4 })))
+```
+
+{{#endtab }}
+
+{{#tab name="Derived instance" }}
+
+```prism
+type Point = Point { x : Int, y : Int }
+
+instance hashPoint : Hash(Point)
+  fn hash(p) =
+    match p of
+      Point(px, py) => blake3(concat("c5:Point/0", concat(hash(px), hash(py))))
+
+fn main() =
+  println(show(hash(Point { x = 3, y = 4 }) == hash(Point { x = 3, y = 4 })))
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
+#### deriving (Lens) {#deriving-lens}
+
+For a record constructor, one getter `f_of` and one setter `with_f` per field ([records](#record-types)). This is the one derivation that synthesizes top-level functions rather than an instance; the functions compose with the [record expressions](#record-expressions) and the [optic paths](#optic-paths).
+
+{{#tabs }}
+
+{{#tab name="Deriving" }}
+
+```prism
+type Vec2 = Vec2 { x : Int, y : Int } deriving (Lens, Show)
+
+fn main() =
+  println(show(x_of(Vec2 { x = 1, y = 2 })))
+  println(show(with_y(Vec2 { x = 1, y = 2 }, 9)))
+```
+
+{{#endtab }}
+
+{{#tab name="Derived functions" }}
+
+```prism
+type Vec2 = Vec2 { x : Int, y : Int } deriving (Show)
+
+fn x_of(v : Vec2) : Int = v.x
+fn with_y(v : Vec2, ny : Int) : Vec2 = Vec2 { ..v, y = ny }
+
+fn main() =
+  println(show(x_of(Vec2 { x = 1, y = 2 })))
+  println(show(with_y(Vec2 { x = 1, y = 2 }, 9)))
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
+#### deriving (Plate) {#deriving-plate}
+
+One layer of structure, taken apart and put back. `children(x)` is the list of `x`'s immediate subvalues _of `x`'s own type_, in constructor-declaration and field order, and nothing else; `rebuild(x, ks)` is `x` with exactly those positions replaced, left to right, by the elements of `ks`. A whole-tree traversal or rewrite (every subterm, a fold, a count, a bottom-up rewrite) is written once against that one pair rather than once per constructor, and a fifty-constructor syntax tree costs the same to walk as a two-constructor one. The derivation looks through list, optional, tuple, and record fields, and through the other data types declared in the program, to find the occurrences a field can lead to; that is what lets a traversal see through the carrier records a tree holds its nodes in (a match arm, a spanned wrapper, a qualifier) with no second match written for them.
+
+The two methods are inverse on one layer, and that law is what every combinator above them relies on: `rebuild(x, children(x))` is `x`, and the list handed to `rebuild` must have the same length and order as the one `children` returned. `children` is pure and total, returning structurally smaller values, so a recursion driven by it terminates on a finite value. `rebuild` carries `Fail` in its row for exactly one reason: a list of any other length is a programming error, not an input to be repaired, so it raises `Fail` rather than padding the missing positions or dropping the extra ones, either of which would silently hand back a value that is not the one asked for. On a correctly shaped list it performs no effect.
+
+Being structural rather than compositional, this derivation differs from the others in two visible ways. It puts no constraint on the type's own parameters, because a `Plate(T(a))` yields `T` occurrences and never an `a`; and it asks nothing of a component's own instances, so a component with no `Plate` instance is traversed all the same. What it cannot take apart it refuses: a field that could still lead back to the derived type through something opaque (a function, a container with no declaration in the program) is an error at the `deriving` clause naming the field and the type it reached, never a silently dropped subterm. Nothing in the class is unforgeable, so a hand-written instance is an ordinary instance and is accepted, which is the escape hatch for an abstract type whose children the compiler cannot see.
+
+{{#tabs }}
+
+{{#tab name="Deriving" }}
+
+```prism
+type Expr = Lit(Int) | Add(Expr, Expr) | Mul(Expr, Expr) deriving (Show, Plate)
+
+-- Bottom-up rewrite: fold constant additions wherever they appear.
+fn simplify(e : Expr) : Expr ! {Fail | e} =
+  let folded = rebuild(e, map(simplify, children(e)))
+  match folded of
+    Add(Lit(a), Lit(b)) => Lit(a + b)
+    other => other
+
+fn main() =
+  println(show(simplify(Mul(Add(Lit(1), Lit(2)), Lit(3)))))
+```
+
+{{#endtab }}
+
+{{#tab name="Derived instance" }}
+
+```prism
+type Expr = Lit(Int) | Add(Expr, Expr) | Mul(Expr, Expr) deriving (Show)
+
+instance plateExpr : Plate(Expr)
+  fn children(e) =
+    match e of
+      Lit(_) => []
+      Add(a, b) => [a, b]
+      Mul(a, b) => [a, b]
+  fn rebuild(e, ks) =
+    match (e, ks) of
+      (Lit(n), []) => Lit(n)
+      (Add(_, _), [a, b]) => Add(a, b)
+      (Mul(_, _), [a, b]) => Mul(a, b)
+      _ => fail()
+
+fn simplify(e : Expr) : Expr ! {Fail | e} =
+  let folded = rebuild(e, map(simplify, children(e)))
+  match folded of
+    Add(Lit(a), Lit(b)) => Lit(a + b)
+    other => other
+
+fn main() =
+  println(show(simplify(Mul(Add(Lit(1), Lit(2)), Lit(3)))))
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
+#### deriving (Serialize) {#deriving-serialize}
+
+The compact positional byte codec (`import Wire`): a product writes its fields in declaration order, a sum prefixes the constructor tag, and the byte builders belong to the library, so the derivation names the shape and the library owns the bytes. The encoding is compact rather than self-describing; the frame that seals a layout and rejects a stale one is [`Stable`'s](#deriving-stable), which is why the two usually derive together.
+
+```prism
+import Wire (..)
+
+type Point = Point { x : Int, y : Int } deriving (Serialize)
+
+fn main() =
+  println(show(wire_len(encode(Point { x = 1, y = 2 }))))
+```
+
+#### deriving (Stable) {#deriving-stable}
+
+The seal on a `Serialize` layout. Its one method is a per-type constant the compiler injects at the derive site, the type's structural shape digest, and `wire_encode_stable`/`wire_decode_stable` frame a value under it so a stale layout is rejected before a byte of the body is read ([stable blocks](#stable-blocks)). `Stable` derives only when every component is itself `Stable`; a non-stable field is a compile error at the derive site.
+
+There is no derived-instance tab here, deliberately: a hand-written `instance Stable(T)` is rejected outright, because the class's only method is compiler-computed and a manual instance could only forge a frozen contract. The error points at `deriving (Stable)`.
+
+```prism
+import Wire (..)
+
+type Meters = Meters(Int) deriving (Eq, Show, Serialize, Stable)
+
+fn decode_meters(bs : Bytes) : Meters = wire_decode_stable(bs)
+
+fn main() =
+  println(show(decode_meters(wire_encode_stable(Meters(5)))))
+```
+
+#### deriving (ToJson, FromJson) {#deriving-tojson-fromjson}
+
+Conversion to and from the dynamic JSON tree (`import Json`), for a type whose schema is its own declaration, derived as a pair, since a type that encodes but cannot decode is a document nobody can read back. One constructor becomes one object: a record constructor's keys are its declared field names, a positional one's are its argument positions (`_0`, `_1`), and a sum additionally names its variant under the key `$`, which no field name can spell, so a document names its constructor rather than an index that quietly changes meaning when a constructor is inserted. A single-constructor type has nothing to discriminate and carries no tag. Constructor and field order are the declaration's and the encoder sorts keys, so a value has one tree and one string on every backend. A decode that does not fit, in any way, is one ordinary `Fail`, caught with `optional` or `default`; the failure carries no payload because `Fail` is nullary, and a positioned failure would mean a different effect on the class signature and so on every hand-written instance too. None of this is the wire codec: a `Serialize` byte format is frozen and versioned by `Stable`, while a JSON document is read by something not compiled against this program, so the encoding is self-describing rather than compact and promises nothing across a change to the declaration.
+
+{{#tabs }}
+
+{{#tab name="Deriving" }}
+
+```prism
+import Json (..)
+
+type Point = Point { x : Int, y : Int } deriving (ToJson, FromJson)
+
+fn main() =
+  println(encode(to_json(Point { x = 1, y = 2 })))
+```
+
+{{#endtab }}
+
+{{#tab name="Derived instance" }}
+
+```prism
+import Json (..)
+
+-- The encoder half; the decoder derives alongside it as the field-lookup
+-- mirror of this construction.
+type Point = Point { x : Int, y : Int }
+
+instance toJsonPoint : ToJson(Point)
+  fn to_json(p) =
+    match p of
+      Point(px, py) => JObj([("x", to_json(px)), ("y", to_json(py))])
+
+fn main() =
+  println(encode(to_json(Point { x = 1, y = 2 })))
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
+#### deriving (Arbitrary) {#deriving-arbitrary}
+
+A property-test generator built from the type's structure (`import Test`): constructors are chosen among, fields generate through their own `Arbitrary` instances, and a recursive type generates under a size budget that decays toward its leaves. Randomness routes through the `Random` effect under a seeded handler, so a run is a pure function of its seed and a failure reports the seed that reproduces it. The derived body is the library's generator combinators, so no instance tab is shown; what matters is that the clause makes `quickcheck` runnable over the type with nothing else written.
+
+```prism
+import Test (..)
+
+import Quickcheck (..)
+
+type Point = Point { x : Int, y : Int } deriving (Eq, Show, Arbitrary)
+
+fn prop_reflexive(p : Point) : Bool = eq(p, p)
+
+fn main() =
+  println(show(passed(quickcheck(arb_gen(), prop_reflexive))))
+```
+
+#### deriving (Identifiable) {#deriving-identifiable}
+
+Shorthand for the identity starter pack: it expands to exactly `Eq`, `Ord`, `Hash`, and `Show`, so an ID newtype is comparable, hashable, and printable from one keyword with no imports. A class listed alongside it is derived once, not twice, and `Arbitrary` is deliberately excluded (it lives behind `import Test` and is a testing concern), so a value that also wants a generator writes `deriving (Identifiable, Arbitrary)`.
+
+{{#tabs }}
+
+{{#tab name="Deriving" }}
+
+```prism
+newtype UserId = UserId(Int) deriving (Identifiable)
+
+fn main() =
+  println(show(UserId(7)))
+  println(show(UserId(3) < UserId(7)))
+```
+
+{{#endtab }}
+
+{{#tab name="Expansion" }}
+
+```prism
+newtype UserId = UserId(Int) deriving (Eq, Ord, Hash, Show)
+
+fn main() =
+  println(show(UserId(7)))
+  println(show(UserId(3) < UserId(7)))
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
 ## 8. Effects and Handlers {#effects-and-handlers}
 
 An `effect` declares a set of operations; each operation has an argument list and a result type. Performing an operation is an ordinary call to its name. A function's effect row is the set of effects whose operations it may perform and has not handled, written `! {L, ...}` on its result type, with an optional row variable tail `! {L | r}`. A bare `!` is an explicit empty row. A row is inferred when omitted.
@@ -792,11 +1151,13 @@ A `never op(x) => e` clause is **non-resumable**: it discards the continuation. 
 
 ### 8.4 Masking {#masking}
 
-`mask<E>(e)` makes every operation of effect `E` performed in `e` bypass the innermost enclosing handler of `E` and reach the next one out. Masks nest, so a double mask skips two handlers. The masked expression still demands an enclosing handler, so `E` remains in its row.
+Operations are answered by the nearest enclosing handler of their effect. `mask<E>(e)` is how an expression declines that default for `E`: inside `e`, an operation of `E` skips the nearest handler and is answered by the next one out. Nothing escapes unhandled; the masked expression still requires a handler somewhere outside it, so `E` stays in its row.
 
 ```prism
 {{#include ../examples/mask.pr}}
 ```
+
+The need arises the moment two handlers of one effect share a scope, which happens whenever code installs a handler of `E` around user code while itself wanting the `E` of its own caller: a wrapper that intercepts every `ask` to log it and then delegates the real question outward, a test harness that handles `State` for the code under test while its own bookkeeping uses the ambient state. Without `mask`, the wrapper's own operations are captured by the handler it just installed, which is at best the wrong answer and at worst an infinite loop; with it, they are addressed past it. Masks nest, so a double mask skips two handlers. Masking skips handlers by position; a [named handler](#named-handlers) addresses one by name.
 
 ### 8.5 Named Handlers {#named-handlers}
 
@@ -1558,6 +1919,24 @@ A single constructor pattern over a recursive type retires the recursion into a 
 {{#include ../examples/tree_fold.pr}}
 ```
 
+Destructuring extends to **parameter position**: a parameter of a `fn` or a lambda may be written as a pattern rather than as a name, with the same meaning as taking a named argument and matching it around the whole body:
+
+```prism,ignore
+fn area(Circle(r)) : Int = r * r
+
+-- means
+
+fn area(s : Shape) : Int =
+  match s of
+    Circle(r) => r * r
+```
+
+A bare variable in parameter position is still the ordinary named parameter and `_` still names a parameter the body ignores; any other pattern is a pattern parameter, and it composes with the rest of a parameter's syntax (a type annotation, `borrow`, and a default all attach as usual). Where several parameters are patterns, the leftmost one's match is the outer one, so a later pattern's bindings cannot capture an earlier one's. A pattern parameter must be **irrefutable**: it has to cover every value of its type, because there is no next arm to fall through to, and a refutable one is reported exactly as the match it denotes, a non-exhaustive match (`E4001`) with the caret under the pattern the author wrote. A pattern parameter has no name of its own, so it cannot be supplied by keyword; other parameters of the same function still can be.
+
+```prism
+{{#include ../examples/pattern_params.pr}}
+```
+
 ### 10.2 Alternation {#pattern-alternation}
 
 A pattern may **alternate**: `p | q | r` matches a value that any one of its alternatives matches. Alternation is legal wherever a pattern is, so it nests inside a constructor argument, a tuple, a list, and a record field, and `Line(0 | 1, _)` is one arm rather than two nearly identical ones.
@@ -1572,29 +1951,7 @@ Because the body is shared, every alternative must bind the same set of names; o
 
 A `let` binding destructures with a constructor or tuple pattern and admits no alternation, since an irrefutable binding has one shape to name and nothing to choose between.
 
-### 10.3 Patterns in Parameter Position {#pattern-parameters}
-
-A parameter of a `fn` or a lambda may be written as a pattern rather than as a name. `fn area(Circle(r)) = ...` is the function that takes one argument and destructures it, with the same meaning as taking a named argument and matching it around the whole body:
-
-```prism,ignore
-fn area(Circle(r)) : Int = r * r
-
--- means
-
-fn area(s : Shape) : Int =
-  match s of
-    Circle(r) => r * r
-```
-
-A bare variable in parameter position is still the ordinary named parameter, binding without testing, and `_` still names a parameter the body ignores. Any other pattern is a pattern parameter, and it composes with the rest of a parameter's syntax: a type annotation, `borrow`, and a default all attach as usual (`fn f(borrow Circle(r) : Shape := unit_circle)`). Where several parameters are patterns, the leftmost one's match is the outer one, so a later pattern's bindings cannot capture an earlier one's.
-
-A pattern parameter must be **irrefutable**: it has to cover every value of its type, because there is no next arm to fall through to. A refutable one is reported exactly as the match it denotes, a non-exhaustive match (`E4001`) naming a missing constructor, with the caret under the pattern the author wrote. A pattern parameter has no name of its own, so it cannot be supplied by keyword; other parameters of the same function still can be.
-
-```prism
-{{#include ../examples/pattern_params.pr}}
-```
-
-### 10.4 Guards {#pattern-guards}
+### 10.3 Guards {#pattern-guards}
 
 A `match` arm may carry a **guard**, `pat if cond => body`: the pattern must match and the guard must evaluate to `true` before the arm fires, and the guard sees every variable the pattern bound. When the pattern fails to match, or matches but the guard is `false`, control falls through to the next arm in source order.
 
@@ -1602,7 +1959,7 @@ A `match` arm may carry a **guard**, `pat if cond => body`: the pattern must mat
 {{#include ../examples/guards.pr}}
 ```
 
-### 10.5 Exhaustiveness and Redundancy {#pattern-exhaustiveness}
+### 10.4 Exhaustivity {#pattern-exhaustiveness}
 
 Every `match` is checked by default, with no opt-out: the usefulness algorithm of [Maranget (2007)](bibliography.md#maranget-2007) decides, from the arms' patterns alone, whether some value of the scrutinee's type reaches no arm (a **non-exhaustive match**, `E4001`, an error that names a concrete missing pattern as a witness) and whether some arm can never fire because every value it would match is already claimed by an earlier arm (an **unreachable arm**, `E4000`). A guarded arm does not count toward exhaustiveness, since its guard may fail at run time and fall through regardless of what its pattern matched; a wildcard arm underneath a family of guarded arms exists precisely because the guards above it cannot discharge the check on their own.
 
@@ -1610,7 +1967,7 @@ Both questions are asked of the arms an [alternation](#pattern-alternation) stan
 
 Exhaustiveness is not a lint: an unhandled case is a compile-time error, not a run-time panic waiting to happen. The proof survives into the compiled program too: the native backend still [lowers a `match` to a constructor `switch`](compiler.md#lowering-core-to-llvm) with a default block, but that block is unreachable code the checker has already proved dead, trapping rather than falling through silently in the one case a bug could ever reach it.
 
-### 10.6 Pattern Synonyms {#pattern-synonyms}
+### 10.5 Pattern Synonyms {#pattern-synonyms}
 
 A `pattern N(x) for T = view ... make ...` declaration defines a bidirectional **pattern synonym**: in match position it runs `view` and succeeds when that returns `Some` (the present case of `Option`, from [the standard prelude](#the-standard-prelude)); in expression position it runs `make`. Here `view` and `make` are contextual keywords, significant only inside a `pattern` declaration. A synonym with both halves is a **prism** (a composable view-and-build pair); one with only `view` is a **view pattern**. The `for` target may also name a class rather than a type, with the view a method of that class: `pattern First(n) for Peek = view peek` matches a value of any type with a `Peek` instance, dispatching `peek` through the dictionary at each match site, so one synonym destructures every instance.
 
@@ -1620,7 +1977,7 @@ A `pattern N(x) for T = view ... make ...` declaration defines a bidirectional *
 
 ## 11. Declarations and Programs {#declarations-and-programs}
 
-A function is declared with `fn`; a parameter may carry a type annotation, a default value `:= e`, or the `borrow` modifier, which lets a pure function read a parameter without taking ownership of it, and it may be written as an irrefutable [pattern](#pattern-parameters) instead of a name. A return annotation is written `: T ! {R}` for result type `T` and effect row `R`, `: T !` for an explicit empty row, or `: T` to leave the row inferred. A parameter with a default may be omitted, and any argument may be passed by name as `f(p := e)`, in any order and mixed with positional arguments; the call is rewritten to positional form, filling omitted defaults. Defaults and named arguments are honored on top-level functions. A top-level `let` is a constant: its references are inlined. A `where` block attaches non-recursive, lexically scoped definitions to a function body.
+A function is declared with `fn`; a parameter may carry a type annotation, a default value `:= e`, or the `borrow` modifier, which lets a pure function read a parameter without taking ownership of it, and it may be written as an irrefutable [pattern](#pattern-destructuring) instead of a name. A return annotation is written `: T ! {R}` for result type `T` and effect row `R`, `: T !` for an explicit empty row, or `: T` to leave the row inferred. A parameter with a default may be omitted, and any argument may be passed by name as `f(p := e)`, in any order and mixed with positional arguments; the call is rewritten to positional form, filling omitted defaults. Defaults and named arguments are honored on top-level functions. A top-level `let` is a constant: its references are inlined. A `where` block attaches non-recursive, lexically scoped definitions to a function body.
 
 ```prism
 {{#include ../examples/named_args.pr}}

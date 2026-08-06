@@ -1,0 +1,94 @@
+-- Property-tests the branded-name contract: identities are a pure function of
+-- allocation order (replay from one seed is byte-stable), scope resolution is
+-- a push/lookup/pop stack with innermost-wins shadowing, and failure is an
+-- explicit error, never a fallback.
+
+import Quickcheck (..)
+
+import Data.Name (..)
+
+import Data.Scope (..)
+
+import Control.Fresh (Fresh, run_fresh, run_fresh_from)
+
+import Data.Result (result_or)
+
+type TermSpace = TermTag
+
+-- Allocate binders for every spelling in order; the rendered forms commit to
+-- both identity and hint.
+fn mint(s : String) : Binder(TermSpace) ! {Fresh} = fresh_binder(s)
+
+fn alloc_all(spellings : List(String)) : List(String) ! {Fresh} =
+  match spellings of
+    Nil => Nil
+    Cons(s, rest) =>
+      let b = mint(s)
+      Cons(render_binder(b), alloc_all(rest))
+
+-- Replay: the same allocation sequence from the same seed renders the same.
+fn prop_replay(spellings : List(String)) : Bool =
+  run_fresh(\() -> alloc_all(spellings))
+    == run_fresh(\() -> alloc_all(spellings))
+    && run_fresh_from(7, \() -> alloc_all(spellings))
+      == run_fresh_from(7, \() -> alloc_all(spellings))
+
+-- Distinct allocations are distinct identities even under one spelling.
+fn two_binders() : (Binder(TermSpace), Binder(TermSpace)) ! {Fresh} =
+  (mint("x"), mint("x"))
+
+fn prop_distinct() : Bool =
+  match run_fresh(\() -> two_binders()) of
+    (a, b) => not(a == b) && not(bound_name(a) == bound_name(b))
+
+-- Push, then lookup, answers the pushed binder; pop restores the shadowed
+-- one; popping past the bottom is an explicit underflow.
+fn pop_or(sc : Scope(TermSpace), spelling : String) : Scope(TermSpace) =
+  result_or(sc, scope_pop(sc, spelling))
+
+fn underflows(sc : Scope(TermSpace), spelling : String) : Bool =
+  match scope_pop(sc, spelling) of
+    Err(ScopeUnderflow(_s)) => true
+    _ => false
+
+fn stack_walk() : Bool ! {Fresh} =
+  let outer = mint("v")
+  let inner = mint("v")
+  let sc = scope_push(scope_push(scope_empty, outer), inner)
+  let innermost =
+    match scope_lookup(sc, "v") of
+      Ok(b) => b == inner
+      Err(_e) => false
+  let restored =
+    match scope_pop(sc, "v") of
+      Ok(sc2) =>
+        match scope_lookup(sc2, "v") of
+          Ok(b) => b == outer
+          Err(_e) => false
+      Err(_e) => false
+  let drained = pop_or(pop_or(sc, "v"), "v")
+  innermost && restored && underflows(drained, "v") && scope_depth(sc, "v") == 2
+
+fn prop_stack() : Bool = run_fresh(\() -> stack_walk())
+
+-- Unknown spellings refuse by name.
+fn empty_terms() : Scope(TermSpace) = scope_empty
+
+fn unknown_refused() : Bool =
+  match scope_lookup(empty_terms(), "ghost") of
+    Err(ScopeUnknown(s)) => s == "ghost"
+    _ => false
+
+fn gen_spellings() : Gen(List(String)) =
+  gen_list(gen_one_of("x", ["y", "z", "shadow"]))
+
+fn main() =
+  println(
+      show_outcome(
+          "Name replay deterministic",
+          quickcheck(gen_spellings(), prop_replay),
+        ),
+    )
+  println("Name distinct under one spelling: {prop_distinct()}")
+  println("Scope push-lookup-pop: {prop_stack()}")
+  println("Scope unknown refused: {unknown_refused()}")

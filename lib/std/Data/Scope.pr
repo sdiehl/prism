@@ -1,0 +1,77 @@
+-- | Lexical scope resolution over branded names: a spelling-to-binder stack.
+--
+-- While resolving syntax, a scope maps each source spelling to the stack of
+-- `Data.Name` binders currently in force for it. Entering a binding pushes;
+-- leaving pops; a reference resolves to the innermost binder. Shadowing is a
+-- push that changes what the spelling means without disturbing the identity
+-- underneath, so alpha-renaming a source program never changes which
+-- identities the resolved output carries, only their hints.
+--
+-- Failure is explicit and named: resolving an unknown spelling and popping a
+-- spelling with no active binder are `ScopeError` values, never silent
+-- fallbacks. The scope is an ordinary persistent value, so a resolver may
+-- thread it through `State`, pass it as an argument, or keep sub-scopes by
+-- simply keeping the old value. Opt-in: not in Base.
+
+import Data.Map (map_empty, map_lookup, map_insert)
+
+import Data.Name (Binder)
+
+-- | A resolution scope for one namespace: each spelling maps to its stack of
+-- active binders, innermost first.
+pub type Scope(space) = Scope { spellings: Map(String, List(Binder(space))) }
+
+-- | Why a scope operation refused.
+pub type ScopeError
+  = ScopeUnknown(String)
+  | ScopeUnderflow(String)
+  deriving (Eq, Show)
+
+-- | The empty scope: no spelling resolves.
+pub let scope_empty : Scope(space) = Scope { spellings = map_empty }
+
+-- The active stack for a spelling; absent means empty.
+fn stack_of(sc : Scope(space), spelling : String) : List(Binder(space)) =
+  match map_lookup(spelling, sc.spellings) of
+    None => Nil
+    Some(bs) => bs
+
+-- | Bring `binder` into force for its own hint spelling, shadowing any binder
+-- already in force for it.
+pub fn scope_push(sc : Scope(space), binder : Binder(space)) : Scope(space) =
+  Scope {
+    spellings = map_insert(
+        binder.hint,
+        Cons(binder, stack_of(sc, binder.hint)),
+        sc.spellings,
+      )
+  }
+
+-- | The innermost binder in force for `spelling`, or `ScopeUnknown`.
+pub fn scope_lookup(
+  sc : Scope(space),
+  spelling : String
+) : Result(Binder(space), ScopeError) =
+  match stack_of(sc, spelling) of
+    Nil => Err(ScopeUnknown(spelling))
+    Cons(b, _rest) => Ok(b)
+
+-- | Leave the innermost binding for `spelling`, restoring whatever it
+-- shadowed; popping a spelling with no active binder is `ScopeUnderflow`.
+pub fn scope_pop(
+  sc : Scope(space),
+  spelling : String
+) : Result(Scope(space), ScopeError) =
+  match stack_of(sc, spelling) of
+    Nil => Err(ScopeUnderflow(spelling))
+    Cons(_b, rest) =>
+      Ok(Scope { spellings = map_insert(spelling, rest, sc.spellings) })
+
+-- | How many binders are in force for `spelling`; zero for an unknown one.
+pub fn scope_depth(sc : Scope(space), spelling : String) : Int =
+  depth_go(stack_of(sc, spelling), 0)
+
+fn depth_go(bs : List(Binder(space)), n : Int) : Int =
+  match bs of
+    Nil => n
+    Cons(_b, rest) => depth_go(rest, n + 1)

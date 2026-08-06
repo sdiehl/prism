@@ -195,7 +195,7 @@ line 1 col 5: unexpected character
 
 ### `decode`
 
-```prism,sig,h-b94dded291f273a1e36df8e663d76e9eb3152158050814feb24a3c434dc848c3
+```prism,sig,h-f7d3245b65eba3ff60207201959315e6c8964f2b2d2ff11a6e950cd7bdd0c978
 decode : (String) -> Result(Json.Json, Json.JsonError)
 ```
 
@@ -211,7 +211,7 @@ Ok(Json.JArr([Json.JInt(1), Json.JInt(2), Json.JInt(3)]))
 
 ### `decode_lossy`
 
-```prism,sig,h-ca8591a1ac859c1095d6bfd1146deedd0dd5a18b57ef1020fe45230eb342cb88
+```prism,sig,h-02972a777432ffeb8c68439087e8206c70d0d47347aa0041d4d47b97ef6e53c2
 decode_lossy : (String) -> Result(Json.Json, Json.JsonError)
 ```
 
@@ -227,7 +227,7 @@ Ok(Json.JFloat(1000))
 
 ### `encode`
 
-```prism,sig,h-76c7ee22bb15ebb6bcb60a5e68574f4580192a89dd09869bbc63aed1d1fa857c
+```prism,sig,h-281ff686253d38ee3a27760861fd94d53ad4aca5bd807dc3605f564694d9a83d
 encode : (Json.Json) -> String
 ```
 
@@ -259,7 +259,7 @@ Json.JInt(2)
 
 ### `to_json_string`
 
-```prism,sig,h-de8d3593c7338c38d6c08be32cfe92a59275b7cd60c7b2e1bf64717ad5c2378b
+```prism,sig,h-8e0a1c390ac05fa4df9aa312bcefbb1e517fedb8117b487e3cc49a4fc0165066
 to_json_string : forall a. (a) -> String
 ```
 

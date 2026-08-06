@@ -1,4 +1,27 @@
 -- | Spectra's command grammar, built applicatively with Std `Cli`.
+--
+-- The executable understands three subcommands, each defaulting its project
+-- path to the current directory:
+--
+-- ```text
+-- spectra check [PATH]
+-- spectra build [PATH] --output deck.pdf --open
+-- spectra clean [PATH]
+-- ```
+--
+-- Parsing is a pure function over an argument list, so the grammar is its own
+-- test surface:
+--
+-- ```prism
+-- # import Cli as C
+-- fn main() =
+--   match parse_spectra_argv(["build", "talk", "--open"]) of
+--     C.Parsed(cmd) => println(show(cmd))
+--     _ => println("usage error")
+-- ```
+-- ```output
+-- SpectraCli.Build("talk", "deck.pdf", true)
+-- ```
 
 import Cli as C
 

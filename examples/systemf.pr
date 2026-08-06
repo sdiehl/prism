@@ -2,10 +2,15 @@
 -- (`ETLam`/`ETApp` are type abstraction/application), while ordinary application
 -- also performs predicative instantiation, as in a small bidirectional checker.
 --
--- Metavariables are equivalence classes in Data.UnionFind. A separate solution
--- map assigns a type to a class root; the occurs check prevents infinite types.
--- State is an effect, and its nested fields are changed with optic paths, so the
--- inference rules contain no context-copying or substitution plumbing.
+-- The pipeline is the front end's shape in miniature: a resolution pass walks
+-- the string-spelled surface once, minting a deterministic branded identity for
+-- every binder (`Data.Name` over `Control.Fresh`) and resolving every reference
+-- through a lexical `Data.Scope`, so the checker's trees carry identities, not
+-- spellings. Substitution is then a structural walk comparing identities; no
+-- capture is possible and no runtime freshening exists. Metavariables are
+-- classes in a payload-carrying union-find: each class root owns one `Meta`
+-- descriptor (unsolved, or solved to a type), so there is no shadow solution
+-- map to keep aligned; the occurs check prevents infinite types.
 --
 -- Expected output:
 --   id                 : forall a. a -> a
@@ -18,9 +23,19 @@
 
 import Control.State (..)
 
-import Data.Map (map_empty, map_insert, map_lookup)
+import Control.Fresh (Fresh, run_fresh)
 
-import Data.UnionFind (uf_empty, uf_find, uf_union)
+import Data.String (contains)
+
+import Data.Result (result_or)
+
+import Data.Name (Name, Binder, fresh_binder, bound_name, name_id)
+
+import Data.Scope (Scope, scope_empty, scope_push, scope_lookup)
+
+import Data.UnionFind.Payload (UnionFind, ufp_empty, ufp_find, ufp_insert, ufp_set, ufp_union_with)
+
+-- The surface syntax: types and terms as the programmer spells them.
 
 type Ty
   = TyInt
@@ -57,177 +72,278 @@ type Expr
   | EIf(Expr, Expr, Expr)
   | EBin(Op, Expr, Expr)
 
-type Env = Env { terms: List((String, Ty)), tyvars: List(String) }
+-- The two namespaces, branded so a term identity can never stand where a type
+-- identity belongs.
 
-type Metas = Metas {
-  parents: Map(Int, Int),
-  solutions: Map(Int, Ty),
-  next: Int
-}
+type TermSpace = TermTag
 
-type Solver = Solver { metas: Metas }
+type TySpace = TyTag
+
+-- The resolved syntax the checker walks: every binder is a `Binder`, every
+-- reference a `Name`, and spellings survive only as presentation hints.
+
+type RTy
+  = RInt
+  | RBool
+  | RVar(Name(TySpace))
+  | RMeta(Int)
+  | RArrow(RTy, RTy)
+  | RForall(Binder(TySpace), RTy)
+
+type RExpr
+  = RVarE(Name(TermSpace))
+  | RIntE(Int)
+  | RBoolE(Bool)
+  | RLam(Binder(TermSpace), RTy, RExpr)
+  | RApp(RExpr, RExpr)
+  | RTLam(Binder(TySpace), RExpr)
+  | RTApp(RExpr, RTy)
+  | RAnn(RExpr, RTy)
+  | RLet(Binder(TermSpace), RExpr, RExpr)
+  | RIf(RExpr, RExpr, RExpr)
+  | RBin(Op, RExpr, RExpr)
 
 error TypeError(String)
 
--- The checker stack has one name at every recursive boundary.
-alias Tc = {State(Solver), TypeError}
-
-fn empty_env() : Env = Env { terms = [], tyvars = [] }
-
-fn empty_solver() : Solver =
-  Solver {
-    metas = Metas { parents = uf_empty, solutions = map_empty, next = 0 }
-  }
-
 fn type_error(msg : String) : a ! {TypeError} = throw TypeError(msg)
 
-fn member_name(x : String, xs : List(String)) : Bool =
-  match xs of
-    Nil => false
-    Cons(y, ys) => x == y || member_name(x, ys)
+-- Resolution: one walk from spellings to identities. Scopes are persistent
+-- values, so entering a binding is passing an extended scope down and leaving
+-- it is returning; nothing is ever popped. Unbound spellings and stray
+-- metavariables in annotations are refused here, which is what lets the
+-- checker below assume every reference is bound.
 
-fn lookup_term(name : String, xs : List((String, Ty))) : Ty ! {TypeError} =
+type Scopes = Scopes { terms: Scope(TermSpace), tys: Scope(TySpace) }
+
+fn empty_scopes() : Scopes = Scopes { terms = scope_empty, tys = scope_empty }
+
+fn resolve_ty(sc : Scopes, ty : Ty) : RTy ! {Fresh, TypeError} =
+  match ty of
+    TyInt => RInt
+    TyBool => RBool
+    TyVar(a) =>
+      match scope_lookup(sc.tys, a) of
+        Ok(b) => RVar(bound_name(b))
+        Err(_e) => type_error("unbound type variable {a}")
+    TyMeta(_) => type_error("metavariable escaped into a source annotation")
+    TyArrow(a, b) => RArrow(resolve_ty(sc, a), resolve_ty(sc, b))
+    TyForall(a, body) =>
+      let binder = fresh_binder(a)
+      RForall(
+          binder,
+          resolve_ty({ sc | tys = scope_push(sc.tys, binder) }, body),
+        )
+
+fn resolve_expr(sc : Scopes, e : Expr) : RExpr ! {Fresh, TypeError} =
+  match e of
+    EVar(x) =>
+      match scope_lookup(sc.terms, x) of
+        Ok(b) => RVarE(bound_name(b))
+        Err(_err) => type_error("unbound variable {x}")
+    EInt(n) => RIntE(n)
+    EBool(b) => RBoolE(b)
+    ELam(x, param, body) =>
+      let rp = resolve_ty(sc, param)
+      let binder = fresh_binder(x)
+      RLam(
+          binder,
+          rp,
+          resolve_expr({ sc | terms = scope_push(sc.terms, binder) }, body),
+        )
+    EApp(f, x) => RApp(resolve_expr(sc, f), resolve_expr(sc, x))
+    ETLam(a, body) =>
+      let binder = fresh_binder(a)
+      RTLam(
+          binder,
+          resolve_expr({ sc | tys = scope_push(sc.tys, binder) }, body),
+        )
+    ETApp(f, arg) => RTApp(resolve_expr(sc, f), resolve_ty(sc, arg))
+    EAnn(inner, annotation) =>
+      RAnn(resolve_expr(sc, inner), resolve_ty(sc, annotation))
+    ELet(x, value, body) =>
+      let rv = resolve_expr(sc, value)
+      let binder = fresh_binder(x)
+      RLet(
+          binder,
+          rv,
+          resolve_expr({ sc | terms = scope_push(sc.terms, binder) }, body),
+        )
+    EIf(c, yes, no) =>
+      RIf(resolve_expr(sc, c), resolve_expr(sc, yes), resolve_expr(sc, no))
+    EBin(op, x, y) => RBin(op, resolve_expr(sc, x), resolve_expr(sc, y))
+
+-- The checker environment: term identities to types. There is no type-variable
+-- list; resolution already proved every `RVar` bound.
+
+type Env = Env { terms: List((Name(TermSpace), RTy)) }
+
+fn empty_env() : Env = Env { terms = [] }
+
+fn lookup_term(
+  name : Name(TermSpace),
+  xs : List((Name(TermSpace), RTy))
+) : RTy ! {TypeError} =
   match xs of
-    Nil => type_error("unbound variable {name}")
+    Nil => type_error("unresolved reference %{name_id(name)}")
     Cons((x, ty), rest) =>
       if name == x then
         ty
       else
         lookup_term(name, rest)
 
-fn with_term(env : Env, name : String, ty : Ty) : Env =
+fn with_term(env : Env, name : Name(TermSpace), ty : RTy) : Env =
   { env | terms ~ \(xs) -> Cons((name, ty), xs) }
 
-fn with_tyvar(env : Env, name : String) : Env =
-  { env | tyvars ~ \(xs) -> Cons(name, xs) }
-
--- Source annotations may contain rigid variables, but never solver metas.
-fn well_formed(env : Env, ty : Ty) : Unit ! {TypeError} =
+-- Substitution is a structural walk comparing identities. Binders are globally
+-- unique, so no walk can reach a binder equal to the name being substituted,
+-- and capture is impossible by construction: the renaming machinery the
+-- string-spelled checker needed does not exist here.
+fn subst(name : Name(TySpace), replacement : RTy, ty : RTy) : RTy =
   match ty of
-    TyInt => ()
-    TyBool => ()
-    TyVar(a) =>
-      if member_name(a, env.tyvars) then
-        ()
-      else
-        type_error("unbound type variable {a}")
-    TyMeta(_) => type_error("metavariable escaped into a source annotation")
-    TyArrow(a, b) =>
-      well_formed(env, a)
-      well_formed(env, b)
-    TyForall(a, body) => well_formed(with_tyvar(env, a), body)
-
--- Capture-avoiding substitution. A deterministic tick suffix is enough because
--- binders are strings and the term is finite.
-fn free_in(name : String, ty : Ty) : Bool =
-  match ty of
-    TyVar(a) => name == a
-    TyArrow(a, b) => free_in(name, a) || free_in(name, b)
-    TyForall(a, body) => name /= a && free_in(name, body)
-    _ => false
-
-fn fresh_name(seed : String, a : Ty, b : Ty) : String =
-  let candidate = concat(seed, "'")
-  if free_in(candidate, a) || free_in(candidate, b) then
-    fresh_name(candidate, a, b)
-  else
-    candidate
-
-fn subst(name : String, replacement : Ty, ty : Ty) : Ty =
-  match ty of
-    TyVar(a) =>
+    RVar(a) =>
       if name == a then
         replacement
       else
         ty
-    TyArrow(a, b) =>
-      TyArrow(subst(name, replacement, a), subst(name, replacement, b))
-    TyForall(a, body) =>
-      if name == a then
-        ty
-      elif free_in(a, replacement) then
-        let fresh = fresh_name(a, body, replacement)
-        let renamed = subst(a, TyVar(fresh), body)
-        TyForall(fresh, subst(name, replacement, renamed))
-      else
-        TyForall(a, subst(name, replacement, body))
+    RArrow(a, b) =>
+      RArrow(subst(name, replacement, a), subst(name, replacement, b))
+    RForall(b, body) => RForall(b, subst(name, replacement, body))
     _ => ty
 
--- The three state changes below are the whole mutable-looking solver. Notice the
--- nested optic paths: allocation changes `metas.next`, union changes
--- `metas.parents`, and solving changes `metas.solutions`.
-fn fresh_meta() : Ty ! {State(Solver)} =
+-- What a metavariable class knows about itself: nothing yet, or its type.
+type Meta = Unsolved | Solved(RTy)
+
+type Metas = Metas { forest: UnionFind(Int, Meta), next: Int }
+
+type Solver = Solver { metas: Metas }
+
+-- The checker stack has one name at every recursive boundary.
+alias Tc = {State(Solver), TypeError}
+
+fn empty_solver() : Solver =
+  Solver {
+    metas = Metas { forest = ufp_empty, next = 0 }
+  }
+
+-- Joining two classes keeps whichever knowledge exists; unify only ever links
+-- two zonked (hence unsolved) metas, so in practice both sides are `Unsolved`.
+fn merge_meta(kept : Meta, lost : Meta) : Meta =
+  match (kept, lost) of
+    (Solved(t), _u) => Solved(t)
+    (Unsolved, other) => other
+
+-- The three state changes below are the whole mutable-looking solver: every
+-- one is an update of `metas.forest`, and allocation also ticks `metas.next`.
+-- The `result_or` fallbacks are for keys the forest cannot actually lack: a
+-- meta is inserted the moment it is allocated, and `next` never repeats.
+fn fresh_meta() : RTy ! {State(Solver)} =
   let s = get()
   let n = s.metas.next
-  put({ s | metas.next ~ \(i) -> i + 1 })
-  TyMeta(n)
+  let grown = result_or(s.metas.forest, ufp_insert(s.metas.forest, n, Unsolved))
+  put({ s | metas = Metas { forest = grown, next = n + 1 } })
+  RMeta(n)
 
 fn root(a : Int) : Int ! {State(Solver)} =
   let s = get()
-  uf_find(s.metas.parents, a)
+  match ufp_find(s.metas.forest, a) of
+    Some((r, _meta)) => r
+    None => a
 
 fn link(a : Int, b : Int) : Unit ! {State(Solver)} =
   let s = get()
-  put({ s | metas.parents = uf_union(s.metas.parents, a, b) })
+  let joined =
+    result_or(s.metas.forest, ufp_union_with(merge_meta, s.metas.forest, a, b))
+  put({ s | metas.forest = joined })
 
-fn solution(a : Int) : Option(Ty) ! {State(Solver)} =
+fn solution(a : Int) : Option(RTy) ! {State(Solver)} =
   let s = get()
-  map_lookup(uf_find(s.metas.parents, a), s.metas.solutions)
+  match ufp_find(s.metas.forest, a) of
+    Some((_r, Solved(t))) => Some(t)
+    _ => None
 
-fn assign(a : Int, ty : Ty) : Unit ! {State(Solver)} =
+fn assign(a : Int, ty : RTy) : Unit ! {State(Solver)} =
   let s = get()
-  let r = uf_find(s.metas.parents, a)
-  put({ s | metas.solutions = map_insert(r, ty, s.metas.solutions) })
+  let solved = result_or(s.metas.forest, ufp_set(s.metas.forest, a, Solved(ty)))
+  put({ s | metas.forest = solved })
 
-fn zonk(ty : Ty) : Ty ! {State(Solver)} =
+fn zonk(ty : RTy) : RTy ! {State(Solver)} =
   match ty of
-    TyMeta(a) =>
+    RMeta(a) =>
       let r = root(a)
       match solution(r) of
-        None => TyMeta(r)
+        None => RMeta(r)
         Some(t) => zonk(t)
-    TyArrow(a, b) => TyArrow(zonk(a), zonk(b))
-    TyForall(a, body) => TyForall(a, zonk(body))
+    RArrow(a, b) => RArrow(zonk(a), zonk(b))
+    RForall(a, body) => RForall(a, zonk(body))
     _ => ty
 
-fn mono(ty : Ty) : Bool =
+fn mono(ty : RTy) : Bool =
   match ty of
-    TyForall(_, _) => false
-    TyArrow(a, b) => mono(a) && mono(b)
+    RForall(_, _) => false
+    RArrow(a, b) => mono(a) && mono(b)
     _ => true
 
-fn occurs(a : Int, ty : Ty) : Bool ! {State(Solver)} =
+fn occurs(a : Int, ty : RTy) : Bool ! {State(Solver)} =
   match zonk(ty) of
-    TyMeta(b) => root(a) == root(b)
-    TyArrow(x, y) => occurs(a, x) || occurs(a, y)
-    TyForall(_, body) => occurs(a, body)
+    RMeta(b) => root(a) == root(b)
+    RArrow(x, y) => occurs(a, x) || occurs(a, y)
+    RForall(_, body) => occurs(a, body)
     _ => false
 
-fn show_ty(ty : Ty) : String = show_ty_at(0, ty)
+-- Printing recovers spellings from binder hints; identities never print. A
+-- binder whose hint is already in use picks up tick suffixes, so shadowed
+-- spellings disambiguate at the printer and nowhere else.
+fn show_ty(ty : RTy) : String = show_ty_at(0, [], ty)
 
-fn show_ty_at(precedence : Int, ty : Ty) : String =
+fn hint_for(env : List((Name(TySpace), String)), n : Name(TySpace)) : String =
+  match env of
+    Nil => "%{name_id(n)}"
+    Cons((m, hint), rest) =>
+      if n == m then
+        hint
+      else
+        hint_for(rest, n)
+
+fn hint_taken(env : List((Name(TySpace), String)), hint : String) : Bool =
+  match env of
+    Nil => false
+    Cons((_m, h), rest) => h == hint || hint_taken(rest, hint)
+
+fn free_hint(env : List((Name(TySpace), String)), hint : String) : String =
+  if hint_taken(env, hint) then
+    free_hint(env, concat(hint, "'"))
+  else
+    hint
+
+fn show_ty_at(
+  precedence : Int,
+  env : List((Name(TySpace), String)),
+  ty : RTy
+) : String =
   match ty of
-    TyInt => "Int"
-    TyBool => "Bool"
-    TyVar(a) => a
-    TyMeta(a) => "?{a}"
-    TyArrow(a, b) =>
-      let text = "{show_ty_at(2, a)} -> {show_ty_at(1, b)}"
+    RInt => "Int"
+    RBool => "Bool"
+    RVar(a) => hint_for(env, a)
+    RMeta(a) => "?{a}"
+    RArrow(a, b) =>
+      let text = "{show_ty_at(2, env, a)} -> {show_ty_at(1, env, b)}"
       if precedence > 1 then
         "({text})"
       else
         text
-    TyForall(a, body) =>
-      let text = "forall {a}. {show_ty_at(0, body)}"
+    RForall(b, body) =>
+      let shown = free_hint(env, b.hint)
+      let inner = Cons((bound_name(b), shown), env)
+      let text = "forall {shown}. {show_ty_at(0, inner, body)}"
       if precedence > 0 then
         "({text})"
       else
         text
 
-fn mismatch(a : Ty, b : Ty) : Unit ! {TypeError} =
+fn mismatch(a : RTy, b : RTy) : Unit ! {TypeError} =
   type_error("cannot unify {show_ty(a)} with {show_ty(b)}")
 
-fn solve(a : Int, ty : Ty) : Unit ! {Tc} =
+fn solve(a : Int, ty : RTy) : Unit ! {Tc} =
   let t = zonk(ty)
   if not(mono(t)) then
     type_error("implicit instantiation is predicative, got {show_ty(t)}")
@@ -236,139 +352,138 @@ fn solve(a : Int, ty : Ty) : Unit ! {Tc} =
   else
     assign(a, t)
 
-fn unify(left : Ty, right : Ty) : Unit ! {Tc} =
+fn unify(left : RTy, right : RTy) : Unit ! {Tc} =
   let a = zonk(left)
   let b = zonk(right)
   match (a, b) of
-    (TyMeta(x), TyMeta(y)) =>
+    (RMeta(x), RMeta(y)) =>
       if root(x) == root(y) then
         ()
       else
         link(x, y)
-    (TyMeta(x), t) => solve(x, t)
-    (t, TyMeta(x)) => solve(x, t)
-    (TyInt, TyInt) => ()
-    (TyBool, TyBool) => ()
-    (TyVar(x), TyVar(y)) =>
+    (RMeta(x), t) => solve(x, t)
+    (t, RMeta(x)) => solve(x, t)
+    (RInt, RInt) => ()
+    (RBool, RBool) => ()
+    (RVar(x), RVar(y)) =>
       if x == y then
         ()
       else
         mismatch(a, b)
-    (TyArrow(a1, a2), TyArrow(b1, b2)) =>
+    (RArrow(a1, a2), RArrow(b1, b2)) =>
       unify(a1, b1)
       unify(a2, b2)
-    (TyForall(x, body1), TyForall(y, body2)) =>
-      unify(body1, subst(y, TyVar(x), body2))
+    (RForall(x, body1), RForall(y, body2)) =>
+      unify(body1, subst(bound_name(y), RVar(bound_name(x)), body2))
     _ => mismatch(a, b)
 
 -- Subsumption differs from equality only at a polymorphic value: eliminate its
--- forall with a fresh existential, then continue. Explicit ETApp remains fully
+-- forall with a fresh existential, then continue. Explicit RTApp remains fully
 -- impredicative; only this convenient implicit path is predicative.
-fn subsume(got : Ty, wanted : Ty) : Unit ! {Tc} =
+fn subsume(got : RTy, wanted : RTy) : Unit ! {Tc} =
   match (zonk(got), zonk(wanted)) of
-    (TyForall(a, body), TyForall(b, other)) =>
-      unify(body, subst(b, TyVar(a), other))
-    (TyForall(a, body), want) =>
+    (RForall(a, body), RForall(b, other)) =>
+      unify(body, subst(bound_name(b), RVar(bound_name(a)), other))
+    (RForall(a, body), want) =>
       let m = fresh_meta()
-      subsume(subst(a, m, body), want)
+      subsume(subst(bound_name(a), m, body), want)
     (have, want) => unify(have, want)
 
-fn apply_type(fn_ty : Ty, arg_ty : Ty) : Ty ! {Tc} =
+fn apply_type(fn_ty : RTy, arg_ty : RTy) : RTy ! {Tc} =
   match zonk(fn_ty) of
-    TyForall(a, body) =>
+    RForall(a, body) =>
       let m = fresh_meta()
-      apply_type(subst(a, m, body), arg_ty)
-    TyArrow(domain, codomain) =>
+      apply_type(subst(bound_name(a), m, body), arg_ty)
+    RArrow(domain, codomain) =>
       subsume(arg_ty, domain)
       zonk(codomain)
     other => type_error("application expects a function, got {show_ty(other)}")
 
-fn infer(env : Env, expr : Expr) : Ty ! {Tc} =
+fn infer(env : Env, expr : RExpr) : RTy ! {Tc} =
   match expr of
-    EVar(x) => lookup_term(x, env.terms)
-    EInt(_) => TyInt
-    EBool(_) => TyBool
-    ELam(x, param, body) =>
-      well_formed(env, param)
-      TyArrow(param, infer(with_term(env, x, param), body))
-    EApp(f, x) => apply_type(infer(env, f), infer(env, x))
-    ETLam(a, body) => TyForall(a, infer(with_tyvar(env, a), body))
-    ETApp(f, arg) =>
-      well_formed(env, arg)
+    RVarE(x) => lookup_term(x, env.terms)
+    RIntE(_) => RInt
+    RBoolE(_) => RBool
+    RLam(x, param, body) =>
+      RArrow(param, infer(with_term(env, bound_name(x), param), body))
+    RApp(f, x) => apply_type(infer(env, f), infer(env, x))
+    RTLam(a, body) => RForall(a, infer(env, body))
+    RTApp(f, arg) =>
       match zonk(infer(env, f)) of
-        TyForall(a, body) => subst(a, arg, body)
+        RForall(a, body) => subst(bound_name(a), arg, body)
         other =>
           type_error("type application expects forall, got {show_ty(other)}")
-    EAnn(e, annotation) =>
-      well_formed(env, annotation)
+    RAnn(e, annotation) =>
       subsume(infer(env, e), annotation)
       annotation
-    ELet(x, value, body) =>
+    RLet(x, value, body) =>
       let ty = infer(env, value)
-      infer(with_term(env, x, ty), body)
-    EIf(cond, yes, no) =>
-      subsume(infer(env, cond), TyBool)
+      infer(with_term(env, bound_name(x), ty), body)
+    RIf(cond, yes, no) =>
+      subsume(infer(env, cond), RBool)
       let a = infer(env, yes)
       let b = infer(env, no)
       unify(a, b)
       zonk(a)
-    EBin(op, x, y) => infer_binop(env, op, x, y)
+    RBin(op, x, y) => infer_binop(env, op, x, y)
 
-fn infer_binop(env : Env, op : Op, x : Expr, y : Expr) : Ty ! {Tc} =
+fn infer_binop(env : Env, op : Op, x : RExpr, y : RExpr) : RTy ! {Tc} =
   match op of
     Add =>
-      subsume(infer(env, x), TyInt)
-      subsume(infer(env, y), TyInt)
-      TyInt
+      subsume(infer(env, x), RInt)
+      subsume(infer(env, y), RInt)
+      RInt
     Sub =>
-      subsume(infer(env, x), TyInt)
-      subsume(infer(env, y), TyInt)
-      TyInt
+      subsume(infer(env, x), RInt)
+      subsume(infer(env, y), RInt)
+      RInt
     Mul =>
-      subsume(infer(env, x), TyInt)
-      subsume(infer(env, y), TyInt)
-      TyInt
+      subsume(infer(env, x), RInt)
+      subsume(infer(env, y), RInt)
+      RInt
     Div =>
-      subsume(infer(env, x), TyInt)
-      subsume(infer(env, y), TyInt)
-      TyInt
+      subsume(infer(env, x), RInt)
+      subsume(infer(env, y), RInt)
+      RInt
     Lt =>
-      subsume(infer(env, x), TyInt)
-      subsume(infer(env, y), TyInt)
-      TyBool
+      subsume(infer(env, x), RInt)
+      subsume(infer(env, y), RInt)
+      RBool
     Le =>
-      subsume(infer(env, x), TyInt)
-      subsume(infer(env, y), TyInt)
-      TyBool
+      subsume(infer(env, x), RInt)
+      subsume(infer(env, y), RInt)
+      RBool
     Gt =>
-      subsume(infer(env, x), TyInt)
-      subsume(infer(env, y), TyInt)
-      TyBool
+      subsume(infer(env, x), RInt)
+      subsume(infer(env, y), RInt)
+      RBool
     Ge =>
-      subsume(infer(env, x), TyInt)
-      subsume(infer(env, y), TyInt)
-      TyBool
+      subsume(infer(env, x), RInt)
+      subsume(infer(env, y), RInt)
+      RBool
     And =>
-      subsume(infer(env, x), TyBool)
-      subsume(infer(env, y), TyBool)
-      TyBool
+      subsume(infer(env, x), RBool)
+      subsume(infer(env, y), RBool)
+      RBool
     Or =>
-      subsume(infer(env, x), TyBool)
-      subsume(infer(env, y), TyBool)
-      TyBool
+      subsume(infer(env, x), RBool)
+      subsume(infer(env, y), RBool)
+      RBool
     Eq =>
       let a = infer(env, x)
       subsume(infer(env, y), a)
-      TyBool
+      RBool
     Ne =>
       let a = infer(env, x)
       subsume(infer(env, y), a)
-      TyBool
+      RBool
 
-fn type_of(expr : Expr) : Result(Ty, String) =
+fn check_resolved(r : RExpr) : RTy ! {Tc} = zonk(infer(empty_env(), r))
+
+fn type_of(expr : Expr) : Result(RTy, String) =
   try
-    let (ty, _solver) =
-      run_state(empty_solver(), \() -> zonk(infer(empty_env(), expr)))
+    let r = run_fresh(\() -> resolve_expr(empty_scopes(), expr))
+    let (ty, _solver) = run_state(empty_solver(), \() -> check_resolved(r))
     Ok(ty)
   catch
     TypeError(msg) => Err(msg)
@@ -380,7 +495,108 @@ fn report(label : String, expr : Expr) : Unit ! {IO} =
 
 fn identity() : Expr = ETLam("a", ELam("x", TyVar("a"), EVar("x")))
 
+-- Whether the two source types unify under a fresh resolver and solver.
+fn resolve_ty_pair(
+  sc : Scopes,
+  a : Ty,
+  b : Ty
+) : (RTy, RTy) ! {Fresh, TypeError} =
+  (resolve_ty(sc, a), resolve_ty(sc, b))
+
+fn unifies(a : Ty, b : Ty) : Bool =
+  try
+    let (ra, rb) = run_fresh(\() -> resolve_ty_pair(empty_scopes(), a, b))
+    let (_u, _s) = run_state(empty_solver(), \() -> unify(ra, rb))
+    true
+  catch
+    TypeError(_msg) => false
+
+-- A meta must not unify with a type containing its own class.
+fn occurs_body() : Unit ! {Tc} =
+  let m = fresh_meta()
+  unify(m, RArrow(m, RInt))
+
+fn occurs_rejected() : Bool =
+  try
+    let (_u, _s) = run_state(empty_solver(), \() -> occurs_body())
+    false
+  catch
+    TypeError(msg) => contains("occurs", msg)
+
+-- Joining two metas and solving one solves the shared class.
+fn shared_body() : RTy ! {Tc} =
+  let m1 = fresh_meta()
+  let m2 = fresh_meta()
+  unify(m1, m2)
+  unify(m2, RInt)
+  zonk(m1)
+
+fn shared_solved() : Bool =
+  try
+    let (ty, _s) = run_state(empty_solver(), \() -> shared_body())
+    show_ty(ty) == "Int"
+  catch
+    TypeError(_msg) => false
+
+-- The shown type of a source expression, or the error text.
+fn shown_type(e : Expr) : String =
+  match type_of(e) of
+    Ok(ty) => show_ty(ty)
+    Err(msg) => "error: {msg}"
+
+-- The baseline witnesses below print nothing while they hold, so the seven
+-- report lines stay the whole visible output; a violation names itself.
+fn baseline(name : String, ok : Bool) : Unit ! {IO} =
+  if ok then
+    ()
+  else
+    println("baseline violated: {name}")
+
+fn baseline_checks() : Unit ! {IO} =
+  -- Instantiating under a shadowing binder must not capture: the inner
+  -- `forall b` cannot swallow the outer `b` being substituted in, and the
+  -- printer, not the substitution, chooses the disambiguating tick.
+  baseline(
+      "instantiation avoids capture",
+      shown_type(
+          ETLam(
+              "b",
+              ETApp(
+                  ETLam("a", ETLam("b", ELam("x", TyVar("a"), EVar("x")))),
+                  TyVar("b"),
+                ),
+            ),
+        )
+        == "forall b. forall b'. b -> b",
+    )
+  -- Alpha-renaming a source binder changes hints, never inferred structure.
+  baseline(
+      "alpha-renaming preserves inference",
+      shown_type(identity()) == "forall a. a -> a"
+        && shown_type(ETLam("z", ELam("x", TyVar("z"), EVar("x"))))
+          == "forall z. z -> z",
+    )
+  -- Alpha-equivalent quantified types unify; a genuinely different body does
+  -- not.
+  let poly_x = TyForall("x", TyArrow(TyVar("x"), TyVar("x")))
+  let poly_y = TyForall("y", TyArrow(TyVar("y"), TyVar("y")))
+  baseline("alpha-equivalent foralls unify", unifies(poly_x, poly_y))
+  baseline(
+      "distinct foralls are rejected",
+      not(unifies(poly_x, TyForall("y", TyArrow(TyVar("y"), TyInt)))),
+    )
+  -- Nested same-spelled binders resolve to distinct identities; the innermost
+  -- wins.
+  baseline(
+      "shadowing resolves innermost",
+      shown_type(ELet("x", EInt(1), ELet("x", EBool(true), EVar("x"))))
+        == "Bool",
+    )
+  baseline("occurs check rejects", occurs_rejected())
+  baseline("meta union then solve", shared_solved())
+
 fn main() : Unit ! {IO} =
+  baseline_checks()
   report("id                ", identity())
   report("id[Int] 42        ", EApp(ETApp(identity(), TyInt), EInt(42)))
   report("implicit id true  ", EApp(identity(), EBool(true)))
@@ -390,7 +606,7 @@ fn main() : Unit ! {IO} =
       ELam("f", poly_id, EApp(ETApp(EVar("f"), TyBool), EBool(true))),
     )
   -- Instantiating both `identity` and `x : forall a. a` creates two metas.
-  -- Their equality goes through uf_union; arithmetic subsequently solves the
+  -- Their equality goes through the forest; arithmetic subsequently solves the
   -- shared root to Int. This is a small executable union-find witness.
   report(
       "union-find        ",

@@ -1,0 +1,181 @@
+-- Property-tests the payload union-find's public determinism contract: the
+-- logical partition is a function of the insertions and unions performed, not
+-- of union order (for a commutative combine) and not of the finds that ran;
+-- the combine function runs exactly once per partition-changing join; and
+-- absence and duplication are explicit errors, never silent states.
+
+import Quickcheck (..)
+
+import Data.UnionFind.Payload (..)
+
+import Data.Result (result_or)
+
+import Data.List (foldl, reverse)
+
+import Control.State (..)
+
+-- Eight singleton classes 0..7, each carrying its key as the descriptor.
+fn seeded() : UnionFind(Int, Int) =
+  foldl(\(uf, k) -> result_or(uf, ufp_insert(uf, k, k)), ufp_empty, [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+    ])
+
+-- Clamp a generated Int onto the seeded key range.
+fn key_of(n : Int) : Int = mod(if n < 0 then 0 - n else n, 8)
+
+fn union_step(acc : UnionFind(Int, Int), p : (Int, Int)) : UnionFind(Int, Int) =
+  match p of
+    (x, y) =>
+      result_or(
+          acc,
+          ufp_union_with(\(a, b) -> a + b, acc, key_of(x), key_of(y)),
+        )
+
+fn apply_unions(
+  uf : UnionFind(Int, Int),
+  pairs : List((Int, Int))
+) : UnionFind(Int, Int) =
+  foldl(union_step, uf, pairs)
+
+-- The partition and its class descriptors are independent of union order when
+-- the combine function is commutative and associative.
+fn prop_order_independent(pairs : List((Int, Int))) : Bool =
+  ufp_roots(apply_unions(seeded(), pairs))
+    == ufp_roots(apply_unions(seeded(), reverse(pairs)))
+
+-- Find is read-only and idempotent: asking twice answers the same, and asking
+-- through any member of a class answers the class root.
+fn root_stable(uf : UnionFind(Int, Int)) : Bool =
+  match ufp_find(uf, 3) of
+    Some((r, _d)) => ufp_find(uf, r) == ufp_find(uf, 3)
+    None => false
+
+fn prop_find_idempotent(pairs : List((Int, Int))) : Bool =
+  let uf = apply_unions(seeded(), pairs)
+  ufp_find(uf, 3) == ufp_find(uf, 3) && root_stable(uf)
+
+-- Every canonical root is the smallest key of its class: each seeded key's
+-- root is never larger than the key itself.
+fn prop_root_is_min(pairs : List((Int, Int))) : Bool =
+  let uf = apply_unions(seeded(), pairs)
+  all_roots_min(uf, [0, 1, 2, 3, 4, 5, 6, 7])
+
+fn all_roots_min(uf : UnionFind(Int, Int), keys : List(Int)) : Bool =
+  match keys of
+    Nil => true
+    Cons(k, rest) =>
+      match ufp_find(uf, k) of
+        Some((r, _d)) => r <= k && all_roots_min(uf, rest)
+        None => false
+
+-- A counting combine: every invocation ticks the State cell, so the final
+-- count is exactly the number of joins that changed the partition.
+fn counted_union(
+  uf : UnionFind(Int, Int),
+  x : Int,
+  y : Int
+) : UnionFind(Int, Int) ! {State(Int)} =
+  result_or(uf, ufp_union_with(\(a, b) -> tick(a + b), uf, x, y))
+
+fn tick(v : Int) : Int ! {State(Int)} =
+  put(get() + 1)
+  v
+
+fn joins_counted(pairs : List((Int, Int))) : (Int, Int) =
+  match run_state(0, \() -> count_run(seeded(), pairs, 0)) of
+    ((_uf, expected), combines) => (expected, combines)
+
+-- Walk the unions, predicting from `ufp_equiv` whether each one will join two
+-- distinct classes, and let the combine count check the prediction.
+fn count_run(
+  uf : UnionFind(Int, Int),
+  pairs : List((Int, Int)),
+  expected : Int
+) : (UnionFind(Int, Int), Int) ! {State(Int)} =
+  match pairs of
+    Nil => (uf, expected)
+    Cons((x, y), rest) =>
+      let a = key_of(x)
+      let b = key_of(y)
+      let fresh_join = ufp_equiv(uf, a, b) == Some(false)
+      let uf2 = counted_union(uf, a, b)
+      count_run(uf2, rest, if fresh_join then expected + 1 else expected)
+
+fn prop_combine_exactly_once(pairs : List((Int, Int))) : Bool =
+  match joins_counted(pairs) of
+    (expected, combines) => expected == combines
+
+-- Absence and duplication are explicit: a never-inserted key refuses reads
+-- and writes, and a second insert refuses rather than overwriting.
+fn refuses(r : Result(UnionFind(Int, Int), UfError), want : UfError) : Bool =
+  match r of
+    Err(e) => e == want
+    Ok(_uf) => false
+
+fn fixed_errors() : Bool =
+  let uf = seeded()
+  ufp_find(uf, 99) == None
+    && refuses(ufp_insert(uf, 3, 30), UfDuplicate)
+    && refuses(ufp_set(uf, 99, 1), UfAbsent)
+    && refuses(ufp_union_with(\(a, b) -> a + b, uf, 0, 99), UfAbsent)
+    && ufp_equiv(uf, 0, 99) == None
+
+-- A 200-link chain built worst-first still answers the smallest key as root,
+-- and the chained class folded every descriptor exactly once.
+fn chain() : Bool =
+  let uf = chain_build(chain_seed(ufp_empty, 0), 199)
+  match ufp_find(uf, 199) of
+    Some((r, total)) => r == 0 && total == 19900
+    None => false
+
+fn chain_seed(uf : UnionFind(Int, Int), k : Int) : UnionFind(Int, Int) =
+  if k > 199 then
+    uf
+  else
+    chain_seed(result_or(uf, ufp_insert(uf, k, k)), k + 1)
+
+fn chain_build(uf : UnionFind(Int, Int), k : Int) : UnionFind(Int, Int) =
+  if k < 1 then
+    uf
+  else
+    chain_build(
+        result_or(uf, ufp_union_with(\(a, b) -> a + b, uf, k, k - 1)),
+        k - 1,
+      )
+
+fn gen_pairs() : Gen(List((Int, Int))) = gen_list(gen_pair(gen_int, gen_int))
+
+fn main() =
+  println(
+      show_outcome(
+          "UnionFind.Payload order-independent",
+          quickcheck(gen_pairs(), prop_order_independent),
+        ),
+    )
+  println(
+      show_outcome(
+          "UnionFind.Payload find idempotent",
+          quickcheck(gen_pairs(), prop_find_idempotent),
+        ),
+    )
+  println(
+      show_outcome(
+          "UnionFind.Payload root is minimum",
+          quickcheck(gen_pairs(), prop_root_is_min),
+        ),
+    )
+  println(
+      show_outcome(
+          "UnionFind.Payload combine exactly once",
+          quickcheck(gen_pairs(), prop_combine_exactly_once),
+        ),
+    )
+  println("UnionFind.Payload explicit errors: {fixed_errors()}")
+  println("UnionFind.Payload hostile chain: {chain()}")

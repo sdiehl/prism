@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/law_ufp.pr
+---
+UnionFind.Payload order-independent: OK, passed 100 tests.
+UnionFind.Payload find idempotent: OK, passed 100 tests.
+UnionFind.Payload root is minimum: OK, passed 100 tests.
+UnionFind.Payload combine exactly once: OK, passed 100 tests.
+UnionFind.Payload explicit errors: true
+UnionFind.Payload hostile chain: true
+=> ()

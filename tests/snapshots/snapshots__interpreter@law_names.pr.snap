@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/law_names.pr
+---
+Name replay deterministic: OK, passed 100 tests.
+Name distinct under one spelling: true
+Scope push-lookup-pop: true
+Scope unknown refused: true
+=> ()

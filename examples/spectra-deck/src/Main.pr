@@ -2,7 +2,7 @@ import Spectra (..)
 
 import Data.String (str_join)
 
--- | The artifact chain a pipeline slide shows, arrowed together.
+-- | The artifact chain the opening slide shows, arrowed together.
 --
 -- A prompt line, evaluated and shown with its value:
 --
@@ -23,32 +23,54 @@ import Data.String (str_join)
 -- ```
 pub fn pipeline(stages : List(String)) : String = str_join(" → ", stages)
 
+-- This deck is an introduction to Prism in six slides, and every slide is its
+-- own witness: the mechanism each one explains is the mechanism that put it on
+-- the screen.
+
+-- The PDF you are reading is the value this function returns, lowered through
+-- the chain below. Reflection lifts the declaration out of this file, so the
+-- definition on the slide is the definition that produced the slide.
 fn value_slide() : Unit ! {SlideBuilder} =
-  pict(para([
-      plain("Spectra keeps presentation structure in "),
-      inline_code("Deck"),
-      plain(" and lets Typst own final typography."),
+  pict(prism_code(reflect fn talk))
+  pict(centered(12, [
+      text(pipeline(["Prism source", "Deck value", "Typst", "PDF"])),
     ]))
   reveal_next()
-  pict(item("Slides, layout, and reveal stages are type checked."))
-  pict(item("Generated Typst is a durable, inspectable artifact."))
+  pict(item("A deck is a pure value; rendering is a pure function of it."))
+  pict(item("Every boundary in the chain is deterministic and inspectable."))
 
--- The code on this slide is this slide, title and all: one declaration that
--- names its own heading, builds its own body, and quotes itself onto it. The
--- quotation is not a string literal. The compiler lifts this declaration out of
--- this file and the formatter renders it, comment block included, so what a
--- reader sees is exactly what put it on the screen.
-fn authoring_slide() : Slide =
-  titled_slide("The authoring surface is Prism", column(14, [
-      prism_code(reflect fn authoring_slide),
-      item("Builder effects elaborate to the same pure deck representation."),
+-- The code on this slide is this slide, title and all: a declaration that
+-- performs `SlideBuilder` effects, is elaborated by Spectra's handler into
+-- the pure deck value, and quotes itself onto the very slide those effects
+-- build. Effects are how Prism programs talk to the world; handlers decide
+-- what the talk means.
+fn effects_slide() : Slide =
+  titled_slide("Effects build this slide", column(14, [
+      prism_code(reflect fn effects_slide),
+      item(
+          "Each pict(...) call is an effect; a handler folds them into a value.",
+        ),
+      item("The row type names what a function may do, and nothing else."),
     ]))
 
-fn reflection_slide() : Unit ! {SlideBuilder} =
-  pict(prism_code(reflect fn slides))
+-- A small language of judgements: an algebraic type, and one match that
+-- renders it totally. The compiler checks the match covers every shape.
+type Judgement = Holds | Fails(String)
+
+fn verdict(j : Judgement) : String =
+  match j of
+    Holds => "holds"
+    Fails(why) => "fails: {why}"
+
+fn types_slide() : Unit ! {SlideBuilder} =
+  pict(prism_code(reflect type Judgement))
+  pict(prism_code(reflect fn verdict))
   reveal_next()
-  pict(item("The deck's running order, quoted out of the file that runs it."))
-  pict(item("A comment-only edit here moves this deck's identity."))
+  pict(item_text([
+      plain("Data declares its shapes; "),
+      inline_code("match"),
+      plain(" must answer all of them, checked at compile time."),
+    ]))
 
 -- Neither output block on this slide is written by hand. `spectra build` hands
 -- every example to the compiler's doctest runner, so a slide claiming an output
@@ -67,29 +89,34 @@ fn doctest_slide() : Unit ! {SlideBuilder} =
       plain(" runs as a program and shows what it prints."),
     ]))
 
-fn artifacts_slide() : Unit ! {SlideBuilder} =
-  pict(centered(16, [
-      text(pipeline(["Prism source", "Deck", "envelope", "Typst", "PDF"])),
-      rich_text([
-          colored("muted", [
-              plain("Every boundary is deterministic and content-addressable."),
-            ]),
-        ]),
-    ]))
+-- Every definition in this file has a content hash, and this PDF is a
+-- function of those hashes. Editing this comment moves this slide's identity
+-- and rebuilds exactly this deck; the definitions it quotes hold still.
+fn identity_slide() : Unit ! {SlideBuilder} =
+  pict(prism_code(reflect fn identity_slide))
+  reveal_next()
+  pict(item("A definition's identity is the hash of what it means."))
+  pict(item("A comment-only edit here moves the reflector, not its targets."))
+
+fn closing_slide() : Unit ! {SlideBuilder} =
+  pict(prism_code(reflect fn slides))
+  reveal_next()
+  pict(
+      item(
+          "The running order of the talk you just watched, quoted from the file that ran it.",
+        ),
+    )
 
 fn slides() : Unit ! {DeckBuilder} =
-  cover("Spectra", "Statically typed presentations with reflection")
-  slide("A deck is a value", value_slide)
-  add_slide(authoring_slide())
-  slide("The deck reads its own source", reflection_slide)
+  cover("Prism", "A deterministic language, introducing itself")
+  slide("This PDF is a Prism value", value_slide)
+  add_slide(effects_slide())
+  slide("Types and patterns", types_slide)
   slide("The examples are run, not claimed", doctest_slide)
-  slide("One source, a spectrum of artifacts", artifacts_slide)
+  slide("Identity is content", identity_slide)
+  slide("The deck reads its own source", closing_slide)
 
 fn talk() : Deck =
-  deck(
-      metadata("Statically typed presentations with reflection", "Prism"),
-      prism_theme,
-      slides,
-    )
+  deck(metadata("Prism, introducing itself", "Prism"), prism_theme, slides)
 
 fn main() = emit_deck(talk())

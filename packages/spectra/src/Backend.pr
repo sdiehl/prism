@@ -1,7 +1,19 @@
 -- | Spectra's pure lowering from presentation values to Typst documents.
 --
 -- Generic syntax construction and escaping belong to the independent `Typst`
--- package. This module contains only presentation-specific mapping decisions.
+-- package. This module contains only presentation-specific mapping decisions:
+-- a `Pict` in, Typst source out, at a chosen reveal stage under a theme.
+--
+-- ```prism
+-- # import Layout (item)
+-- # import Theme (prism_theme)
+-- fn main() = println(render_pict(item("Lowered by the backend."), 0, prism_theme))
+-- ```
+-- ```output
+-- align(left,
+--   text(size: 21pt,
+--     fill: rgb("#211a2c"))[#(text(fill: rgb("#6d28d9"))[#(text("→ "))] + text("Lowered by the backend."))])
+-- ```
 
 import Data.List (append)
 
@@ -21,7 +33,7 @@ pub type TypstDocument = TypstDocument {
   assets: List(String)
 } deriving (Eq, Show)
 
-fn color(name : String, theme : Theme) : T.Doc =
+fn color(name : String, theme : Theme) : T.Expr =
   let value =
     if name == "" then
       theme.foreground
@@ -33,13 +45,13 @@ fn color(name : String, theme : Theme) : T.Doc =
       name
   T.call("rgb", [T.string("#{value}")])
 
-fn alignment(align : Align) : T.Doc =
+fn alignment(align : Align) : T.Expr =
   match align of
-    Left => T.atom("left")
-    Center => T.atom("center")
-    Right => T.atom("right")
+    Left => T.alignment(T.ALeft)
+    Center => T.alignment(T.ACenter)
+    Right => T.alignment(T.ARight)
 
-fn inline_doc(x : Inline, theme : Theme) : T.Doc =
+fn inline_doc(x : Inline, theme : Theme) : T.Expr =
   match x of
     Plain(s) => T.call("text", [T.string(s)])
     InlineCode(s) =>
@@ -55,14 +67,14 @@ fn inline_doc(x : Inline, theme : Theme) : T.Doc =
           inline_docs(xs, theme),
         )
 
-fn inline_docs(xs : List(Inline), theme : Theme) : T.Doc =
+fn inline_docs(xs : List(Inline), theme : Theme) : T.Expr =
   match xs of
-    Nil => T.empty()
+    Nil => T.sym("")
     Cons(x, Nil) => inline_doc(x, theme)
     Cons(x, rest) =>
-      T.concat_docs([
+      T.concat_exprs([
           inline_doc(x, theme),
-          T.atom(" + "),
+          T.sym(" + "),
           inline_docs(rest, theme),
         ])
 
@@ -114,15 +126,15 @@ pub fn pict_assets(p : Pict) : List(String) =
     Fragment(_, child) => pict_assets(child)
     RawTypst(_) => Nil
 
-fn pict_docs(xs : List(Pict), stage : Int, theme : Theme) : List(T.Doc) =
+fn pict_docs(xs : List(Pict), stage : Int, theme : Theme) : List(T.Expr) =
   match xs of
     Nil => Nil
     Cons(p, rest) =>
       Cons(pict_doc(p, stage, theme), pict_docs(rest, stage, theme))
 
-fn pict_doc(p : Pict, stage : Int, theme : Theme) : T.Doc =
+fn pict_doc(p : Pict, stage : Int, theme : Theme) : T.Expr =
   match p of
-    Empty => T.atom("none")
+    Empty => T.none_expr()
     Text(style, xs) =>
       let size =
         if style.size <= 0 then
@@ -143,7 +155,7 @@ fn pict_doc(p : Pict, stage : Int, theme : Theme) : T.Doc =
     CodeBlock(language, source) =>
       T.content_call("block", [T.named("width", T.percent(100)), T.named("fill", color(theme.code_background, theme)), T.named("inset", T.pt(14)), T.named("radius", T.pt(7))], T.content_call("text", [T.named("fill", color(theme.code_foreground, theme)), T.named("font", T.string(theme.code_font)), T.named("size", T.pt(theme.code_size))], T.call("raw", [
           T.string(source),
-          T.named("block", T.atom("true")),
+          T.named("block", T.boolean(true)),
           T.named("lang", T.string(language)),
         ])))
     Image(path) =>
@@ -163,7 +175,7 @@ fn pict_doc(p : Pict, stage : Int, theme : Theme) : T.Doc =
       T.call(
           "stack",
           Cons(
-              T.named("dir", T.atom("ltr")),
+              T.named("dir", T.direction(T.Ltr)),
               Cons(
                   T.named("spacing", T.pt(gap)),
                   pict_docs(children, stage, theme),
@@ -176,7 +188,7 @@ fn pict_doc(p : Pict, stage : Int, theme : Theme) : T.Doc =
           T.call(
               "stack",
               Cons(
-                  T.named("dir", T.atom("ttb")),
+                  T.named("dir", T.direction(T.Ttb)),
                   Cons(
                       T.named("spacing", T.pt(gap)),
                       pict_docs(children, stage, theme),
@@ -213,16 +225,16 @@ fn pict_doc(p : Pict, stage : Int, theme : Theme) : T.Doc =
       if at <= stage then
         pict_doc(child, stage, theme)
       else
-        T.atom("none")
-    RawTypst(source) => T.raw(source)
+        T.none_expr()
+    RawTypst(source) => T.content(T.raw(source))
 
 -- | Render a pict for one concrete reveal stage.
 pub fn render_pict(p : Pict, stage : Int, theme : Theme) : String =
-  T.render(96, pict_doc(p, stage, theme))
+  T.render_expr(96, pict_doc(p, stage, theme))
 
-fn title_doc(title : Option(String)) : T.Doc =
+fn title_doc(title : Option(String)) : T.Expr =
   match title of
-    None => T.atom("none")
+    None => T.none_expr()
     Some(value) => T.string(value)
 
 -- | Render one physical page from a logical slide and reveal stage.
@@ -241,10 +253,10 @@ pub fn render_slide_page(
 pub fn typst_prelude(theme : Theme) : String =
   T.document([
       T.atom("// Generated by Spectra. Inspect, diff, and keep this artifact."),
-      T.set_rule("document", [T.named("date", T.atom("none"))]),
+      T.set_rule("document", [T.named("date", T.none_expr())]),
       T.set_rule("page", [
-          T.named("width", T.atom("13.333in")),
-          T.named("height", T.atom("7.5in")),
+          T.named("width", T.sym("13.333in")),
+          T.named("height", T.sym("7.5in")),
           T.named("margin", T.pt(theme.margin_pt)),
           T.named("fill", color(theme.background, theme)),
         ]),
@@ -253,31 +265,33 @@ pub fn typst_prelude(theme : Theme) : String =
           T.named("size", T.pt(theme.body_size)),
           T.named("fill", color(theme.foreground, theme)),
         ]),
-      T.set_rule("par", [T.named("leading", T.atom("0.65em"))]),
-      T.let_function("spectra-slide", [T.atom("title"), T.atom("body")], [
+      T.set_rule("par", [T.named("leading", T.sym("0.65em"))]),
+      T.let_function("spectra-slide", [T.sym("title"), T.sym("body")], [
           T.call("rect", [
               T.named("width", T.percent(100)),
               T.named("height", T.pt(2)),
               T.named("fill", color("accent", theme)),
             ]),
           T.call("v", [T.pt(16)]),
-          T.concat_docs([
-              T.atom("set "),
-              T.call("align", [T.atom("left + top")]),
+          T.concat_exprs([
+              T.sym("set "),
+              T.call("align", [
+                  T.sum([T.alignment(T.ALeft), T.alignment(T.ATop)]),
+                ]),
             ]),
           T.if_suite("title != none", [
               T.content_call(
                   "text",
                   [
                       T.named("size", T.pt(theme.title_size)),
-                      T.named("weight", T.atom("700")),
+                      T.named("weight", T.int(700)),
                       T.named("fill", color(theme.accent, theme)),
                     ],
-                  T.atom("title"),
+                  T.sym("title"),
                 ),
               T.call("v", [T.pt(18)]),
             ]),
-          T.atom("body"),
+          T.sym("body"),
         ]),
       T.empty(),
     ])

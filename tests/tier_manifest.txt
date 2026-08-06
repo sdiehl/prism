@@ -164,7 +164,7 @@ tests/cases/run/comp_guards.pr	selective-free-monad
 tests/cases/run/comp_in_annotated_row.pr	selective-free-monad
 tests/cases/run/comp_map_once.pr	state-fusion
 tests/cases/run/constrained_mutual.pr	evidence
-tests/cases/run/control_effects.pr	selective-free-monad
+tests/cases/run/control_effects.pr	evidence
 tests/cases/run/control_validate.pr	whole-program-free-monad
 tests/cases/run/curry.pr	pure
 tests/cases/run/curry_effect.pr	evidence
@@ -219,6 +219,7 @@ tests/cases/run/ho_row_inst.pr	pure
 tests/cases/run/identifiable.pr	pure
 tests/cases/run/incr_diff.pr	whole-program-free-monad
 tests/cases/run/indexing_ops.pr	selective-free-monad
+tests/cases/run/int_boundary.pr	pure
 tests/cases/run/int_low64_neg.pr	pure
 tests/cases/run/interp_basic.pr	pure
 tests/cases/run/interp_effects.pr	evidence
@@ -227,8 +228,10 @@ tests/cases/run/interp_string.pr	pure
 tests/cases/run/intmap.pr	whole-program-free-monad
 tests/cases/run/law_checked.pr	pure
 tests/cases/run/law_fail.pr	whole-program-free-monad
+tests/cases/run/law_names.pr	whole-program-free-monad
 tests/cases/run/law_reader.pr	whole-program-free-monad
 tests/cases/run/law_state.pr	whole-program-free-monad
+tests/cases/run/law_ufp.pr	whole-program-free-monad
 tests/cases/run/list_ops.pr	pure
 tests/cases/run/list_show.pr	pure
 tests/cases/run/list_singleton.pr	pure

@@ -18,6 +18,20 @@
 --
 -- A line marked as hidden compiles for the runner but stays off the slide, so
 -- setup a reader does not need never reaches the screen.
+--
+-- `read_doc` takes a reflected declaration apart into prose, examples, and the
+-- definition itself:
+--
+-- ```prism
+-- fn main() =
+--   let doc = read_doc("-- | Twice.\nfn double(x : Int) : Int = x * 2")
+--   println(doc.prose)
+--   println(doc.definition)
+-- ```
+-- ```output
+-- Twice.
+-- fn double(x : Int) : Int = x * 2
+-- ```
 
 import Layout (Pict, column)
 

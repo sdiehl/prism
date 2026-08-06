@@ -1,7 +1,16 @@
 -- | Backend-neutral layout values for Spectra.
 --
 -- These constructors describe intent. They deliberately contain no measured
--- coordinates or Typst-specific layout state.
+-- coordinates or Typst-specific layout state; a `Pict` is plain data a backend
+-- interprets later, which is why building one needs no effects and shows as
+-- the constructors it is made of:
+--
+-- ```prism
+-- fn main() = println(show(column(8, [text("hi")])))
+-- ```
+-- ```output
+-- Layout.Column(8, Layout.Left, [Layout.Text(Layout.TextStyle { size = 0, color = "", align = Layout.Left }, [Layout.Plain("hi")])])
+-- ```
 
 pub type Align = Left | Center | Right deriving (Eq, Show)
 

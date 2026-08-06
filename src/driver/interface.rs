@@ -127,12 +127,53 @@ pub(super) fn exported_names(entry: &Program, module_path: Option<&str>) -> BTre
         .collect()
 }
 
+// The canonical names a module re-exports through its `pub import`s. An
+// explicit list names each forwarded item; a glob forwards everything the
+// source module contributed to this module's checked seed, recognized by its
+// canonical prefix. The payloads all live in `checked` already, because the
+// source's interface seeded this module's check, so forwarding is a lookup,
+// not a recomputation. A consumer's environment then rehydrates re-exported
+// values, types, and constructors without loading the source module's own
+// interface, which the module build does not do for transitive dependencies.
+fn reexported_names(entry: &Program, checked: &Checked) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for import in entry.imports.iter().filter(|import| import.reexport) {
+        let path = import.path.join(".");
+        if let Some(names) = &import.names {
+            for name in names {
+                out.insert(format!("{path}.{name}"));
+            }
+        } else {
+            let prefix = format!("{path}.");
+            for key in checked.data.keys() {
+                if key.starts_with(&prefix) {
+                    out.insert(key.clone());
+                }
+            }
+            for key in checked.constrained.keys() {
+                let key = key.to_string();
+                if key.starts_with(&prefix) {
+                    out.insert(key);
+                }
+            }
+            for key in checked.classes.keys() {
+                let key = key.to_string();
+                if key.starts_with(&prefix) {
+                    out.insert(key);
+                }
+            }
+        }
+    }
+    out
+}
+
 pub(super) fn metadata_entries(
     entry: &Program,
     module_path: Option<&str>,
     checked: &Checked,
 ) -> Result<Vec<ModuleInterfaceEntry>, serde_json::Error> {
-    let exports = exported_names(entry, module_path);
+    let mut exports = exported_names(entry, module_path);
+    exports.extend(reexported_names(entry, checked));
     let opaques = entry
         .opaques
         .iter()

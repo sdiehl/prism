@@ -1609,7 +1609,8 @@ fn dec_expr_node(
     EHole(str_at(fields, "name", path))
   elif kind == tag_expr_bin() then
     let op = str_at(fields, "op", path)
-    e2(fields, path, "lhs", "rhs", \(l, r) -> EBin(op, l, r))
+    let l = req_at(fields, "lhs", path, dec_expr)
+    EBin(op, l, req_at(fields, "rhs", path, dec_expr))
   elif kind == tag_expr_neg() then
     e1(fields, path, "expr", ENeg)
   else
@@ -1761,7 +1762,8 @@ fn dec_expr_node6(
 ) : Expr ! {Decode} =
   if kind == tag_expr_compose() then
     let dir = str_at(fields, "dir", path)
-    e2(fields, path, "lhs", "rhs", \(l, r) -> ECompose(dir, l, r))
+    let l = req_at(fields, "lhs", path, dec_expr)
+    ECompose(dir, l, req_at(fields, "rhs", path, dec_expr))
   elif kind == tag_expr_read_path() then
     let b = req_at(fields, "base", path, dec_expr)
     EReadPath(b, list_at(fields, "path", path, dec_pstep))

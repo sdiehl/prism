@@ -1,7 +1,7 @@
 {
   "compatibility": {
     "compiler_surfaces": [
-      "compiler=0.9.0;hash-scheme=prism-core-hash-v1;target=aarch64-apple-darwin;backend=check;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;native-effects=true;trampoline=true;fuse=false;rt-checks=false;native-kont-frames=false"
+      "compiler=0.17.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=check;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;erasures=true;native-effects=true;trampoline=true;fuse=false;rt-checks=false;native-kont-frames=false"
     ],
     "dependencies_by_identity": {},
     "dependency_root_conflicts": {},
@@ -9,12 +9,12 @@
     "package_count": 1,
     "packages_by_name": {
       "tzdb": [
-        "namespace@prism-core-hash-v1:b9e853148727ff579064fca5c03118a2205c9d383c3ab20a5e8ca8b139ec1d90"
+        "namespace@prism-core-hash-v2:743fd954d9e4483607c903ef02e84f68eff2c0d85e45803f9ee976177dc1653d"
       ]
     },
     "problems": [],
     "stdlib_roots": [
-      "embedded-stdlib@prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0"
+      "embedded-stdlib@prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef"
     ],
     "unique_package_names": 1,
     "verdict": "compatible"
@@ -22,7 +22,7 @@
   "format": "prism-check-world-v1",
   "lineage_format": "prism-build-lineage-v1",
   "packages": {
-    "b9e853148727ff579064fca5c03118a2205c9d383c3ab20a5e8ca8b139ec1d90": {
+    "743fd954d9e4483607c903ef02e84f68eff2c0d85e45803f9ee976177dc1653d": {
       "gates": {
         "check": "passed",
         "dependency": "passed",
@@ -45,15 +45,15 @@
           "objects_written": 0
         },
         "compiler": {
-          "identity": "compiler=0.9.0;hash-scheme=prism-core-hash-v1;target=aarch64-apple-darwin;backend=check;source-root=prism-core-hash-v1:b9e853148727ff579064fca5c03118a2205c9d383c3ab20a5e8ca8b139ec1d90;stdlib-root=prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;native-effects=true;trampoline=true;fuse=false;rt-checks=false;native-kont-frames=false;",
+          "identity": "compiler=0.17.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=check;source-root=prism-core-hash-v2:743fd954d9e4483607c903ef02e84f68eff2c0d85e45803f9ee976177dc1653d;stdlib-root=prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;erasures=true;native-effects=true;trampoline=true;fuse=false;rt-checks=false;native-kont-frames=false;",
           "rows": [
             {
               "key": "compiler",
-              "value": "0.9.0"
+              "value": "0.17.0"
             },
             {
               "key": "hash-scheme",
-              "value": "prism-core-hash-v1"
+              "value": "prism-core-hash-v2"
             },
             {
               "key": "target",
@@ -65,11 +65,11 @@
             },
             {
               "key": "source-root",
-              "value": "prism-core-hash-v1:b9e853148727ff579064fca5c03118a2205c9d383c3ab20a5e8ca8b139ec1d90"
+              "value": "prism-core-hash-v2:743fd954d9e4483607c903ef02e84f68eff2c0d85e45803f9ee976177dc1653d"
             },
             {
               "key": "stdlib-root",
-              "value": "prism-core-hash-v1:ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0"
+              "value": "prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef"
             },
             {
               "key": "opt",
@@ -94,6 +94,10 @@
             {
               "key": "effect-tier",
               "value": "auto"
+            },
+            {
+              "key": "erasures",
+              "value": "true"
             },
             {
               "key": "native-effects",
@@ -126,16 +130,16 @@
             "name": null,
             "origin": null,
             "role": "source",
-            "root": "b9e853148727ff579064fca5c03118a2205c9d383c3ab20a5e8ca8b139ec1d90",
-            "scheme": "prism-core-hash-v1"
+            "root": "743fd954d9e4483607c903ef02e84f68eff2c0d85e45803f9ee976177dc1653d",
+            "scheme": "prism-core-hash-v2"
           },
           "stdlib": {
             "artifact_kind": "embedded-stdlib",
             "name": null,
             "origin": null,
             "role": "stdlib",
-            "root": "ac8a7aa43202f1cb43e22b0359ebfeff9043cfc386d4669d24fca8187420d6e0",
-            "scheme": "prism-core-hash-v1"
+            "root": "bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef",
+            "scheme": "prism-core-hash-v2"
           }
         },
         "request": {
@@ -147,64 +151,239 @@
       "name": "tzdb",
       "public_api": [
         {
-          "hash": "27c1611e12bb23d40cfab58822e4d464886be8876144889e09aea1f5d667cb0d",
+          "hash": "0d0b810d4a34ee3bab0186bfd1bab8c4f4b01c8f1a5de119d6cd777f719d4dbc",
+          "name": "Basis",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "bf4803073109135e3707420f0ed021fee0911735b0ad7aa1103de180f4cc8e97",
+          "name": "Dst",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "bd9e6550149f6aad348a4d9a29e67790eea4e0e96d2166d994ec62fd3eed7271",
+          "name": "Switch",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "3fe4eefa221035d2d6ef55782ac8065e44e6cfb600ff0c8d38ac8d9738759d99",
           "name": "Zone",
-          "scheme": "prism-core-hash-v1"
+          "scheme": "prism-core-hash-v2"
         },
         {
-          "hash": "f0e4916c7d8727ffc1c5cdf8395a930dfdd889629b0bcc8fe089b111e24f6837",
+          "hash": "d1cb0356048f61641f8905aaa4ab9639e87844ae81d1b9b81116205b6bd374c2",
+          "name": "abbrev_at",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "832ecd4cadaba05b7119f882acbab6d6723485964630eaeb1357f81fcb07e64d",
+          "name": "america_anchorage",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "cb62a0d66d3564b164c4a6338fdf4eac0400caf809cec60544a05905f6e32ebd",
+          "name": "america_chicago",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "89f036b0ccb9bc6b438ddf0c2c00330866bb52d2b32e827efbbc7e7679bd48de",
+          "name": "america_denver",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "b848e34aac442cf85e67f7ad5e86c7ac8359382f91b90cfae5017577f2ba1b0b",
+          "name": "america_los_angeles",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "11f2b592a2520ef551f2d8521d46a10e7a40994e90637de3e14d0f93543a6e42",
+          "name": "america_mexico_city",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "f0dda1c7faf584dfe3da76a2d27624eb535cdece35bf3a82f08c06416f6af0fe",
           "name": "america_new_york",
-          "scheme": "prism-core-hash-v1"
+          "scheme": "prism-core-hash-v2"
         },
         {
-          "hash": "fc55f614e150bb4bcb87b33539dd9b2d5d869ac93b62b753827aa65d06414b16",
+          "hash": "b03617b0de9c5ade7e74ee61a5786666db813aa667b3402218d86def0f449c72",
+          "name": "america_phoenix",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "89ad145d34f0ffea2e3af3ae7c24a81899c492ff22d537f076c8b233064a7536",
+          "name": "america_sao_paulo",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "fa686318bbe40c1f3bd706e63198c1cc5739ea5a071073af0536f8f49df3df5a",
+          "name": "asia_dubai",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "d3af17eef26d85f58bd16e787b575ffb4cb465a644f2b1bc62e43a0858688bbc",
+          "name": "asia_kolkata",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "b942ffff206cb0db25a2bdbeaec4b648ea5d39cc7b619a40fc5f95da06d8f8a7",
+          "name": "asia_shanghai",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "6bedd0b4b32e7af796d5ef1f5ec38684ee11126d69de22729c91076a395d34fd",
+          "name": "asia_singapore",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "ac71631a197ebcc48d33c71d9bfba9d3c49e13354e5253f17946f378c33d8953",
           "name": "asia_tokyo",
-          "scheme": "prism-core-hash-v1"
+          "scheme": "prism-core-hash-v2"
         },
         {
-          "hash": "a7a093434a3fa41e05faa969803c7c3326d4a36a893a21ee220e940430a6a177",
+          "hash": "b351e010515fd6fa2a4abb9c9963bdfcd6dd43d43a3c950f3151a934a84686ac",
+          "name": "australia_brisbane",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "710ed673ee7a8797355b32703d88c584a397c9a5b404222bc73443817f40f5d3",
+          "name": "australia_sydney",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "c5be42801d9005abdf4555956970aa38f7fdc798d136435ef00419709bfd8e86",
+          "name": "civil_from_days",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "11eb7d8f927326cd1e6e5b7481fa18decaa7a71505aeee00a7b05dd7bf12ae2e",
+          "name": "day_of_week",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "39fc2065d4584659a7b97d5ae5794e3fe56d32080aa8aae91988f424fa644f87",
+          "name": "days_from_civil",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "efe3e47692b1c558e57dc2c1eddbb4d8aa43042d244df2e674b5704b21d0a657",
+          "name": "days_in_month",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "f5210f8328061f193598ebfceb34192e386e1dcad0fce67d78c946e2b653858e",
+          "name": "europe_athens",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "ce2c9897bfe12da0a2da411fbac0ea477714c359668ad3e758248d9750325857",
+          "name": "europe_berlin",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "8d7d17e13f77b82c63c85831561d1ebfbc553ff293b5a7ffcadeef452e942841",
+          "name": "europe_lisbon",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "1ff308ff4993e270d184816cf0339a7cba1c289d896127ae2d0982424364868b",
           "name": "europe_london",
-          "scheme": "prism-core-hash-v1"
+          "scheme": "prism-core-hash-v2"
         },
         {
-          "hash": "155f6302f18456929c126c67b361fa599d406d412d7600f1fbfb19d0a7e0b584",
+          "hash": "9fc51c2a75e64fa11bac024cf033d93475375ac9cf2e4b604971a48ac75a4884",
+          "name": "europe_madrid",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "83091b7dd41ddb295620640db109e4c04c4e77de0335f760dd27f698ae7f86ba",
+          "name": "europe_paris",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "64520e236924886f8b4cafe83e3e957091cca6d1a2cafab0ad5997b131c8a224",
+          "name": "europe_rome",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "cc45a38f31714ae46a4c8f4462c21b09d08ef8294b6e363df9e70995f9b195a7",
           "name": "find_zone",
-          "scheme": "prism-core-hash-v1"
+          "scheme": "prism-core-hash-v2"
         },
         {
-          "hash": "57fe2e6b32d8c9b0fff95fa4ba5b224db0ecb63e88a21fceddbc9783be8b166e",
+          "hash": "fdaa177216b7292d51d02c66863b4745026336333bc6aef9ac8257156c2936f8",
           "name": "format_in_zone",
-          "scheme": "prism-core-hash-v1"
+          "scheme": "prism-core-hash-v2"
         },
         {
-          "hash": "0705a6adfc39a1af5f5f291952e52f505c275852d4b4363360b37a349c7c7126",
-          "name": "offset_duration",
-          "scheme": "prism-core-hash-v1"
+          "hash": "73c2d2341c76d505e92464e3e4e2e676b42b9fa5d579cd516829ac284eafc26a",
+          "name": "is_dst",
+          "scheme": "prism-core-hash-v2"
         },
         {
-          "hash": "7c2ae112ad1a57be909b4ea213732ac4957af7afa384e05e3f35e495494a2ffd",
+          "hash": "3c39658c9d200e3af013aaf7232b62a2a28dea9515ef7547381ed6932a19763a",
+          "name": "is_leap_year",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "0ce1cc07940b72270fcf19e3626961cb6b5ecd0f58d774ff06a77233d68898b7",
+          "name": "next_transition",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "2cf892c052edc5691c771e43ab69763e699c572362960cbaf4f433bc2f29edc7",
+          "name": "offset_at",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "ae81f5ab758da2f798060783a5659aa15cd0630e14f5d1d6e24a297d88b2498d",
+          "name": "offset_minutes_at",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "0ca0600ae92a8fae25d9d0b9cf33aa5dacc6bb3c6031aa2360a700a2bc5e9ee4",
+          "name": "pacific_auckland",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "698ec81af6fab846b35a2467a3897fcf5592bd4d41e5bcd304acad9fac137708",
+          "name": "std_offset_minutes",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "a89a978338d394155be170cea0c9cfcd890c0e122deb66e873ec3dc9bbb31156",
+          "name": "to_local",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "e24faaeaf9d5995b9b5996c889d411f0ca16a6b4edecd99f0b833120fbc4799f",
+          "name": "tzdata_version",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "8798ac6ac05782cd40a072a5f81b337456f6deffe67cf38a76bd42b6a6bec55c",
           "name": "utc",
-          "scheme": "prism-core-hash-v1"
+          "scheme": "prism-core-hash-v2"
         },
         {
-          "hash": "f1d17bf08bacfd1f6ca9e3b4faacd1003441e5f04dbead6764c475aeec22e492",
-          "name": "wall_in_zone",
-          "scheme": "prism-core-hash-v1"
-        },
-        {
-          "hash": "5080db2bb142c17cc0a9e088b92f011822c63338903daead88625a8b30d8fa90",
+          "hash": "d1edae27aca73571b304f202ebc41f3671aedf805b1a0427b4616d49483ca9c3",
           "name": "zone_name",
-          "scheme": "prism-core-hash-v1"
+          "scheme": "prism-core-hash-v2"
         },
         {
-          "hash": "30c0a6058bc2f33bf017891a5a95a2dfb6af6f939f0e96f130d705c1984f0db1",
-          "name": "zone_offset_minutes",
-          "scheme": "prism-core-hash-v1"
+          "hash": "ee2ac9bce7e41c13881a187d88d5f0155455f4d94a5464c8af7af54fbede9d35",
+          "name": "zone_names",
+          "scheme": "prism-core-hash-v2"
+        },
+        {
+          "hash": "ed8433cf3b3f60e1102c23556c5ef56d1e097b8e8f5bef5d99434e890955b2ae",
+          "name": "zones",
+          "scheme": "prism-core-hash-v2"
         }
       ]
     }
   },
-  "root": "packages",
+  "root": "packages/tzdb",
   "validation": {
     "checks": {
       "doctests": "not-run",

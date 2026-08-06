@@ -21,8 +21,8 @@ Draw the next integer from the monotonic counter.
 
 ### `run_fresh`
 
-```prism,sig,h-f47a49359d4036a331620cbdcbceca8131709b573b2f6e1b66c74b7a289b298e
-run_fresh : forall e0 a. (() -> a ! {Control.Fresh.Fresh, e0}) -> a ! {e0}
+```prism,sig,h-3a5f26f3aa346b0c9f8fd8211693d8483d62dda48fbe90819745e82ebb6cd16e
+run_fresh : forall e0 a. (() -> a ! {Control.Fresh.Fresh, Var@n@5, e0}) -> a ! {e0}
 ```
 
 Run `action` with a fresh-name counter starting at `0`, discharging `Fresh`.
@@ -37,8 +37,8 @@ run_fresh(\() -> [gensym("tmp"), gensym("tmp")])
 
 ### `run_fresh_from`
 
-```prism,sig,h-7f4b7ff4f1689cccfff8041f881addc2fdbab606e1d674a7e3edcbcfc1987c2f
-run_fresh_from : forall e0 a. (Int, () -> a ! {Control.Fresh.Fresh, e0}) -> a ! {e0}
+```prism,sig,h-6a6e9e76223fdb6a2277a701b187d74768b295477a5f64cd37bcabbfddc50ca7
+run_fresh_from : forall e0 a. (Int, () -> a ! {Control.Fresh.Fresh, Var@n@5, e0}) -> a ! {e0}
 ```
 
 Run `action` with the counter starting at `start`.

@@ -144,11 +144,59 @@ fn accept_file(
     }
 }
 
+// The raw multiline string delimiters. A doc-shaped fence inside an `r"""`
+// literal (a fixture that deliberately spells out a docstring, as the Spectra
+// example tests do) is string content, not an expectation, so the scanner
+// tracks raw-literal state while walking lines. A raw literal recognizes no
+// escapes and closes at the next `"""`, which is what makes the line-level
+// tracking exact. Openers are only sought outside comment lines, since a
+// literal cannot open inside a comment but prose may well mention one.
+const RAW_OPEN: &str = "r\"\"\"";
+const RAW_CLOSE: &str = "\"\"\"";
+
+// Which lines begin inside a raw multiline string literal.
+fn raw_string_lines(lines: &[&str]) -> Vec<bool> {
+    let mut inside = false;
+    let mut flags = Vec::with_capacity(lines.len());
+    for line in lines {
+        flags.push(inside);
+        let mut rest = *line;
+        loop {
+            if inside {
+                match rest.find(RAW_CLOSE) {
+                    Some(p) => {
+                        inside = false;
+                        rest = &rest[p + RAW_CLOSE.len()..];
+                    }
+                    None => break,
+                }
+            } else {
+                if rest.trim_start().starts_with("--") {
+                    break;
+                }
+                match rest.find(RAW_OPEN) {
+                    Some(p) => {
+                        inside = true;
+                        rest = &rest[p + RAW_OPEN.len()..];
+                    }
+                    None => break,
+                }
+            }
+        }
+    }
+    flags
+}
+
 // Find every `prism` doctest that is immediately followed by an `output` block.
 fn scan(disp: &str, lines: &[&str]) -> Vec<Block> {
+    let in_raw = raw_string_lines(lines);
     let mut out = Vec::new();
     let mut i = 0;
     while i < lines.len() {
+        if in_raw[i] {
+            i += 1;
+            continue;
+        }
         let Some((_, info)) = doc_fence(lines[i]) else {
             i += 1;
             continue;

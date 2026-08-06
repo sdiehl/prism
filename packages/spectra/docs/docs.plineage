@@ -1,0 +1,407 @@
+{
+  "format": "prism-lineage-graph-v1",
+  "variant": "docs",
+  "nodes": [
+    {
+      "id": "blake3:013dfb249c90286cd32d9eb408012c651fd655f4fd4d013ec2e93be82a2fa460",
+      "kind": "artifact",
+      "payload": {
+        "kind": "docs-page",
+        "path": "code.md",
+        "digest_scheme": "blake3",
+        "digest": "013dfb249c90286cd32d9eb408012c651fd655f4fd4d013ec2e93be82a2fa460",
+        "bytes": 785
+      }
+    },
+    {
+      "id": "blake3:3974c5a2c2ba239168a58b57557f38d4603a8af99024cba2ac4d802413bfd224",
+      "kind": "artifact",
+      "payload": {
+        "kind": "docs-page",
+        "path": "main.md",
+        "digest_scheme": "blake3",
+        "digest": "3974c5a2c2ba239168a58b57557f38d4603a8af99024cba2ac4d802413bfd224",
+        "bytes": 394
+      }
+    },
+    {
+      "id": "blake3:7cf399fe3d7a4f89aa68953cd0c98348cdcf555c2eec2634067fa09535e6be0b",
+      "kind": "artifact",
+      "payload": {
+        "kind": "docs-page",
+        "path": "spectrabuild.md",
+        "digest_scheme": "blake3",
+        "digest": "7cf399fe3d7a4f89aa68953cd0c98348cdcf555c2eec2634067fa09535e6be0b",
+        "bytes": 1663
+      }
+    },
+    {
+      "id": "blake3:80bb5b250ffba2bd754c1a434b2fa27fa081922b94c1b9790301897e6f3d6021",
+      "kind": "artifact",
+      "payload": {
+        "kind": "docs-page",
+        "path": "theme.md",
+        "digest_scheme": "blake3",
+        "digest": "80bb5b250ffba2bd754c1a434b2fa27fa081922b94c1b9790301897e6f3d6021",
+        "bytes": 1277
+      }
+    },
+    {
+      "id": "blake3:bd42ddc5d61f1ff40ffcf7936d08da87f38ef7eb2b1602f8a3ffffa823becc51",
+      "kind": "artifact",
+      "payload": {
+        "kind": "docs-page",
+        "path": "layout.md",
+        "digest_scheme": "blake3",
+        "digest": "bd42ddc5d61f1ff40ffcf7936d08da87f38ef7eb2b1602f8a3ffffa823becc51",
+        "bytes": 2611
+      }
+    },
+    {
+      "id": "blake3:c4bd96371c5278ce884bc9f137328400be5cca181cfbebad5f220337e71e3cd4",
+      "kind": "artifact",
+      "payload": {
+        "kind": "docs-page",
+        "path": "index.md",
+        "digest_scheme": "blake3",
+        "digest": "c4bd96371c5278ce884bc9f137328400be5cca181cfbebad5f220337e71e3cd4",
+        "bytes": 1110
+      }
+    },
+    {
+      "id": "blake3:df7d55f43e975830af896e0f3c762d2de1ea18b177a0154c18c40d610d33f2a3",
+      "kind": "artifact",
+      "payload": {
+        "kind": "docs-page",
+        "path": "backend.md",
+        "digest_scheme": "blake3",
+        "digest": "df7d55f43e975830af896e0f3c762d2de1ea18b177a0154c18c40d610d33f2a3",
+        "bytes": 1671
+      }
+    },
+    {
+      "id": "blake3:e79fbddfb7a5b3c0e697338918387cdd490872a5dd663209398c4950a808345a",
+      "kind": "artifact",
+      "payload": {
+        "kind": "docs-page",
+        "path": "spectracli.md",
+        "digest_scheme": "blake3",
+        "digest": "e79fbddfb7a5b3c0e697338918387cdd490872a5dd663209398c4950a808345a",
+        "bytes": 1089
+      }
+    },
+    {
+      "id": "blake3:ef5208d79ca00e77518df7227565ae530f71517fe129808a745fd01c41182860",
+      "kind": "artifact",
+      "payload": {
+        "kind": "docs-page",
+        "path": "spectra.md",
+        "digest_scheme": "blake3",
+        "digest": "ef5208d79ca00e77518df7227565ae530f71517fe129808a745fd01c41182860",
+        "bytes": 5846
+      }
+    },
+    {
+      "id": "blake3:f6c0383c2a0a3161fc0489c4dc24d047064d3bb96b9984317e6eb79644f58db5",
+      "kind": "artifact",
+      "payload": {
+        "kind": "docs-page",
+        "path": "example.md",
+        "digest_scheme": "blake3",
+        "digest": "f6c0383c2a0a3161fc0489c4dc24d047064d3bb96b9984317e6eb79644f58db5",
+        "bytes": 2834
+      }
+    },
+    {
+      "id": "prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef",
+      "kind": "stdlib-root",
+      "payload": {
+        "role": "stdlib",
+        "name": null,
+        "origin": null,
+        "artifact_kind": "embedded-stdlib",
+        "scheme": "prism-core-hash-v2",
+        "root": "bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef"
+      }
+    },
+    {
+      "id": "prism-core-hash-v2:c9a872766ee1047d6062f222974a1a8b170665bebff6fbfe5b91e7d76db42288",
+      "kind": "source-root",
+      "payload": {
+        "role": "source",
+        "name": null,
+        "origin": null,
+        "artifact_kind": "namespace",
+        "scheme": "prism-core-hash-v2",
+        "root": "c9a872766ee1047d6062f222974a1a8b170665bebff6fbfe5b91e7d76db42288"
+      }
+    },
+    {
+      "id": "sha256:16b496577e911f2faf7cd071ea9b981ab2e6b689c567d18a9842b351621c7a84",
+      "kind": "doctest",
+      "payload": {
+        "location": "Layout (module)",
+        "output_scheme": "sha256",
+        "output_digest": "4927bacbbb92af750dd7607cd33b771111b51a095432a01fd4328e736d0e74f2"
+      }
+    },
+    {
+      "id": "sha256:1c94c750d4af7e5bc4f94c8df76d1ce6c29e2ec3982b651901211de29ad8cfaf",
+      "kind": "compiler-identity",
+      "payload": {
+        "fingerprint": "compiler=0.17.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=docs;source-root=prism-core-hash-v2:c9a872766ee1047d6062f222974a1a8b170665bebff6fbfe5b91e7d76db42288;stdlib-root=prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;erasures=true;native-effects=true;trampoline=true;fuse=false;rt-checks=false;native-kont-frames=false;",
+        "rows": [
+          {
+            "key": "compiler",
+            "value": "0.17.0"
+          },
+          {
+            "key": "hash-scheme",
+            "value": "prism-core-hash-v2"
+          },
+          {
+            "key": "target",
+            "value": "aarch64-apple-darwin"
+          },
+          {
+            "key": "backend",
+            "value": "docs"
+          },
+          {
+            "key": "source-root",
+            "value": "prism-core-hash-v2:c9a872766ee1047d6062f222974a1a8b170665bebff6fbfe5b91e7d76db42288"
+          },
+          {
+            "key": "stdlib-root",
+            "value": "prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef"
+          },
+          {
+            "key": "opt",
+            "value": "O1"
+          },
+          {
+            "key": "passes",
+            "value": "level-default"
+          },
+          {
+            "key": "disabled",
+            "value": "none"
+          },
+          {
+            "key": "backend-opt",
+            "value": "2"
+          },
+          {
+            "key": "scheduler",
+            "value": "cooperative"
+          },
+          {
+            "key": "effect-tier",
+            "value": "auto"
+          },
+          {
+            "key": "erasures",
+            "value": "true"
+          },
+          {
+            "key": "native-effects",
+            "value": "true"
+          },
+          {
+            "key": "trampoline",
+            "value": "true"
+          },
+          {
+            "key": "fuse",
+            "value": "false"
+          },
+          {
+            "key": "rt-checks",
+            "value": "false"
+          },
+          {
+            "key": "native-kont-frames",
+            "value": "false"
+          }
+        ]
+      }
+    },
+    {
+      "id": "sha256:628173fe916bf9533788f70a379e621d0b756a51e76e50a2725241b68481d85a",
+      "kind": "doctest",
+      "payload": {
+        "location": "Code (module)",
+        "output_scheme": "sha256",
+        "output_digest": "facbc9beeab8f6547d4ea3feff0e1c1cdcc4af79a2ae7ae9c09728a95dd983b9"
+      }
+    },
+    {
+      "id": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "kind": "request",
+      "payload": {
+        "kind": "docs",
+        "path": "packages/spectra",
+        "entry": "packages/spectra"
+      }
+    },
+    {
+      "id": "sha256:90e96e46f8772dc8e012e282d32c451de18ff1e25a36ecf3e6dbdd50b1de6778",
+      "kind": "doctest",
+      "payload": {
+        "location": "Spectra (module)",
+        "output_scheme": "sha256",
+        "output_digest": "185f8db32271fe25f561a6fc938b2e264306ec304eda518007d1764826381969"
+      }
+    },
+    {
+      "id": "sha256:a41324acf50da17af80e212436bfa1c5817a07b0f2265e5e2ddf87186cadf346",
+      "kind": "doctest",
+      "payload": {
+        "location": "SpectraCli (module)",
+        "output_scheme": "sha256",
+        "output_digest": "8cdd4805f0ab1a6bfc55db2ce31f3a4aa185589bb6380aba84966fd2cdce1405"
+      }
+    },
+    {
+      "id": "sha256:a585115b146f6129c84d7efd10e8df6653d2b9c64a9ce8592346abde61044f4a",
+      "kind": "doctest",
+      "payload": {
+        "location": "Backend (module)",
+        "output_scheme": "sha256",
+        "output_digest": "995043e2e9440ad1be95a4583da362a4733e91138f3e202f23c5280238889010"
+      }
+    },
+    {
+      "id": "sha256:b14459c46a9b08f899aac1db9bca2e4911615305744b36e56bbcbf5be135ecc7",
+      "kind": "docs-generator",
+      "payload": {
+        "format": "prism-docs-markdown-v1"
+      }
+    },
+    {
+      "id": "sha256:d71b6c0377f0fdebd8e3eb9576a53c780ac34b619f7648f574d3cbc6cbb8a37b",
+      "kind": "doctest",
+      "payload": {
+        "location": "Theme (module)",
+        "output_scheme": "sha256",
+        "output_digest": "75b5548a68a039b726bfc32f21da43ee8fcf9004d135bd48ff26f3aa26a44f9e"
+      }
+    },
+    {
+      "id": "sha256:ecea9dd1ee9741a2fd3c9b4a6a707147c553edc4ddc87d7098ab6cc212f52291",
+      "kind": "doctest",
+      "payload": {
+        "location": "Example (module)",
+        "output_scheme": "sha256",
+        "output_digest": "f9dd6797427e742d9008e98bc84eb67935cfb0dd0bddc1a00d00f596505c780f"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "blake3:013dfb249c90286cd32d9eb408012c651fd655f4fd4d013ec2e93be82a2fa460",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "blake3:3974c5a2c2ba239168a58b57557f38d4603a8af99024cba2ac4d802413bfd224",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "blake3:7cf399fe3d7a4f89aa68953cd0c98348cdcf555c2eec2634067fa09535e6be0b",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "blake3:80bb5b250ffba2bd754c1a434b2fa27fa081922b94c1b9790301897e6f3d6021",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "blake3:bd42ddc5d61f1ff40ffcf7936d08da87f38ef7eb2b1602f8a3ffffa823becc51",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "blake3:c4bd96371c5278ce884bc9f137328400be5cca181cfbebad5f220337e71e3cd4",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "blake3:df7d55f43e975830af896e0f3c762d2de1ea18b177a0154c18c40d610d33f2a3",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "blake3:e79fbddfb7a5b3c0e697338918387cdd490872a5dd663209398c4950a808345a",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "blake3:ef5208d79ca00e77518df7227565ae530f71517fe129808a745fd01c41182860",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "blake3:f6c0383c2a0a3161fc0489c4dc24d047064d3bb96b9984317e6eb79644f58db5",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef",
+      "kind": "input"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "prism-core-hash-v2:c9a872766ee1047d6062f222974a1a8b170665bebff6fbfe5b91e7d76db42288",
+      "kind": "input"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "sha256:16b496577e911f2faf7cd071ea9b981ab2e6b689c567d18a9842b351621c7a84",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "sha256:1c94c750d4af7e5bc4f94c8df76d1ce6c29e2ec3982b651901211de29ad8cfaf",
+      "kind": "identified-by"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "sha256:628173fe916bf9533788f70a379e621d0b756a51e76e50a2725241b68481d85a",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "sha256:90e96e46f8772dc8e012e282d32c451de18ff1e25a36ecf3e6dbdd50b1de6778",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "sha256:a41324acf50da17af80e212436bfa1c5817a07b0f2265e5e2ddf87186cadf346",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "sha256:a585115b146f6129c84d7efd10e8df6653d2b9c64a9ce8592346abde61044f4a",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "sha256:b14459c46a9b08f899aac1db9bca2e4911615305744b36e56bbcbf5be135ecc7",
+      "kind": "identified-by"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "sha256:d71b6c0377f0fdebd8e3eb9576a53c780ac34b619f7648f574d3cbc6cbb8a37b",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "to": "sha256:ecea9dd1ee9741a2fd3c9b4a6a707147c553edc4ddc87d7098ab6cc212f52291",
+      "kind": "produced"
+    }
+  ]
+}

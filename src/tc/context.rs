@@ -427,13 +427,32 @@ impl Tc<'_> {
 
     pub(super) fn generalize_map(&self, env: &Env, ty: &Type) -> (Type, Renames) {
         let t = self.zonk(ty);
-        self.generalize_zonked(env, &t)
+        self.generalize_zonked(env, &t, true)
+    }
+
+    // Generalization for a finished top-level declaration. Identical to
+    // `generalize`, except the pinned `var`-cell existentials no longer anchor
+    // the environment: the declaration that owned each cell has discharged it
+    // (the desugar's escape check guarantees no cell outlives its declaration),
+    // so a cell type solved to the owner's rigid variable must not exclude that
+    // variable, or its spelling, from any scheme's quantifiers.
+    pub(super) fn generalize_decl(&self, env: &Env, ty: &Type) -> Type {
+        self.generalize_decl_map(env, ty).0
+    }
+
+    pub(super) fn generalize_decl_map(&self, env: &Env, ty: &Type) -> (Type, Renames) {
+        let t = self.zonk(ty);
+        self.generalize_zonked(env, &t, false)
     }
 
     // The scheme builder proper. It only accepts a `Zonked`, so the free-variable
     // enumeration and structural renaming below can never be handed a type whose
-    // meaning still hides behind an unsolved metavariable.
-    fn generalize_zonked(&self, env: &Env, zt: &Zonked) -> (Type, Renames) {
+    // meaning still hides behind an unsolved metavariable. `anchor_var_ops`
+    // includes the pinned `var`-cell existentials in the environment anchors:
+    // true for every local generalization point (the cell must stay one type
+    // for as long as its scope is still being checked), false once a top-level
+    // declaration is finished (see `generalize_decl`).
+    fn generalize_zonked(&self, env: &Env, zt: &Zonked, anchor_var_ops: bool) -> (Type, Renames) {
         let t: &Type = zt;
         let mut exs = BTreeSet::new();
         t.free_exist(&mut exs);
@@ -443,7 +462,12 @@ impl Tc<'_> {
         let mut env_exs = BTreeSet::new();
         let mut env_row_exs = BTreeSet::new();
         let mut env_tvars = env.free_type_vars().collect::<BTreeSet<_>>();
-        for exist in env.free_exists() {
+        let anchor_exists: Vec<u32> = if anchor_var_ops {
+            env.free_exists().chain(env.var_op_exists()).collect()
+        } else {
+            env.free_exists().collect()
+        };
+        for exist in anchor_exists {
             let applied = self.apply(&Type::Exist(exist));
             applied.free_exist(&mut env_exs);
             applied.free_exist_row(&mut env_row_exs);

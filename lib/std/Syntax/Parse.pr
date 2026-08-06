@@ -41,12 +41,24 @@ pub fn parse_program_tokens(
 
 -- | Lex, lay out, and parse one complete Prism source file.
 pub fn parse_source(text : String) : Result(List(Item), ParseFailure) =
+  parse_source_budgeted(depth_budget(), text)
+
+-- | `parse_source` under an explicit recursion budget. The default budget is
+-- deep enough that no realistic program meets it; a harness probing the depth
+-- contract (acceptance below the budget, the structured refusal beyond it)
+-- passes a small budget here instead of paying for thousands of nesting
+-- levels. The refusal machinery exercised is identical at every budget.
+pub fn parse_source_budgeted(
+  budget : Int,
+  text : String
+) : Result(List(Item), ParseFailure) =
   match layout(text) of
     Err(e) => Err(ParseLex(e))
     Ok(tokens) =>
-      match parse_program_tokens(tokens, str_len(text)) of
-        Ok(items) => Ok(items)
-        Err(d) => Err(ParseSyntax(d))
+      match parse_program(cursor_of(tokens, str_len(text)), budget) of
+        PTook(items, _c) => Ok(items)
+        PStuck(c) => Err(ParseSyntax(cursor_diagnostic(c)))
+        PFault(d) => Err(ParseSyntax(d))
 
 -- | Parse one expression from a token cursor and require complete consumption.
 pub fn parse_expr_tokens(

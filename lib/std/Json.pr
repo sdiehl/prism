@@ -50,6 +50,8 @@ import Data.String (..)
 
 import Data.Char (is_digit)
 
+import Data.Bytes (Bytes, bytes_concat, bytes_index, bytes_length, bytes_slice, bytes_to_string, string_to_bytes)
+
 -- | A dynamic JSON value. Numbers split into `JInt` and `JFloat` so the
 -- exact-or-error decode is a structural distinction rather than a hidden flag: an
 -- object is an association list in parse order (duplicate keys are preserved, not
@@ -98,16 +100,24 @@ fn char_str(cp : Int) : String = str_of_char(chr(cp))
 -- opaque. `is_digit` (Data.Char) covers `0`-`9`.
 fn is_ws(c : Int) : Bool = c == 32 || c == 9 || c == 10 || c == 13
 
--- Advance past any run of JSON whitespace starting at `i`.
-fn skip_ws(s : String, i : Int) : Int =
-  if i < str_len(s) && is_ws(char_at(s, i)) then
-    skip_ws(s, i + 1)
+-- The scanner walks raw UTF-8 bytes: `bytes_index` is constant-time where the
+-- codepoint accessors re-walk the prefix on every call, which turned the whole
+-- parser quadratic in the input. Every structural byte JSON dispatches on is
+-- ASCII, and a UTF-8 lead or continuation byte is >= 128, so byte comparisons
+-- against ASCII codes can never misfire inside multi-byte text.
+
+-- Advance past any run of JSON whitespace starting at byte `i`.
+fn skip_ws(b : Bytes, n : Int, i : Int) : Int =
+  if i < n && is_ws(bytes_index(b, i)) then
+    skip_ws(b, n, i + 1)
   else
     i
 
--- The 1-based line and column of index `i`, for a positioned error.
+-- The 1-based line and column of byte index `i`, for a positioned error. The
+-- column counts codepoints, so a continuation byte advances the walk without
+-- advancing the column.
 fn line_col_go(
-  s : String,
+  b : Bytes,
   j : Int,
   i : Int,
   line : Int,
@@ -115,18 +125,30 @@ fn line_col_go(
 ) : (Int, Int) =
   if j >= i then
     (line, col)
-  elif char_at(s, j) == 10 then
-    line_col_go(s, j + 1, i, line + 1, 1)
   else
-    line_col_go(s, j + 1, i, line, col + 1)
+    let c = bytes_index(b, j)
+    if c == 10 then
+      line_col_go(b, j + 1, i, line + 1, 1)
+    elif c >= 128 && c < 192 then
+      line_col_go(b, j + 1, i, line, col)
+    else
+      line_col_go(b, j + 1, i, line, col + 1)
 
-fn mk_err(s : String, i : Int, msg : String) : JsonError =
-  let (l, c) = line_col_go(s, 0, min(i, str_len(s)), 1, 1)
+fn mk_err(b : Bytes, n : Int, i : Int, msg : String) : JsonError =
+  let (l, c) = line_col_go(b, 0, min(i, n), 1, 1)
   JsonError(msg, l, c)
 
--- True when the literal `lit` occurs at index `i`.
-fn lit_at(s : String, i : Int, lit : String) : Bool =
-  i + str_len(lit) <= str_len(s) && str_eq(substring(s, i, str_len(lit)), lit)
+-- True when the ASCII literal `lit` occurs at byte index `i`.
+fn lit_at(b : Bytes, n : Int, i : Int, lit : String) : Bool =
+  i + byte_len(lit) <= n && lit_at_go(b, i, lit, 0, byte_len(lit))
+
+fn lit_at_go(b : Bytes, i : Int, lit : String, k : Int, m : Int) : Bool =
+  if k >= m then
+    true
+  elif bytes_index(b, i + k) == byte_at(lit, k) then
+    lit_at_go(b, i, lit, k + 1, m)
+  else
+    false
 
 -- The value of a single hex digit, or `None`.
 fn hex_val(c : Int) : Option(Int) =
@@ -139,160 +161,190 @@ fn hex_val(c : Int) : Option(Int) =
   else
     None
 
--- Four hex digits at `[i, i+4)` as a code point, or `None`.
-fn hex4(s : String, i : Int) : Option(Int) =
-  if i + 4 > str_len(s) then
+-- Four hex digits at bytes `[i, i+4)` as a code point, or `None`.
+fn hex4(b : Bytes, n : Int, i : Int) : Option(Int) =
+  if i + 4 > n then
     None
   else
     match ((
-          hex_val(char_at(s, i)),
-          hex_val(char_at(s, i + 1)),
-          hex_val(char_at(s, i + 2)),
-          hex_val(char_at(s, i + 3)),
+          hex_val(bytes_index(b, i)),
+          hex_val(bytes_index(b, i + 1)),
+          hex_val(bytes_index(b, i + 2)),
+          hex_val(bytes_index(b, i + 3)),
         )) of
-      (Some(a), Some(b), Some(c), Some(d)) =>
-        Some(((a * 16 + b) * 16 + c) * 16 + d)
+      (Some(h1), Some(h2), Some(h3), Some(h4)) =>
+        Some(((h1 * 16 + h2) * 16 + h3) * 16 + h4)
       _ => None
 
 -- Parse a JSON string body starting at the opening quote `i`, returning the
--- decoded string and the index just past the closing quote.
-fn parse_string(s : String, i : Int) : Result((String, Int), JsonError) =
-  str_chars(s, i + 1, "")
-
-fn str_chars(
-  s : String,
-  i : Int,
-  acc : String
+-- decoded string and the byte index just past the closing quote. The raw run
+-- between escapes is sliced from the input whole, so an escape-free string
+-- costs one slice; only an escape forces the decoded prefix to be copied.
+fn parse_string(
+  b : Bytes,
+  n : Int,
+  i : Int
 ) : Result((String, Int), JsonError) =
-  if i >= str_len(s) then
-    Err(mk_err(s, i, "unterminated string"))
+  str_run(b, n, i + 1, i + 1, bytes_slice(b, 0, 0))
+
+-- Scan the raw run that began at `start` with the cursor at `j`; `acc` holds
+-- the decoded bytes before `start`.
+fn str_run(
+  b : Bytes,
+  n : Int,
+  start : Int,
+  j : Int,
+  acc : Bytes
+) : Result((String, Int), JsonError) =
+  if j >= n then
+    Err(mk_err(b, n, j, "unterminated string"))
   else
-    let c = char_at(s, i)
+    let c = bytes_index(b, j)
     if c == 34 then
-      Ok((acc, i + 1))
+      let whole = bytes_concat(acc, bytes_slice(b, start, j - start))
+      match bytes_to_string(whole) of
+        Some(text) => Ok((text, j + 1))
+        None => Err(mk_err(b, n, j, "invalid UTF-8 in string"))
     elif c == 92 then
-      parse_escape(s, i + 1, acc)
+      parse_escape(
+          b,
+          n,
+          j + 1,
+          bytes_concat(acc, bytes_slice(b, start, j - start)),
+        )
     elif c < 32 then
-      Err(mk_err(s, i, "unescaped control character in string"))
+      Err(mk_err(b, n, j, "unescaped control character in string"))
     else
-      str_chars(s, i + 1, concat(acc, char_str(c)))
+      str_run(b, n, start, j + 1, acc)
+
+-- Append one decoded scalar to `acc` and resume the raw run at `k`.
+fn esc_emit(
+  b : Bytes,
+  n : Int,
+  k : Int,
+  acc : Bytes,
+  cp : Int
+) : Result((String, Int), JsonError) =
+  str_run(b, n, k, k, bytes_concat(acc, string_to_bytes(char_str(cp))))
 
 fn parse_escape(
-  s : String,
+  b : Bytes,
+  n : Int,
   i : Int,
-  acc : String
+  acc : Bytes
 ) : Result((String, Int), JsonError) =
-  if i >= str_len(s) then
-    Err(mk_err(s, i, "unterminated escape"))
+  if i >= n then
+    Err(mk_err(b, n, i, "unterminated escape"))
   else
-    let c = char_at(s, i)
+    let c = bytes_index(b, i)
     if c == 34 then
-      str_chars(s, i + 1, concat(acc, char_str(34)))
+      esc_emit(b, n, i + 1, acc, 34)
     elif c == 92 then
-      str_chars(s, i + 1, concat(acc, char_str(92)))
+      esc_emit(b, n, i + 1, acc, 92)
     elif c == 47 then
-      str_chars(s, i + 1, concat(acc, char_str(47)))
+      esc_emit(b, n, i + 1, acc, 47)
     elif c == 98 then
-      str_chars(s, i + 1, concat(acc, char_str(8)))
+      esc_emit(b, n, i + 1, acc, 8)
     elif c == 102 then
-      str_chars(s, i + 1, concat(acc, char_str(12)))
+      esc_emit(b, n, i + 1, acc, 12)
     elif c == 110 then
-      str_chars(s, i + 1, concat(acc, char_str(10)))
+      esc_emit(b, n, i + 1, acc, 10)
     elif c == 114 then
-      str_chars(s, i + 1, concat(acc, char_str(13)))
+      esc_emit(b, n, i + 1, acc, 13)
     elif c == 116 then
-      str_chars(s, i + 1, concat(acc, char_str(9)))
+      esc_emit(b, n, i + 1, acc, 9)
     elif c == 117 then
-      parse_unicode(s, i + 1, acc)
+      parse_unicode(b, n, i + 1, acc)
     else
-      Err(mk_err(s, i, "invalid escape"))
+      Err(mk_err(b, n, i, "invalid escape"))
 
 -- Parse a `\uXXXX` escape (the `\u` already consumed), joining a surrogate pair
 -- into one scalar. A lone or mismatched surrogate is an error, so the decoded
 -- string is always valid Unicode.
 fn parse_unicode(
-  s : String,
+  b : Bytes,
+  n : Int,
   i : Int,
-  acc : String
+  acc : Bytes
 ) : Result((String, Int), JsonError) =
-  match hex4(s, i) of
-    None => Err(mk_err(s, i, "invalid \\u escape"))
+  match hex4(b, n, i) of
+    None => Err(mk_err(b, n, i, "invalid \\u escape"))
     Some(cp) =>
       if cp >= 55296 && cp <= 56319 then
-        if lit_at(s, i + 4, "\\u") then
-          match hex4(s, i + 6) of
+        if lit_at(b, n, i + 4, "\\u") then
+          match hex4(b, n, i + 6) of
             Some(lo) =>
               if lo >= 56320 && lo <= 57343 then
                 let scalar = 65536 + (cp - 55296) * 1024 + lo - 56320
-                str_chars(s, i + 10, concat(acc, char_str(scalar)))
+                esc_emit(b, n, i + 10, acc, scalar)
               else
-                Err(mk_err(s, i, "invalid low surrogate in \\u escape"))
-            None => Err(mk_err(s, i, "invalid \\u escape"))
+                Err(mk_err(b, n, i, "invalid low surrogate in \\u escape"))
+            None => Err(mk_err(b, n, i, "invalid \\u escape"))
         else
-          Err(mk_err(s, i, "unpaired high surrogate in \\u escape"))
+          Err(mk_err(b, n, i, "unpaired high surrogate in \\u escape"))
       elif cp >= 56320 && cp <= 57343 then
-        Err(mk_err(s, i, "unpaired low surrogate in \\u escape"))
+        Err(mk_err(b, n, i, "unpaired low surrogate in \\u escape"))
       else
-        str_chars(s, i + 4, concat(acc, char_str(cp)))
+        esc_emit(b, n, i + 4, acc, cp)
 
 -- Number lexing: validate a JSON number's grammar and find its end. Returns the
 -- end index and whether the token has a fraction or exponent (so is a float).
 
-fn skip_digits(s : String, i : Int) : Int =
-  if i < str_len(s) && is_digit(char_at(s, i)) then
-    skip_digits(s, i + 1)
+fn skip_digits(b : Bytes, n : Int, i : Int) : Int =
+  if i < n && is_digit(bytes_index(b, i)) then
+    skip_digits(b, n, i + 1)
   else
     i
 
 -- Integer part after the optional sign: a single `0`, or `[1-9][0-9]*`.
-fn lex_int_part(s : String, i : Int) : Option(Int) =
-  if i >= str_len(s) || not(is_digit(char_at(s, i))) then
+fn lex_int_part(b : Bytes, n : Int, i : Int) : Option(Int) =
+  if i >= n || not(is_digit(bytes_index(b, i))) then
     None
-  elif char_at(s, i) == 48 then
+  elif bytes_index(b, i) == 48 then
     Some(i + 1)
   else
-    Some(skip_digits(s, i))
+    Some(skip_digits(b, n, i))
 
 -- Optional fraction: a `.` followed by at least one digit.
-fn lex_frac(s : String, i : Int) : Option((Int, Bool)) =
-  if i < str_len(s) && char_at(s, i) == 46 then
+fn lex_frac(b : Bytes, n : Int, i : Int) : Option((Int, Bool)) =
+  if i < n && bytes_index(b, i) == 46 then
     let j = i + 1
-    if j < str_len(s) && is_digit(char_at(s, j)) then
-      Some((skip_digits(s, j), true))
+    if j < n && is_digit(bytes_index(b, j)) then
+      Some((skip_digits(b, n, j), true))
     else
       None
   else
     Some((i, false))
 
 -- Optional exponent: `e`/`E`, an optional sign, then at least one digit.
-fn lex_exp(s : String, i : Int) : Option((Int, Bool)) =
-  if (i < str_len(s) && (char_at(s, i) == 101 || char_at(s, i) == 69)) then
+fn lex_exp(b : Bytes, n : Int, i : Int) : Option((Int, Bool)) =
+  if i < n && (bytes_index(b, i) == 101 || bytes_index(b, i) == 69) then
     let j =
-      if (i + 1 < str_len(s)
-          && (char_at(s, i + 1) == 43 || char_at(s, i + 1) == 45)) then
+      if (i + 1 < n
+          && (bytes_index(b, i + 1) == 43 || bytes_index(b, i + 1) == 45)) then
         i + 2
       else
         i + 1
-    if j < str_len(s) && is_digit(char_at(s, j)) then
-      Some((skip_digits(s, j), true))
+    if j < n && is_digit(bytes_index(b, j)) then
+      Some((skip_digits(b, n, j), true))
     else
       None
   else
     Some((i, false))
 
-fn lex_number(s : String, i0 : Int) : Option((Int, Bool)) =
+fn lex_number(b : Bytes, n : Int, i0 : Int) : Option((Int, Bool)) =
   let i1 =
-    if i0 < str_len(s) && char_at(s, i0) == 45 then
+    if i0 < n && bytes_index(b, i0) == 45 then
       i0 + 1
     else
       i0
-  match lex_int_part(s, i1) of
+  match lex_int_part(b, n, i1) of
     None => None
     Some(i2) =>
-      match lex_frac(s, i2) of
+      match lex_frac(b, n, i2) of
         None => None
         Some((i3, hf)) =>
-          match lex_exp(s, i3) of
+          match lex_exp(b, n, i3) of
             None => None
             Some((i4, he)) => Some((i4, hf || he))
 
@@ -323,19 +375,25 @@ fn classify_number(
 
 fn parse_number(
   lossy : Bool,
-  s : String,
+  b : Bytes,
+  n : Int,
   i : Int
 ) : Result((Json, Int), JsonError) =
-  match lex_number(s, i) of
-    None => Err(mk_err(s, i, "invalid number"))
+  match lex_number(b, n, i) of
+    None => Err(mk_err(b, n, i, "invalid number"))
     Some((end, is_dec)) =>
-      let lexeme = substring(s, i, end - i)
+      -- A validated number lexeme is pure ASCII, so the conversion is total.
+      let lexeme =
+        match bytes_to_string(bytes_slice(b, i, end - i)) of
+          Some(text) => text
+          None => ""
       match classify_number(lossy, lexeme, is_dec) of
         Some(v) => Ok((v, end))
         None =>
           Err(
               mk_err(
-                  s,
+                  b,
+                  n,
                   i,
                   "number not exactly representable (use decode_lossy)",
                 ),
@@ -345,130 +403,137 @@ fn parse_number(
 
 fn parse_value(
   lossy : Bool,
-  s : String,
+  b : Bytes,
+  n : Int,
   i : Int,
   d : Int
 ) : Result((Json, Int), JsonError) =
-  let j = skip_ws(s, i)
-  if j >= str_len(s) then
-    Err(mk_err(s, j, "unexpected end of input"))
+  let j = skip_ws(b, n, i)
+  if j >= n then
+    Err(mk_err(b, n, j, "unexpected end of input"))
   else
-    let c = char_at(s, j)
+    let c = bytes_index(b, j)
     if c == 123 then
-      parse_object(lossy, s, j, d)
+      parse_object(lossy, b, n, j, d)
     elif c == 91 then
-      parse_array(lossy, s, j, d)
+      parse_array(lossy, b, n, j, d)
     elif c == 34 then
-      match parse_string(s, j) of
+      match parse_string(b, n, j) of
         Ok((str, k)) => Ok((JStr(str), k))
         Err(e) => Err(e)
     elif c == 45 || is_digit(c) then
-      parse_number(lossy, s, j)
-    elif lit_at(s, j, "true") then
+      parse_number(lossy, b, n, j)
+    elif lit_at(b, n, j, "true") then
       Ok((JBool(true), j + 4))
-    elif lit_at(s, j, "false") then
+    elif lit_at(b, n, j, "false") then
       Ok((JBool(false), j + 5))
-    elif lit_at(s, j, "null") then
+    elif lit_at(b, n, j, "null") then
       Ok((JNull, j + 4))
     else
-      Err(mk_err(s, j, "unexpected character"))
+      Err(mk_err(b, n, j, "unexpected character"))
 
 fn parse_array(
   lossy : Bool,
-  s : String,
+  b : Bytes,
+  n : Int,
   i : Int,
   d : Int
 ) : Result((Json, Int), JsonError) =
   if d + 1 > max_depth() then
-    Err(mk_err(s, i, "maximum nesting depth exceeded"))
+    Err(mk_err(b, n, i, "maximum nesting depth exceeded"))
   else
-    let j = skip_ws(s, i + 1)
-    if j < str_len(s) && char_at(s, j) == 93 then
+    let j = skip_ws(b, n, i + 1)
+    if j < n && bytes_index(b, j) == 93 then
       Ok((JArr(Nil), j + 1))
     else
-      array_elems(lossy, s, i + 1, d + 1, Nil)
+      array_elems(lossy, b, n, i + 1, d + 1, Nil)
 
 fn array_elems(
   lossy : Bool,
-  s : String,
+  b : Bytes,
+  n : Int,
   i : Int,
   d : Int,
   acc : List(Json)
 ) : Result((Json, Int), JsonError) =
-  match parse_value(lossy, s, i, d) of
+  match parse_value(lossy, b, n, i, d) of
     Err(e) => Err(e)
     Ok((v, k)) =>
       let acc2 = Cons(v, acc)
-      let j = skip_ws(s, k)
-      if j >= str_len(s) then
-        Err(mk_err(s, j, "unterminated array"))
+      let j = skip_ws(b, n, k)
+      if j >= n then
+        Err(mk_err(b, n, j, "unterminated array"))
       else
-        let c = char_at(s, j)
+        let c = bytes_index(b, j)
         if c == 93 then
           Ok((JArr(reverse(acc2)), j + 1))
         elif c == 44 then
-          array_elems(lossy, s, j + 1, d, acc2)
+          array_elems(lossy, b, n, j + 1, d, acc2)
         else
-          Err(mk_err(s, j, "expected ',' or ']' in array"))
+          Err(mk_err(b, n, j, "expected ',' or ']' in array"))
 
 fn parse_object(
   lossy : Bool,
-  s : String,
+  b : Bytes,
+  n : Int,
   i : Int,
   d : Int
 ) : Result((Json, Int), JsonError) =
   if d + 1 > max_depth() then
-    Err(mk_err(s, i, "maximum nesting depth exceeded"))
+    Err(mk_err(b, n, i, "maximum nesting depth exceeded"))
   else
-    let j = skip_ws(s, i + 1)
-    if j < str_len(s) && char_at(s, j) == 125 then
+    let j = skip_ws(b, n, i + 1)
+    if j < n && bytes_index(b, j) == 125 then
       Ok((JObj(Nil), j + 1))
     else
-      object_members(lossy, s, i + 1, d + 1, Nil)
+      object_members(lossy, b, n, i + 1, d + 1, Nil)
 
 fn object_members(
   lossy : Bool,
-  s : String,
+  b : Bytes,
+  n : Int,
   i : Int,
   d : Int,
   acc : List((String, Json))
 ) : Result((Json, Int), JsonError) =
-  let j = skip_ws(s, i)
-  if j >= str_len(s) || char_at(s, j) /= 34 then
-    Err(mk_err(s, j, "expected string key in object"))
+  let j = skip_ws(b, n, i)
+  if j >= n || bytes_index(b, j) /= 34 then
+    Err(mk_err(b, n, j, "expected string key in object"))
   else
-    match parse_string(s, j) of
+    match parse_string(b, n, j) of
       Err(e) => Err(e)
       Ok((key, k)) =>
-        let k2 = skip_ws(s, k)
-        if k2 >= str_len(s) || char_at(s, k2) /= 58 then
-          Err(mk_err(s, k2, "expected ':' after object key"))
+        let k2 = skip_ws(b, n, k)
+        if k2 >= n || bytes_index(b, k2) /= 58 then
+          Err(mk_err(b, n, k2, "expected ':' after object key"))
         else
-          match parse_value(lossy, s, k2 + 1, d) of
+          match parse_value(lossy, b, n, k2 + 1, d) of
             Err(e) => Err(e)
             Ok((v, m)) =>
               let acc2 = Cons((key, v), acc)
-              let m2 = skip_ws(s, m)
-              if m2 >= str_len(s) then
-                Err(mk_err(s, m2, "unterminated object"))
+              let m2 = skip_ws(b, n, m)
+              if m2 >= n then
+                Err(mk_err(b, n, m2, "unterminated object"))
               else
-                let c = char_at(s, m2)
+                let c = bytes_index(b, m2)
                 if c == 125 then
                   Ok((JObj(reverse(acc2)), m2 + 1))
                 elif c == 44 then
-                  object_members(lossy, s, m2 + 1, d, acc2)
+                  object_members(lossy, b, n, m2 + 1, d, acc2)
                 else
-                  Err(mk_err(s, m2, "expected ',' or '\}' in object"))
+                  Err(mk_err(b, n, m2, "expected ',' or '\}' in object"))
 
 fn decode_with(lossy : Bool, s : String) : Result(Json, JsonError) =
-  match parse_value(lossy, s, 0, 0) of
+  let b = string_to_bytes(s)
+  let n = bytes_length(b)
+  match parse_value(lossy, b, n, 0, 0) of
     Err(e) => Err(e)
     Ok((v, k)) =>
-      let j = skip_ws(s, k)
-      if j >= str_len(s) then
+      let j = skip_ws(b, n, k)
+      if j >= n then
         Ok(v)
       else
-        Err(mk_err(s, j, "trailing input after top-level value"))
+        Err(mk_err(b, n, j, "trailing input after top-level value"))
 
 -- | Decode a JSON document with exact number semantics: a number decodes only
 -- when its lexeme is already canonical, otherwise a decode error. Total: any
@@ -498,15 +563,32 @@ pub fn decode_lossy(s : String) : Result(Json, JsonError) = decode_with(true, s)
 
 -- Escape a string into a canonical JSON string literal: the two mandatory
 -- escapes, the five short control escapes, and `\uXXXX` for the remaining
--- controls. Non-ASCII scalars pass through as UTF-8.
+-- controls. Non-ASCII scalars pass through as UTF-8. The walk is byte-level
+-- and flushes the raw run between escapes as one slice, so a string with no
+-- escapes is copied once; every escape byte is ASCII, so a run boundary can
+-- never split a multi-byte scalar.
 fn encode_string(s : String) : String =
-  concat("\"", concat(esc_go(s, 0, ""), "\""))
+  let b = string_to_bytes(s)
+  let n = bytes_length(b)
+  concat("\"", concat(esc_run(b, n, 0, 0, ""), "\""))
 
-fn esc_go(s : String, i : Int, acc : String) : String =
-  if i >= str_len(s) then
-    acc
+fn esc_run(b : Bytes, n : Int, start : Int, j : Int, acc : String) : String =
+  if j >= n then
+    concat(acc, raw_run(b, start, j))
   else
-    esc_go(s, i + 1, concat(acc, esc_char(char_at(s, i))))
+    let c = bytes_index(b, j)
+    if c == 34 || c == 92 || c < 32 then
+      let flushed = concat(concat(acc, raw_run(b, start, j)), esc_char(c))
+      esc_run(b, n, j + 1, j + 1, flushed)
+    else
+      esc_run(b, n, start, j + 1, acc)
+
+-- The bytes `[start, end)` as text. A run breaks only at ASCII escape bytes,
+-- so the slice is always whole scalars; the empty fallback is unreachable.
+fn raw_run(b : Bytes, start : Int, end : Int) : String =
+  match bytes_to_string(bytes_slice(b, start, end - start)) of
+    Some(text) => text
+    None => ""
 
 fn esc_char(c : Int) : String =
   if c == 34 then

@@ -1,6 +1,6 @@
 # Spectra
 
-Spectra is a typed Prism presentation DSL that lowers deterministic deck values to inspectable Typst and PDF artifacts.
+Spectra is a self-indulgent presentation generator in the finest tradition of functional languages compiling their own presentations in themselves. It is also, more soberly, a typed Prism presentation DSL that lowers deterministic deck values to inspectable Typst and PDF artifacts; the flagship deck is an introduction to Prism whose every slide is built by the mechanism it explains, quoting its own source through `reflect`.
 
 The implementation is Prism throughout. `src/Main.pr` is the standalone CLI; `Spectra.pr` is the public authoring facade; `Backend.pr` lowers the backend-neutral layout tree through the separate `typst` package.
 

@@ -5,8 +5,8 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 ## Merkle root
 
 - **Scheme**: `prism-core-hash-v2`
-- **Hash**: `5f74ceb8cdbb6bee38bb1d4797b4d7688c207bf37e02c35c3cc5ef7876557fa3`
-- **Compiler version**: Prism v0.16.0
+- **Hash**: `bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef`
+- **Compiler version**: Prism v0.17.0
 
 ## Modules
 
@@ -15,7 +15,7 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 - [Control.Layer](./control-layer.md) - The children-and-rebuild interface a generic traversal runs on, and the collecting queries that ride it.
 - [Control.Reader](./control-reader.md) - The canonical `Reader(r)` effect: a read-only ambient environment.
 - [Control.Rewrite](./control-rewrite.md) - Strategy combinators: a pass as a composition of small local rules instead of a hand-written recursive match.
-- [Control.State](./control-state.md) - The canonical `State(s)` effect: a threaded piece of mutable-looking state, interpreted by parameter passing.
+- [Control.State](./control-state.md) - The canonical `State(s)` effect: a threaded piece of mutable-looking state, interpreted through a private cell scoped to the run.
 - [Control.Validate](./control-validate.md) - Validation as an algebraic effect.
 - [Control.Writer](./control-writer.md) - The canonical `Writer(w)` effect: accumulate output on the side.
 - [Data.Bind](./data-bind.md) - Binders, the two nameless coordinate systems, and the canonical rendering that makes alpha-equivalent terms identical.
@@ -33,13 +33,16 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 - [Data.Map](./data-map.md) - Persistent ordered map: an AVL-balanced binary search tree over keys.
 - [Data.Maybe](./data-maybe.md) - Operations over `Option`.
 - [Data.Monad](./data-monad.md) - Generic operations derived from the `Applicative` and `Monad` classes.
+- [Data.Name](./data-name.md) - Deterministic nominal identities with phantom namespace brands.
 - [Data.Ordered](./data-ordered.md) - Explicit ordering witnesses: the branded, statically coherent path to ordered maps.
 - [Data.Pretty](./data-pretty.md) - A Leijen-style pretty printer.
 - [Data.Result](./data-result.md) - Operations over `Result`.
+- [Data.Scope](./data-scope.md) - Lexical scope resolution over branded names: a spelling-to-binder stack.
 - [Data.Set](./data-set.md) - Ordered sets, reusing the balanced-tree map.
 - [Data.String](./data-string.md) - String operations, byte-oriented and ASCII-accurate.
 - [Data.Tensor](./data-tensor.md) - Dense multi-dimensional tensors over a flat `FloatBuf`.
 - [Data.UnionFind](./data-unionfind.md) - A persistent union-find (disjoint-set) over an ordered key type.
+- [Data.UnionFind.Payload](./data-unionfind-payload.md) - A persistent union-find whose canonical roots carry a descriptor payload.
 - [Data.Validation](./data-validation.md) - `Validation`, the error-accumulating sibling of `Result`.
 - [Data.Vec](./data-vec.md) - Fixed-length vectors indexed by a `Nat` dimension.
 - [Syntax.Analysis](./syntax-analysis.md) - Analysis walks over the surface syntax tree.

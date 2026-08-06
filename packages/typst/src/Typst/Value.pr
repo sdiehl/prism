@@ -1,0 +1,100 @@
+-- | Typst's value vocabulary as Prism types.
+--
+-- A length is not a string with a suffix: it is a constructor whose unit is
+-- part of the type, an invalid one is unrepresentable, and the rendering owns
+-- the spelling in exactly one place. The same holds for colors, alignment,
+-- and direction. Every `show_*` function here produces the literal Typst
+-- spelling and nothing else; the `Typst` root turns these into code
+-- expressions.
+
+-- | A length with its unit: points, ems, centimeters, fractions, or percent.
+pub type Length
+  = Pt(Int)
+  | Em(Int)
+  | Cm(Int)
+  | Fr(Int)
+  | Percent(Int)
+  deriving (Eq, Show)
+
+-- | A color: an RGB triple or a grayscale luma, each channel `0..255`. The
+-- renderer clamps out-of-range channels rather than emitting invalid syntax.
+pub type Color = Rgb(Int, Int, Int) | Luma(Int) deriving (Eq, Show)
+
+-- | A one-axis alignment. Typst's two-axis alignments compose with `+` at the
+-- call site; this type owns the nine primitive spellings.
+pub type Alignment
+  = AStart
+  | AEnd
+  | ALeft
+  | ACenter
+  | ARight
+  | ATop
+  | AHorizon
+  | ABottom
+  deriving (Eq, Show)
+
+-- | A layout direction.
+pub type Dir
+  = Ltr
+  | Rtl
+  | Ttb
+  | Btt
+  deriving (Eq, Show)
+
+-- | The literal Typst spelling of a length.
+--
+-- ```prism
+-- show_length(Pt(12))
+-- ```
+-- ```output
+-- 12pt
+-- ```
+pub fn show_length(l : Length) : String =
+  match l of
+    Pt(n) => "{n}pt"
+    Em(n) => "{n}em"
+    Cm(n) => "{n}cm"
+    Fr(n) => "{n}fr"
+    Percent(n) => "{n}%"
+
+fn clamp_channel(n : Int) : Int =
+  if n < 0 then
+    0
+  elif n > 255 then
+    255
+  else
+    n
+
+-- | The literal Typst spelling of a color.
+--
+-- ```prism
+-- show_color(Rgb(109, 40, 217))
+-- ```
+-- ```output
+-- rgb(109, 40, 217)
+-- ```
+pub fn show_color(c : Color) : String =
+  match c of
+    Rgb(r, g, b) =>
+      "rgb({clamp_channel(r)}, {clamp_channel(g)}, {clamp_channel(b)})"
+    Luma(n) => "luma({clamp_channel(n)})"
+
+-- | The literal Typst spelling of an alignment.
+pub fn show_alignment(a : Alignment) : String =
+  match a of
+    AStart => "start"
+    AEnd => "end"
+    ALeft => "left"
+    ACenter => "center"
+    ARight => "right"
+    ATop => "top"
+    AHorizon => "horizon"
+    ABottom => "bottom"
+
+-- | The literal Typst spelling of a direction.
+pub fn show_dir(d : Dir) : String =
+  match d of
+    Ltr => "ltr"
+    Rtl => "rtl"
+    Ttb => "ttb"
+    Btt => "btt"

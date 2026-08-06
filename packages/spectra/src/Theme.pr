@@ -1,7 +1,18 @@
 -- | Theme values for Spectra decks.
 --
 -- Themes are ordinary immutable Prism data. The Typst backend is the only
--- place that interprets these values as concrete page and text settings.
+-- place that interprets these values as concrete page and text settings, so a
+-- custom theme is a record update away from a built-in one:
+--
+-- ```prism
+-- fn main() =
+--   println(prism_theme.name)
+--   println(Theme { ..prism_theme, name = "mine" }.name)
+-- ```
+-- ```output
+-- prism
+-- mine
+-- ```
 
 pub type Theme = Theme {
   name: String,

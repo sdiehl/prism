@@ -1,0 +1,63 @@
+-- Negative differential witness: consume a Rust `syntax-diagnostics`
+-- artifact, run the embedded malformed source through the Prism-owned
+-- frontend, and compare the semantic projection of the refusal: code, phase,
+-- span, canonical expected set, and related spans. Message prose is
+-- renderer-owned and deliberately not compared; a lex-phase refusal compares
+-- its code and offset, since the Prism lexer reports an offset rather than a
+-- span. Prints `ok` on agreement and one named divergence otherwise.
+
+import Syntax.Lex (..)
+
+import Syntax.Codec (..)
+
+import Syntax.Parse (..)
+
+import Syntax.Diagnostic (..)
+
+import Syntax.Source (Span)
+
+fn sorted(xs : List(String)) : List(String) = sort(xs)
+
+fn same_related(a : List(Span), b : List(Span)) : Bool =
+  match (a, b) of
+    (Nil, Nil) => true
+    (Cons(x, xs), Cons(y, ys)) => x == y && same_related(xs, ys)
+    _ => false
+
+fn against(text : String, want : Diagnostic) : String =
+  match parse_source(text) of
+    Ok(_items) => "accepted a source the oracle refuses"
+    Err(ParseLex(e)) =>
+      match want.phase of
+        DPLex =>
+          if (lex_code(e) == want.code && lex_offset(e) == want.span.lo) then
+            "ok"
+          else
+            "lex divergence: got {lex_code(e)}@{lex_offset(e)}, want {want.code}@{want.span.lo}"
+        DPParse =>
+          "phase divergence: got lex {lex_code(e)}, want parse {want.code}"
+    Err(ParseSyntax(d)) =>
+      match want.phase of
+        DPLex => "phase divergence: got parse {d.code}, want lex {want.code}"
+        DPParse =>
+          if d.code /= want.code then
+            "code divergence: got {d.code}, want {want.code}"
+          elif not(d.span == want.span) then
+            "span divergence: got {d.span.lo}:{d.span.hi}, want {want.span.lo}:{want.span.hi}"
+          elif sorted(d.expected) /= sorted(want.expected) then
+            "expected-set divergence at {d.span.lo}"
+          elif not(same_related(d.related, want.related)) then
+            "related divergence at {d.span.lo}"
+          else
+            "ok"
+
+fn main() =
+  match decode_diagnostics(read_file(arg(0))) of
+    Err(e) => println("decode {codec_error_message(e)}")
+    Ok(doc) =>
+      match doc.diagnostics of
+        Cons(want, Nil) => println(against(doc.source.text, want))
+        _ =>
+          println(
+              "oracle carries {show_int(length(doc.diagnostics))} diagnostics, expected one",
+            )

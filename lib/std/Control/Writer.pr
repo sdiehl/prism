@@ -2,13 +2,14 @@
 --
 -- `tell(m)` appends `m` to a log the producer never sees; `run_writer` returns
 -- the computation's result paired with the whole log in emission order. The
--- handler threads the growing log as a parameter (tail-resumptive, so it
--- fuses), so nothing shared or mutable is involved. `eval_writer` keeps only
--- the result, `exec_writer` only the log, and `listen`/`censor` observe or
--- rewrite an inner computation's log while staying inside the effect.
+-- handler accumulates the log in a cell private to the run, and every clause
+-- resumes exactly once in tail position, so the compiler is free to lower the
+-- whole run to direct updates. `eval_writer` keeps only the result,
+-- `exec_writer` only the log, and `listen`/`censor` observe or rewrite an
+-- inner computation's log while staying inside the effect.
 -- Opt-in: not in Base.
 
-import Data.List (append, reverse)
+import Data.List (reverse)
 
 -- | Append one item of type `w` to the accumulated log.
 pub effect Writer(w)
@@ -24,11 +25,14 @@ pub effect Writer(w)
 -- ((), [started, finished])
 -- ```
 pub fn run_writer(action : () -> a ! {Writer(w) | e}) : (a, List(w)) =
-  let f =
+  var log := Nil
+  let r =
     handle action() with
-      tell(m) resume k => \(log) -> k(())(Cons(m, log))
-      return r => \(log) -> (r, reverse(log))
-  f(Nil)
+      tell(m) resume k =>
+        log := Cons(m, log)
+        k(())
+      return r => r
+  (r, reverse(log))
 
 -- | Run `action` and keep only its result, discarding the log.
 pub fn eval_writer(action : () -> a ! {Writer(w) | e}) : a =

@@ -2,7 +2,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-const INTENTIONAL_DOC_VARIANTS: &[&str] = &["player_manual.pr"];
+// The docs copy of `mask.pr` is a deliberately minimal two-handler teaching
+// example; the corpus copy keeps the full nested-mask edge coverage.
+const INTENTIONAL_DOC_VARIANTS: &[&str] = &["mask.pr", "player_manual.pr"];
 
 const WASM_VISIBLE_DOC_EXAMPLES: &[&str] = &[
     "docs/examples/app_stack.pr",

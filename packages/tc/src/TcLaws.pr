@@ -1,0 +1,209 @@
+-- | The property laws of the type-and-row core, run by `prism test`.
+--
+-- These laws state the type-and-row core's contract executably: rigid
+-- substitution, zonking idempotence, unification order-independence,
+-- generalization's ambient-capture refusal, and deterministic row
+-- normalization. Generators stay shallow (types of depth three, labels from a
+-- fixed pool) because the laws are structural, not adversarial.
+
+import Tc (..)
+
+import Quickcheck (..)
+
+import Control.State (..)
+
+import Control.Fresh (Fresh, run_fresh)
+
+import Data.Name (Name, Binder, fresh_binder, bound_name)
+
+import Data.Result (result_or)
+
+import Data.List (map, reverse, foldl)
+
+import Data.Foldable (length)
+
+-- Deterministic rigid names for the substitution laws: identities 0 and 1 in
+-- each namespace, minted by replaying the same fresh seed.
+fn ty_names() : (Name(TyVarSpace), Name(TyVarSpace)) =
+  run_fresh(\() -> mint_two_tys())
+
+fn mint_two_tys() : (Name(TyVarSpace), Name(TyVarSpace)) ! {Fresh} =
+  let a = mint_ty()
+  let b = mint_ty()
+  (bound_name(a), bound_name(b))
+
+fn mint_ty() : Binder(TyVarSpace) ! {Fresh} = fresh_binder("t")
+
+-- A shallow generated type over the two rigid names and small metas.
+fn gen_vty() : Gen(VTy) = gen_sized(\(size) -> gen_vty_at(min(size, 3)))
+
+fn gen_vty_at(depth : Int) : Gen(VTy) =
+  if depth <= 0 then
+    gen_leaf()
+  else
+    gen_choose(gen_leaf(), [
+        gen_map(\(t) -> VCon("T", [t]), gen_vty_at(depth - 1)),
+        gen_map2(
+            \(a, b) -> VTuple([a, b]),
+            gen_vty_at(depth - 1),
+            gen_vty_at(depth - 1),
+          ),
+        gen_map2(
+            \(t, r) -> v_fun([t], c_ret(t, r)),
+            gen_vty_at(depth - 1),
+            gen_row_shallow(),
+          ),
+      ])
+
+fn gen_leaf() : Gen(VTy) =
+  match ty_names() of
+    (na, nb) =>
+      gen_choose(gen_const(VInt), [
+          gen_const(VBool),
+          gen_const(VUnit),
+          gen_const(VVar(na)),
+          gen_const(VVar(nb)),
+        ])
+
+fn gen_label_pool() : Gen(Label) =
+  gen_map(label0, gen_one_of("A", ["B", "C", "D"]))
+
+fn gen_row_shallow() : Gen(Row) =
+  gen_map(\(ls) -> row_closed(dedup_labels(ls)), gen_list(gen_label_pool()))
+
+fn dedup_labels(ls : List(Label)) : List(Label) =
+  foldl(\(acc, l) -> if label_in(acc, l) then acc else Cons(l, acc), Nil, ls)
+
+fn label_in(ls : List(Label), l : Label) : Bool =
+  match ls of
+    Nil => false
+    Cons(h, rest) => h.name == l.name || label_in(rest, l)
+
+-- A generated substitution binding the two rigid names.
+fn gen_subst() : Gen(Subst) =
+  match ty_names() of
+    (na, nb) =>
+      gen_map2(
+          \(t1, t2) -> subst_ty(subst_ty(subst_empty, na, t1), nb, t2),
+          gen_vty(),
+          gen_vty(),
+        )
+
+-- Law: applying the empty substitution is the identity.
+fn prop_subst_empty(t : VTy) : Bool = apply_v(subst_empty, t) == t
+
+test fn subst_empty_is_identity() =
+  match quickcheck(gen_vty(), prop_subst_empty) of
+    Passed(_n) => ()
+    Failed(_x, _i, _s, _z) => fail()
+
+-- Law: applying a composed substitution matches sequential application.
+fn prop_compose(pair : (Subst, (Subst, VTy))) : Bool =
+  match pair of
+    (s2, (s1, t)) =>
+      apply_v(subst_compose(s2, s1), t) == apply_v(s2, apply_v(s1, t))
+
+test fn compose_matches_sequential() =
+  match (quickcheck(
+        gen_pair(gen_subst(), gen_pair(gen_subst(), gen_vty())),
+        prop_compose,
+      )) of
+    Passed(_n) => ()
+    Failed(_x, _i, _s, _z) => fail()
+
+-- Law: zonking is idempotent, including through solved metas.
+fn zonk_twice_agrees(t : VTy) : Bool ! {State(Solver), TcFail} =
+  let m = fresh_ty_meta()
+  unify_v(m, t)
+  let once = zonk_v(m)
+  once == zonk_v(once)
+
+fn prop_zonk_idempotent(t : VTy) : Bool =
+  match run_tc(\() -> zonk_twice_agrees(t)) of
+    Ok(held) => held
+    Err(_e) => true
+
+test fn zonk_is_idempotent() =
+  match quickcheck(gen_vty(), prop_zonk_idempotent) of
+    Passed(_n) => ()
+    Failed(_x, _i, _s, _z) => fail()
+
+-- Law: unification is order-independent modulo canonical meta naming. The
+-- probe unifies a chain of metas against a generated type in both orders and
+-- compares the canonicalized rendering of the chain's head.
+fn chain_solved(t : VTy, flipped : Bool) : String ! {State(Solver), TcFail} =
+  let m1 = fresh_ty_meta()
+  let m2 = fresh_ty_meta()
+  if flipped then
+    unify_v(m2, t)
+    unify_v(m1, m2)
+  else
+    unify_v(m1, m2)
+    unify_v(m2, t)
+  show_vty(zonk_v(m1))
+
+fn prop_unify_order(t : VTy) : Bool =
+  run_tc(\() -> chain_solved(t, false)) == run_tc(\() -> chain_solved(t, true))
+
+test fn unify_is_order_independent() =
+  match quickcheck(gen_vty(), prop_unify_order) of
+    Passed(_n) => ()
+    Failed(_x, _i, _s, _z) => fail()
+
+-- Law: generalization never captures an ambient metavariable.
+fn gen_capture_witness() : (Int, Int) ! {State(Solver), TcFail, Fresh} =
+  let ambient = fresh_ty_meta()
+  let local = fresh_ty_meta()
+  let scheme =
+    match ambient of
+      VMeta(a) => generalize([a], VTuple([ambient, local]))
+      _ => generalize([], VTuple([ambient, local]))
+  let still_meta =
+    match zonk_v(ambient) of
+      VMeta(_id) => 1
+      _ => 0
+  (length(scheme.tyvars), still_meta)
+
+test fn generalize_skips_ambient() =
+  let outcome = run_fresh(\() -> run_tc(\() -> gen_capture_witness()))
+  match outcome of
+    Ok((bound, still_meta)) =>
+      if bound == 1 && still_meta == 1 then
+        ()
+      else
+        fail()
+    Err(_e) => fail()
+
+-- Law: row normalization is deterministic: any permutation of distinct
+-- labels normalizes to one spelling.
+fn prop_row_normal(ls : List(Label)) : Bool =
+  let distinct = dedup_labels(ls)
+  let forward = row_closed(distinct)
+  let backward = row_closed(reverse(distinct))
+  run_tc(\() -> normalized_pair(forward, backward)) == Ok(true)
+
+fn normalized_pair(a : Row, b : Row) : Bool ! {State(Solver), TcFail} =
+  row_normalize(a) == row_normalize(b)
+
+test fn row_normalization_deterministic() =
+  match quickcheck(gen_list(gen_label_pool()), prop_row_normal) of
+    Passed(_n) => ()
+    Failed(_x, _i, _s, _z) => fail()
+
+-- Row unification smoke: an open row absorbs the closed remainder.
+fn open_absorbs() : String ! {State(Solver), TcFail} =
+  let tail = fresh_row_meta()
+  unify_row(row_open([label0("IO")], tail), row_closed([
+      label0("Ask"),
+      label0("IO"),
+    ]))
+  show_row(row_normalize(zonk_row(row_open([label0("IO")], tail))))
+
+test fn open_row_absorbs_remainder() =
+  match run_tc(\() -> open_absorbs()) of
+    Ok(shown) =>
+      if shown == "\{Ask, IO\}" then
+        ()
+      else
+        fail()
+    Err(_e) => fail()

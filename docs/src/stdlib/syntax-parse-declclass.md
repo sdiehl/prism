@@ -42,7 +42,7 @@ Parse a class declaration, including marker classes without a body and layout bo
 
 ### `parse_instance_item`
 
-```prism,sig,h-52e3d4627624e9f1d317b6d888405b2d29f9bcdc1b10d51b5a6de7249fa52405
+```prism,sig,h-4ccdf255f89d8f76c11f8f6d21b5e61baabaf260161359a738352ba108a872b8
 parse_instance_item : (Syntax.Cursor.Cursor, Int, Option(String)) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Item)
 ```
 

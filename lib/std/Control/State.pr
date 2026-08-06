@@ -1,11 +1,13 @@
 -- | The canonical `State(s)` effect: a threaded piece of mutable-looking state,
--- interpreted by parameter passing.
+-- interpreted through a private cell scoped to the run.
 --
 -- `get` reads the current state, `put` overwrites it; a computation performs
 -- them without ever naming a state value in its own signature. `run_state`
 -- discharges the effect, threading `init` through and handing back the result
 -- paired with the final state. Because the handler is the only interpreter, the
 -- same ops can be re-read (bounded, logged) without touching the producer.
+-- Every clause resumes exactly once in tail position, so the compiler is free
+-- to lower the whole run to direct state updates.
 -- Opt-in: not in Base.
 
 -- | Read (`get`) and overwrite (`put`) a threaded state of type `s`.
@@ -14,8 +16,9 @@ pub effect State(s)
   put(s) : Unit
 
 -- | Run `action`, threading `init` as the initial state; returns `(result,
--- final_state)`. The handler makes the block a state transformer `s -> (a, s)`
--- and applies it to `init`.
+-- final_state)`. The state lives in a cell private to this run: `get` resumes
+-- with its current value, `put` overwrites it and resumes, and the final value
+-- is read back once the action returns.
 --
 -- ```prism
 -- run_state(1, \() -> state(\(s) -> (s * 2, s + 1)))
@@ -24,12 +27,15 @@ pub effect State(s)
 -- (2, 2)
 -- ```
 pub fn run_state(init : s, action : () -> a ! {State(s) | e}) : (a, s) =
-  let f =
+  var cell := init
+  let r =
     handle action() with
-      get() resume k => \(s) -> k(s)(s)
-      put(s2) resume k => \(_s) -> k(())(s2)
-      return r => \(s) -> (r, s)
-  f(init)
+      get() resume k => k(cell)
+      put(s2) resume k =>
+        cell := s2
+        k(())
+      return r => r
+  (r, cell)
 
 -- | Run `action` for its result only, discarding the final state.
 pub fn eval_state(init : s, action : () -> a ! {State(s) | e}) : a =

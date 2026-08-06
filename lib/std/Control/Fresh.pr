@@ -29,11 +29,13 @@ pub fn run_fresh(action : () -> a ! {Fresh | e}) : a = run_fresh_from(0, action)
 -- [10, 11]
 -- ```
 pub fn run_fresh_from(start : Int, action : () -> a ! {Fresh | e}) : a =
-  let f =
-    handle action() with
-      fresh() resume k => \(n) -> k(n)(n + 1)
-      return r => \(_n) -> r
-  f(start)
+  var n := start
+  handle action() with
+    fresh() resume k =>
+      let v = n
+      n := n + 1
+      k(v)
+    return r => r
 
 -- | A fresh string identifier: `prefix` followed by the next counter value.
 pub fn gensym(prefix : String) : String ! {Fresh} =

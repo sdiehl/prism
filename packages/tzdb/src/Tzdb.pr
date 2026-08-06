@@ -1,49 +1,608 @@
--- A tiny content-addressed timezone package seed.
+-- | Deterministic timezone arithmetic over a pinned, curated zone table.
 --
--- The real IANA database is intentionally not frozen into Std. This module is a
--- small deterministic dataset exercising package transport: named zones are
--- data, offsets apply to `Time.Wall`, and the source travels as a package bundle.
+-- The operating system's timezone database is an ambient input, so consulting
+-- it would put a hidden mutable table between a program and its output. This
+-- package takes the other route: the zone data is ordinary Prism source,
+-- versioned with the package, so a conversion is a pure function of the
+-- instant, the zone value, and the package root. The table is a curated subset
+-- of the IANA database (`tzdata_version` names the release the rules were
+-- transcribed from), carrying each zone's standard offset and, where one is
+-- observed, its daylight-saving rule in effect at that release. Historical
+-- transitions before the current rules are out of scope, and so is the full
+-- zone census; a program that needs either needs the real database, not a
+-- frozen copy of it.
+--
+-- Offsets are computed, not stored per instant: a `Dst` rule names its switch
+-- days the way legislation does (the second Sunday of March at 02:00 standard
+-- time), and the calendar arithmetic turns that into an exact UTC instant for
+-- any year. All arithmetic is over `Time.Wall`, nanoseconds since the Unix
+-- epoch, and is valid for instants from 1970 through 9999.
+--
+-- ```prism
+-- # import Time (..)
+-- fn main() =
+--   let noon = wall_of_nanos(1782907200 * 1000000000)
+--   match find_zone("America/New_York") of
+--     Some(z) => println(format_in_zone(noon, z))
+--     None => println("unknown zone")
+-- ```
+-- ```output
+-- 2026-07-01T08:00:00-04:00
+-- ```
 
 import Time (..)
 
-pub type Zone = Zone { name: String, offset_minutes: Int } deriving (Eq, Show)
+-- Floor division and remainder for a positive divisor. `/` truncates toward
+-- zero, which disagrees with floor exactly on negative dividends, and local
+-- seconds go negative for a western zone in the epoch's first hours.
+fn div_floor(a : Int, b : Int) : Int =
+  if a >= 0 then
+    a / b
+  else
+    0 - (0 - a + b - 1) / b
 
-pub fn zone_name(z : Zone) : String = z.name
+fn mod_floor(a : Int, b : Int) : Int = a - div_floor(a, b) * b
 
-pub fn zone_offset_minutes(z : Zone) : Int = z.offset_minutes
+fn secs_per_day() : Int = 86400
 
-pub fn utc() : Zone = Zone { name = "UTC", offset_minutes = 4 }
-
-pub fn europe_london() : Zone = Zone { name = "Europe/London", offset_minutes = 1 }
-
-pub fn america_new_york() : Zone =
-  Zone { name = "America/New_York", offset_minutes = -300 }
-
--- | Tokyo runs nine hours ahead of UTC, so its offset is 540 minutes.
+-- | Whether `year` is a Gregorian leap year.
 --
 -- ```prism
--- fn main() = println(9 * 60)
+-- fn main() =
+--   println(show(is_leap_year(2024)))
+--   println(show(is_leap_year(2100)))
 -- ```
 -- ```output
--- 540
+-- true
+-- false
 -- ```
-pub fn asia_tokyo() : Zone = Zone { name = "Asia/Tokyo", offset_minutes = 540 }
+pub fn is_leap_year(year : Int) : Bool =
+  year % 4 == 0 && year % 100 /= 0 || year % 400 == 0
 
-pub fn offset_duration(z : Zone) : Duration = minutes(zone_offset_minutes(z))
-
-pub fn wall_in_zone(w : Wall, z : Zone) : Wall = wall_add(w, offset_duration(z))
-
-pub fn format_in_zone(w : Wall, z : Zone) : String =
-  "{format_rfc3339(wall_in_zone(w, z))} {zone_name(z)}"
-
-pub fn find_zone(name : String) : Option(Zone) =
-  if name == "UTC" then
-    Some(utc())
-  elif name == "Europe/London" then
-    Some(europe_london())
-  elif name == "America/New_York" then
-    Some(america_new_york())
-  elif name == "Asia/Tokyo" then
-    Some(asia_tokyo())
+-- | The number of days in `month` of `year`.
+pub fn days_in_month(year : Int, month : Int) : Int =
+  if month == 2 then
+    if is_leap_year(year) then
+      29
+    else
+      28
+  elif month == 4 || month == 6 || month == 9 || month == 11 then
+    30
   else
-    None
+    31
+
+-- | Days since 1970-01-01 for a civil date. The inverse of `civil_from_days`.
+--
+-- ```prism
+-- fn main() = println(show(days_from_civil(1970, 1, 2)))
+-- ```
+-- ```output
+-- 1
+-- ```
+pub fn days_from_civil(year : Int, month : Int, day : Int) : Int =
+  let y =
+    if month <= 2 then
+      year - 1
+    else
+      year
+  let era = y / 400
+  let yoe = y - era * 400
+  let mp = mod_floor(month + 9, 12)
+  let doy = (153 * mp + 2) / 5 + day - 1
+  let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+  era * 146097 + doe - 719468
+
+-- | The civil date `(year, month, day)` of a day count since 1970-01-01.
+--
+-- ```prism
+-- fn main() = println(show(civil_from_days(20270)))
+-- ```
+-- ```output
+-- (2025, 7, 1)
+-- ```
+pub fn civil_from_days(days : Int) : (Int, Int, Int) =
+  let z = days + 719468
+  let era = div_floor(z, 146097)
+  let doe = z - era * 146097
+  let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+  let y = yoe + era * 400
+  let doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+  let mp = (5 * doy + 2) / 153
+  let d = doy - (153 * mp + 2) / 5 + 1
+  let m =
+    if mp < 10 then
+      mp + 3
+    else
+      mp - 9
+  if m <= 2 then
+    (y + 1, m, d)
+  else
+    (y, m, d)
+
+-- | The day of the week for a day count since 1970-01-01: 0 is Sunday through
+-- 6 is Saturday.
+pub fn day_of_week(days : Int) : Int = mod_floor(days + 4, 7)
+
+-- The day of the month for the `week`th `weekday` of a month, where weeks 1
+-- through 4 are the first through fourth occurrence and 5 means the last.
+fn nth_weekday(year : Int, month : Int, week : Int, weekday : Int) : Int =
+  if week == 5 then
+    let last = days_in_month(year, month)
+    let dow = day_of_week(days_from_civil(year, month, last))
+    last - mod_floor(dow - weekday + 7, 7)
+  else
+    let dow = day_of_week(days_from_civil(year, month, 1))
+    1 + mod_floor(weekday - dow + 7, 7) + 7 * (week - 1)
+
+-- | The clock a switch's `at_minutes` is read against: `Utc` (the European
+-- convention, every zone switching at one shared instant), `Standard` (the
+-- North American spring convention), or `Daylight` (the autumn convention,
+-- naming the wall clock that is actually showing when the switch happens).
+pub type Basis = Utc | Standard | Daylight deriving (Eq, Show)
+
+-- | One annual switch day, stated the way legislation states it: the `week`th
+-- `weekday` of `month` (weeks 1 through 4, or 5 for the last), at `at_minutes`
+-- past midnight read against `basis`.
+pub type Switch = Switch {
+  month: Int,
+  week: Int,
+  weekday: Int,
+  at_minutes: Int,
+  basis: Basis
+} deriving (Eq, Show)
+
+-- | A daylight-saving rule: the offset moves by `delta_minutes` between the
+-- `starts` and `ends` switches. A southern-hemisphere rule has `starts` later
+-- in the year than `ends` and spans the new year.
+pub type Dst = Dst {
+  delta_minutes: Int,
+  starts: Switch,
+  ends: Switch
+} deriving (Eq, Show)
+
+-- | A timezone: an IANA-style name, standard and daylight abbreviations, the
+-- standard offset from UTC in minutes, and the daylight rule if one is
+-- observed.
+pub type Zone = Zone {
+  name: String,
+  abbrev_std: String,
+  abbrev_dst: String,
+  std_minutes: Int,
+  dst: Option(Dst)
+} deriving (Eq, Show)
+
+-- | A zone's IANA-style name.
+pub fn zone_name(z : Zone) : String = z.name
+
+-- | A zone's standard (winter) offset from UTC in minutes.
+pub fn std_offset_minutes(z : Zone) : Int = z.std_minutes
+
+fn basis_offset(b : Basis, std : Int, delta : Int) : Int =
+  match b of
+    Utc => 0
+    Standard => std
+    Daylight => std + delta
+
+-- The exact UTC instant, in Unix seconds, of a switch in a given year.
+fn switch_secs(year : Int, sw : Switch, std : Int, delta : Int) : Int =
+  let day = nth_weekday(year, sw.month, sw.week, sw.weekday)
+  let days = days_from_civil(year, sw.month, day)
+  days * secs_per_day()
+    + sw.at_minutes * 60
+    - basis_offset(sw.basis, std, delta) * 60
+
+-- | The zone's offset from UTC, in minutes, at a UTC instant. This is the
+-- package's central question; everything else is a projection of it.
+--
+-- New York is four hours behind UTC in July and five in January:
+--
+-- ```prism
+-- # import Time (..)
+-- fn main() =
+--   println(show(offset_minutes_at(america_new_york(), wall_of_nanos(1782907200 * 1000000000))))
+--   println(show(offset_minutes_at(america_new_york(), wall_of_nanos(1768478400 * 1000000000))))
+-- ```
+-- ```output
+-- -240
+-- -300
+-- ```
+--
+-- The switch is exact. United States daylight time in 2026 begins at
+-- 2026-03-08T07:00:00Z (02:00 standard time in the Eastern zone), and one
+-- second earlier is still winter:
+--
+-- ```prism
+-- # import Time (..)
+-- fn main() =
+--   println(show(offset_minutes_at(america_new_york(), wall_of_nanos(1772953199 * 1000000000))))
+--   println(show(offset_minutes_at(america_new_york(), wall_of_nanos(1772953200 * 1000000000))))
+-- ```
+-- ```output
+-- -300
+-- -240
+-- ```
+pub fn offset_minutes_at(z : Zone, w : Wall) : Int =
+  match z.dst of
+    None => z.std_minutes
+    Some(rule) =>
+      let t = wall_unix_secs(w)
+      let (year, _m, _d) = civil_from_days(div_floor(t, secs_per_day()))
+      let on_at =
+        switch_secs(year, rule.starts, z.std_minutes, rule.delta_minutes)
+      let off_at =
+        switch_secs(year, rule.ends, z.std_minutes, rule.delta_minutes)
+      let dst_on =
+        if rule.starts.month < rule.ends.month then
+          t >= on_at && t < off_at
+        else
+          t >= on_at || t < off_at
+      if dst_on then
+        z.std_minutes + rule.delta_minutes
+      else
+        z.std_minutes
+
+-- | Whether daylight-saving time is in effect in the zone at a UTC instant.
+--
+-- Sydney observes daylight time across the new year:
+--
+-- ```prism
+-- # import Time (..)
+-- fn main() =
+--   println(show(is_dst(australia_sydney(), wall_of_nanos(1768478400 * 1000000000))))
+-- ```
+-- ```output
+-- true
+-- ```
+pub fn is_dst(z : Zone, w : Wall) : Bool = offset_minutes_at(z, w) /= z.std_minutes
+
+-- | The zone's offset at an instant, as a `Time.Duration`.
+pub fn offset_at(z : Zone, w : Wall) : Duration = minutes(offset_minutes_at(z, w))
+
+-- | The abbreviation showing on the zone's clocks at an instant.
+--
+-- ```prism
+-- # import Time (..)
+-- fn main() =
+--   println(abbrev_at(america_new_york(), wall_of_nanos(1782907200 * 1000000000)))
+-- ```
+-- ```output
+-- EDT
+-- ```
+pub fn abbrev_at(z : Zone, w : Wall) : String =
+  if is_dst(z, w) then
+    z.abbrev_dst
+  else
+    z.abbrev_std
+
+-- | The local wall reading of a UTC instant in the zone: the same `Wall`
+-- shifted by the zone's offset at that instant. Formatting it as UTC yields
+-- the zone's local clock; it is a reading, not a new instant.
+pub fn to_local(z : Zone, w : Wall) : Wall = wall_add(w, offset_at(z, w))
+
+fn pad2(n : Int) : String =
+  if n < 10 then
+    "0{n}"
+  else
+    "{n}"
+
+fn format_offset(mins : Int) : String =
+  let sign =
+    if mins < 0 then
+      "-"
+    else
+      "+"
+  let magnitude =
+    if mins < 0 then
+      0 - mins
+    else
+      mins
+  "{sign}{pad2(magnitude / 60)}:{pad2(magnitude % 60)}"
+
+-- | A UTC instant rendered as the zone's local RFC 3339 timestamp, offset
+-- suffix included.
+--
+-- ```prism
+-- # import Time (..)
+-- fn main() =
+--   let noon = wall_of_nanos(1782907200 * 1000000000)
+--   println(format_in_zone(noon, america_new_york()))
+--   println(format_in_zone(noon, asia_tokyo()))
+--   println(format_in_zone(noon, utc()))
+-- ```
+-- ```output
+-- 2026-07-01T08:00:00-04:00
+-- 2026-07-01T21:00:00+09:00
+-- 2026-07-01T12:00:00+00:00
+-- ```
+pub fn format_in_zone(w : Wall, z : Zone) : String =
+  let off = offset_minutes_at(z, w)
+  let ls = wall_unix_secs(w) + off * 60
+  let (y, m, d) = civil_from_days(div_floor(ls, secs_per_day()))
+  let rest = mod_floor(ls, secs_per_day())
+  let hh = pad2(rest / 3600)
+  let mi = pad2(rest % 3600 / 60)
+  let ss = pad2(rest % 60)
+  "{y}-{pad2(m)}-{pad2(d)}T{hh}:{mi}:{ss}{format_offset(off)}"
+
+-- | The next offset switch strictly after an instant, or `None` for a zone
+-- that observes no daylight time.
+--
+-- From the middle of 2026, New York next switches when daylight time ends at
+-- 06:00 UTC on the first Sunday of November:
+--
+-- ```prism
+-- # import Time (..)
+-- fn main() =
+--   match next_transition(america_new_york(), wall_of_nanos(1782907200 * 1000000000)) of
+--     Some(t) => println(show(wall_unix_secs(t)))
+--     None => println("fixed")
+-- ```
+-- ```output
+-- 1793512800
+-- ```
+pub fn next_transition(z : Zone, w : Wall) : Option(Wall) =
+  match z.dst of
+    None => None
+    Some(rule) =>
+      let t = wall_unix_secs(w)
+      let (year, _m, _d) = civil_from_days(div_floor(t, secs_per_day()))
+      let candidates = [
+          switch_secs(year, rule.starts, z.std_minutes, rule.delta_minutes),
+          switch_secs(year, rule.ends, z.std_minutes, rule.delta_minutes),
+          switch_secs(year + 1, rule.starts, z.std_minutes, rule.delta_minutes),
+          switch_secs(year + 1, rule.ends, z.std_minutes, rule.delta_minutes),
+        ]
+      match earliest_after(t, candidates) of
+        Some(s) => Some(wall_of_nanos(s * 1000000000))
+        None => None
+
+fn earliest_after(t : Int, candidates : List(Int)) : Option(Int) =
+  match candidates of
+    Nil => None
+    Cons(c, rest) =>
+      match earliest_after(t, rest) of
+        None =>
+          if c > t then
+            Some(c)
+          else
+            None
+        Some(best) =>
+          if c > t && c < best then
+            Some(c)
+          else
+            Some(best)
+
+-- The four daylight rules the table draws on, each transcribed from the
+-- release `tzdata_version` names.
+
+-- United States and Canada: forward on the second Sunday of March at 02:00
+-- standard time, back on the first Sunday of November at 02:00 daylight time.
+fn us_dst() : Dst =
+  Dst {
+    delta_minutes = 60,
+    starts = Switch {
+      month = 3,
+      week = 2,
+      weekday = 0,
+      at_minutes = 120,
+      basis = Standard
+    },
+    ends = Switch {
+      month = 11,
+      week = 1,
+      weekday = 0,
+      at_minutes = 120,
+      basis = Daylight
+    }
+  }
+
+-- European Union and United Kingdom: forward on the last Sunday of March and
+-- back on the last Sunday of October, both at 01:00 UTC, so every European
+-- zone switches at one shared instant.
+fn eu_dst() : Dst =
+  Dst {
+    delta_minutes = 60,
+    starts = Switch {
+      month = 3,
+      week = 5,
+      weekday = 0,
+      at_minutes = 60,
+      basis = Utc
+    },
+    ends = Switch {
+      month = 10,
+      week = 5,
+      weekday = 0,
+      at_minutes = 60,
+      basis = Utc
+    }
+  }
+
+-- South-eastern Australia: forward on the first Sunday of October at 02:00
+-- standard time, back on the first Sunday of April at 03:00 daylight time.
+fn au_dst() : Dst =
+  Dst {
+    delta_minutes = 60,
+    starts = Switch {
+      month = 10,
+      week = 1,
+      weekday = 0,
+      at_minutes = 120,
+      basis = Standard
+    },
+    ends = Switch {
+      month = 4,
+      week = 1,
+      weekday = 0,
+      at_minutes = 180,
+      basis = Daylight
+    }
+  }
+
+-- New Zealand: forward on the last Sunday of September at 02:00 standard time,
+-- back on the first Sunday of April at 03:00 daylight time.
+fn nz_dst() : Dst =
+  Dst {
+    delta_minutes = 60,
+    starts = Switch {
+      month = 9,
+      week = 5,
+      weekday = 0,
+      at_minutes = 120,
+      basis = Standard
+    },
+    ends = Switch {
+      month = 4,
+      week = 1,
+      weekday = 0,
+      at_minutes = 180,
+      basis = Daylight
+    }
+  }
+
+fn fixed(name : String, abbrev : String, std : Int) : Zone =
+  Zone {
+    name = name,
+    abbrev_std = abbrev,
+    abbrev_dst = abbrev,
+    std_minutes = std,
+    dst = None
+  }
+
+fn ruled(
+  name : String,
+  ab_std : String,
+  ab_dst : String,
+  std : Int,
+  rule : Dst
+) : Zone =
+  Zone {
+    name = name,
+    abbrev_std = ab_std,
+    abbrev_dst = ab_dst,
+    std_minutes = std,
+    dst = Some(rule)
+  }
+
+-- | The IANA tzdata release the table's rules were transcribed from.
+pub fn tzdata_version() : String = "2025b"
+
+-- | Coordinated Universal Time itself, offset zero, no daylight rule.
+pub fn utc() : Zone = fixed("UTC", "UTC", 0)
+
+pub fn europe_london() : Zone = ruled("Europe/London", "GMT", "BST", 0, eu_dst())
+
+pub fn europe_lisbon() : Zone = ruled("Europe/Lisbon", "WET", "WEST", 0, eu_dst())
+
+pub fn europe_paris() : Zone = ruled("Europe/Paris", "CET", "CEST", 60, eu_dst())
+
+pub fn europe_berlin() : Zone = ruled("Europe/Berlin", "CET", "CEST", 60, eu_dst())
+
+pub fn europe_madrid() : Zone = ruled("Europe/Madrid", "CET", "CEST", 60, eu_dst())
+
+pub fn europe_rome() : Zone = ruled("Europe/Rome", "CET", "CEST", 60, eu_dst())
+
+pub fn europe_athens() : Zone = ruled("Europe/Athens", "EET", "EEST", 120, eu_dst())
+
+pub fn america_new_york() : Zone =
+  ruled("America/New_York", "EST", "EDT", -300, us_dst())
+
+pub fn america_chicago() : Zone =
+  ruled("America/Chicago", "CST", "CDT", -360, us_dst())
+
+pub fn america_denver() : Zone =
+  ruled("America/Denver", "MST", "MDT", -420, us_dst())
+
+-- | Arizona observes no daylight time, unlike the rest of the Mountain zone.
+pub fn america_phoenix() : Zone = fixed("America/Phoenix", "MST", -420)
+
+pub fn america_los_angeles() : Zone =
+  ruled("America/Los_Angeles", "PST", "PDT", -480, us_dst())
+
+pub fn america_anchorage() : Zone =
+  ruled("America/Anchorage", "AKST", "AKDT", -540, us_dst())
+
+-- | Brazil abolished daylight time in 2019.
+pub fn america_sao_paulo() : Zone = fixed("America/Sao_Paulo", "-03", -180)
+
+-- | Mexico abolished daylight time in 2022.
+pub fn america_mexico_city() : Zone = fixed("America/Mexico_City", "CST", -360)
+
+pub fn asia_tokyo() : Zone = fixed("Asia/Tokyo", "JST", 540)
+
+pub fn asia_shanghai() : Zone = fixed("Asia/Shanghai", "CST", 480)
+
+-- | India runs on a half-hour offset, five hours thirty minutes ahead of UTC.
+pub fn asia_kolkata() : Zone = fixed("Asia/Kolkata", "IST", 330)
+
+pub fn asia_dubai() : Zone = fixed("Asia/Dubai", "+04", 240)
+
+pub fn asia_singapore() : Zone = fixed("Asia/Singapore", "+08", 480)
+
+pub fn australia_sydney() : Zone =
+  ruled("Australia/Sydney", "AEST", "AEDT", 600, au_dst())
+
+-- | Queensland observes no daylight time, unlike New South Wales.
+pub fn australia_brisbane() : Zone = fixed("Australia/Brisbane", "AEST", 600)
+
+pub fn pacific_auckland() : Zone =
+  ruled("Pacific/Auckland", "NZST", "NZDT", 720, nz_dst())
+
+-- | Every zone in the table, in name order.
+pub fn zones() : List(Zone) =
+  [
+      america_anchorage(),
+      america_chicago(),
+      america_denver(),
+      america_los_angeles(),
+      america_mexico_city(),
+      america_new_york(),
+      america_phoenix(),
+      america_sao_paulo(),
+      asia_dubai(),
+      asia_kolkata(),
+      asia_shanghai(),
+      asia_singapore(),
+      asia_tokyo(),
+      australia_brisbane(),
+      australia_sydney(),
+      europe_athens(),
+      europe_berlin(),
+      europe_lisbon(),
+      europe_london(),
+      europe_madrid(),
+      europe_paris(),
+      europe_rome(),
+      pacific_auckland(),
+      utc(),
+    ]
+
+-- | Look a zone up by its IANA-style name.
+--
+-- ```prism
+-- fn main() =
+--   match find_zone("Asia/Kolkata") of
+--     Some(z) => println(show(std_offset_minutes(z)))
+--     None => println("unknown")
+-- ```
+-- ```output
+-- 330
+-- ```
+pub fn find_zone(name : String) : Option(Zone) = find_named(zones(), name)
+
+fn find_named(zs : List(Zone), name : String) : Option(Zone) =
+  match zs of
+    Nil => None
+    Cons(z, rest) =>
+      if zone_name(z) == name then
+        Some(z)
+      else
+        find_named(rest, name)
+
+-- | The names of every zone in the table, in order.
+pub fn zone_names() : List(String) = names_of(zones())
+
+fn names_of(zs : List(Zone)) : List(String) =
+  match zs of
+    Nil => Nil
+    Cons(z, rest) => Cons(zone_name(z), names_of(rest))

@@ -1,0 +1,211 @@
+{
+  "format": "prism-lineage-graph-v1",
+  "variant": "docs",
+  "nodes": [
+    {
+      "id": "blake3:41eb88713d9fb00f88b9ee56e789d8d1e92eefed249b799d180e092978605185",
+      "kind": "artifact",
+      "payload": {
+        "kind": "docs-page",
+        "path": "tclaws.md",
+        "digest_scheme": "blake3",
+        "digest": "41eb88713d9fb00f88b9ee56e789d8d1e92eefed249b799d180e092978605185",
+        "bytes": 492
+      }
+    },
+    {
+      "id": "blake3:bca1d94e0015e3f63a7f6db9256ec75c7296b4e3b6338daf1c63a4217422c1e6",
+      "kind": "artifact",
+      "payload": {
+        "kind": "docs-page",
+        "path": "tc.md",
+        "digest_scheme": "blake3",
+        "digest": "bca1d94e0015e3f63a7f6db9256ec75c7296b4e3b6338daf1c63a4217422c1e6",
+        "bytes": 6407
+      }
+    },
+    {
+      "id": "blake3:c5961833ecdb1323ace6429256c46780fcbda9081983e42354149f60210c1e7c",
+      "kind": "artifact",
+      "payload": {
+        "kind": "docs-page",
+        "path": "index.md",
+        "digest_scheme": "blake3",
+        "digest": "c5961833ecdb1323ace6429256c46780fcbda9081983e42354149f60210c1e7c",
+        "bytes": 369
+      }
+    },
+    {
+      "id": "prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef",
+      "kind": "stdlib-root",
+      "payload": {
+        "role": "stdlib",
+        "name": null,
+        "origin": null,
+        "artifact_kind": "embedded-stdlib",
+        "scheme": "prism-core-hash-v2",
+        "root": "bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef"
+      }
+    },
+    {
+      "id": "prism-core-hash-v2:f737f35f1cf3eba733aa13fc3c30a7c0ff833e312faa7a8fe23ad186e4f7b6df",
+      "kind": "source-root",
+      "payload": {
+        "role": "source",
+        "name": null,
+        "origin": null,
+        "artifact_kind": "namespace",
+        "scheme": "prism-core-hash-v2",
+        "root": "f737f35f1cf3eba733aa13fc3c30a7c0ff833e312faa7a8fe23ad186e4f7b6df"
+      }
+    },
+    {
+      "id": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
+      "kind": "request",
+      "payload": {
+        "kind": "docs",
+        "path": "packages/tc",
+        "entry": "packages/tc"
+      }
+    },
+    {
+      "id": "sha256:5ae0aa991ddcdbc4203dc03b19029fac6fc7fb85647ffde9a56a651f08145a4e",
+      "kind": "compiler-identity",
+      "payload": {
+        "fingerprint": "compiler=0.17.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=docs;source-root=prism-core-hash-v2:f737f35f1cf3eba733aa13fc3c30a7c0ff833e312faa7a8fe23ad186e4f7b6df;stdlib-root=prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;erasures=true;native-effects=true;trampoline=true;fuse=false;rt-checks=false;native-kont-frames=false;",
+        "rows": [
+          {
+            "key": "compiler",
+            "value": "0.17.0"
+          },
+          {
+            "key": "hash-scheme",
+            "value": "prism-core-hash-v2"
+          },
+          {
+            "key": "target",
+            "value": "aarch64-apple-darwin"
+          },
+          {
+            "key": "backend",
+            "value": "docs"
+          },
+          {
+            "key": "source-root",
+            "value": "prism-core-hash-v2:f737f35f1cf3eba733aa13fc3c30a7c0ff833e312faa7a8fe23ad186e4f7b6df"
+          },
+          {
+            "key": "stdlib-root",
+            "value": "prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef"
+          },
+          {
+            "key": "opt",
+            "value": "O1"
+          },
+          {
+            "key": "passes",
+            "value": "level-default"
+          },
+          {
+            "key": "disabled",
+            "value": "none"
+          },
+          {
+            "key": "backend-opt",
+            "value": "2"
+          },
+          {
+            "key": "scheduler",
+            "value": "cooperative"
+          },
+          {
+            "key": "effect-tier",
+            "value": "auto"
+          },
+          {
+            "key": "erasures",
+            "value": "true"
+          },
+          {
+            "key": "native-effects",
+            "value": "true"
+          },
+          {
+            "key": "trampoline",
+            "value": "true"
+          },
+          {
+            "key": "fuse",
+            "value": "false"
+          },
+          {
+            "key": "rt-checks",
+            "value": "false"
+          },
+          {
+            "key": "native-kont-frames",
+            "value": "false"
+          }
+        ]
+      }
+    },
+    {
+      "id": "sha256:b14459c46a9b08f899aac1db9bca2e4911615305744b36e56bbcbf5be135ecc7",
+      "kind": "docs-generator",
+      "payload": {
+        "format": "prism-docs-markdown-v1"
+      }
+    },
+    {
+      "id": "sha256:ff6fe931f5e8e4250e43e7f16adaac3a4562c9c5526e15fab4c150aebf89d339",
+      "kind": "doctest",
+      "payload": {
+        "location": "Tc (module)",
+        "output_scheme": "sha256",
+        "output_digest": "49f411f0a1a7f7194924426f72b9f9d73f9e5b3dead2d2bb95c8614c9f923e6c"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
+      "to": "blake3:41eb88713d9fb00f88b9ee56e789d8d1e92eefed249b799d180e092978605185",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
+      "to": "blake3:bca1d94e0015e3f63a7f6db9256ec75c7296b4e3b6338daf1c63a4217422c1e6",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
+      "to": "blake3:c5961833ecdb1323ace6429256c46780fcbda9081983e42354149f60210c1e7c",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
+      "to": "prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef",
+      "kind": "input"
+    },
+    {
+      "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
+      "to": "prism-core-hash-v2:f737f35f1cf3eba733aa13fc3c30a7c0ff833e312faa7a8fe23ad186e4f7b6df",
+      "kind": "input"
+    },
+    {
+      "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
+      "to": "sha256:5ae0aa991ddcdbc4203dc03b19029fac6fc7fb85647ffde9a56a651f08145a4e",
+      "kind": "identified-by"
+    },
+    {
+      "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
+      "to": "sha256:b14459c46a9b08f899aac1db9bca2e4911615305744b36e56bbcbf5be135ecc7",
+      "kind": "identified-by"
+    },
+    {
+      "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
+      "to": "sha256:ff6fe931f5e8e4250e43e7f16adaac3a4562c9c5526e15fab4c150aebf89d339",
+      "kind": "produced"
+    }
+  ]
+}

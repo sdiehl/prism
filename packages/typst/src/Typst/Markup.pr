@@ -1,0 +1,97 @@
+-- | Typst's markup layer as typed combinators: headings, emphasis, lists,
+-- figures, tables, links, labels and references.
+--
+-- Everything here produces or consumes the root module's `Doc` and `Expr`
+-- types and escapes through the same two doors; where Typst has both a
+-- markup shorthand and a function form, the function form wins, because it
+-- composes without whitespace sensitivity.
+--
+-- ```prism
+-- # import Typst (document, render, code, string, named, pt)
+-- fn main() =
+--   println(document([
+--       heading(1, "Results"),
+--       bullet_list(["one", "two"]),
+--       link("https://example.org", "the source"),
+--     ]))
+-- ```
+-- ```output
+-- #heading(level: 1)[Results]
+-- #list([one], [two])
+-- #link("https://example.org")[the source]
+-- ```
+
+import Data.List (map)
+
+import Typst (..)
+
+fn content_text(value : String) : Doc = text_line(value)
+
+fn bracketed(value : String) : Expr = content(content_text(value))
+
+-- | A numbered heading, `#heading(level: n)[...]`.
+pub fn heading(level : Int, title : String) : Doc =
+  code(concat_exprs([
+      call("heading", [named("level", int(level))]),
+      bracketed(title),
+    ]))
+
+-- | Emphasized prose, `#emph[...]`.
+pub fn emph(value : String) : Doc =
+  code(concat_exprs([call("emph", []), bracketed(value)]))
+
+-- | Strong prose, `#strong[...]`.
+pub fn strong(value : String) : Doc =
+  code(concat_exprs([call("strong", []), bracketed(value)]))
+
+-- | An unnumbered list, one content argument per item.
+pub fn bullet_list(items : List(String)) : Doc =
+  code(call("list", map(bracketed, items)))
+
+-- | A numbered list, one content argument per item.
+pub fn numbered_list(items : List(String)) : Doc =
+  code(call("enum", map(bracketed, items)))
+
+-- | A link with display text, `#link(url)[text]`.
+pub fn link(url : String, display : String) : Doc =
+  code(concat_exprs([call("link", [string(url)]), bracketed(display)]))
+
+-- | A figure around a body expression, with an escaped caption.
+pub fn figure(body : Expr, caption : String) : Doc =
+  code(concat_exprs([
+      call("figure", [named("caption", content(content_text(caption)))]),
+      content(code(body)),
+    ]))
+
+-- | A table with a fixed column count; cells are escaped prose.
+pub fn table(columns : Int, cells : List(String)) : Doc =
+  code(
+      call(
+          "table",
+          Cons(named("columns", int(columns)), map(bracketed, cells)),
+        ),
+    )
+
+-- | Attach a label to reference later, `<name>`.
+pub fn label_mark(name : String) : Doc = atom("<{name}>")
+
+-- | A reference to a labeled element, `@name`.
+pub fn ref_mark(name : String) : Doc = atom("@{name}")
+
+test fn headings_carry_their_level() =
+  if render(96, heading(2, "Two")) == "#heading(level: 2)[Two]" then
+    ()
+  else
+    fail()
+
+test fn list_items_are_escaped_content() =
+  if render(96, bullet_list(["a *b*"])) == "#list([a \\*b\\*])" then
+    ()
+  else
+    fail()
+
+test fn tables_lead_with_columns() =
+  if (render(96, table(2, ["a", "b"])) == "#table(columns: 2, [a], [b])") then
+    ()
+  else
+    fail()

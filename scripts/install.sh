@@ -124,7 +124,17 @@ smoke() {
   else
     say "binary installed but failed to launch: $out"
     case "$(uname -s)" in
-      Darwin) say "prism needs LLVM 22 at runtime: brew install llvm@22" ;;
+      Darwin)
+        # A dyld "Library not loaded" abort is a packaging fault, not a missing
+        # prerequisite: the published binary should load nothing outside
+        # /usr/lib and /System, so no local install can make it launch.
+        case "$out" in
+          *"Library not loaded"*) say "this build links a library that is absent here. That is a fault in
+the published artifact, not something to install around. Please report it at
+https://github.com/$REPO/issues with the error above; meanwhile install via Nix
+or build from source." ;;
+          *) say "prism compiles native binaries via clang from LLVM 22: brew install llvm@22" ;;
+        esac ;;
       Linux) say "prism needs LLVM 22 + clang at runtime: on Debian/Ubuntu run
   curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s 22
 on other distros install your llvm-22/clang packages, or use the rpm/pacman

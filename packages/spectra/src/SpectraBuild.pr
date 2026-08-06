@@ -3,6 +3,18 @@
 -- The executable treats `prism` and `typst` as explicit external tools. Deck
 -- construction and Typst lowering remain pure package code; this module is the
 -- narrow host shell that captures the framed envelope and writes artifacts.
+-- The pipeline a `spectra build` runs, end to end:
+--
+-- ```text
+-- prism docs <project> --test     doctest outputs pinned before anything renders
+-- prism run <project>             the deck program prints its framed envelope
+-- (pure lowering)                 the envelope's deck value becomes Typst source
+-- typst compile                   Typst renders the PDF
+-- target/spectra/                 deck.typ and deck.pdf installed atomically
+-- ```
+--
+-- `check_project` verifies the tools and the deck without writing artifacts;
+-- `clean_project` removes only `target/spectra`.
 
 import Data.String (contains, ends_with, starts_with, str_of_char, trim)
 

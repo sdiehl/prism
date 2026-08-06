@@ -304,26 +304,53 @@ fn const_fold(op: CoreOp, a: &TypedValue, b: &TypedValue) -> Option<TypedValueKi
     }
 }
 
-// `byte_at` is a byte operation, not a Unicode-codepoint operation. Folding a
-// literal therefore indexes `str::as_bytes`, including UTF-8 continuation
-// bytes, and preserves the runtime's `-1` result for every invalid index.
-fn const_fold_byte_at(op: Builtin, args: &[TypedValue]) -> Option<TypedValueKind> {
-    if op != Builtin::ByteAt {
-        return None;
+// The byte-level string builtins fold over literals with exactly the
+// runtime's semantics. `byte_at` and `byte_len` are byte operations, not
+// Unicode-codepoint operations: folding indexes and measures `str::as_bytes`,
+// including UTF-8 continuation bytes, and preserves the runtime's `-1` result
+// for every invalid index. `str_eq` over two literals is content equality,
+// matching `prism_str_cmp`'s zero case. Every mention of a keyword-table
+// literal in the self-hosted lexer's guards reaches one of these.
+fn const_fold_str_builtin(op: Builtin, args: &[TypedValue]) -> Option<TypedValueKind> {
+    match op {
+        Builtin::ByteAt => {
+            let [text, index] = args else {
+                return None;
+            };
+            let (TypedValueKind::Str(text), TypedValueKind::Int(index)) =
+                (&peel(text).kind, &peel(index).kind)
+            else {
+                return None;
+            };
+            let byte = usize::try_from(*index)
+                .ok()
+                .and_then(|index| text.as_bytes().get(index))
+                .map_or(-1, |byte| i64::from(*byte));
+            Some(TypedValueKind::Int(byte))
+        }
+        Builtin::ByteLen => {
+            let [text] = args else {
+                return None;
+            };
+            let TypedValueKind::Str(text) = &peel(text).kind else {
+                return None;
+            };
+            let length = i64::try_from(text.len()).ok()?;
+            Some(TypedValueKind::Int(length))
+        }
+        Builtin::StrEq => {
+            let [left, right] = args else {
+                return None;
+            };
+            let (TypedValueKind::Str(left), TypedValueKind::Str(right)) =
+                (&peel(left).kind, &peel(right).kind)
+            else {
+                return None;
+            };
+            Some(TypedValueKind::Bool(left == right))
+        }
+        _ => None,
     }
-    let [text, index] = args else {
-        return None;
-    };
-    let (TypedValueKind::Str(text), TypedValueKind::Int(index)) =
-        (&peel(text).kind, &peel(index).kind)
-    else {
-        return None;
-    };
-    let byte = usize::try_from(*index)
-        .ok()
-        .and_then(|index| text.as_bytes().get(index))
-        .map_or(-1, |byte| i64::from(*byte));
-    Some(TypedValueKind::Int(byte))
 }
 
 // The selected arm: bind each matched field with its declared type, then the
@@ -677,7 +704,7 @@ impl Rewrite for Simplifier {
                     .iter()
                     .map(|arg| self.value(arg, env))
                     .collect::<Vec<_>>();
-                if let Some(folded) = const_fold_byte_at(*op, &args2) {
+                if let Some(folded) = const_fold_str_builtin(*op, &args2) {
                     self.ticks += 1;
                     TypedComp::new(
                         comp.sig.clone(),
@@ -1572,5 +1599,41 @@ mod tests {
             actual.functions()[0].body().kind(),
             &TypedCompKind::Return(int(2))
         );
+    }
+
+    // The literal folds mirror the runtime byte semantics exactly: byte_at
+    // indexes bytes with -1 out of range, byte_len measures bytes, str_eq is
+    // content equality. A miss on any non-literal argument folds nothing.
+    #[test]
+    fn string_builtins_fold_over_literals() {
+        let text = TypedValue::new(source(Type::Str), TypedValueKind::Str("h\u{e9}".into()));
+        let at = |i: i64| {
+            const_fold_str_builtin(
+                Builtin::ByteAt,
+                &[
+                    text.clone(),
+                    TypedValue::new(source(Type::Int), TypedValueKind::Int(i)),
+                ],
+            )
+        };
+        assert_eq!(at(0), Some(TypedValueKind::Int(i64::from(b'h'))));
+        assert_eq!(at(1), Some(TypedValueKind::Int(0xC3)));
+        assert_eq!(at(3), Some(TypedValueKind::Int(-1)));
+        assert_eq!(at(-1), Some(TypedValueKind::Int(-1)));
+        assert_eq!(
+            const_fold_str_builtin(Builtin::ByteLen, std::slice::from_ref(&text)),
+            Some(TypedValueKind::Int(3))
+        );
+        assert_eq!(
+            const_fold_str_builtin(Builtin::StrEq, &[text.clone(), text.clone()]),
+            Some(TypedValueKind::Bool(true))
+        );
+        let other = TypedValue::new(source(Type::Str), TypedValueKind::Str("he".into()));
+        assert_eq!(
+            const_fold_str_builtin(Builtin::StrEq, &[text.clone(), other]),
+            Some(TypedValueKind::Bool(false))
+        );
+        let dynamic = var("s", source(Type::Str));
+        assert_eq!(const_fold_str_builtin(Builtin::ByteLen, &[dynamic]), None);
     }
 }

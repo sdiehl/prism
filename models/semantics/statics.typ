@@ -52,8 +52,30 @@ $"U"(X)$ types a thunk. Rows are unordered sets of distinct labels, optionally
 open in a row variable $rho$; $chevron.l overline(ell) | epsilon chevron.r$
 abbreviates iterated extension.
 
-#todo[surface-level polymorphism: $forall$, schemes, the kind context $Delta$,
-and the $"Row"$ and $"Nat"$ kinds. The Core typed here is monomorphic.]
+== Schemes
+
+$ sigma ::= forall overline(alpha) thin overline(rho) . A $
+
+A scheme binds rigid type variables $overline(alpha)$ and rigid row variables
+$overline(rho)$ over a value type. Generalization closes a type over the
+solver metavariables that are free in it but not free in the ambient context;
+instantiation replaces each bound variable with a fresh metavariable:
+
+#rules(
+  rule(name: smallcaps("gen"),
+    $Gamma tack A arrow.r.double forall overline(alpha) . A[overline(alpha) \/ overline(?m)]$,
+    $overline(?m) = "fmv"(A) without "fmv"(Gamma)$),
+  rule(name: smallcaps("inst"),
+    $forall overline(alpha) . A arrow.r.double.long A[overline(?m) \/ overline(alpha)]$,
+    $overline(?m) "fresh"$),
+)
+
+The reference implementation of this section and the next is the `tc` package
+(value-type schemes today; computation schemes and the kind context $Delta$
+with the $"Row"$ and $"Nat"$ kinds are still open).
+
+#todo[computation-type schemes, the kind context $Delta$, and the $"Row"$ and
+$"Nat"$ kinds. The Core typed here is monomorphic.]
 
 == Judgement forms
 
@@ -93,8 +115,30 @@ All typing judgements are implicitly closed under $tilde.equiv$.
 together with reflexivity, symmetry, and transitivity. No row is equivalent to
 one containing itself; the unification occurs check enforces this.
 
-#todo[row unification: unify-empty, unify-var with occurs check, head hoisting
-on closed and open rows, fresh-tail side condition.]
+== Row unification
+
+Unification first rewrites both rows to the canonical form (labels sorted,
+duplicates refused) and splits the shared labels, whose arguments unify
+pairwise. What remains is each side's leftover labels against the other
+side's tail:
+
+#rules(
+  rule(name: smallcaps("u-closed"),
+    $chevron.l chevron.r tilde chevron.l chevron.r$),
+  rule(name: smallcaps("u-absorb"),
+    $?r tilde chevron.l overline(ell) | t chevron.r$,
+    $?r in.not "tails"(chevron.l overline(ell) | t chevron.r)$),
+  rule(name: smallcaps("u-middle"),
+    $chevron.l overline(ell_1) | ?r_1 chevron.r tilde chevron.l overline(ell_2) | ?r_2 chevron.r$,
+    $?r_1 arrow.r.bar chevron.l overline(ell_2) | ?r chevron.r$,
+    $?r_2 arrow.r.bar chevron.l overline(ell_1) | ?r chevron.r$,
+    $?r "fresh"$),
+)
+
+A closed tail admits no leftover labels; a metavariable tail absorbs the other
+side's leftovers under the occurs side condition; two distinct metavariable
+tails meet in a fresh middle tail carrying each side's leftovers to the other;
+and a rigid tail matches only itself, with no leftovers on either side.
 
 == Value typing
 

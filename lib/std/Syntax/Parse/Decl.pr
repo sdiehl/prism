@@ -1251,7 +1251,14 @@ fn parse_params(
         c
     match parse_pattern(c0, depth) of
       PFault(d) => PFault(d)
-      PStuck(c1) => PStuck(c1)
+      PStuck(c1) =>
+        -- At the parameter's first token the closing paren and the borrow
+        -- marker are live alternatives beside a pattern start; once anything
+        -- of the pattern has been consumed, its own expectations stand alone.
+        if c1.pos == c.pos then
+          PStuck(cursor_note(cursor_note(c1, TFixed(")")), TFixed("borrow")))
+        else
+          PStuck(c1)
       PTook(pat, c1) =>
         match parse_param_type(c1, depth) of
           PFault(d) => PFault(d)

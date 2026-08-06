@@ -977,7 +977,7 @@ fn repo_tzdb_package_publishes_and_runs_end_to_end() {
         "{}",
         String::from_utf8_lossy(&run.stderr)
     );
-    assert!(String::from_utf8_lossy(&run.stdout).contains("1970-01-01T09:00:00Z Asia/Tokyo"));
+    assert!(String::from_utf8_lossy(&run.stdout).contains("1970-01-01T09:00:00+09:00"));
 }
 
 #[test]
@@ -1193,7 +1193,7 @@ fn docs_manifest_round_trips_and_rejects_stale_and_drifted_inputs() {
     let entry = project.join("src").join("Tzdb.pr");
     let mutated = fs::read_to_string(&entry)
         .unwrap()
-        .replace("offset_minutes = 540", "offset_minutes = 541");
+        .replace("\"JST\", 540", "\"JST\", 541");
     fs::write(&entry, mutated).unwrap();
     let drifted = run_docs(&[
         project.as_os_str(),
@@ -1278,7 +1278,7 @@ fn check_world_names_moved_public_definition_against_baseline() {
     let entry = project.join("src").join("Tzdb.pr");
     let mutated = fs::read_to_string(&entry)
         .unwrap()
-        .replace("offset_minutes = 540", "offset_minutes = 541");
+        .replace("\"JST\", 540", "\"JST\", 541");
     fs::write(&entry, mutated).unwrap();
 
     let baseline = Path::new(env!("CARGO_MANIFEST_DIR"))

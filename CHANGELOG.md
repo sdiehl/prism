@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.17.0
+
+- Effects: rewrote the `State`, `Writer`, and `Fresh` runners in a cell style the fast tiers accept, moving idiomatic State to the evidence tier.
+- Typechecker: fixed generic `var` cells silently losing polymorphism, so a cell over a signature variable now generalizes correctly.
+- Typed Core: fixed a handler row merge that spelled one private cell effect two ways and refused cell-style runners under open rows.
+- Effect confinement: confined the syntax-artifact decode region, so a program using `Syntax.Codec` stays direct outside the decoder.
+- Performance: made JSON parsing and encoding linear by scanning bytes instead of codepoints; a 2.1 MB artifact decode fell from unbounded minutes to 167 ms.
+- Parser robustness: layout blocks now spend the recursion budget, closing an unbounded-recursion hole on nested open `if` bodies.
+- Parser accountability: landed the committed differential driver and a fourteen-axis depth ledger, probing acceptance below the budget and the structured refusal beyond it.
+- Standard library: added `Data.UnionFind.Payload`, `Data.Name`, and `Data.Scope` as checker seeds with property-law coverage.
+- Checker: added the `tc` package with the type, row, and scheme core, unification with occurs checks, and generalization, mirrored by the statics sketch.
+- Example: the System F checker now resolves spellings to branded identities before checking, deleting its capture-avoidance machinery.
+- Typst: split markup from code expressions in the types, added typed lengths, colors, and alignment, and a markup combinator layer.
+- Spectra: the flagship deck is an introduction to Prism whose slides each reflect the code that builds them.
+- Documentation: added the spec's deriving section with clause-and-instance tabs, a minimal masking treatment, and the book's Packages part.
+- Packages: rebuilt tzdb as a real timezone library with a DST rule engine and doctested transitions.
+- Testing: pinned the tagged-immediate integer boundary across interpreter and native backends.
+- Packaging: fixed the macOS artifact linking against Homebrew's z3, which aborted on machines without the build host's brew tree.
+
 ## 0.16.0
 
 - Self-hosted parser: added `Syntax.Parse` for files and expressions, with generated type/pattern control and Rust as the oracle.

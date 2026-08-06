@@ -1,6 +1,6 @@
 {
   "schema": "prism-syntax-diagnostics-v1",
-  "compiler": "0.16.0",
+  "compiler": "0.17.0",
   "source": {
     "digest": "e58d35529c8c7e03570b152a0654de3d3e22bc112b27977d6668fc070eb90145",
     "text": "-- An interpolation hole with no expression: the lexer refuses this file at the\n-- opening brace, the compiler's `LexError::EmptyHole` (E7001).\nfn main() = println(\"value = {}\")\n"

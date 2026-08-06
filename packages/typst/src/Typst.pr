@@ -1,13 +1,52 @@
 -- | Typed, deterministic construction of Typst source documents.
 --
 -- This package owns Typst syntax composition and escaping. It deliberately
--- knows nothing about presentations, slides, themes, or Spectra.
+-- knows nothing about presentations, slides, themes, or Spectra. Typst's own
+-- distinction between markup and code mode is a typed one here: a `Doc` is
+-- markup (document lines, prose, content), an `Expr` is a code-mode
+-- expression (calls, values, arrays), and the only bridges are `code`, which
+-- prefixes the `#` marker itself, and `content`, which wraps markup in a
+-- content block. A code expression cannot land in markup position without
+-- the marker, because the types refuse it.
+--
+-- Trust has exactly two doors: `atom` (markup) and `sym` (code) admit raw
+-- Typst spelling verbatim, and `raw` admits multi-line markup; everything
+-- else escapes by construction. Typst's value vocabulary (lengths, colors,
+-- alignment, direction) comes typed from `Typst.Value` and is re-exported
+-- here, so an invalid length is unrepresentable and rendering owns every
+-- spelling.
+--
+-- ```prism
+-- fn main() =
+--   println(document([
+--       set_rule("page", [named("width", pt(300)), named("height", pt(200))]),
+--       set_rule("text", [named("size", pt(12))]),
+--       code(call("heading", [string("Hello from Prism")])),
+--       text_line("Each line of this document came from a typed combinator."),
+--     ]))
+-- ```
+-- ```output
+-- #set page(width: 300pt, height: 200pt)
+-- #set text(size: 12pt)
+-- #heading("Hello from Prism")
+-- Each line of this document came from a typed combinator.
+-- ```
 
 import Data.String (split, str_of_char)
 
+import Data.Bytes (Bytes, bytes_concat, bytes_index, bytes_length, bytes_slice, bytes_to_string, string_to_bytes)
+
 import Data.Pretty as Pretty
 
+import Typst.Value (..)
+
+pub import Typst.Value (..)
+
+-- | A markup-mode document fragment.
 opaque type Doc = TypstDoc(Pretty.Doc)
+
+-- | A code-mode expression.
+opaque type Expr = TypstExpr(Pretty.Doc)
 
 fn wrap(doc : Pretty.Doc) : Doc = TypstDoc(doc)
 
@@ -15,51 +54,116 @@ fn unwrap(doc : Doc) : Pretty.Doc =
   match doc of
     TypstDoc(value) => value
 
+fn ewrap(doc : Pretty.Doc) : Expr = TypstExpr(doc)
+
+fn eunwrap(e : Expr) : Pretty.Doc =
+  match e of
+    TypstExpr(value) => value
+
 fn unwrap_docs(docs : List(Doc)) : List(Pretty.Doc) =
   match docs of
     Nil => Nil
     Cons(doc, rest) => Cons(unwrap(doc), unwrap_docs(rest))
+
+fn eunwrap_all(es : List(Expr)) : List(Pretty.Doc) =
+  match es of
+    Nil => Nil
+    Cons(e, rest) => Cons(eunwrap(e), eunwrap_all(rest))
+
+-- The markup layer.
+
+-- | An empty markup fragment.
+pub fn empty() : Doc = wrap(Pretty.empty())
+
+-- | One atomic piece of trusted Typst markup. One of the two trust doors:
+-- the argument is emitted verbatim.
+pub fn atom(source : String) : Doc = wrap(Pretty.text(source))
+
+-- | Multi-line trusted Typst markup, preserving line boundaries; `atom`
+-- iterated over lines, so the same door.
+pub fn raw(source : String) : Doc = lines(raw_lines(split(10, source)))
 
 fn raw_lines(values : List(String)) : List(Doc) =
   match values of
     Nil => Nil
     Cons(value, rest) => Cons(atom(value), raw_lines(rest))
 
--- | An empty document.
-pub fn empty() : Doc = wrap(Pretty.empty())
+-- | A line of prose with Typst's markup control characters escaped, so any
+-- Prism string renders as itself.
+--
+-- ```prism
+-- render(96, text_line("prices in # and * stay literal"))
+-- ```
+-- ```output
+-- prices in \# and \* stay literal
+-- ```
+pub fn text_line(value : String) : Doc = atom(escape_markup(value))
 
--- | One atomic piece of trusted Typst syntax.
-pub fn atom(source : String) : Doc = wrap(Pretty.text(source))
-
--- | A document containing raw Typst, preserving line boundaries.
-pub fn raw(source : String) : Doc = lines(raw_lines(split(10, source)))
-
--- | Documents separated by `sep`.
-pub fn join(sep : Doc, docs : List(Doc)) : Doc =
-  wrap(Pretty.join_docs(unwrap(sep), unwrap_docs(docs)))
-
--- | Documents separated by forced line breaks.
+-- | Markup fragments separated by forced line breaks.
 pub fn lines(docs : List(Doc)) : Doc =
   wrap(Pretty.join_docs(Pretty.hardline(), unwrap_docs(docs)))
 
--- | Concatenate documents without a separator.
+-- | Markup fragments separated by `sep`.
+pub fn join(sep : Doc, docs : List(Doc)) : Doc =
+  wrap(Pretty.join_docs(unwrap(sep), unwrap_docs(docs)))
+
+-- | Concatenate markup fragments without a separator.
 pub fn concat_docs(docs : List(Doc)) : Doc =
   wrap(Pretty.concat_docs(unwrap_docs(docs)))
 
-fn comma_sep(docs : List(Doc)) : Pretty.Doc =
+-- The code layer.
+
+-- | One atomic piece of trusted code-mode Typst: an identifier, an operator,
+-- a literal spelling the caller owns. The code-mode trust door.
+pub fn sym(source : String) : Expr = ewrap(Pretty.text(source))
+
+-- | The `none` value, for optional argument positions.
+pub fn none_expr() : Expr = sym("none")
+
+-- | A boolean literal.
+pub fn boolean(value : Bool) : Expr = sym(if value then "true" else "false")
+
+-- | An integer literal.
+pub fn int(value : Int) : Expr = sym("{value}")
+
+-- | Escape arbitrary text as a Typst string value.
+pub fn string(value : String) : Expr = sym("\"{escape_string(value)}\"")
+
+-- | A typed length value.
+pub fn len(l : Length) : Expr = sym(show_length(l))
+
+-- | A point length.
+pub fn pt(n : Int) : Expr = len(Pt(n))
+
+-- | An em length.
+pub fn em(n : Int) : Expr = len(Em(n))
+
+-- | A percentage length.
+pub fn percent(n : Int) : Expr = len(Percent(n))
+
+-- | A fraction length.
+pub fn fr(n : Int) : Expr = len(Fr(n))
+
+-- | A typed color value.
+pub fn color(c : Color) : Expr = sym(show_color(c))
+
+-- | A typed alignment value.
+pub fn alignment(a : Alignment) : Expr = sym(show_alignment(a))
+
+-- | A typed direction value.
+pub fn direction(d : Dir) : Expr = sym(show_dir(d))
+
+fn comma_sep(es : List(Expr)) : Pretty.Doc =
   Pretty.group(
       Pretty.join_docs(
           Pretty.cat(Pretty.text(","), Pretty.line()),
-          unwrap_docs(docs),
+          eunwrap_all(es),
         ),
     )
 
--- | A parenthesized tuple or argument group.
-pub fn tuple(docs : List(Doc)) : Doc = wrap(Pretty.parens(comma_sep(docs)))
-
 -- | A Typst function call.
-pub fn call(name : String, args : List(Doc)) : Doc =
-  wrap(
+pub fn call(name : String, args : List(Expr)) : Expr =
+  ewrap(
       Pretty.cat(
           Pretty.text(name),
           Pretty.parens(Pretty.nest(2, comma_sep(args))),
@@ -67,33 +171,37 @@ pub fn call(name : String, args : List(Doc)) : Doc =
     )
 
 -- | A named argument.
-pub fn named(name : String, value : Doc) : Doc =
-  concat_docs([atom(name), atom(": "), value])
+pub fn named(name : String, value : Expr) : Expr =
+  concat_exprs([sym(name), sym(": "), value])
 
--- | Prefix a document with Typst's code marker.
-pub fn code(doc : Doc) : Doc = concat_docs([atom("#"), doc])
+-- | A parenthesized tuple or argument group.
+pub fn tuple(es : List(Expr)) : Expr = ewrap(Pretty.parens(comma_sep(es)))
 
--- | Attach a content block whose body is a code expression.
-pub fn content_call(name : String, args : List(Doc), body : Doc) : Doc =
-  wrap(
-      Pretty.cat(
-          unwrap(call(name, args)),
-          Pretty.brackets(
-              Pretty.cat(Pretty.text("#"), Pretty.parens(unwrap(body))),
-            ),
-        ),
-    )
+-- | An array literal.
+pub fn array(es : List(Expr)) : Expr = ewrap(Pretty.brackets(comma_sep(es)))
+
+-- | Concatenate code expressions without a separator.
+pub fn concat_exprs(es : List(Expr)) : Expr =
+  ewrap(Pretty.concat_docs(eunwrap_all(es)))
+
+-- | Code expressions joined with Typst's content `+`, the idiom for building
+-- one content value out of many.
+pub fn sum(es : List(Expr)) : Expr =
+  match es of
+    Nil => none_expr()
+    Cons(e, Nil) => e
+    Cons(e, rest) => concat_exprs([e, sym(" + "), sum(rest)])
 
 -- | A braced code suite with stable indentation.
-pub fn suite(docs : List(Doc)) : Doc =
-  wrap(
+pub fn suite(es : List(Expr)) : Expr =
+  ewrap(
       Pretty.braces(
           Pretty.cat(
               Pretty.hardline(),
               Pretty.cat(
                   Pretty.nest(
                       2,
-                      Pretty.join_docs(Pretty.hardline(), unwrap_docs(docs)),
+                      Pretty.join_docs(Pretty.hardline(), eunwrap_all(es)),
                     ),
                   Pretty.hardline(),
                 ),
@@ -101,74 +209,185 @@ pub fn suite(docs : List(Doc)) : Doc =
         ),
     )
 
+-- | An `if condition { ... }` code suite.
+pub fn if_suite(condition : String, body : List(Expr)) : Expr =
+  concat_exprs([sym("if "), sym(condition), sym(" "), suite(body)])
+
+-- | A call carrying a trailing content block whose body is one code
+-- expression, `name(args)[#(body)]`.
+pub fn content_call(name : String, args : List(Expr), body : Expr) : Expr =
+  ewrap(
+      Pretty.cat(
+          eunwrap(call(name, args)),
+          Pretty.brackets(
+              Pretty.cat(Pretty.text("#"), Pretty.parens(eunwrap(body))),
+            ),
+        ),
+    )
+
+-- The two bridges between the modes.
+
+-- | Lift a code expression into markup position by prefixing Typst's `#`
+-- marker. The only way an expression reaches a document line.
+pub fn code(e : Expr) : Doc = wrap(Pretty.cat(Pretty.text("#"), eunwrap(e)))
+
+-- | Wrap markup as a code-mode content value, `[...]`.
+pub fn content(d : Doc) : Expr = ewrap(Pretty.brackets(unwrap(d)))
+
+-- Rules and bindings, which are document lines.
+
 -- | A top-level `#set name(...)` rule.
-pub fn set_rule(name : String, args : List(Doc)) : Doc =
-  code(concat_docs([atom("set "), call(name, args)]))
+pub fn set_rule(name : String, args : List(Expr)) : Doc =
+  code(concat_exprs([sym("set "), call(name, args)]))
+
+-- | A top-level `#show selector: body` rule.
+pub fn show_rule(selector : String, body : Expr) : Doc =
+  code(concat_exprs([sym("show "), sym(selector), sym(": "), body]))
 
 -- | A `#let name(params) = { ... }` function binding.
-pub fn let_function(name : String, params : List(Doc), body : List(Doc)) : Doc =
-  concat_docs([atom("#let "), call(name, params), atom(" = "), suite(body)])
+pub fn let_function(name : String, params : List(Expr), body : List(Expr)) : Doc =
+  code(concat_exprs([sym("let "), call(name, params), sym(" = "), suite(body)]))
 
--- | An `if condition { ... }` suite.
-pub fn if_suite(condition : String, body : List(Doc)) : Doc =
-  concat_docs([atom("if "), atom(condition), atom(" "), suite(body)])
+-- | A `#let name = value` binding.
+pub fn let_binding(name : String, value : Expr) : Doc =
+  code(concat_exprs([sym("let "), sym(name), sym(" = "), value]))
 
--- | A point length.
-pub fn pt(n : Int) : Doc = atom("{n}pt")
+-- Escaping, owned here and nowhere else. Both escapes walk raw bytes and
+-- flush the run between escapes as one slice; every escaped byte is ASCII,
+-- so a run boundary can never split a multi-byte scalar.
 
--- | A percentage length.
-pub fn percent(n : Int) : Doc = atom("{n}%")
+fn escape_string(value : String) : String =
+  let b = string_to_bytes(value)
+  esc_run(b, bytes_length(b), 0, 0, "", string_escape_of)
 
-fn escape_go(s : String, i : Int, acc : String) : String =
-  if i >= str_len(s) then
-    acc
+fn escape_markup(value : String) : String =
+  let b = string_to_bytes(value)
+  esc_run(b, bytes_length(b), 0, 0, "", markup_escape_of)
+
+fn esc_run(
+  b : Bytes,
+  n : Int,
+  start : Int,
+  j : Int,
+  acc : String,
+  escape_of : (Int) -> Option(String)
+) : String =
+  if j >= n then
+    concat(acc, run_text(b, start, j))
   else
-    let c = char_at(s, i)
-    let escaped =
-      if c == 34 then
-        "\\\""
-      elif c == 92 then
-        "\\\\"
-      elif c == 10 then
-        "\\n"
-      elif c == 13 then
-        "\\r"
-      elif c == 9 then
-        "\\t"
-      else
-        str_of_char(chr(c))
-    escape_go(s, i + 1, "{acc}{escaped}")
+    match escape_of(bytes_index(b, j)) of
+      Some(escaped) =>
+        let flushed = concat(concat(acc, run_text(b, start, j)), escaped)
+        esc_run(b, n, j + 1, j + 1, flushed, escape_of)
+      None => esc_run(b, n, start, j + 1, acc, escape_of)
 
--- | Escape arbitrary text as a Typst string value.
-pub fn string(value : String) : Doc = atom("\"{escape_go(value, 0, "")}\"")
+fn run_text(b : Bytes, start : Int, end : Int) : String =
+  match bytes_to_string(bytes_slice(b, start, end - start)) of
+    Some(piece) => piece
+    None => ""
 
--- | Render at a selected source width.
+fn string_escape_of(c : Int) : Option(String) =
+  if c == 34 then
+    Some("\\\"")
+  elif c == 92 then
+    Some("\\\\")
+  elif c == 10 then
+    Some("\\n")
+  elif c == 13 then
+    Some("\\r")
+  elif c == 9 then
+    Some("\\t")
+  else
+    None
+
+fn markup_escape_of(c : Int) : Option(String) =
+  if c == 35 then
+    Some("\\#")
+  elif c == 42 then
+    Some("\\*")
+  elif c == 95 then
+    Some("\\_")
+  elif c == 96 then
+    Some("\\`")
+  elif c == 91 then
+    Some("\\[")
+  elif c == 93 then
+    Some("\\]")
+  elif c == 36 then
+    Some("\\$")
+  elif c == 60 then
+    Some("\\<")
+  elif c == 62 then
+    Some("\\>")
+  elif c == 64 then
+    Some("\\@")
+  elif c == 92 then
+    Some("\\\\")
+  else
+    None
+
+-- Rendering.
+
+-- | Render markup at a selected source width. Rendering is pure: equal
+-- documents render equally, always.
 pub fn render(width : Int, doc : Doc) : String = Pretty.render(width, unwrap(doc))
+
+-- | Render one code expression at a selected source width, without the
+-- markup marker: the caller owns the position it lands in.
+pub fn render_expr(width : Int, e : Expr) : String =
+  Pretty.render(width, eunwrap(e))
 
 -- | Render a conventional 96-column Typst source document.
 pub fn document(docs : List(Doc)) : String = render(96, lines(docs))
 
 test fn strings_are_escaped() =
-  if render(96, string("a\"b\\c\n")) == "\"a\\\"b\\\\c\\n\"" then
+  if render_expr(96, string("a\"b\\c\n")) == "\"a\\\"b\\\\c\\n\"" then
+    ()
+  else
+    fail()
+
+test fn markup_text_is_escaped() =
+  if (render(96, text_line("# not a heading")) == "\\# not a heading") then
     ()
   else
     fail()
 
 test fn calls_break_deterministically() =
-  let doc = call("f", [named("left", atom("1")), named("right", atom("2"))])
-  if render(80, doc) == "f(left: 1, right: 2)" then
+  let doc = call("f", [named("left", sym("1")), named("right", sym("2"))])
+  if render_expr(80, doc) == "f(left: 1, right: 2)" then
     ()
   else
     fail()
 
 test fn content_bodies_remain_one_code_expression() =
-  let body = concat_docs([
-      call("text", [string("a")]),
-      atom(" + "),
-      call("raw", [string("b")]),
-    ])
-  if (render(80, content_call("box", Nil, body))
+  let body = sum([call("text", [string("a")]), call("raw", [string("b")])])
+  if (render_expr(80, content_call("box", Nil, body))
       == "box()[#(text(\"a\") + raw(\"b\"))]") then
+    ()
+  else
+    fail()
+
+test fn typed_values_own_their_spelling() =
+  let args = [
+      named("width", len(Percent(100))),
+      named("fill", color(Rgb(300, -1, 40))),
+      named("dir", direction(Ttb)),
+      named("align", alignment(AHorizon)),
+    ]
+  if (render_expr(96, call("box", args))
+      == "box(width: 100%, fill: rgb(255, 0, 40), dir: ttb, align: horizon)") then
+    ()
+  else
+    fail()
+
+test fn rendering_is_deterministic_and_stable() =
+  let doc = lines([
+      set_rule("page", [named("width", pt(300))]),
+      code(call("heading", [string("d")])),
+      text_line("prose with # inside"),
+    ])
+  let once = render(96, doc)
+  if once == render(96, doc) && render(96, atom(once)) == once then
     ()
   else
     fail()

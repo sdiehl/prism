@@ -2015,7 +2015,17 @@ fn parse_operation_arm(c : Cursor, depth : Int) : Parsed(HandlerArm) =
 -- Layout blocks and statement sugar
 -- -------------------------------------------------------------------------
 
+-- A layout block spends one budget unit at entry: blocks nest through
+-- statement forms (an open `if` body holding another open `if`) without
+-- passing any other spending production, so the block door is where the
+-- depth contract must collect.
 fn parse_block(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  match descend(depth, c) of
+    PStuck(c0) => PStuck(c0)
+    PFault(d0) => PFault(d0)
+    PTook(spent, _c0) => parse_block_at(c, spent)
+
+fn parse_block_at(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
   let saved = c
   match take_kind(c, TVOpen) of
     PStuck(c1) => PStuck(c1)

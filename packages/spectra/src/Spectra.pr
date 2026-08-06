@@ -1,4 +1,32 @@
 -- | Spectra: typed Prism presentations lowered to deterministic Typst.
+--
+-- A deck is an ordinary immutable value: metadata, a theme, and a list of
+-- slides whose bodies are `Pict` layout values. Everything else is a
+-- projection of that value, so building one is just building data:
+--
+-- ```prism
+-- fn main() =
+--   let d = make_deck(
+--       metadata("Prism in Six Slides", "sdiehl"),
+--       prism_theme,
+--       [titled_slide("Hello", item("A deck is a value."))],
+--     )
+--   match d.slides of
+--     Cons(s, Nil) =>
+--       match s.title of
+--         Some(t) => println(t)
+--         None => ()
+--     _ => ()
+-- ```
+-- ```output
+-- Hello
+-- ```
+--
+-- The effectful `deck`/`slide`/`pict` builders elaborate to this same pure
+-- representation; `render_typst` lowers a deck to a Typst document, and the
+-- standalone `spectra` executable (see `SpectraCli`) drives the pipeline
+-- through to a PDF. Slides can quote their own source through `reflect fn`,
+-- which is what makes a deck that explains its own code an ordinary program.
 
 import Layout as L
 

@@ -541,7 +541,7 @@ impl Tc<'_> {
         // additionally keeps its own latent row open so it fits an effectful
         // context by solving that variable under row unification.
         let self_ty = default_open_rows(&self.apply(&seed.self_ty));
-        let (g, renames) = self.generalize_map(env, &self_ty);
+        let (g, renames) = self.generalize_decl_map(env, &self_ty);
         if !d.constraints.is_empty() {
             // The scheme's quantified type variables; a constraint may mention only
             // these. A rigid signature variable that no parameter or result uses is
@@ -655,7 +655,7 @@ impl Tc<'_> {
         self.flush_spans();
         self.flush_holes();
         let t = self.apply(&ty);
-        Ok((self.generalize(env, &t), effs))
+        Ok((self.generalize_decl(env, &t), effs))
     }
 
     pub(in crate::tc) fn check_instance(

@@ -419,10 +419,8 @@ fn main() =
 source_filename = "prism"
 
 @.fmts = private constant [3 x i8] c"%s\00"
-@.str0 = private constant [2 x i8] c"a\00"
-@.str1 = private constant [2 x i8] c"b\00"
-@prism_native_kont_table = constant [923 x i8] c"scheme  prism-core-hash-v2\0Abundle  a2e29a57b96431bbdc75dbd75ccc45f34d45e5b8ac5754da0b2bb83a60b2fe0a\0Acompiler  0.16.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:a2e29a57b96431bbdc75dbd75ccc45f34d45e5b8ac5754da0b2bb83a60b2fe0a\0Aflag  stdlib-root  prism-core-hash-v2:5f74ceb8cdbb6bee38bb1d4797b4d7688c207bf37e02c35c3cc5ef7876557fa3\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_eqp  055362bef1c82a335fb4bfbdf8c9bb3dd7d851ee62efb128ef9c247b19e8dd5f  eqp\0Afn      prismfn_ltp  6e58d3d4a8d58100fd612000a344a785f83ebcee8141e19bc3ee92db2ef75e58  ltp\0Afn      prismfn_main  257e5934c92f2afbc435ff1ad94432554913f7e89f510e0ea0091ec2f4a7f359  main\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [1089 x i8] c"state-map 1\0Ascheme  prism-core-hash-v2\0Abundle  a2e29a57b96431bbdc75dbd75ccc45f34d45e5b8ac5754da0b2bb83a60b2fe0a\0Acompiler  0.16.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:a2e29a57b96431bbdc75dbd75ccc45f34d45e5b8ac5754da0b2bb83a60b2fe0a\0Aflag  stdlib-root  prism-core-hash-v2:5f74ceb8cdbb6bee38bb1d4797b4d7688c207bf37e02c35c3cc5ef7876557fa3\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_eqp 055362bef1c82a335fb4bfbdf8c9bb3dd7d851ee62efb128ef9c247b19e8dd5f eqp arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prismfn_ltp 6e58d3d4a8d58100fd612000a344a785f83ebcee8141e19bc3ee92db2ef75e58 ltp arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prismfn_main 257e5934c92f2afbc435ff1ad94432554913f7e89f510e0ea0091ec2f4a7f359 main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [923 x i8] c"scheme  prism-core-hash-v2\0Abundle  a2e29a57b96431bbdc75dbd75ccc45f34d45e5b8ac5754da0b2bb83a60b2fe0a\0Acompiler  0.17.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:a2e29a57b96431bbdc75dbd75ccc45f34d45e5b8ac5754da0b2bb83a60b2fe0a\0Aflag  stdlib-root  prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_eqp  055362bef1c82a335fb4bfbdf8c9bb3dd7d851ee62efb128ef9c247b19e8dd5f  eqp\0Afn      prismfn_ltp  6e58d3d4a8d58100fd612000a344a785f83ebcee8141e19bc3ee92db2ef75e58  ltp\0Afn      prismfn_main  257e5934c92f2afbc435ff1ad94432554913f7e89f510e0ea0091ec2f4a7f359  main\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1089 x i8] c"state-map 1\0Ascheme  prism-core-hash-v2\0Abundle  a2e29a57b96431bbdc75dbd75ccc45f34d45e5b8ac5754da0b2bb83a60b2fe0a\0Acompiler  0.17.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:a2e29a57b96431bbdc75dbd75ccc45f34d45e5b8ac5754da0b2bb83a60b2fe0a\0Aflag  stdlib-root  prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_eqp 055362bef1c82a335fb4bfbdf8c9bb3dd7d851ee62efb128ef9c247b19e8dd5f eqp arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prismfn_ltp 6e58d3d4a8d58100fd612000a344a785f83ebcee8141e19bc3ee92db2ef75e58 ltp arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prismfn_main 257e5934c92f2afbc435ff1ad94432554913f7e89f510e0ea0091ec2f4a7f359 main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol2 = private constant [13 x i8] c"prismfn_main\00"
 @.kont_hash2 = private constant [65 x i8] c"257e5934c92f2afbc435ff1ad94432554913f7e89f510e0ea0091ec2f4a7f359\00"
 @.kont_name2 = private constant [5 x i8] c"main\00"
@@ -442,47 +440,39 @@ entry:
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t10 = call i64 @prism_str_lit(ptr @.str0, i64 1)
-  %t11 = call i64 @prism_str_lit(ptr @.str1, i64 1)
-  %t12 = call i64 @prism_str_eq(i64 %t10, i64 %t11)
-  %t14 = shl i64 %t12, 1
-  %t15 = or i64 %t14, 1
-  call void @prism_rc_dec(i64 %t10)
-  call void @prism_rc_dec(i64 %t11)
-  %t17 = ashr i64 %t15, 1
-  %t18 = call i64 @prism_show_bool(i64 %t17)
-  call void @prism_rc_dec(i64 %t15)
-  %t19 = inttoptr i64 %t18 to ptr
-  %t20 = getelementptr inbounds i8, ptr %t19, i64 24
-  %1 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t20)
-  call void @prism_rc_dec(i64 %t18)
-  call void @prism_rc_dec(i64 0)
-  call void @prism_print_nl()
-  call void @prism_rc_dec(i64 0)
-  %t28 = call i64 @prism_show_bool(i64 0)
+  %t13 = call i64 @prism_show_bool(i64 0)
   call void @prism_rc_dec(i64 1)
-  %t29 = inttoptr i64 %t28 to ptr
-  %t30 = getelementptr inbounds i8, ptr %t29, i64 24
-  %2 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t30)
-  call void @prism_rc_dec(i64 %t28)
+  %t14 = inttoptr i64 %t13 to ptr
+  %t15 = getelementptr inbounds i8, ptr %t14, i64 24
+  %1 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t15)
+  call void @prism_rc_dec(i64 %t13)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t38 = call i64 @prism_show_bool(i64 1)
-  call void @prism_rc_dec(i64 3)
-  %t39 = inttoptr i64 %t38 to ptr
-  %t40 = getelementptr inbounds i8, ptr %t39, i64 24
-  %3 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t40)
-  call void @prism_rc_dec(i64 %t38)
+  %t23 = call i64 @prism_show_bool(i64 0)
+  call void @prism_rc_dec(i64 1)
+  %t24 = inttoptr i64 %t23 to ptr
+  %t25 = getelementptr inbounds i8, ptr %t24, i64 24
+  %2 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t25)
+  call void @prism_rc_dec(i64 %t23)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   call void @prism_rc_dec(i64 0)
-  %t48 = call i64 @prism_show_bool(i64 1)
+  %t33 = call i64 @prism_show_bool(i64 1)
   call void @prism_rc_dec(i64 3)
-  %t49 = inttoptr i64 %t48 to ptr
-  %t50 = getelementptr inbounds i8, ptr %t49, i64 24
-  %4 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t50)
-  call void @prism_rc_dec(i64 %t48)
+  %t34 = inttoptr i64 %t33 to ptr
+  %t35 = getelementptr inbounds i8, ptr %t34, i64 24
+  %3 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t35)
+  call void @prism_rc_dec(i64 %t33)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  call void @prism_rc_dec(i64 0)
+  %t43 = call i64 @prism_show_bool(i64 1)
+  call void @prism_rc_dec(i64 3)
+  %t44 = inttoptr i64 %t43 to ptr
+  %t45 = getelementptr inbounds i8, ptr %t44, i64 24
+  %4 = call i32 (ptr, ...) @printf(ptr @.fmts, ptr %t45)
+  call void @prism_rc_dec(i64 %t43)
   call void @prism_rc_dec(i64 0)
   call void @prism_print_nl()
   ret i64 0
@@ -499,12 +489,6 @@ declare i32 @printf(ptr, ...) #0
 
 ; Function Attrs: nounwind
 declare void @prism_print_nl() #0
-
-; Function Attrs: nounwind
-declare i64 @prism_str_lit(ptr, i64) #0
-
-; Function Attrs: nounwind
-declare i64 @prism_str_eq(i64, i64) #0
 
 attributes #0 = { nounwind }
 

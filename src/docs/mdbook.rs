@@ -12,15 +12,17 @@
 //! `prism,sig`, `prism,def`, `prism,ignore`, `prism,cfail,ok`, or a `*,err` when
 //! a block that should type-check does not.
 //!
-//! It also owns the stdlib section's book structure: SUMMARY.md lists only the
-//! stdlib index chapter, and the generated per-module pages beside it are
-//! injected as its sub-chapters here (`inject_stdlib`), ordered by the index's
-//! own module list. Regenerating the reference (`just docs-gen`) is therefore
-//! the only step that adds a module to the book; SUMMARY.md never changes.
+//! It also owns the generated sections' book structure: SUMMARY.md lists only
+//! each generated index chapter (the stdlib reference, and one per package
+//! under `packages/`), and the generated per-module pages beside an index are
+//! injected as its sub-chapters here (`inject_generated`), ordered by the
+//! index's own module list. Regenerating a reference (`just docs-gen`,
+//! `just docs-packages`) is therefore the only step that adds a module to the
+//! book; SUMMARY.md never changes.
 
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
@@ -32,16 +34,30 @@ use crate::lex::{
     lex_raw,
 };
 use crate::names::ENTRY_POINT;
-use crate::resolve::default_roots;
+use crate::resolve::{default_roots, Root};
 
 use super::check_quiet;
 use super::doctest::{imported, is_hidden, runnable, split_imports, unhide, MOD_ATTR};
 
 // The stdlib index chapter: the only stdlib entry SUMMARY.md carries. Its
-// sibling module pages become sub-chapters at build time via `inject_stdlib`.
+// sibling module pages become sub-chapters at build time via `inject_generated`.
 const STDLIB_INDEX: &str = "stdlib/index.md";
-// The book-relative directory the generated stdlib pages live in.
-const STDLIB_DIR: &str = "stdlib";
+// The book-relative directory the per-package generated references live in;
+// each `packages/<name>/index.md` chapter is a generated index like the
+// stdlib's, and its sibling module pages are injected the same way.
+const PACKAGES_DIR: &str = "packages/";
+const INDEX_PAGE: &str = "/index.md";
+
+// Whether a chapter source path is a generated-reference index whose sibling
+// module pages should be injected as sub-chapters: the stdlib index, or a
+// package index beneath `packages/` (the `packages/index.md` landing page
+// itself is hand-written prose, not a generated index).
+fn generated_index(source_path: &str) -> bool {
+    source_path == STDLIB_INDEX
+        || source_path
+            .strip_prefix(PACKAGES_DIR)
+            .is_some_and(|rest| rest.ends_with(INDEX_PAGE))
+}
 
 // The `- [Title](./page.md)` module links of the generated stdlib index, in
 // order. Only same-directory `.md` targets count; anything else on the page is
@@ -83,13 +99,14 @@ fn collect_source_paths(items: &[Value], out: &mut BTreeSet<String>) {
     }
 }
 
-// Append the generated stdlib module pages as sub-chapters of the stdlib index
-// chapter, reading their markdown from `src_dir` (the book's source directory;
-// mdbook only loads SUMMARY chapters itself). Runs before `walk`, so injected
-// pages get their fences annotated like any hand-listed chapter. Warns when the
-// index chapter carries no module links at all, since that silently empties the
-// stdlib section (`PRISM_MDBOOK_STRICT` turns the warning into a build failure).
-fn inject_stdlib(
+// Append a generated reference's module pages as sub-chapters of its index
+// chapter (the stdlib index, and each package index; see `generated_index`),
+// reading their markdown from `src_dir` (the book's source directory; mdbook
+// only loads SUMMARY chapters itself). Runs before `walk`, so injected pages
+// get their fences annotated like any hand-listed chapter. Warns when an index
+// chapter carries no module links at all, since that silently empties its
+// section (`PRISM_MDBOOK_STRICT` turns the warning into a build failure).
+fn inject_generated(
     items: &mut [Value],
     src_dir: &Path,
     existing: &BTreeSet<String>,
@@ -99,18 +116,31 @@ fn inject_stdlib(
         let Some(ch) = item.get_mut("Chapter") else {
             continue;
         };
-        if ch.get("source_path").and_then(Value::as_str) != Some(STDLIB_INDEX) {
+        let source_path = ch
+            .get("source_path")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if !generated_index(&source_path) {
             if let Some(subs) = ch.get_mut("sub_items").and_then(Value::as_array_mut) {
-                inject_stdlib(subs, src_dir, existing, warnings)?;
+                inject_generated(subs, src_dir, existing, warnings)?;
             }
             continue;
         }
+        // The directory the index's module pages sit in, from the index's own
+        // path: `stdlib/index.md` -> `stdlib`, `packages/tzdb/index.md` ->
+        // `packages/tzdb`. Every `generated_index` path ends with the index
+        // page, the stdlib's included.
+        let Some(dir) = source_path.strip_suffix(INDEX_PAGE) else {
+            continue;
+        };
+        let dir = dir.to_string();
         let links = index_links(ch.get("content").and_then(Value::as_str).unwrap_or(""));
         if links.is_empty() {
             warnings.push(format!(
-                "stdlib index ({STDLIB_INDEX}) lists no module pages; stdlib chapters not injected"
+                "generated index ({source_path}) lists no module pages; its chapters were not injected"
             ));
-            return Ok(());
+            continue;
         }
         let parent_name = ch
             .get("name")
@@ -126,8 +156,8 @@ fn inject_stdlib(
             continue;
         };
         for (title, page) in links {
-            let path = format!("{STDLIB_DIR}/{page}");
-            if path == STDLIB_INDEX || existing.contains(&path) {
+            let path = format!("{dir}/{page}");
+            if path == source_path || existing.contains(&path) {
                 continue;
             }
             let body = fs::read_to_string(src_dir.join(&path)).map_err(|e| {
@@ -145,7 +175,6 @@ fn inject_stdlib(
                 "parent_names": [parent_name],
             }}));
         }
-        return Ok(());
     }
     Ok(())
 }
@@ -207,7 +236,14 @@ fn hash_suffix(info: &str) -> String {
 
 // Classify one `prism` block body: the rewritten info string and an optional
 // failure message when a block that was expected to type-check did not.
-fn classify(info: &str, body: &str, book_root: &Path) -> (String, Option<String>) {
+// `extra_roots` are searched before the book root: empty for ordinary
+// chapters, the package source directories for a page under `packages/`.
+fn classify(
+    info: &str,
+    body: &str,
+    book_root: &Path,
+    extra_roots: &[PathBuf],
+) -> (String, Option<String>) {
     // Reference blocks the generator emits: never run, never checked.
     if has_attr(info, "sig") {
         return (format!("prism,sig{}", hash_suffix(info)), None);
@@ -220,8 +256,14 @@ fn classify(info: &str, body: &str, book_root: &Path) -> (String, Option<String>
     }
 
     // Resolve a block's imports against the book root the preprocessor context
-    // gave us, not the process CWD (which need not be the book directory).
-    let roots = default_roots(book_root);
+    // gave us, not the process CWD (which need not be the book directory). A
+    // package page's blocks additionally see the repository's package sources,
+    // ahead of the book root, so `import Tzdb (..)` resolves the way it does
+    // inside the package project.
+    let mut roots = default_roots(book_root);
+    for dir in extra_roots.iter().rev() {
+        roots.insert(0, Root::Dir(dir.clone()));
+    }
     // A bare expression or `let`-block is wrapped as an implicit `main`, so it
     // counts as runnable rather than merely type-checking. The program is the
     // same one the doctest runner builds: hidden lines unhidden and the stamped
@@ -325,9 +367,13 @@ fn example_source_map(body: &str, program: &str, prefix: usize, skip: usize) -> 
 
 // Run the one canonical extraction (`dump typespans`), then project any
 // implicit-main, import-prefix, or hidden-line offsets back onto the exact
-// fence bytes readers see.
-fn analyze_types(body: &str, info: &str) -> Result<TypeSpans, Error> {
-    let roots = default_roots(Path::new("."));
+// fence bytes readers see. `extra_roots` mirrors `classify`'s: package source
+// directories for a block on a package page, empty everywhere else.
+fn analyze_types(body: &str, info: &str, extra_roots: &[PathBuf]) -> Result<TypeSpans, Error> {
+    let mut roots = default_roots(Path::new("."));
+    for dir in extra_roots.iter().rev() {
+        roots.insert(0, Root::Dir(dir.clone()));
+    }
     let compile = compile_of(body);
     let (skip, rest) = split_imports(&compile);
     let program = runnable(mod_attr(info), &compile);
@@ -609,7 +655,11 @@ fn is_fence(line: &str, marker: &str) -> bool {
 
 /// Rewrite every `prism` fence in `content`, returning the new markdown and any
 /// failures (a block that should type-check but does not).
-pub(crate) fn annotate_markdown(content: &str, book_root: &Path) -> (String, Vec<String>) {
+pub(crate) fn annotate_markdown(
+    content: &str,
+    book_root: &Path,
+    extra_roots: &[PathBuf],
+) -> (String, Vec<String>) {
     let lines: Vec<&str> = content.lines().collect();
     let mut out = String::new();
     let mut warnings = Vec::new();
@@ -631,7 +681,7 @@ pub(crate) fn annotate_markdown(content: &str, book_root: &Path) -> (String, Vec
             j += 1;
         }
         if lang_of(info) == "prism" {
-            let (new_info, warn) = classify(info, &body, book_root);
+            let (new_info, warn) = classify(info, &body, book_root, extra_roots);
             let checked_ok = warn.is_none() && new_info.split(',').any(|part| part == "ok");
             if let Some(w) = warn {
                 warnings.push(w);
@@ -647,7 +697,7 @@ pub(crate) fn annotate_markdown(content: &str, book_root: &Path) -> (String, Vec
             // button and shared playground link without showing that boilerplate.
             let browser_source = imported(mod_attr(info), &compile_of(&body));
             if tooltip_eligible && checked_ok {
-                match analyze_types(&body, info)
+                match analyze_types(&body, info, extra_roots)
                     .and_then(|types| typed_html(&display, &new_info, &types, &browser_source))
                 {
                     Ok(html) => {
@@ -699,19 +749,50 @@ pub(crate) fn annotate_markdown(content: &str, book_root: &Path) -> (String, Vec
     (out, warnings)
 }
 
-// Walk the mdbook section tree, rewriting each chapter's content in place.
-fn walk(items: &mut Vec<Value>, warnings: &mut Vec<String>, book_root: &Path) {
+// The source directories of the repository's packages, for resolving a package
+// page's doc blocks: every `<repo>/packages/*/src` that exists, in name order.
+// The book root is `<repo>/docs`, so the packages tree is its sibling.
+fn package_src_dirs(book_root: &Path) -> Vec<PathBuf> {
+    let Some(repo) = book_root.parent() else {
+        return Vec::new();
+    };
+    let Ok(entries) = fs::read_dir(repo.join(PACKAGES_DIR.trim_end_matches('/'))) else {
+        return Vec::new();
+    };
+    let mut dirs: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|e| e.path().join("src"))
+        .filter(|p| p.is_dir())
+        .collect();
+    dirs.sort();
+    dirs
+}
+
+// Walk the mdbook section tree, rewriting each chapter's content in place. A
+// chapter under `packages/` gets the package source roots for its doc blocks;
+// every other chapter resolves against the book root and stdlib alone.
+fn walk(
+    items: &mut Vec<Value>,
+    warnings: &mut Vec<String>,
+    book_root: &Path,
+    package_dirs: &[PathBuf],
+) {
     for item in items {
         let Some(chapter) = item.get_mut("Chapter") else {
             continue;
         };
+        let in_packages = chapter
+            .get("source_path")
+            .and_then(Value::as_str)
+            .is_some_and(|p| p.starts_with(PACKAGES_DIR));
+        let extras = if in_packages { package_dirs } else { &[] };
         if let Some(content) = chapter.get("content").and_then(Value::as_str) {
-            let (new, mut w) = annotate_markdown(content, book_root);
+            let (new, mut w) = annotate_markdown(content, book_root, extras);
             warnings.append(&mut w);
             chapter["content"] = Value::String(new);
         }
         if let Some(subs) = chapter.get_mut("sub_items").and_then(Value::as_array_mut) {
-            walk(subs, warnings, book_root);
+            walk(subs, warnings, book_root, package_dirs);
         }
     }
 }
@@ -750,8 +831,9 @@ pub fn preprocess_book(input: &str) -> Result<(String, Vec<String>), Error> {
     if let Some(items) = book.get_mut(key).and_then(Value::as_array_mut) {
         let mut existing = BTreeSet::new();
         collect_source_paths(items, &mut existing);
-        inject_stdlib(items, &src_dir, &existing, &mut warnings)?;
-        walk(items, &mut warnings, Path::new(root));
+        inject_generated(items, &src_dir, &existing, &mut warnings)?;
+        let package_dirs = package_src_dirs(Path::new(root));
+        walk(items, &mut warnings, Path::new(root), &package_dirs);
     }
     let json = serde_json::to_string(&book)
         .map_err(|e| Error::CodegenDocs(format!("mdbook preprocessor output: {e}")))?;
@@ -772,7 +854,7 @@ mod tests {
             "```prism\n-- a comment\nfn add(x : Int) : Int = x + 2\n```\n",
             "```prism,compile_fail\n-- a comment\nfn bad() : Int = true\n```\n",
         ] {
-            let (rendered, warnings) = annotate_markdown(markdown, Path::new("."));
+            let (rendered, warnings) = annotate_markdown(markdown, Path::new("."), &[]);
             assert!(warnings.is_empty(), "{warnings:?}");
             assert!(
                 rendered.contains("<span class=\"hljs-comment\">-- a comment</span>"),
@@ -784,7 +866,7 @@ mod tests {
     #[test]
     fn compiling_block_bakes_theme_classes_and_nested_types_idempotently() {
         let markdown = "```prism\nfn add(x : Int) : Int = x + 2\n```\n";
-        let (once, warnings) = annotate_markdown(markdown, Path::new("."));
+        let (once, warnings) = annotate_markdown(markdown, Path::new("."), &[]);
         assert!(warnings.is_empty(), "{warnings:?}");
         assert!(once.contains("<pre class=\"prism-typed-block\">"));
         assert!(once.contains("class=\"language-prism hljs prism-typed check ok\""));
@@ -796,7 +878,7 @@ mod tests {
         assert!(once.contains("&quot;format&quot;:&quot;prism-typespans-v1&quot;"));
         assert!(!once.contains("```"));
 
-        let (twice, warnings) = annotate_markdown(&once, Path::new("."));
+        let (twice, warnings) = annotate_markdown(&once, Path::new("."), &[]);
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(twice, once, "typed docs bake must be byte-idempotent");
     }
@@ -804,7 +886,7 @@ mod tests {
     #[test]
     fn stdlib_module_context_reaches_the_browser_runner() {
         let markdown = "```prism,mod=Data.Tensor\nstrides(new([2, 3], 0.0))\n```\n";
-        let (rendered, warnings) = annotate_markdown(markdown, Path::new("."));
+        let (rendered, warnings) = annotate_markdown(markdown, Path::new("."), &[]);
         assert!(warnings.is_empty(), "{warnings:?}");
         assert!(rendered.contains("class=\"language-prism hljs prism-typed run ok\""));
         assert!(rendered.contains(
@@ -816,7 +898,7 @@ mod tests {
     #[test]
     fn compile_fail_blocks_are_never_analyzed_for_tooltips() {
         let markdown = "```prism,compile_fail\nfn bad() : Int = true\n```\n";
-        let (rendered, warnings) = annotate_markdown(markdown, Path::new("."));
+        let (rendered, warnings) = annotate_markdown(markdown, Path::new("."), &[]);
         assert!(warnings.is_empty(), "{warnings:?}");
         // Plain lexer highlighting is baked (every prism snippet is colored),
         // but never a typespans payload: no analysis ran.

@@ -2435,15 +2435,17 @@ impl<'a> Builder<'a> {
         {
             // Resumption clauses carry the handler's own row recursively. The
             // least fixed point of `outer = residual | clauses | outer` is the
-            // union of the non-recursive labels over the residual's tail.
-            Ok(EffRow::canonical(
-                residual
-                    .labels()
-                    .into_iter()
-                    .chain(resolved_clauses.labels())
-                    .cloned(),
-                residual.tail().clone(),
-            ))
+            // union of the non-recursive labels over the residual's tail. The
+            // union must run through `union_rows`, not a raw label chain: the
+            // residual can spell a local-state effect in the legacy
+            // zero-argument form while the clause row carries the recovered
+            // cell type, and only the union's merge collapses the two
+            // spellings into one instantiation.
+            let clause_labels = EffRow::canonical(
+                resolved_clauses.labels().into_iter().cloned(),
+                EffRow::Empty,
+            );
+            self.solver.union_rows(&residual, &clause_labels)
         } else {
             self.solver.union_rows(&residual, &resolved_clauses)
         }

@@ -1,0 +1,741 @@
+-- | The type-and-row core of a Prism typechecker, written in Prism.
+--
+-- This library is the first load-bearing piece of the self-hosted checker: the
+-- type, row, scheme, and error ADTs, the free-variable collectors, rigid
+-- substitution with composition, metavariable zonking, row normalization, type
+-- and row unification with occurs checks, and generalization and
+-- instantiation. The grammar mirrors the statics sketch: value types and
+-- computation types are split in the call-by-push-value style, a computation
+-- is a returned value with an effect row or a function into a computation, and
+-- rows are unordered sets of distinct labels over a closed, rigid, or
+-- metavariable tail.
+--
+-- Identities follow the front end's discipline: rigid type and row variables
+-- are branded `Data.Name` identities minted by resolution, never spellings,
+-- and metavariable classes live in a payload-carrying union-find, so solving a
+-- class solves every alias of it. The solver is written in the effects style
+-- (a `State` cell for the two forests plus an aborting error), which the
+-- compiler confines to the checking region; the structural operations are
+-- pure.
+--
+-- ```prism
+-- # import Control.State (..)
+-- fn demo() : String ! {State(Solver), TcFail} =
+--   let m = fresh_ty_meta()
+--   unify_v(v_fun([VInt], c_ret(m, row_closed([label0("IO")]))), v_fun([VInt], c_ret(VBool, row_closed([label0("IO")]))))
+--   show_vty(zonk_v(m))
+--
+-- fn main() =
+--   match run_tc(\() -> demo()) of
+--     Ok(shown) => println(shown)
+--     Err(_e) => println("no")
+-- ```
+-- ```output
+-- Bool
+-- ```
+
+import Control.State (..)
+
+import Control.Fresh (Fresh, fresh)
+
+import Data.Name (Name, Binder, fresh_binder, bound_name, name_id)
+
+import Data.Result (result_or)
+
+import Data.List (map, reverse, foldl, append, filter)
+
+import Data.UnionFind.Payload (UnionFind, ufp_empty, ufp_find, ufp_insert, ufp_set, ufp_union_with)
+
+import Data.Map (map_empty, map_lookup, map_insert, map_to_list)
+
+-- The two rigid-variable namespaces, branded so a type identity can never
+-- stand where a row identity belongs.
+
+pub type TyVarSpace = TyVarTag
+
+pub type RowVarSpace = RowVarTag
+
+-- Value types, computation types, and rows, in the statics sketch's grammar.
+
+pub type VTy
+  = VInt
+  | VFloat
+  | VBool
+  | VUnit
+  | VString
+  | VCon(String, List(VTy))
+  | VTuple(List(VTy))
+  | VThunk(CTy)
+  | VVar(Name(TyVarSpace))
+  | VMeta(Int)
+  deriving (Eq, Show)
+
+pub type CTy = CRet(VTy, Row) | CFun(List(VTy), CTy) deriving (Eq, Show)
+
+-- | An effect label: a name applied to value-type arguments.
+pub type Label = Label { name: String, args: List(VTy) } deriving (Eq, Show)
+
+-- | A row tail: closed, a rigid row variable, or a row metavariable.
+pub type Tail
+  = TailClosed
+  | TailVar(Name(RowVarSpace))
+  | TailMeta(Int)
+  deriving (Eq, Show)
+
+-- | An effect row: labels over a tail. `row_normalize` is the canonical form;
+-- every function below that consumes a row normalizes first.
+pub type Row = Row { labels: List(Label), tail: Tail } deriving (Eq, Show)
+
+-- | A polymorphic scheme: rigid type and row binders over a value type.
+pub type Scheme = Scheme {
+  tyvars: List(Binder(TyVarSpace)),
+  rowvars: List(Binder(RowVarSpace)),
+  body: VTy
+}
+
+-- | Why checking refused.
+pub type TcError
+  = Mismatch(String, String)
+  | RowMismatch(String, String)
+  | OccursV(Int, String)
+  | OccursRow(Int, String)
+  | DuplicateLabel(String)
+  deriving (Eq, Show)
+
+-- | The aborting refusal effect: `tc_fail` abandons the current check with a
+-- structured `TcError`, and `run_tc` turns the abandonment into an `Err`.
+pub effect TcFail
+  never tc_abort(TcError) : a
+
+pub fn tc_fail(e : TcError) : a ! {TcFail} = tc_abort(e)
+
+-- Constructor conveniences the rules read naturally through.
+
+pub fn v_fun(params : List(VTy), body : CTy) : VTy = VThunk(CFun(params, body))
+
+pub fn c_ret(v : VTy, r : Row) : CTy = CRet(v, r)
+
+pub fn label0(name : String) : Label = Label { name = name, args = [] }
+
+pub fn row_closed(labels : List(Label)) : Row =
+  Row { labels = labels, tail = TailClosed }
+
+pub fn row_open(labels : List(Label), tail : Tail) : Row =
+  Row { labels = labels, tail = tail }
+
+-- The solver: two metavariable forests (types and rows) plus the allocation
+-- counter, in one State cell. Every class root owns its solution knowledge.
+
+pub type TySol = TyUnsolved | TySolved(VTy)
+
+pub type RowSol = RowUnsolved | RowSolved(Row)
+
+pub type Solver = Solver {
+  tys: UnionFind(Int, TySol),
+  rows: UnionFind(Int, RowSol),
+  next: Int
+}
+
+pub fn empty_solver() : Solver =
+  Solver { tys = ufp_empty, rows = ufp_empty, next = 0 }
+
+fn ok_first(pair : (a, Solver)) : Result(a, TcError) =
+  match pair of
+    (v, _s) => Ok(v)
+
+-- | Run a checking computation against a fresh solver, catching refusals.
+pub fn run_tc(action : () -> a ! {State(Solver), TcFail | e}) : Result(a, TcError) ! { | e} =
+  handle run_state(empty_solver(), action) with
+    never tc_abort(err) => Err(err)
+    return pair => ok_first(pair)
+
+fn merge_ty(kept : TySol, lost : TySol) : TySol =
+  match (kept, lost) of
+    (TySolved(t), _u) => TySolved(t)
+    (TyUnsolved, other) => other
+
+fn merge_row(kept : RowSol, lost : RowSol) : RowSol =
+  match (kept, lost) of
+    (RowSolved(r), _u) => RowSolved(r)
+    (RowUnsolved, other) => other
+
+pub fn fresh_ty_meta() : VTy ! {State(Solver)} =
+  let s = get()
+  let n = s.next
+  let grown = result_or(s.tys, ufp_insert(s.tys, n, TyUnsolved))
+  put({ s | tys = grown, next = n + 1 })
+  VMeta(n)
+
+pub fn fresh_row_meta() : Tail ! {State(Solver)} =
+  let s = get()
+  let n = s.next
+  let grown = result_or(s.rows, ufp_insert(s.rows, n, RowUnsolved))
+  put({ s | rows = grown, next = n + 1 })
+  TailMeta(n)
+
+fn ty_root(a : Int) : Int ! {State(Solver)} =
+  let s = get()
+  match ufp_find(s.tys, a) of
+    Some((r, _sol)) => r
+    None => a
+
+fn ty_solution(a : Int) : Option(VTy) ! {State(Solver)} =
+  let s = get()
+  match ufp_find(s.tys, a) of
+    Some((_r, TySolved(t))) => Some(t)
+    _ => None
+
+fn ty_assign(a : Int, t : VTy) : Unit ! {State(Solver)} =
+  let s = get()
+  put({ s | tys = result_or(s.tys, ufp_set(s.tys, a, TySolved(t))) })
+
+fn ty_link(a : Int, b : Int) : Unit ! {State(Solver)} =
+  let s = get()
+  put({ s | tys = result_or(s.tys, ufp_union_with(merge_ty, s.tys, a, b)) })
+
+fn row_root(a : Int) : Int ! {State(Solver)} =
+  let s = get()
+  match ufp_find(s.rows, a) of
+    Some((r, _sol)) => r
+    None => a
+
+fn row_solution(a : Int) : Option(Row) ! {State(Solver)} =
+  let s = get()
+  match ufp_find(s.rows, a) of
+    Some((_r, RowSolved(t))) => Some(t)
+    _ => None
+
+fn row_assign(a : Int, r : Row) : Unit ! {State(Solver)} =
+  let s = get()
+  put({ s | rows = result_or(s.rows, ufp_set(s.rows, a, RowSolved(r))) })
+
+fn row_link(a : Int, b : Int) : Unit ! {State(Solver)} =
+  let s = get()
+  put({ s | rows = result_or(s.rows, ufp_union_with(merge_row, s.rows, a, b)) })
+
+-- Zonking: chase every solved metavariable to its current knowledge. Zonking
+-- twice is the same as zonking once, because a zonked term contains only
+-- unsolved roots.
+
+pub fn zonk_v(ty : VTy) : VTy ! {State(Solver)} =
+  match ty of
+    VMeta(a) =>
+      let r = ty_root(a)
+      match ty_solution(r) of
+        None => VMeta(r)
+        Some(t) => zonk_v(t)
+    VCon(name, args) => VCon(name, zonk_each(args))
+    VTuple(items) => VTuple(zonk_each(items))
+    VThunk(c) => VThunk(zonk_c(c))
+    other => other
+
+fn zonk_each(tys : List(VTy)) : List(VTy) ! {State(Solver)} =
+  match tys of
+    Nil => Nil
+    Cons(t, rest) => Cons(zonk_v(t), zonk_each(rest))
+
+pub fn zonk_c(c : CTy) : CTy ! {State(Solver)} =
+  match c of
+    CRet(v, r) => CRet(zonk_v(v), zonk_row(r))
+    CFun(params, body) => CFun(zonk_each(params), zonk_c(body))
+
+pub fn zonk_row(r : Row) : Row ! {State(Solver)} =
+  match r.tail of
+    TailMeta(a) =>
+      let root = row_root(a)
+      match row_solution(root) of
+        None => Row { labels = zonk_labels(r.labels), tail = TailMeta(root) }
+        Some(solved) =>
+          let deeper = zonk_row(solved)
+          Row {
+            labels = append(zonk_labels(r.labels), deeper.labels),
+            tail = deeper.tail
+          }
+    _ => Row { labels = zonk_labels(r.labels), tail = r.tail }
+
+fn zonk_labels(ls : List(Label)) : List(Label) ! {State(Solver)} =
+  match ls of
+    Nil => Nil
+    Cons(l, rest) =>
+      Cons(Label { name = l.name, args = zonk_each(l.args) }, zonk_labels(rest))
+
+-- Rigid substitution: finite maps from rigid identities to types and rows,
+-- with application and composition. This is the instrument of instantiation;
+-- metavariable solving goes through the forests above instead.
+
+pub type Subst = Subst {
+  tys: Map(Name(TyVarSpace), VTy),
+  rows: Map(Name(RowVarSpace), Row)
+}
+
+pub let subst_empty : Subst = Subst { tys = map_empty, rows = map_empty }
+
+pub fn subst_ty(s : Subst, v : Name(TyVarSpace), t : VTy) : Subst =
+  { s | tys = map_insert(v, t, s.tys) }
+
+pub fn subst_row(s : Subst, v : Name(RowVarSpace), r : Row) : Subst =
+  { s | rows = map_insert(v, r, s.rows) }
+
+pub fn apply_v(s : Subst, ty : VTy) : VTy =
+  match ty of
+    VVar(v) =>
+      match map_lookup(v, s.tys) of
+        Some(t) => t
+        None => ty
+    VCon(name, args) => VCon(name, map(\(t) -> apply_v(s, t), args))
+    VTuple(items) => VTuple(map(\(t) -> apply_v(s, t), items))
+    VThunk(c) => VThunk(apply_c(s, c))
+    other => other
+
+pub fn apply_c(s : Subst, c : CTy) : CTy =
+  match c of
+    CRet(v, r) => CRet(apply_v(s, v), apply_row(s, r))
+    CFun(params, body) =>
+      CFun(map(\(t) -> apply_v(s, t), params), apply_c(s, body))
+
+pub fn apply_row(s : Subst, r : Row) : Row =
+  let applied = map(\(l) -> apply_label(s, l), r.labels)
+  match r.tail of
+    TailVar(v) =>
+      match map_lookup(v, s.rows) of
+        Some(grown) =>
+          Row { labels = append(applied, grown.labels), tail = grown.tail }
+        None => Row { labels = applied, tail = r.tail }
+    _ => Row { labels = applied, tail = r.tail }
+
+fn apply_label(s : Subst, l : Label) : Label =
+  Label { name = l.name, args = map(\(t) -> apply_v(s, t), l.args) }
+
+-- | The substitution equal to applying `first` and then `second`.
+pub fn subst_compose(second : Subst, first : Subst) : Subst =
+  Subst { tys = compose_tys(second, first), rows = compose_rows(second, first) }
+
+fn compose_tys(second : Subst, first : Subst) : Map(Name(TyVarSpace), VTy) =
+  let mapped = ct_mapped(second, map_to_list(first.tys), map_empty)
+  ct_keep(first, map_to_list(second.tys), mapped)
+
+fn ct_mapped(
+  second : Subst,
+  entries : List((Name(TyVarSpace), VTy)),
+  acc : Map(Name(TyVarSpace), VTy)
+) : Map(Name(TyVarSpace), VTy) =
+  match entries of
+    Nil => acc
+    Cons((v, t), rest) =>
+      ct_mapped(second, rest, map_insert(v, apply_v(second, t), acc))
+
+fn ct_keep(
+  first : Subst,
+  entries : List((Name(TyVarSpace), VTy)),
+  acc : Map(Name(TyVarSpace), VTy)
+) : Map(Name(TyVarSpace), VTy) =
+  match entries of
+    Nil => acc
+    Cons((v, t), rest) =>
+      match map_lookup(v, first.tys) of
+        Some(_shadowed) => ct_keep(first, rest, acc)
+        None => ct_keep(first, rest, map_insert(v, t, acc))
+
+fn compose_rows(second : Subst, first : Subst) : Map(Name(RowVarSpace), Row) =
+  let mapped = cr_mapped(second, map_to_list(first.rows), map_empty)
+  cr_keep(first, map_to_list(second.rows), mapped)
+
+fn cr_mapped(
+  second : Subst,
+  entries : List((Name(RowVarSpace), Row)),
+  acc : Map(Name(RowVarSpace), Row)
+) : Map(Name(RowVarSpace), Row) =
+  match entries of
+    Nil => acc
+    Cons((v, r), rest) =>
+      cr_mapped(second, rest, map_insert(v, apply_row(second, r), acc))
+
+fn cr_keep(
+  first : Subst,
+  entries : List((Name(RowVarSpace), Row)),
+  acc : Map(Name(RowVarSpace), Row)
+) : Map(Name(RowVarSpace), Row) =
+  match entries of
+    Nil => acc
+    Cons((v, r), rest) =>
+      match map_lookup(v, first.rows) of
+        Some(_shadowed) => cr_keep(first, rest, acc)
+        None => cr_keep(first, rest, map_insert(v, r, acc))
+
+-- Free variables: rigid identities and metavariable ids, collected in
+-- first-occurrence order without duplicates.
+
+fn add_int(seen : List(Int), x : Int) : List(Int) =
+  if elem_int(seen, x) then
+    seen
+  else
+    append(seen, [x])
+
+fn elem_int(xs : List(Int), x : Int) : Bool =
+  match xs of
+    Nil => false
+    Cons(y, rest) => y == x || elem_int(rest, x)
+
+pub fn free_metas_v(ty : VTy) : List(Int) = fm_v(ty, [])
+
+fn fm_v(ty : VTy, acc : List(Int)) : List(Int) =
+  match ty of
+    VMeta(a) => add_int(acc, a)
+    VCon(_name, args) => fm_each(args, acc)
+    VTuple(items) => fm_each(items, acc)
+    VThunk(c) => fm_c(c, acc)
+    _ => acc
+
+fn fm_each(tys : List(VTy), acc : List(Int)) : List(Int) =
+  match tys of
+    Nil => acc
+    Cons(t, rest) => fm_each(rest, fm_v(t, acc))
+
+fn fm_c(c : CTy, acc : List(Int)) : List(Int) =
+  match c of
+    CRet(v, r) => fm_row(r, fm_v(v, acc))
+    CFun(params, body) => fm_c(body, fm_each(params, acc))
+
+fn fm_row(r : Row, acc : List(Int)) : List(Int) =
+  let with_labels = fm_labels(r.labels, acc)
+  match r.tail of
+    TailMeta(a) => add_int(with_labels, a)
+    _ => with_labels
+
+fn fm_labels(ls : List(Label), acc : List(Int)) : List(Int) =
+  match ls of
+    Nil => acc
+    Cons(l, rest) => fm_labels(rest, fm_each(l.args, acc))
+
+-- Row normalization: sort the labels by name, refuse duplicates. Two
+-- normalized rows are equal exactly when the rows are equivalent, which is
+-- what makes the canonical form a decision procedure for the sketch's row
+-- equivalence.
+
+fn label_lt(a : Label, b : Label) : Bool = cmp(a.name, b.name) < 0
+
+fn insert_label(l : Label, ls : List(Label)) : List(Label) =
+  match ls of
+    Nil => [l]
+    Cons(h, rest) =>
+      if label_lt(l, h) then
+        Cons(l, ls)
+      else
+        Cons(h, insert_label(l, rest))
+
+fn sort_labels(ls : List(Label)) : List(Label) =
+  foldl(\(acc, l) -> insert_label(l, acc), Nil, ls)
+
+fn has_dup(ls : List(Label)) : Option(String) =
+  match ls of
+    Nil => None
+    Cons(_l, Nil) => None
+    Cons(a, Cons(b, rest)) =>
+      if a.name == b.name then
+        Some(a.name)
+      else
+        has_dup(Cons(b, rest))
+
+pub fn row_normalize(r : Row) : Row ! {TcFail} =
+  let sorted = sort_labels(r.labels)
+  match has_dup(sorted) of
+    Some(name) => tc_fail(DuplicateLabel(name))
+    None => Row { labels = sorted, tail = r.tail }
+
+-- Occurs checks: a metavariable class must not appear in its own solution.
+
+fn occurs_v(a : Int, ty : VTy) : Bool ! {State(Solver)} =
+  match zonk_v(ty) of
+    VMeta(b) => ty_root(a) == ty_root(b)
+    VCon(_name, args) => occurs_each(a, args)
+    VTuple(items) => occurs_each(a, items)
+    VThunk(c) => occurs_c(a, c)
+    _ => false
+
+fn occurs_each(a : Int, tys : List(VTy)) : Bool ! {State(Solver)} =
+  match tys of
+    Nil => false
+    Cons(t, rest) => occurs_v(a, t) || occurs_each(a, rest)
+
+fn occurs_c(a : Int, c : CTy) : Bool ! {State(Solver)} =
+  match c of
+    CRet(v, r) => occurs_v(a, v) || occurs_labels(a, r.labels)
+    CFun(params, body) => occurs_each(a, params) || occurs_c(a, body)
+
+fn occurs_labels(a : Int, ls : List(Label)) : Bool ! {State(Solver)} =
+  match ls of
+    Nil => false
+    Cons(l, rest) => occurs_each(a, l.args) || occurs_labels(a, rest)
+
+fn row_occurs(a : Int, r : Row) : Bool ! {State(Solver)} =
+  let z = zonk_row(r)
+  match z.tail of
+    TailMeta(b) => row_root(a) == row_root(b)
+    _ => false
+
+-- Unification.
+
+fn solve_ty(a : Int, ty : VTy) : Unit ! {State(Solver), TcFail} =
+  let t = zonk_v(ty)
+  if occurs_v(a, t) then
+    tc_fail(OccursV(a, show_vty(t)))
+  else
+    ty_assign(a, t)
+
+pub fn unify_v(left : VTy, right : VTy) : Unit ! {State(Solver), TcFail} =
+  let a = zonk_v(left)
+  let b = zonk_v(right)
+  match (a, b) of
+    (VMeta(x), VMeta(y)) =>
+      if ty_root(x) == ty_root(y) then
+        ()
+      else
+        ty_link(x, y)
+    (VMeta(x), t) => solve_ty(x, t)
+    (t, VMeta(x)) => solve_ty(x, t)
+    (VInt, VInt) => ()
+    (VFloat, VFloat) => ()
+    (VBool, VBool) => ()
+    (VUnit, VUnit) => ()
+    (VString, VString) => ()
+    (VVar(x), VVar(y)) =>
+      if x == y then
+        ()
+      else
+        mismatch(a, b)
+    (VCon(n1, args1), VCon(n2, args2)) =>
+      if n1 == n2 then
+        unify_each(a, b, args1, args2)
+      else
+        mismatch(a, b)
+    (VTuple(items1), VTuple(items2)) => unify_each(a, b, items1, items2)
+    (VThunk(c1), VThunk(c2)) => unify_c(c1, c2)
+    _ => mismatch(a, b)
+
+fn mismatch(a : VTy, b : VTy) : Unit ! {TcFail} =
+  tc_fail(Mismatch(show_vty(a), show_vty(b)))
+
+fn unify_each(
+  ctx_a : VTy,
+  ctx_b : VTy,
+  xs : List(VTy),
+  ys : List(VTy)
+) : Unit ! {State(Solver), TcFail} =
+  match (xs, ys) of
+    (Nil, Nil) => ()
+    (Cons(x, xrest), Cons(y, yrest)) =>
+      unify_v(x, y)
+      unify_each(ctx_a, ctx_b, xrest, yrest)
+    _ => mismatch(ctx_a, ctx_b)
+
+pub fn unify_c(left : CTy, right : CTy) : Unit ! {State(Solver), TcFail} =
+  match (left, right) of
+    (CRet(v1, r1), CRet(v2, r2)) =>
+      unify_v(v1, v2)
+      unify_row(r1, r2)
+    (CFun(p1, b1), CFun(p2, b2)) =>
+      unify_each(VThunk(left), VThunk(right), p1, p2)
+      unify_c(b1, b2)
+    _ => tc_fail(Mismatch(show_cty(left), show_cty(right)))
+
+-- Row unification: after zonking and normalizing, unify the shared labels'
+-- arguments pairwise, then reconcile each side's leftover labels with the
+-- other side's tail. Two open tails meet in a fresh middle tail; a closed
+-- tail admits no leftovers.
+
+fn split_common(
+  xs : List(Label),
+  ys : List(Label)
+) : (List((Label, Label)), List(Label), List(Label)) =
+  match (xs, ys) of
+    (Nil, _rest) => ([], [], ys)
+    (_rest, Nil) => ([], xs, [])
+    (Cons(x, xrest), Cons(y, yrest)) =>
+      if x.name == y.name then
+        match split_common(xrest, yrest) of
+          (both, lx, ly) => (Cons((x, y), both), lx, ly)
+      elif cmp(x.name, y.name) < 0 then
+        match split_common(xrest, ys) of
+          (both, lx, ly) => (both, Cons(x, lx), ly)
+      else
+        match split_common(xs, yrest) of
+          (both, lx, ly) => (both, lx, Cons(y, ly))
+
+fn unify_label_args(pairs : List((Label, Label))) : Unit ! {State(Solver), TcFail} =
+  match pairs of
+    Nil => ()
+    Cons((x, y), rest) =>
+      unify_each(VCon(x.name, x.args), VCon(y.name, y.args), x.args, y.args)
+      unify_label_args(rest)
+
+fn row_mismatch(a : Row, b : Row) : a ! {TcFail} =
+  tc_fail(RowMismatch(show_row(a), show_row(b)))
+
+fn solve_row_tail(
+  a : Int,
+  leftover : List(Label),
+  tail : Tail
+) : Unit ! {State(Solver), TcFail} =
+  let target = Row { labels = leftover, tail = tail }
+  if row_occurs(a, target) then
+    tc_fail(OccursRow(a, show_row(target)))
+  else
+    row_assign(a, target)
+
+pub fn unify_row(left : Row, right : Row) : Unit ! {State(Solver), TcFail} =
+  let a = row_normalize(zonk_row(left))
+  let b = row_normalize(zonk_row(right))
+  match split_common(a.labels, b.labels) of
+    (both, extra_a, extra_b) =>
+      unify_label_args(both)
+      match (a.tail, b.tail) of
+        (TailClosed, TailClosed) =>
+          match (extra_a, extra_b) of
+            (Nil, Nil) => ()
+            _ => row_mismatch(a, b)
+        (TailMeta(x), TailClosed) =>
+          match extra_b2_closed(extra_a) of
+            true => solve_row_tail(x, extra_b, TailClosed)
+            false => row_mismatch(a, b)
+        (TailClosed, TailMeta(y)) =>
+          match extra_b2_closed(extra_b) of
+            true => solve_row_tail(y, extra_a, TailClosed)
+            false => row_mismatch(a, b)
+        (TailMeta(x), TailMeta(y)) =>
+          if row_root(x) == row_root(y) then
+            match (extra_a, extra_b) of
+              (Nil, Nil) => ()
+              _ => row_mismatch(a, b)
+          else
+            let middle = fresh_row_meta()
+            solve_row_tail(x, extra_b, middle)
+            solve_row_tail(y, extra_a, middle)
+        (TailVar(x), TailVar(y)) =>
+          if x == y && closed_extras(extra_a, extra_b) then
+            ()
+          else
+            row_mismatch(a, b)
+        (TailMeta(x), TailVar(_v)) =>
+          if closed_only(extra_a) then
+            solve_row_tail(x, extra_b, b.tail)
+          else
+            row_mismatch(a, b)
+        (TailVar(_v), TailMeta(y)) =>
+          if closed_only(extra_b) then
+            solve_row_tail(y, extra_a, a.tail)
+          else
+            row_mismatch(a, b)
+        _ => row_mismatch(a, b)
+
+fn closed_extras(extra_a : List(Label), extra_b : List(Label)) : Bool =
+  closed_only(extra_a) && closed_only(extra_b)
+
+fn closed_only(extra : List(Label)) : Bool =
+  match extra of
+    Nil => true
+    _ => false
+
+fn extra_b2_closed(extra : List(Label)) : Bool = closed_only(extra)
+
+-- Generalization and instantiation. Generalizing promotes every metavariable
+-- free in the zonked type but not in the ambient set to a fresh rigid binder;
+-- instantiating replaces every scheme binder with a fresh metavariable.
+
+pub fn generalize(ambient : List(Int), ty : VTy) : Scheme ! {State(Solver), Fresh} =
+  let z = zonk_v(ty)
+  let candidates = filter(\(m) -> not(elem_int(ambient, m)), free_metas_v(z))
+  gen_go(candidates, [], z)
+
+fn gen_go(
+  metas : List(Int),
+  binders : List(Binder(TyVarSpace)),
+  body : VTy
+) : Scheme ! {State(Solver), Fresh} =
+  match metas of
+    Nil => Scheme { tyvars = reverse(binders), rowvars = [], body = body }
+    Cons(m, rest) =>
+      let binder = fresh_binder("t")
+      ty_assign(m, VVar(bound_name(binder)))
+      gen_go(rest, Cons(binder, binders), zonk_v(body))
+
+pub fn instantiate(scheme : Scheme) : VTy ! {State(Solver)} =
+  inst_go(scheme.tyvars, subst_empty, scheme.body)
+
+fn inst_go(
+  binders : List(Binder(TyVarSpace)),
+  s : Subst,
+  body : VTy
+) : VTy ! {State(Solver)} =
+  match binders of
+    Nil => apply_v(s, body)
+    Cons(b, rest) =>
+      let m = fresh_ty_meta()
+      inst_go(rest, subst_ty(s, bound_name(b), m), body)
+
+-- Stable pretty-printing: rigid identities render through deterministic
+-- positional hints, metavariables by class id.
+
+pub fn show_vty(ty : VTy) : String =
+  match ty of
+    VInt => "Int"
+    VFloat => "Float"
+    VBool => "Bool"
+    VUnit => "Unit"
+    VString => "String"
+    VCon(name, Nil) => name
+    VCon(name, args) => "{name}({join_tys(args)})"
+    VTuple(items) => "({join_tys(items)})"
+    VThunk(c) => show_cty(c)
+    VVar(v) => "a{name_id(v)}"
+    VMeta(a) => "?{a}"
+
+fn join_tys(tys : List(VTy)) : String =
+  match tys of
+    Nil => ""
+    Cons(t, Nil) => show_vty(t)
+    Cons(t, rest) => "{show_vty(t)}, {join_tys(rest)}"
+
+pub fn show_cty(c : CTy) : String =
+  match c of
+    CRet(v, r) => "{show_vty(v)} ! {show_row(r)}"
+    CFun(params, body) => "({join_tys(params)}) -> {show_cty(body)}"
+
+pub fn show_row(r : Row) : String =
+  let inner = join_labels(r.labels)
+  match r.tail of
+    TailClosed => "\{{inner}\}"
+    TailVar(v) => "\{{inner} | r{name_id(v)}\}"
+    TailMeta(a) => "\{{inner} | ?{a}\}"
+
+fn join_labels(ls : List(Label)) : String =
+  match ls of
+    Nil => ""
+    Cons(l, Nil) => show_label(l)
+    Cons(l, rest) => "{show_label(l)}, {join_labels(rest)}"
+
+fn show_label(l : Label) : String =
+  match l.args of
+    Nil => l.name
+    args => "{l.name}({join_tys(args)})"
+
+pub fn show_scheme(s : Scheme) : String =
+  match s.tyvars of
+    Nil => show_vty(s.body)
+    vs => "forall {join_binders(vs)}. {show_vty(s.body)}"
+
+fn join_binders(bs : List(Binder(TyVarSpace))) : String =
+  match bs of
+    Nil => ""
+    Cons(b, Nil) => "a{name_id(bound_name(b))}"
+    Cons(b, rest) => "a{name_id(bound_name(b))} {join_binders(rest)}"
+
+fn main() =
+  match run_tc(\() -> demo_main()) of
+    Ok(shown) => println(shown)
+    Err(_e) => println("tc demo failed")
+
+fn demo_main() : String ! {State(Solver), TcFail} =
+  let m = fresh_ty_meta()
+  let io = row_closed([label0("IO")])
+  unify_v(v_fun([VInt], c_ret(m, io)), v_fun([VInt], c_ret(VBool, io)))
+  show_vty(zonk_v(m))

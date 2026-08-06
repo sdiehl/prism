@@ -1,0 +1,180 @@
+-- | A persistent union-find whose canonical roots carry a descriptor payload.
+--
+-- The payload-free forest in `Data.UnionFind` answers only equivalence; this
+-- module is the opt-in layer for solvers that also attach a fact to each
+-- class (a metavariable's solution, a binding level, a rank). One descriptor
+-- lives at each canonical root, and `ufp_union_with` combines exactly the two
+-- descriptors whose classes are joined, exactly once per join.
+--
+-- Absence is explicit where the payload-free forest is implicit: a key that
+-- was never inserted has no descriptor, so it is not a silent singleton;
+-- `ufp_find` answers `None` and the writing operations answer `UfAbsent`.
+-- Duplicate insertion is `UfDuplicate`, never a silent overwrite.
+--
+-- Determinism is part of the public contract, not a courtesy: `ufp_union_with`
+-- keeps the smaller root by `Ord`, passes the kept root's descriptor to
+-- `combine` first and the absorbed root's second, and deletes the losing
+-- descriptor, so a class's representative and payload are a pure function of
+-- the insertions and unions performed, never of the order finds ran in. The
+-- representation (parent links) is private; render a forest through
+-- `ufp_roots`, which describes the logical partition. There is no path
+-- compression: a query-history-dependent representation would leak into any
+-- structural comparison, the wrong trade before a serialization boundary is
+-- pinned. Opt-in: not in Base.
+
+import Data.Map (map_empty, map_lookup, map_insert, map_delete, map_to_list)
+
+import Data.Result (result_or)
+
+-- | A payload-carrying forest over ordered keys. The constructor is the
+-- module's private representation; go through the `ufp_` functions.
+pub type UnionFind(k, a) = Ufp { parents: Map(k, k), payloads: Map(k, a) }
+
+-- | Why a forest operation refused.
+pub type UfError = UfDuplicate | UfAbsent deriving (Eq, Show)
+
+-- | The empty forest: no keys, no classes.
+pub let ufp_empty : UnionFind(k, a) =
+  Ufp { parents = map_empty, payloads = map_empty }
+
+-- The canonical root of `x`, which must be a member. Walks parent links; the
+-- chain is as long as the joins that built it, never compressed.
+fn root_of(uf : UnionFind(k, a), x : k) : k given Ord(k) =
+  match map_lookup(x, uf.parents) of
+    None => x
+    Some(p) => root_of(uf, p)
+
+-- Whether `x` was ever inserted: members are exactly the keys that either
+-- carry a descriptor (roots) or a parent link (absorbed members).
+fn member(uf : UnionFind(k, a), x : k) : Bool given Ord(k) =
+  match map_lookup(x, uf.payloads) of
+    Some(_a) => true
+    None =>
+      match map_lookup(x, uf.parents) of
+        Some(_p) => true
+        None => false
+
+-- | Insert `x` as a fresh singleton class with descriptor `a`. Inserting a
+-- key that is already a member (root or not) is `UfDuplicate`.
+--
+-- ```prism
+-- ufp_find(result_or(ufp_empty, ufp_insert(ufp_empty, 1, "one")), 1)
+-- ```
+-- ```output
+-- Some((1, one))
+-- ```
+pub fn ufp_insert(
+  uf : UnionFind(k, a),
+  x : k,
+  a : a
+) : Result(UnionFind(k, a), UfError) given Ord(k) =
+  if member(uf, x) then
+    Err(UfDuplicate)
+  else
+    Ok(Ufp { ..uf, payloads = map_insert(x, a, uf.payloads) })
+
+-- | The canonical root of `x`'s class and the class descriptor, or `None`
+-- when `x` was never inserted.
+--
+-- ```prism
+-- ufp_find(result_or(ufp_empty, ufp_insert(ufp_empty, 1, "one")), 9)
+-- ```
+-- ```output
+-- None
+-- ```
+pub fn ufp_find(uf : UnionFind(k, a), x : k) : Option((k, a)) given Ord(k) =
+  if member(uf, x) then
+    let r = root_of(uf, x)
+    match map_lookup(r, uf.payloads) of
+      Some(a) => Some((r, a))
+      None => None
+  else
+    None
+
+-- | Replace the descriptor of `x`'s class, or `UfAbsent` when `x` was never
+-- inserted. The class and its root are unchanged.
+pub fn ufp_set(
+  uf : UnionFind(k, a),
+  x : k,
+  a : a
+) : Result(UnionFind(k, a), UfError) given Ord(k) =
+  if member(uf, x) then
+    let r = root_of(uf, x)
+    Ok(Ufp { ..uf, payloads = map_insert(r, a, uf.payloads) })
+  else
+    Err(UfAbsent)
+
+-- | Join the classes of `x` and `y`. The smaller root by `Ord` stays the
+-- root; `combine` receives the kept root's descriptor first and the absorbed
+-- root's second, runs exactly once per join that changes the partition, and
+-- its result becomes the joined class's descriptor. Joining a class with
+-- itself is a no-op that never calls `combine`; either key absent is
+-- `UfAbsent`.
+--
+-- ```prism
+-- let uf1 = result_or(ufp_empty, ufp_insert(ufp_empty, 2, "b"))
+-- let uf2 = result_or(ufp_empty, ufp_insert(uf1, 1, "a"))
+-- ufp_find(result_or(ufp_empty, ufp_union_with(concat, uf2, 2, 1)), 2)
+-- ```
+-- ```output
+-- Some((1, ab))
+-- ```
+pub fn ufp_union_with(
+  combine : (a, a) -> a ! {| e},
+  uf : UnionFind(k, a),
+  x : k,
+  y : k
+) : Result(UnionFind(k, a), UfError) ! { | e} given Ord(k) =
+  if not(member(uf, x)) || not(member(uf, y)) then
+    Err(UfAbsent)
+  else
+    let rx = root_of(uf, x)
+    let ry = root_of(uf, y)
+    let c = cmp(rx, ry)
+    if c == 0 then
+      Ok(uf)
+    else
+      let kept =
+        if c < 0 then
+          rx
+        else
+          ry
+      let lost =
+        if c < 0 then
+          ry
+        else
+          rx
+      match ((map_lookup(kept, uf.payloads), map_lookup(lost, uf.payloads))) of
+        (Some(ka), Some(la)) =>
+          let joined = combine(ka, la)
+          Ok(
+              Ufp {
+                parents = map_insert(lost, kept, uf.parents),
+                payloads = map_insert(kept, joined, map_delete(lost, uf.payloads))
+              },
+            )
+        _ => Err(UfAbsent)
+
+-- | The logical partition: every canonical root paired with its class
+-- descriptor, in ascending key order. This is the rendering to compare or
+-- serialize; it is independent of the parent paths any sequence of joins
+-- happened to build.
+--
+-- ```prism
+-- let uf1 = result_or(ufp_empty, ufp_insert(ufp_empty, 2, "b"))
+-- let uf2 = result_or(ufp_empty, ufp_insert(uf1, 1, "a"))
+-- ufp_roots(result_or(ufp_empty, ufp_union_with(concat, uf2, 1, 2)))
+-- ```
+-- ```output
+-- [(1, ab)]
+-- ```
+pub fn ufp_roots(uf : UnionFind(k, a)) : List((k, a)) given Ord(k) =
+  map_to_list(uf.payloads)
+
+-- | Whether `x` and `y` are members of the same class; `None` when either was
+-- never inserted.
+pub fn ufp_equiv(uf : UnionFind(k, a), x : k, y : k) : Option(Bool) given Ord(k) =
+  if member(uf, x) && member(uf, y) then
+    Some(cmp(root_of(uf, x), root_of(uf, y)) == 0)
+  else
+    None

@@ -1,4 +1,12 @@
--- | Code-oriented Spectra combinators.
+-- | Code-oriented Spectra combinators: fenced source blocks and inline
+-- monospace, as plain `Pict`/`Inline` values.
+--
+-- ```prism
+-- fn main() = println(show(prism_code("fn main() = ()")))
+-- ```
+-- ```output
+-- Layout.CodeBlock("prism", "fn main() = ()")
+-- ```
 
 import Layout (Pict, Inline, CodeBlock, InlineCode)
 

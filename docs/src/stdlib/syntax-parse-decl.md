@@ -10,7 +10,7 @@ This module deliberately keeps declaration dispatch direct. Grammar families tha
 
 ### `parse_program`
 
-```prism,sig,h-e825797a7791b406f529197fd064fa686a0ff576776e6064f233902bb40a04bd
+```prism,sig,h-cc49adb37aebee39b355d03644ce008c662a8634aa0c95730aecdc732c2440f1
 parse_program : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(List(Syntax.Ast.Item))
 ```
 
@@ -18,7 +18,7 @@ Parse the complete post-layout token stream as a whole source file.
 
 ### `parse_item`
 
-```prism,sig,h-74e32774a98aeec5e13f436d987c5ee540e66f092a8ca855887727647cad406f
+```prism,sig,h-34b9a6b42f999563e9a77d45366ec9e136bb554a13addb2a1b6a766c63b1547c
 parse_item : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Item)
 ```
 

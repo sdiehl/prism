@@ -1,0 +1,23 @@
+-- Pins the tagged-immediate boundary. A native integer up to 62 bits of
+-- magnitude rides in a tagged machine word; 4611686018427387904 is 2^62, the
+-- first value past it, and nothing about that representation may show:
+-- literals at the boundary, arithmetic that crosses it in both directions,
+-- comparison across it, and printing must all behave as arbitrary-precision
+-- integers, byte-identically on the interpreter and every native tier.
+
+fn main() =
+  let edge = 4611686018427387903
+  let over = 4611686018427387904
+  println(show_int(edge))
+  println(show_int(over))
+  println(show_int(edge + 1))
+  println(show_int(over - 1))
+  println(show_int(0 - over))
+  println(show_int(0 - edge - 2))
+  println(show_int(edge + edge))
+  println(show_int(over * 2))
+  println(show_int((edge + 1) * 2 / 2))
+  println(show(edge < over))
+  println(show(over - 1 == edge))
+  println(show_int(over / 4611686018427387904))
+  println(show_int(9223372036854775808 - 4611686018427387904))

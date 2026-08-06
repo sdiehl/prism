@@ -95,7 +95,7 @@ tests/cases/run/comp_guards.pr: selective-free-monad
 tests/cases/run/comp_in_annotated_row.pr: selective-free-monad
 tests/cases/run/comp_map_once.pr: state-fusion
 tests/cases/run/constrained_mutual.pr: evidence
-tests/cases/run/control_effects.pr: selective-free-monad
+tests/cases/run/control_effects.pr: evidence
 tests/cases/run/control_validate.pr: whole-program-free-monad
 tests/cases/run/curry_effect.pr: evidence
 tests/cases/run/deep_effect_recursion.pr: state-fusion
@@ -132,8 +132,10 @@ tests/cases/run/interp_effects.pr: evidence
 tests/cases/run/interp_show.pr: evidence
 tests/cases/run/intmap.pr: whole-program-free-monad
 tests/cases/run/law_fail.pr: whole-program-free-monad
+tests/cases/run/law_names.pr: whole-program-free-monad
 tests/cases/run/law_reader.pr: whole-program-free-monad
 tests/cases/run/law_state.pr: whole-program-free-monad
+tests/cases/run/law_ufp.pr: whole-program-free-monad
 tests/cases/run/local_mono_combined.pr: local-partial
 tests/cases/run/local_mono_escape.pr: whole-program-free-monad
 tests/cases/run/mask.pr: whole-program-free-monad

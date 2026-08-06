@@ -1,6 +1,6 @@
 {
   "schema": "prism-syntax-diagnostics-v1",
-  "compiler": "0.16.0",
+  "compiler": "0.17.0",
   "source": {
     "digest": "d7e9722b9825121eb97e7f53668b2f17437da2b8b501932982ba9d6d7ecb2007",
     "text": "-- The retired brace-delimited class body, recognized in full so the deliberate\n-- diagnostic names the layout rewrite instead of degrading to an unexpected\n-- token, and carries no generic expectation set.\nclass Show(a) { show : (a) -> String }\n"

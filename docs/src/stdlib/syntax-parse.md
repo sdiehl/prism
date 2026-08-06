@@ -20,7 +20,7 @@ A source-level parse failure, preserving whether lexing or parsing refused the i
 
 ### `parse_program_tokens`
 
-```prism,sig,h-b613f1b314b86c1d95dba3224e5076606722bde4b69ec1efc1f2cab9c4b2923c
+```prism,sig,h-4383cded28a60a2fa43834340b20123d505c6e74a2bad5cffd62099b4dcda33c
 parse_program_tokens : (List(Syntax.Token.Token), Int) -> Result(List(Syntax.Ast.Item), Syntax.Diagnostic.Diagnostic)
 ```
 
@@ -28,15 +28,23 @@ Parse an already-laid-out whole-program token stream.
 
 ### `parse_source`
 
-```prism,sig,h-7482a46de8d629c862002732c3cbb633f6a93b37949c9dcb81e4b5405e4a34ae
+```prism,sig,h-87dd3e25eba61e6f3ae16845090ea29c26c0bd52f51ea100af4ae5c1f34bfea6
 parse_source : (String) -> Result(List(Syntax.Ast.Item), Syntax.Parse.ParseFailure)
 ```
 
 Lex, lay out, and parse one complete Prism source file.
 
+### `parse_source_budgeted`
+
+```prism,sig,h-2bdb8ea98c8ef738267fb4e3b2c52fd0e19aae481f18a983412d577b9d382e5d
+parse_source_budgeted : (Int, String) -> Result(List(Syntax.Ast.Item), Syntax.Parse.ParseFailure)
+```
+
+`parse_source` under an explicit recursion budget. The default budget is deep enough that no realistic program meets it; a harness probing the depth contract (acceptance below the budget, the structured refusal beyond it) passes a small budget here instead of paying for thousands of nesting levels. The refusal machinery exercised is identical at every budget.
+
 ### `parse_expr_tokens`
 
-```prism,sig,h-954604cf984a61e711a48bf4a295c504f0d1d371f6536b0c1f81590a4c618988
+```prism,sig,h-79386a422d6de9c30ebbdf48c9863877f5a86f8e2df1be436c8aeda7f6b0ca94
 parse_expr_tokens : (List(Syntax.Token.Token), Int) -> Result(Syntax.Ast.Sp(Syntax.Ast.Expr), Syntax.Diagnostic.Diagnostic)
 ```
 
@@ -44,7 +52,7 @@ Parse one expression from a token cursor and require complete consumption.
 
 ### `parse_expr_source`
 
-```prism,sig,h-d1521724c8c2a9d66d4a2dfd1d9c14d177552a60c317a7c5baeef269e159c75d
+```prism,sig,h-c86a001d41c8475b771903c7a8532ed7b2fd4ad3e8dff769b61994892e0c6a8d
 parse_expr_source : (String) -> Result(Syntax.Ast.Sp(Syntax.Ast.Expr), Syntax.Parse.ParseFailure)
 ```
 

@@ -1,0 +1,85 @@
+-- | Deterministic nominal identities with phantom namespace brands.
+--
+-- A name's semantic identity is one integer, drawn from `Control.Fresh`'s
+-- monotonic counter, so a run's names are a pure function of allocation
+-- order: same program, same names, on every backend and every machine. The
+-- source spelling travels beside the identity as a presentation hint and
+-- carries no meaning; renaming a binder's hint changes what a diagnostic
+-- prints and nothing else.
+--
+-- The phantom `space` parameter brands a name with its namespace. A consumer
+-- declares one marker type per namespace (terms, types, modules) and the
+-- checker refuses to mix them: `Name(TermSpace)` and `Name(TySpace)` are
+-- distinct types with no conversion. The brand is compile-time only; every
+-- name is one integer at runtime.
+--
+-- This is nominal identity, not a substitution framework. Once binders and
+-- references carry unique identities, substitution compares names directly
+-- and can never capture a same-spelled inner binder; disambiguating suffixes
+-- become the pretty-printer's concern alone. The equality and ordering
+-- instances are hand-written on the payload so the brand is never
+-- constrained: a marker type needs no instances to brand a name.
+-- Opt-in: not in Base.
+
+import Control.Fresh (Fresh, fresh)
+
+-- | A branded nominal identity: one integer, one phantom namespace.
+pub newtype Name(space) = Name(Int)
+
+-- | A binder: the identity the checker compares, and the source spelling
+-- diagnostics print.
+pub type Binder(space) = Binder { name: Name(space), hint: String }
+
+instance eqName : Eq(Name(space))
+  fn eq(a, b) =
+    match (a, b) of
+      (Name(x), Name(y)) => x == y
+
+instance ordName : Ord(Name(space))
+  fn cmp(a, b) =
+    match (a, b) of
+      (Name(x), Name(y)) => cmp(x, y)
+
+instance showName : Show(Name(space))
+  fn show(n) =
+    match n of
+      Name(x) => "%{x}"
+
+-- Binder equality and order are the name's identity alone: two binders with
+-- one identity are the same binding whatever their hints say, and a binder
+-- prints as its rendered form.
+instance eqBinder : Eq(Binder(space))
+  fn eq(a, b) = a.name == b.name
+
+instance ordBinder : Ord(Binder(space))
+  fn cmp(a, b) = cmp(a.name, b.name)
+
+instance showBinder : Show(Binder(space))
+  fn show(b) = render_binder(b)
+
+-- | The integer identity a name carries. Serialization and hashing commit to
+-- this and the surrounding schema, never to an address or a random seed.
+pub fn name_id(n : Name(space)) : Int =
+  match n of
+    Name(x) => x
+
+-- | Allocate a binder with a fresh deterministic identity and the given
+-- presentation hint.
+--
+-- ```prism
+-- # import Control.Fresh (run_fresh)
+-- run_fresh(\() -> [render_binder(fresh_binder("x")), render_binder(fresh_binder("x"))])
+-- ```
+-- ```output
+-- [x%0, x%1]
+-- ```
+pub fn fresh_binder(hint : String) : Binder(space) ! {Fresh} =
+  Binder { name = Name(fresh()), hint = hint }
+
+-- | A reference to a binder: the branded name the checker compares.
+pub fn bound_name(b : Binder(space)) : Name(space) = b.name
+
+-- | Render a binder as its hint plus its identity, deterministic and unique
+-- by construction. A prettier printer may use the hint alone where no sibling
+-- shares the spelling.
+pub fn render_binder(b : Binder(space)) : String = "{b.hint}%{name_id(b.name)}"

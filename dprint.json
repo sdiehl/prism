@@ -22,6 +22,7 @@
     "models/.lake",
     "models/fixtures/*.json",
     "docs/src/stdlib",
+    "docs/src/packages/*/",
     "tests/fixtures"
   ],
   "plugins": [

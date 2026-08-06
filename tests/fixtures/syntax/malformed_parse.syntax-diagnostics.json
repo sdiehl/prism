@@ -1,6 +1,6 @@
 {
   "schema": "prism-syntax-diagnostics-v1",
-  "compiler": "0.16.0",
+  "compiler": "0.17.0",
   "source": {
     "digest": "9ee3f1af77ae784c00842c163f840a7d6d7b0d676951e73b2b7583f949daa0a9",
     "text": "-- Lexes fine but cannot parse: a declaration missing its parameter list.\nfn broken( = 1\n"

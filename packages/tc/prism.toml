@@ -1,0 +1,5 @@
+[package]
+name = "tc"
+
+[bin]
+entry = "src/Tc.pr"
