@@ -8,7 +8,7 @@
 - Effect confinement: confined the syntax-artifact decode region, so a program using `Syntax.Codec` stays direct outside the decoder.
 - Performance: made JSON parsing and encoding linear by scanning bytes instead of codepoints; a 2.1 MB artifact decode fell from unbounded minutes to 167 ms.
 - Parser robustness: layout blocks now spend the recursion budget, closing an unbounded-recursion hole on nested open `if` bodies.
-- Parser accountability: landed the committed differential driver and a fourteen-axis depth ledger, probing acceptance below the budget and the structured refusal beyond it.
+- Parser accountability: committed the differential driver and a fourteen-axis depth ledger, probing acceptance below the budget and the structured refusal beyond it.
 - Standard library: added `Data.UnionFind.Payload`, `Data.Name`, and `Data.Scope` as checker seeds with property-law coverage.
 - Checker: added the `tc` package with the type, row, and scheme core, unification with occurs checks, and generalization, mirrored by the statics sketch.
 - Example: the System F checker now resolves spellings to branded identities before checking, deleting its capture-avoidance machinery.
