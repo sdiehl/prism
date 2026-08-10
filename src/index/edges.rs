@@ -178,21 +178,23 @@ fn show_helper_owner(target: &str) -> Option<&str> {
 fn synthetic_owners(sources: &Sources<'_>) -> BTreeMap<String, String> {
     let mut owners = BTreeMap::new();
     for instance in &sources.production.program.instances {
-        let crate::syntax::ast::Ty::Con(owner, _) = &instance.head else {
+        if sources.indexed.contains(&instance.name) {
             continue;
-        };
-        if !sources.indexed.contains(&instance.name) {
-            // Derived instances use the synthetic zero span and lead to the type
-            // whose `deriving` clause generated them. A hand-written imported
-            // instance keeps its own canonical identity; it becomes a real card
-            // when its unit is merged with this one.
-            let destination = if instance.span.start == 0 && instance.span.end == 0 {
-                owner.clone()
-            } else {
-                instance.name.clone()
-            };
-            owners.insert(instance.name.clone(), destination);
         }
+        // Derived instances use the synthetic zero span and lead to the type
+        // whose `deriving` clause generated them. A hand-written imported
+        // instance keeps its own canonical identity; it becomes a real card when
+        // its unit is merged with this one. The latter need not have a named type
+        // head (`ordStr` is an instance for the scalar `String`).
+        let destination = if instance.span.start == 0 && instance.span.end == 0 {
+            let crate::syntax::ast::Ty::Con(owner, _) = &instance.head else {
+                continue;
+            };
+            owner.clone()
+        } else {
+            instance.name.clone()
+        };
+        owners.insert(instance.name.clone(), destination);
     }
     owners
 }
