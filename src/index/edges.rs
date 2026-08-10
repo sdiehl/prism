@@ -43,7 +43,8 @@ pub(super) struct Sources<'a> {
 pub(super) fn derive(sources: &Sources<'_>) -> Vec<Edge> {
     let mut edges = BTreeSet::new();
     let lowered = lowered_methods(sources);
-    calls(sources, &lowered, &mut edges);
+    let synthetic = synthetic_owners(sources);
+    calls(sources, &lowered, &synthetic, &mut edges);
     types_and_effects(sources, &lowered, &mut edges);
     handles(sources, &mut edges);
     instances(sources, &mut edges);
@@ -58,12 +59,17 @@ pub(super) fn derive(sources: &Sources<'_>) -> Vec<Edge> {
 // the index (a prelude function a project calls) is still emitted, named by its
 // canonical name: a viewer can render and label a link that leaves the index,
 // which is more useful than a silently missing one.
-fn calls(sources: &Sources<'_>, lowered: &Lowered, out: &mut BTreeSet<Edge>) {
+fn calls(
+    sources: &Sources<'_>,
+    lowered: &Lowered,
+    synthetic: &BTreeMap<String, String>,
+    out: &mut BTreeSet<Edge>,
+) {
     let graph = DepGraph::of(&sources.production.core);
     for def in sources.defs {
         for name in core_names(def, lowered) {
             for dep in graph.direct_deps(Sym::new(name)) {
-                let to = resolve_target(sources, dep.as_str());
+                let to = resolve_target(sources, synthetic, dep.as_str());
                 // A method calling a sibling of the same instance is not the
                 // instance calling itself.
                 if to != def.id {
@@ -129,11 +135,64 @@ fn lowered_methods(sources: &Sources<'_>) -> Lowered {
 // the edge is retargeted there: a link that resolves to where the code actually
 // is beats one that resolves to nothing. Any other name passes through unchanged,
 // including one outside the index.
-fn resolve_target(sources: &Sources<'_>, target: &str) -> String {
-    match crate::names::parse_instance_method(target) {
-        Some((instance, _)) if sources.indexed.contains(instance) => instance.to_string(),
-        _ => target.to_string(),
+fn resolve_target(
+    sources: &Sources<'_>,
+    synthetic: &BTreeMap<String, String>,
+    target: &str,
+) -> String {
+    if sources.indexed.contains(target) {
+        return target.to_string();
     }
+    if let Some(owner) = synthetic.get(target) {
+        return owner.clone();
+    }
+    if let Some((instance, _)) = crate::names::parse_instance_method(target) {
+        if sources.indexed.contains(instance) {
+            return instance.to_string();
+        }
+        if let Some(owner) = synthetic.get(instance) {
+            return owner.clone();
+        }
+    }
+    target.to_string()
+}
+
+// Compiler-synthesized call targets have no declaration of their own. A derived
+// instance's methods are written by `deriving (...)` on its datatype, and a
+// structural `_show_*` helper is generated for the one indexed datatype in its
+// signature. Send both to that datatype so every dependency chip reaches the
+// source that caused the helper to exist.
+fn synthetic_owners(sources: &Sources<'_>) -> BTreeMap<String, String> {
+    let mut owners = BTreeMap::new();
+    for instance in &sources.production.program.instances {
+        let crate::syntax::ast::Ty::Con(owner, _) = &instance.head else {
+            continue;
+        };
+        // Derived instances use the synthetic zero span. Preserve an external
+        // owner too: a package index may derive through an imported stdlib type,
+        // and the target becomes local when those artifacts are merged. A real
+        // imported instance keeps its own identity instead.
+        if instance.span.start == 0
+            && instance.span.end == 0
+            && !sources.indexed.contains(&instance.name)
+        {
+            owners.insert(instance.name.clone(), owner.clone());
+        }
+    }
+    for decl in &sources.production.checked.decls {
+        if !decl.name.starts_with("_show_") || sources.indexed.contains(&decl.name) {
+            continue;
+        }
+        let mut mentioned = BTreeSet::new();
+        type_cons(&decl.ty, &mut mentioned);
+        let mut indexed = mentioned
+            .into_iter()
+            .filter(|name| sources.indexed.contains(name.as_str()));
+        if let (Some(owner), None) = (indexed.next(), indexed.next()) {
+            owners.insert(decl.name.clone(), owner.as_str().to_string());
+        }
+    }
+    owners
 }
 
 // `uses-type` and `performs`.

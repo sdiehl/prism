@@ -857,13 +857,16 @@ pub fn is_instance_method(name: &str) -> bool {
 }
 
 // "i@inst@method" -> (inst, method); the tested inverse of `instance_method`.
-// Neither an instance name nor a method name can contain `@` (both are source
-// identifiers), so the split is unambiguous. A consumer that renders the
-// dependency graph uses this to send a call to a lowered method back to the
-// instance declaration the method's source lives in.
+// A derived instance is named from its canonical type and can therefore contain
+// the private-module separator (`serializeIncr@Snap`). The method is always a
+// source identifier, so splitting at the final separator preserves that complete
+// instance identity. A consumer that renders the dependency graph uses this to
+// send a call to the declaration that owns the method's source.
 #[must_use]
 pub fn parse_instance_method(name: &str) -> Option<(&str, &str)> {
-    let (inst, method) = name.strip_prefix(INSTANCE_METHOD_PREFIX)?.split_once('@')?;
+    let (inst, method) = name
+        .strip_prefix(INSTANCE_METHOD_PREFIX)?
+        .rsplit_once('@')?;
     (!inst.is_empty() && !method.is_empty()).then_some((inst, method))
 }
 
@@ -1419,6 +1422,12 @@ mod tests {
             assert_eq!(super::parse_instance_method(&name), Some((inst, method)));
             assert!(name.starts_with(&super::instance_method_prefix(inst)));
         }
+        let private = "serializeIncr@Snap";
+        let name = super::instance_method(private, "decode");
+        assert_eq!(
+            super::parse_instance_method(&name),
+            Some((private, "decode"))
+        );
         assert_eq!(super::parse_instance_method("show"), None);
         assert_eq!(super::parse_instance_method("i@showInt"), None);
         assert_eq!(super::parse_instance_method("i@@show"), None);

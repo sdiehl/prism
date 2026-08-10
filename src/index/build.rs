@@ -403,7 +403,6 @@ fn attach_type_refs(
                 .insert(builtin.name.clone());
         }
     }
-    let indexed: BTreeSet<String> = defs.iter().map(|d| d.id.clone()).collect();
     // A constructor spelled in a pattern reaches the type that declares it, the
     // same destination its use in an expression already reaches.
     let resolve = |token: &str| -> Option<String> {
@@ -416,7 +415,7 @@ fn attach_type_refs(
             return None;
         }
         let owner = owners.get(token).or_else(|| owners.get(bare))?;
-        indexed.contains(owner).then(|| owner.clone())
+        Some(owner.clone())
     };
 
     for def in defs.iter_mut() {
@@ -634,13 +633,15 @@ fn attach_refs(defs: &mut [Def], seen: &occurrences::Occurrences, owners: &Membe
     // Owned rather than borrowed from `defs`, which is about to be mutated.
     let indexed: BTreeSet<String> = defs.iter().map(|d| d.id.clone()).collect();
     // A reference to a constructor, an operation, or a method points at the
-    // declaration that writes it, when the index has that declaration.
+    // declaration that writes it. The owner may live in another independently
+    // indexed unit; retaining its canonical target here is what lets a later
+    // merge close the link.
     let retarget = |target: &str| -> String {
         if indexed.contains(target) {
             return target.to_string();
         }
         match owners.get(target) {
-            Some(owner) if indexed.contains(owner) => owner.clone(),
+            Some(owner) => owner.clone(),
             _ => target.to_string(),
         }
     };

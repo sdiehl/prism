@@ -444,10 +444,12 @@ fn refs_are_offsets_into_the_definitions_own_source() {
     for d in &index.defs {
         for r in &d.refs {
             let written = &d.source[r.start..r.end];
-            let tail = r.target.rsplit(['.', '@']).next().unwrap_or(&r.target);
             assert!(
-                written == tail || written == r.target,
-                "`{}`: offsets {}..{} hold {written:?}, not `{}`",
+                !written.is_empty()
+                    && written
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.')),
+                "`{}`: offsets {}..{} do not hold one source name: {written:?} (target `{}`)",
                 d.id,
                 r.start,
                 r.end,
@@ -570,7 +572,7 @@ fn no_reference_in_a_whole_program_index_is_left_unexplained() {
     let builtins: BTreeSet<&str> = index.builtins.iter().map(|p| p.name.as_str()).collect();
     let mut unexplained: Vec<String> = Vec::new();
     for d in &index.defs {
-        for r in &d.refs {
+        for r in d.refs.iter().chain(&d.ty_refs).chain(&d.eff_refs) {
             let bare = r.target.rsplit(['.', '@']).next().unwrap_or(&r.target);
             if !ids.contains(r.target.as_str()) && !builtins.contains(bare) {
                 unexplained.push(format!("{} (in {})", r.target, d.id));
@@ -584,6 +586,19 @@ fn no_reference_in_a_whole_program_index_is_left_unexplained() {
         "{} references are neither indexed nor known primitives: {:?}",
         unexplained.len(),
         &unexplained[..unexplained.len().min(10)]
+    );
+    let dangling: Vec<_> = index
+        .edges
+        .iter()
+        .filter(|edge| {
+            let bare = edge.to.rsplit(['.', '@']).next().unwrap_or(&edge.to);
+            !ids.contains(edge.to.as_str()) && !builtins.contains(bare)
+        })
+        .collect();
+    assert!(
+        dangling.is_empty(),
+        "edge targets are neither indexed nor known primitives: {:?}",
+        &dangling[..dangling.len().min(10)]
     );
 }
 
@@ -1111,7 +1126,12 @@ fn a_rendered_type_carries_its_own_links_and_highlighting() {
 
 #[test]
 fn an_imported_type_keeps_its_canonical_reference_outside_this_unit() {
-    let index = index_of("import Time (Duration)\n\nfn elapsed(d : Duration) : Duration = d\n");
+    let index = index_of(
+        "import Time (Duration)\n\
+         import Concurrent (Outcome, Completed)\n\n\
+         fn elapsed(d : Duration) : Duration = Duration(0)\n\
+         fn done() : Outcome(Int) = Completed(0)\n",
+    );
     let elapsed = def(&index, "elapsed");
     let targets: BTreeSet<&str> = elapsed
         .refs
@@ -1122,6 +1142,25 @@ fn an_imported_type_keeps_its_canonical_reference_outside_this_unit() {
     assert!(
         targets.contains("Time.Duration"),
         "the imported type should retain its compiler-resolved target: {targets:?}"
+    );
+    assert!(
+        elapsed
+            .refs
+            .iter()
+            .filter(|r| &elapsed.source[r.start..r.end] == "Duration")
+            .all(|r| r.target == "Time.Duration"),
+        "both the annotation and constructor should land on Time.Duration: {:?}",
+        elapsed.refs
+    );
+    let done = def(&index, "done");
+    let completed = done
+        .refs
+        .iter()
+        .find(|r| &done.source[r.start..r.end] == "Completed")
+        .expect("constructor reference");
+    assert_eq!(
+        completed.target, "Concurrent.Outcome",
+        "an imported constructor should land on its external type declaration"
     );
 }
 
