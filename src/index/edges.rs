@@ -154,42 +154,44 @@ fn resolve_target(
             return owner.clone();
         }
     }
+    if let Some(owner) = show_helper_owner(target) {
+        if sources.indexed.contains(owner) {
+            return owner.to_string();
+        }
+    }
     target.to_string()
 }
 
-// Compiler-synthesized call targets have no declaration of their own. A derived
-// instance's methods are written by `deriving (...)` on its datatype, and a
-// structural `_show_*` helper is generated for the one indexed datatype in its
-// signature. Send both to that datatype so every dependency chip reaches the
-// source that caused the helper to exist.
+// `_show_10_Tc.TcError` begins with the length-prefixed constructor name its
+// structural show helper was generated for. Decode that first chunk; tuples and
+// other non-constructor prefixes simply fail the indexed-owner check above.
+fn show_helper_owner(target: &str) -> Option<&str> {
+    let rest = target.strip_prefix("_show_")?;
+    let (len, payload) = rest.split_once('_')?;
+    payload.get(..len.parse().ok()?)
+}
+
+// An instance method may have no declaration in this unit. A derived method is
+// written by `deriving (...)` on its datatype, while a hand-written imported
+// method is written in the external instance declaration. Preserve the canonical
+// owner of either so a dependency chip reaches source now or after index merge.
 fn synthetic_owners(sources: &Sources<'_>) -> BTreeMap<String, String> {
     let mut owners = BTreeMap::new();
     for instance in &sources.production.program.instances {
         let crate::syntax::ast::Ty::Con(owner, _) = &instance.head else {
             continue;
         };
-        // Derived instances use the synthetic zero span. Preserve an external
-        // owner too: a package index may derive through an imported stdlib type,
-        // and the target becomes local when those artifacts are merged. A real
-        // imported instance keeps its own identity instead.
-        if instance.span.start == 0
-            && instance.span.end == 0
-            && !sources.indexed.contains(&instance.name)
-        {
-            owners.insert(instance.name.clone(), owner.clone());
-        }
-    }
-    for decl in &sources.production.checked.decls {
-        if !decl.name.starts_with("_show_") || sources.indexed.contains(&decl.name) {
-            continue;
-        }
-        let mut mentioned = BTreeSet::new();
-        type_cons(&decl.ty, &mut mentioned);
-        let mut indexed = mentioned
-            .into_iter()
-            .filter(|name| sources.indexed.contains(name.as_str()));
-        if let (Some(owner), None) = (indexed.next(), indexed.next()) {
-            owners.insert(decl.name.clone(), owner.as_str().to_string());
+        if !sources.indexed.contains(&instance.name) {
+            // Derived instances use the synthetic zero span and lead to the type
+            // whose `deriving` clause generated them. A hand-written imported
+            // instance keeps its own canonical identity; it becomes a real card
+            // when its unit is merged with this one.
+            let destination = if instance.span.start == 0 && instance.span.end == 0 {
+                owner.clone()
+            } else {
+                instance.name.clone()
+            };
+            owners.insert(instance.name.clone(), destination);
         }
     }
     owners
