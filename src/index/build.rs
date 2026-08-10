@@ -126,7 +126,7 @@ pub fn build(input: IndexInput<'_>) -> Result<Index, Error> {
         &owners,
     );
     let builtins = builtin_names();
-    attach_type_refs(&mut defs, &owners, &builtins);
+    attach_type_refs(&mut defs, &production.program, &owners, &builtins);
     let token_classes = attach_tokens(&mut defs);
     let type_table = super::typed::attach_types(&mut defs, &production);
     let indexed: BTreeSet<String> = defs.iter().map(|d| d.id.clone()).collect();
@@ -342,7 +342,12 @@ fn pack_tokens(text: &str, classes: &mut Vec<String>) -> String {
 // exactly one indexed declaration bears that name, so the cross-module ambiguity
 // that made `Outcome` link to three types cannot come back through this door; a
 // token that names several is left as text rather than pointed somewhere plausible.
-fn attach_type_refs(defs: &mut [Def], owners: &MemberOwners, builtins: &[Primitive]) {
+fn attach_type_refs(
+    defs: &mut [Def],
+    program: &crate::syntax::ast::Program<crate::syntax::ast::Core>,
+    owners: &MemberOwners,
+    builtins: &[Primitive],
+) {
     // Owned, not borrowed: `defs` is mutated below.
     let mut by_name: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for d in &*defs {
@@ -365,6 +370,30 @@ fn attach_type_refs(defs: &mut [Def], owners: &MemberOwners, builtins: &[Primiti
                 .or_default()
                 .insert(d.id.clone());
         }
+    }
+    // Imported declarations are part of the checked program even when they are
+    // not part of this unit's definition layer. Retain their canonical targets:
+    // a standalone package viewer can honestly label them as leaving its index,
+    // while a merged standard-library/package index turns them into ordinary
+    // links. Without this join, `Typst.Doc` in Spectra was semantically resolved
+    // by the compiler but had no clickable span because Typst was indexed in a
+    // different artifact.
+    let mut known = Vec::new();
+    known.extend(program.types.iter().map(|d| d.name.as_str()));
+    known.extend(program.effects.iter().map(|d| d.name.as_str()));
+    known.extend(program.errors.iter().map(|d| d.name.as_str()));
+    known.extend(program.classes.iter().map(|d| d.name.as_str()));
+    known.extend(program.aliases.iter().map(|d| d.name.as_str()));
+    known.extend(program.synonyms.iter().map(|d| d.name.as_str()));
+    for canonical in known {
+        by_name
+            .entry(canonical.to_string())
+            .or_default()
+            .insert(canonical.to_string());
+        by_name
+            .entry(crate::names::bare_name(canonical).to_string())
+            .or_default()
+            .insert(canonical.to_string());
     }
     for builtin in builtins {
         if matches!(builtin.kind, PrimitiveKind::Type | PrimitiveKind::Effect) {

@@ -1103,6 +1103,22 @@ fn a_rendered_type_carries_its_own_links_and_highlighting() {
     assert!(!build.ty_tokens.is_empty(), "a type gains highlight spans");
 }
 
+#[test]
+fn an_imported_type_keeps_its_canonical_reference_outside_this_unit() {
+    let index = index_of("import Time (Duration)\n\nfn elapsed(d : Duration) : Duration = d\n");
+    let elapsed = def(&index, "elapsed");
+    let targets: BTreeSet<&str> = elapsed
+        .refs
+        .iter()
+        .chain(&elapsed.ty_refs)
+        .map(|r| r.target.as_str())
+        .collect();
+    assert!(
+        targets.contains("Time.Duration"),
+        "the imported type should retain its compiler-resolved target: {targets:?}"
+    );
+}
+
 // Handling an effect is what *removes* it from a row, so the definition that
 // gives an effect its meaning is precisely the one whose inferred effects no
 // longer mention it. Read the rows alone and an effect nobody in this unit
