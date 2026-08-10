@@ -20,6 +20,7 @@ pub fn index_cmd(
     path: &Path,
     out: Option<PathBuf>,
     stdlib: bool,
+    as_library: bool,
     no_source: bool,
     check: bool,
     cfg: &crate::Config,
@@ -27,7 +28,7 @@ pub fn index_cmd(
     let (index, default_dir) = if stdlib {
         (build_stdlib(!no_source)?, PathBuf::from("target"))
     } else {
-        build_project(path, !no_source, cfg)?
+        build_project(path, !no_source, as_library, cfg)?
     };
     let json = index.to_json().map_err(|e| {
         (
@@ -90,10 +91,18 @@ fn build_stdlib(embed_source: bool) -> Result<Index, CmdError> {
 fn build_project(
     path: &Path,
     embed_source: bool,
+    as_library: bool,
     cfg: &crate::Config,
 ) -> Result<(Index, PathBuf), CmdError> {
     let (modules, roots, base, _, title, _) = resolve_docs_input(path)?;
-    let entry = entry_dotted(path, &modules, &base);
+    // Documentation combines several packages in one namespace. Indexing a
+    // project's binary entry at the compiler root would make its declarations
+    // bare (`render`) while another package imports them qualified
+    // (`Typst.render`). Library mode compiles every project module through an
+    // import, making the identities agree at that join.
+    let entry = (!as_library)
+        .then(|| entry_dotted(path, &modules, &base))
+        .flatten();
     let source = merged_source(path, &modules, entry.as_deref(), cfg)?;
     let index = build(IndexInput {
         modules: &modules,
@@ -105,6 +114,40 @@ fn build_project(
     })
     .map_err(|e| (e, source.clone(), file_name(path)))?;
     Ok((index, base.join("target")))
+}
+
+/// Join existing index artifacts into one cross-unit reference universe.
+pub fn merge_cmd(inputs: &[PathBuf], title: String, out: Option<PathBuf>) -> CmdResult {
+    let mut indexes = Vec::new();
+    for file in inputs {
+        let text = std::fs::read_to_string(file)
+            .map_err(|e| (Error::Io(e), String::new(), file.display().to_string()))?;
+        indexes.push(Index::from_json(&text).map_err(|e| {
+            (
+                Error::CodegenDump(e),
+                String::new(),
+                file.display().to_string(),
+            )
+        })?);
+    }
+    let index = Index::merge(title, indexes)
+        .map_err(|e| (Error::CodegenDump(e), String::new(), String::new()))?;
+    let json = index.to_json().map_err(|e| {
+        (
+            Error::CodegenDump(e.to_string()),
+            String::new(),
+            String::new(),
+        )
+    })?;
+    let file = out.unwrap_or_else(|| PathBuf::from("target").join(INDEX_FILE));
+    if let Some(dir) = file.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| (Error::Io(e), String::new(), dir.display().to_string()))?;
+    }
+    std::fs::write(&file, json)
+        .map_err(|e| (Error::Io(e), String::new(), file.display().to_string()))?;
+    report(&index, &file);
+    Ok(())
 }
 
 // The merged program the addresses are taken over: the build's own input, plus one

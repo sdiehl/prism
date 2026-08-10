@@ -327,12 +327,23 @@ enum Cmd {
         /// definitions the author changed, which only re-hashed underneath them
         #[arg(long, value_names = ["OLD", "NEW"], num_args = 2, conflicts_with_all = ["stdlib", "check"])]
         diff: Option<Vec<PathBuf>>,
+        /// Join existing index artifacts into one cross-unit index instead of
+        /// compiling `path`
+        #[arg(long, num_args = 1.., conflicts_with_all = ["diff", "stdlib", "check", "no_source", "as_library"])]
+        merge: Option<Vec<PathBuf>>,
+        /// Display title for an index produced by `--merge`
+        #[arg(long, requires = "merge")]
+        title: Option<String>,
         /// Output file (default: `<project>/target/index.json`)
         #[arg(short, long)]
         out: Option<PathBuf>,
         /// Index the embedded standard library instead of `path`
         #[arg(long)]
         stdlib: bool,
+        /// Compile every project module as an imported library module, including
+        /// the configured binary entry, so its identities remain qualified
+        #[arg(long, conflicts_with = "stdlib")]
+        as_library: bool,
         /// Omit each module's source text, for a consumer that reads the working
         /// tree itself
         #[arg(long)]
@@ -1091,13 +1102,21 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
         Cmd::Index {
             path,
             diff,
+            merge,
+            title,
             out,
             stdlib,
+            as_library,
             no_source,
             check,
         } => match diff.as_deref() {
             Some([old, new]) => cli::index::diff_cmd(old, new, out),
-            _ => cli::index::index_cmd(&path, out, stdlib, no_source, check, cfg),
+            _ if merge.is_some() => cli::index::merge_cmd(
+                merge.as_deref().unwrap_or_default(),
+                title.unwrap_or_else(|| "Prism Reference".into()),
+                out,
+            ),
+            _ => cli::index::index_cmd(&path, out, stdlib, as_library, no_source, check, cfg),
         },
         Cmd::Mdbook { rest } => cli::docs::mdbook_cmd(&rest, cfg.flags.mdbook_strict),
     }

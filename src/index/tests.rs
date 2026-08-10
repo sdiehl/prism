@@ -6,7 +6,9 @@ use crate::driver::namespace_layers;
 use crate::sym::Sym;
 use crate::{default_roots, with_prelude, ModuleSource};
 
-use super::{build, EdgeKind, Index, IndexInput, Kind, TestLayer, Vis, INDEX_FORMAT};
+use super::{
+    build, EdgeKind, Index, IndexInput, Kind, PrimitiveKind, TestLayer, Vis, INDEX_FORMAT,
+};
 
 const MODULE: &str = "M";
 
@@ -62,6 +64,54 @@ fn stdlib_index() -> Index {
         embed_source: false,
     })
     .expect("index the standard library")
+}
+
+fn named_unit(mut index: Index, module: &str) -> Index {
+    index.modules[0].dotted = module.into();
+    for def in &mut index.defs {
+        let old = def.id.clone();
+        def.module = module.into();
+        def.id = format!("{module}.{old}");
+        for edge in &mut index.edges {
+            if edge.from == old {
+                edge.from = def.id.clone();
+            }
+            if edge.to == old {
+                edge.to = def.id.clone();
+            }
+        }
+    }
+    index.envelope.title = module.into();
+    index
+}
+
+#[test]
+fn independently_built_units_merge_deterministically() {
+    let left = named_unit(index_of("fn one(x : Int) : Int = x\n"), "Left");
+    let right = named_unit(index_of("fn two(x : Float) : Float = x\n"), "Right");
+    let merged = Index::merge("Reference".into(), vec![left.clone(), right.clone()]).unwrap();
+    let again = Index::merge("Reference".into(), vec![left, right]).unwrap();
+
+    assert_eq!(merged, again);
+    assert!(merged.def("Left.one").is_some());
+    assert!(merged.def("Right.two").is_some());
+    assert_eq!(
+        merged.builtins.iter().filter(|p| p.name == "Float").count(),
+        1
+    );
+}
+
+#[test]
+fn merging_rebases_interned_span_indexes() {
+    let mut shared = vec!["keyword".to_string()];
+    let packed = super::merge_packed(
+        "0 4 0 1 2 1",
+        &["type".to_string(), "keyword".to_string()],
+        &mut shared,
+    )
+    .unwrap();
+    assert_eq!(packed, "0 4 1 1 2 0");
+    assert_eq!(shared, ["keyword", "type"]);
 }
 
 const SIMPLE: &str = "\
@@ -481,8 +531,28 @@ fn primitives_are_named_as_such_rather_than_left_unexplained() {
         "float primitives are missing"
     );
     assert!(builtins.contains("IO"), "wired-in effects are missing");
+    for name in [
+        "Unit", "Int", "I64", "U64", "Bool", "Float", "Char", "String",
+    ] {
+        let primitive = index.builtins.iter().find(|p| p.name == name).unwrap();
+        assert_eq!(primitive.kind, PrimitiveKind::Type, "`{name}` kind");
+        assert!(primitive.doc.is_some(), "`{name}` should explain itself");
+    }
+    assert_eq!(
+        index.builtins.iter().find(|p| p.name == "IO").unwrap().kind,
+        PrimitiveKind::Effect
+    );
     // A declared capability is an ordinary definition, never listed as primitive.
     assert!(!builtins.contains("Chime"));
+
+    // Scalar names lex as dedicated keywords rather than uppercase identifiers.
+    // They still need source locations so the viewer can make them links.
+    let ding = def(&index, "ding");
+    assert!(ding
+        .refs
+        .iter()
+        .chain(&ding.ty_refs)
+        .any(|r| r.target == "Unit"));
 }
 
 // The claim the two fixes together are worth: over an artifact that contains the

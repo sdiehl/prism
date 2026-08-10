@@ -20,8 +20,8 @@ use crate::types::show_effects;
 use crate::Config;
 
 use super::{
-    edges, occurrences, surface, Def, Envelope, Index, IndexModule, Kind, Primitive, SourceRef,
-    Span, TestLayer, Vis, INDEX_FORMAT,
+    edges, occurrences, surface, Def, Envelope, Index, IndexModule, Kind, Primitive, PrimitiveKind,
+    SourceRef, Span, TestLayer, Vis, INDEX_FORMAT,
 };
 
 /// What to index.
@@ -125,7 +125,8 @@ pub fn build(input: IndexInput<'_>) -> Result<Index, Error> {
         &occurrences::extract(input.source, input.roots)?,
         &owners,
     );
-    attach_type_refs(&mut defs, &owners);
+    let builtins = builtin_names();
+    attach_type_refs(&mut defs, &owners, &builtins);
     let token_classes = attach_tokens(&mut defs);
     let type_table = super::typed::attach_types(&mut defs, &production);
     let indexed: BTreeSet<String> = defs.iter().map(|d| d.id.clone()).collect();
@@ -149,7 +150,7 @@ pub fn build(input: IndexInput<'_>) -> Result<Index, Error> {
         modules,
         defs,
         edges,
-        builtins: builtin_names(),
+        builtins,
         token_classes,
         type_table,
     })
@@ -166,30 +167,106 @@ pub fn build(input: IndexInput<'_>) -> Result<Index, Error> {
 fn builtin_names() -> Vec<Primitive> {
     let mut arities = BTreeMap::new();
     crate::core::builtin_arities(&mut arities);
-    let mut names: BTreeMap<String, Option<String>> = arities
+    let mut names: BTreeMap<String, Primitive> = arities
         .into_keys()
-        .map(|name| (name, None::<String>))
+        .map(|name| {
+            (
+                name.clone(),
+                Primitive {
+                    name,
+                    kind: PrimitiveKind::Value,
+                    signature: None,
+                    doc: None,
+                },
+            )
+        })
         .collect();
-    names.extend(
-        crate::core::builtins::FLOAT_OPS_BY_WIRE
-            .iter()
-            .map(|op| (op.name().to_string(), Some(op.signature().to_string()))),
-    );
+    names.extend(crate::core::builtins::FLOAT_OPS_BY_WIRE.iter().map(|op| {
+        let name = op.name().to_string();
+        (
+            name.clone(),
+            Primitive {
+                name,
+                kind: PrimitiveKind::Value,
+                signature: Some(op.signature().to_string()),
+                doc: None,
+            },
+        )
+    }));
     // The enum-backed builtins are the ones that record a surface signature; the
     // table above supplies the rest of the names.
     for b in crate::core::builtins::BUILTINS_BY_WIRE {
         if let Some(sig) = b.signature() {
-            names.insert(b.name().to_string(), Some(sig.to_string()));
+            let name = b.name().to_string();
+            names.insert(
+                name.clone(),
+                Primitive {
+                    name,
+                    kind: PrimitiveKind::Value,
+                    signature: Some(sig.to_string()),
+                    doc: None,
+                },
+            );
         }
     }
-    for effect in [names::IO_EFFECT, names::EXN_EFFECT, names::FAIL_EFFECT] {
-        names.insert(effect.to_string(), None);
+    for scalar in crate::types::Type::SCALARS {
+        let name = scalar.show();
+        names.insert(
+            name.clone(),
+            Primitive {
+                doc: scalar_doc(&name).map(str::to_string),
+                name,
+                kind: PrimitiveKind::Type,
+                signature: Some("Type".into()),
+            },
+        );
     }
-    names.insert(names::FAIL_OP.to_string(), Some("forall a. () -> a".into()));
-    names
-        .into_iter()
-        .map(|(name, signature)| Primitive { name, signature })
-        .collect()
+    names.insert(
+        crate::kw::TY_OR_NULL.into(),
+        Primitive {
+            name: crate::kw::TY_OR_NULL.into(),
+            kind: PrimitiveKind::Type,
+            signature: Some("(Type) -> Type".into()),
+            doc: Some(
+                "A non-allocating nullable type whose element occupies one non-null word.".into(),
+            ),
+        },
+    );
+    for effect in [names::IO_EFFECT, names::EXN_EFFECT, names::FAIL_EFFECT] {
+        names.insert(
+            effect.to_string(),
+            Primitive {
+                name: effect.to_string(),
+                kind: PrimitiveKind::Effect,
+                signature: None,
+                doc: Some("A compiler-wired effect with no Prism declaration.".into()),
+            },
+        );
+    }
+    names.insert(
+        names::FAIL_OP.to_string(),
+        Primitive {
+            name: names::FAIL_OP.to_string(),
+            kind: PrimitiveKind::Value,
+            signature: Some("forall a. () -> a".into()),
+            doc: Some("Abort the current computation through the wired Fail effect.".into()),
+        },
+    );
+    names.into_values().collect()
+}
+
+fn scalar_doc(name: &str) -> Option<&'static str> {
+    match name {
+        crate::kw::TY_UNIT => Some("The unit type, whose sole value is ()."),
+        crate::kw::TY_INT => Some("An arbitrary-precision integer."),
+        crate::kw::TY_I64 => Some("A wrapping signed 64-bit integer."),
+        crate::kw::TY_U64 => Some("A wrapping unsigned 64-bit integer."),
+        crate::kw::TY_BOOL => Some("The boolean type, with values true and false."),
+        crate::kw::TY_FLOAT => Some("An IEEE-754 double-precision floating-point number."),
+        crate::kw::TY_CHAR => Some("A Unicode scalar value."),
+        crate::kw::TY_STRING => Some("An immutable UTF-8 string."),
+        _ => None,
+    }
 }
 
 // Bake each definition's highlight spans, and return the class table they index.
@@ -265,7 +342,7 @@ fn pack_tokens(text: &str, classes: &mut Vec<String>) -> String {
 // exactly one indexed declaration bears that name, so the cross-module ambiguity
 // that made `Outcome` link to three types cannot come back through this door; a
 // token that names several is left as text rather than pointed somewhere plausible.
-fn attach_type_refs(defs: &mut [Def], owners: &MemberOwners) {
+fn attach_type_refs(defs: &mut [Def], owners: &MemberOwners, builtins: &[Primitive]) {
     // Owned, not borrowed: `defs` is mutated below.
     let mut by_name: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for d in &*defs {
@@ -287,6 +364,14 @@ fn attach_type_refs(defs: &mut [Def], owners: &MemberOwners) {
                 .entry(d.id.clone())
                 .or_default()
                 .insert(d.id.clone());
+        }
+    }
+    for builtin in builtins {
+        if matches!(builtin.kind, PrimitiveKind::Type | PrimitiveKind::Effect) {
+            by_name
+                .entry(builtin.name.clone())
+                .or_default()
+                .insert(builtin.name.clone());
         }
     }
     let indexed: BTreeSet<String> = defs.iter().map(|d| d.id.clone()).collect();
@@ -355,8 +440,17 @@ fn named_in(
     };
     let mut found: Vec<SourceRef> = Vec::new();
     for (start, token, end) in tokens {
-        let (crate::lex::Token::UIdent(name) | crate::lex::Token::QualName(name)) = &token else {
-            continue;
+        let name = match &token {
+            crate::lex::Token::UIdent(name) | crate::lex::Token::QualName(name) => name.as_str(),
+            crate::lex::Token::KwInt => crate::kw::TY_INT,
+            crate::lex::Token::KwI64 => crate::kw::TY_I64,
+            crate::lex::Token::KwU64 => crate::kw::TY_U64,
+            crate::lex::Token::KwBool => crate::kw::TY_BOOL,
+            crate::lex::Token::KwFloat => crate::kw::TY_FLOAT,
+            crate::lex::Token::KwChar => crate::kw::TY_CHAR,
+            crate::lex::Token::KwString => crate::kw::TY_STRING,
+            crate::lex::Token::KwUnit => crate::kw::TY_UNIT,
+            _ => continue,
         };
         // Never displace a reference the renamer established, or a member's
         // declaration site.

@@ -32,7 +32,7 @@
 //! identity surface, pre-optimizer elaborated Core), so `--check` can gate a
 //! committed copy in CI the way `prism docs --check` gates committed pages.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -473,13 +473,164 @@ pub struct Index {
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct Primitive {
     pub name: String,
+    /// Which compiler namespace the primitive occupies. Builtin types and
+    /// effects are navigation destinations just as builtin values are; keeping
+    /// the distinction here lets a viewer present a real virtual declaration
+    /// instead of a generic "implemented elsewhere" label.
+    #[serde(default)]
+    pub kind: PrimitiveKind,
     /// The signature the checker seeds. Absent for a primitive the table records
     /// no surface type for (one reached only through lowering).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
+    /// A short compiler-owned description for wired entities that have no Prism
+    /// doc comment of their own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+}
+
+/// The namespace occupied by a compiler primitive.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PrimitiveKind {
+    /// A callable or runtime-provided value.
+    #[default]
+    Value,
+    /// A wired type constructor, including the eight scalar types.
+    Type,
+    /// A wired effect with no source declaration.
+    Effect,
 }
 
 impl Index {
+    /// Join independently compiled units into one navigable artifact.
+    ///
+    /// Each unit keeps the compiler facts it was built with. The only rewrite is
+    /// to the two interned span tables: their small integer indexes are rebased
+    /// onto one shared table while definitions, references, and edges retain
+    /// their canonical names. This is what lets a documentation site combine the
+    /// standard library and packages without teaching its viewer about multiple
+    /// wire documents.
+    ///
+    /// # Errors
+    /// Refuses an empty set, compiler/scheme mismatches, duplicate module or
+    /// definition identities, conflicting primitive records, and malformed
+    /// packed span data.
+    pub fn merge(title: String, indexes: Vec<Self>) -> Result<Self, String> {
+        let Some(first) = indexes.first() else {
+            return Err("cannot merge an empty set of indexes".into());
+        };
+        let scheme = first.envelope.scheme.clone();
+        let compiler = first.envelope.compiler.clone();
+        let mut hasher = blake3::Hasher::new();
+        merge_hash_field(&mut hasher, INDEX_FORMAT.as_bytes());
+        merge_hash_field(&mut hasher, title.as_bytes());
+
+        let mut modules = Vec::new();
+        let mut module_names = BTreeSet::new();
+        let mut defs = Vec::new();
+        let mut def_ids = BTreeSet::new();
+        let mut edges = BTreeSet::new();
+        let mut builtins: BTreeMap<String, Primitive> = BTreeMap::new();
+        let mut token_classes = Vec::new();
+        let mut type_table = Vec::new();
+        let mut any_tests = false;
+        let mut unavailable_tests = Vec::new();
+
+        for mut index in indexes {
+            if index.envelope.scheme != scheme {
+                return Err(format!(
+                    "cannot merge `{}`: hash scheme `{}` differs from `{scheme}`",
+                    index.envelope.title, index.envelope.scheme
+                ));
+            }
+            if index.envelope.compiler != compiler {
+                return Err(format!(
+                    "cannot merge `{}`: compiler `{}` differs from `{compiler}`",
+                    index.envelope.title, index.envelope.compiler
+                ));
+            }
+            merge_hash_field(&mut hasher, index.envelope.title.as_bytes());
+            merge_hash_field(&mut hasher, index.envelope.contract.as_bytes());
+            match index.envelope.tests {
+                TestLayer::Included => any_tests = true,
+                TestLayer::Empty => {}
+                TestLayer::Unavailable(why) => {
+                    unavailable_tests.push(format!("{}: {why}", index.envelope.title));
+                }
+            }
+
+            for module in index.modules {
+                if !module_names.insert(module.dotted.clone()) {
+                    return Err(format!(
+                        "module `{}` occurs in more than one merged index",
+                        module.dotted
+                    ));
+                }
+                modules.push(module);
+            }
+            for def in &mut index.defs {
+                if !def_ids.insert(def.id.clone()) {
+                    return Err(format!(
+                        "definition `{}` occurs in more than one merged index; index projects with \
+                         `--as-library` so their entry modules are qualified",
+                        def.id
+                    ));
+                }
+                def.tokens = merge_packed(&def.tokens, &index.token_classes, &mut token_classes)?;
+                def.ty_tokens =
+                    merge_packed(&def.ty_tokens, &index.token_classes, &mut token_classes)?;
+                def.eff_tokens =
+                    merge_packed(&def.eff_tokens, &index.token_classes, &mut token_classes)?;
+                def.types = merge_packed(&def.types, &index.type_table, &mut type_table)?;
+            }
+            defs.extend(index.defs);
+            edges.extend(index.edges);
+            for builtin in index.builtins {
+                match builtins.get(&builtin.name) {
+                    Some(existing) if existing != &builtin => {
+                        return Err(format!(
+                            "primitive `{}` has conflicting records in merged indexes",
+                            builtin.name
+                        ));
+                    }
+                    Some(_) => {}
+                    None => {
+                        builtins.insert(builtin.name.clone(), builtin);
+                    }
+                }
+            }
+        }
+
+        let tests = if unavailable_tests.is_empty() {
+            if any_tests {
+                TestLayer::Included
+            } else {
+                TestLayer::Empty
+            }
+        } else {
+            TestLayer::Unavailable(unavailable_tests.join("\n"))
+        };
+        let merged = Self {
+            envelope: Envelope {
+                format: INDEX_FORMAT.into(),
+                scheme,
+                compiler,
+                contract: hasher.finalize().to_hex().to_string(),
+                title,
+                tests,
+            },
+            modules,
+            defs,
+            edges: edges.into_iter().collect(),
+            builtins: builtins.into_values().collect(),
+            token_classes,
+            type_table,
+        };
+        // Keep the same validation boundary as an artifact read from disk.
+        Self::from_json(&merged.to_json().map_err(|e| e.to_string())?)
+    }
+
     /// Serialize with stable indentation and field order.
     ///
     /// Deterministic: identical source yields byte-identical JSON, which is what
@@ -525,4 +676,49 @@ impl Index {
     pub fn def(&self, id: &str) -> Option<&Def> {
         self.defs.iter().find(|d| d.id == id)
     }
+}
+
+fn merge_hash_field(hasher: &mut blake3::Hasher, bytes: &[u8]) {
+    hasher.update(&(bytes.len() as u64).to_le_bytes());
+    hasher.update(bytes);
+}
+
+// Rebase packed `gap length index` triples from one intern table onto another.
+// Gaps and lengths are byte offsets and therefore survive unchanged.
+fn merge_packed(packed: &str, from: &[String], to: &mut Vec<String>) -> Result<String, String> {
+    if packed.is_empty() {
+        return Ok(String::new());
+    }
+    let fields: Vec<&str> = packed.split_whitespace().collect();
+    if fields.len() % 3 != 0 {
+        return Err(format!(
+            "malformed packed spans: expected triples, found {} fields",
+            fields.len()
+        ));
+    }
+    let mut out = String::new();
+    for triple in fields.chunks_exact(3) {
+        let gap = triple[0]
+            .parse::<usize>()
+            .map_err(|_| format!("malformed span gap `{}`", triple[0]))?;
+        let len = triple[1]
+            .parse::<usize>()
+            .map_err(|_| format!("malformed span length `{}`", triple[1]))?;
+        let old = triple[2]
+            .parse::<usize>()
+            .map_err(|_| format!("malformed span table index `{}`", triple[2]))?;
+        let value = from
+            .get(old)
+            .ok_or_else(|| format!("span table index {old} is out of bounds ({})", from.len()))?;
+        let new = to.iter().position(|v| v == value).unwrap_or_else(|| {
+            to.push(value.clone());
+            to.len() - 1
+        });
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        use std::fmt::Write as _;
+        write!(out, "{gap} {len} {new}").expect("writing to a String cannot fail");
+    }
+    Ok(out)
 }
