@@ -437,11 +437,8 @@ fn refs_are_offsets_into_the_definitions_own_source() {
             .iter()
             .map(|r| r.target.as_str())
             .collect::<Vec<_>>(),
-        vec!["double", "double"],
+        vec!["Int", "Int", "double", "double"],
     );
-    for r in &quad.refs {
-        assert_eq!(&quad.source[r.start..r.end], "double");
-    }
     // Every definition in the index, not just this one: a ref must slice the name
     // it resolves to out of the text it claims to be in.
     for d in &index.defs {
@@ -458,8 +455,15 @@ fn refs_are_offsets_into_the_definitions_own_source() {
             );
         }
     }
-    // A definition that calls nothing has none, rather than an empty-range entry.
-    assert!(def(&index, "double").refs.is_empty());
+    // A definition that calls nothing still links its scalar type annotations.
+    assert_eq!(
+        def(&index, "double")
+            .refs
+            .iter()
+            .map(|r| r.target.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Int", "Int"]
+    );
 }
 
 // The in-body links and the `calls` edges are two views of one fact, so they must
@@ -647,12 +651,14 @@ fn effect_row_labels_are_occurrences_over_the_label_name_alone() {
     assert_eq!(
         pairs,
         vec![
+            ("Unit", "Unit"),
             ("Ask", "Ask"),
             ("Chirp", "Chirp"),
+            ("Int", "Int"),
             ("chirp", "Chirp"),
             ("ask", "Ask")
         ],
-        "row labels and operation calls, in source order"
+        "scalar types, row labels, and operation calls, in source order"
     );
 }
 
