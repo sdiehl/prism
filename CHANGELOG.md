@@ -2,21 +2,21 @@
 
 ## 0.18.0
 
-- Code index: added `prism index`, a whole-program artifact of every definition and the edges between them, and the `/viewer/` page that browses code by definition rather than by file.
-- Diagnostics: added `prism explain CODE` and REPL `:explain`, one coverage-pinned page per emitted code, plus edit-distance did-you-mean corrections across compiler and REPL scopes.
-- Typed holes: `check --at-hole` reports the expected type, effect row, and ranked candidates, `--fill` substitutes a sole exact-type binding and restores on a failed re-check, and `run --defer-holes` turns reached holes into deterministic faults.
-- Type search: added `prism search TYPE` over project, package, and standard-library interfaces by subsumption, and bounded `prism synth --at-hole` whose candidates the ordinary checker re-verifies.
-- Bootstrap: added `prism bootstrap check FILE`, a Prism shadow of the Rust checker over the `prism-tc-input-v1` artifact, reporting parity or the first diverging fact.
+- Code index: added `prism index`, a whole-program artifact of definitions and their edges, and the `/viewer/` page that browses by definition.
+- Diagnostics: added `prism explain CODE` and REPL `:explain`, one page per emitted code, plus did-you-mean corrections.
+- Typed holes: added `check --at-hole` reporting, `--fill` for a sole exact-type candidate, and `run --defer-holes` turning reached holes into deterministic faults.
+- Type search: added `prism search TYPE` over project and library interfaces by subsumption, and bounded `prism synth` whose candidates the checker re-verifies.
+- Bootstrap: added `prism bootstrap check FILE`, a Prism shadow of the Rust checker reporting parity or the first diverging fact.
 - Effect lowering: added the `tier-explain` dump, one sentence per region naming its rung and the recorded fact that forced it.
-- Typechecker: lambda parameter annotations now feed inference, and a call's result meets its expected type before its arguments are checked, so first-class lens construction typechecks.
+- Typechecker: lambda annotations now feed inference, and a call's result meets its expected type before its arguments, so lens construction typechecks.
 - Patterns: added `let pat = value else fallback`, lowering identically to the equivalent two-arm match.
 - Optics: added `#path a.b.c` and anchored `#path Type.a.b` lens literals, and compound path-update terminals like `{ s | hp -= dmg, cells.each *= 2 }`.
-- Imperative: assignment left sides extend to `var`-rooted field and index paths, `var x : T := e` types the cell, and threaded state takes the same statements through `get()`.
-- Deriving: `Lens` emits type-qualified lens values beside the accessor pair when `Data.Optic` is in scope, derived contexts omit phantom parameters, and a shared-field accessor collision reports E6072 at derive time instead of an internal error.
-- Parser: rewrote `Syntax.Parse` sequencing onto `let else`, a thousand lines shorter with byte-identical output, and adversarial nesting cost fell from a 2.3 exponent to linear.
-- Standard library: added `Data.Optic` lenses and traversals with effect-polymorphic rewriting and a `Control.State` bridge, replay-stable `Data.Intern`, and first-divergence `Data.Diff`.
+- Imperative: assignment left sides extend to `var`-rooted field and index paths, `var x : T := e` types the cell, and threaded state takes the same statements.
+- Deriving: `Lens` emits type-qualified lenses when `Data.Optic` is in scope, derived contexts omit phantom parameters, and shared-field collisions report E6072.
+- Parser: rewrote `Syntax.Parse` onto `let else`, a thousand lines shorter with byte-identical output, and adversarial nesting cost fell to linear.
+- Standard library: added `Data.Optic` lenses and traversals with a `Control.State` bridge, replay-stable `Data.Intern`, and first-divergence `Data.Diff`.
 - Example: refactored System F onto one anchored solver route, ambient-state statements, and factored operator rules.
-- Documentation: folded optics, typed holes, and diagnostics into the spec and compiler book, and package reference pages ship module sources so browser Run works on blocks importing package modules.
+- Documentation: folded optics, typed holes, and diagnostics into the spec, and package reference pages ship module sources so browser Run works.
 
 ## 0.17.0
 
