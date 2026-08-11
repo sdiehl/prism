@@ -9,7 +9,6 @@
 --   depth never negative: OK
 
 import Test (..)
-
 import Quickcheck (..)
 
 fn report(name : String, o : Outcome(a)) =

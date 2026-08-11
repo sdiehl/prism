@@ -14,7 +14,7 @@ Determinism is part of the public contract, not a courtesy: `ufp_union_with` kee
 
 ### `UnionFind`
 
-```prism,def,h-e474178b921468e9107e03d8148096c201a7a3042f417eb62deb2de141a73857
+```prism,def,h-1982cd7165d0e38622f02eb2ac34911082a9145695ae89249afac447bef21da6
 type UnionFind(k, a) = Ufp { parents: Map(k, k), payloads: Map(k, a) }
 ```
 
@@ -32,7 +32,7 @@ Why a forest operation refused.
 
 ### `ufp_empty`
 
-```prism,sig,h-8f9f56cc7afa6bb86fb4585960f74026bc80941d2435d6d36439fa90802424b6
+```prism,sig,h-81d75b111211c78603ef30979790dcaf91fdc23f739d32a3db98b99e5c8cf441
 ufp_empty : forall a b. Data.UnionFind.Payload.UnionFind(a, b)
 ```
 
@@ -40,8 +40,8 @@ The empty forest: no keys, no classes.
 
 ### `ufp_insert`
 
-```prism,sig,h-cb5699b0ab856af000f12cf1a401d8e2b7be2f576fe9649f4d17e1368778cf8b
-ufp_insert : forall a b. (Data.UnionFind.Payload.UnionFind(a, b), a, b) -> Result(Data.UnionFind.Payload.UnionFind(a, b), Data.UnionFind.Payload.UfError)
+```prism,sig,h-75443b34674a64bcbe26e5506e2f1875cbe1150f454a18cd410a4c03c03e07f7
+ufp_insert : forall a b. (Data.UnionFind.Payload.UnionFind(a, b), a, b) -> Result(Data.UnionFind.Payload.UnionFind(a, b), Data.UnionFind.Payload.UfError) given Ord(a)
 ```
 
 Insert `x` as a fresh singleton class with descriptor `a`. Inserting a key that is already a member (root or not) is `UfDuplicate`.
@@ -56,8 +56,8 @@ Some((1, one))
 
 ### `ufp_find`
 
-```prism,sig,h-00859898900a8f0ff47ab6121b1708f383227e01e0d81c73954b7d522f7bdce2
-ufp_find : forall a b. (Data.UnionFind.Payload.UnionFind(a, b), a) -> Option((a, b))
+```prism,sig,h-55a9d98ec5e3d00213bc7c36fba96dc524d26166baaca8e11056b46498ca5f0b
+ufp_find : forall a b. (Data.UnionFind.Payload.UnionFind(a, b), a) -> Option((a, b)) given Ord(a)
 ```
 
 The canonical root of `x`'s class and the class descriptor, or `None` when `x` was never inserted.
@@ -72,16 +72,16 @@ None
 
 ### `ufp_set`
 
-```prism,sig,h-cc6532be89628dd2a5f8a583783de63c9bb548d1443d9463cb7b51a7fbd43205
-ufp_set : forall a b. (Data.UnionFind.Payload.UnionFind(a, b), a, b) -> Result(Data.UnionFind.Payload.UnionFind(a, b), Data.UnionFind.Payload.UfError)
+```prism,sig,h-3c422e196f11773f833d1d4a5fcfadafdbe1179031dd529bbc86ebe56946915d
+ufp_set : forall a b. (Data.UnionFind.Payload.UnionFind(a, b), a, b) -> Result(Data.UnionFind.Payload.UnionFind(a, b), Data.UnionFind.Payload.UfError) given Ord(a)
 ```
 
 Replace the descriptor of `x`'s class, or `UfAbsent` when `x` was never inserted. The class and its root are unchanged.
 
 ### `ufp_union_with`
 
-```prism,sig,h-c27330de35c611afc3595e0d4b41f97b5e247b09e653f3995ebaef3fd63e2a94
-ufp_union_with : forall e0 a b. ((a, a) -> a ! {e0}, Data.UnionFind.Payload.UnionFind(b, a), b, b) -> Result(Data.UnionFind.Payload.UnionFind(b, a), Data.UnionFind.Payload.UfError) ! {e0}
+```prism,sig,h-46f6aa97e2f1240c04c7a67b351f16404bda1b950281eb119d4ace2f8b559b6c
+ufp_union_with : forall e0 a b. ((a, a) -> a ! {e0}, Data.UnionFind.Payload.UnionFind(b, a), b, b) -> Result(Data.UnionFind.Payload.UnionFind(b, a), Data.UnionFind.Payload.UfError) ! {e0} given Ord(b)
 ```
 
 Join the classes of `x` and `y`. The smaller root by `Ord` stays the root; `combine` receives the kept root's descriptor first and the absorbed root's second, runs exactly once per join that changes the partition, and its result becomes the joined class's descriptor. Joining a class with itself is a no-op that never calls `combine`; either key absent is `UfAbsent`.
@@ -98,8 +98,8 @@ Some((1, ab))
 
 ### `ufp_roots`
 
-```prism,sig,h-d69979f7812b1b268db41c418cedde3fe4f6f7f6b0e91a16b4bc6a9a279ae8cf
-ufp_roots : forall a b. (Data.UnionFind.Payload.UnionFind(a, b)) -> List((a, b))
+```prism,sig,h-fe80775899d5c4ccca6c378c0f200e53904777f8e96c160fbea4ea0a1e6a4003
+ufp_roots : forall a b. (Data.UnionFind.Payload.UnionFind(a, b)) -> List((a, b)) given Ord(a)
 ```
 
 The logical partition: every canonical root paired with its class descriptor, in ascending key order. This is the rendering to compare or serialize; it is independent of the parent paths any sequence of joins happened to build.
@@ -116,8 +116,8 @@ ufp_roots(result_or(ufp_empty, ufp_union_with(concat, uf2, 1, 2)))
 
 ### `ufp_equiv`
 
-```prism,sig,h-c84a0261bf63507b65a273eaf0430653014980bdc233e6e08ffb36364e64defe
-ufp_equiv : forall a b. (Data.UnionFind.Payload.UnionFind(a, b), a, a) -> Option(Bool)
+```prism,sig,h-6152e8b276dabe69a09ec83ec5ebc4f508b0aeec51ea56ad24876b46b8c42cf3
+ufp_equiv : forall a b. (Data.UnionFind.Payload.UnionFind(a, b), a, a) -> Option(Bool) given Ord(a)
 ```
 
 Whether `x` and `y` are members of the same class; `None` when either was never inserted.

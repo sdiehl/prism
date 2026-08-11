@@ -329,7 +329,7 @@ The immediate children of one resolved node, in source order. The one constructo
 
 ### `rnode_rebuild`
 
-```prism,sig,h-ba42bef133a167c89540811f9f0204ff8a9d1290af224164f33f3bc85614874b
+```prism,sig,h-beb968dec6041f9b54e5e7ad92a1a898aeb9494651a20ebc26bee2ca58addf4b
 rnode_rebuild : (Syntax.Resolved.RNode, List(Syntax.Resolved.RNode)) -> Syntax.Resolved.RNode
 ```
 
@@ -337,7 +337,7 @@ Put a replacement child list back into a resolved node, keeping its id, kind, an
 
 ### `rnode_layer`
 
-```prism,sig,h-c159995444b07fa339c97d3b59793e1afad7e3ef9fb2154435fb033e44646641
+```prism,sig,h-9d4c7fc2c59280b7b8e7f9094592af820dd3589b5965981742c5965eed7fce53
 rnode_layer : () -> Control.Layer.Layer(Syntax.Resolved.RNode)
 ```
 
@@ -345,7 +345,7 @@ The children-and-rebuild pair for resolved nodes, so every strategy in `Control.
 
 ### `rnode_universe`
 
-```prism,sig,h-0d1791f6d2ee8f0e89843e147472a6c66100a1defc9efc5412ea44bce167e452
+```prism,sig,h-b88bbf3c7ef6f2f326a9831b9d6c3b13a905cf036d12d6d1961422cfdb2593b6
 rnode_universe : (Syntax.Resolved.RNode) -> List(Syntax.Resolved.RNode)
 ```
 
@@ -353,7 +353,7 @@ Every node of a resolved body, root first, depth-first. The uniplate `universe` 
 
 ### `rnode_count`
 
-```prism,sig,h-0346d899e1185d938c4b2a8d22f316f230805f1d4a614e6449063a0953a8de9f
+```prism,sig,h-393d93d8f92aac0430fad709c55ae5e6e5cb2880fc3af8e78bb98d1771fb1db4
 rnode_count : (Syntax.Resolved.RNode) -> Int
 ```
 

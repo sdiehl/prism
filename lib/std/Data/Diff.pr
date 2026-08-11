@@ -1,0 +1,126 @@
+-- | First-divergence reporting for two lists.
+--
+-- A differential check answers one question: are these two sequences the same,
+-- and if not, where do they first stop being the same? Equality alone answers
+-- the first half and throws away the second, which is the half a failure
+-- message is made of. This module keeps both: the answer is `None` when the
+-- lists agree everywhere, and otherwise the one index where they first part
+-- company plus what each side holds there.
+--
+-- Divergence has exactly three shapes, because two lists walked in lockstep can
+-- only part in three ways: both sides have an element at the index and the
+-- elements differ, or one side ran out while the other continued. A shorter
+-- list is therefore never reported as a difference at some element, and the
+-- index in every shape means the same thing, the number of positions that
+-- agreed before it.
+--
+-- The scan stops at the first divergence, so comparing two long lists that part
+-- early costs the agreeing prefix and nothing more.
+--
+-- ```prism
+-- match first_diff([1, 2, 3], [1, 9, 3]) of
+--   None => println("equal")
+--   Some(d) => println(diff_message(d))
+-- ```
+-- ```output
+-- index 1: left 2, right 9
+-- ```
+--
+-- Opt-in: not in Base.
+
+-- | Where and how two lists first differ. `DiffAt(i, left, right)` is a genuine
+-- element mismatch at index `i`; `DiffLeftEnd(i, right)` is the left list
+-- ending at `i` while the right still holds an element there; `DiffRightEnd(i,
+-- left)` is the mirror image.
+pub type Divergence(a)
+  = DiffAt(Int, a, a)
+  | DiffLeftEnd(Int, a)
+  | DiffRightEnd(Int, a)
+  deriving (Eq, Show)
+
+-- | Where `xs` and `ys` first differ, or `None` when they are equal. The
+-- elements are compared with their own `Eq`, so this agrees with `==` on the
+-- whole lists exactly.
+--
+-- ```prism
+-- (first_diff([1, 2], [1, 2]), first_diff([1, 2, 3], [1, 2]))
+-- ```
+-- ```output
+-- (None, Some(Data.Diff.DiffRightEnd(2, 3)))
+-- ```
+pub fn first_diff(xs : List(a), ys : List(a)) : Option(Divergence(a)) given Eq(a) =
+  first_diff_by(\(x, y) -> x == y, xs, ys)
+
+-- | Where `xs` and `ys` first differ under the caller's notion of sameness.
+-- `same(x, y)` decides whether two elements count as agreeing, which is what a
+-- comparison that ignores part of an element (a span, a cached size) needs.
+--
+-- ```prism
+-- first_diff_by(\(x, y) -> x % 10 == y % 10, [11, 22], [1, 5])
+-- ```
+-- ```output
+-- Some(Data.Diff.DiffAt(1, 22, 5))
+-- ```
+pub fn first_diff_by(same, xs : List(a), ys : List(a)) : Option(Divergence(a)) =
+  diff_from(0, same, xs, ys)
+
+fn diff_from(
+  i : Int,
+  same,
+  xs : List(a),
+  ys : List(a)
+) : Option(Divergence(a)) =
+  match xs of
+    Nil =>
+      match ys of
+        Nil => None
+        Cons(y, _yr) => Some(DiffLeftEnd(i, y))
+    Cons(x, xr) =>
+      match ys of
+        Nil => Some(DiffRightEnd(i, x))
+        Cons(y, yr) =>
+          if same(x, y) then
+            diff_from(i + 1, same, xr, yr)
+          else
+            Some(DiffAt(i, x, y))
+
+-- | The index a divergence sits at: the number of positions that agreed before
+-- the two lists parted. The three shapes all count the same way, so a caller
+-- reporting a position never matches on the shape first.
+--
+-- ```prism
+-- (diff_index(DiffAt(1, 2, 9)), diff_index(DiffLeftEnd(3, 4)))
+-- ```
+-- ```output
+-- (1, 3)
+-- ```
+pub fn diff_index(d : Divergence(a)) : Int =
+  match d of
+    DiffAt(i, _l, _r) => i
+    DiffLeftEnd(i, _r) => i
+    DiffRightEnd(i, _l) => i
+
+-- | One line naming the divergence, for a failure message. The constructor's
+-- own `Show` renders the shape; this renders the story.
+--
+-- ```prism
+-- diff_message(DiffLeftEnd(2, 7))
+-- ```
+-- ```output
+-- index 2: left ended, right 7
+-- ```
+pub fn diff_message(d : Divergence(a)) : String given Show(a) =
+  match d of
+    DiffAt(i, l, r) =>
+      concat_all([
+          "index ",
+          show_int(i),
+          ": left ",
+          show(l),
+          ", right ",
+          show(r),
+        ])
+    DiffLeftEnd(i, r) =>
+      concat_all(["index ", show_int(i), ": left ended, right ", show(r)])
+    DiffRightEnd(i, l) =>
+      concat_all(["index ", show_int(i), ": right ended, left ", show(l)])

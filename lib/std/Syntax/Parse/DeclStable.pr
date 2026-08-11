@@ -11,23 +11,14 @@
 -- already-decoded visibility.
 
 import Data.Foldable (length)
-
 import Data.List (..)
-
 import Syntax.Source (..)
-
 import Syntax.Token (..)
-
 import Syntax.Ast (..)
-
 import Syntax.Cursor (..)
-
 import Syntax.Diagnostic (..)
-
 import Syntax.Parse.Support (..)
-
 import Syntax.Parse.Type (..)
-
 import Syntax.Parse.Expr (..)
 
 -- A parsed pattern-declaration clause before its family-level invariants have
@@ -67,57 +58,32 @@ pub fn parse_pattern_decl(
   depth : Int,
   vis : Option(String)
 ) : Parsed(Item) =
-  match descend(depth, c) of
-    PStuck(c1) => PStuck(c1)
-    PFault(d) => PFault(d)
-    PTook(d, c1) => parse_pattern_decl_body(c1, d, vis)
+  let p1 = descend(depth, c)
+  let PTook(d, c1) = p1 else parsed_refused(p1)
+  parse_pattern_decl_body(c1, d, vis)
 
 fn parse_pattern_decl_body(
   saved : Cursor,
   depth : Int,
   vis : Option(String)
 ) : Parsed(Item) =
-  match take_fixed(saved, "pattern") of
-    PStuck(c1) => PStuck(c1)
-    PFault(d) => PFault(d)
-    PTook(_, c1) =>
-      match take_word(c1, TUid) of
-        PStuck(c2) => PStuck(c2)
-        PFault(d) => PFault(d)
-        PTook(name, c2) =>
-          match take_fixed(c2, "(") of
-            PStuck(c3) => PStuck(c3)
-            PFault(d) => PFault(d)
-            PTook(_, c3) =>
-              match parse_ident_list(c3, ")", Nil) of
-                PStuck(c4) => PStuck(c4)
-                PFault(d) => PFault(d)
-                PTook(params, c4) =>
-                  match take_fixed(c4, "for") of
-                    PStuck(c5) => PStuck(c5)
-                    PFault(d) => PFault(d)
-                    PTook(_, c5) =>
-                      match take_word(c5, TUid) of
-                        PStuck(c6) => PStuck(c6)
-                        PFault(d) => PFault(d)
-                        PTook(for_ty, c6) =>
-                          match take_fixed(c6, "=") of
-                            PStuck(c7) => PStuck(c7)
-                            PFault(d) => PFault(d)
-                            PTook(_, c7) =>
-                              match parse_pattern_clauses(c7, depth) of
-                                PStuck(c8) => PStuck(c8)
-                                PFault(d) => PFault(d)
-                                PTook(clauses, c8) =>
-                                  assemble_pattern(
-                                      saved,
-                                      c8,
-                                      name,
-                                      params,
-                                      for_ty,
-                                      clauses,
-                                      vis,
-                                    )
+  let p1 = take_fixed(saved, "pattern")
+  let PTook(_, c1) = p1 else parsed_refused(p1)
+  let p2 = take_word(c1, TUid)
+  let PTook(name, c2) = p2 else parsed_refused(p2)
+  let p3 = take_fixed(c2, "(")
+  let PTook(_, c3) = p3 else parsed_refused(p3)
+  let p4 = parse_ident_list(c3, ")", Nil)
+  let PTook(params, c4) = p4 else parsed_refused(p4)
+  let p5 = take_fixed(c4, "for")
+  let PTook(_, c5) = p5 else parsed_refused(p5)
+  let p6 = take_word(c5, TUid)
+  let PTook(for_ty, c6) = p6 else parsed_refused(p6)
+  let p7 = take_fixed(c6, "=")
+  let PTook(_, c7) = p7 else parsed_refused(p7)
+  let p8 = parse_pattern_clauses(c7, depth)
+  let PTook(clauses, c8) = p8 else parsed_refused(p8)
+  assemble_pattern(saved, c8, name, params, for_ty, clauses, vis)
 
 -- A conventional comma list with an optional trailing comma. The closing
 -- delimiter is consumed here.
@@ -129,16 +95,14 @@ fn parse_ident_list(
   if at_fixed(c, close) then
     PTook(reverse(rev), cursor_advance(c))
   else
-    match take_word(c, TIdent) of
-      PStuck(c1) => PStuck(c1)
-      PFault(d) => PFault(d)
-      PTook(name, c1) =>
-        if at_fixed(c1, ",") then
-          parse_ident_list(cursor_advance(c1), close, Cons(name, rev))
-        elif at_fixed(c1, close) then
-          PTook(reverse(Cons(name, rev)), cursor_advance(c1))
-        else
-          PStuck(note_comma_or(c1, close))
+    let p1 = take_word(c, TIdent)
+    let PTook(name, c1) = p1 else parsed_refused(p1)
+    if at_fixed(c1, ",") then
+      parse_ident_list(cursor_advance(c1), close, Cons(name, rev))
+    elif at_fixed(c1, close) then
+      PTook(reverse(Cons(name, rev)), cursor_advance(c1))
+    else
+      PStuck(note_comma_or(c1, close))
 
 fn parse_pattern_clauses(
   c : Cursor,
@@ -147,10 +111,9 @@ fn parse_pattern_clauses(
   if at_kind(c, TVOpen) then
     parse_pattern_clause_block(cursor_advance(c), depth, Nil)
   else
-    match parse_pattern_clause(c, depth) of
-      PStuck(c1) => PStuck(c1)
-      PFault(d) => PFault(d)
-      PTook(clause, c1) => PTook([clause], c1)
+    let p1 = parse_pattern_clause(c, depth)
+    let PTook(clause, c1) = p1 else parsed_refused(p1)
+    PTook([clause], c1)
 
 fn parse_pattern_clause_block(
   c : Cursor,
@@ -162,48 +125,38 @@ fn parse_pattern_clause_block(
   elif at_kind(c, TVSemi) then
     parse_pattern_clause_block(cursor_advance(c), depth, rev)
   else
-    match parse_pattern_clause(c, depth) of
-      PStuck(c1) => PStuck(c1)
-      PFault(d) => PFault(d)
-      PTook(clause, c1) =>
-        if at_kind(c1, TVSemi) then
-          parse_pattern_clause_block(
-              cursor_advance(c1),
-              depth,
-              Cons(clause, rev),
-            )
-        elif at_kind(c1, TVClose) then
-          parse_pattern_clause_block(c1, depth, Cons(clause, rev))
-        else
-          let c2 = cursor_note(c1, TVSemi)
-          PStuck(cursor_note(c2, TVClose))
+    let p1 = parse_pattern_clause(c, depth)
+    let PTook(clause, c1) = p1 else parsed_refused(p1)
+    if at_kind(c1, TVSemi) then
+      parse_pattern_clause_block(cursor_advance(c1), depth, Cons(clause, rev))
+    elif at_kind(c1, TVClose) then
+      parse_pattern_clause_block(c1, depth, Cons(clause, rev))
+    else
+      let c2 = cursor_note(c1, TVSemi)
+      PStuck(cursor_note(c2, TVClose))
 
 fn parse_pattern_clause(c : Cursor, depth : Int) : Parsed(PatternClause) =
   let saved = c
-  match take_word(c, TIdent) of
-    PStuck(c1) => PStuck(c1)
-    PFault(d) => PFault(d)
-    PTook(word, c1) =>
-      match parse_expr(c1, depth) of
-        PStuck(c2) => PStuck(c2)
-        PFault(d) => PFault(d)
-        PTook(expr, c2) =>
-          if word /= "view" && word /= "make" then
-            PFault(
-                refuse(
-                    cursor_since(saved, c2),
-                    "expected `view` or `make` in pattern declaration",
-                  ),
-              )
-          else
-            PTook(
-                PatternClause {
-                  word = word,
-                  expr = expr,
-                  span = cursor_since(saved, c2)
-                },
-                c2,
-              )
+  let p1 = take_word(c, TIdent)
+  let PTook(word, c1) = p1 else parsed_refused(p1)
+  let p2 = parse_expr(c1, depth)
+  let PTook(expr, c2) = p2 else parsed_refused(p2)
+  if word /= "view" && word /= "make" then
+    PFault(
+        refuse(
+            cursor_since(saved, c2),
+            "expected `view` or `make` in pattern declaration",
+          ),
+      )
+  else
+    PTook(
+        PatternClause {
+          word = word,
+          expr = expr,
+          span = cursor_since(saved, c2)
+        },
+        c2,
+      )
 
 fn assemble_pattern(
   saved : Cursor,
@@ -330,64 +283,53 @@ pub fn parse_stable_decl(
   depth : Int,
   vis : Option(String)
 ) : Parsed(Item) =
-  match descend(depth, c) of
-    PStuck(c1) => PStuck(c1)
-    PFault(d) => PFault(d)
-    PTook(d, c1) => parse_stable_decl_body(c1, d, vis)
+  let p1 = descend(depth, c)
+  let PTook(d, c1) = p1 else parsed_refused(p1)
+  parse_stable_decl_body(c1, d, vis)
 
 fn parse_stable_decl_body(
   saved : Cursor,
   depth : Int,
   vis : Option(String)
 ) : Parsed(Item) =
-  match take_fixed(saved, "stable") of
-    PStuck(c1) => PStuck(c1)
-    PFault(d) => PFault(d)
-    PTook(_, c1) =>
-      match take_word(c1, TUid) of
-        PStuck(c2) => PStuck(c2)
-        PFault(d) => PFault(d)
-        PTook(name, c2) =>
-          match take_fixed(c2, "\{") of
-            PStuck(c3) => PStuck(c3)
-            PFault(d) => PFault(d)
-            PTook(_, c3) =>
-              let empty =
-                StableParts {
-                  rungs = Nil,
-                  converters = Nil,
-                  migrations = Nil,
-                  has_migrations = false,
-                  saw_body = false
-                }
-              match (parse_stable_entries(saved, c3, depth, name, empty)) of
-                PStuck(c4) => PStuck(c4)
-                PFault(d) => PFault(d)
-                PTook(parts, c4) =>
-                  match take_fixed(c4, "\}") of
-                    PStuck(c5) => PStuck(c5)
-                    PFault(d) => PFault(d)
-                    PTook(_, c5) =>
-                      if length(parts.rungs) == 0 then
-                        PFault(
-                            refuse(
-                                cursor_since(saved, c5),
-                                "`stable {name}` declares no version rungs",
-                              ),
-                          )
-                      else
-                        PTook(
-                            IStable {
-                              name = name,
-                              rungs = parts.rungs,
-                              converters = parts.converters,
-                              migrations = parts.migrations,
-                              span = cursor_since(saved, c5),
-                              vis = vis,
-                              dep = None
-                            },
-                            c5,
-                          )
+  let p1 = take_fixed(saved, "stable")
+  let PTook(_, c1) = p1 else parsed_refused(p1)
+  let p2 = take_word(c1, TUid)
+  let PTook(name, c2) = p2 else parsed_refused(p2)
+  let p3 = take_fixed(c2, "\{")
+  let PTook(_, c3) = p3 else parsed_refused(p3)
+  let empty =
+    StableParts {
+      rungs = Nil,
+      converters = Nil,
+      migrations = Nil,
+      has_migrations = false,
+      saw_body = false
+    }
+  let p4 = parse_stable_entries(saved, c3, depth, name, empty)
+  let PTook(parts, c4) = p4 else parsed_refused(p4)
+  let p5 = take_fixed(c4, "\}")
+  let PTook(_, c5) = p5 else parsed_refused(p5)
+  if length(parts.rungs) == 0 then
+    PFault(
+        refuse(
+            cursor_since(saved, c5),
+            "`stable {name}` declares no version rungs",
+          ),
+      )
+  else
+    PTook(
+        IStable {
+          name = name,
+          rungs = parts.rungs,
+          converters = parts.converters,
+          migrations = parts.migrations,
+          span = cursor_since(saved, c5),
+          vis = vis,
+          dep = None
+        },
+        c5,
+      )
 
 fn parse_stable_entries(
   decl_start : Cursor,
@@ -399,45 +341,40 @@ fn parse_stable_entries(
   if at_fixed(c, "\}") then
     PTook(parts, c)
   else
-    match parse_stable_entry(c, depth) of
-      PStuck(c1) => PStuck(c1)
-      PFault(d) => PFault(d)
-      PTook(entry, c1) =>
-        match add_stable_entry(decl_start, c1, family, parts, entry) of
-          CheckBad(d) => PFault(d)
-          CheckOk(next) =>
-            if at_fixed(c1, ",") then
-              parse_stable_entries(
-                  decl_start,
-                  cursor_advance(c1),
-                  depth,
-                  family,
-                  next,
-                )
-            elif at_fixed(c1, "\}") then
-              PTook(next, c1)
-            else
-              PStuck(note_comma_or(c1, "\}"))
+    let p1 = parse_stable_entry(c, depth)
+    let PTook(entry, c1) = p1 else parsed_refused(p1)
+    match add_stable_entry(decl_start, c1, family, parts, entry) of
+      CheckBad(d) => PFault(d)
+      CheckOk(next) =>
+        if at_fixed(c1, ",") then
+          parse_stable_entries(
+              decl_start,
+              cursor_advance(c1),
+              depth,
+              family,
+              next,
+            )
+        elif at_fixed(c1, "\}") then
+          PTook(next, c1)
+        else
+          PStuck(note_comma_or(c1, "\}"))
 
 fn parse_stable_entry(c : Cursor, depth : Int) : Parsed(StableEntry) =
   match cursor_kind(c) of
     Some(TUid) =>
-      match parse_rung(c, depth) of
-        PStuck(c1) => PStuck(c1)
-        PFault(d) => PFault(d)
-        PTook(rung, c1) => PTook(SERung(rung), c1)
+      let p1 = parse_rung(c, depth)
+      let PTook(rung, c1) = p1 else parsed_refused(p1)
+      PTook(SERung(rung), c1)
     Some(TIdent) =>
       let word = peek_word(c)
       if word == "migrations" then
-        match parse_migrations(c, depth) of
-          PStuck(c1) => PStuck(c1)
-          PFault(d) => PFault(d)
-          PTook(rows, c1) => PTook(SEMigrations(rows), c1)
+        let p2 = parse_migrations(c, depth)
+        let PTook(rows, c1) = p2 else parsed_refused(p2)
+        PTook(SEMigrations(rows), c1)
       elif word == "upgrade" || word == "downgrade" then
-        match parse_converter(c, depth) of
-          PStuck(c1) => PStuck(c1)
-          PFault(d) => PFault(d)
-          PTook(converter, c1) => PTook(SEConverter(converter), c1)
+        let p3 = parse_converter(c, depth)
+        let PTook(converter, c1) = p3 else parsed_refused(p3)
+        PTook(SEConverter(converter), c1)
       else
         PFault(
             refuse(
@@ -497,76 +434,56 @@ fn add_stable_entry(
 
 fn parse_rung(c : Cursor, depth : Int) : Parsed(Rung) =
   let saved = c
-  match take_word(c, TUid) of
-    PStuck(c1) => PStuck(c1)
-    PFault(d) => PFault(d)
-    PTook(name, c1) =>
-      match take_fixed(c1, "=") of
-        PStuck(c2) => PStuck(c2)
-        PFault(d) => PFault(d)
-        PTook(_, c2) =>
-          match take_fixed(c2, "\{") of
-            PStuck(c3) => PStuck(c3)
-            PFault(d) => PFault(d)
-            PTook(_, c3) =>
-              match parse_rung_body(c3, depth) of
-                PStuck(c4) => PStuck(c4)
-                PFault(d) => PFault(d)
-                PTook(body, c4) =>
-                  match take_fixed(c4, "\}") of
-                    PStuck(c5) => PStuck(c5)
-                    PFault(d) => PFault(d)
-                    PTook(_, c5) =>
-                      match parse_frozen_badge(c5) of
-                        PStuck(c6) => PStuck(c6)
-                        PFault(d) => PFault(d)
-                        PTook(frozen, c6) =>
-                          match body of
-                            (base, fields) =>
-                              PTook(
-                                  Rung {
-                                    name = name,
-                                    base = base,
-                                    fields = fields,
-                                    frozen = frozen,
-                                    span = cursor_since(saved, c6)
-                                  },
-                                  c6,
-                                )
+  let p1 = take_word(c, TUid)
+  let PTook(name, c1) = p1 else parsed_refused(p1)
+  let p2 = take_fixed(c1, "=")
+  let PTook(_, c2) = p2 else parsed_refused(p2)
+  let p3 = take_fixed(c2, "\{")
+  let PTook(_, c3) = p3 else parsed_refused(p3)
+  let p4 = parse_rung_body(c3, depth)
+  let PTook(body, c4) = p4 else parsed_refused(p4)
+  let p5 = take_fixed(c4, "\}")
+  let PTook(_, c5) = p5 else parsed_refused(p5)
+  let p6 = parse_frozen_badge(c5)
+  let PTook(frozen, c6) = p6 else parsed_refused(p6)
+  match body of
+    (base, fields) =>
+      PTook(
+          Rung {
+            name = name,
+            base = base,
+            fields = fields,
+            frozen = frozen,
+            span = cursor_since(saved, c6)
+          },
+          c6,
+        )
 
 fn parse_rung_body(
   c : Cursor,
   depth : Int
 ) : Parsed((Option(String), List(RungField))) =
   if at_fixed(c, "..") then
-    match take_word(cursor_advance(c), TUid) of
-      PStuck(c1) => PStuck(c1)
-      PFault(d) => PFault(d)
-      PTook(base, c1) =>
-        if at_fixed(c1, "\}") then
-          PTook((Some(base), Nil), c1)
-        elif at_fixed(c1, ",") then
-          match parse_rung_field(cursor_advance(c1), depth) of
-            PStuck(c2) => PStuck(c2)
-            PFault(d) => PFault(d)
-            PTook(field, c2) =>
-              match parse_rung_field_tail(c2, depth, [field], false) of
-                PStuck(c3) => PStuck(c3)
-                PFault(d) => PFault(d)
-                PTook(fields, c3) => PTook((Some(base), fields), c3)
-        else
-          PStuck(note_comma_or(c1, "\}"))
+    let p1 = take_word(cursor_advance(c), TUid)
+    let PTook(base, c1) = p1 else parsed_refused(p1)
+    if at_fixed(c1, "\}") then
+      PTook((Some(base), Nil), c1)
+    elif at_fixed(c1, ",") then
+      let p2 = parse_rung_field(cursor_advance(c1), depth)
+      let PTook(field, c2) = p2 else parsed_refused(p2)
+      let p3 = parse_rung_field_tail(c2, depth, [field], false)
+      let PTook(fields, c3) = p3 else parsed_refused(p3)
+      PTook((Some(base), fields), c3)
+    else
+      PStuck(note_comma_or(c1, "\}"))
   elif at_fixed(c, "\}") then
     PTook((None, Nil), c)
   else
-    match parse_rung_field(c, depth) of
-      PStuck(c1) => PStuck(c1)
-      PFault(d) => PFault(d)
-      PTook(field, c1) =>
-        match parse_rung_field_tail(c1, depth, [field], true) of
-          PStuck(c2) => PStuck(c2)
-          PFault(d) => PFault(d)
-          PTook(fields, c2) => PTook((None, fields), c2)
+    let p4 = parse_rung_field(c, depth)
+    let PTook(field, c1) = p4 else parsed_refused(p4)
+    let p5 = parse_rung_field_tail(c1, depth, [field], true)
+    let PTook(fields, c2) = p5 else parsed_refused(p5)
+    PTook((None, fields), c2)
 
 fn parse_rung_field_tail(
   c : Cursor,
@@ -581,41 +498,23 @@ fn parse_rung_field_tail(
     if at_fixed(c1, "\}") && allow_trailing then
       PTook(fields, c1)
     else
-      match parse_rung_field(c1, depth) of
-        PStuck(c2) => PStuck(c2)
-        PFault(d) => PFault(d)
-        PTook(field, c2) =>
-          parse_rung_field_tail(
-              c2,
-              depth,
-              append(fields, [field]),
-              allow_trailing,
-            )
+      let p2 = parse_rung_field(c1, depth)
+      let PTook(field, c2) = p2 else parsed_refused(p2)
+      parse_rung_field_tail(c2, depth, append(fields, [field]), allow_trailing)
 
 fn parse_rung_field(c : Cursor, depth : Int) : Parsed(RungField) =
-  match take_word(c, TIdent) of
-    PStuck(c1) => PStuck(c1)
-    PFault(d) => PFault(d)
-    PTook(name, c1) =>
-      match take_fixed(c1, ":") of
-        PStuck(c2) => PStuck(c2)
-        PFault(d) => PFault(d)
-        PTook(_, c2) =>
-          match parse_type(c2, depth) of
-            PStuck(c3) => PStuck(c3)
-            PFault(d) => PFault(d)
-            PTook(ty, c3) =>
-              if at_fixed(c3, "=") then
-                match parse_expr(cursor_advance(c3), depth) of
-                  PStuck(c4) => PStuck(c4)
-                  PFault(d) => PFault(d)
-                  PTook(dflt, c4) =>
-                    PTook(
-                        RungField { name = name, ty = ty, dflt = Some(dflt) },
-                        c4,
-                      )
-              else
-                PTook(RungField { name = name, ty = ty, dflt = None }, c3)
+  let p1 = take_word(c, TIdent)
+  let PTook(name, c1) = p1 else parsed_refused(p1)
+  let p2 = take_fixed(c1, ":")
+  let PTook(_, c2) = p2 else parsed_refused(p2)
+  let p3 = parse_type(c2, depth)
+  let PTook(ty, c3) = p3 else parsed_refused(p3)
+  if at_fixed(c3, "=") then
+    let p4 = parse_expr(cursor_advance(c3), depth)
+    let PTook(dflt, c4) = p4 else parsed_refused(p4)
+    PTook(RungField { name = name, ty = ty, dflt = Some(dflt) }, c4)
+  else
+    PTook(RungField { name = name, ty = ty, dflt = None }, c3)
 
 -- Optional in the grammar, but once an identifier follows a rung it is
 -- committed as the contextual badge and checked deliberately.
@@ -624,22 +523,19 @@ fn parse_frozen_badge(c : Cursor) : Parsed(Option(String)) =
     PTook(None, c)
   else
     let saved = c
-    match take_word(c, TIdent) of
-      PStuck(c1) => PStuck(c1)
-      PFault(d) => PFault(d)
-      PTook(word, c1) =>
-        if word /= "frozen" then
-          PFault(
-              refuse(
-                  cursor_since(saved, c1),
-                  "expected `frozen` after a rung, found `{word}`",
-                ),
-            )
-        else
-          match take_word(c1, TStr) of
-            PStuck(c2) => PStuck(c2)
-            PFault(d) => PFault(d)
-            PTook(digest, c2) => PTook(Some(digest), c2)
+    let p1 = take_word(c, TIdent)
+    let PTook(word, c1) = p1 else parsed_refused(p1)
+    if word /= "frozen" then
+      PFault(
+          refuse(
+              cursor_since(saved, c1),
+              "expected `frozen` after a rung, found `{word}`",
+            ),
+        )
+    else
+      let p2 = take_word(c1, TStr)
+      let PTook(digest, c2) = p2 else parsed_refused(p2)
+      PTook(Some(digest), c2)
 
 -- -------------------------------------------------------------------------
 -- Hand-written converters
@@ -647,81 +543,58 @@ fn parse_frozen_badge(c : Cursor) : Parsed(Option(String)) =
 
 fn parse_converter(c : Cursor, depth : Int) : Parsed(Converter) =
   let saved = c
-  match take_word(c, TIdent) of
-    PStuck(c1) => PStuck(c1)
-    PFault(d) => PFault(d)
-    PTook(dir, c1) =>
-      if dir /= "upgrade" && dir /= "downgrade" then
-        PFault(
-            refuse(
-                cursor_since(saved, c1),
-                "expected `upgrade` or `downgrade`, found `{dir}`",
-              ),
+  let p1 = take_word(c, TIdent)
+  let PTook(dir, c1) = p1 else parsed_refused(p1)
+  if dir /= "upgrade" && dir /= "downgrade" then
+    PFault(
+        refuse(
+            cursor_since(saved, c1),
+            "expected `upgrade` or `downgrade`, found `{dir}`",
+          ),
+      )
+  else
+    let p2 = take_word(c1, TUid)
+    let PTook(from, c2) = p2 else parsed_refused(p2)
+    let p3 = take_fixed(c2, "->")
+    let PTook(_, c3) = p3 else parsed_refused(p3)
+    let p4 = take_word(c3, TUid)
+    let PTook(to, c4) = p4 else parsed_refused(p4)
+    let p5 = take_fixed(c4, "=")
+    let PTook(_, c5) = p5 else parsed_refused(p5)
+    let p6 = parse_converter_body(c5, depth)
+    let PTook(body, c6) = p6 else parsed_refused(p6)
+    let p7 = parse_drop_loss(c6)
+    let PTook(dropped, c7) = p7 else parsed_refused(p7)
+    match body of
+      (base, overrides) =>
+        PTook(
+            Converter {
+              dir = dir,
+              from = from,
+              to = to,
+              base = base,
+              overrides = overrides,
+              drop_loss = dropped,
+              span = cursor_since(saved, c7)
+            },
+            c7,
           )
-      else
-        match take_word(c1, TUid) of
-          PStuck(c2) => PStuck(c2)
-          PFault(d) => PFault(d)
-          PTook(from, c2) =>
-            match take_fixed(c2, "->") of
-              PStuck(c3) => PStuck(c3)
-              PFault(d) => PFault(d)
-              PTook(_, c3) =>
-                match take_word(c3, TUid) of
-                  PStuck(c4) => PStuck(c4)
-                  PFault(d) => PFault(d)
-                  PTook(to, c4) =>
-                    match take_fixed(c4, "=") of
-                      PStuck(c5) => PStuck(c5)
-                      PFault(d) => PFault(d)
-                      PTook(_, c5) =>
-                        match parse_converter_body(c5, depth) of
-                          PStuck(c6) => PStuck(c6)
-                          PFault(d) => PFault(d)
-                          PTook(body, c6) =>
-                            match parse_drop_loss(c6) of
-                              PStuck(c7) => PStuck(c7)
-                              PFault(d) => PFault(d)
-                              PTook(dropped, c7) =>
-                                match body of
-                                  (base, overrides) =>
-                                    PTook(
-                                        Converter {
-                                          dir = dir,
-                                          from = from,
-                                          to = to,
-                                          base = base,
-                                          overrides = overrides,
-                                          drop_loss = dropped,
-                                          span = cursor_since(saved, c7)
-                                        },
-                                        c7,
-                                      )
 
 fn parse_converter_body(
   c : Cursor,
   depth : Int
 ) : Parsed((Sp(Expr), List(NamedExpr))) =
-  match take_fixed(c, "\{") of
-    PStuck(c1) => PStuck(c1)
-    PFault(d) => PFault(d)
-    PTook(_, c1) =>
-      match take_fixed(c1, "..") of
-        PStuck(c2) => PStuck(c2)
-        PFault(d) => PFault(d)
-        PTook(_, c2) =>
-          match parse_expr(c2, depth) of
-            PStuck(c3) => PStuck(c3)
-            PFault(d) => PFault(d)
-            PTook(base, c3) =>
-              match parse_converter_fields(c3, depth, Nil) of
-                PStuck(c4) => PStuck(c4)
-                PFault(d) => PFault(d)
-                PTook(fields, c4) =>
-                  match take_fixed(c4, "\}") of
-                    PStuck(c5) => PStuck(c5)
-                    PFault(d) => PFault(d)
-                    PTook(_, c5) => PTook((base, fields), c5)
+  let p1 = take_fixed(c, "\{")
+  let PTook(_, c1) = p1 else parsed_refused(p1)
+  let p2 = take_fixed(c1, "..")
+  let PTook(_, c2) = p2 else parsed_refused(p2)
+  let p3 = parse_expr(c2, depth)
+  let PTook(base, c3) = p3 else parsed_refused(p3)
+  let p4 = parse_converter_fields(c3, depth, Nil)
+  let PTook(fields, c4) = p4 else parsed_refused(p4)
+  let p5 = take_fixed(c4, "\}")
+  let PTook(_, c5) = p5 else parsed_refused(p5)
+  PTook((base, fields), c5)
 
 -- Unlike ordinary comma lists, converter fields do not admit a trailing comma.
 fn parse_converter_fields(
@@ -732,21 +605,15 @@ fn parse_converter_fields(
   if not(at_fixed(c, ",")) then
     PTook(fields, c)
   else
-    match take_word(cursor_advance(c), TIdent) of
-      PStuck(c1) => PStuck(c1)
-      PFault(d) => PFault(d)
-      PTook(name, c1) =>
-        match take_fixed(c1, "=") of
-          PStuck(c2) => PStuck(c2)
-          PFault(d) => PFault(d)
-          PTook(_, c2) =>
-            match parse_expr(c2, depth) of
-              PStuck(c3) => PStuck(c3)
-              PFault(d) => PFault(d)
-              PTook(value, c3) =>
-                parse_converter_fields(c3, depth, append(fields, [
-                    NamedExpr { name = name, value = value },
-                  ]))
+    let p1 = take_word(cursor_advance(c), TIdent)
+    let PTook(name, c1) = p1 else parsed_refused(p1)
+    let p2 = take_fixed(c1, "=")
+    let PTook(_, c2) = p2 else parsed_refused(p2)
+    let p3 = parse_expr(c2, depth)
+    let PTook(value, c3) = p3 else parsed_refused(p3)
+    parse_converter_fields(c3, depth, append(fields, [
+        NamedExpr { name = name, value = value },
+      ]))
 
 -- As with `frozen`, a following identifier commits to this optional contextual
 -- suffix and receives a precise spelling diagnostic on mismatch.
@@ -755,22 +622,19 @@ fn parse_drop_loss(c : Cursor) : Parsed(List(String)) =
     PTook(Nil, c)
   else
     let saved = c
-    match take_word(c, TIdent) of
-      PStuck(c1) => PStuck(c1)
-      PFault(d) => PFault(d)
-      PTook(word, c1) =>
-        if word /= "drop_loss" then
-          PFault(
-              refuse(
-                  cursor_since(saved, c1),
-                  "expected `drop_loss`, found `{word}`",
-                ),
-            )
-        else
-          match take_fixed(c1, "(") of
-            PStuck(c2) => PStuck(c2)
-            PFault(d) => PFault(d)
-            PTook(_, c2) => parse_ident_list(c2, ")", Nil)
+    let p1 = take_word(c, TIdent)
+    let PTook(word, c1) = p1 else parsed_refused(p1)
+    if word /= "drop_loss" then
+      PFault(
+          refuse(
+              cursor_since(saved, c1),
+              "expected `drop_loss`, found `{word}`",
+            ),
+        )
+    else
+      let p2 = take_fixed(c1, "(")
+      let PTook(_, c2) = p2 else parsed_refused(p2)
+      parse_ident_list(c2, ")", Nil)
 
 -- -------------------------------------------------------------------------
 -- Migration tables and routes
@@ -778,30 +642,23 @@ fn parse_drop_loss(c : Cursor) : Parsed(List(String)) =
 
 fn parse_migrations(c : Cursor, depth : Int) : Parsed(List(Migration)) =
   let saved = c
-  match take_word(c, TIdent) of
-    PStuck(c1) => PStuck(c1)
-    PFault(d) => PFault(d)
-    PTook(word, c1) =>
-      if word /= "migrations" then
-        PFault(
-            refuse(
-                cursor_since(saved, c1),
-                "expected `migrations`, found `{word}`",
-              ),
-          )
-      else
-        match take_fixed(c1, "\{") of
-          PStuck(c2) => PStuck(c2)
-          PFault(d) => PFault(d)
-          PTook(_, c2) =>
-            match parse_migration_rows(c2, depth, Nil) of
-              PStuck(c3) => PStuck(c3)
-              PFault(d) => PFault(d)
-              PTook(rows, c3) =>
-                match take_fixed(c3, "\}") of
-                  PStuck(c4) => PStuck(c4)
-                  PFault(d) => PFault(d)
-                  PTook(_, c4) => PTook(rows, c4)
+  let p1 = take_word(c, TIdent)
+  let PTook(word, c1) = p1 else parsed_refused(p1)
+  if word /= "migrations" then
+    PFault(
+        refuse(
+            cursor_since(saved, c1),
+            "expected `migrations`, found `{word}`",
+          ),
+      )
+  else
+    let p2 = take_fixed(c1, "\{")
+    let PTook(_, c2) = p2 else parsed_refused(p2)
+    let p3 = parse_migration_rows(c2, depth, Nil)
+    let PTook(rows, c3) = p3 else parsed_refused(p3)
+    let p4 = take_fixed(c3, "\}")
+    let PTook(_, c4) = p4 else parsed_refused(p4)
+    PTook(rows, c4)
 
 fn parse_migration_rows(
   c : Cursor,
@@ -811,64 +668,50 @@ fn parse_migration_rows(
   if at_fixed(c, "\}") then
     PTook(rows, c)
   else
-    match parse_migration_row(c, depth) of
-      PStuck(c1) => PStuck(c1)
-      PFault(d) => PFault(d)
-      PTook(row, c1) =>
-        if c1.pos == c.pos then
-          PFault(refuse(cursor_span(c), "migration parser made no progress"))
-        else
-          parse_migration_rows(c1, depth, append(rows, [row]))
+    let p1 = parse_migration_row(c, depth)
+    let PTook(row, c1) = p1 else parsed_refused(p1)
+    if c1.pos == c.pos then
+      PFault(refuse(cursor_span(c), "migration parser made no progress"))
+    else
+      parse_migration_rows(c1, depth, append(rows, [row]))
 
 fn parse_migration_row(c : Cursor, depth : Int) : Parsed(Migration) =
   let saved = c
-  match take_word(c, TUid) of
-    PStuck(c1) => PStuck(c1)
-    PFault(d) => PFault(d)
-    PTook(from, c1) =>
-      match take_fixed(c1, "->") of
-        PStuck(c2) => PStuck(c2)
-        PFault(d) => PFault(d)
-        PTook(_, c2) =>
-          match take_word(c2, TUid) of
-            PStuck(c3) => PStuck(c3)
-            PFault(d) => PFault(d)
-            PTook(to, c3) =>
-              match take_fixed(c3, "=") of
-                PStuck(c4) => PStuck(c4)
-                PFault(d) => PFault(d)
-                PTook(_, c4) =>
-                  match parse_migration_route(c4, depth) of
-                    PStuck(c5) => PStuck(c5)
-                    PFault(d) => PFault(d)
-                    PTook(route, c5) =>
-                      PTook(
-                          Migration {
-                            from = from,
-                            to = to,
-                            route = route,
-                            span = cursor_since(saved, c5)
-                          },
-                          c5,
-                        )
+  let p1 = take_word(c, TUid)
+  let PTook(from, c1) = p1 else parsed_refused(p1)
+  let p2 = take_fixed(c1, "->")
+  let PTook(_, c2) = p2 else parsed_refused(p2)
+  let p3 = take_word(c2, TUid)
+  let PTook(to, c3) = p3 else parsed_refused(p3)
+  let p4 = take_fixed(c3, "=")
+  let PTook(_, c4) = p4 else parsed_refused(p4)
+  let p5 = parse_migration_route(c4, depth)
+  let PTook(route, c5) = p5 else parsed_refused(p5)
+  PTook(
+      Migration {
+        from = from,
+        to = to,
+        route = route,
+        span = cursor_since(saved, c5)
+      },
+      c5,
+    )
 
 fn parse_migration_route(c : Cursor, depth : Int) : Parsed(MigrationRoute) =
   let saved = c
-  match take_word(c, TIdent) of
-    PStuck(c1) => PStuck(c1)
-    PFault(d) => PFault(d)
-    PTook(word, c1) =>
-      if at_fixed(c1, "(") then
-        parse_version_route(saved, word, cursor_advance(c1), depth)
-      elif word == "auto" then
-        PTook(MAuto, c1)
-      else
-        PFault(
-            refuse(
-                cursor_since(saved, c1),
-                "expected `auto` or `version(...)`, found `{word}`",
-              ),
-          )
+  let p1 = take_word(c, TIdent)
+  let PTook(word, c1) = p1 else parsed_refused(p1)
+  if at_fixed(c1, "(") then
+    parse_version_route(saved, word, cursor_advance(c1), depth)
+  elif word == "auto" then
+    PTook(MAuto, c1)
+  else
+    PFault(
+        refuse(
+            cursor_since(saved, c1),
+            "expected `auto` or `version(...)`, found `{word}`",
+          ),
+      )
 
 fn parse_version_route(
   saved : Cursor,
@@ -876,59 +719,46 @@ fn parse_version_route(
   c : Cursor,
   depth : Int
 ) : Parsed(MigrationRoute) =
-  match parse_version_arg(c, depth) of
-    PStuck(c1) => PStuck(c1)
-    PFault(d) => PFault(d)
-    PTook(up, c1) =>
-      match take_fixed(c1, ",") of
-        PStuck(c2) => PStuck(c2)
-        PFault(d) => PFault(d)
-        PTook(_, c2) =>
-          match parse_version_arg(c2, depth) of
-            PStuck(c3) => PStuck(c3)
-            PFault(d) => PFault(d)
-            PTook(down, c3) =>
-              let c4 =
-                if at_fixed(c3, ",") then
-                  cursor_advance(c3)
-                else
-                  c3
-              match take_fixed(c4, ")") of
-                PStuck(c5) => PStuck(c5)
-                PFault(d) => PFault(d)
-                PTook(_, c5) =>
-                  match (up, down) of
-                    ((up_name, up_dir), (down_name, down_dir)) =>
-                      if word /= "version" then
-                        PFault(
-                            refuse(
-                                cursor_since(saved, c5),
-                                "expected `auto` or `version(...)`, found `{word}`",
-                              ),
-                          )
-                      elif (up_name /= "upgrade" || down_name /= "downgrade") then
-                        PFault(
-                            refuse(
-                                cursor_since(saved, c5),
-                                "`version(...)` takes `upgrade = ..., downgrade = ...`",
-                              ),
-                          )
-                      else
-                        PTook(MVersion(up_dir, down_dir), c5)
+  let p1 = parse_version_arg(c, depth)
+  let PTook(up, c1) = p1 else parsed_refused(p1)
+  let p2 = take_fixed(c1, ",")
+  let PTook(_, c2) = p2 else parsed_refused(p2)
+  let p3 = parse_version_arg(c2, depth)
+  let PTook(down, c3) = p3 else parsed_refused(p3)
+  let c4 =
+    if at_fixed(c3, ",") then
+      cursor_advance(c3)
+    else
+      c3
+  let p5 = take_fixed(c4, ")")
+  let PTook(_, c5) = p5 else parsed_refused(p5)
+  match (up, down) of
+    ((up_name, up_dir), (down_name, down_dir)) =>
+      if word /= "version" then
+        PFault(
+            refuse(
+                cursor_since(saved, c5),
+                "expected `auto` or `version(...)`, found `{word}`",
+              ),
+          )
+      elif up_name /= "upgrade" || down_name /= "downgrade" then
+        PFault(
+            refuse(
+                cursor_since(saved, c5),
+                "`version(...)` takes `upgrade = ..., downgrade = ...`",
+              ),
+          )
+      else
+        PTook(MVersion(up_dir, down_dir), c5)
 
 fn parse_version_arg(c : Cursor, depth : Int) : Parsed((String, MigrationDir)) =
-  match take_word(c, TIdent) of
-    PStuck(c1) => PStuck(c1)
-    PFault(d) => PFault(d)
-    PTook(name, c1) =>
-      match take_fixed(c1, "=") of
-        PStuck(c2) => PStuck(c2)
-        PFault(d) => PFault(d)
-        PTook(_, c2) =>
-          match parse_expr(c2, depth) of
-            PStuck(c3) => PStuck(c3)
-            PFault(d) => PFault(d)
-            PTook(expr, c3) => PTook((name, migration_dir(expr)), c3)
+  let p1 = take_word(c, TIdent)
+  let PTook(name, c1) = p1 else parsed_refused(p1)
+  let p2 = take_fixed(c1, "=")
+  let PTook(_, c2) = p2 else parsed_refused(p2)
+  let p3 = parse_expr(c2, depth)
+  let PTook(expr, c3) = p3 else parsed_refused(p3)
+  PTook((name, migration_dir(expr)), c3)
 
 fn migration_dir(e : Sp(Expr)) : MigrationDir =
   match e.node of

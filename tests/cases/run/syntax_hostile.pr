@@ -17,9 +17,7 @@
 -- node span past the source) have their own committed fixtures.
 
 import Data.String (contains, str_repeat)
-
 import Json (Json, JsonError, decode)
-
 import Syntax.Codec (..)
 
 -- A minimal well-formed token document over the one-byte source `x`, with the

@@ -11,6 +11,11 @@ pub const TEST: &str = "test";
 pub const TOTAL: &str = "total";
 pub const ASSUME: &str = "assume";
 pub const DECREASES: &str = "decreases";
+// The optic literal head, `#path a.b.c`. The `#` sigil is what makes the form
+// recognizable: an expression may not otherwise begin with `#` followed by a
+// name, so one token past the sigil decides the literal. The word itself stays an
+// ordinary identifier everywhere, and needs no reservation.
+pub const PATH: &str = "path";
 pub const DEPRECATED: &str = "deprecated";
 pub const PUB: &str = "pub";
 pub const IMPORT: &str = "import";

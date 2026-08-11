@@ -1,0 +1,16 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/path_lit_traversal.pr
+---
+== tokens ==
+VOpen Fn Ident("f") LParen Ident("xs") Colon UIdent("List") LParen KwInt RParen RParen Colon KwInt Eq Hash Ident("path") Ident("xs") LBracket Int(IntLit { value: 0, suffix: None }) RBracket Dot Ident("x") VClose
+
+== parse ==
+[E7100] Parse Error: a path literal takes field steps only (`#path a.b.c`): `each`, `[i]`, `?Ctor` and `where` focus more than one place, so build those with `traversal` instead of a path literal
+   ╭─[ <source>:5:30 ]
+   │
+ 5 │ fn f(xs : List(Int)) : Int = #path xs[0].x
+   │                              ──────┬──────  
+   │                                    ╰──────── here
+───╯

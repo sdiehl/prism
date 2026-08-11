@@ -15,11 +15,8 @@
 -- point of the query.
 
 import Data.List (map, flatten, reverse, filter)
-
 import Syntax.Source (..)
-
 import Syntax.Token (..)
-
 import Syntax.Codec (..)
 
 -- | The head of a top-level declaration: its leading keyword, the first name it

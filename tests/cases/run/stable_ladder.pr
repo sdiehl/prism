@@ -10,9 +10,7 @@
 -- --accept`.
 
 import Wire (..)
-
 import Test (..)
-
 import Quickcheck (..)
 
 stable Order {

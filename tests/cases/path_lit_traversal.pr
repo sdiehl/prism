@@ -1,0 +1,5 @@
+-- A path literal focuses exactly one place, which is what lets its setter be
+-- total. A step that focuses many places has no single target to write back to,
+-- so it is refused here rather than accepted into a shape whose setter would
+-- have to invent an answer.
+fn f(xs : List(Int)) : Int = #path xs[0].x

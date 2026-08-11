@@ -23,4 +23,4 @@ Every math symbol these files need resolves within this set (no `-lm`); `sqrt` f
 
 ## Determinism flag
 
-All of this is compiled with `-ffp-contract=off` (pinned in `build.rs` and the driver link step). Without it a compiler may fuse `a*b+c` into an FMA on one platform and not another, diverging the last bit of both ordinary arithmetic and these functions' internals.
+All of this is compiled with `-ffp-contract=off` (pinned in `crates/prism-native/build.rs` and the native driver link step). Without it a compiler may fuse `a*b+c` into an FMA on one platform and not another, diverging the last bit of both ordinary arithmetic and these functions' internals.

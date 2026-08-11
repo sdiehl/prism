@@ -12,7 +12,6 @@
 --   recorded run reproduced: true
 
 import Concurrent (..)
-
 import Replay (record, replay)
 
 fn worker(_name : String) : Int ! {Async(Int), Random} =

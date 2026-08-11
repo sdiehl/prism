@@ -109,6 +109,8 @@ value Data.List.take_while
 value Data.List.unzip
 value Data.List.zip
 value Data.List.zip_with
+value Data.List@count_go
+value Data.List@tabulate_go
 value Data.Map.map_balance
 value Data.Map.map_bf
 value Data.Map.map_delete
@@ -126,7 +128,13 @@ value Data.Map.map_rot_left
 value Data.Map.map_rot_right
 value Data.Map.map_size
 value Data.Map.map_to_list
+value Data.Map.map_to_lists
 value Data.Map.map_values
+value Data.Map@map_extract_min
+value Data.Map@map_keys_go
+value Data.Map@map_lists_go
+value Data.Map@map_pairs_go
+value Data.Map@map_values_go
 value Data.Maybe.and_then
 value Data.Maybe.both
 value Data.Maybe.is_none
@@ -215,7 +223,6 @@ value concat_all
 value concat_map
 value const
 value default
-value e
 value entropy
 value enum_from_then_to
 value enum_from_to

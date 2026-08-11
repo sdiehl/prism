@@ -20,18 +20,21 @@
 -- `t[i, j]` and `t[i, j] := v` are surface sugar for `at_tensor` / `tensor_set`.
 
 import Data.List (..)
-
 import Data.Maybe (..)
-
 import Data.Foldable (..)
 
--- | A dense tensor: flat storage plus per-axis shape, strides, and names.
-pub type Tensor = MkTensor(FloatBuf, List(Int), List(Int), List(String))
+-- | A dense tensor: flat storage plus per-axis shape, strides, and names. The
+-- representation is opaque so shape/stride/axis lengths cannot be put out of
+-- sync by constructing a value outside this module.
+opaque type Tensor = MkTensor {
+  data: FloatBuf,
+  dims: List(Int),
+  steps: List(Int),
+  labels: List(String)
+}
 
 -- | The flat backing buffer.
-pub fn buf(t : Tensor) : FloatBuf =
-  match t of
-    MkTensor(b, _, _, _) => b
+pub fn buf(borrow t : Tensor) : FloatBuf = t.data
 
 -- | The extent of each axis, outermost first.
 --
@@ -41,9 +44,7 @@ pub fn buf(t : Tensor) : FloatBuf =
 -- ```output
 -- [2, 3]
 -- ```
-pub fn shape(t : Tensor) : List(Int) =
-  match t of
-    MkTensor(_, s, _, _) => s
+pub fn shape(borrow t : Tensor) : List(Int) = t.dims
 
 -- | The flat-offset stride of each axis.
 --
@@ -53,9 +54,7 @@ pub fn shape(t : Tensor) : List(Int) =
 -- ```output
 -- [3, 1]
 -- ```
-pub fn strides(t : Tensor) : List(Int) =
-  match t of
-    MkTensor(_, _, st, _) => st
+pub fn strides(borrow t : Tensor) : List(Int) = t.steps
 
 -- | The name of each axis.
 --
@@ -65,9 +64,7 @@ pub fn strides(t : Tensor) : List(Int) =
 -- ```output
 -- [0, 1]
 -- ```
-pub fn axes(t : Tensor) : List(String) =
-  match t of
-    MkTensor(_, _, _, ax) => ax
+pub fn axes(borrow t : Tensor) : List(String) = t.labels
 
 -- | The number of axes.
 --
@@ -77,7 +74,7 @@ pub fn axes(t : Tensor) : List(String) =
 -- ```output
 -- 2
 -- ```
-pub fn rank(t : Tensor) : Int = length(shape(t))
+pub fn rank(borrow t : Tensor) : Int = length(shape(t))
 
 -- | The total number of elements: the product of the shape.
 --
@@ -87,24 +84,21 @@ pub fn rank(t : Tensor) : Int = length(shape(t))
 -- ```output
 -- 6
 -- ```
-pub fn size(t : Tensor) : Int = prod(shape(t))
+pub fn size(borrow t : Tensor) : Int = prod(shape(t))
 
 -- The product of a list of extents (the flat length a shape needs).
 fn prod(xs : List(Int)) : Int = foldl(\(acc, x) -> acc * x, 1, xs)
 
--- The sum of a list.
-fn sum(xs : List(Int)) : Int = foldl(\(acc, x) -> acc + x, 0, xs)
-
 -- Row-major (C-order) strides for a shape: the stride of an axis is the product
 -- of every extent to its right, so the last axis has stride 1.
-fn rm_strides_go(k : Int, n : Int, shape : List(Int)) : List(Int) =
-  if k >= n then
-    Nil
-  else
-    Cons(prod(drop(k + 1, shape)), rm_strides_go(k + 1, n, shape))
+fn rm_strides_go(shape : List(Int)) : (Int, List(Int)) =
+  match shape of
+    Nil => (1, Nil)
+    Cons(n, rest) =>
+      match rm_strides_go(rest) of
+        (stride, steps) => (n * stride, Cons(stride, steps))
 
-fn rm_strides(shape : List(Int)) : List(Int) =
-  rm_strides_go(0, length(shape), shape)
+fn rm_strides(shape : List(Int)) : List(Int) = snd(rm_strides_go(shape))
 
 -- Default axis names "0", "1", ... for a rank.
 fn default_axes(n : Int) : List(String) = map(\(i) -> show_int(i), range(0, n))
@@ -112,7 +106,41 @@ fn default_axes(n : Int) : List(String) = map(\(i) -> show_int(i), range(0, n))
 -- The flat offset of a multi-index under a stride list: the dot product of the
 -- index and the strides.
 fn offset(idx : List(Int), st : List(Int)) : Int =
-  sum(zip_with(\(i, s) -> i * s, idx, st))
+  match idx of
+    Nil => 0
+    Cons(i, ir) =>
+      match st of
+        Nil => 0
+        Cons(s, sr) => i * s + offset(ir, sr)
+
+-- Validate a public multi-index while computing its offset. Rank must match
+-- exactly and every coordinate must lie within its own axis; checking only the
+-- final flat offset would incorrectly accept values such as `[0, 3]` for a
+-- `[2, 2]` tensor.
+fn checked_offset(
+  idx : List(Int),
+  dims : List(Int),
+  steps : List(Int),
+  acc : Int
+) : Option(Int) =
+  match idx of
+    Nil =>
+      match (dims, steps) of
+        (Nil, Nil) => Some(acc)
+        _ => None
+    Cons(i, ir) =>
+      match (dims, steps) of
+        (Cons(n, nr), Cons(s, sr)) =>
+          if i >= 0 && i < n then
+            checked_offset(ir, nr, sr, acc + i * s)
+          else
+            None
+        _ => None
+
+fn valid_shape(shape : List(Int)) : Bool =
+  match shape of
+    Nil => true
+    Cons(n, rest) => n >= 0 && valid_shape(rest)
 
 -- | A tensor of the given shape with every element set to `fill`, row-major.
 --
@@ -124,12 +152,15 @@ fn offset(idx : List(Int), st : List(Int)) : Int =
 -- 7
 -- ```
 pub fn new(shape : List(Int), fill : Float) : Tensor =
-  MkTensor(
-      tbuf_new(prod(shape), fill),
-      shape,
-      rm_strides(shape),
-      default_axes(length(shape)),
-    )
+  if valid_shape(shape) then
+    MkTensor {
+      data = tbuf_new(prod(shape), fill),
+      dims = shape,
+      steps = rm_strides(shape),
+      labels = default_axes(length(shape))
+    }
+  else
+    fail()
 
 -- Write a list of values into a buffer starting at index `i`.
 fn fill_from(b : FloatBuf, i : Int, xs : List(Float)) : FloatBuf =
@@ -148,12 +179,15 @@ fn fill_from(b : FloatBuf, i : Int, xs : List(Float)) : FloatBuf =
 -- 3
 -- ```
 pub fn from_list(shape : List(Int), xs : List(Float)) : Tensor =
-  MkTensor(
-      fill_from(tbuf_new(prod(shape), 0.0), 0, xs),
-      shape,
-      rm_strides(shape),
-      default_axes(length(shape)),
-    )
+  if valid_shape(shape) then
+    MkTensor {
+      data = fill_from(tbuf_new(prod(shape), 0.0), 0, xs),
+      dims = shape,
+      steps = rm_strides(shape),
+      labels = default_axes(length(shape))
+    }
+  else
+    fail()
 
 -- | The element at a multi-index, or `fail()` if the offset is out of range.
 -- Backs `t[i, j]`.
@@ -164,14 +198,23 @@ pub fn from_list(shape : List(Int), xs : List(Float)) : Tensor =
 -- ```output
 -- 2
 -- ```
+--
+-- Coordinates are checked per axis, not merely by their final flat offset:
+--
+-- ```prism
+-- default(\() -> at_tensor(new([2, 2], 0.0), [0, 3]), -1.0)
+-- ```
+-- ```output
+-- -1
+-- ```
 pub fn at_tensor(t : Tensor, idx : List(Int)) : Float =
-  match t of
-    MkTensor(b, _, st, _) =>
-      let off = offset(idx, st)
-      if off >= 0 && off < tbuf_len(b) then
-        tbuf_get(b, off)
+  match checked_offset(idx, t.dims, t.steps, 0) of
+    Some(off) =>
+      if off < tbuf_len(t.data) then
+        tbuf_get(t.data, off)
       else
         fail()
+    None => fail()
 
 -- | A tensor equal to `t` but with the element at a multi-index set to `v`, or
 -- `fail()` if out of range. Backs `t[i, j] := v`.
@@ -184,13 +227,13 @@ pub fn at_tensor(t : Tensor, idx : List(Int)) : Float =
 -- 5
 -- ```
 pub fn tensor_set(t : Tensor, idx : List(Int), v : Float) : Tensor =
-  match t of
-    MkTensor(b, sh, st, ax) =>
-      let off = offset(idx, st)
-      if off >= 0 && off < tbuf_len(b) then
-        MkTensor(tbuf_set(b, off, v), sh, st, ax)
+  match checked_offset(idx, t.dims, t.steps, 0) of
+    Some(off) =>
+      if off < tbuf_len(t.data) then
+        MkTensor { ..t, data = tbuf_set(t.data, off, v) }
       else
         fail()
+    None => fail()
 
 -- The position of a name in a list, or `fail()` if absent.
 fn index_of_go(k : Int, x : String, xs : List(String)) : Int =
@@ -225,11 +268,14 @@ fn swap_at(i : Int, j : Int, xs : List(a)) : List(a) =
 -- 3
 -- ```
 pub fn transpose(t : Tensor, a : String, b : String) : Tensor =
-  match t of
-    MkTensor(b0, sh, st, ax) =>
-      let i = index_of(a, ax)
-      let j = index_of(b, ax)
-      MkTensor(b0, swap_at(i, j, sh), swap_at(i, j, st), swap_at(i, j, ax))
+  let i = index_of(a, t.labels)
+  let j = index_of(b, t.labels)
+  MkTensor {
+    ..t,
+    dims = swap_at(i, j, t.dims),
+    steps = swap_at(i, j, t.steps),
+    labels = swap_at(i, j, t.labels)
+  }
 
 -- | Reinterpret the elements under a new shape of the same size. Requires the
 -- tensor to be contiguous (row-major strides); a transposed view must be copied
@@ -242,17 +288,17 @@ pub fn transpose(t : Tensor, a : String, b : String) : Tensor =
 -- [4]
 -- ```
 pub fn reshape(t : Tensor, new_shape : List(Int)) : Tensor =
-  match t of
-    MkTensor(b, sh, st, _) =>
-      if st == rm_strides(sh) && prod(sh) == prod(new_shape) then
-        MkTensor(
-            b,
-            new_shape,
-            rm_strides(new_shape),
-            default_axes(length(new_shape)),
-          )
-      else
-        fail()
+  if (valid_shape(new_shape)
+      && t.steps == rm_strides(t.dims)
+      && prod(t.dims) == prod(new_shape)) then
+    MkTensor {
+      data = t.data,
+      dims = new_shape,
+      steps = rm_strides(new_shape),
+      labels = default_axes(length(new_shape))
+    }
+  else
+    fail()
 
 -- Whether a tensor is contiguous: its strides are the row-major strides of its
 -- shape, so the flat buffer is exactly the row-major element sequence and can be
@@ -260,13 +306,16 @@ pub fn reshape(t : Tensor, new_shape : List(Int)) : Tensor =
 -- produce contiguous tensors; a `transpose` view is not contiguous and must be
 -- copied (e.g. through `reshape` after a materialising op) before the elementwise
 -- and matmul functions accept it.
-fn is_contig(t : Tensor) : Bool =
-  match t of
-    MkTensor(_, sh, st, _) => st == rm_strides(sh)
+fn is_contig(borrow t : Tensor) : Bool = t.steps == rm_strides(t.dims)
 
 -- Wrap a freshly filled row-major buffer as a contiguous tensor of `sh`.
 fn contig_tensor(sh : List(Int), b : FloatBuf) : Tensor =
-  MkTensor(b, sh, rm_strides(sh), default_axes(length(sh)))
+  MkTensor {
+    data = b,
+    dims = sh,
+    steps = rm_strides(sh),
+    labels = default_axes(length(sh))
+  }
 
 -- Apply `f` to each element of `bi`, writing into `out` at the same flat
 -- position, over `[p, n)`. Pure: raw buffer reads and writes, and `f` is a plain
@@ -503,22 +552,22 @@ pub fn sum_axis(t : Tensor, axis_name : String) : Tensor ! {Fail} =
     let ks = drop_at(a, st)
     let ostrides = rm_strides(osh)
     let total = prod(osh)
-    MkTensor(
-        sum_axis_fill(
-            buf(t),
-            tbuf_new(total, 0.0),
-            ostrides,
-            osh,
-            ks,
-            sa,
-            extent,
-            0,
-            total,
-          ),
-        osh,
-        ostrides,
-        oax,
-      )
+    MkTensor {
+      data = sum_axis_fill(
+          buf(t),
+          tbuf_new(total, 0.0),
+          ostrides,
+          osh,
+          ks,
+          sa,
+          extent,
+          0,
+          total,
+        ),
+      dims = osh,
+      steps = ostrides,
+      labels = oax
+    }
   else
     fail()
 

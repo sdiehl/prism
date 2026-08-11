@@ -2,9 +2,8 @@
 //!
 //! A pinned, feature-spanning set of example programs, each measured end to end
 //! through `core_of` (lex, parse, resolve, desugar, typecheck, elaborate, and the
-//! pre-optimizer). The point is a stable baseline: later perf work compares
-//! against recorded numbers rather than guesses, so add programs deliberately and
-//! keep the set fixed, so one label means the same thing release over release.
+//! pre-optimizer). The fixed corpus makes recorded numbers comparable across
+//! revisions, so add programs deliberately and keep each label's meaning stable.
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use std::hint::black_box;

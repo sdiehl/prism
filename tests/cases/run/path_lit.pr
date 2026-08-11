@@ -1,0 +1,44 @@
+import Data.Optic (..)
+import Control.State (..)
+
+type Pos = Pos { x: Int, y: Int } deriving (Show)
+
+type Player = Player { name: String, pos: Pos, hp: Int } deriving (Show)
+
+-- A one-step literal focuses a field of the record it is applied to; a
+-- multi-step literal reaches through the nested record in one spelling.
+let hp_at : Lens(Player, Int) = #path hp
+
+let pos_at : Lens(Player, Pos) = #path pos
+
+let player_x : Lens(Player, Int) = #path pos.x
+
+let y_at : Lens(Pos, Int) = #path y
+
+fn start() : Player =
+  Player {
+    name = "ada",
+    pos = Pos { x = 1, y = 2 },
+    hp = 10
+  }
+
+-- Under a State handler the same literal drives the effectful accessors.
+fn advance() : Int ! {State(Player)} =
+  modify_at(player_x, \(n) -> n + 5)
+  set_at(hp_at, 30)
+  gets_at(player_x)
+
+fn main() =
+  let p = start()
+  println(show(view(player_x, p)))
+  println(show(view(hp_at, p)))
+  println(show(lens_set(player_x, p, 42).pos.x))
+  println(show(over(hp_at, \(n) -> n * 3, p).hp))
+  -- A literal composes with another literal.
+  let composed = compose_lens(pos_at, y_at)
+  println(show(view(composed, p)))
+  println(show(lens_set(composed, p, 9).pos.y))
+  match run_state(p, advance) of
+    (seen, final) =>
+      println(show(seen))
+      println(show(final.hp))

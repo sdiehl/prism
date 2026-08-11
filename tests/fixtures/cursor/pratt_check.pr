@@ -15,21 +15,13 @@
 -- builders from the caller, and for this comparison the caller's node is the
 -- rendering.
 import Data.List (..)
-
 import Data.Maybe (..)
-
 import Data.String (..)
-
 import Syntax.Source (..)
-
 import Syntax.Token (..)
-
 import Syntax.Ast (..)
-
 import Syntax.Codec (..)
-
 import Syntax.Lex (..)
-
 import Syntax.Cursor (..)
 
 -- The spelling of a composition direction as it was written.

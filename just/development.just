@@ -23,10 +23,11 @@ run FILE:
 check FILE:
     cargo run -- check "{{ FILE }}"
 
-# Run the full test suite with compact output.
+# Run the full test suite with compact output; deep-recursion tests need the
+# same enlarged libtest stack the ci test recipe sets.
 [group('development')]
 t:
-    PRISM_COMPILER_CACHE=0 cargo nextest run --all
+    RUST_MIN_STACK=33554432 PRISM_COMPILER_CACHE=0 cargo nextest run --all
     PRISM_COMPILER_CACHE=0 cargo test --workspace --doc
 
 # Run one test target or filter with compact output.

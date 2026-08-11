@@ -21,8 +21,9 @@ fn mss(xs) =
   let (best, _here) = foldl(kadane, (0, 0), xs)
   best
 
--- The cubic spec: the largest sum over every segment xs[i..j).
-fn seg_sum(xs, i, j) = sum(take(j - i, drop(i, xs)))
+-- The cubic spec: the largest sum over every segment xs[i..j). The element
+-- type is pinned so the generalized `sum` has a concrete Num instance.
+fn seg_sum(xs : List(Int), i, j) = sum(take(j - i, drop(i, xs)))
 
 fn mss_spec(xs) =
   let n = length(xs)

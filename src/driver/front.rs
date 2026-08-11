@@ -56,6 +56,9 @@ enum FrontStop {
 pub(super) enum FrontRequest {
     /// Type-check only, with diagnostics: the `check` family.
     Check,
+    /// Type-check only, retaining typed holes as reports instead of raising
+    /// them: the hole query surface (`check --at-hole`).
+    CheckHoles,
     /// The public validity verdict (`prism check`): elaborate and run every
     /// semantic validator, but stop before retarget/opt/lowering/codegen.
     CheckValidated,
@@ -84,6 +87,7 @@ impl FrontRequest {
     const fn policy(self) -> FrontOpts {
         match self {
             Self::Check => FrontOpts::CHECK,
+            Self::CheckHoles => FrontOpts::CHECK_HOLES,
             Self::CheckValidated => FrontOpts::CHECK_VALIDATED,
             Self::Full => FrontOpts::FULL,
             Self::FullDeferredHoles => FrontOpts::FULL_DEFERRED_HOLES,
@@ -139,6 +143,19 @@ impl FrontOpts {
         validate: false,
         pre_opt: false,
         allow_holes: false,
+        typed_tooltips: false,
+    };
+    // The hole query surface: the `CHECK` policy with typed holes retained as
+    // reports rather than raised. An ordinary type error still fails exactly as
+    // it does under `CHECK`, so the query answers only about programs whose one
+    // remaining question is the hole itself.
+    const CHECK_HOLES: Self = Self {
+        stop: FrontStop::Checked,
+        diagnostics: true,
+        scheduler_retarget: false,
+        validate: false,
+        pre_opt: false,
+        allow_holes: true,
         typed_tooltips: false,
     };
     // The full compile path: scheduler retarget, validators, and the pre-lowering

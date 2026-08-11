@@ -17,6 +17,8 @@ use std::path::{Path, PathBuf};
 
 use prism::{default_roots, interpret_io_on_with_args, with_prelude, Config};
 
+use super::fixture_stems;
+
 const FIXTURE_DIR: &str = "tests/fixtures/syntax";
 
 // Every corpus stem with committed artifact goldens, kept sorted.
@@ -104,16 +106,7 @@ stem_roundtrip! {
 // corpus file without extending the gate is a test failure, not a silent skip.
 #[test]
 fn roundtrip_covers_every_stem() {
-    let mut found: Vec<String> = fs::read_dir(fixture_dir())
-        .expect("fixture dir")
-        .filter_map(Result::ok)
-        .filter_map(|e| {
-            let name = e.file_name().into_string().ok()?;
-            let stem = name.strip_suffix(".surface-syntax.json")?;
-            (!stem.starts_with("mismatch")).then(|| stem.to_string())
-        })
-        .collect();
-    found.sort_unstable();
+    let found = fixture_stems(&fixture_dir(), ".surface-syntax.json", "mismatch");
     assert_eq!(
         found, STEMS,
         "fixture stems and the static round-trip list have drifted apart"

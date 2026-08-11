@@ -16,7 +16,6 @@
 -- root) green without a per-example fixture convention.
 
 import Json (..)
-
 import Data.Bytes (..)
 
 -- A per-tile tally: the above-threshold count, the byte sum, and the four

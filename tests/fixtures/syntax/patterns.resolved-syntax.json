@@ -1,6 +1,6 @@
 {
   "schema": "prism-resolved-syntax-v1",
-  "compiler": "0.15.0",
+  "compiler": "0.18.0",
   "source": {
     "digest": "4af039e91ba99d57a978bb8d61f6cb3a8193a72f0c1e18d29d2a910e9c10dff8",
     "text": "-- Pattern forms: constructors, tuples, records, literals, guards, views,\n-- alternations, and parameters written as patterns.\ntype Point = Point { x: Int, y: Int }\n\ntype Shape = Dot | Line(Point, Point) | Poly(List(Point))\n\npattern Diag(n) for Point =\n  view \\(p) -> if p.x == p.y then Some(p.x) else None\n  make \\(n) -> Point { x = n, y = n }\n\nfn classify(s : Shape) : Int =\n  match s of\n    Dot => 0\n    Line(Point { x = 0, y = 0 }, _) => 1\n    Line(a, b) if a.x == b.x => 2\n    Poly(Nil) => 3\n    Poly(Cons(p, Nil)) => p.x\n    _ => 9\n\nfn literals(v : Int, c : Char, f : Float, b : Bool) : Int =\n  match (v, c, f, b) of\n    (0, 'a', 1.5, true) => 1\n    (n, _, _, false) => n\n    _ => 2\n\nfn record_rest(p : Point) : Int =\n  match p of\n    Point { x = 0, .. } => 0\n    Point { x = x, y = y } => x + y\n\nfn views(p : Point) : Int =\n  match p of\n    Diag(n) if n > 3 => n * 2\n    Diag(n) => n\n    _ => 0\n\nfn alternation(s : Shape) : Int =\n  match s of\n    Dot | Poly(Nil) => 0\n    Line(Point { x = 0, y = 0 } | Point { x = 1, y = 1 }, _) => 1\n    Line(p, _) | Poly(Cons(p, _)) => p.x\n\nfn alt_literals(c : Char, n : Int) : Int =\n  match (c, n) of\n    ('a' | 'b' | 'c', 0 | 1) => 1\n    (_, _) => 2\n\nfn param_pats(Point { x = x, .. }, (a, b), borrow q : Point) : Int =\n  let f = \\(Point { x = u, y = v }) -> u + v\n  x + a + b + q.y + f(q)\n"
@@ -15,7 +15,7 @@
         }
       ],
       "body": {
-        "id": 1309,
+        "id": 1308,
         "kind": "match",
         "span": [
           379,
@@ -23,7 +23,7 @@
         ],
         "children": [
           {
-            "id": 1310,
+            "id": 1309,
             "kind": "var",
             "span": [
               385,
@@ -31,7 +31,7 @@
             ]
           },
           {
-            "id": 1311,
+            "id": 1310,
             "kind": "int",
             "span": [
               401,
@@ -39,7 +39,7 @@
             ]
           },
           {
-            "id": 1312,
+            "id": 1311,
             "kind": "int",
             "span": [
               442,
@@ -47,7 +47,7 @@
             ]
           },
           {
-            "id": 1313,
+            "id": 1312,
             "kind": "bin",
             "span": [
               462,
@@ -55,7 +55,7 @@
             ],
             "children": [
               {
-                "id": 1314,
+                "id": 1313,
                 "kind": "field",
                 "span": [
                   462,
@@ -63,7 +63,7 @@
                 ],
                 "children": [
                   {
-                    "id": 1315,
+                    "id": 1314,
                     "kind": "var",
                     "span": [
                       462,
@@ -73,7 +73,7 @@
                 ]
               },
               {
-                "id": 1316,
+                "id": 1315,
                 "kind": "field",
                 "span": [
                   469,
@@ -81,7 +81,7 @@
                 ],
                 "children": [
                   {
-                    "id": 1317,
+                    "id": 1316,
                     "kind": "var",
                     "span": [
                       469,
@@ -93,7 +93,7 @@
             ]
           },
           {
-            "id": 1318,
+            "id": 1317,
             "kind": "int",
             "span": [
               476,
@@ -101,7 +101,7 @@
             ]
           },
           {
-            "id": 1319,
+            "id": 1318,
             "kind": "int",
             "span": [
               495,
@@ -109,7 +109,7 @@
             ]
           },
           {
-            "id": 1320,
+            "id": 1319,
             "kind": "field",
             "span": [
               523,
@@ -117,7 +117,7 @@
             ],
             "children": [
               {
-                "id": 1321,
+                "id": 1320,
                 "kind": "var",
                 "span": [
                   523,
@@ -127,7 +127,7 @@
             ]
           },
           {
-            "id": 1322,
+            "id": 1321,
             "kind": "int",
             "span": [
               536,
@@ -158,7 +158,7 @@
         }
       ],
       "body": {
-        "id": 1323,
+        "id": 1322,
         "kind": "match",
         "span": [
           601,
@@ -166,7 +166,7 @@
         ],
         "children": [
           {
-            "id": 1324,
+            "id": 1323,
             "kind": "tuple",
             "span": [
               607,
@@ -174,7 +174,7 @@
             ],
             "children": [
               {
-                "id": 1325,
+                "id": 1324,
                 "kind": "var",
                 "span": [
                   608,
@@ -182,7 +182,7 @@
                 ]
               },
               {
-                "id": 1326,
+                "id": 1325,
                 "kind": "var",
                 "span": [
                   611,
@@ -190,7 +190,7 @@
                 ]
               },
               {
-                "id": 1327,
+                "id": 1326,
                 "kind": "var",
                 "span": [
                   614,
@@ -198,7 +198,7 @@
                 ]
               },
               {
-                "id": 1328,
+                "id": 1327,
                 "kind": "var",
                 "span": [
                   617,
@@ -208,7 +208,7 @@
             ]
           },
           {
-            "id": 1329,
+            "id": 1328,
             "kind": "int",
             "span": [
               650,
@@ -216,7 +216,7 @@
             ]
           },
           {
-            "id": 1330,
+            "id": 1329,
             "kind": "var",
             "span": [
               676,
@@ -224,7 +224,7 @@
             ]
           },
           {
-            "id": 1331,
+            "id": 1330,
             "kind": "int",
             "span": [
               687,
@@ -243,7 +243,7 @@
         }
       ],
       "body": {
-        "id": 1332,
+        "id": 1331,
         "kind": "match",
         "span": [
           726,
@@ -251,7 +251,7 @@
         ],
         "children": [
           {
-            "id": 1333,
+            "id": 1332,
             "kind": "var",
             "span": [
               732,
@@ -259,7 +259,7 @@
             ]
           },
           {
-            "id": 1334,
+            "id": 1333,
             "kind": "int",
             "span": [
               764,
@@ -267,7 +267,7 @@
             ]
           },
           {
-            "id": 1335,
+            "id": 1334,
             "kind": "bin",
             "span": [
               796,
@@ -275,7 +275,7 @@
             ],
             "children": [
               {
-                "id": 1336,
+                "id": 1335,
                 "kind": "var",
                 "span": [
                   796,
@@ -283,7 +283,7 @@
                 ]
               },
               {
-                "id": 1337,
+                "id": 1336,
                 "kind": "var",
                 "span": [
                   800,
@@ -304,7 +304,7 @@
         }
       ],
       "body": {
-        "id": 1338,
+        "id": 1337,
         "kind": "match",
         "span": [
           833,
@@ -312,7 +312,7 @@
         ],
         "children": [
           {
-            "id": 1339,
+            "id": 1338,
             "kind": "var",
             "span": [
               839,
@@ -320,7 +320,7 @@
             ]
           },
           {
-            "id": 1340,
+            "id": 1339,
             "kind": "match",
             "span": [
               848,
@@ -328,7 +328,7 @@
             ],
             "children": [
               {
-                "id": 1341,
+                "id": 1340,
                 "kind": "call",
                 "span": [
                   848,
@@ -336,7 +336,7 @@
                 ],
                 "children": [
                   {
-                    "id": 1342,
+                    "id": 1341,
                     "kind": "var",
                     "span": [
                       848,
@@ -344,7 +344,7 @@
                     ]
                   },
                   {
-                    "id": 1343,
+                    "id": 1342,
                     "kind": "var",
                     "span": [
                       848,
@@ -354,7 +354,7 @@
                 ]
               },
               {
-                "id": 1344,
+                "id": 1343,
                 "kind": "bin",
                 "span": [
                   859,
@@ -362,7 +362,7 @@
                 ],
                 "children": [
                   {
-                    "id": 1345,
+                    "id": 1344,
                     "kind": "var",
                     "span": [
                       859,
@@ -370,7 +370,7 @@
                     ]
                   },
                   {
-                    "id": 1346,
+                    "id": 1345,
                     "kind": "int",
                     "span": [
                       863,
@@ -380,7 +380,7 @@
                 ]
               },
               {
-                "id": 1347,
+                "id": 1346,
                 "kind": "bin",
                 "span": [
                   868,
@@ -388,7 +388,7 @@
                 ],
                 "children": [
                   {
-                    "id": 1348,
+                    "id": 1347,
                     "kind": "var",
                     "span": [
                       868,
@@ -396,7 +396,7 @@
                     ]
                   },
                   {
-                    "id": 1349,
+                    "id": 1348,
                     "kind": "int",
                     "span": [
                       872,
@@ -406,7 +406,7 @@
                 ]
               },
               {
-                "id": 1350,
+                "id": 1349,
                 "kind": "match",
                 "span": [
                   848,
@@ -414,7 +414,7 @@
                 ],
                 "children": [
                   {
-                    "id": 1351,
+                    "id": 1350,
                     "kind": "var",
                     "span": [
                       848,
@@ -422,7 +422,7 @@
                     ]
                   },
                   {
-                    "id": 1352,
+                    "id": 1351,
                     "kind": "match",
                     "span": [
                       878,
@@ -430,7 +430,7 @@
                     ],
                     "children": [
                       {
-                        "id": 1353,
+                        "id": 1352,
                         "kind": "call",
                         "span": [
                           878,
@@ -438,7 +438,7 @@
                         ],
                         "children": [
                           {
-                            "id": 1354,
+                            "id": 1353,
                             "kind": "var",
                             "span": [
                               878,
@@ -446,7 +446,7 @@
                             ]
                           },
                           {
-                            "id": 1355,
+                            "id": 1354,
                             "kind": "var",
                             "span": [
                               878,
@@ -456,7 +456,7 @@
                         ]
                       },
                       {
-                        "id": 1356,
+                        "id": 1355,
                         "kind": "var",
                         "span": [
                           889,
@@ -464,7 +464,7 @@
                         ]
                       },
                       {
-                        "id": 1357,
+                        "id": 1356,
                         "kind": "match",
                         "span": [
                           878,
@@ -472,7 +472,7 @@
                         ],
                         "children": [
                           {
-                            "id": 1358,
+                            "id": 1357,
                             "kind": "var",
                             "span": [
                               878,
@@ -480,7 +480,7 @@
                             ]
                           },
                           {
-                            "id": 1359,
+                            "id": 1358,
                             "kind": "int",
                             "span": [
                               900,
@@ -507,7 +507,7 @@
         }
       ],
       "body": {
-        "id": 1360,
+        "id": 1359,
         "kind": "match",
         "span": [
           939,
@@ -515,11 +515,19 @@
         ],
         "children": [
           {
-            "id": 1361,
+            "id": 1360,
             "kind": "var",
             "span": [
               945,
               946
+            ]
+          },
+          {
+            "id": 1361,
+            "kind": "int",
+            "span": [
+              973,
+              974
             ]
           },
           {
@@ -534,8 +542,8 @@
             "id": 1363,
             "kind": "int",
             "span": [
-              973,
-              974
+              1039,
+              1040
             ]
           },
           {
@@ -548,14 +556,6 @@
           },
           {
             "id": 1365,
-            "kind": "int",
-            "span": [
-              1039,
-              1040
-            ]
-          },
-          {
-            "id": 1366,
             "kind": "field",
             "span": [
               1078,
@@ -563,7 +563,7 @@
             ],
             "children": [
               {
-                "id": 1367,
+                "id": 1366,
                 "kind": "var",
                 "span": [
                   1078,
@@ -573,7 +573,7 @@
             ]
           },
           {
-            "id": 1368,
+            "id": 1367,
             "kind": "field",
             "span": [
               1078,
@@ -581,7 +581,7 @@
             ],
             "children": [
               {
-                "id": 1369,
+                "id": 1368,
                 "kind": "var",
                 "span": [
                   1078,
@@ -606,7 +606,7 @@
         }
       ],
       "body": {
-        "id": 1370,
+        "id": 1369,
         "kind": "match",
         "span": [
           1128,
@@ -614,7 +614,7 @@
         ],
         "children": [
           {
-            "id": 1371,
+            "id": 1370,
             "kind": "tuple",
             "span": [
               1134,
@@ -622,7 +622,7 @@
             ],
             "children": [
               {
-                "id": 1372,
+                "id": 1371,
                 "kind": "var",
                 "span": [
                   1135,
@@ -630,13 +630,21 @@
                 ]
               },
               {
-                "id": 1373,
+                "id": 1372,
                 "kind": "var",
                 "span": [
                   1138,
                   1139
                 ]
               }
+            ]
+          },
+          {
+            "id": 1373,
+            "kind": "int",
+            "span": [
+              1176,
+              1177
             ]
           },
           {
@@ -683,14 +691,6 @@
             "id": 1379,
             "kind": "int",
             "span": [
-              1176,
-              1177
-            ]
-          },
-          {
-            "id": 1380,
-            "kind": "int",
-            "span": [
               1192,
               1193
             ]
@@ -715,7 +715,7 @@
         }
       ],
       "body": {
-        "id": 1381,
+        "id": 1380,
         "kind": "match",
         "span": [
           1209,
@@ -723,7 +723,7 @@
         ],
         "children": [
           {
-            "id": 1382,
+            "id": 1381,
             "kind": "var",
             "span": [
               1209,
@@ -731,7 +731,7 @@
             ]
           },
           {
-            "id": 1383,
+            "id": 1382,
             "kind": "match",
             "span": [
               1230,
@@ -739,7 +739,7 @@
             ],
             "children": [
               {
-                "id": 1384,
+                "id": 1383,
                 "kind": "var",
                 "span": [
                   1230,
@@ -747,7 +747,7 @@
                 ]
               },
               {
-                "id": 1385,
+                "id": 1384,
                 "kind": "let",
                 "span": [
                   1266,
@@ -755,7 +755,7 @@
                 ],
                 "children": [
                   {
-                    "id": 1386,
+                    "id": 1385,
                     "kind": "lam",
                     "span": [
                       1274,
@@ -763,7 +763,7 @@
                     ],
                     "children": [
                       {
-                        "id": 1387,
+                        "id": 1386,
                         "kind": "match",
                         "span": [
                           1276,
@@ -771,7 +771,7 @@
                         ],
                         "children": [
                           {
-                            "id": 1388,
+                            "id": 1387,
                             "kind": "var",
                             "span": [
                               1276,
@@ -779,7 +779,7 @@
                             ]
                           },
                           {
-                            "id": 1389,
+                            "id": 1388,
                             "kind": "bin",
                             "span": [
                               1303,
@@ -787,7 +787,7 @@
                             ],
                             "children": [
                               {
-                                "id": 1390,
+                                "id": 1389,
                                 "kind": "var",
                                 "span": [
                                   1303,
@@ -795,7 +795,7 @@
                                 ]
                               },
                               {
-                                "id": 1391,
+                                "id": 1390,
                                 "kind": "var",
                                 "span": [
                                   1307,
@@ -809,7 +809,7 @@
                     ]
                   },
                   {
-                    "id": 1392,
+                    "id": 1391,
                     "kind": "bin",
                     "span": [
                       1311,
@@ -817,7 +817,7 @@
                     ],
                     "children": [
                       {
-                        "id": 1393,
+                        "id": 1392,
                         "kind": "bin",
                         "span": [
                           1311,
@@ -825,7 +825,7 @@
                         ],
                         "children": [
                           {
-                            "id": 1394,
+                            "id": 1393,
                             "kind": "bin",
                             "span": [
                               1311,
@@ -833,7 +833,7 @@
                             ],
                             "children": [
                               {
-                                "id": 1395,
+                                "id": 1394,
                                 "kind": "bin",
                                 "span": [
                                   1311,
@@ -841,7 +841,7 @@
                                 ],
                                 "children": [
                                   {
-                                    "id": 1396,
+                                    "id": 1395,
                                     "kind": "var",
                                     "span": [
                                       1311,
@@ -849,7 +849,7 @@
                                     ]
                                   },
                                   {
-                                    "id": 1397,
+                                    "id": 1396,
                                     "kind": "var",
                                     "span": [
                                       1315,
@@ -859,7 +859,7 @@
                                 ]
                               },
                               {
-                                "id": 1398,
+                                "id": 1397,
                                 "kind": "var",
                                 "span": [
                                   1319,
@@ -869,7 +869,7 @@
                             ]
                           },
                           {
-                            "id": 1399,
+                            "id": 1398,
                             "kind": "field",
                             "span": [
                               1323,
@@ -877,7 +877,7 @@
                             ],
                             "children": [
                               {
-                                "id": 1400,
+                                "id": 1399,
                                 "kind": "var",
                                 "span": [
                                   1323,
@@ -889,7 +889,7 @@
                         ]
                       },
                       {
-                        "id": 1401,
+                        "id": 1400,
                         "kind": "call",
                         "span": [
                           1329,
@@ -897,7 +897,7 @@
                         ],
                         "children": [
                           {
-                            "id": 1402,
+                            "id": 1401,
                             "kind": "var",
                             "span": [
                               1329,
@@ -905,7 +905,7 @@
                             ]
                           },
                           {
-                            "id": 1403,
+                            "id": 1402,
                             "kind": "var",
                             "span": [
                               1331,

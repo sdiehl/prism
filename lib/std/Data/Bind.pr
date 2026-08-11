@@ -16,9 +16,7 @@
 -- Opt-in: not in Base.
 
 import Data.List (map, drop, reverse)
-
 import Data.Foldable (length)
-
 import Data.String (str_join)
 
 -- | The outward distance from a use site to the binder it refers to:
@@ -28,12 +26,12 @@ import Data.String (str_join)
 -- constructors share one flat namespace with every module in the program, so a
 -- constructor named for its type would rebind any other `Index` in scope and the
 -- failure would surface far from the declaration.
-pub type Index = MkIndex(Int) deriving (Eq, Ord, Show)
+pub newtype Index = MkIndex(Int) deriving (Eq, Ord, Show)
 
 -- | The inward distance from the root to a binder: `bind_level(0)` is the
 -- outermost binder in scope. Constructor named `MkLevel` for the same reason
 -- `Index` uses `MkIndex`.
-pub type Level = MkLevel(Int) deriving (Eq, Ord, Show)
+pub newtype Level = MkLevel(Int) deriving (Eq, Ord, Show)
 
 -- | Brand a raw outward distance as an `Index`. One of the two ways in.
 --
@@ -43,7 +41,7 @@ pub type Level = MkLevel(Int) deriving (Eq, Ord, Show)
 -- ```output
 -- 2
 -- ```
-pub fn bind_index(n : Int) : Index = MkIndex(n)
+pub fn bind_index(n : Int) : Index @ noalloc = MkIndex(n)
 
 -- | Brand a raw inward distance as a `Level`. One of the two ways in.
 --
@@ -53,15 +51,15 @@ pub fn bind_index(n : Int) : Index = MkIndex(n)
 -- ```output
 -- 2
 -- ```
-pub fn bind_level(n : Int) : Level = MkLevel(n)
+pub fn bind_level(n : Int) : Level @ noalloc = MkLevel(n)
 
 -- | The raw distance carried by an `Index`. One of the two ways out.
-pub fn bind_index_int(i : Index) : Int =
+pub fn bind_index_int(borrow i : Index) : Int @ noalloc =
   match i of
     MkIndex(n) => n
 
 -- | The raw distance carried by a `Level`. One of the two ways out.
-pub fn bind_level_int(l : Level) : Int =
+pub fn bind_level_int(borrow l : Level) : Int @ noalloc =
   match l of
     MkLevel(n) => n
 
@@ -98,7 +96,7 @@ pub fn bind_level_at(depth : Int, i : Index) : Level =
 -- scope hides the older slot from `bind_index_of` while leaving it reachable by
 -- its own index, which is what an interpreter walking a closure environment
 -- needs.
-pub type BindEnv(a) = BindEnv { slots: List((String, a)) }
+opaque type BindEnv(a) = BindEnv { slots: List((String, a)) }
 
 -- | No binders in scope.
 pub let bind_empty : BindEnv(a) = BindEnv { slots = Nil }
@@ -146,11 +144,11 @@ pub fn bind_push_names(
 
 -- | How many binders are in scope. A use site here writes indices below this and
 -- levels below this.
-pub fn bind_depth(env : BindEnv(a)) : Int = length(env.slots)
+pub fn bind_depth(borrow env : BindEnv(a)) : Int = length(env.slots)
 
 -- | Every name in scope, innermost first, with shadowed names still listed at
 -- their own index.
-pub fn bind_names(env : BindEnv(a)) : List(String) = map(fst, env.slots)
+pub fn bind_names(borrow env : BindEnv(a)) : List(String) = map(fst, env.slots)
 
 -- | Drop the `n` innermost binders, leaving what was in scope before them.
 --

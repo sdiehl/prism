@@ -300,10 +300,12 @@ fn example_gate(package_dir: &Path, cfg: &crate::Config) -> GateStatus {
 // The doctest gate: run the doctests in the package's doc comments through the docs
 // machinery. A package with no doctests is not-run.
 fn doctest_gate(manifest: &Path) -> GateStatus {
-    let Ok((modules, roots, base, _, title)) = resolve_docs_input(manifest) else {
+    let Ok((modules, roots, base, _, title, description)) = resolve_docs_input(manifest) else {
         return GateStatus::NotRun;
     };
-    let Ok(generated) = crate::project_pages(modules, &roots, &title) else {
+    let Ok(generated) =
+        crate::docs::project_pages_with_description(modules, &roots, &title, &description)
+    else {
         return GateStatus::NotRun;
     };
     if generated.example_count() == 0 {

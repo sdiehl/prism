@@ -1,0 +1,43 @@
+type Box(a) = Box(a)
+
+type Point = Point { x: Int, y: Int }
+
+fn id(x) = x
+
+fn one() : Int = 1
+
+fn add(x : Int, y : Int) : Int = x + y
+
+fn choose(flag : Bool, x : Int, y : Int) : Int =
+  if flag then
+    x
+  else
+    y
+
+fn pair(x : Int) : (Int, Bool) = (x, true)
+
+fn unbox(value : Box(Int)) : Int =
+  match value of
+    Box(x) => x
+
+fn use_id() : Int = id(one())
+
+fn local(n : Int) : Int =
+  let bump = \(x : Int) -> x + 1
+  bump(n)
+
+fn down(n : Int) : Int =
+  if n == 0 then
+    0
+  else
+    down(n - 1)
+
+fn origin() : Point = Point { x = 0, y = 0 }
+
+fn sum_point(point : Point) : Int =
+  match point of
+    Point { x = x, y = y } => x + y
+
+-- Lists are deliberately outside T1. They count as uncovered syntax without
+-- turning an otherwise matching shadow run into a disagreement.
+fn later() : List(Int) = [1, 2]

@@ -10,6 +10,6 @@ This module deliberately knows nothing about Type grammar control flow. Generate
 
 ### `validate_usage`
 
-```prism,sig,h-82169eccc945e4606192737eca76aba9b498b99accfdd1d84c108e3b0c20ec8f
+```prism,sig,h-81097d472e7ff936d09df88cf7522972b950954274f48d689be95fb1690911a1
 validate_usage : (Syntax.Cursor.Cursor, Syntax.Ast.Ty, List(String), Bool, Syntax.Cursor.Cursor) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Ty)
 ```

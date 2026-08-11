@@ -24,13 +24,9 @@
 -- determinism contract, argv and all.
 
 import Data.List (map, filter, foldl, foldr, append, reverse, nth)
-
 import Data.Maybe (..)
-
 import Data.Result (..)
-
 import Data.String (starts_with, str_join, pad_right, index_of, contains)
-
 import Data.Char (is_digit)
 
 -- ASCII byte of `-`, the flag sigil.
@@ -72,7 +68,7 @@ pub type Tokens = Tokens { opts: List((String, String)), pos: List(String) }
 -- (the description help is rendered from) and a pure reader over lexed tokens
 -- threading the positional cursor. Build these with the combinators below, never
 -- by hand.
-pub type Parser(a) = Parser {
+opaque type Parser(a) = Parser {
   opts: List(OptSpec),
   args: List(ArgSpec),
   run: (Tokens, Int) -> Result((a, Int), CliError)

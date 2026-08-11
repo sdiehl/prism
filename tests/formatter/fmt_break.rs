@@ -10,42 +10,7 @@
 
 use rstest::rstest;
 
-// The parse AST with span offsets stripped, invariant under the whitespace
-// reflow a reformat performs (reflow shifts only spans; a structural change
-// survives the strip).
-fn ast_no_spans(src: &str) -> String {
-    prism::dump("ast", src)
-        .expect("must parse")
-        .lines()
-        .filter(|l| {
-            let t = l.trim_start();
-            !t.starts_with("span:") && !is_span_range(t)
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-// A bare `start..end,` line, the `Debug` rendering of a `Span` field value.
-fn is_span_range(t: &str) -> bool {
-    let t = t.trim_end_matches(',');
-    matches!(t.split_once(".."), Some((a, b)) if !a.is_empty()
-        && a.bytes().all(|c| c.is_ascii_digit())
-        && b.bytes().all(|c| c.is_ascii_digit()))
-}
-
-// Format, assert the output equals `want`, then assert reparse + idempotence +
-// meaning preservation.
-fn pin(src: &str, want: &str) {
-    let once = prism::format(src).expect("input must parse");
-    assert_eq!(once, want, "layout drift:\n{once}");
-    let twice = prism::format(&once).expect("formatted output must reparse");
-    assert_eq!(once, twice, "not idempotent:\n{once}\n-->\n{twice}");
-    assert_eq!(
-        ast_no_spans(src),
-        ast_no_spans(&once),
-        "formatting changed the parsed meaning:\n{src}\n-->\n{once}"
-    );
-}
+use super::assert_format_semantics;
 
 #[derive(Clone, Copy, Debug)]
 enum BreakCase {
@@ -129,18 +94,18 @@ fn expression_breaking_matches_pinned_layout(
     )]
     case: BreakCase,
 ) {
-    pin(case.src(), case.want());
+    assert_format_semantics(case.src(), case.want());
 }
 
 #[test]
 fn partial_handler_keeps_braces_and_roundtrips() {
     let source = "effect E\n  one() : Int\n  two() : Int\n\nfn run() : Int ! {E} =\n  handle one() + two() with partial {\n    one() resume k => k(1),\n    return r => r\n  }\n";
-    pin(source, source);
+    assert_format_semantics(source, source);
 }
 
 #[test]
 fn transact_uses_layout_when_bound() {
     let src = "fn main() =\n  let r = transact let _ = balance -= 40 in let _ = stock -= 1 in let _ = guard(balance >= 0) in 1 else 0\n  r\n";
     let want = "fn main() =\n  let r =\n    transact\n      balance -= 40\n      stock -= 1\n      guard(balance >= 0)\n      1\n    else\n      0\n  r\n";
-    pin(src, want);
+    assert_format_semantics(src, want);
 }

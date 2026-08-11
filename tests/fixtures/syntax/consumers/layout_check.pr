@@ -10,15 +10,10 @@
 -- Float values are compared numerically, both sides renormalized through
 -- `parse_float`/`show_float`; every other value is compared byte for byte.
 import Data.Foldable (length)
-
 import Syntax.Source (..)
-
 import Syntax.Token (..)
-
 import Syntax.Codec (..)
-
 import Syntax.Lex (..)
-
 import Syntax.Layout (..)
 
 -- Renormalize a float spelling to the runtime's canonical form so two spellings

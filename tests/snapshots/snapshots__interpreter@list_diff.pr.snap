@@ -1,0 +1,14 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/list_diff.pr
+---
+same
+index 1: left 2, right 9
+index 2: left ended, right 3
+index 2: right ended, left 3
+index 0: left ended, right 7
+index: 2, shape: Data.Diff.DiffRightEnd(2, 3)
+tags agree: None
+values differ: Some(Data.Diff.DiffAt(0, (1, "a"), (1, "x")))
+=> ()

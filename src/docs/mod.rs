@@ -259,7 +259,7 @@ fn stdlib_sigs() -> Result<BTreeMap<String, String>, Error> {
     Ok(checked
         .decls
         .iter()
-        .map(|d| (d.name.clone(), d.ty.show()))
+        .map(|d| (d.name.clone(), checked.show_sig(d)))
         .collect())
 }
 
@@ -312,7 +312,8 @@ pub fn stdlib_pages() -> Result<Generated, Error> {
 // General projects.
 // ---------------------------------------------------------------------------
 
-const PROJECT_BLURB: &str = "API documentation generated from the project's source by `prism docs`. \
+pub(crate) const PROJECT_BLURB: &str =
+    "API documentation generated from the project's source by `prism docs`. \
 Function and value signatures are the typechecker's inferred types; prose comes from `-- |` doc comments.";
 
 // Infer each module's own signatures by type-checking it against the project's
@@ -332,7 +333,7 @@ fn project_sigs(
             if own.contains(&d.name) {
                 // Key by the qualified name the renderer looks up first, so two
                 // modules that share a bare name never collide in the map.
-                sigs.insert(format!("{}.{}", m.dotted, d.name), d.ty.show());
+                sigs.insert(format!("{}.{}", m.dotted, d.name), checked.show_sig(d));
             }
         }
     }
@@ -349,13 +350,27 @@ pub fn project_pages(
     roots: &[Root],
     index_title: &str,
 ) -> Result<Generated, Error> {
+    project_pages_with_description(modules, roots, index_title, PROJECT_BLURB)
+}
+
+/// Generate documentation for a project whose landing page carries a package
+/// description, followed by the generated module list.
+///
+/// # Errors
+/// Fails if a module does not parse or type-check.
+pub(crate) fn project_pages_with_description(
+    modules: Vec<ModuleSource>,
+    roots: &[Root],
+    index_title: &str,
+    description: &str,
+) -> Result<Generated, Error> {
     let sigs = project_sigs(&modules, roots)?;
     let specs: Vec<ModSpec> = modules.into_iter().map(ModSpec::from_source).collect();
     render_all(
         &specs,
         &sigs,
         index_title,
-        PROJECT_BLURB,
+        description,
         None,
         &BTreeMap::new(),
         &BTreeMap::new(),

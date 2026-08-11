@@ -1,0 +1,11 @@
+---
+source: tests/formatter/fmt_trivia.rs
+assertion_line: 242
+expression: "fmt(\"import Data.List (append)\\n\\\n     \\n\\\n     import Data.Map (map_empty)\\n\\\n     -- picks the ordered set\\n\\\n     import Data.Set (set_from_list)\\n\\\n     \\n\\\n     fn main() = append([1], [2])\\n\")"
+---
+import Data.List (append)
+import Data.Map (map_empty)
+-- picks the ordered set
+import Data.Set (set_from_list)
+
+fn main() = append([1], [2])

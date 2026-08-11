@@ -225,6 +225,7 @@ impl Fmt<'_> {
             return None;
         }
         match call_shape(f, args) {
+            CallShape::Path(lit) => Some(text(lit)),
             CallShape::Recv(recv) => {
                 let recv_d = paren_doc(dot_recv_parens(&recv.node), self.expr_doc(recv, base)?);
                 Some(concat([recv_d, text(kw::QUESTION)]))

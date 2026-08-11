@@ -139,6 +139,13 @@ pub const REPLAY_DRIVERS: &[&str] = &["Replay.record", "Replay.replay", "Replay.
 pub const INCR_REPLAY_DRIVERS: &[&str] =
     &["Incr.run_incr_durable_replay", "Incr.run_incr_store_replay"];
 
+// The optic constructor a path literal expands to, taking a getter and a setter
+// and returning the lens over them. It lives in the optic module rather than the
+// prelude, so a program using the literal imports that module. The spelling has
+// one home here because the parser emits the call and the formatter reads it
+// back; the drift-guard test below pins it to the definition.
+pub const LENS_FN: &str = "lens";
+
 // The prelude tail-recursive loop drivers a `while`/`loop` desugars to.
 // `erase_control` recognizes calls to them by name to lower a recognized loop to
 // direct control flow, so a prelude rename without a matching edit here would
@@ -267,6 +274,62 @@ pub const JSON_TAG_KEY: &str = "$";
 // names instead, and a constructor is one or the other, never both, so the two
 // schemes cannot collide inside one object.
 pub const JSON_POS_KEY: &str = "_";
+
+// The three names `deriving (Lens)` synthesizes per record field, and the optic
+// library constructor the field lens is built with. The derivation and the optic
+// module agree on the pair the constructor carries (a getter and a functional
+// setter, in that order), so the spelling has one home here rather than a bare
+// string re-typed at each emission site; the drift-guard test pins the
+// constructor to its module definition, as the wire and JSON hooks above are
+// pinned. The three name builders are synthesis only: nothing downstream parses
+// a fact back out of the result.
+
+/// The optic library's lens constructor, pairing a getter with a setter.
+///
+/// Deliberately not spelled for its type: constructors share one flat namespace,
+/// so a constructor named `Lens` would be a name every other module has to avoid.
+pub const OPTIC_MK_LENS: &str = "MkLens";
+
+/// The derived getter for record field `f` (`hp` -> `hp_of`).
+#[must_use]
+pub fn lens_getter(field: &str) -> String {
+    format!("{field}_of")
+}
+
+/// The derived functional setter for record field `f` (`hp` -> `with_hp`).
+#[must_use]
+pub fn lens_setter(field: &str) -> String {
+    format!("with_{field}")
+}
+
+/// The derived first-class lens value for field `f` of record type `ty`.
+///
+/// Top-level values share one flat namespace, so the name carries the type it
+/// focuses (`Point` and `x` -> `point_x`) and two records with a field of the
+/// same name keep distinct lenses. A collision with a user definition is an
+/// ordinary duplicate definition, resolved the way the language resolves one.
+#[must_use]
+pub fn lens_value(ty: &str, field: &str) -> String {
+    format!("{}_{field}", snake_case(bare_name(ty)))
+}
+
+/// A type name in the lowercase-with-underscores spelling values are written in:
+/// every letter lowercased, with a separator before each uppercase letter that
+/// follows a lowercase letter or a digit (`Point` -> `point`, `HashMap` ->
+/// `hash_map`, `Vec2` -> `vec2`). Runs of capitals stay one word (`HTTP` ->
+/// `http`), which keeps the result an ordinary lowercase identifier in every case.
+fn snake_case(ty: &str) -> String {
+    let mut out = String::with_capacity(ty.len() + 1);
+    let mut prev_lower = false;
+    for c in ty.chars() {
+        if c.is_ascii_uppercase() && prev_lower {
+            out.push('_');
+        }
+        prev_lower = c.is_ascii_lowercase() || c.is_ascii_digit();
+        out.extend(c.to_lowercase());
+    }
+    out
+}
 
 // The `stable`-block version ladder. A stable type
 // desugars to one frozen rung type per version and a set of plain adjacent
@@ -835,6 +898,27 @@ pub fn path_base(n: u32) -> String {
     format!("base@{n}")
 }
 
+// Binders of the two halves a path literal expands to: the whole its getter
+// reads and its setter rebuilds, and the part the setter writes. The `@` keeps
+// both unspellable, so no field name along the path can capture either, and the
+// pair is what the formatter matches on to restore the literal surface.
+pub const PATH_WHOLE: &str = "whole@";
+pub const PATH_PART: &str = "part@";
+
+// The `Control.State` operation spellings the ambient-state statement expands
+// to: `get().a.b += e` becomes `put({ get() | a.b += e })`. The expansion is
+// syntactic (both names resolve in the program's own scope, like writing the
+// longhand by hand), and these consts are the one home of that contract
+// between the statement sugar and the stdlib's `Control.State`.
+pub const STATE_GET: &str = "get";
+pub const STATE_PUT: &str = "put";
+
+// Binder of the synthesized modifier a compound path terminal expands to:
+// `p += e` is `p ~ \(focus@) -> focus@ + e`. The `@` keeps the binder
+// unspellable so the right operand can never capture it, and the exact
+// lambda shape is what the formatter matches on to restore `p += e`.
+pub const PATH_FOCUS: &str = "focus@";
+
 // Binder for a parameter written as a pattern. The parameter needs a name to be
 // a parameter, but the source wrote a pattern instead of one, so the name comes
 // from its position and the `@` sigil keeps it unspellable and uncallable by
@@ -983,17 +1067,18 @@ pub fn local_shadow(n: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        bare_name, exported, is_synthesized, is_var_get, is_var_runner, is_var_set, module_of,
-        named_effect, named_op, parse_named_op, parse_scoped_escape, parse_var_get,
-        parse_var_runner, parse_var_set, plate_helper, plate_rebuilder, private, sort_prim_kind,
-        split_family_member, stable_family_member, stable_route_downgrade, stable_route_upgrade,
-        stable_rung, throw_op, var_effect, var_get, var_runner, var_set, ScopedEscape,
-        ALLOC_EFFECT, ALLOC_OP, ARBITRARY_METHOD, ARENA_MODULE, CAP_WRAPPERS, CHILDREN_METHOD,
-        CONCAT_MAP_FN, DECODE_METHOD, DIV_MOD_METHOD, DIV_QUOT_METHOD, EMIT_OP, ENCODE_METHOD,
-        ENTROPY_EFFECT, EQ_METHOD, FMAP_METHOD, FORCE_FN, FOREVER, FROM_JSON_METHOD, GUARD_FN,
-        HASH_METHOD, INCR_REPLAY_DRIVERS, INPUT_CAPABILITY_EFFECTS, INT_CMP, JSON_FIELD_FN,
-        JSON_OBJ, JSON_STR, NUM_ADD_METHOD, NUM_FROMINT_METHOD, NUM_MUL_METHOD, NUM_NEG_METHOD,
-        NUM_SUB_METHOD, ORD_METHOD, POW_METHOD, QC_ARB_GEN, QC_GEN_BIND, QC_GEN_CHOOSE,
+        bare_name, exported, is_synthesized, is_var_get, is_var_runner, is_var_set, lens_getter,
+        lens_setter, lens_value, module_of, named_effect, named_op, parse_named_op,
+        parse_scoped_escape, parse_var_get, parse_var_runner, parse_var_set, plate_helper,
+        plate_rebuilder, private, sort_prim_kind, split_family_member, stable_family_member,
+        stable_route_downgrade, stable_route_upgrade, stable_rung, throw_op, var_effect, var_get,
+        var_runner, var_set, ScopedEscape, ALLOC_EFFECT, ALLOC_OP, ARBITRARY_METHOD, ARENA_MODULE,
+        CAP_WRAPPERS, CHILDREN_METHOD, CONCAT_MAP_FN, DECODE_METHOD, DIV_MOD_METHOD,
+        DIV_QUOT_METHOD, EMIT_OP, ENCODE_METHOD, ENTROPY_EFFECT, EQ_METHOD, FMAP_METHOD, FORCE_FN,
+        FOREVER, FROM_JSON_METHOD, GUARD_FN, HASH_METHOD, INCR_REPLAY_DRIVERS,
+        INPUT_CAPABILITY_EFFECTS, INT_CMP, JSON_FIELD_FN, JSON_OBJ, JSON_STR, LENS_FN,
+        NUM_ADD_METHOD, NUM_FROMINT_METHOD, NUM_MUL_METHOD, NUM_NEG_METHOD, NUM_SUB_METHOD,
+        OPTIC_MK_LENS, ORD_METHOD, POW_METHOD, QC_ARB_GEN, QC_GEN_BIND, QC_GEN_CHOOSE,
         QC_GEN_CONST, QC_GEN_RESIZE, QC_GEN_RUN, REBUILD_METHOD, REPEAT_WHILE, REPLAY_DRIVERS,
         RUN_IO, SCOLLECT_FN, SHAPE_DIGEST_METHOD, SHOW_METHOD, SMAP_FN, SORT_BY_ORD_FN, SORT_FN,
         SORT_PRIM_INSTANCES, STR_ESCAPE_FN, SUCCEEDS_FN, TO_JSON_METHOD, WIRE_CAT,
@@ -1066,6 +1151,11 @@ mod tests {
                 "Incr driver `{d}` (names::INCR_REPLAY_DRIVERS) has no `fn {short}(` in Incr.pr"
             );
         }
+        let optic = include_str!("../../../lib/std/Data/Optic.pr");
+        assert!(
+            optic.contains(&format!("fn {LENS_FN}(")),
+            "lens constructor `{LENS_FN}` (names::LENS_FN) has no `fn {LENS_FN}(` in Data/Optic.pr"
+        );
     }
 
     // The loop drivers, class methods, and desugar helpers are the string
@@ -1222,6 +1312,29 @@ mod tests {
                 "Json constructor `{c}` (names) is not applied anywhere in Json.pr"
             );
         }
+        // The lens constructor a derived field lens is built with, pinned to the
+        // declaration that gives it its two-argument shape.
+        let optic = include_str!("../../../lib/std/Data/Optic.pr");
+        assert!(
+            optic.contains(&format!("= {OPTIC_MK_LENS}(")),
+            "lens constructor `{OPTIC_MK_LENS}` (names) has no `= {OPTIC_MK_LENS}(` declaration in Data/Optic.pr"
+        );
+    }
+
+    // The three names one derived record field carries. They are generated, never
+    // parsed back, so what matters is that they are distinct from each other and a
+    // deterministic function of the type and field: two records with a field of
+    // the same name must not derive the same lens value.
+    #[test]
+    fn lens_names_are_distinct_and_type_qualified() {
+        assert_eq!(lens_getter("hp"), "hp_of");
+        assert_eq!(lens_setter("hp"), "with_hp");
+        assert_eq!(lens_value("Point", "x"), "point_x");
+        assert_eq!(lens_value("Vec2", "x"), "vec2_x");
+        assert_eq!(lens_value("HashMap", "size"), "hash_map_size");
+        assert_eq!(lens_value("HTTP", "code"), "http_code");
+        assert_eq!(lens_value("Data.Optic.Wrapped", "it"), "wrapped_it");
+        assert_ne!(lens_value("Point", "x"), lens_value("Line", "x"));
     }
 
     // The `var_*` name codecs are string inverses the `erase_var` pass and the

@@ -1,8 +1,9 @@
 use marginalia::Span;
 
 use super::{Env, Tc};
-use crate::error::{ErrKind, TypeError};
+use crate::error::{suggest, ErrKind, TypeError};
 use crate::kw;
+use crate::names;
 use std::collections::BTreeSet;
 
 use crate::sym::Sym;
@@ -98,6 +99,10 @@ impl Tc<'_> {
                         ctor_name: ctor_name.clone(),
                     }
                     .at(span)
+                    .maybe_help(suggest::suggestion(
+                        ctor_name,
+                        self.ctors.keys().map(|k| names::bare_name(k)),
+                    ))
                 })?;
                 // Without `..`, a record pattern must bind every field: the `..`
                 // spread is what licenses omitting the rest. Enforcing this
@@ -135,6 +140,10 @@ impl Tc<'_> {
                                 ctor: ctor_name.clone(),
                             }
                             .at(span)
+                            .maybe_help(suggest::suggestion(
+                                fname,
+                                info.fields.iter().map(|f| f.as_str()),
+                            ))
                         })?;
                     let mut ft = info.args[fi].clone();
                     for (pn, t) in &tsubs {
@@ -173,10 +182,14 @@ impl Tc<'_> {
                 }
             }
             Pattern::Ctor(name, subs) => {
-                let info =
-                    self.ctors.get(name).cloned().ok_or_else(|| {
-                        ErrKind::UnknownConstructor { name: name.clone() }.at(span)
-                    })?;
+                let info = self.ctors.get(name).cloned().ok_or_else(|| {
+                    ErrKind::UnknownConstructor { name: name.clone() }
+                        .at(span)
+                        .maybe_help(suggest::suggestion(
+                            name,
+                            self.ctors.keys().map(|k| names::bare_name(k)),
+                        ))
+                })?;
                 let (result, tsubs, rsubs) = self.open_ctor(&info);
                 self.equate(ty, &result).map_err(|e| e.at(span))?;
                 if subs.len() != info.args.len() {

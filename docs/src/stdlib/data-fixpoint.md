@@ -4,113 +4,18 @@
 
 Least fixed points over a join-semilattice, solved by worklist.
 
-This is the iteration half of the substrate the compiler analyzes itself with, mirrored into Prism the way `Data.Graph` mirrors the components half. The compiler's own fixpoint solves for the least `x` above a seed and closed under a step, over a finite map of sets, by recomputing every key each round until no key grows. The same shape is here, driven by a worklist instead of rounds, and generalized from "a set" to any carrier with a `Semilattice` instance. A pass that propagates latent effects along a call graph, an occurrence count, or a liveness set is the same program three times: a per-node contribution, a join, and a dependency relation saying who must be recomputed when a node moves.
+This is the iteration half of the substrate the compiler analyzes itself with, mirrored into Prism the way `Data.Graph` mirrors the components half. The compiler's own fixpoint solves for the least `x` above a seed and closed under a step, over a finite map of sets, by recomputing every key each round until no key grows. The same shape is here, driven by a worklist instead of rounds, and generalized from "a set" to any carrier with a `Semilattice` instance (the class and its carriers live in `Data.Lattice`; this module is only the iteration). A pass that propagates latent effects along a call graph, an occurrence count, or a liveness set is the same program three times: a per-node contribution, a join, and a dependency relation saying who must be recomputed when a node moves.
 
 Determinism. The node set is the seed's key set, taken in ascending `Ord(k)` order; the dependency relation is reversed once through `Data.Graph`, whose successor lists are ascending and duplicate-free; and a node is appended to the queue only when it is not already waiting. The queue is therefore a pure function of the two input maps, and a map is a pure function of its bindings, never of insertion order. Two callers who build the same relation from differently ordered lists run the same iteration, not merely reach the same answer.
 
 Termination. Every update joins into the previous value (`fix_least` never replaces, it accumulates), so a node's value only ever ascends, and a node is re-queued only when its value strictly ascended. On a carrier of finite height the chain stabilizes, no node is re-queued, and the queue drains. Two things break that argument, and neither is checkable here: a carrier of unbounded height (a `Map` that gains a fresh key every visit), and a `lat_join`/`lat_leq` pair that disagree, which reports a change forever. So the loop is bounded: it consumes one unit of budget per visit and calls `fail()` when the budget runs out, rather than spinning. `fix_budget` is the default, and `fix_least_within` takes the budget explicitly for a carrier taller than that default assumes. Opt-in: not in Base.
 
-## Type Classes
-
-### `Semilattice`
-
-```prism,def,h-9f2bffed8a9a478d33ed6e9cce61f20f18297a4f6219327152b1cd37b087be2f
-class Semilattice(a)
-  lat_bottom : () -> a
-  lat_join : (a, a) -> a
-  lat_leq : (a, a) -> Bool
-```
-
-A carrier ordered by a least upper bound, with a least element: everything a fixpoint needs to know about the values it is solving for.
-
-`lat_join` is the least upper bound, `lat_bottom` its identity, and `lat_leq` the partial order the join induces. The laws, for all `x`, `y`, `z`:
-
-- associative: `lat_join(x, lat_join(y, z))` and `lat_join(lat_join(x, y), z)` - commutative: `lat_join(x, y)` and `lat_join(y, x)` - idempotent: `lat_join(x, x)` and `x` - identity: `lat_join(lat_bottom(), x)` and `x` - order: `lat_leq(x, y)` is true exactly when `lat_join(x, y)` and `y` agree
-
-The equality every law is stated up to is `lat_equiv`, the equivalence the order induces, rather than structural equality: `Map` and `Option` carriers have no `Eq` instance to state it with, and two values at the same point of the order are interchangeable to every consumer here.
-
-Instance resolution keys on the head type constructor, so a carrier admits exactly one instance: there is no second, set-specific `Map` instance beside the one below, and none is needed, because that one already is set union at `Map(k, Unit)`, which is how `Data.Set` spells a set. The same rule is why `Int` and `List` have no instance: `max` on `Int` is a join with no identity (`Int` has no least element), and a list admits several defensible joins (union, pointwise, concatenation) with nothing in the type to choose between them. A program that wants one declares it on its own type.
-
-## Instances
-
-### `latUnit`
-
-```prism,def,h-12d7f1b406b0694438ab052f1c7c313943c778add346d0ec861255d9c5db1bb0
-instance latUnit : Semilattice(Unit)
-```
-
-The one-point lattice. Trivial on its own; it is the payload that turns the map instance into set union, since there a key's presence is the information and its value carries none.
-
-### `latBool`
-
-```prism,def,h-58fb088c4710165d70c542f1ef3eeb8df9c2b4bd97025052f21d7e9d091fb945
-instance latBool : Semilattice(Bool)
-```
-
-Disjunction, ordered `false` below `true`: the carrier a reachability or "is this ever called" pass accumulates in.
-
-### `latOption`
-
-```prism,def,h-89c73b22edefa2444671a0d347b04345d7638f2f2b4f06ff4902ecc62dd8aaa3
-instance latOption : Semilattice(Option(a))
-```
-
-The lifted lattice: `None` strictly below every `Some`, and two `Some`s joined under the payload's own order. `None` is genuinely below `Some` of bottom, so "absent" and "present and empty" stay distinguishable, which is what a "has this node been reached at all" question needs.
-
-### `latPair`
-
-```prism,def,h-7b2ce22f61e66797cb2374416e00aff5c03a2febc4156d5911014681281914dd
-instance latPair : Semilattice((a, b))
-```
-
-The product lattice: componentwise join, componentwise order. Two analyses run as one pass by pairing their carriers.
-
-### `latMap`
-
-```prism,def,h-93d5cd965e9035c82761c88f142588fdcff34fcbca3b3ab8029588a0b339871d
-instance latMap : Semilattice(Map(k, v, ord))
-```
-
-The partial-map lattice: the empty map is bottom, an absent key is strictly below any present one, and two present keys join under the payload's order. At `Unit` that is exactly set union over `Data.Set` (presence is the only information a key carries); at a nested map it is the map of sets the compiler's own fixpoint is specialized to.
-
 ## Functions and Values
-
-### `lat_joins`
-
-```prism,sig,h-2c2de2be590f83a9f3074b16cc234251e50932e7b8e9192d3da307d3968df74e
-lat_joins : forall a. (List(a)) -> a
-```
-
-The join of a list, bottom-first. The combining step a transfer function takes over its dependencies' values.
-
-```prism,mod=Data.Fixpoint
-lat_joins([false, true, false])
-```
-
-```output
-true
-```
-
-### `lat_equiv`
-
-```prism,sig,h-d9e19bdebf71362529c9b30efefd037a995b99694c0b0df67353a01d88b23b0b
-lat_equiv : forall a. (a, a) -> Bool
-```
-
-Whether two values sit at the same point of the order. This is the equality the laws are stated up to, and the only one available on a carrier with no `Eq` instance.
-
-```prism,mod=Data.Fixpoint
-lat_equiv(map_insert(1, (), map_empty), map_insert(1, (), map_empty))
-```
-
-```output
-true
-```
 
 ### `fix_at`
 
-```prism,sig,h-1570bacda3bdd1e964142bf2dfeb67765a4e97d78954a4aee093719f7a5cd7f0
-fix_at : forall a b c. (Map(b, c, a), b) -> c
+```prism,sig,h-c5584e1ccae95c1dd7e96519e3ed93abe37b927299f5ac6929b77e691db08b3a
+fix_at : forall a b c. (Map(b, c, a), b) -> c given Ord(b), Data.Lattice.Semilattice(c)
 ```
 
 The value assigned to `key`, or bottom when the assignment says nothing about it. A transfer function reads its dependencies through this rather than matching on `map_lookup`, so an unmentioned node reads as the least element instead of an `Option` the caller has to decide about.
@@ -128,7 +33,7 @@ The value assigned to `key`, or bottom when the assignment says nothing about it
 
 ### `fix_budget`
 
-```prism,sig,h-2e596cd9e30eba15482af2ff808f538a2e9c60e34cbf71d5a13242be1f8c3769
+```prism,sig,h-eb7244cf58fae29c82e83eaf3bc896d9a00f38fb6f994c526f94f8b4b517bff0
 fix_budget : forall a b c d. (Map(c, d, a), Map(c, List(c), b)) -> Int
 ```
 
@@ -147,8 +52,8 @@ fix_budget(
 
 ### `fix_least`
 
-```prism,sig,h-56af46602ca3b725cd455256261d2daaf4990e3ab97925960135f2fcc8731942
-fix_least : forall e0 a b c d. (Map(c, d, a), Map(c, List(c), b), (c, Map(c, d, a)) -> d ! {Fail, e0}) -> Map(c, d, a) ! {Fail, e0}
+```prism,sig,h-dbd8503637706ef6246c83c0e1fa73c4f43cfc02e136fbc0bba12edf8ac79042
+fix_least : forall e0 a b c d. (Map(c, d, a), Map(c, List(c), b), (c, Map(c, d, a)) -> d ! {Fail, e0}) -> Map(c, d, a) ! {Fail, e0} given Ord(c), Data.Lattice.Semilattice(d)
 ```
 
 The least assignment above `seed` closed under `step`, by worklist.
@@ -171,8 +76,8 @@ fix_least(
 
 ### `fix_least_within`
 
-```prism,sig,h-cbbcee5b696259cb02e6b5ec9e827204dbf300942f4302d026f2cbbd0c98b5af
-fix_least_within : forall e0 a b c d. (Int, Map(c, d, a), Map(c, List(c), b), (c, Map(c, d, a)) -> d ! {Fail, e0}) -> Map(c, d, a) ! {Fail, e0}
+```prism,sig,h-fbd2d7e767a0f5319745d375ef707975bee01511621d84e5c3c2e5a4f75d9a9f
+fix_least_within : forall e0 a b c d. (Int, Map(c, d, a), Map(c, List(c), b), (c, Map(c, d, a)) -> d ! {Fail, e0}) -> Map(c, d, a) ! {Fail, e0} given Ord(c), Data.Lattice.Semilattice(d)
 ```
 
 `fix_least` with an explicit visit budget. `fail()` when the budget is exhausted: the solve is abandoned rather than reported at whatever assignment it had reached, since a partial answer to a least-fixpoint question is a wrong answer, not an approximate one.
@@ -194,8 +99,8 @@ false
 
 ### `fix_propagate`
 
-```prism,sig,h-792f0fb598f68aff38e339277423873b323d16ee51a619b372971aa8d70060e4
-fix_propagate : forall a b c d e. (Map(d, e, a), Map(d, List(d), b)) -> Map(d, e, c) ! {Fail}
+```prism,sig,h-afb3bd027d5399421921fb5778d5ad1710b47e22e508809436745f4cbf4df5c5
+fix_propagate : forall a b c d e. (Map(d, e, a), Map(d, List(d), b)) -> Map(d, e, c) ! {Fail} given Ord(d), Data.Lattice.Semilattice(e)
 ```
 
 The transitive closure of a per-node contribution along a dependency relation: the least `x` with `x[k]` the join of `own[k]` and every `x[j]` for `j` in `uses[k]`.

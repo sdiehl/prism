@@ -47,6 +47,17 @@
       }
     },
     {
+      "id": "blake3:b3eca28a0cc9505e8ca701b31eefc9f3d0d7d7c622158106d345e721fc27a6be",
+      "kind": "artifact",
+      "payload": {
+        "kind": "docs-page",
+        "path": "index.md",
+        "digest_scheme": "blake3",
+        "digest": "b3eca28a0cc9505e8ca701b31eefc9f3d0d7d7c622158106d345e721fc27a6be",
+        "bytes": 1012
+      }
+    },
+    {
       "id": "blake3:bd42ddc5d61f1ff40ffcf7936d08da87f38ef7eb2b1602f8a3ffffa823becc51",
       "kind": "artifact",
       "payload": {
@@ -55,17 +66,6 @@
         "digest_scheme": "blake3",
         "digest": "bd42ddc5d61f1ff40ffcf7936d08da87f38ef7eb2b1602f8a3ffffa823becc51",
         "bytes": 2611
-      }
-    },
-    {
-      "id": "blake3:c4bd96371c5278ce884bc9f137328400be5cca181cfbebad5f220337e71e3cd4",
-      "kind": "artifact",
-      "payload": {
-        "kind": "docs-page",
-        "path": "index.md",
-        "digest_scheme": "blake3",
-        "digest": "c4bd96371c5278ce884bc9f137328400be5cca181cfbebad5f220337e71e3cd4",
-        "bytes": 1110
       }
     },
     {
@@ -113,19 +113,7 @@
       }
     },
     {
-      "id": "prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef",
-      "kind": "stdlib-root",
-      "payload": {
-        "role": "stdlib",
-        "name": null,
-        "origin": null,
-        "artifact_kind": "embedded-stdlib",
-        "scheme": "prism-core-hash-v2",
-        "root": "bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef"
-      }
-    },
-    {
-      "id": "prism-core-hash-v2:c9a872766ee1047d6062f222974a1a8b170665bebff6fbfe5b91e7d76db42288",
+      "id": "prism-core-hash-v2:b1c3d54151f1f2a344a48f2a21962cf2b4627e51ff87be6b544e0e114f053f52",
       "kind": "source-root",
       "payload": {
         "role": "source",
@@ -133,7 +121,19 @@
         "origin": null,
         "artifact_kind": "namespace",
         "scheme": "prism-core-hash-v2",
-        "root": "c9a872766ee1047d6062f222974a1a8b170665bebff6fbfe5b91e7d76db42288"
+        "root": "b1c3d54151f1f2a344a48f2a21962cf2b4627e51ff87be6b544e0e114f053f52"
+      }
+    },
+    {
+      "id": "prism-core-hash-v2:b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb",
+      "kind": "stdlib-root",
+      "payload": {
+        "role": "stdlib",
+        "name": null,
+        "origin": null,
+        "artifact_kind": "embedded-stdlib",
+        "scheme": "prism-core-hash-v2",
+        "root": "b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb"
       }
     },
     {
@@ -146,10 +146,19 @@
       }
     },
     {
-      "id": "sha256:1c94c750d4af7e5bc4f94c8df76d1ce6c29e2ec3982b651901211de29ad8cfaf",
+      "id": "sha256:628173fe916bf9533788f70a379e621d0b756a51e76e50a2725241b68481d85a",
+      "kind": "doctest",
+      "payload": {
+        "location": "Code (module)",
+        "output_scheme": "sha256",
+        "output_digest": "facbc9beeab8f6547d4ea3feff0e1c1cdcc4af79a2ae7ae9c09728a95dd983b9"
+      }
+    },
+    {
+      "id": "sha256:73ab95341bb4a4dafd4f3fb0b48941abbe2cecf2b6fedd350570336c35396628",
       "kind": "compiler-identity",
       "payload": {
-        "fingerprint": "compiler=0.17.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=docs;source-root=prism-core-hash-v2:c9a872766ee1047d6062f222974a1a8b170665bebff6fbfe5b91e7d76db42288;stdlib-root=prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;erasures=true;native-effects=true;trampoline=true;fuse=false;rt-checks=false;native-kont-frames=false;",
+        "fingerprint": "compiler=0.17.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=docs;source-root=prism-core-hash-v2:b1c3d54151f1f2a344a48f2a21962cf2b4627e51ff87be6b544e0e114f053f52;stdlib-root=prism-core-hash-v2:b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;erasures=true;native-effects=true;trampoline=true;fuse=false;rt-checks=false;native-kont-frames=false;",
         "rows": [
           {
             "key": "compiler",
@@ -169,11 +178,11 @@
           },
           {
             "key": "source-root",
-            "value": "prism-core-hash-v2:c9a872766ee1047d6062f222974a1a8b170665bebff6fbfe5b91e7d76db42288"
+            "value": "prism-core-hash-v2:b1c3d54151f1f2a344a48f2a21962cf2b4627e51ff87be6b544e0e114f053f52"
           },
           {
             "key": "stdlib-root",
-            "value": "prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef"
+            "value": "prism-core-hash-v2:b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb"
           },
           {
             "key": "opt",
@@ -224,15 +233,6 @@
             "value": "false"
           }
         ]
-      }
-    },
-    {
-      "id": "sha256:628173fe916bf9533788f70a379e621d0b756a51e76e50a2725241b68481d85a",
-      "kind": "doctest",
-      "payload": {
-        "location": "Code (module)",
-        "output_scheme": "sha256",
-        "output_digest": "facbc9beeab8f6547d4ea3feff0e1c1cdcc4af79a2ae7ae9c09728a95dd983b9"
       }
     },
     {
@@ -320,12 +320,12 @@
     },
     {
       "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
-      "to": "blake3:bd42ddc5d61f1ff40ffcf7936d08da87f38ef7eb2b1602f8a3ffffa823becc51",
+      "to": "blake3:b3eca28a0cc9505e8ca701b31eefc9f3d0d7d7c622158106d345e721fc27a6be",
       "kind": "produced"
     },
     {
       "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
-      "to": "blake3:c4bd96371c5278ce884bc9f137328400be5cca181cfbebad5f220337e71e3cd4",
+      "to": "blake3:bd42ddc5d61f1ff40ffcf7936d08da87f38ef7eb2b1602f8a3ffffa823becc51",
       "kind": "produced"
     },
     {
@@ -350,12 +350,12 @@
     },
     {
       "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
-      "to": "prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef",
+      "to": "prism-core-hash-v2:b1c3d54151f1f2a344a48f2a21962cf2b4627e51ff87be6b544e0e114f053f52",
       "kind": "input"
     },
     {
       "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
-      "to": "prism-core-hash-v2:c9a872766ee1047d6062f222974a1a8b170665bebff6fbfe5b91e7d76db42288",
+      "to": "prism-core-hash-v2:b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb",
       "kind": "input"
     },
     {
@@ -365,13 +365,13 @@
     },
     {
       "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
-      "to": "sha256:1c94c750d4af7e5bc4f94c8df76d1ce6c29e2ec3982b651901211de29ad8cfaf",
-      "kind": "identified-by"
+      "to": "sha256:628173fe916bf9533788f70a379e621d0b756a51e76e50a2725241b68481d85a",
+      "kind": "produced"
     },
     {
       "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
-      "to": "sha256:628173fe916bf9533788f70a379e621d0b756a51e76e50a2725241b68481d85a",
-      "kind": "produced"
+      "to": "sha256:73ab95341bb4a4dafd4f3fb0b48941abbe2cecf2b6fedd350570336c35396628",
+      "kind": "identified-by"
     },
     {
       "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",

@@ -1,0 +1,29 @@
+-- A type parameter no field mentions is a brand: it keeps two uses of one shape
+-- from being interchanged and no derived method can reach a value of it, so the
+-- derived instances do not require `Show` or `Eq` of it. `Draft` and `Final` have
+-- no instances of their own, and branding by them still shows and compares.
+type Draft = Draft
+
+type Final = Final
+
+type Doc(phase) = D { text: String, revision: Int } deriving (Eq, Show)
+
+-- A parameter a field does mention is reached by the derived methods, so its
+-- instance is still required; here it is used at `Int`, which has one.
+type Bag(a, brand) = Bag(List(a)) deriving (Eq, Show)
+
+fn drafted(t : String) : Doc(Draft) = D { text = t, revision = 0 }
+
+fn published(d : Doc(Draft)) : Doc(Final) =
+  D { text = d.text, revision = d.revision + 1 }
+
+fn stamped(xs : List(Int)) : Bag(Int, Final) = Bag(xs)
+
+fn main() =
+  let d = drafted("hi")
+  println(show(d))
+  println(show(published(d)))
+  println(show(d == drafted("hi")))
+  println(show(d == drafted("bye")))
+  println(show(stamped([1, 2])))
+  println(show(stamped([1, 2]) == stamped([1, 3])))

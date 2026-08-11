@@ -30,9 +30,9 @@ pub(crate) enum Status {
     /// Trusted source assumption (`assume total fn`).
     Assumed,
     /// A `decreases` measure produced well-formed ranking obligations. Solver-free,
-    /// so this dump does not yet claim the measure proves anything: it reports how
-    /// many obligations over how many recursive edges await discharge by an SMT
-    /// solver (`prism verify`). Kept distinct from the checked and trusted verdicts.
+    /// so this dump makes no proof claim: it reports how many obligations over how
+    /// many recursive edges await discharge by an SMT solver (`prism verify`). Kept
+    /// distinct from the checked and trusted verdicts.
     Ranking { edges: usize, obligations: usize },
     /// Well-formed but unproven, with a precise reason.
     Pending(String),

@@ -24,7 +24,7 @@
 import Control.Fresh (Fresh, fresh)
 
 -- | A branded nominal identity: one integer, one phantom namespace.
-pub newtype Name(space) = Name(Int)
+opaque newtype Name(space) = Name(Int)
 
 -- | A binder: the identity the checker compares, and the source spelling
 -- diagnostics print.
@@ -59,7 +59,7 @@ instance showBinder : Show(Binder(space))
 
 -- | The integer identity a name carries. Serialization and hashing commit to
 -- this and the surrounding schema, never to an address or a random seed.
-pub fn name_id(n : Name(space)) : Int =
+pub fn name_id(borrow n : Name(space)) : Int @ noalloc =
   match n of
     Name(x) => x
 
@@ -77,9 +77,10 @@ pub fn fresh_binder(hint : String) : Binder(space) ! {Fresh} =
   Binder { name = Name(fresh()), hint = hint }
 
 -- | A reference to a binder: the branded name the checker compares.
-pub fn bound_name(b : Binder(space)) : Name(space) = b.name
+pub fn bound_name(borrow b : Binder(space)) : Name(space) = b.name
 
 -- | Render a binder as its hint plus its identity, deterministic and unique
 -- by construction. A prettier printer may use the hint alone where no sibling
 -- shares the spelling.
-pub fn render_binder(b : Binder(space)) : String = "{b.hint}%{name_id(b.name)}"
+pub fn render_binder(borrow b : Binder(space)) : String =
+  "{b.hint}%{name_id(b.name)}"

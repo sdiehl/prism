@@ -4,9 +4,7 @@
 -- subject. Both are pure functions of the artifact bytes. A refusal prints one
 -- structured error line.
 import Json (json_error_message)
-
 import Syntax.Codec (..)
-
 import Syntax.Identity (..)
 
 fn main() =

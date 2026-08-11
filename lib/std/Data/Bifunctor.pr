@@ -1,0 +1,55 @@
+-- | Functors of two arguments: map both payloads of a two-parameter type at
+-- once.
+--
+-- `bimap` transforms each side of a `p(a, b)` with its own function, and the
+-- one-sided maps are the two specializations with the identity on the other
+-- side. The carrier here is `Result`, whose two sides are the success and the
+-- error; `map_first` is then `Data.Result`'s `map_result` and `map_second`
+-- its `map_err`, stated once against the class so a function generic in the
+-- bifunctor works for any future two-parameter carrier. Effects ride the
+-- mapped functions' shared row, like `fmap`. Opt-in: not in Base.
+
+-- | A two-argument functor: `bimap(id, id, p)` is `p`, and `bimap` composes
+-- sidewise.
+pub class Bifunctor(p)
+  bimap : ((a) -> c ! {| e}, (b) -> d ! {| e}, p(a, b)) -> p(c, d) ! {| e}
+
+instance bifunctorResult : Bifunctor(Result)
+  fn bimap(f, g, r) = result_bimap(f, g, r)
+
+fn result_bimap(
+  f : (a) -> c ! {| e},
+  g : (b) -> d ! {| e},
+  r : Result(a, b)
+) : Result(c, d) ! { | e} =
+  match r of
+    Ok(x) => Ok(f(x))
+    Err(y) => Err(g(y))
+
+-- | Map the first side only.
+--
+-- ```prism
+-- (map_first(\(x) -> x + 1, Ok(1)), map_first(\(x) -> x + 1, Err("e")))
+-- ```
+-- ```output
+-- (Ok(2), Err(e))
+-- ```
+pub fn map_first(
+  f : (a) -> c ! {| e},
+  p : p(a, b)
+) : p(c, b) ! { | e} given Bifunctor(p) =
+  bimap(f, \(y) -> y, p)
+
+-- | Map the second side only.
+--
+-- ```prism
+-- (map_second(\(m) -> concat(m, "!"), Err("bad")), map_second(\(m) -> m, Ok(1)))
+-- ```
+-- ```output
+-- (Err(bad!), Ok(1))
+-- ```
+pub fn map_second(
+  g : (b) -> d ! {| e},
+  p : p(a, b)
+) : p(a, d) ! { | e} given Bifunctor(p) =
+  bimap(\(x) -> x, g, p)

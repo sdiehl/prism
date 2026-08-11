@@ -437,7 +437,7 @@ Seq.to_list(Seq.chunk(Seq.range(1, 6), 2))
 
 ### `window`
 
-```prism,sig,h-3d2a9ad262776bcd131a7ff73f4e5880025f0494a6c07e4d1d0341edc17b04be
+```prism,sig,h-27f834e2664d18c9ccfbaaa9dc64d646d08967270c4662b2d859269115706c77
 window : forall a. ((Unit) -> Sequence.Step(a), Int) -> (Unit) -> Sequence.Step(List(a))
 ```
 

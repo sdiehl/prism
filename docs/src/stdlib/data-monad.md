@@ -11,7 +11,7 @@ Like `Data.Foldable`, these are constrained free functions written once against 
 ### `join`
 
 ```prism,sig,h-86f39eed14e5b8ce7ed4283d5e5adc29a7a93547a426edc93025c64b99c78b4f
-join : forall a b. (a(a(b))) -> a(b)
+join : forall a b. (a(a(b))) -> a(b) given Monad(a)
 ```
 
 Collapse one level of nesting: `m(m(a))` to `m(a)`.
@@ -27,7 +27,7 @@ join([[1, 2], [3, 4]])
 ### `map2`
 
 ```prism,sig,h-32b648e6f911067c480f5cd78ac776376792d000c11fa5b2bb7b63b51f0a6175
-map2 : forall a b c d. ((a, b) -> c, d(a), d(b)) -> d(c)
+map2 : forall a b c d. ((a, b) -> c, d(a), d(b)) -> d(c) given Applicative(d)
 ```
 
 Lift a binary function over two wrapped values (`Applicative`).
@@ -43,7 +43,7 @@ Some(3)
 ### `map3`
 
 ```prism,sig,h-c899c8c882b3521ec3456257eac60f0672763e2709c1e37a66f2744364160099
-map3 : forall a b c d e. ((a, b, c) -> d, e(a), e(b), e(c)) -> e(d)
+map3 : forall a b c d e. ((a, b, c) -> d, e(a), e(b), e(c)) -> e(d) given Applicative(e)
 ```
 
 Lift a ternary function over three wrapped values (`Applicative`).
@@ -59,7 +59,7 @@ Some(6)
 ### `sequence`
 
 ```prism,sig,h-591025e11da4139e811e5703e000314025f15bf335729dc36dada87defc7e193
-sequence : forall a b. (List(a(b))) -> a(List(b))
+sequence : forall a b. (List(a(b))) -> a(List(b)) given Applicative(a)
 ```
 
 Evaluate a list of wrapped values left to right, collecting the results (`Applicative`). `Option` short-circuits on `None`; `List` takes the cartesian product.
@@ -75,7 +75,7 @@ Some([1, 2, 3])
 ### `traverse_list`
 
 ```prism,sig,h-b376920493893ab472ab3645d86af1d74c352e50032446c616e377e0cce5947e
-traverse_list : forall a b c. ((a) -> b(c), List(a)) -> b(List(c))
+traverse_list : forall a b c. ((a) -> b(c), List(a)) -> b(List(c)) given Applicative(b)
 ```
 
 Apply `f` to each element and sequence the wrapped results (`Applicative`). This is `sequence` after a plain `map`.

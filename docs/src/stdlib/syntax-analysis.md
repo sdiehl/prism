@@ -26,7 +26,7 @@ A shape census of one expression: the counts a size heuristic, a lint threshold,
 
 ### `an_nodes`
 
-```prism,sig,h-405a5f35412079fa57df011f1abde40ac031a6d4cf29b4a2cba99344e326a55a
+```prism,sig,h-beddaa9c32e7e80bdd43643bd5ffbcaf97cbf9e26f6b54763cc92113487eacd9
 an_nodes : (Syntax.Ast.Sp(Syntax.Ast.Expr)) -> List(Syntax.Ast.Sp(Syntax.Ast.Expr))
 ```
 
@@ -34,7 +34,7 @@ Every node of an expression, root first, in source order.
 
 ### `an_where`
 
-```prism,sig,h-60c3abc71f50a375cd84d7255d5823fea581185f5c70aa8f89d24f9ef6ffa1e2
+```prism,sig,h-99f62b0f293b1ef58f22e778b142079ed06edc6742254d08cae7bcb6c10a0b0a
 an_where : forall e0. ((Syntax.Ast.Sp(Syntax.Ast.Expr)) -> Bool ! {e0}, Syntax.Ast.Sp(Syntax.Ast.Expr)) -> List(Syntax.Ast.Sp(Syntax.Ast.Expr)) ! {e0}
 ```
 
@@ -42,7 +42,7 @@ Every node satisfying a predicate, in source order.
 
 ### `an_size`
 
-```prism,sig,h-21fdf57df4a25a2f07a9382d4a60fc92a363375e0dc2cb9ebcbd61298a209d07
+```prism,sig,h-c1216e343d487075821a8d63fcf3a14c43f501d4ad7ebe6f5b02cb58def68340
 an_size : (Syntax.Ast.Sp(Syntax.Ast.Expr)) -> Int
 ```
 
@@ -50,7 +50,7 @@ The number of nodes in an expression.
 
 ### `an_depth`
 
-```prism,sig,h-cdc6a27a9614abe6444c5ae79fb865b9651c839ebe64bd00e4e27adb780ba532
+```prism,sig,h-491ce47128b5d20242b494f1c1de631a43d2bad5c248a31e80051098e9b14cd0
 an_depth : (Syntax.Ast.Sp(Syntax.Ast.Expr)) -> Int
 ```
 
@@ -58,7 +58,7 @@ The height of an expression: `1` at a leaf.
 
 ### `an_spans`
 
-```prism,sig,h-562917f318a645a3c5bcf76267f316507d63774bbb4ce62b21e578b5c358fa67
+```prism,sig,h-f572c6255ed351b3aa3453fd49036e984bf9cdb79231de04ba2d632a07ccbe2a
 an_spans : (Syntax.Ast.Sp(Syntax.Ast.Expr)) -> List(Syntax.Source.Span)
 ```
 
@@ -66,7 +66,7 @@ The span of every node, root first, in source order.
 
 ### `an_var_uses`
 
-```prism,sig,h-c0b68d69c65f9dff1a9431051a02ede7434e1e1ae3dac8452aabb1571625550f
+```prism,sig,h-fb44508987e844f0c5b403685a39bd47915b5cf8ee44a2288a9a879a2935e132
 an_var_uses : (Syntax.Ast.Sp(Syntax.Ast.Expr)) -> List((String, Syntax.Source.Span))
 ```
 
@@ -74,7 +74,7 @@ Every variable occurrence: the identifier and the exact span it covers. This is 
 
 ### `an_var_names`
 
-```prism,sig,h-77498827304bb9aee89596a78ce44416eada3c609bb536c878e9d444060fee98
+```prism,sig,h-4cba9e06ebbea7d85b526a59f636d169007c6c57bd2fab5c7acfff5462f3f7e5
 an_var_names : (Syntax.Ast.Sp(Syntax.Ast.Expr)) -> List(String)
 ```
 
@@ -82,7 +82,7 @@ Every name written as a variable, in first-occurrence order and without repeats.
 
 ### `an_uses_of`
 
-```prism,sig,h-8546fd2b90666371d2457dae62029c193a8ff690ab077151e5774304a9eb8d82
+```prism,sig,h-dcbd4377a3ee7a42b0802f744d00d75f51455254f7911d0ffce57c77148a545d
 an_uses_of : (String, Syntax.Ast.Sp(Syntax.Ast.Expr)) -> Int
 ```
 
@@ -90,7 +90,7 @@ How many times a name is written as a variable.
 
 ### `an_calls`
 
-```prism,sig,h-f41c784c9d90a48828f44d81db280cb8d0ecb3d857161e1b5c4d32d82415dac6
+```prism,sig,h-070ff49e4c841f746b1cfc49589504c974f6601d937195846698811ffecdc189
 an_calls : (Syntax.Ast.Sp(Syntax.Ast.Expr)) -> List(Syntax.Ast.Sp(Syntax.Ast.Expr))
 ```
 
@@ -106,7 +106,7 @@ Whether a node is an application. The predicate `an_calls` filters on, made publ
 
 ### `an_call_targets`
 
-```prism,sig,h-1c4864f69b9f4aa2e8d4a2715e96297e6a0a672f58506c64acf896dc8d39a11f
+```prism,sig,h-44a3a9f3f9cabec6c3f33ad3b191347322f7970696e6702c545db982eeb6ce41
 an_call_targets : (Syntax.Ast.Sp(Syntax.Ast.Expr)) -> List(String)
 ```
 
@@ -114,7 +114,7 @@ The name of every directly called function, in source order. A call whose head i
 
 ### `an_holes`
 
-```prism,sig,h-8002e65a7869123ddb1b190f13fe151e12ad15c18df1e4701a48aee0b533c325
+```prism,sig,h-f77dfe27acac1539a76e9091080fbff23920eb7703b6a939097dd4aa404b0899
 an_holes : (Syntax.Ast.Sp(Syntax.Ast.Expr)) -> List(Syntax.Source.Span)
 ```
 
@@ -122,7 +122,7 @@ The span of every typed hole, in source order: what a completion tool asks for f
 
 ### `an_any`
 
-```prism,sig,h-ee09965cd844d7726ad3d56d7443583066462de46a8b6580435cc369a257e1a9
+```prism,sig,h-42c62540ba7cf548918dd7730805bc1772ce1f24ea36a98ebdfadf9de98a9e95
 an_any : forall e0. ((Syntax.Ast.Sp(Syntax.Ast.Expr)) -> Bool ! {e0}, Syntax.Ast.Sp(Syntax.Ast.Expr)) -> Bool ! {e0}
 ```
 
@@ -130,7 +130,7 @@ Whether any node satisfies the predicate, short-circuiting on the first hit.
 
 ### `an_census`
 
-```prism,sig,h-9b45a91befe203ae8a7c46379a35bb0caeeef8d141804c35a1c2a65503a4db64
+```prism,sig,h-dd8de4fdc2841020772f386eaf08568328ffbe1a73c33323f009027b361abf7c
 an_census : (Syntax.Ast.Sp(Syntax.Ast.Expr)) -> Syntax.Analysis.ExprCensus
 ```
 

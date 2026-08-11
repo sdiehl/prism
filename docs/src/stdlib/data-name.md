@@ -62,7 +62,7 @@ instance ordBinder : Ord(Binder(space))
 
 ### `showBinder`
 
-```prism,def,h-d307fe7b1ce9f4fa03d6931e6dce8b80eab35b14324eb46f2b8413da7b4c4787
+```prism,def,h-9a6dd53a6b70aef51dae29995e061a508e93e18189655d4b42668e9a247a7165
 instance showBinder : Show(Binder(space))
 ```
 
@@ -70,7 +70,7 @@ instance showBinder : Show(Binder(space))
 
 ### `name_id`
 
-```prism,sig,h-9026d9d9281b8e7fc3113745528b1cf3810371e8e4be92ed4f562907dd138d03
+```prism,sig,h-95dd2ba9cd2741c97515c7983a474953e3dfb71905b64ba1fbce12cc2546f600
 name_id : forall a. (Data.Name.Name(a)) -> Int
 ```
 
@@ -95,7 +95,7 @@ run_fresh(\() -> [render_binder(fresh_binder("x")), render_binder(fresh_binder("
 
 ### `bound_name`
 
-```prism,sig,h-d1419887724e1d29133bb6ab1393dfccc828574ef43a7a3ca8d8c1d7243fe203
+```prism,sig,h-21f6a38b2ac144e99e07fd19ced093153de906bd0523271d4a56230f82e37911
 bound_name : forall a. (Data.Name.Binder(a)) -> Data.Name.Name(a)
 ```
 
@@ -103,7 +103,7 @@ A reference to a binder: the branded name the checker compares.
 
 ### `render_binder`
 
-```prism,sig,h-7bd01375975681b23e1e58024214629ce75bbcc8f73171bb6285b1ab1e990983
+```prism,sig,h-0ed53d886b2d3cdc62a6d5fb4c1a35b84e3e95b370cf30f4a1dbd07385e74328
 render_binder : forall a. (Data.Name.Binder(a)) -> String
 ```
 

@@ -19,15 +19,10 @@
 -- document every other syntax fault does, with no error type of its own.
 
 import Data.List (..)
-
 import Data.Maybe (..)
-
 import Data.String (..)
-
 import Syntax.Source (..)
-
 import Syntax.Token (..)
-
 import Syntax.Diagnostic (..)
 
 -- -------------------------------------------------------------------------

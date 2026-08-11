@@ -41,15 +41,18 @@ fn dependents_is_the_transitive_closure_of_callers() {
 // `deps` walks the other direction: what a definition transitively needs.
 #[test]
 fn deps_walks_dependencies_not_dependents() {
-    // `concat_map` is defined via `map` and `concat`, so both are in its closure.
-    // Qualified, because the prelude re-exports an unqualified alias too.
+    // `list_ap` is defined via `concat_map` and `map`, and `concat_map` in turn
+    // needs `append`, so the closure holds all three: the direct dependencies
+    // and one reachable only transitively. Qualified, because the prelude
+    // re-exports an unqualified alias too.
     let tail = |d: &String| d.rsplit('.').next().unwrap_or("").to_string();
-    let deps: Vec<String> = names(&q("deps", "Data.List.concat_map", ""))
+    let deps: Vec<String> = names(&q("deps", "Data.List.list_ap", ""))
         .iter()
         .map(&tail)
         .collect();
     assert!(deps.contains(&"map".to_string()), "deps: {deps:?}");
-    assert!(deps.contains(&"flatten".to_string()), "deps: {deps:?}");
+    assert!(deps.contains(&"concat_map".to_string()), "deps: {deps:?}");
+    assert!(deps.contains(&"append".to_string()), "deps: {deps:?}");
 }
 
 // `uses-type` finds definitions by a whole-token type match, so `Option` matches

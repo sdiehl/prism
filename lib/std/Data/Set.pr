@@ -17,7 +17,6 @@
 -- set across an assembly boundary must agree on its canonical ordering.
 
 import Data.Map (map_empty, map_insert, map_member, map_delete, map_size, map_keys)
-
 import Data.List (foldl, filter)
 
 -- | The empty set.
@@ -42,7 +41,8 @@ pub fn set_insert(x : k, s : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
 -- ```output
 -- true
 -- ```
-pub fn set_member(x : k, s : Map(k, Unit)) : Bool given Ord(k) = map_member(x, s)
+pub fn set_member(x : k, borrow s : Map(k, Unit)) : Bool given Ord(k) =
+  map_member(x, s)
 
 -- | Remove `x` from the set (a no-op if absent).
 --
@@ -63,7 +63,7 @@ pub fn set_delete(x : k, s : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
 -- ```output
 -- 3
 -- ```
-pub fn set_size(s) = map_size(s)
+pub fn set_size(borrow s) = map_size(s)
 
 -- | The elements in ascending order.
 --
@@ -73,7 +73,7 @@ pub fn set_size(s) = map_size(s)
 -- ```output
 -- [1, 2, 3]
 -- ```
-pub fn set_to_list(s) = map_keys(s)
+pub fn set_to_list(borrow s) = map_keys(s)
 
 -- | Build a set from a list, dropping duplicates.
 --

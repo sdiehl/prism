@@ -9,6 +9,7 @@
 // spelling, and we side with plain `pub`.
 #![allow(dead_code, unreachable_pub)]
 
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -26,7 +27,7 @@ pub mod fuzzgen;
 /// A clean run under `PRISM_CHECK_LEAKS` writes exactly this to stderr.
 const LEAK_OK: &str = "prism: 0 cells leaked";
 /// The env var that turns on the runtime's live-cell balance report.
-const CHECK_LEAKS: &str = "PRISM_CHECK_LEAKS";
+pub const CHECK_LEAKS: &str = "PRISM_CHECK_LEAKS";
 /// Opt-in memoization of verified native cases: set it to skip programs whose
 /// complete toolchain fingerprint is unchanged since a previous green run.
 const GATE_CACHE: &str = "PRISM_GATE_CACHE";
@@ -179,6 +180,13 @@ pub fn canonical_exit(run: &Run) -> u8 {
     run.exit.unwrap_or(0) as u8
 }
 
+const PROCESS_EXIT_MASK: i32 = 0xFF;
+
+/// Normalize an OS process exit to the one-byte status the native ABI exposes.
+pub const fn canonical_process_exit(exit: i32) -> i32 {
+    exit & PROCESS_EXIT_MASK
+}
+
 /// The corpus directories, relative to the crate root.
 const CORPUS_DIRS: [&str; 2] = ["examples", "tests/cases/run"];
 
@@ -248,7 +256,8 @@ fn candidates() -> Vec<(String, PathBuf)> {
 /// that block on input; the off-platform arm excludes IO whose native and
 /// interpreted runs are not a pure function of the source.
 fn runnable(full: &str, root: &Path) -> bool {
-    let on_platform = prism::off_platform_builtins(full, root).is_ok_and(|ops| ops.is_empty());
+    let on_platform = prism::off_platform_builtins(full, &prism::resolve::default_roots(root))
+        .is_ok_and(|ops| ops.is_empty());
     on_platform && prism::interpret(full).is_ok()
 }
 
@@ -267,6 +276,20 @@ pub fn corpus() -> Vec<PathBuf> {
 const SHARD_TOTAL_ENV: &str = "PRISM_SHARD_TOTAL";
 /// Env var naming this shard's 0-based index (`0 <= index < total`).
 const SHARD_INDEX_ENV: &str = "PRISM_SHARD_INDEX";
+const UNSHARDED_TOTAL: usize = 1;
+const DEFAULT_SHARD_INDEX: usize = 0;
+
+fn shard_total() -> usize {
+    env::var(SHARD_TOTAL_ENV)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(UNSHARDED_TOTAL)
+}
+
+/// Whether this process is running one proper partition of the corpus.
+pub fn corpus_is_sharded() -> bool {
+    shard_total() > UNSHARDED_TOTAL
+}
 
 /// Partition a sorted corpus for CI sharding: with `PRISM_SHARD_TOTAL=n` (n > 1)
 /// set, keep only the cases whose position mod n equals `PRISM_SHARD_INDEX`, so n
@@ -274,17 +297,14 @@ const SHARD_INDEX_ENV: &str = "PRISM_SHARD_INDEX";
 /// list unchanged, so local runs and the tier oracle are unaffected. The corpus is
 /// already sorted, so the partition is identical on every machine.
 pub fn shard(cases: Vec<PathBuf>) -> Vec<PathBuf> {
-    let total = env::var(SHARD_TOTAL_ENV)
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(1);
-    if total <= 1 {
+    let total = shard_total();
+    if total <= UNSHARDED_TOTAL {
         return cases;
     }
     let index = env::var(SHARD_INDEX_ENV)
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(0);
+        .unwrap_or(DEFAULT_SHARD_INDEX);
     shard_by(cases, total, index)
 }
 
@@ -338,6 +358,17 @@ pub fn temp_bin(tag: &str, stem: &str) -> PathBuf {
 /// substring search for the leak line would let slip through.
 pub fn leak_free(stderr: &str) -> bool {
     stderr.trim_end() == LEAK_OK
+}
+
+/// The program's own stderr: everything except the leak checker's report line,
+/// which belongs to the harness and not to the observation trace the tiers
+/// must agree on.
+pub fn program_stderr(stderr: &str) -> String {
+    stderr
+        .lines()
+        .filter(|line| !line.starts_with("prism: ") || !line.ends_with(" cells leaked"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// A content fingerprint of everything outside the program source that can move
@@ -593,32 +624,57 @@ pub fn cache_key_with_identity(full: &str, tag: &str, identity: &GateCacheIdenti
     h.finalize().to_hex().to_string()
 }
 
+/// Memoize a corpus verdict the way the parity oracles do. When
+/// `PRISM_GATE_CACHE` is set and a prior green run recorded this (fingerprint,
+/// tag, source) key, skip `check`: the verdict is a pure function of the key,
+/// so a recorded pass is as good as a fresh one. Only passes are recorded, so
+/// a failing case is always re-run, and the full cold gate is one
+/// `cargo clean` (or an unset env) away.
+pub fn with_gate_cache(
+    full: &str,
+    tag: &str,
+    check: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    let cache = gate_cache_dir();
+    let key = cache.as_ref().map(|_| cache_key(full, tag));
+    if let (Some(dir), Some(k)) = (&cache, &key) {
+        if dir.join(k).exists() {
+            return Ok(());
+        }
+    }
+    check()?;
+    // Record the pass: an empty marker named by the key. Only reached on a full
+    // verification, so a failing case never leaves a marker to skip it later.
+    if let (Some(dir), Some(k)) = (&cache, &key) {
+        let _ = fs::write(dir.join(k), b"");
+    }
+    Ok(())
+}
+
 /// Build `case` with `build`, run it under leak checking on empty stdin, and
 /// diff stdout (byte-for-byte) and the leak report against the interpreter. The
 /// one native build/run/diff/leak path behind both parity oracles; `tag` names
 /// the backend (`llvm`/`mlir`) or the forced tier for messages and temp paths.
-///
-/// When `PRISM_GATE_CACHE` is set, a case whose toolchain fingerprint matches a
-/// prior green run is skipped: its result is a pure function of the key, so a
-/// recorded pass is as good as a fresh one. Only passes are recorded, so a
-/// failing case is always re-run, and the full cold gate is one `cargo clean`
-/// (or an unset env) away.
 pub fn check_native_parity(
     case: &Path,
     tag: &str,
     build: impl Fn(&str, &Path) -> Result<(), Error>,
 ) -> Result<(), String> {
     let full = source(case);
-    let cache = gate_cache_dir();
-    let key = cache.as_ref().map(|_| cache_key(&full, tag));
-    if let (Some(dir), Some(k)) = (&cache, &key) {
-        if dir.join(k).exists() {
-            return Ok(());
-        }
-    }
+    with_gate_cache(&full, tag, || {
+        check_native_parity_uncached(case, &full, tag, build)
+    })
+}
+
+fn check_native_parity_uncached(
+    case: &Path,
+    full: &str,
+    tag: &str,
+    build: impl Fn(&str, &Path) -> Result<(), Error>,
+) -> Result<(), String> {
     let stem = case.file_stem().unwrap().to_string_lossy();
     let bin = temp_bin(tag, &stem);
-    if let Err(e) = build(&full, &bin) {
+    if let Err(e) = build(full, &bin) {
         cleanup_bin(&bin);
         return Err(format!("{}: {tag} build failed: {e}", case.display()));
     }
@@ -630,7 +686,7 @@ pub fn check_native_parity(
     };
     // The interpreter reference: its streamed stdout and the exit code its result
     // implies (`canonical_exit`), both compared against the native process.
-    let reference = prism::interpret(&full).unwrap();
+    let reference = prism::interpret(full).unwrap();
     let want = &reference.term;
     // A program whose `main` returns a tagged-immediate value exits with that
     // value as its code; `canonical_exit` reconstructs it the way the native
@@ -654,7 +710,7 @@ pub fn check_native_parity(
     let native_trace = prism::ObservationTrace::from_process(
         &out.stdout,
         native_stderr.as_bytes(),
-        got_exit & 0xFF,
+        canonical_process_exit(got_exit),
     );
     let interpreter_trace =
         prism::ObservationTrace::from_process(want.as_bytes(), &[], i32::from(want_exit));
@@ -673,11 +729,6 @@ pub fn check_native_parity(
             leak.trim()
         ));
     }
-    // Record the pass: an empty marker named by the key. Only reached on a full
-    // verification, so a failing case never leaves a marker to skip it later.
-    if let (Some(dir), Some(k)) = (&cache, &key) {
-        let _ = fs::write(dir.join(k), b"");
-    }
     Ok(())
 }
 
@@ -687,7 +738,10 @@ pub fn check_native_parity(
 /// a spawned test thread. Reserve generously: the reservation is virtual and
 /// pages commit only on use, so the cost of headroom is nothing and the cost of
 /// too little is a corpus-wide abort that names no culprit.
-const CORPUS_WORKER_STACK: usize = 256 * 1024 * 1024;
+const MEBIBYTE: usize = 1024 * 1024;
+const CORPUS_WORKER_STACK: usize = 256 * MEBIBYTE;
+const DEFAULT_PARALLELISM: usize = 4;
+const MIN_WORKER_COUNT: usize = 1;
 
 /// Run `check` over `cases` across cores, collecting every failure so one run
 /// reports all divergences rather than aborting at the first. Returns the
@@ -699,8 +753,8 @@ pub fn parallel_check(
     let next = AtomicUsize::new(0);
     let fails: Mutex<Vec<String>> = Mutex::new(Vec::new());
     let threads = thread::available_parallelism()
-        .map_or(4, std::num::NonZeroUsize::get)
-        .min(cases.len().max(1));
+        .map_or(DEFAULT_PARALLELISM, NonZeroUsize::get)
+        .min(cases.len().max(MIN_WORKER_COUNT));
     thread::scope(|s| {
         for _ in 0..threads {
             let worker = || loop {

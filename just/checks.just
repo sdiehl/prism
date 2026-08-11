@@ -12,7 +12,7 @@ parity:
 # Compare the corpus across all optimizer configurations.
 [group('tests')]
 opt-equiv *FLAGS:
-    PRISM_COMPILER_CACHE=0 PRISM_CORE_LINT=1 PRISM_QUIET=1 cargo test {{ FLAGS }} --test opt_equiv gate::optimizer_configurations_have_identical_observation_traces -- --ignored --exact
+    PRISM_COMPILER_CACHE=0 PRISM_CORE_LINT=1 PRISM_QUIET=1 cargo test {{ FLAGS }} --test opt_equiv gate::optimizer_configurations_have_identical_observation_traces -- --exact
 
 # Run native performance gates.
 [group('tests')]

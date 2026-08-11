@@ -76,9 +76,7 @@
 -- no unserializable value.
 
 import Data.List (..)
-
 import Data.Foldable (..)
-
 import Data.Map (..)
 
 -- The varint radix (7 data bits per byte, the eighth a continuation flag) and the
@@ -103,12 +101,12 @@ let byte_mask : Int = 256
 -- `Bytes(buf, off)` denoting the bytes `buf[off ..]`. The concrete representation
 -- is owned by the codec; a derived instance only ever threads a `Bytes` through
 -- the builders below, never inspects it.
-pub type Bytes = Bytes(Buf, Int)
+opaque type Bytes = Bytes(Buf, Int)
 
 -- | What a downgrade could not carry down: the names of the fields dropped when
 -- lowering a value to an older frozen version. A downgrade never silently
 -- discards, it reports every field it had to drop.
-pub type Loss = Loss(List(String))
+pub newtype Loss = Loss(List(String)) deriving (Show)
 
 -- | The codec, derived structurally by `deriving (Serialize)`. `encode` writes a
 -- value's compact positional body; `decode` reads one back, returning the value
@@ -576,7 +574,8 @@ instance serializeTriple : Serialize((a, b, c)) given Serialize(a), Serialize(b)
 -- now exists above). Decoding zips the lists back and rebuilds the tree with the
 -- ambient `Ord(k)`.
 fn enc_map(m : Map(k, v, ord)) : Bytes given Serialize(k), Serialize(v) =
-  wire_cat(encode(map_keys(m)), encode(map_values(m)))
+  match map_to_lists(m) of
+    (keys, values) => wire_cat(encode(keys), encode(values))
 
 fn zip_pairs(ks : List(k), vs : List(v)) : List((k, v)) =
   match ks of
@@ -878,7 +877,7 @@ pub fn compose_upgrade(lo_mid : (a) -> b, mid_hi : (b) -> c) : (a) -> c =
 -- compose_downgrade(\(z) -> (z - 1, dropped(["hi"])), \(m) -> (m, no_loss))(10)
 -- ```
 -- ```output
--- (9, Wire.Loss([hi]))
+-- (9, [hi])
 -- ```
 pub fn compose_downgrade(
   hi_mid : (c) -> (b, Loss),
@@ -900,7 +899,7 @@ pub type Policy = Reject | LargestSafeSubset
 -- reconcile(LargestSafeSubset, \(x) -> (x - 1, no_loss), 5)
 -- ```
 -- ```output
--- (4, Wire.Loss([]))
+-- (4, [])
 -- ```
 pub fn reconcile(p : Policy, down : (hi) -> (lo, Loss), x : hi) : (lo, Loss) =
   match p of

@@ -360,7 +360,9 @@ pub(crate) fn index(
 ) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "# {title}\n");
-    let _ = writeln!(out, "{blurb}\n");
+    if !blurb.trim().is_empty() {
+        let _ = writeln!(out, "{}\n", blurb.trim());
+    }
     if let Some(anchor) = anchor {
         let _ = writeln!(out, "{anchor}\n");
     }

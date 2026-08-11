@@ -1,6 +1,7 @@
 use super::call::{
     call_shape, callee_parens, dot_parts, dot_recv_parens, is_with_call, paren_if, CallShape,
 };
+use super::decl::fmt_ty;
 use super::pat::fmt_pat_inline;
 use super::{
     text_width, Expr, Fmt, Grade, HandlerArm, Marker, Mode, Pattern, Sugar, SugarArm, INDENT, S,
@@ -74,12 +75,16 @@ impl Fmt<'_> {
         if let Some(s) = self.fmt_interp(f, args) {
             return s;
         }
+        if let Some(s) = self.fmt_state_stmt(f, args) {
+            return s;
+        }
         let flat_args = |xs: &[S<Expr>]| -> Vec<String> {
             xs.iter()
                 .map(|a| self.fmt_expr(a, indent, Mode::Flat))
                 .collect()
         };
         match call_shape(f, args) {
+            CallShape::Path(lit) => lit,
             CallShape::Recv(recv) => {
                 format!("{}{}", self.fmt_dot_recv(recv, indent), kw::QUESTION)
             }
@@ -167,16 +172,28 @@ impl Fmt<'_> {
                 };
                 (s, v.span.end, b.as_ref())
             }
-            Expr::Sugar(Sugar::VarDecl(x, v, b)) => (
-                format!(
-                    "{ind}{} {x} {} {}",
-                    kw::VAR,
-                    kw::COLON_EQ,
-                    self.fmt_expr(v, indent, Mode::Flat)
-                ),
-                v.span.end,
-                b.as_ref(),
-            ),
+            Expr::Sugar(Sugar::VarDecl(x, v, b)) => {
+                // `var x : T := e` parses with the annotation riding the
+                // initializer as a synth `Ann`; print the slot back. A
+                // hand-written `(e : T)` initializer is non-synth and keeps
+                // its inline spelling.
+                let (ann, init) = match &v.node {
+                    Expr::Ann(inner, ty) if v.synth => {
+                        (format!(" : {}", fmt_ty(ty)), inner.as_ref())
+                    }
+                    _ => (String::new(), v.as_ref()),
+                };
+                (
+                    format!(
+                        "{ind}{} {x}{ann} {} {}",
+                        kw::VAR,
+                        kw::COLON_EQ,
+                        self.fmt_expr(init, indent, Mode::Flat)
+                    ),
+                    v.span.end,
+                    b.as_ref(),
+                )
+            }
             Expr::Call(f, args) if is_with_call(args) => {
                 let (last, init) = args.split_last()?;
                 let Expr::Lam(ps, body) = &last.node else {
@@ -213,13 +230,31 @@ impl Fmt<'_> {
                 last_arm_end(body, arms),
                 body.as_ref(),
             ),
-            // Pattern lets and `?` statements desugar to matches carrying the
-            // synthetic marker. One arm restores `let pat =`, two restore `?`.
+            // Pattern lets, early-return bindings, and `?` statements desugar to
+            // matches carrying the synthetic marker. One arm restores
+            // `let pat =`; of the two-arm shapes, a wildcard fallback arm
+            // restores `let pat = v else fb` and the rest restore `?`, whose
+            // fallback arm is always an `Err` constructor.
             Expr::Match(s, arms) if cur.synth && arms.len() == 1 => (
                 self.fmt_let_line(&fmt_pat_inline(&arms[0].pat), s, indent, cur.span.start),
                 arms[0].body.span.start,
                 &arms[0].body,
             ),
+            Expr::Match(s, arms)
+                if cur.synth && arms.len() == 2 && matches!(arms[1].pat.node, Pattern::Wild) =>
+            {
+                (
+                    self.fmt_let_else_line(
+                        &fmt_pat_inline(&arms[0].pat),
+                        s,
+                        &arms[1].body,
+                        indent,
+                        cur.span.start,
+                    ),
+                    arms[1].body.span.end,
+                    &arms[0].body,
+                )
+            }
             Expr::Match(s, arms) if cur.synth && arms.len() == 2 => {
                 let v = self.fmt_expr(s, indent, Mode::Flat);
                 let binder = match &arms[0].pat.node {

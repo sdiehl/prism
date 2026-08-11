@@ -26,6 +26,17 @@ fn build(w : OrdWitness(Int, brand)) : Int =
 fn main() = print(with_ordering(asc, build))
 "#;
 
+// A raw map can infer any phantom brand, so branding the witness alone is not
+// enough. The ordered-map wrapper must reject a tree built outside the witness
+// API even when its brand variable could otherwise unify.
+const RAW_MAP_BYPASS: &str = r#"import Data.Ordered (..)
+import Data.Map (..)
+fn asc(a : Int, b : Int) : Int = a - b
+fn attempt_lookup(w : OrdWitness(Int, brand)) : Option(String) =
+  ord_lookup(w, 1, map_insert(1, "forged", map_empty))
+fn main() = print(with_ordering(asc, attempt_lookup))
+"#;
+
 #[test]
 fn cross_witness_mixing_is_rejected() {
     let err = prism::check(with_prelude(CROSS).as_str())
@@ -35,12 +46,15 @@ fn cross_witness_mixing_is_rejected() {
         "expected a type error, got: {err}"
     );
     let msg = err.to_string();
-    // A brand mismatch: two `Map` types agreeing on key and value but differing in
-    // the third (brand) parameter, naming both witnesses' brands.
+    // A brand mismatch naming both witnesses directly. Since a call's
+    // instantiated result unifies with its expected type before the arguments
+    // are checked, the disagreement surfaces at the witness argument itself
+    // (`OrdWitness(Int, ba)` vs `OrdWitness(Int, bb)`) rather than one level
+    // out at the `Map` those calls would have produced.
     assert!(
         msg.contains("type mismatch")
-            && msg.contains("Map(Int, String, bb)")
-            && msg.contains("Map(Int, String, ba)"),
+            && msg.contains("OrdWitness(Int, bb)")
+            && msg.contains("OrdWitness(Int, ba)"),
         "expected a brand mismatch naming both witnesses, got: {msg}"
     );
 }
@@ -49,4 +63,40 @@ fn cross_witness_mixing_is_rejected() {
 fn one_witness_threaded_consistently_checks() {
     prism::check(with_prelude(CONSISTENT).as_str())
         .expect("a single witness used consistently must type-check");
+}
+
+#[test]
+fn raw_map_cannot_enter_the_witness_api() {
+    let err = prism::check(with_prelude(RAW_MAP_BYPASS).as_str())
+        .expect_err("a raw map must not masquerade as a witness-built map");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("type mismatch")
+            && msg.contains("Map(Int, String")
+            && msg.contains("OrderedMap(Int, String"),
+        "expected a raw/ordered map mismatch, got: {msg}"
+    );
+}
+
+#[test]
+fn stdlib_invariant_constructors_are_hidden() {
+    let cases = [
+        ("Data.Vec", "MkVec"),
+        ("Data.FlatArray", "FloatArr"),
+        ("Data.IntMap", "IMLeaf"),
+        ("Data.UnionFind.Payload", "Ufp"),
+        ("Data.Frozen", "Frz"),
+        ("Data.Tensor", "MkTensor"),
+        ("Data.Ordered", "OrdBy"),
+    ];
+    for (module, ctor) in cases {
+        let src = format!("import {module} ({ctor})\nfn main() = print(0)");
+        let err = prism::check(with_prelude(&src).as_str())
+            .expect_err("stdlib invariant constructor must be hidden");
+        let msg = err.to_string();
+        assert!(
+            msg.contains(&format!("does not export `{ctor}`")),
+            "expected hidden-constructor error for {module}.{ctor}, got: {msg}"
+        );
+    }
 }

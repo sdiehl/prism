@@ -357,10 +357,10 @@ fn delete_object(root: &Path, hash: &str) {
 
 // The standard library ships as a pinned content-addressed root through the
 // store. A lockfile records that root; a later build recomputes the embedded
-// stdlib's root and compares. The three outcomes (unpinned, agree, disagree) are
-// the whole distribution story the store supports today: a disagreement is named
-// exactly, so two programs pinning different Std roots are told apart the same way
-// two dependency hashes are, rather than silently coexisting.
+// stdlib's root and compares. The three outcomes are unpinned, agree, and
+// disagree. A disagreement is named exactly, so two programs pinning different
+// Std roots are told apart the same way two dependency hashes are, rather than
+// silently coexisting.
 #[test]
 fn std_root_pins_and_verifies() {
     let root = stdlib_root().expect("embedded stdlib elaborates");
@@ -1153,6 +1153,17 @@ fn docs_manifest_round_trips_and_rejects_stale_and_drifted_inputs() {
         String::from_utf8_lossy(&gen.stderr)
     );
     assert!(out.join("docs.plineage").is_file(), "manifest is written");
+    let index = fs::read_to_string(out.join("index.md")).unwrap();
+    assert!(
+        index.starts_with(
+            "# tzdb\n\nDeterministic timezone arithmetic over a pinned, curated zone table.\n\n## Modules\n"
+        ),
+        "package description must lead directly into the generated module list:\n{index}"
+    );
+    assert!(
+        !index.contains("API documentation generated from the project's source"),
+        "package-specific copy must replace the generic docs blurb:\n{index}"
+    );
     let ok = run_docs(&[
         project.as_os_str(),
         "--out".as_ref(),

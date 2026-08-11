@@ -5,6 +5,7 @@
 use std::cmp::Ordering;
 use std::io::{Read as _, Write as _};
 use std::path::Path;
+use std::process::Command;
 use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -25,8 +26,16 @@ use super::{owned_math, Rv};
 // so it can emit at most 63 characters. The interpreter mirrors that cap to stay
 // byte-identical with the native backend.
 const RT_FLOAT_PREC_MAX_CHARS: usize = 63;
+const BYTE_MASK: i64 = 0xFF;
+const DEFAULT_BYTE: u8 = 0;
 const BUFFER_INDEX_ERROR: &str = "buffer index out of bounds";
 const TBUF_NEGATIVE_LENGTH_ERROR: &str = "tbuf_new: negative length";
+
+#[expect(clippy::cast_sign_loss)]
+const fn low_byte(value: i64) -> u8 {
+    (value & BYTE_MASK) as u8
+}
+
 /// Mirrors `prism_big_of_str` in the C runtime: ASCII-trim, optional sign, then
 /// a strict all-digit decimal parse. Anything else is None.
 pub(super) fn big_of_str(s: &str) -> Option<BigInt> {
@@ -406,7 +415,7 @@ pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv
         },
         (B::WriteBytesFile, [Rv::Str(p), Rv::Buf(v)]) => Ok(file_result(fs::write(p, &v[..]))),
         (B::WriteFile, [Rv::Str(p), Rv::Str(c)]) => Ok(file_result(fs::write(p, c))),
-        (B::FileExists, [Rv::Str(p)]) => Ok(Rv::Bool(std::path::Path::new(p).exists())),
+        (B::FileExists, [Rv::Str(p)]) => Ok(Rv::Bool(Path::new(p).exists())),
         (B::AppendFile, [Rv::Str(p), Rv::Str(c)]) => {
             let r = fs::OpenOptions::new()
                 .append(true)
@@ -442,7 +451,7 @@ pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv
         // Run a shell command, returning its exit code (-1 on spawn failure or
         // signal death), matching the C runtime's `WEXITSTATUS(system(..))`.
         (B::System, [Rv::Str(cmd)]) => Ok(Rv::Int(i64::from(
-            std::process::Command::new("sh")
+            Command::new("sh")
                 .arg("-c")
                 .arg(cmd)
                 .status()
@@ -531,9 +540,9 @@ pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv
                 .iter()
                 .map(|e| {
                     if let Rv::Int(n) = e {
-                        u8::try_from(*n & 0xFF).unwrap_or(0)
+                        low_byte(*n)
                     } else {
-                        0
+                        DEFAULT_BYTE
                     }
                 })
                 .collect();
@@ -569,8 +578,7 @@ pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv
         (B::BufEmpty, []) => Ok(Rv::Buf(Rc::new(Vec::new()))),
         (B::BufNew, [Rv::Int(n), Rv::Int(init)]) => {
             let k = usize::try_from(*n).map_err(|_| "buf_new: negative length".to_string())?;
-            #[expect(clippy::cast_sign_loss)]
-            let byte = (*init & 0xFF) as u8;
+            let byte = low_byte(*init);
             Ok(Rv::Buf(Rc::new(vec![byte; k])))
         }
         (B::BufLen, [Rv::Buf(v)]) => Ok(Rv::Int(i64::try_from(v.len()).unwrap_or(0))),
@@ -585,16 +593,12 @@ pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv
                 return Err(BUFFER_INDEX_ERROR.to_string());
             }
             let mut next = v.to_vec();
-            #[expect(clippy::cast_sign_loss)]
-            {
-                next[k] = (*x & 0xFF) as u8;
-            }
+            next[k] = low_byte(*x);
             Ok(Rv::Buf(Rc::new(next)))
         }
         (B::BufPush, [Rv::Buf(v), Rv::Int(x)]) => {
             let mut next = v.to_vec();
-            #[expect(clippy::cast_sign_loss)]
-            next.push((*x & 0xFF) as u8);
+            next.push(low_byte(*x));
             Ok(Rv::Buf(Rc::new(next)))
         }
         // Typed buffers (f64 and i64 elements): one raw-word storage, routed to

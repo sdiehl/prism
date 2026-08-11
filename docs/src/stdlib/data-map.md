@@ -20,7 +20,7 @@ The empty map.
 
 ### `map_height`
 
-```prism,sig,h-6af95315bce55020f4979858451e2081406178ac3f06fb117ef28f540f976d7b
+```prism,sig,h-dfe39c17f0890081502e2fc09ac8dcb8f95a400b4b9d2f7b4ed7ae330672f390
 map_height : forall a b c. (Map(a, b, c)) -> Int
 ```
 
@@ -28,7 +28,7 @@ Helper: the cached height of the tree (0 for the empty map).
 
 ### `map_node`
 
-```prism,sig,h-fb13c6aba260cba349531937518ac2e3a9b5439ab24bdbbf9401b8495a24f377
+```prism,sig,h-c51cd424810d72247ee51c954c61673f2240962ced6a01038d81abfcc86d694a
 map_node : forall a b c. (a, b, Map(a, b, c), Map(a, b, c)) -> Map(a, b, c)
 ```
 
@@ -36,7 +36,7 @@ Helper: build a `Bin` node, computing its height from its children.
 
 ### `map_bf`
 
-```prism,sig,h-7bde43d97b972cdd46ab5dfe7492a25a8897df924340b255cc6afcb3af1bc1de
+```prism,sig,h-3929b18afc7aeabee9dbe9dc5a6a8449cf771fae2c88de1a89f62e8a785777f9
 map_bf : forall a b c. (Map(a, b, c)) -> Int
 ```
 
@@ -44,7 +44,7 @@ Helper: the balance factor of a node (left height minus right height).
 
 ### `map_rot_right`
 
-```prism,sig,h-8c5a536c7daa9d5b0ce2a8f76ccddf0aaf085afd4e91034d9faeae3dd8e4a0a1
+```prism,sig,h-213d079a8164ed215b7d860c475822b69fe741a305b2877a39a69ad252b040d3
 map_rot_right : forall a b c. (Map(a, b, c)) -> Map(a, b, c)
 ```
 
@@ -52,7 +52,7 @@ Helper: a single right AVL rotation.
 
 ### `map_rot_left`
 
-```prism,sig,h-26f39b07c758a6bd49f796816e240c3071e1c1a820981bec67925b609555308c
+```prism,sig,h-d47704a4809c77e4e72a4b1208d58769c97f17c1229c4a8f4c6f23db5b1e04d5
 map_rot_left : forall a b c. (Map(a, b, c)) -> Map(a, b, c)
 ```
 
@@ -60,7 +60,7 @@ Helper: a single left AVL rotation.
 
 ### `map_balance`
 
-```prism,sig,h-9c7ed7a2702412bd15ff6ab79b59ee1a53790458d48bc839e872adff1855654d
+```prism,sig,h-adda6fce5573a89e0207d9eaab0903c23baf90eba379e1d6aa35c1e915c34470
 map_balance : forall a b c. (Map(a, b, c)) -> Map(a, b, c)
 ```
 
@@ -68,8 +68,8 @@ Helper: rebalance a node after an insert or delete unbalanced it.
 
 ### `map_insert`
 
-```prism,sig,h-5b22cf6d240565ec3152d1eef4e78ad8a3348e51f0328631f569645b763f4649
-map_insert : forall a b c. (b, c, Map(b, c, a)) -> Map(b, c, a)
+```prism,sig,h-95863727d0c69fa7ddbe0b574f362f20ea71891b579bee0559fae9327358e2ec
+map_insert : forall a b c. (b, c, Map(b, c, a)) -> Map(b, c, a) given Ord(b)
 ```
 
 Insert `key` with `value`, overwriting any existing binding, and rebalance.
@@ -84,8 +84,8 @@ Some(a)
 
 ### `map_lookup`
 
-```prism,sig,h-2e861f6c84cb8078ea49123ab8927375c9d1f085a90360c1f3f393ba6fd066c7
-map_lookup : forall a b c. (b, Map(b, c, a)) -> Option(c)
+```prism,sig,h-da23c16186beeb1624a3b93d2f5f8898b572af85f6059bf1da061b4de11677e3
+map_lookup : forall a b c. (b, Map(b, c, a)) -> Option(c) given Ord(b)
 ```
 
 The value bound to `key` as `Some`, or `None` when absent.
@@ -100,8 +100,8 @@ Some(b)
 
 ### `map_member`
 
-```prism,sig,h-df0e71c1bbfa1ad5b75854d4570fc6761ee87c56d04b342e45c88443e7f5b312
-map_member : forall a b c. (b, Map(b, c, a)) -> Bool
+```prism,sig,h-c7189f7ada4d1cb76a362388a79a5b62e349a39c2a10cf5187047721dfe232e1
+map_member : forall a b c. (b, Map(b, c, a)) -> Bool given Ord(b)
 ```
 
 True when `key` is present in the map.
@@ -116,7 +116,7 @@ true
 
 ### `map_size`
 
-```prism,sig,h-0f1dded1474cf6ceb50afd2cd85103815eb4fa60bf35d39fb2d3fdd2a099c5cd
+```prism,sig,h-4aaf0034c71d707eefcbba2945f9d3d8afd77cc9c7ec2d3c0c3751c967734ddc
 map_size : forall a b c. (Map(a, b, c)) -> Int
 ```
 
@@ -132,7 +132,7 @@ map_size(map_from_list([(1, "a"), (2, "b")]))
 
 ### `map_min`
 
-```prism,sig,h-5e6c658aef8b94afe71c428a5d354cc019c3d5689521bc3da25f92e780c22c9f
+```prism,sig,h-c81ce79452c604b34765c652a2d063da17ccac467e926e31d916af2dea6a6edb
 map_min : forall a b c. (Map(a, b, c)) -> Option((a, b))
 ```
 
@@ -148,8 +148,8 @@ Some((1, a))
 
 ### `map_delete`
 
-```prism,sig,h-f8a69461e80dc4e091fa59abe7bf94c5c7b4543e627703297be84f7e055d056d
-map_delete : forall a b c. (b, Map(b, c, a)) -> Map(b, c, a)
+```prism,sig,h-fe7f75525363477d0fbeae83d5f78ae447e584ad868ef7ba28ff6814b530ed73
+map_delete : forall a b c. (b, Map(b, c, a)) -> Map(b, c, a) given Ord(b)
 ```
 
 Remove `key` (a no-op if absent), rebalancing the tree.
@@ -164,7 +164,7 @@ map_to_list(map_delete(1, map_from_list([(1, "a"), (2, "b")])))
 
 ### `map_to_list`
 
-```prism,sig,h-477c9d7ba80a00cf4a83a7ee9d0bef4a4db48145332242e885d3268375b99f53
+```prism,sig,h-210e1b773ec824d396d2159a7f9f405bd61ff47bb85d949465583562425a432f
 map_to_list : forall a b c. (Map(a, b, c)) -> List((a, b))
 ```
 
@@ -180,7 +180,7 @@ map_to_list(map_from_list([(2, "b"), (1, "a")]))
 
 ### `map_keys`
 
-```prism,sig,h-6b419e112a3561d39fdc3e151f86cb46122f3a529fc8e5f436c96d88be91ea44
+```prism,sig,h-7e3deb58520512dbeb307bb8dbc864c0644aaa8ae8dafe7c0c2bfd3142534b67
 map_keys : forall a b c. (Map(a, b, c)) -> List(a)
 ```
 
@@ -196,7 +196,7 @@ map_keys(map_from_list([(2, "b"), (1, "a")]))
 
 ### `map_values`
 
-```prism,sig,h-fc376960b116d5b7fe012bbeb9c70922a2866b1c1017b3bb9139ca1a3726d9f6
+```prism,sig,h-8df4f1e6a6d2ac34d3ef6a9535e50084d6febce5ce5a8e147aff7d8d9c9e8049
 map_values : forall a b c. (Map(a, b, c)) -> List(b)
 ```
 
@@ -210,10 +210,18 @@ map_values(map_from_list([(1, "a"), (2, "b")]))
 [a, b]
 ```
 
+### `map_to_lists`
+
+```prism,sig,h-f516b732d799dbc58af1d635a3c32690ad922ce1038c519109008a7053b07e0b
+map_to_lists : forall a b c. (Map(a, b, c)) -> (List(a), List(b))
+```
+
+The ascending keys and their values as two aligned lists, produced by one tree walk. This is the representation used by the frozen map wire codec.
+
 ### `map_from_list`
 
-```prism,sig,h-ed5771109cccf19571ba99add0b699a57a7338fe45ef8ab22c2089563e99499c
-map_from_list : forall a b c. (List((b, c))) -> Map(b, c, a)
+```prism,sig,h-f8d009a961d6a1d2e5609985801856327d8fa6748a1b4187c838d812f5ccc6f8
+map_from_list : forall a b c. (List((b, c))) -> Map(b, c, a) given Ord(b)
 ```
 
 Build a map from `(key, value)` pairs; a later pair overwrites an earlier one with the same key.

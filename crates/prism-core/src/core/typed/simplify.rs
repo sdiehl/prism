@@ -729,6 +729,7 @@ impl Rewrite for Simplifier {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::slice;
 
     use crate::core::{EffectStrategy, OpGrades};
     use crate::flags::{DynFlags, EffectTier};
@@ -1621,7 +1622,7 @@ mod tests {
         assert_eq!(at(3), Some(TypedValueKind::Int(-1)));
         assert_eq!(at(-1), Some(TypedValueKind::Int(-1)));
         assert_eq!(
-            const_fold_str_builtin(Builtin::ByteLen, std::slice::from_ref(&text)),
+            const_fold_str_builtin(Builtin::ByteLen, slice::from_ref(&text)),
             Some(TypedValueKind::Int(3))
         );
         assert_eq!(

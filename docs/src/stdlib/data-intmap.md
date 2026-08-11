@@ -16,7 +16,7 @@ Opt-in: not in Base.
 
 ### `IntMap`
 
-```prism,def,h-1caf3bd5e27120c6a95988375bbee30e33b7f8f2f4cc2781ba944f75a49399af
+```prism,def,h-367535ae13aecd2136e0b32ff403d0351545657372d09e897686aed5eb8905ce
 type IntMap(v)
   = IMEmpty
   | IMLeaf(I64, v)
@@ -32,7 +32,7 @@ A map from `I64` keys to values of type `v`.
 
 ### `intmap_empty`
 
-```prism,sig,h-1a0f0eb179ed9ec88373b006588212e4e9b93ed4a623f77f12fe89264b50465f
+```prism,sig,h-a07d6f579bf0b2601c1e1b92d0adaf5a0bbb933a6ab8d7475f04f318e868b110
 intmap_empty : forall a. Data.IntMap.IntMap(a)
 ```
 
@@ -48,7 +48,7 @@ true
 
 ### `intmap_singleton`
 
-```prism,sig,h-d314eb102cf705164470424ba19f11f8f78cd57a96dd1cc3de68e4d2e1727df8
+```prism,sig,h-af65c4458412f0bd40fb6561ee01826309bbc67df6758b7af2138b0ce6816d79
 intmap_singleton : forall a. (I64, a) -> Data.IntMap.IntMap(a)
 ```
 
@@ -64,7 +64,7 @@ intmap_to_list(intmap_singleton(7i64, "a"))
 
 ### `intmap_insert`
 
-```prism,sig,h-d24295108d6cde4bfac50f5188d11361f397cf0993ff36d366be628069f17383
+```prism,sig,h-ea193505bfbb7a4bec592bc901bd507a66d784db422679627d413955e3fce9f6
 intmap_insert : forall a. (I64, a, Data.IntMap.IntMap(a)) -> Data.IntMap.IntMap(a)
 ```
 
@@ -80,7 +80,7 @@ Some(a)
 
 ### `intmap_insert_with`
 
-```prism,sig,h-5fcd302eec1e341a3eb361be52ff04e565d6e32dbf7bdfc4db9f909e96d58190
+```prism,sig,h-6fa8c3ac494fb0bbd0a974144d6e2fec3b7dbbb06bed669d4918f88a5df46d3c
 intmap_insert_with : forall e0 a. ((a, a) -> a ! {e0}, I64, a, Data.IntMap.IntMap(a)) -> Data.IntMap.IntMap(a) ! {e0}
 ```
 
@@ -98,7 +98,7 @@ intmap_to_list(
 
 ### `intmap_lookup`
 
-```prism,sig,h-0325688a162efc36e0fd7146417688b1a094c3f2c6c81cafb04db8cd5ca0ea6a
+```prism,sig,h-4d157dcd8de6c447b98ed5161a0cc48c1b1db44e03e1c540da0df96681ddb234
 intmap_lookup : forall a. (I64, Data.IntMap.IntMap(a)) -> Option(a)
 ```
 
@@ -114,7 +114,7 @@ Some(b)
 
 ### `intmap_member`
 
-```prism,sig,h-1bcf482857d861bf75b5704e2454d25586740c8582fa3e9b809d880ec31a3223
+```prism,sig,h-9ed5887da3bc24fd02ac6de9b5550fc0fa37d4b95d368af8b3765f5473edf0f7
 intmap_member : forall a. (I64, Data.IntMap.IntMap(a)) -> Bool
 ```
 
@@ -130,7 +130,7 @@ true
 
 ### `intmap_delete`
 
-```prism,sig,h-d7e919347d8d78ce68be79991ed5e9abc82dbdab39da85f0cb810513211d2e0d
+```prism,sig,h-b9f0daf219646712382aa417d12da92878cb9682587f0cd8d1b60c0b54eac84a
 intmap_delete : forall a. (I64, Data.IntMap.IntMap(a)) -> Data.IntMap.IntMap(a)
 ```
 
@@ -146,7 +146,7 @@ intmap_to_list(intmap_delete(1i64, intmap_from_list([(1i64, "a"), (2i64, "b")]))
 
 ### `intmap_size`
 
-```prism,sig,h-513f8a269cb6552b1c61a831ac3bf4f88a5a87989537371f921260da1fde314e
+```prism,sig,h-e7dfb5123664f7b5d15df3f1f90eef891d95ca67120a47bc911890179249bfc0
 intmap_size : forall a. (Data.IntMap.IntMap(a)) -> Int
 ```
 
@@ -162,7 +162,7 @@ intmap_size(intmap_from_list([(1i64, "a"), (2i64, "b")]))
 
 ### `intmap_is_empty`
 
-```prism,sig,h-9b85d2b7627b36f8ec8bcfbbabcca481aa0389c356597b0a538089deb10a3a39
+```prism,sig,h-61ce6657004e26e470fbc7fc1bd8ec092ae10415f5fbb307212a54c4f8ce961b
 intmap_is_empty : forall a. (Data.IntMap.IntMap(a)) -> Bool
 ```
 
@@ -178,7 +178,7 @@ true
 
 ### `intmap_union`
 
-```prism,sig,h-3e1072d99331786927e9b57ead5c8c6c602925ed3b4e3e5f10312c82519cf0f4
+```prism,sig,h-de7a92474065a879802028a56059a81aeb62593956466e183ecd28445e9a9692
 intmap_union : forall a. (Data.IntMap.IntMap(a), Data.IntMap.IntMap(a)) -> Data.IntMap.IntMap(a)
 ```
 
@@ -199,7 +199,7 @@ intmap_to_list(
 
 ### `intmap_union_with`
 
-```prism,sig,h-ddead3913106dbff1855deee25b3171cc721eb01d7f9a1640ae33258d893f3da
+```prism,sig,h-c2e15f1c19be30cda0c5a4a936e21c418a26c185e304b576039e736f98019571
 intmap_union_with : forall e0 a. ((a, a) -> a ! {e0}, Data.IntMap.IntMap(a), Data.IntMap.IntMap(a)) -> Data.IntMap.IntMap(a) ! {e0}
 ```
 
@@ -223,7 +223,7 @@ intmap_to_list(
 
 ### `intmap_intersection`
 
-```prism,sig,h-4c92e3ba3c8b27c0e9f93d4bce55cdd5f09ff09dbf97b8a69581372a468c8ec7
+```prism,sig,h-82f9a24fabcaebcbd0698460beb74b7d5793c014f2be783bbdc8ebc837b973e4
 intmap_intersection : forall a b. (Data.IntMap.IntMap(a), Data.IntMap.IntMap(b)) -> Data.IntMap.IntMap(a)
 ```
 
@@ -244,7 +244,7 @@ intmap_to_list(
 
 ### `intmap_difference`
 
-```prism,sig,h-9c07ec318aa6150e9cf8a0e036c01bfa3d6661b9a5740fc54ca5f69a97904c53
+```prism,sig,h-558c481a3d6bf6e39392d63e6a5eac3701accdac7a16dab89850a2c5873f69e1
 intmap_difference : forall a b. (Data.IntMap.IntMap(a), Data.IntMap.IntMap(b)) -> Data.IntMap.IntMap(a)
 ```
 
@@ -265,7 +265,7 @@ intmap_to_list(
 
 ### `intmap_filter`
 
-```prism,sig,h-ff67788f5b765bb8e6529db03ef4a7c5e5b7618c33fc8f2691077c2b8575cf5b
+```prism,sig,h-ede8e63d9006f4f3eab61691dd3643bd140790553888817f8623d2f2bda0a623
 intmap_filter : forall e0 a. ((I64, a) -> Bool ! {e0}, Data.IntMap.IntMap(a)) -> Data.IntMap.IntMap(a) ! {e0}
 ```
 
@@ -288,7 +288,7 @@ intmap_to_list(
 
 ### `intmap_map_values`
 
-```prism,sig,h-9943dd54701d235eaffbc374d36e77754b17bc14b2057894158c5939fb8cdb01
+```prism,sig,h-6f81d1ac8c60b0c404a5a558afe371fd518b9c472fe570f919d705e55f654147
 intmap_map_values : forall e0 a b. ((a) -> b ! {e0}, Data.IntMap.IntMap(a)) -> Data.IntMap.IntMap(b) ! {e0}
 ```
 
@@ -306,7 +306,7 @@ intmap_values(
 
 ### `intmap_fold`
 
-```prism,sig,h-a18786797a37702ab6ea88f4a04f78387cc5ace519ce8218895c161ab53661d0
+```prism,sig,h-fb324b7d77bc60ffd91353ae49c7b59054fd802c658c088d5863e2573fd79424
 intmap_fold : forall e0 a b. ((a, I64, b) -> a ! {e0}, a, Data.IntMap.IntMap(b)) -> a ! {e0}
 ```
 
@@ -324,7 +324,7 @@ intmap_fold(\(acc, k, _v) -> acc + k, 0i64, intmap_from_list([(1i64, "a"), (2i64
 
 ### `intmap_to_list`
 
-```prism,sig,h-88dc96c937653049d0638d35f4e4c6e4b2bb3e841c404f43e9235479e161e712
+```prism,sig,h-60b2fdfa75fb43a99d3d05fc35c33439275dcf73d467dc49d92d071b8e7e2fb3
 intmap_to_list : forall a. (Data.IntMap.IntMap(a)) -> List((I64, a))
 ```
 
@@ -340,7 +340,7 @@ intmap_to_list(intmap_from_list([(2i64, "b"), (0i64, "z"), (1i64, "a")]))
 
 ### `intmap_keys`
 
-```prism,sig,h-18b53403070f6da3a7fc732c2defad2ba0ae8fb08839c231775a92a51c9acd84
+```prism,sig,h-f78f1238b3404f4ec0b207d89fcf75ff541c8500f84c294db3abd20fec1201c3
 intmap_keys : forall a. (Data.IntMap.IntMap(a)) -> List(I64)
 ```
 
@@ -356,7 +356,7 @@ intmap_keys(intmap_from_list([(2i64, "b"), (1i64, "a")]))
 
 ### `intmap_values`
 
-```prism,sig,h-44a38926ab6097463ed17065cd534d17f3c8dbddbeb7418f07406f478a2b8e18
+```prism,sig,h-9ad476b1d8da0b96194fed8e32af3e52ef796e2dd6d11afba5825dc60470e796
 intmap_values : forall a. (Data.IntMap.IntMap(a)) -> List(a)
 ```
 
@@ -372,7 +372,7 @@ intmap_values(intmap_from_list([(1i64, "a"), (2i64, "b")]))
 
 ### `intmap_from_list`
 
-```prism,sig,h-3f3a88eb9eecf6d6a177be724bc09b9200a4bfaca822af57f945290b36c92567
+```prism,sig,h-b7126c9a99215c60749babd8cd1adc35dea814344164e28b6afeb74b084d0b36
 intmap_from_list : forall a. (List((I64, a))) -> Data.IntMap.IntMap(a)
 ```
 

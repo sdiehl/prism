@@ -1,5 +1,4 @@
 import Data.Bytes (..)
-
 import Wire (..)
 
 -- Hex-encode then hex-decode N bytes. The input is one `buf_new` allocation, so

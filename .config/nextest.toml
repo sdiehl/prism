@@ -18,6 +18,15 @@ filter = 'binary(typed_spine)'
 test-group = 'corpus-compilers'
 slow-timeout = { period = "120s", terminate-after = 16 }
 
+# The whole-corpus test lowers every runnable program under eight optimizer
+# configurations and interprets each; the sample test is its fast subset. Same
+# rule as every other entry here: the timeout catches a hang, it does not bound
+# honest work.
+[[profile.default.overrides]]
+filter = 'binary(opt_equiv)'
+test-group = 'corpus-compilers'
+slow-timeout = { period = "120s", terminate-after = 32 }
+
 [[profile.default.overrides]]
 filter = 'binary(compiler) & test(core_lint_clean_on_corpus)'
 test-group = 'corpus-compilers'
@@ -95,6 +104,11 @@ slow-timeout = { period = "120s", terminate-after = 16 }
 filter = 'binary(typed_spine)'
 test-group = 'corpus-compilers'
 slow-timeout = { period = "120s", terminate-after = 16 }
+
+[[profile.ci.overrides]]
+filter = 'binary(opt_equiv)'
+test-group = 'corpus-compilers'
+slow-timeout = { period = "120s", terminate-after = 32 }
 
 [[profile.ci.overrides]]
 filter = 'binary(compiler) & test(core_lint_clean_on_corpus)'

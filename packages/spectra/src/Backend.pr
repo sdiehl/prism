@@ -16,13 +16,9 @@
 -- ```
 
 import Data.List (append)
-
 import Data.String (contains)
-
 import Typst as T
-
 import Layout (..)
-
 import Theme (Theme, prism_theme)
 
 pub type TypstDocument = TypstDocument {

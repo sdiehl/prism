@@ -1,0 +1,28 @@
+-- A path literal is sugar and nothing else: it parses to a call of `lens` on a
+-- getter and a setter built from the field steps. Defining `lens` here rather
+-- than importing the optic library keeps this a picture of the expansion alone,
+-- with no library body in the way. One step and two steps are both present,
+-- because the nesting of the read and of the write back is the part the sugar
+-- decides. The binders the expansion introduces are unspellable, so nothing a
+-- program can write shadows them.
+type Lens(s, a) = MkLens((s) -> a, (s, a) -> s)
+
+fn lens(get, set) = MkLens(get, set)
+
+type Pos = Pos { x: Int, y: Int }
+
+type Player = Player { pos: Pos, hp: Int }
+
+fn hp_lens() : Lens(Player, Int) = #path hp
+
+fn depth_lens() : Lens(Player, Int) = #path pos.x
+
+fn read(l : Lens(Player, Int), p : Player) : Int =
+  match l of
+    MkLens(get, _set) => get(p)
+
+fn main() =
+  let here = Pos { x = 3, y = 4 }
+  let p = Player { pos = here, hp = 7 }
+  println(read(hp_lens(), p))
+  println(read(depth_lens(), p))

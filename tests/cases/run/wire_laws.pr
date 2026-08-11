@@ -7,9 +7,7 @@
 -- function of its seed and reproduces identically on both backends.
 
 import Wire (..)
-
 import Test (..)
-
 import Quickcheck (..)
 
 -- A product, a sum with a nullary variant, and a nested recursive type, each

@@ -5,7 +5,7 @@
 // assumed. `tests/fixtures/syntax/released/<version>/` holds artifacts exactly
 // as an earlier release cut them, byte for byte, and is never regenerated: the
 // current reader must decode them, re-encode them to the same bytes, and agree
-// with today's exporter on everything except the compiler stamp they carry.
+// with the current exporter on everything except the compiler stamp they carry.
 //
 // The refusal side matters as much. A document naming a different schema
 // version is refused whether that version is older or newer than the current
@@ -37,7 +37,7 @@ const STEMS: [&str; 4] = ["decls", "interp", "stable", "types"];
 const RETAINED_FAMILIES: [(&str, &str); 2] =
     [("syntax-tokens", "tokens"), ("surface-syntax", "surface")];
 
-// What today's reader promises about one syntax schema.
+// What the current reader promises about one syntax schema.
 //
 // `Read` means the tag shipped in the named earlier release and its documents
 // are still read unchanged; the retained corpus is the evidence. `New` means
@@ -168,7 +168,7 @@ retained_reads! {
 }
 
 // Every retained artifact carries the stamp of the release it was cut from, so
-// the corpus cannot be quietly refreshed into today's output and keep claiming
+// the corpus cannot be quietly refreshed into current output and keep claiming
 // to test an older format.
 #[test]
 fn retained_artifacts_carry_the_released_stamp() {
@@ -184,7 +184,7 @@ fn retained_artifacts_carry_the_released_stamp() {
     }
 }
 
-// The shape statement: today's exporter reproduces a retained artifact exactly,
+// The shape statement: the current exporter reproduces a retained artifact exactly,
 // apart from the compiler stamp inside the envelope. Comparing the whole
 // document rather than a schema tag is what makes the tag's claim honest, since
 // an unbumped tag over a drifted shape is precisely the failure this catches.

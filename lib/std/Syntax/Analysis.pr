@@ -7,15 +7,10 @@
 -- name means; that is the resolver's job and `Syntax.Rename` queries it.
 
 import Control.Layer (..)
-
 import Data.Foldable (elem, length)
-
 import Data.List (concat_map, filter, map)
-
 import Syntax.Ast (..)
-
 import Syntax.Source (..)
-
 import Syntax.Walk (..)
 
 -- | Every node of an expression, root first, in source order.

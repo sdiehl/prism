@@ -22,8 +22,8 @@ The empty set.
 
 ### `set_insert`
 
-```prism,sig,h-fd0deebb70f5ecaab9688031a826ebb9ac55d757e09a40808fb776c7857d52ce
-set_insert : forall a b. (b, Map(b, Unit, a)) -> Map(b, Unit, a)
+```prism,sig,h-491ef5143072b8972f4649d928cf32df6e0656127e31ff3953e815af897f267a
+set_insert : forall a b. (b, Map(b, Unit, a)) -> Map(b, Unit, a) given Ord(b)
 ```
 
 Add `x` to the set (a no-op if already present).
@@ -38,8 +38,8 @@ set_to_list(set_insert(2, set_insert(1, set_empty)))
 
 ### `set_member`
 
-```prism,sig,h-b44ab229e6b087c1c9a25973b737d533d220c37c5143f3f9b154d97146544349
-set_member : forall a b. (b, Map(b, Unit, a)) -> Bool
+```prism,sig,h-dc6b25df7ca1a43cd2a3aac4454e3a06024d74ddbf96f14dc4e1282ed3a59eef
+set_member : forall a b. (b, Map(b, Unit, a)) -> Bool given Ord(b)
 ```
 
 True when `x` is a member of the set.
@@ -54,8 +54,8 @@ true
 
 ### `set_delete`
 
-```prism,sig,h-c5caaee7df58ba34b8517f16ed9e2af5b746908dbc4cdd00a5900fe250590ef4
-set_delete : forall a b. (b, Map(b, Unit, a)) -> Map(b, Unit, a)
+```prism,sig,h-135f583028b89039913f3af5ce4a001f8d02b19c9a6d9c02380a37cbefe63bf9
+set_delete : forall a b. (b, Map(b, Unit, a)) -> Map(b, Unit, a) given Ord(b)
 ```
 
 Remove `x` from the set (a no-op if absent).
@@ -70,7 +70,7 @@ set_to_list(set_delete(2, set_from_list([1, 2, 3])))
 
 ### `set_size`
 
-```prism,sig,h-bf13cb0ce24421b63d945ccc09fd1b2baefe1b0bbe31b15df5e48597eb17a196
+```prism,sig,h-b03735b1f42e8ed4290f5dbedc9d5a985fac9ff872ac668b4c4630a023274b86
 set_size : forall a b c. (Map(a, b, c)) -> Int
 ```
 
@@ -86,7 +86,7 @@ set_size(set_from_list([1, 2, 2, 3]))
 
 ### `set_to_list`
 
-```prism,sig,h-1867c8a72d6996735ea0506c8dc518602aca8b4c24691b19a6340c6ac96a7563
+```prism,sig,h-417d3c1e53be50763bf71c56330960f28dd60f386b761ac1ed16938160d9548a
 set_to_list : forall a b c. (Map(a, b, c)) -> List(a)
 ```
 
@@ -102,8 +102,8 @@ set_to_list(set_from_list([3, 1, 2, 1]))
 
 ### `set_from_list`
 
-```prism,sig,h-832a57c611963988b3ba5da62cc610fe2780dc59eb64f0fc98908fa53c78b649
-set_from_list : forall a b. (List(b)) -> Map(b, Unit, a)
+```prism,sig,h-62e1694e3fd82be730442157a2a88ac7cc421c3efc45544c2759605e9c0bd704
+set_from_list : forall a b. (List(b)) -> Map(b, Unit, a) given Ord(b)
 ```
 
 Build a set from a list, dropping duplicates.
@@ -118,8 +118,8 @@ set_to_list(set_from_list([3, 1, 2, 1]))
 
 ### `set_union`
 
-```prism,sig,h-f93ada8aa4bada3cebddda074441ceebf9c5007dcfb21a2e9f5403c5f2cf37c8
-set_union : forall a b c. (Map(c, Unit, a), Map(c, Unit, b)) -> Map(c, Unit, a)
+```prism,sig,h-922889b5fa77a236fcf8114a3412b2d0c516f49a2af974ee67963f2f81b31e79
+set_union : forall a b c. (Map(c, Unit, a), Map(c, Unit, b)) -> Map(c, Unit, a) given Ord(c)
 ```
 
 Every element in either set.
@@ -134,8 +134,8 @@ set_to_list(set_union(set_from_list([1, 2]), set_from_list([2, 3])))
 
 ### `set_intersection`
 
-```prism,sig,h-8c62e1e81b8947ce083eaf9b6336560b71881c839a46387bb9e0ee65f0df8b28
-set_intersection : forall a b c d. (Map(d, Unit, a), Map(d, Unit, b)) -> Map(d, Unit, c)
+```prism,sig,h-6f68da390914bdee144bbee4492ae28f661189ae18247decdd9fe5e554bb3ce6
+set_intersection : forall a b c d. (Map(d, Unit, a), Map(d, Unit, b)) -> Map(d, Unit, c) given Ord(d)
 ```
 
 The elements in both sets.
@@ -150,8 +150,8 @@ set_to_list(set_intersection(set_from_list([1, 2, 3]), set_from_list([2, 3, 4]))
 
 ### `set_difference`
 
-```prism,sig,h-fb3f5fe3107f254175b5a312bb9e417d07de371c09ab06309f02372d44bc9973
-set_difference : forall a b c d. (Map(d, Unit, a), Map(d, Unit, b)) -> Map(d, Unit, c)
+```prism,sig,h-89dd6d2de635667e31e9cabc8110dcb7bef2c9ca4204b28aea37621dfb45b966
+set_difference : forall a b c d. (Map(d, Unit, a), Map(d, Unit, b)) -> Map(d, Unit, c) given Ord(d)
 ```
 
 The elements of `s1` that are not in `s2`.

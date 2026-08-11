@@ -1,0 +1,13 @@
+import Data.Foldable (length)
+import Syntax.Codec (decode_tc_input, codec_error_message)
+
+fn main() =
+  match decode_tc_input(read_file(arg(0))) of
+    Err(e) => println("decode error: {codec_error_message(e)}")
+    Ok(doc) =>
+      println("schema {doc.schema}")
+      println("types {length(doc.types)}")
+      println("effects {length(doc.effects)}")
+      println("classes {length(doc.classes)}")
+      println("instances {length(doc.instances)}")
+      println("functions {length(doc.functions)}")

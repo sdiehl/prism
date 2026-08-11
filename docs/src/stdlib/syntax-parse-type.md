@@ -10,7 +10,7 @@ Structural ownership lives in Syntax.Parse.GeneratedType. The generated parser p
 
 ### `parse_type`
 
-```prism,sig,h-1efc70e36be22c0d9b8d1ca5432333c5e5932e6c5256885afc9680c752f1e47c
+```prism,sig,h-7681d96a5e198457638e3357d01d531af96ba878b7fc881574d03467734734be
 parse_type : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Ty)
 ```
 
@@ -18,7 +18,7 @@ Parse one complete surface type.
 
 ### `parse_type_head`
 
-```prism,sig,h-51fc795bff556c897d466fe0d968f32c71616ac31983814d48d1fa25d0040d1d
+```prism,sig,h-d7853a8a313370e9cd89c2c82ffbdfaf8e4aec9344f17c8dab139a1b63cd45ab
 parse_type_head : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Ty)
 ```
 
@@ -26,7 +26,7 @@ Parse through the arrow layer while leaving a trailing effect suffix for declara
 
 ### `parse_type_arg`
 
-```prism,sig,h-5e31142993466ba24f73e2bfb6c2686e0d2f62f36072a8a9e1015e739d84d63c
+```prism,sig,h-4d5ec266bdcdd1e6ba9dd5d29413a24616119f07f580db2d773095081685f01d
 parse_type_arg : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Ty)
 ```
 
@@ -34,7 +34,7 @@ Parse a type-constructor argument, including row and natural arguments.
 
 ### `parse_effect_row`
 
-```prism,sig,h-db16671b5a0d1daeea1e83bf556924c9f1307362fba2aad87c9dca9bcbb73525
+```prism,sig,h-753080fa82fb0e22ce9b30043cf3a307766f97b0dcb01dc0af9d677b22beeb8b
 parse_effect_row : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Row)
 ```
 
@@ -42,7 +42,7 @@ Parse an effect suffix including its leading `!`.
 
 ### `parse_eff_label`
 
-```prism,sig,h-57b8218af3be489474bd72f2dd5ca894298fc1ef438f0b0ef82147cfd4559008
+```prism,sig,h-b5c372991cc2012dda914c74584e650875e75eeecdd929036c6d9181b94f966a
 parse_eff_label : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.EffLabel)
 ```
 

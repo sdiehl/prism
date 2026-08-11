@@ -14,6 +14,17 @@
       }
     },
     {
+      "id": "blake3:a46b24ca58a55e631403d6e727d6ed2083fd78e95c882707e7610099fb235ac0",
+      "kind": "artifact",
+      "payload": {
+        "kind": "docs-page",
+        "path": "index.md",
+        "digest_scheme": "blake3",
+        "digest": "a46b24ca58a55e631403d6e727d6ed2083fd78e95c882707e7610099fb235ac0",
+        "bytes": 314
+      }
+    },
+    {
       "id": "blake3:bca1d94e0015e3f63a7f6db9256ec75c7296b4e3b6338daf1c63a4217422c1e6",
       "kind": "artifact",
       "payload": {
@@ -25,30 +36,18 @@
       }
     },
     {
-      "id": "blake3:c5961833ecdb1323ace6429256c46780fcbda9081983e42354149f60210c1e7c",
+      "id": "blake3:ddab84bf7f5d7bb69143c4cf74fafcb3c26cda16366a6e4d5f63773324800acb",
       "kind": "artifact",
       "payload": {
         "kind": "docs-page",
-        "path": "index.md",
+        "path": "bootstrap.md",
         "digest_scheme": "blake3",
-        "digest": "c5961833ecdb1323ace6429256c46780fcbda9081983e42354149f60210c1e7c",
-        "bytes": 369
+        "digest": "ddab84bf7f5d7bb69143c4cf74fafcb3c26cda16366a6e4d5f63773324800acb",
+        "bytes": 421
       }
     },
     {
-      "id": "prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef",
-      "kind": "stdlib-root",
-      "payload": {
-        "role": "stdlib",
-        "name": null,
-        "origin": null,
-        "artifact_kind": "embedded-stdlib",
-        "scheme": "prism-core-hash-v2",
-        "root": "bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef"
-      }
-    },
-    {
-      "id": "prism-core-hash-v2:f737f35f1cf3eba733aa13fc3c30a7c0ff833e312faa7a8fe23ad186e4f7b6df",
+      "id": "prism-core-hash-v2:881698ddaa5c0c565e28b2d990b11cc1f46b0415b0a5b61544c98b427d00af18",
       "kind": "source-root",
       "payload": {
         "role": "source",
@@ -56,7 +55,19 @@
         "origin": null,
         "artifact_kind": "namespace",
         "scheme": "prism-core-hash-v2",
-        "root": "f737f35f1cf3eba733aa13fc3c30a7c0ff833e312faa7a8fe23ad186e4f7b6df"
+        "root": "881698ddaa5c0c565e28b2d990b11cc1f46b0415b0a5b61544c98b427d00af18"
+      }
+    },
+    {
+      "id": "prism-core-hash-v2:b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb",
+      "kind": "stdlib-root",
+      "payload": {
+        "role": "stdlib",
+        "name": null,
+        "origin": null,
+        "artifact_kind": "embedded-stdlib",
+        "scheme": "prism-core-hash-v2",
+        "root": "b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb"
       }
     },
     {
@@ -69,10 +80,10 @@
       }
     },
     {
-      "id": "sha256:5ae0aa991ddcdbc4203dc03b19029fac6fc7fb85647ffde9a56a651f08145a4e",
+      "id": "sha256:5367bfd3638076efc717de77e3f035eac37c8948afddd423f9963dcd26438571",
       "kind": "compiler-identity",
       "payload": {
-        "fingerprint": "compiler=0.17.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=docs;source-root=prism-core-hash-v2:f737f35f1cf3eba733aa13fc3c30a7c0ff833e312faa7a8fe23ad186e4f7b6df;stdlib-root=prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;erasures=true;native-effects=true;trampoline=true;fuse=false;rt-checks=false;native-kont-frames=false;",
+        "fingerprint": "compiler=0.17.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=docs;source-root=prism-core-hash-v2:881698ddaa5c0c565e28b2d990b11cc1f46b0415b0a5b61544c98b427d00af18;stdlib-root=prism-core-hash-v2:b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;erasures=true;native-effects=true;trampoline=true;fuse=false;rt-checks=false;native-kont-frames=false;",
         "rows": [
           {
             "key": "compiler",
@@ -92,11 +103,11 @@
           },
           {
             "key": "source-root",
-            "value": "prism-core-hash-v2:f737f35f1cf3eba733aa13fc3c30a7c0ff833e312faa7a8fe23ad186e4f7b6df"
+            "value": "prism-core-hash-v2:881698ddaa5c0c565e28b2d990b11cc1f46b0415b0a5b61544c98b427d00af18"
           },
           {
             "key": "stdlib-root",
-            "value": "prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef"
+            "value": "prism-core-hash-v2:b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb"
           },
           {
             "key": "opt",
@@ -174,27 +185,32 @@
     },
     {
       "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
+      "to": "blake3:a46b24ca58a55e631403d6e727d6ed2083fd78e95c882707e7610099fb235ac0",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
       "to": "blake3:bca1d94e0015e3f63a7f6db9256ec75c7296b4e3b6338daf1c63a4217422c1e6",
       "kind": "produced"
     },
     {
       "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
-      "to": "blake3:c5961833ecdb1323ace6429256c46780fcbda9081983e42354149f60210c1e7c",
+      "to": "blake3:ddab84bf7f5d7bb69143c4cf74fafcb3c26cda16366a6e4d5f63773324800acb",
       "kind": "produced"
     },
     {
       "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
-      "to": "prism-core-hash-v2:bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef",
+      "to": "prism-core-hash-v2:881698ddaa5c0c565e28b2d990b11cc1f46b0415b0a5b61544c98b427d00af18",
       "kind": "input"
     },
     {
       "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
-      "to": "prism-core-hash-v2:f737f35f1cf3eba733aa13fc3c30a7c0ff833e312faa7a8fe23ad186e4f7b6df",
+      "to": "prism-core-hash-v2:b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb",
       "kind": "input"
     },
     {
       "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
-      "to": "sha256:5ae0aa991ddcdbc4203dc03b19029fac6fc7fb85647ffde9a56a651f08145a4e",
+      "to": "sha256:5367bfd3638076efc717de77e3f035eac37c8948afddd423f9963dcd26438571",
       "kind": "identified-by"
     },
     {

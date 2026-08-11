@@ -1,0 +1,1258 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/path_lit.pr
+---
+== tokens ==
+VOpen Type UIdent("Lens") LParen Ident("s") Comma Ident("a") RParen Eq UIdent("MkLens") LParen LParen Ident("s") RParen Arrow Ident("a") Comma LParen Ident("s") Comma Ident("a") RParen Arrow Ident("s") RParen VSemi Fn Ident("lens") LParen Ident("get") Comma Ident("set") RParen Eq UIdent("MkLens") LParen Ident("get") Comma Ident("set") RParen VSemi Type UIdent("Pos") Eq UIdent("Pos") LBrace Ident("x") Colon KwInt Comma Ident("y") Colon KwInt RBrace VSemi Type UIdent("Player") Eq UIdent("Player") LBrace Ident("pos") Colon UIdent("Pos") Comma Ident("hp") Colon KwInt RBrace VSemi Fn Ident("hp_lens") LParen RParen Colon UIdent("Lens") LParen UIdent("Player") Comma KwInt RParen Eq Hash Ident("path") Ident("hp") VSemi Fn Ident("depth_lens") LParen RParen Colon UIdent("Lens") LParen UIdent("Player") Comma KwInt RParen Eq Hash Ident("path") Ident("pos") Dot Ident("x") VSemi Fn Ident("read") LParen Ident("l") Colon UIdent("Lens") LParen UIdent("Player") Comma KwInt RParen Comma Ident("p") Colon UIdent("Player") RParen Colon KwInt Eq VOpen Match Ident("l") Of VOpen UIdent("MkLens") LParen Ident("get") Comma Ident("_set") RParen FatArrow Ident("get") LParen Ident("p") RParen VClose VClose VSemi Fn Ident("main") LParen RParen Eq VOpen Let Ident("here") Eq UIdent("Pos") LBrace Ident("x") Eq Int(IntLit { value: 3, suffix: None }) Comma Ident("y") Eq Int(IntLit { value: 4, suffix: None }) RBrace VSemi Let Ident("p") Eq UIdent("Player") LBrace Ident("pos") Eq Ident("here") Comma Ident("hp") Eq Int(IntLit { value: 7, suffix: None }) RBrace VSemi Ident("println") LParen Ident("read") LParen Ident("hp_lens") LParen RParen Comma Ident("p") RParen RParen VSemi Ident("println") LParen Ident("read") LParen Ident("depth_lens") LParen RParen Comma Ident("p") RParen RParen VClose VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Lens",
+            params: [
+                "s",
+                "a",
+            ],
+            param_kinds: [
+                Type,
+                Type,
+            ],
+            ctors: [
+                Ctor {
+                    name: "MkLens",
+                    args: [
+                        Fun(
+                            [
+                                Var(
+                                    "s",
+                                ),
+                            ],
+                            Empty,
+                            Var(
+                                "a",
+                            ),
+                        ),
+                        Fun(
+                            [
+                                Var(
+                                    "s",
+                                ),
+                                Var(
+                                    "a",
+                                ),
+                            ],
+                            Empty,
+                            Var(
+                                "s",
+                            ),
+                        ),
+                    ],
+                    fields: None,
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 510..557,
+        },
+        DataDecl {
+            name: "Pos",
+            params: [],
+            param_kinds: [],
+            ctors: [
+                Ctor {
+                    name: "Pos",
+                    args: [
+                        Int,
+                        Int,
+                    ],
+                    fields: Some(
+                        [
+                            (
+                                "x",
+                                Int,
+                            ),
+                            (
+                                "y",
+                                Int,
+                            ),
+                        ],
+                    ),
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 597..630,
+        },
+        DataDecl {
+            name: "Player",
+            params: [],
+            param_kinds: [],
+            ctors: [
+                Ctor {
+                    name: "Player",
+                    args: [
+                        Con(
+                            "Pos",
+                            [],
+                        ),
+                        Int,
+                    ],
+                    fields: Some(
+                        [
+                            (
+                                "pos",
+                                Con(
+                                    "Pos",
+                                    [],
+                                ),
+                            ),
+                            (
+                                "hp",
+                                Int,
+                            ),
+                        ],
+                    ),
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 632..674,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "lens",
+            params: [
+                Param {
+                    name: "get",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+                Param {
+                    name: "set",
+                    ty: None,
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "MkLens",
+                        ),
+                        span: 579..585,
+                    },
+                    [
+                        Spanned {
+                            node: Var(
+                                "get",
+                            ),
+                            span: 586..589,
+                        },
+                        Spanned {
+                            node: Var(
+                                "set",
+                            ),
+                            span: 591..594,
+                        },
+                    ],
+                ),
+                span: 579..595,
+            },
+            wheres: [],
+            span: 559..595,
+        },
+        Decl {
+            name: "hp_lens",
+            params: [],
+            ret: Some(
+                Con(
+                    "Lens",
+                    [
+                        Con(
+                            "Player",
+                            [],
+                        ),
+                        Int,
+                    ],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "lens",
+                        ),
+                        span: 711..719,
+                    },
+                    [
+                        Spanned {
+                            node: Lam(
+                                [
+                                    Param {
+                                        name: "whole@",
+                                        ty: None,
+                                        borrow: false,
+                                        default: None,
+                                    },
+                                ],
+                                Spanned {
+                                    node: FieldAccess(
+                                        Spanned {
+                                            node: Var(
+                                                "whole@",
+                                            ),
+                                            span: 711..719,
+                                        },
+                                        "hp",
+                                    ),
+                                    span: 711..719,
+                                },
+                            ),
+                            span: 711..719,
+                        },
+                        Spanned {
+                            node: Lam(
+                                [
+                                    Param {
+                                        name: "whole@",
+                                        ty: None,
+                                        borrow: false,
+                                        default: None,
+                                    },
+                                    Param {
+                                        name: "part@",
+                                        ty: None,
+                                        borrow: false,
+                                        default: None,
+                                    },
+                                ],
+                                Spanned {
+                                    node: RecordUpdatePath(
+                                        Spanned {
+                                            node: Var(
+                                                "whole@",
+                                            ),
+                                            span: 711..719,
+                                        },
+                                        [
+                                            (
+                                                [
+                                                    Field(
+                                                        "hp",
+                                                    ),
+                                                ],
+                                                Set(
+                                                    Spanned {
+                                                        node: Var(
+                                                            "part@",
+                                                        ),
+                                                        span: 711..719,
+                                                    },
+                                                ),
+                                            ),
+                                        ],
+                                    ),
+                                    span: 711..719,
+                                },
+                            ),
+                            span: 711..719,
+                        },
+                    ],
+                ),
+                span: 711..719,
+                synth: true,
+            },
+            wheres: [],
+            span: 676..719,
+        },
+        Decl {
+            name: "depth_lens",
+            params: [],
+            ret: Some(
+                Con(
+                    "Lens",
+                    [
+                        Con(
+                            "Player",
+                            [],
+                        ),
+                        Int,
+                    ],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "lens",
+                        ),
+                        span: 759..770,
+                    },
+                    [
+                        Spanned {
+                            node: Lam(
+                                [
+                                    Param {
+                                        name: "whole@",
+                                        ty: None,
+                                        borrow: false,
+                                        default: None,
+                                    },
+                                ],
+                                Spanned {
+                                    node: FieldAccess(
+                                        Spanned {
+                                            node: FieldAccess(
+                                                Spanned {
+                                                    node: Var(
+                                                        "whole@",
+                                                    ),
+                                                    span: 759..770,
+                                                },
+                                                "pos",
+                                            ),
+                                            span: 759..770,
+                                        },
+                                        "x",
+                                    ),
+                                    span: 759..770,
+                                },
+                            ),
+                            span: 759..770,
+                        },
+                        Spanned {
+                            node: Lam(
+                                [
+                                    Param {
+                                        name: "whole@",
+                                        ty: None,
+                                        borrow: false,
+                                        default: None,
+                                    },
+                                    Param {
+                                        name: "part@",
+                                        ty: None,
+                                        borrow: false,
+                                        default: None,
+                                    },
+                                ],
+                                Spanned {
+                                    node: RecordUpdatePath(
+                                        Spanned {
+                                            node: Var(
+                                                "whole@",
+                                            ),
+                                            span: 759..770,
+                                        },
+                                        [
+                                            (
+                                                [
+                                                    Field(
+                                                        "pos",
+                                                    ),
+                                                    Field(
+                                                        "x",
+                                                    ),
+                                                ],
+                                                Set(
+                                                    Spanned {
+                                                        node: Var(
+                                                            "part@",
+                                                        ),
+                                                        span: 759..770,
+                                                    },
+                                                ),
+                                            ),
+                                        ],
+                                    ),
+                                    span: 759..770,
+                                },
+                            ),
+                            span: 759..770,
+                        },
+                    ],
+                ),
+                span: 759..770,
+                synth: true,
+            },
+            wheres: [],
+            span: 721..770,
+        },
+        Decl {
+            name: "read",
+            params: [
+                Param {
+                    name: "l",
+                    ty: Some(
+                        Con(
+                            "Lens",
+                            [
+                                Con(
+                                    "Player",
+                                    [],
+                                ),
+                                Int,
+                            ],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+                Param {
+                    name: "p",
+                    ty: Some(
+                        Con(
+                            "Player",
+                            [],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "l",
+                        ),
+                        span: 831..832,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Ctor(
+                                    "MkLens",
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "get",
+                                            ),
+                                            span: 847..850,
+                                        },
+                                        Spanned {
+                                            node: Var(
+                                                "_set",
+                                            ),
+                                            span: 852..856,
+                                        },
+                                    ],
+                                ),
+                                span: 840..857,
+                            },
+                            body: Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "get",
+                                        ),
+                                        span: 861..864,
+                                    },
+                                    [
+                                        Spanned {
+                                            node: Var(
+                                                "p",
+                                            ),
+                                            span: 865..866,
+                                        },
+                                    ],
+                                ),
+                                span: 861..867,
+                            },
+                        },
+                    ],
+                ),
+                span: 825..867,
+            },
+            wheres: [],
+            span: 772..867,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "here",
+                    Spanned {
+                        node: RecordCreate(
+                            "Pos",
+                            [
+                                (
+                                    "x",
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 3,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 904..905,
+                                    },
+                                ),
+                                (
+                                    "y",
+                                    Spanned {
+                                        node: Int(
+                                            IntLit {
+                                                value: 4,
+                                                suffix: None,
+                                            },
+                                        ),
+                                        span: 911..912,
+                                    },
+                                ),
+                            ],
+                        ),
+                        span: 894..914,
+                    },
+                    Spanned {
+                        node: Let(
+                            "p",
+                            Spanned {
+                                node: RecordCreate(
+                                    "Player",
+                                    [
+                                        (
+                                            "pos",
+                                            Spanned {
+                                                node: Var(
+                                                    "here",
+                                                ),
+                                                span: 940..944,
+                                            },
+                                        ),
+                                        (
+                                            "hp",
+                                            Spanned {
+                                                node: Int(
+                                                    IntLit {
+                                                        value: 7,
+                                                        suffix: None,
+                                                    },
+                                                ),
+                                                span: 951..952,
+                                            },
+                                        ),
+                                    ],
+                                ),
+                                span: 925..954,
+                            },
+                            Spanned {
+                                node: Let(
+                                    "_",
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "println",
+                                                ),
+                                                span: 957..964,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Call(
+                                                        Spanned {
+                                                            node: Var(
+                                                                "read",
+                                                            ),
+                                                            span: 965..969,
+                                                        },
+                                                        [
+                                                            Spanned {
+                                                                node: Call(
+                                                                    Spanned {
+                                                                        node: Var(
+                                                                            "hp_lens",
+                                                                        ),
+                                                                        span: 970..977,
+                                                                    },
+                                                                    [],
+                                                                ),
+                                                                span: 970..979,
+                                                            },
+                                                            Spanned {
+                                                                node: Var(
+                                                                    "p",
+                                                                ),
+                                                                span: 981..982,
+                                                            },
+                                                        ],
+                                                    ),
+                                                    span: 965..983,
+                                                },
+                                            ],
+                                        ),
+                                        span: 957..984,
+                                    },
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "println",
+                                                ),
+                                                span: 987..994,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Call(
+                                                        Spanned {
+                                                            node: Var(
+                                                                "read",
+                                                            ),
+                                                            span: 995..999,
+                                                        },
+                                                        [
+                                                            Spanned {
+                                                                node: Call(
+                                                                    Spanned {
+                                                                        node: Var(
+                                                                            "depth_lens",
+                                                                        ),
+                                                                        span: 1000..1010,
+                                                                    },
+                                                                    [],
+                                                                ),
+                                                                span: 1000..1012,
+                                                            },
+                                                            Spanned {
+                                                                node: Var(
+                                                                    "p",
+                                                                ),
+                                                                span: 1014..1015,
+                                                            },
+                                                        ],
+                                                    ),
+                                                    span: 995..1016,
+                                                },
+                                            ],
+                                        ),
+                                        span: 987..1017,
+                                    },
+                                ),
+                                span: 957..1017,
+                            },
+                        ),
+                        span: 917..1017,
+                    },
+                ),
+                span: 883..1017,
+            },
+            wheres: [],
+            span: 869..1017,
+        },
+    ],
+}
+
+== types ==
+lens : forall a b. ((b) -> a, (b, a) -> b) -> Lens(b, a)
+hp_lens : () -> Lens(Player, Int)
+depth_lens : () -> Lens(Player, Int)
+read : (Lens(Player, Int), Player) -> Int
+main : () -> Unit ! {IO}
+
+== core (cbpv) ==
+fn lens(get, set) =
+  return get to t@0
+  return set to t@1
+  return MkLens(t@0, t@1)
+fn hp_lens() =
+  thunk { \whole@.
+    return whole@ to t@2
+    case t@2 of
+      Player(_, t@3) =>
+        return t@3
+  } to t@4
+  thunk { \whole@ part@.
+    return whole@ to t@5
+    return part@ to t@6
+    case t@5 of
+      Player(t@7, t@8) =>
+        return Player(t@7, t@6)
+  } to t@9
+  lens(t@4, t@9)
+fn depth_lens() =
+  thunk { \whole@.
+    return whole@ to t@10
+    case t@10 of
+      Player(t@11, _) =>
+        return t@11
+    to t@12
+    case t@12 of
+      Pos(t@13, _) =>
+        return t@13
+  } to t@14
+  thunk { \whole@ part@.
+    return whole@ to t@15
+    return part@ to t@16
+    case t@15 of
+      Player(t@17, t@18) =>
+        case t@17 of
+          Pos(t@19, t@20) =>
+            return Pos(t@16, t@20)
+        to t@21
+        return Player(t@21, t@18)
+  } to t@22
+  lens(t@14, t@22)
+fn read(l, p) =
+  return l to t@23
+  case t@23 of
+    MkLens(get, _set) =>
+      return p to t@24
+      return get to t@25
+      (force t@25)(t@24)
+fn main() =
+  return 3 to t@26
+  return 4 to t@27
+  return Pos(t@26, t@27) to here
+  return here to t@28
+  return 7 to t@29
+  return Player(t@28, t@29) to p
+  hp_lens() to t@30
+  return p to t@31
+  read(t@30, t@31) to t@32
+  print t@32 to t@33
+  print_nl
+  depth_lens() to t@34
+  return p to t@35
+  read(t@34, t@35) to t@36
+  print t@36 to t@37
+  print_nl
+
+== fbip (rc) ==
+fn lens(get, set) =
+  return get to t@0
+  return set to t@1
+  return MkLens(t@0, t@1)
+fn hp_lens() =
+  thunk { \whole@.
+    return whole@ to t@2
+    case t@2 of
+      Player(_, t@3) =>
+        dup t@3
+        drop t@2
+        return t@3
+  } to t@4
+  thunk { \whole@ part@.
+    return whole@ to t@5
+    return part@ to t@6
+    case t@5 of
+      Player(t@7, t@8) =>
+        dup t@7
+        drop t@5
+        return Player(t@7, t@6)
+  } to t@9
+  lens(t@4, t@9)
+fn depth_lens() =
+  thunk { \whole@.
+    return whole@ to t@10
+    case t@10 of
+      Player(t@11, _) =>
+        dup t@11
+        drop t@10
+        return t@11
+    to t@12
+    case t@12 of
+      Pos(t@13, _) =>
+        dup t@13
+        drop t@12
+        return t@13
+  } to t@14
+  thunk { \whole@ part@.
+    return whole@ to t@15
+    return part@ to t@16
+    case t@15 of
+      Player(t@17, t@18) =>
+        dup t@17
+        dup t@18
+        drop t@15
+        case t@17 of
+          Pos(t@19, t@20) =>
+            dup t@20
+            drop t@17
+            return Pos(t@16, t@20)
+        to t@21
+        return Player(t@21, t@18)
+  } to t@22
+  lens(t@14, t@22)
+fn read(l, p) =
+  return l to t@23
+  case t@23 of
+    MkLens(get, _set) =>
+      dup get
+      drop t@23
+      return p to t@24
+      return get to t@25
+      (force t@25)(t@24)
+fn main() =
+  return 3 to t@26
+  return 4 to t@27
+  return Pos(t@26, t@27) to here
+  return here to t@28
+  return 7 to t@29
+  return Player(t@28, t@29) to p
+  dup p
+  hp_lens() to t@30
+  return p to t@31
+  read(t@30, t@31) to t@32
+  print t@32 to t@33
+  drop t@33
+  print_nl
+  drop _
+  depth_lens() to t@34
+  return p to t@35
+  read(t@34, t@35) to t@36
+  print t@36 to t@37
+  drop t@37
+  print_nl
+
+== llvm ==
+; ModuleID = 'prism'
+source_filename = "prism"
+
+@prism_native_kont_table = constant [1131 x i8] c"scheme  prism-core-hash-v2\0Abundle  b99846199af3afe31ba07f683ae771743408e1fa9d983dd01b5378fd5ee7cefe\0Acompiler  0.18.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:b99846199af3afe31ba07f683ae771743408e1fa9d983dd01b5378fd5ee7cefe\0Aflag  stdlib-root  prism-core-hash-v2:80303809162f28f277bc5587d17f115db91817dec5cc85cb79673defb9214f2e\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_depth_lens  7a2671d76a235bd1bf0a7e685966775dba88c6249a06fa9c2b738af8b242766c  depth_lens\0Afn      prismfn_hp_lens  78e9e214ec525f57cab7432fa910c17893189dadd97148908dd1bd36972acb73  hp_lens\0Afn      prismfn_lens  704068e56261f9c8691b0fdd406ba5681ff0883527815f6b83673e68b84e9e62  lens\0Afn      prismfn_main  e163ba746073168d3a7c10193dedf594cbcb37d9beb5ffbf5a2c9026875bb0e1  main\0Afn      prismfn_read  91ac6b20fbb7805137083c0063aa8fad71d4f651fe8848003a3086ece8f1226c  read\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1339 x i8] c"state-map 1\0Ascheme  prism-core-hash-v2\0Abundle  b99846199af3afe31ba07f683ae771743408e1fa9d983dd01b5378fd5ee7cefe\0Acompiler  0.18.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:b99846199af3afe31ba07f683ae771743408e1fa9d983dd01b5378fd5ee7cefe\0Aflag  stdlib-root  prism-core-hash-v2:80303809162f28f277bc5587d17f115db91817dec5cc85cb79673defb9214f2e\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_depth_lens 7a2671d76a235bd1bf0a7e685966775dba88c6249a06fa9c2b738af8b242766c depth_lens arity 0 slots abi-word[]\0Astate prismfn_hp_lens 78e9e214ec525f57cab7432fa910c17893189dadd97148908dd1bd36972acb73 hp_lens arity 0 slots abi-word[]\0Astate prismfn_lens 704068e56261f9c8691b0fdd406ba5681ff0883527815f6b83673e68b84e9e62 lens arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prismfn_main e163ba746073168d3a7c10193dedf594cbcb37d9beb5ffbf5a2c9026875bb0e1 main arity 0 slots abi-word[]\0Astate prismfn_read 91ac6b20fbb7805137083c0063aa8fad71d4f651fe8848003a3086ece8f1226c read arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0A\00", section ",.prism_kont", align 1
+@.kont_symbol2 = private constant [13 x i8] c"prismfn_lens\00"
+@.kont_hash2 = private constant [65 x i8] c"704068e56261f9c8691b0fdd406ba5681ff0883527815f6b83673e68b84e9e62\00"
+@.kont_name2 = private constant [5 x i8] c"lens\00"
+@.kont_symbol3 = private constant [13 x i8] c"prismfn_main\00"
+@.kont_hash3 = private constant [65 x i8] c"e163ba746073168d3a7c10193dedf594cbcb37d9beb5ffbf5a2c9026875bb0e1\00"
+@.kont_name3 = private constant [5 x i8] c"main\00"
+@.kont_symbol4 = private constant [13 x i8] c"prismfn_read\00"
+@.kont_hash4 = private constant [65 x i8] c"91ac6b20fbb7805137083c0063aa8fad71d4f651fe8848003a3086ece8f1226c\00"
+@.kont_name4 = private constant [5 x i8] c"read\00"
+@prism_native_kont_ptrs = constant [3 x { ptr, ptr, ptr, ptr }] [{ ptr, ptr, ptr, ptr } { ptr @prismfn_lens, ptr @.kont_symbol2, ptr @.kont_hash2, ptr @.kont_name2 }, { ptr, ptr, ptr, ptr } { ptr @prismfn_main, ptr @.kont_symbol3, ptr @.kont_hash3, ptr @.kont_name3 }, { ptr, ptr, ptr, ptr } { ptr @prismfn_read, ptr @.kont_symbol4, ptr @.kont_hash4, ptr @.kont_name4 }], section ",.prism_kont", align 8
+@prism_native_kont_ptrs_len = constant i64 3, section ",.prism_kont", align 8
+@llvm.used = appending global [4 x ptr] [ptr @prism_native_kont_table, ptr @prism_native_kont_state_map, ptr @prism_native_kont_ptrs, ptr @prism_native_kont_ptrs_len], section ",llvm.metadata"
+
+; Function Attrs: nounwind
+define i64 @prismfn_lens(i64 %a0, i64 %a1) #0 {
+entry:
+  %t1 = call ptr @prism_alloc(i64 2)
+  %t2 = getelementptr inbounds i8, ptr %t1, i64 8
+  store i64 0, ptr %t2, align 8
+  %t4 = getelementptr inbounds i8, ptr %t1, i64 24
+  store i64 %a0, ptr %t4, align 8
+  %t5 = getelementptr inbounds i8, ptr %t1, i64 32
+  store i64 %a1, ptr %t5, align 8
+  %t6 = ptrtoint ptr %t1 to i64
+  ret i64 %t6
+}
+
+; Function Attrs: nounwind
+declare ptr @prism_alloc(i64) #0
+
+; Function Attrs: nounwind
+define i64 @prismfn_read(i64 %a0, i64 %a1) #0 {
+entry:
+  %t0 = inttoptr i64 %a0 to ptr
+  %t1 = getelementptr inbounds i8, ptr %t0, i64 8
+  %t2 = load i64, ptr %t1, align 8
+  switch i64 %t2, label %b1 [
+    i64 0, label %b2
+  ]
+
+b2:                                               ; preds = %entry
+  %t3 = getelementptr inbounds i8, ptr %t0, i64 24
+  %t4 = load i64, ptr %t3, align 8
+  %t5 = getelementptr inbounds i8, ptr %t0, i64 32
+  %t6 = load i64, ptr %t5, align 8
+  call void @prism_rc_inc(i64 %t4)
+  call void @prism_rc_dec(i64 %a0)
+  %t9 = call i64 @prismap_1(i64 %t4, i64 %a1)
+  call void @prism_rc_dec(i64 %t4)
+  ret i64 %t9
+
+b1:                                               ; preds = %entry
+  call void @prism_match_error()
+  unreachable
+}
+
+; Function Attrs: nounwind
+declare void @prism_match_error() #0
+
+; Function Attrs: nounwind
+declare void @prism_rc_inc(i64) #0
+
+; Function Attrs: nounwind
+declare void @prism_rc_dec(i64) #0
+
+; Function Attrs: nounwind
+define i64 @prismap_1(i64 %_clos, i64 %_a0) #0 {
+entry:
+  %_cp = inttoptr i64 %_clos to ptr
+  %_tp = getelementptr inbounds i8, ptr %_cp, i64 8
+  %_tag = load i64, ptr %_tp, align 8
+  switch i64 %_tag, label %_dead [
+    i64 4180332117194187166, label %_lam4180332117194187166
+    i64 6217696733472061813, label %_lam6217696733472061813
+    i64 7170891667029511803, label %_lam7170891667029511803
+    i64 7743101094664659736, label %_lam7743101094664659736
+    i64 4526294491531849704, label %_lam4526294491531849704
+    i64 1616227615631620365, label %_lam1616227615631620365
+  ]
+
+_lam4180332117194187166:                          ; preds = %entry
+  %_r4180332117194187166 = call i64 @prismlam_4180332117194187166(i64 %_a0)
+  br label %_merge
+
+_lam6217696733472061813:                          ; preds = %entry
+  %_ac6217696733472061813 = call ptr @prism_alloc(i64 1)
+  %_atp6217696733472061813 = getelementptr inbounds i8, ptr %_ac6217696733472061813, i64 8
+  store i64 4526294491531849704, ptr %_atp6217696733472061813, align 8
+  %_afp6217696733472061813_0 = getelementptr inbounds i8, ptr %_ac6217696733472061813, i64 24
+  store i64 %_a0, ptr %_afp6217696733472061813_0, align 8
+  %_r6217696733472061813 = ptrtoint ptr %_ac6217696733472061813 to i64
+  br label %_merge
+
+_lam7170891667029511803:                          ; preds = %entry
+  %_r7170891667029511803 = call i64 @prismlam_7170891667029511803(i64 %_a0)
+  br label %_merge
+
+_lam7743101094664659736:                          ; preds = %entry
+  %_ac7743101094664659736 = call ptr @prism_alloc(i64 1)
+  %_atp7743101094664659736 = getelementptr inbounds i8, ptr %_ac7743101094664659736, i64 8
+  store i64 1616227615631620365, ptr %_atp7743101094664659736, align 8
+  %_afp7743101094664659736_0 = getelementptr inbounds i8, ptr %_ac7743101094664659736, i64 24
+  store i64 %_a0, ptr %_afp7743101094664659736_0, align 8
+  %_r7743101094664659736 = ptrtoint ptr %_ac7743101094664659736 to i64
+  br label %_merge
+
+_lam4526294491531849704:                          ; preds = %entry
+  %_fp4526294491531849704_0 = getelementptr inbounds i8, ptr %_cp, i64 24
+  %_fv4526294491531849704_0 = load i64, ptr %_fp4526294491531849704_0, align 8
+  %_r4526294491531849704 = call i64 @prismlam_4526294491531849704(i64 %_fv4526294491531849704_0, i64 %_a0)
+  br label %_merge
+
+_lam1616227615631620365:                          ; preds = %entry
+  %_fp1616227615631620365_0 = getelementptr inbounds i8, ptr %_cp, i64 24
+  %_fv1616227615631620365_0 = load i64, ptr %_fp1616227615631620365_0, align 8
+  %_r1616227615631620365 = call i64 @prismlam_1616227615631620365(i64 %_fv1616227615631620365_0, i64 %_a0)
+  br label %_merge
+
+_dead:                                            ; preds = %entry
+  call void @prism_apply_error()
+  unreachable
+
+_merge:                                           ; preds = %_lam1616227615631620365, %_lam4526294491531849704, %_lam7743101094664659736, %_lam7170891667029511803, %_lam6217696733472061813, %_lam4180332117194187166
+  %_result = phi i64 [ %_r4180332117194187166, %_lam4180332117194187166 ], [ %_r6217696733472061813, %_lam6217696733472061813 ], [ %_r7170891667029511803, %_lam7170891667029511803 ], [ %_r7743101094664659736, %_lam7743101094664659736 ], [ %_r4526294491531849704, %_lam4526294491531849704 ], [ %_r1616227615631620365, %_lam1616227615631620365 ]
+  ret i64 %_result
+}
+
+; Function Attrs: nounwind
+define i64 @prismfn_main() #0 {
+entry:
+  %t3 = call ptr @prism_alloc(i64 2)
+  %t4 = getelementptr inbounds i8, ptr %t3, i64 8
+  store i64 0, ptr %t4, align 8
+  %t6 = getelementptr inbounds i8, ptr %t3, i64 24
+  store i64 7, ptr %t6, align 8
+  %t7 = getelementptr inbounds i8, ptr %t3, i64 32
+  store i64 9, ptr %t7, align 8
+  %t8 = ptrtoint ptr %t3 to i64
+  %t11 = call ptr @prism_alloc(i64 2)
+  %t12 = getelementptr inbounds i8, ptr %t11, i64 8
+  store i64 0, ptr %t12, align 8
+  %t14 = getelementptr inbounds i8, ptr %t11, i64 24
+  store i64 %t8, ptr %t14, align 8
+  %t15 = getelementptr inbounds i8, ptr %t11, i64 32
+  store i64 15, ptr %t15, align 8
+  %t16 = ptrtoint ptr %t11 to i64
+  call void @prism_rc_inc(i64 %t16)
+  %t19 = call ptr @prism_alloc(i64 0)
+  %t20 = getelementptr inbounds i8, ptr %t19, i64 8
+  store i64 4180332117194187166, ptr %t20, align 8
+  %t22 = ptrtoint ptr %t19 to i64
+  %t24 = call ptr @prism_alloc(i64 0)
+  %t25 = getelementptr inbounds i8, ptr %t24, i64 8
+  store i64 6217696733472061813, ptr %t25, align 8
+  %t27 = ptrtoint ptr %t24 to i64
+  %t28 = call i64 @prismfn_lens(i64 %t22, i64 %t27)
+  %t29 = call i64 @prismfn_read(i64 %t28, i64 %t16)
+  call void @prism_print_int(i64 %t29)
+  call void @prism_rc_dec(i64 %t29)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  call void @prism_rc_dec(i64 0)
+  %t35 = call ptr @prism_alloc(i64 0)
+  %t36 = getelementptr inbounds i8, ptr %t35, i64 8
+  store i64 7170891667029511803, ptr %t36, align 8
+  %t38 = ptrtoint ptr %t35 to i64
+  %t40 = call ptr @prism_alloc(i64 0)
+  %t41 = getelementptr inbounds i8, ptr %t40, i64 8
+  store i64 7743101094664659736, ptr %t41, align 8
+  %t43 = ptrtoint ptr %t40 to i64
+  %t44 = call i64 @prismfn_lens(i64 %t38, i64 %t43)
+  %t45 = call i64 @prismfn_read(i64 %t44, i64 %t16)
+  call void @prism_print_int(i64 %t45)
+  call void @prism_rc_dec(i64 %t45)
+  call void @prism_rc_dec(i64 0)
+  call void @prism_print_nl()
+  ret i64 0
+}
+
+; Function Attrs: nounwind
+declare void @prism_print_int(i64) #0
+
+; Function Attrs: nounwind
+declare void @prism_print_nl() #0
+
+; Function Attrs: nounwind
+define i64 @prismlam_4180332117194187166(i64 %_p0) #0 {
+entry:
+  %t0 = inttoptr i64 %_p0 to ptr
+  %t1 = getelementptr inbounds i8, ptr %t0, i64 8
+  %t2 = load i64, ptr %t1, align 8
+  switch i64 %t2, label %b1 [
+    i64 0, label %b2
+  ]
+
+b2:                                               ; preds = %entry
+  %t3 = getelementptr inbounds i8, ptr %t0, i64 32
+  %t4 = load i64, ptr %t3, align 8
+  call void @prism_rc_inc(i64 %t4)
+  call void @prism_rc_dec(i64 %_p0)
+  ret i64 %t4
+
+b1:                                               ; preds = %entry
+  call void @prism_match_error()
+  unreachable
+}
+
+; Function Attrs: nounwind
+define i64 @prismlam_6217696733472061813(i64 %_p0, i64 %_p1) #0 {
+entry:
+  %t0 = inttoptr i64 %_p0 to ptr
+  %t1 = getelementptr inbounds i8, ptr %t0, i64 8
+  %t2 = load i64, ptr %t1, align 8
+  switch i64 %t2, label %b1 [
+    i64 0, label %b2
+  ]
+
+b2:                                               ; preds = %entry
+  %t3 = getelementptr inbounds i8, ptr %t0, i64 24
+  %t4 = load i64, ptr %t3, align 8
+  %t5 = getelementptr inbounds i8, ptr %t0, i64 32
+  %t6 = load i64, ptr %t5, align 8
+  call void @prism_rc_inc(i64 %t4)
+  call void @prism_rc_dec(i64 %_p0)
+  %t10 = call ptr @prism_alloc(i64 2)
+  %t11 = getelementptr inbounds i8, ptr %t10, i64 8
+  store i64 0, ptr %t11, align 8
+  %t13 = getelementptr inbounds i8, ptr %t10, i64 24
+  store i64 %t4, ptr %t13, align 8
+  %t14 = getelementptr inbounds i8, ptr %t10, i64 32
+  store i64 %_p1, ptr %t14, align 8
+  %t15 = ptrtoint ptr %t10 to i64
+  ret i64 %t15
+
+b1:                                               ; preds = %entry
+  call void @prism_match_error()
+  unreachable
+}
+
+; Function Attrs: nounwind
+define i64 @prismlam_7170891667029511803(i64 %_p0) #0 {
+entry:
+  %t0 = inttoptr i64 %_p0 to ptr
+  %t1 = getelementptr inbounds i8, ptr %t0, i64 8
+  %t2 = load i64, ptr %t1, align 8
+  switch i64 %t2, label %b1 [
+    i64 0, label %b2
+  ]
+
+b2:                                               ; preds = %entry
+  %t3 = getelementptr inbounds i8, ptr %t0, i64 24
+  %t4 = load i64, ptr %t3, align 8
+  call void @prism_rc_inc(i64 %t4)
+  call void @prism_rc_dec(i64 %_p0)
+  br label %b0
+
+b1:                                               ; preds = %entry
+  call void @prism_match_error()
+  unreachable
+
+b0:                                               ; preds = %b2
+  %t7 = phi i64 [ %t4, %b2 ]
+  %t8 = inttoptr i64 %t7 to ptr
+  %t9 = getelementptr inbounds i8, ptr %t8, i64 8
+  %t10 = load i64, ptr %t9, align 8
+  switch i64 %t10, label %b4 [
+    i64 0, label %b5
+  ]
+
+b5:                                               ; preds = %b0
+  %t11 = getelementptr inbounds i8, ptr %t8, i64 24
+  %t12 = load i64, ptr %t11, align 8
+  call void @prism_rc_inc(i64 %t12)
+  call void @prism_rc_dec(i64 %t7)
+  ret i64 %t12
+
+b4:                                               ; preds = %b0
+  call void @prism_match_error()
+  unreachable
+}
+
+; Function Attrs: nounwind
+define i64 @prismlam_7743101094664659736(i64 %_p0, i64 %_p1) #0 {
+entry:
+  %t0 = inttoptr i64 %_p0 to ptr
+  %t1 = getelementptr inbounds i8, ptr %t0, i64 8
+  %t2 = load i64, ptr %t1, align 8
+  switch i64 %t2, label %b1 [
+    i64 0, label %b2
+  ]
+
+b2:                                               ; preds = %entry
+  %t3 = getelementptr inbounds i8, ptr %t0, i64 24
+  %t4 = load i64, ptr %t3, align 8
+  %t5 = getelementptr inbounds i8, ptr %t0, i64 32
+  %t6 = load i64, ptr %t5, align 8
+  call void @prism_rc_inc(i64 %t4)
+  call void @prism_rc_inc(i64 %t6)
+  call void @prism_rc_dec(i64 %_p0)
+  %t10 = inttoptr i64 %t4 to ptr
+  %t11 = getelementptr inbounds i8, ptr %t10, i64 8
+  %t12 = load i64, ptr %t11, align 8
+  switch i64 %t12, label %b4 [
+    i64 0, label %b5
+  ]
+
+b1:                                               ; preds = %entry
+  call void @prism_match_error()
+  unreachable
+
+b5:                                               ; preds = %b2
+  %t13 = getelementptr inbounds i8, ptr %t10, i64 24
+  %t14 = load i64, ptr %t13, align 8
+  %t15 = getelementptr inbounds i8, ptr %t10, i64 32
+  %t16 = load i64, ptr %t15, align 8
+  call void @prism_rc_inc(i64 %t16)
+  call void @prism_rc_dec(i64 %t4)
+  %t20 = call ptr @prism_alloc(i64 2)
+  %t21 = getelementptr inbounds i8, ptr %t20, i64 8
+  store i64 0, ptr %t21, align 8
+  %t23 = getelementptr inbounds i8, ptr %t20, i64 24
+  store i64 %_p1, ptr %t23, align 8
+  %t24 = getelementptr inbounds i8, ptr %t20, i64 32
+  store i64 %t16, ptr %t24, align 8
+  %t25 = ptrtoint ptr %t20 to i64
+  br label %b3
+
+b4:                                               ; preds = %b2
+  call void @prism_match_error()
+  unreachable
+
+b3:                                               ; preds = %b5
+  %t26 = phi i64 [ %t25, %b5 ]
+  %t28 = call ptr @prism_alloc(i64 2)
+  %t29 = getelementptr inbounds i8, ptr %t28, i64 8
+  store i64 0, ptr %t29, align 8
+  %t31 = getelementptr inbounds i8, ptr %t28, i64 24
+  store i64 %t26, ptr %t31, align 8
+  %t32 = getelementptr inbounds i8, ptr %t28, i64 32
+  store i64 %t6, ptr %t32, align 8
+  %t33 = ptrtoint ptr %t28 to i64
+  ret i64 %t33
+}
+
+; Function Attrs: nounwind
+define i64 @prismlam_4526294491531849704(i64 %_fv0, i64 %_p0) #0 {
+entry:
+  call void @prism_rc_inc(i64 %_fv0)
+  %t0 = call i64 @prismlam_6217696733472061813(i64 %_fv0, i64 %_p0)
+  ret i64 %t0
+}
+
+; Function Attrs: nounwind
+define i64 @prismlam_1616227615631620365(i64 %_fv0, i64 %_p0) #0 {
+entry:
+  call void @prism_rc_inc(i64 %_fv0)
+  %t0 = call i64 @prismlam_7743101094664659736(i64 %_fv0, i64 %_p0)
+  ret i64 %t0
+}
+
+; Function Attrs: nounwind
+declare void @prism_apply_error() #0
+
+; Function Attrs: nounwind
+define i64 @prismap_2(i64 %_clos, i64 %_a0, i64 %_a1) #0 {
+entry:
+  %_cp = inttoptr i64 %_clos to ptr
+  %_tp = getelementptr inbounds i8, ptr %_cp, i64 8
+  %_tag = load i64, ptr %_tp, align 8
+  switch i64 %_tag, label %_dead [
+    i64 4180332117194187166, label %_lam4180332117194187166
+    i64 6217696733472061813, label %_lam6217696733472061813
+    i64 7170891667029511803, label %_lam7170891667029511803
+    i64 7743101094664659736, label %_lam7743101094664659736
+    i64 4526294491531849704, label %_lam4526294491531849704
+    i64 1616227615631620365, label %_lam1616227615631620365
+  ]
+
+_lam4180332117194187166:                          ; preds = %entry
+  call void @prism_apply_error()
+  unreachable
+
+_lam6217696733472061813:                          ; preds = %entry
+  %_r6217696733472061813 = call i64 @prismlam_6217696733472061813(i64 %_a0, i64 %_a1)
+  br label %_merge
+
+_lam7170891667029511803:                          ; preds = %entry
+  call void @prism_apply_error()
+  unreachable
+
+_lam7743101094664659736:                          ; preds = %entry
+  %_r7743101094664659736 = call i64 @prismlam_7743101094664659736(i64 %_a0, i64 %_a1)
+  br label %_merge
+
+_lam4526294491531849704:                          ; preds = %entry
+  %_fp4526294491531849704_0 = getelementptr inbounds i8, ptr %_cp, i64 24
+  %_fv4526294491531849704_0 = load i64, ptr %_fp4526294491531849704_0, align 8
+  call void @prism_apply_error()
+  unreachable
+
+_lam1616227615631620365:                          ; preds = %entry
+  %_fp1616227615631620365_0 = getelementptr inbounds i8, ptr %_cp, i64 24
+  %_fv1616227615631620365_0 = load i64, ptr %_fp1616227615631620365_0, align 8
+  call void @prism_apply_error()
+  unreachable
+
+_dead:                                            ; preds = %entry
+  call void @prism_apply_error()
+  unreachable
+
+_merge:                                           ; preds = %_lam7743101094664659736, %_lam6217696733472061813
+  %_result = phi i64 [ %_r6217696733472061813, %_lam6217696733472061813 ], [ %_r7743101094664659736, %_lam7743101094664659736 ]
+  ret i64 %_result
+}
+
+attributes #0 = { nounwind }
+
+== run ==
+output: [7, 3]
+result: ()

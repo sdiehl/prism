@@ -23,13 +23,9 @@
 -- (non-negative wall readings) are supported.
 
 import Data.List (..)
-
 import Data.Maybe (..)
-
 import Data.String (..)
-
 import Data.Char (is_digit)
-
 import Concurrent (..)
 
 -- Unit conversions, pinned. A `Duration` is nanoseconds; these name the scale
@@ -43,13 +39,13 @@ import Concurrent (..)
 -- ```output
 -- 1000000000
 -- ```
-pub fn nanos_per_sec() : Int = 1000000000
+pub fn nanos_per_sec() : Int @ noalloc = 1000000000
 
 -- | Nanoseconds in one millisecond.
-pub fn nanos_per_milli() : Int = 1000000
+pub fn nanos_per_milli() : Int @ noalloc = 1000000
 
 -- | Nanoseconds in one microsecond.
-pub fn nanos_per_micro() : Int = 1000
+pub fn nanos_per_micro() : Int @ noalloc = 1000
 
 fn secs_per_day() : Int = 86400
 
@@ -58,7 +54,7 @@ fn secs_per_hour() : Int = 3600
 fn secs_per_min() : Int = 60
 
 -- | A signed span of time, in nanoseconds.
-pub type Duration = Duration(Int)
+pub newtype Duration = Duration(Int)
 
 -- | The span in whole nanoseconds.
 --
@@ -68,12 +64,12 @@ pub type Duration = Duration(Int)
 -- ```output
 -- 2000000000
 -- ```
-pub fn dur_nanos(d : Duration) : Int =
+pub fn dur_nanos(borrow d : Duration) : Int @ noalloc =
   match d of
     Duration(n) => n
 
 -- | A duration of `n` nanoseconds.
-pub fn nanos(n : Int) : Duration = Duration(n)
+pub fn nanos(n : Int) : Duration @ noalloc = Duration(n)
 
 -- | A duration of `n` microseconds.
 --
@@ -126,7 +122,7 @@ pub fn hours(n : Int) : Duration = Duration(n * nanos_per_sec() * secs_per_hour(
 -- ```output
 -- 90
 -- ```
-pub fn dur_as_secs(d : Duration) : Int = dur_nanos(d) / nanos_per_sec()
+pub fn dur_as_secs(borrow d : Duration) : Int = dur_nanos(d) / nanos_per_sec()
 
 -- | The whole-millisecond part of a duration (truncated toward zero).
 --
@@ -136,7 +132,7 @@ pub fn dur_as_secs(d : Duration) : Int = dur_nanos(d) / nanos_per_sec()
 -- ```output
 -- 2000
 -- ```
-pub fn dur_as_millis(d : Duration) : Int = dur_nanos(d) / nanos_per_milli()
+pub fn dur_as_millis(borrow d : Duration) : Int = dur_nanos(d) / nanos_per_milli()
 
 -- | Sum of two durations.
 --
@@ -209,7 +205,7 @@ pub fn dur_cmp(a : Duration, b : Duration) : Int =
 pub fn dur_eq(a : Duration, b : Duration) : Bool = dur_cmp(a, b) == 0
 
 -- | A monotonic clock reading, in nanoseconds from an unspecified origin.
-pub type Instant = Instant(Int)
+pub newtype Instant = Instant(Int)
 
 -- | The raw monotonic reading in nanoseconds. The absolute value is meaningless
 -- across processes; subtract two instants to get an elapsed `Duration`.
@@ -220,7 +216,7 @@ pub type Instant = Instant(Int)
 -- ```output
 -- 500
 -- ```
-pub fn instant_nanos(i : Instant) : Int =
+pub fn instant_nanos(borrow i : Instant) : Int @ noalloc =
   match i of
     Instant(n) => n
 
@@ -248,7 +244,7 @@ pub fn instant_add(i : Instant, d : Duration) : Instant =
   Instant(instant_nanos(i) + dur_nanos(d))
 
 -- | A wall-clock reading: nanoseconds since the Unix epoch, in UTC.
-pub type Wall = Wall(Int)
+pub newtype Wall = Wall(Int)
 
 -- | The reading in nanoseconds since the Unix epoch (UTC).
 --
@@ -258,12 +254,12 @@ pub type Wall = Wall(Int)
 -- ```output
 -- 1500000000
 -- ```
-pub fn wall_nanos(w : Wall) : Int =
+pub fn wall_nanos(borrow w : Wall) : Int @ noalloc =
   match w of
     Wall(n) => n
 
 -- | A wall reading from nanoseconds since the Unix epoch.
-pub fn wall_of_nanos(n : Int) : Wall = Wall(n)
+pub fn wall_of_nanos(n : Int) : Wall @ noalloc = Wall(n)
 
 -- | Whole seconds since the Unix epoch (truncated toward zero).
 --
@@ -273,7 +269,7 @@ pub fn wall_of_nanos(n : Int) : Wall = Wall(n)
 -- ```output
 -- 1
 -- ```
-pub fn wall_unix_secs(w : Wall) : Int = wall_nanos(w) / nanos_per_sec()
+pub fn wall_unix_secs(borrow w : Wall) : Int = wall_nanos(w) / nanos_per_sec()
 
 -- | A wall reading advanced by a duration.
 --

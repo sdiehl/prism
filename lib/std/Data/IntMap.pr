@@ -39,7 +39,7 @@ let int_ones : U64 = 18446744073709551615u64
 -- `prefix` above the single set bit of `mask`, `zeros` holds those whose branch
 -- bit is clear and `ones` those whose branch bit is set. Both subtrees of a
 -- branch are non-empty.
-pub type IntMap(v)
+opaque type IntMap(v)
   = IMEmpty
   | IMLeaf(I64, v)
   | IMBranch(U64, U64, IntMap(v), IntMap(v))
@@ -167,10 +167,10 @@ pub fn intmap_insert_with(f, key : I64, value : v, t : IntMap(v)) : IntMap(v) =
 -- ```output
 -- Some(b)
 -- ```
-pub fn intmap_lookup(key : I64, t : IntMap(v)) : Option(v) =
+pub fn intmap_lookup(key : I64, borrow t : IntMap(v)) : Option(v) =
   im_look(im_word(key), key, t)
 
-fn im_look(w : U64, key : I64, t : IntMap(v)) : Option(v) =
+fn im_look(w : U64, key : I64, borrow t : IntMap(v)) : Option(v) =
   match t of
     IMEmpty => None
     IMLeaf(k2, v2) =>
@@ -194,7 +194,7 @@ fn im_look(w : U64, key : I64, t : IntMap(v)) : Option(v) =
 -- ```output
 -- true
 -- ```
-pub fn intmap_member(key : I64, t : IntMap(v)) : Bool =
+pub fn intmap_member(key : I64, borrow t : IntMap(v)) : Bool =
   match intmap_lookup(key, t) of
     None => false
     Some(_) => true
@@ -234,7 +234,7 @@ fn im_del(w : U64, key : I64, t : IntMap(v)) : IntMap(v) =
 -- ```output
 -- 2
 -- ```
-pub fn intmap_size(t : IntMap(v)) : Int =
+pub fn intmap_size(borrow t : IntMap(v)) : Int =
   match t of
     IMEmpty => 0
     IMLeaf(_k, _v) => 1
@@ -248,7 +248,7 @@ pub fn intmap_size(t : IntMap(v)) : Int =
 -- ```output
 -- true
 -- ```
-pub fn intmap_is_empty(t : IntMap(v)) : Bool =
+pub fn intmap_is_empty(borrow t : IntMap(v)) : Bool @ noalloc =
   match t of
     IMEmpty => true
     _ => false
@@ -423,9 +423,9 @@ pub fn intmap_fold(f, z : b, t : IntMap(v)) : b =
 -- ```output
 -- [(0, z), (1, a), (2, b)]
 -- ```
-pub fn intmap_to_list(t : IntMap(v)) : List((I64, v)) = im_list(t, Nil)
+pub fn intmap_to_list(borrow t : IntMap(v)) : List((I64, v)) = im_list(t, Nil)
 
-fn im_list(t : IntMap(v), acc : List((I64, v))) : List((I64, v)) =
+fn im_list(borrow t : IntMap(v), acc : List((I64, v))) : List((I64, v)) =
   match t of
     IMEmpty => acc
     IMLeaf(k, v) => Cons((k, v), acc)
@@ -439,7 +439,7 @@ fn im_list(t : IntMap(v), acc : List((I64, v))) : List((I64, v)) =
 -- ```output
 -- [1, 2]
 -- ```
-pub fn intmap_keys(t : IntMap(v)) : List(I64) = map(fst, intmap_to_list(t))
+pub fn intmap_keys(borrow t : IntMap(v)) : List(I64) = map(fst, intmap_to_list(t))
 
 -- | The values in ascending key order.
 --
@@ -449,7 +449,7 @@ pub fn intmap_keys(t : IntMap(v)) : List(I64) = map(fst, intmap_to_list(t))
 -- ```output
 -- [a, b]
 -- ```
-pub fn intmap_values(t : IntMap(v)) : List(v) = map(snd, intmap_to_list(t))
+pub fn intmap_values(borrow t : IntMap(v)) : List(v) = map(snd, intmap_to_list(t))
 
 -- | Build a map from `(key, value)` pairs; a later pair overwrites an earlier one
 -- with the same key. The result depends only on the surviving bindings, so any

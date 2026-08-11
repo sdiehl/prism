@@ -8,12 +8,12 @@ Stable public facade for the generated Pattern-family parser.
 
 ### `parse_pattern`
 
-```prism,sig,h-76bcb7d6b76b7cf424c2df18c498aac2d2abbc98e5893bc18e88e80353cd8fcc
+```prism,sig,h-9731ed2f4a8b321f66b813945b98856cecb39c9c7f04a5e539654dfd71540999
 parse_pattern : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Sp(Syntax.Ast.Pat))
 ```
 
 ### `parse_let_pattern`
 
-```prism,sig,h-49b5668d9e7521d88e1c3e838e7ad1ba7fff9e55d045d6aae4514f00da6758ee
+```prism,sig,h-46fa50b5e4002d7dbda188ba8e4b2dc4922be666763c0a9ce84b0608c9dc6fb6
 parse_let_pattern : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Sp(Syntax.Ast.Pat))
 ```

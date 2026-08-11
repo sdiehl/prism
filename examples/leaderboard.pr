@@ -6,9 +6,7 @@
 -- the same "trinity" and its unchanged hash spares the banner.
 
 import Data.Map (..)
-
 import Data.List (..)
-
 import Incr (..)
 
 -- Insert into a list kept in descending-by-score order. A small comparator sort

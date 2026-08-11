@@ -1,10 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
 
 use super::defaulting::default_open_rows;
 use super::diagnostics::{forall_ty_binders, poly_recursion_hint};
 use crate::error::{ErrKind, TypeError};
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core, Decl};
+use crate::types::deps;
 use crate::types::ty::{EffRow, Effects, Type};
 
 use super::super::env::Annot;
@@ -68,11 +70,11 @@ impl Tc<'_> {
 
     // Zonk after resolve_all, while this declaration's solutions are still in ctx.
     fn flush_spans(&mut self) {
-        for (id, t) in std::mem::take(&mut self.pending) {
+        for (id, t) in mem::take(&mut self.pending) {
             let t = self.apply(&t);
             self.span_types.insert(id, t);
         }
-        let pending: BTreeMap<_, _> = std::mem::take(&mut self.pending_tooltip_rows)
+        let pending: BTreeMap<_, _> = mem::take(&mut self.pending_tooltip_rows)
             .into_iter()
             .collect();
         for (id, row) in pending {
@@ -90,7 +92,7 @@ impl Tc<'_> {
     // subsumption relation in a rolled-back context, so ranking cannot constrain
     // either the hole or a later candidate.
     pub(in crate::tc) fn flush_holes(&mut self) {
-        for site in std::mem::take(&mut self.hole_sites) {
+        for site in mem::take(&mut self.hole_sites) {
             let expected = self.apply(&site.expected);
             let expected_s = self.report_type(&expected);
             let effects = self.report_row(&site.effects);
@@ -220,7 +222,7 @@ impl Tc<'_> {
             // A self-recursive call typed monomorphically cannot be used at a
             // second type without a signature; name the remedy (only on the error
             // path, and only for an actually self-recursive function).
-            if crate::types::effects::is_self_recursive(d) {
+            if deps::is_self_recursive(d) {
                 poly_recursion_hint(e, d)
             } else {
                 e
@@ -246,9 +248,9 @@ impl Tc<'_> {
     ) -> Result<Vec<Type>, TypeError> {
         let env_outer = env.clone();
         self.reset_ctx();
-        // Stage 1: seed every member. `env` accumulates the group's env-visible
-        // schemes so a sibling reference resolves to a real (monomorphic or
-        // annotated) type, not a placeholder stub.
+        // Seed every member. `env` accumulates the group's env-visible schemes so
+        // a sibling reference resolves to a real (monomorphic or annotated) type,
+        // not a placeholder stub.
         let mut seeds = Vec::with_capacity(members.len());
         for d in members {
             let seed = if d.konst {
@@ -265,7 +267,7 @@ impl Tc<'_> {
             env.insert(Sym::from(&d.name), visible);
             seeds.push(seed);
         }
-        // Stage 2: infer every body against the seeded group.
+        // Infer every body against the seeded group.
         for (d, seed) in members.iter().zip(&seeds) {
             // A monomorphic mutual call that needs the sibling at a second type
             // cannot be typed without a signature; name the remedy.
@@ -278,7 +280,7 @@ impl Tc<'_> {
                 super::super::require_pure_konst(d, &effs)?;
             }
         }
-        // Stage 3: generalize every member once, against the pre-group env, so the
+        // Generalize every member once against the pre-group environment so the
         // group's shared existentials all generalize.
         let mut out = Vec::with_capacity(members.len());
         for (d, seed) in members.iter().zip(&seeds) {
@@ -291,10 +293,10 @@ impl Tc<'_> {
         Ok(out)
     }
 
-    // Stage 1 of declaration inference: allocate the parameter, return, and
-    // effect-row existentials and build the monomorphic self-type, without
-    // touching any shared environment. Does not reset the context, so a caller
-    // can seed several members into one shared context before inferring them.
+    // Allocate the parameter, return, and effect-row existentials and build the
+    // monomorphic self-type without touching any shared environment. This does not
+    // reset the context, so a caller can seed several members into one shared
+    // context before inferring them.
     fn seed_decl(&mut self, d: &Decl<Core>) -> Result<DeclSeed, TypeError> {
         // One kind per variable across every annotation of the declaration
         // (params, return, and constraints share one signature scope).
@@ -404,11 +406,10 @@ impl Tc<'_> {
         })
     }
 
-    // Stage 1 for a constant member of a recursion group: its self-type is its
-    // value type (no arrow, no effects), from the annotation if given else a fresh
-    // existential. A constant is generalized by value restriction in `finish_decl`
-    // exactly as `infer_const` does; the dummy row tail keeps the shared seed shape
-    // and never carries a label, so it defaults to empty.
+    // Seed a constant member of a recursion group with its value type (no arrow or
+    // effects), taken from the annotation or a fresh existential. `finish_decl`
+    // applies the same value restriction as `infer_const`; the dummy row tail keeps
+    // the shared seed shape and carries no label, so it defaults to empty.
     fn seed_konst(&mut self, d: &Decl<Core>) -> Result<DeclSeed, TypeError> {
         let val = match &d.ret {
             Some(ann) => {
@@ -431,10 +432,10 @@ impl Tc<'_> {
         })
     }
 
-    // Stage 2: check the body against the seeded self-type. `env` holds the
-    // entry for this member's own name (a recursive call) and the env-visible
-    // schemes of any siblings (a mutual call). The self-entry is re-inserted last
-    // so it wins over any colliding parameter name, matching the pre-split order.
+    // Check the body against the seeded self-type. `env` holds the entry for this
+    // member's own name (a recursive call) and the visible schemes of any siblings
+    // (a mutual call). The self-entry is re-inserted last so it wins over any
+    // colliding parameter name, matching the pre-split order.
     //
     // The self-entry for a plain annotated function is its generalized annotation
     // scheme, so a recursive call instantiates it and may be used at a second type
@@ -527,9 +528,9 @@ impl Tc<'_> {
         Ok(())
     }
 
-    // Stage 3: generalize the inferred self-type against `env` (the environment
-    // as it was before this member or its group was seeded, so the group's shared
-    // existentials all generalize) and record any class constraints.
+    // Generalize the inferred self-type against `env`, as it stood before this
+    // member or its group was seeded, and record any class constraints. This
+    // generalizes the group's shared existentials together.
     fn finish_decl(
         &mut self,
         env: &Env,

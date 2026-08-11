@@ -42,6 +42,7 @@
 //! is rejected here rather than lowered.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::{iter, ptr};
 
 use crate::core::builtins::Builtin;
 use crate::types::ty::{EffRow, Label};
@@ -137,7 +138,7 @@ pub fn prepare(
     let graph = direct_graph(&fns);
     let arena_reachable = closure(&roots, &graph);
     let otherwise = closure(
-        &std::iter::once(Sym::new(ENTRY_POINT)).collect(),
+        &iter::once(Sym::new(ENTRY_POINT)).collect(),
         &otherwise_graph(&fns, &installers),
     );
     let arena_only: BTreeSet<Sym> = arena_reachable.difference(&otherwise).copied().collect();
@@ -168,9 +169,9 @@ pub fn prepare(
 
 /// The checked declaration of the operation this pass performs.
 struct Alloc {
-    /// What the allocator hands out (currently `Arena.Cell`).
+    /// What the allocator hands out (`Arena.Cell`).
     cell: CoreType,
-    /// The row label the operation carries (currently `Alloc`).
+    /// The row label the operation carries (`Alloc`).
     label: Label,
 }
 
@@ -382,7 +383,7 @@ fn otherwise_graph(
 /// var-bound case resolves to the literal at its binding site, so the address
 /// identifies the same body either way it is reached.
 fn body_id(body: &TypedComp) -> usize {
-    std::ptr::from_ref::<TypedComp>(body) as usize
+    ptr::from_ref::<TypedComp>(body) as usize
 }
 
 /// The body identities of every thunk passed to an installer call in `c`.
@@ -586,7 +587,7 @@ impl Alloc {
             row.labels()
                 .into_iter()
                 .cloned()
-                .chain(std::iter::once(self.label.clone())),
+                .chain(iter::once(self.label.clone())),
             row.tail().clone(),
         )
     }

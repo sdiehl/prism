@@ -10,15 +10,10 @@
 -- file the two sides disagree about shows up as a count mismatch instead of a
 -- timing artifact.
 import Data.Foldable (length)
-
 import Syntax.Source (..)
-
 import Syntax.Token (..)
-
 import Syntax.Lex (..)
-
 import Syntax.Layout (..)
-
 import Syntax.Parse (..)
 
 fn raw_count(text : String) : Int =

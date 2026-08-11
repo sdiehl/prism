@@ -1,0 +1,15 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/deriving_lens.pr
+---
+1
+Point { x = 1, y = 9 }
+Point { x = 10, y = 2 }
+1
+Line { start = Point { x = 40, y = 2 }, weight = 3 }
+Line { start = Point { x = 1, y = 2 }, weight = 4 }
+1
+Tagged { label = "hits!", count = 1 }
+Tagged { label = "hits", count = 7 }
+=> ()

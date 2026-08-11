@@ -55,7 +55,7 @@ fn cancel_main_scene() : Int ! {Async(Int), IO} =
   let c = channel()
   let _child = fork(\() -> main_child(c))
   recv(c)
-  cancel(Fiber(0))
+  cancel_root()
   yield()
   99
 

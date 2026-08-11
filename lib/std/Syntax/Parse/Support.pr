@@ -12,13 +12,9 @@
 -- as a sentinel expectation name.
 
 import Syntax.Source (..)
-
 import Syntax.Token (..)
-
 import Syntax.Diagnostic (..)
-
 import Syntax.Cursor (..)
-
 import Data.String (contains, index_of)
 
 -- | One parse step: the value and the cursor after it, an unmet expectation
@@ -40,6 +36,18 @@ pub fn parsed_fault(p : Parsed(a)) : Option(Diagnostic) =
     PTook(_, _) => None
     PStuck(c) => Some(cursor_diagnostic(c))
     PFault(d) => Some(d)
+
+-- | Carry a refusal through to the next step's result type. A production that
+-- sequences several steps passes an earlier step's refusal along unchanged,
+-- and only the value type differs between the two, so this re-tags a refusal
+-- without inspecting it. Applied to a success it stops at the cursor reached,
+-- which is what a caller that has already bound the value never asks for; it
+-- is the `else` half of a pattern binding whose `PTook` half took the value.
+pub fn parsed_refused(p : Parsed(a)) : Parsed(b) =
+  match p of
+    PTook(_, c) => PStuck(c)
+    PStuck(c) => PStuck(c)
+    PFault(d) => PFault(d)
 
 -- -------------------------------------------------------------------------
 -- Deliberate refusals and the recursion budget

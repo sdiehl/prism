@@ -38,7 +38,7 @@ use super::{frontend, Config};
 pub(super) fn types_section(checked: &Checked) -> String {
     let mut s = String::new();
     for d in &checked.decls {
-        writeln!(s, "{} : {}", d.name, d.ty.show()).unwrap();
+        writeln!(s, "{} : {}", d.name, checked.show_sig(d)).unwrap();
     }
     s
 }

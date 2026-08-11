@@ -7,19 +7,12 @@
 -- fixed pool) because the laws are structural, not adversarial.
 
 import Tc (..)
-
 import Quickcheck (..)
-
 import Control.State (..)
-
 import Control.Fresh (Fresh, run_fresh)
-
 import Data.Name (Name, Binder, fresh_binder, bound_name)
-
 import Data.Result (result_or)
-
 import Data.List (map, reverse, foldl)
-
 import Data.Foldable (length)
 
 -- Deterministic rigid names for the substitution laws: identities 0 and 1 in

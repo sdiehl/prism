@@ -10,11 +10,8 @@
 -- stays authoritative: the Prism result is compared and reported, never
 -- substituted.
 import Syntax.Source (..)
-
 import Syntax.Diagnostic (..)
-
 import Syntax.Codec (..)
-
 import Syntax.Lex (..)
 
 -- The compiler classifies a fault as incomplete (an interactive reader should

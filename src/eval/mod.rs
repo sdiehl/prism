@@ -401,16 +401,15 @@ pub struct Run {
 
 // SplitMix64 default seed, shared with the C runtime (`PRISM_RNG_SEED` in
 // `runtime/prism_io.c`) so the interpreter and native backends produce
-// identical streams from an unseeded `rand`. This is a free choice of initial
-// state; it coincidentally equals the gamma below but is a distinct quantity
-// and may be changed without touching the generator's increment.
+// identical streams from an unseeded `rand`. A free choice of initial state:
+// it happens to equal the gamma below but is a distinct quantity, so the
+// `rng_constants_match_the_c_runtime` test pins each constant to its own C
+// counterpart, never to the other.
 const DEFAULT_SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 
 // SplitMix64's Weyl-sequence increment (the "gamma", 2^64 / golden ratio),
 // `PRISM_RNG_GAMMA` in the C runtime. A fixed generator parameter that advances
-// the internal state on every draw. Its value coincides with the default seed
-// but is a separate quantity: editing one must not silently move the other,
-// which is why they are not pinned equal by any test.
+// the internal state on every draw.
 const SPLITMIX_GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
 
 const fn splitmix64(state: &mut u64) -> u64 {
@@ -2107,7 +2106,22 @@ mod tests {
     use super::{
         fmt_g, run_observed_lowered_with_args, run_observed_with_args, run_traced,
         runtime_oracle::rt_oracle, splitmix64, Builtin, Obs, Sym, Tape, TracedRun, DEFAULT_SEED,
+        SPLITMIX_GAMMA,
     };
+
+    // Both halves of the generator are re-declared in the C runtime; a drift in
+    // either constant would silently fork the interpreter and native streams.
+    #[test]
+    fn rng_constants_match_the_c_runtime() {
+        let c = include_str!("../../runtime/prism_io.c");
+        for (name, value) in [
+            ("PRISM_RNG_SEED", DEFAULT_SEED),
+            ("PRISM_RNG_GAMMA", SPLITMIX_GAMMA),
+        ] {
+            let line = format!("#define {name} 0x{value:X}UL");
+            assert!(c.contains(&line), "runtime/prism_io.c must pin `{line}`");
+        }
+    }
 
     // `fmt_g` renders the shortest decimal that round-trips back to the same
     // double: full precision, no truncation, scientific only outside [-4, 16).

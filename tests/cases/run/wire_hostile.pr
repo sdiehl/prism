@@ -12,7 +12,6 @@
 -- length faults on frames built byte by byte.
 
 import Wire (..)
-
 import Data.Map (..)
 
 -- Discharge `Fail` to a default, so a fallible decode becomes a pure `Bool`: a

@@ -21,13 +21,9 @@
 -- `Sp(Expr)` and `Sp(Pat)` would be a single instance.
 
 import Control.Layer (..)
-
 import Data.Foldable (any, length)
-
 import Data.List (append, concat_map, drop, foldl, map, reverse, take)
-
 import Syntax.Ast (..)
-
 import Syntax.Source (..)
 
 -- | The immediate `Expr` children of one node, in source order. Children held
@@ -565,14 +561,7 @@ fn wk_params(ps : List(Param), cs : List(Sp(Expr))) : Option(List(Param)) =
             None => None
             Some(tl) => Some(Cons(p, tl))
 
-fn wk_param(p : Param, v : Sp(Expr)) : Param =
-  Param {
-    name = p.name,
-    pat = p.pat,
-    ty = p.ty,
-    is_borrow = p.is_borrow,
-    dflt = Some(v)
-  }
+fn wk_param(p : Param, v : Sp(Expr)) : Param = Param { ..p, dflt = Some(v) }
 
 -- | The base case every carrier rebuild shares: the child list must be spent
 -- exactly, so a longer one is a shape mismatch and not a silent truncation.
@@ -601,7 +590,7 @@ pub fn lit_probe(n : Int) : Sp(Expr) =
   }
 
 -- | The number of nodes in the tree.
-pub fn expr_count(e : Sp(Expr)) : Int = length(expr_universe(e))
+pub fn expr_count(e : Sp(Expr)) : Int = lay_size(expr_layer(), e)
 
 -- | Whether any node satisfies the predicate.
 pub fn expr_any(p, e) =

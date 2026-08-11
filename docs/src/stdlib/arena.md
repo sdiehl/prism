@@ -12,8 +12,8 @@ The `alloc` operation is compiler-internal: the arena-lowering pass rewrites a c
 
 ### `Cell`
 
-```prism,def,h-272e6c12f90ed48de7a84984ec89ccd88645f5ee83b7137c6b108fc7f6cb0cd6
-type Cell = Cell(Int)
+```prism,def,h-e5589f350579f3bdb956488e83ca5d6cc3677c5b79bb0fea418248ce7d22dcb0
+newtype Cell = Cell(Int)
 ```
 
 An opaque handle to a raw cell handed out by an allocator. It carries no observable payload; the arena-lowering pass writes a constructor into it, and user code never inspects it. The vestigial field keeps the type nominal.

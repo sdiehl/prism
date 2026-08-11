@@ -35,17 +35,11 @@
 -- ```
 
 import Control.State (..)
-
 import Control.Fresh (Fresh, fresh)
-
 import Data.Name (Name, Binder, fresh_binder, bound_name, name_id)
-
 import Data.Result (result_or)
-
 import Data.List (map, reverse, foldl, append, filter)
-
 import Data.UnionFind.Payload (UnionFind, ufp_empty, ufp_find, ufp_insert, ufp_set, ufp_union_with)
-
 import Data.Map (map_empty, map_lookup, map_insert, map_to_list)
 
 -- The two rigid-variable namespaces, branded so a type identity can never

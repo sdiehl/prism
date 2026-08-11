@@ -2,23 +2,14 @@
 -- The generator may fingerprint this file, but must never emit or rewrite it.
 
 import Data.List (..)
-
 import Data.Maybe (..)
-
 import Syntax.Source (..)
-
 import Syntax.Token (..)
-
 import Syntax.Ast (..)
-
 import Syntax.Cursor (..)
-
 import Syntax.Parse.Support (..)
-
 import Syntax.Parse.GeneratedControl (..)
-
 import Syntax.Parse.PatternSemantics (..)
-
 import Syntax.Parse.GeneratedPattern (..)
 
 fn pattern_token(

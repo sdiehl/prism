@@ -11,7 +11,8 @@
 //!
 //! Generation reads the resolved surface program before optimization, so the
 //! obligation bytes are invariant across optimizer configuration, backend, and
-//! effect-lowering tier. No solver is consulted here; discharge is a later step.
+//! effect-lowering tier. Generation does not consult a solver; discharge is a
+//! separate operation.
 
 use crate::error::TypeError;
 use crate::syntax::ast::Program;
@@ -33,7 +34,7 @@ pub(crate) enum VcStatus {
     /// One obligation per `ensures` clause, in source order.
     Obligations(Vec<Obligation>),
     /// The contract is well-formed but the body is outside the supported
-    /// fragment, so no obligation can be generated yet.
+    /// fragment, so no obligation can be generated.
     Pending(String),
 }
 
@@ -54,8 +55,8 @@ pub(crate) fn generate(prog: &Program) -> Result<Vec<FunctionVCs>, TypeError> {
         let contract = checker.checked_contract(d)?;
         let subject = crate::verify::normalize::contract_digest(&contract);
         if contract.ensures.is_empty() {
-            // A requires-only contract has no standalone goal; its precondition
-            // constrains callers, discharged modularly in a later wave.
+            // A requires-only contract has no standalone goal. Its precondition
+            // constrains callers rather than the function body.
             continue;
         }
         let body = match checker.elab_body(d, &contract.params, contract.result) {

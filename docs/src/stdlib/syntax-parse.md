@@ -20,7 +20,7 @@ A source-level parse failure, preserving whether lexing or parsing refused the i
 
 ### `parse_program_tokens`
 
-```prism,sig,h-4383cded28a60a2fa43834340b20123d505c6e74a2bad5cffd62099b4dcda33c
+```prism,sig,h-d420245951c664e909e63156ef177d7e1235ae499d641ad43d0a8985b0d473ee
 parse_program_tokens : (List(Syntax.Token.Token), Int) -> Result(List(Syntax.Ast.Item), Syntax.Diagnostic.Diagnostic)
 ```
 
@@ -28,7 +28,7 @@ Parse an already-laid-out whole-program token stream.
 
 ### `parse_source`
 
-```prism,sig,h-87dd3e25eba61e6f3ae16845090ea29c26c0bd52f51ea100af4ae5c1f34bfea6
+```prism,sig,h-669f00b9cee17932b12118a992e65ce0f3f0e1fc2fbdc5da6af01b1826d6d516
 parse_source : (String) -> Result(List(Syntax.Ast.Item), Syntax.Parse.ParseFailure)
 ```
 
@@ -36,7 +36,7 @@ Lex, lay out, and parse one complete Prism source file.
 
 ### `parse_source_budgeted`
 
-```prism,sig,h-2bdb8ea98c8ef738267fb4e3b2c52fd0e19aae481f18a983412d577b9d382e5d
+```prism,sig,h-44e790db8fa16d8acf1d19e793ab6db5d5234362befc34eb27dadf4ca6ba9e19
 parse_source_budgeted : (Int, String) -> Result(List(Syntax.Ast.Item), Syntax.Parse.ParseFailure)
 ```
 
@@ -44,7 +44,7 @@ parse_source_budgeted : (Int, String) -> Result(List(Syntax.Ast.Item), Syntax.Pa
 
 ### `parse_expr_tokens`
 
-```prism,sig,h-79386a422d6de9c30ebbdf48c9863877f5a86f8e2df1be436c8aeda7f6b0ca94
+```prism,sig,h-43d218d26849e3df5ea2e0423ada90a9200f27aa63c9824bc2d99ad1141195c0
 parse_expr_tokens : (List(Syntax.Token.Token), Int) -> Result(Syntax.Ast.Sp(Syntax.Ast.Expr), Syntax.Diagnostic.Diagnostic)
 ```
 
@@ -52,7 +52,7 @@ Parse one expression from a token cursor and require complete consumption.
 
 ### `parse_expr_source`
 
-```prism,sig,h-c86a001d41c8475b771903c7a8532ed7b2fd4ad3e8dff769b61994892e0c6a8d
+```prism,sig,h-fedddd85115cb8eac9f523280fcef31ae1db236317a69f16833386b940f88309
 parse_expr_source : (String) -> Result(Syntax.Ast.Sp(Syntax.Ast.Expr), Syntax.Parse.ParseFailure)
 ```
 

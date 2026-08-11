@@ -6,19 +6,55 @@ value  ->  Var sym
         |  Bool b
         |  Unit
         |  Str s
+        |  Thunk comp
         |  Ctor sym tag [ value, ... ]
         |  Tuple [ value, ... ]
-        |  Thunk comp
+        |  UnboxedTuple [ value, ... ]
+        |  UnboxedRecord [ (sym, value), ... ]
 
 comp   ->  Return value
         |  Bind comp sym comp
         |  Force value
         |  Lam [ sym, ... ] comp
         |  App comp [ value, ... ]
-        |  Call sym [ value, ... ]
         |  If value comp comp
+        |  Prim coreop value value
+        |  Call sym [ value, ... ]
+        |  Io ioop [ value, ... ]
+        |  Error value
         |  Case value [ (pat, comp), ... ]
-        |  Prim op value value
+        |  FloatBuiltin floatop value
+        |  Neg neglane value
+        |  UnboxedProject value sym
         |  Do sym [ value, ... ]
-        |  Handle { body, return_var, return_body, ops }
+        |  Handle { body: comp, return_var: maybe-sym,
+                    return_body: maybe-comp, ops: [ handleop, ... ] }
         |  Mask [ sym, ... ] comp
+        |  StrBuiltin builtin [ value, ... ]
+        |  Dup value
+        |  Drop value
+        |  WithReuse { token: sym, freed: value, body: comp }
+        |  Reuse sym value
+        |  InitAt value value
+        |  RefNew value
+        |  RefGet value
+        |  RefSet value value
+
+pat    ->  Wild
+        |  Var sym
+        |  Ctor sym [ maybe-sym, ... ]
+        |  Tuple [ maybe-sym, ... ]
+
+maybe-sym -> Some sym | None
+maybe-comp -> Some comp | None
+
+handleop ->  HandleOp { name: sym, params: [ sym, ... ],
+                        resume: sym, body: comp }
+
+corefn ->  CoreFn { name: sym, params: [ sym, ... ], body: comp,
+                    dict_arity: n }
+
+core   ->  Core [ corefn, ... ]
+
+-- coreop, ioop, floatop, neglane, and builtin range over the corresponding
+-- implementation enums summarized in the tables below.

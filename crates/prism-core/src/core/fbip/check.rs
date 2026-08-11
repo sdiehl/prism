@@ -1,9 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::types::{CtorInfo, DeclInfo, Type};
 use prism_common::sym::Sym;
 use prism_syntax::ast::{Core as CorePhase, Fip, Program};
 use prism_syntax::names;
+
+use crate::core::builtins::{builtin, BuiltinKind};
+use crate::types::{CtorInfo, DeclInfo, Type};
 
 use super::super::cbpv::{Comp, Core, CoreFn, CorePat, Value};
 use super::super::fv::pat_vars;
@@ -75,8 +77,11 @@ pub fn replayable_annots(prog: &Program<CorePhase>) -> BTreeSet<Sym> {
 // builds a constructor (e.g. string ops returning a boxed Str) is excluded.
 fn alloc_free_prim(name: &str) -> bool {
     matches!(
-        name,
-        "print" | "println" | "print_float" | "print_string" | "error" | "srand"
+        builtin(name),
+        Some((
+            _,
+            BuiltinKind::Print | BuiltinKind::Println | BuiltinKind::Error | BuiltinKind::Srand
+        ))
     )
 }
 
@@ -143,27 +148,46 @@ impl Witnesses {
 
 // Record a witness for each fresh cell a value materializes. A bare constructor,
 // tuple, or thunk in any non-`reuse` position allocates; scalars and variables do
-// not. A value contributes a witness iff it would have failed the first-failure
-// check, so the accept/reject decision is unchanged.
-fn value_alloc(v: &Value, out: &mut Witnesses) {
+// not. A declared `newtype` constructor is the exception: its wrapper is erased
+// by a mandatory representation pass, so only allocations nested in its single
+// field count. The authoritative constructor set comes from the checked source
+// declarations; ordinary one-field data constructors remain allocating.
+fn value_alloc(v: &Value, newtypes: &BTreeSet<Sym>, out: &mut Witnesses) {
     match v {
+        Value::Ctor(name, _, fields) if newtypes.contains(name) => {
+            for field in fields {
+                value_alloc(field, newtypes, out);
+            }
+        }
         Value::Ctor(name, ..) => out.push(AllocWitness::Ctor(*name)),
         Value::Tuple(_) => out.push(AllocWitness::Tuple),
         Value::Thunk(_) => out.push(AllocWitness::Closure),
         // Unboxed products carry no heap cell, so they are not an allocation
         // witness themselves; their fields still might allocate.
-        Value::UnboxedTuple(fs) => fs.iter().for_each(|f| value_alloc(f, out)),
-        Value::UnboxedRecord(fs) => fs.iter().for_each(|(_, f)| value_alloc(f, out)),
+        Value::UnboxedTuple(fields) => {
+            for field in fields {
+                value_alloc(field, newtypes, out);
+            }
+        }
+        Value::UnboxedRecord(fields) => {
+            for (_, field) in fields {
+                value_alloc(field, newtypes, out);
+            }
+        }
         _ => {}
     }
 }
 
 // The argument of a `Comp::Reuse`: the head cell reuses a dropped token, so only
 // its fields can hide a fresh allocation.
-fn value_alloc_under_reuse(v: &Value, out: &mut Witnesses) {
+fn value_alloc_under_reuse(v: &Value, newtypes: &BTreeSet<Sym>, out: &mut Witnesses) {
     match v {
-        Value::Ctor(_, _, fs) | Value::Tuple(fs) => fs.iter().for_each(|f| value_alloc(f, out)),
-        other => value_alloc(other, out),
+        Value::Ctor(_, _, fields) | Value::Tuple(fields) => {
+            for field in fields {
+                value_alloc(field, newtypes, out);
+            }
+        }
+        other => value_alloc(other, newtypes, out),
     }
 }
 
@@ -172,14 +196,21 @@ fn value_alloc_under_reuse(v: &Value, out: &mut Witnesses) {
 // caller demands a `fip` callee; an `@ noalloc`/`fbip` caller accepts either
 // certificate. The traversal mirrors the accepting checker exactly, so a body is
 // rejected iff at least one witness is recorded.
-fn comp_alloc(c: &Comp, want: Fip, fips: &Fips, users: &BTreeSet<Sym>, out: &mut Witnesses) {
+fn comp_alloc(
+    c: &Comp,
+    want: Fip,
+    fips: &Fips,
+    users: &BTreeSet<Sym>,
+    newtypes: &BTreeSet<Sym>,
+    out: &mut Witnesses,
+) {
     match c {
-        Comp::Reuse(_, v) => value_alloc_under_reuse(v, out),
+        Comp::Reuse(_, v) => value_alloc_under_reuse(v, newtypes, out),
         // Freeing the dropped cell is the allocation-free shell a `Reuse` in the
         // body then spends; check the body like any other scope.
         Comp::WithReuse { freed, body, .. } => {
-            value_alloc(freed, out);
-            comp_alloc(body, want, fips, users, out);
+            value_alloc(freed, newtypes, out);
+            comp_alloc(body, want, fips, users, newtypes, out);
         }
         Comp::Call(g, args) => {
             if users.contains(g) {
@@ -194,31 +225,35 @@ fn comp_alloc(c: &Comp, want: Fip, fips: &Fips, users: &BTreeSet<Sym>, out: &mut
                 out.push(AllocWitness::Builtin(*g));
             }
             for a in args {
-                value_alloc(a, out);
+                value_alloc(a, newtypes, out);
             }
         }
         Comp::Bind(m, _, n) => {
-            comp_alloc(m, want, fips, users, out);
-            comp_alloc(n, want, fips, users, out);
+            comp_alloc(m, want, fips, users, newtypes, out);
+            comp_alloc(n, want, fips, users, newtypes, out);
         }
         Comp::If(_, t, e) => {
-            comp_alloc(t, want, fips, users, out);
-            comp_alloc(e, want, fips, users, out);
+            comp_alloc(t, want, fips, users, newtypes, out);
+            comp_alloc(e, want, fips, users, newtypes, out);
         }
-        Comp::Case(_, arms) => arms
-            .iter()
-            .for_each(|(_, b)| comp_alloc(b, want, fips, users, out)),
-        Comp::Lam(_, b) | Comp::Mask(_, b) => comp_alloc(b, want, fips, users, out),
+        Comp::Case(_, arms) => {
+            for (_, body) in arms {
+                comp_alloc(body, want, fips, users, newtypes, out);
+            }
+        }
+        Comp::Lam(_, b) | Comp::Mask(_, b) => {
+            comp_alloc(b, want, fips, users, newtypes, out);
+        }
         Comp::App(fbody, args) => {
-            comp_alloc(fbody, want, fips, users, out);
+            comp_alloc(fbody, want, fips, users, newtypes, out);
             for a in args {
-                value_alloc(a, out);
+                value_alloc(a, newtypes, out);
             }
             out.push(AllocWitness::IndirectCall);
         }
         Comp::Prim(_, a, b) => {
-            value_alloc(a, out);
-            value_alloc(b, out);
+            value_alloc(a, newtypes, out);
+            value_alloc(b, newtypes, out);
         }
         // The fip check runs on the un-effect-lowered core, so a Ref op (introduced
         // only by `erase_local_vars` during effect lowering) is unreachable here;
@@ -231,13 +266,13 @@ fn comp_alloc(c: &Comp, want: Fip, fips: &Fips, users: &BTreeSet<Sym>, out: &mut
         | Comp::UnboxedProject(v, _)
         | Comp::Drop(v)
         | Comp::RefNew(v)
-        | Comp::RefGet(v) => value_alloc(v, out),
+        | Comp::RefGet(v) => value_alloc(v, newtypes, out),
         // `InitAt` is a post-lowering (arena) node, unreachable in this
         // pre-lowering check; kept total, and its embedded constructor still
         // counts as an allocation like a `RefSet`'s stored value.
         Comp::RefSet(cell, v) | Comp::InitAt(cell, v) => {
-            value_alloc(cell, out);
-            value_alloc(v, out);
+            value_alloc(cell, newtypes, out);
+            value_alloc(v, newtypes, out);
         }
         Comp::Do(op, args) => {
             // A performed `alloc` materializes a fresh cell (serviced from an
@@ -248,12 +283,12 @@ fn comp_alloc(c: &Comp, want: Fip, fips: &Fips, users: &BTreeSet<Sym>, out: &mut
                 out.push(AllocWitness::AllocOp);
             }
             for a in args {
-                value_alloc(a, out);
+                value_alloc(a, newtypes, out);
             }
         }
         Comp::StrBuiltin(_, args) | Comp::Io(_, args) => {
             for a in args {
-                value_alloc(a, out);
+                value_alloc(a, newtypes, out);
             }
         }
         Comp::Handle {
@@ -262,12 +297,12 @@ fn comp_alloc(c: &Comp, want: Fip, fips: &Fips, users: &BTreeSet<Sym>, out: &mut
             ops,
             ..
         } => {
-            comp_alloc(body, want, fips, users, out);
+            comp_alloc(body, want, fips, users, newtypes, out);
             if let Some(rb) = return_body {
-                comp_alloc(rb, want, fips, users, out);
+                comp_alloc(rb, want, fips, users, newtypes, out);
             }
             for op in ops {
-                comp_alloc(&op.body, want, fips, users, out);
+                comp_alloc(&op.body, want, fips, users, newtypes, out);
             }
         }
         Comp::Dup(_) => {}
@@ -320,8 +355,10 @@ fn witness_clause(w: &AllocWitness, want: Fip) -> String {
 /// Verify every `fip`/`fbip`-annotated function over the reuse-lowered core.
 ///
 /// `fips` maps a function name to its annotation, `sigs` the borrow mask (a
-/// `fip` function may carry no borrowed param), and `users` is the set of
-/// user-defined function names (to tell a user call from a prim/builtin).
+/// `fip` function may carry no borrowed param), `users` is the set of
+/// user-defined function names (to tell a user call from a prim/builtin), and
+/// `newtypes` is the authoritative set of constructors erased by the mandatory
+/// newtype representation pass.
 ///
 /// # Errors
 /// Fails with a clear message when an annotated function allocates fresh, is
@@ -331,6 +368,7 @@ pub fn check_fip(
     fips: &Fips,
     sigs: &Sigs,
     users: &BTreeSet<Sym>,
+    newtypes: &BTreeSet<Sym>,
 ) -> Result<(), String> {
     for f in &core.fns {
         let Some(&want) = fips.get(&f.name) else {
@@ -347,7 +385,7 @@ pub fn check_fip(
             }
         }
         let mut witnesses = Witnesses::new();
-        comp_alloc(&f.body, want, fips, users, &mut witnesses);
+        comp_alloc(&f.body, want, fips, users, newtypes, &mut witnesses);
         if !witnesses.seen.is_empty() {
             return Err(render_alloc(want, f.name.as_str(), &witnesses));
         }
@@ -695,6 +733,8 @@ const fn kw(f: Fip) -> &'static str {
 // is exactly what isolates the stack rule).
 #[cfg(test)]
 mod tests {
+    use std::iter;
+
     use super::*;
     use crate::core::cbpv::CoreOp;
 
@@ -842,11 +882,11 @@ mod tests {
     }
 
     fn fip_of(f: &CoreFn) -> Fips {
-        std::iter::once((f.name, Fip::Fip)).collect()
+        iter::once((f.name, Fip::Fip)).collect()
     }
 
     fn fbip_of(f: &CoreFn) -> Fips {
-        std::iter::once((f.name, Fip::Fbip)).collect()
+        iter::once((f.name, Fip::Fbip)).collect()
     }
 
     fn use_var_twice(x: &str) -> Comp {
@@ -867,12 +907,85 @@ mod tests {
         let core = Core {
             fns: vec![f.clone()],
         };
-        let err = check_fip(&core, &fbip_of(&f), &BTreeMap::new(), &users(&["make"]))
-            .expect_err("fbip/without-alloc must reject closure allocation");
+        let err = check_fip(
+            &core,
+            &fbip_of(&f),
+            &BTreeMap::new(),
+            &users(&["make"]),
+            &BTreeSet::new(),
+        )
+        .expect_err("fbip/without-alloc must reject closure allocation");
         assert!(
             err.contains("a lambda is materialized as a fresh closure cell"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn zero_alloc_accepts_erased_newtype_constructor() {
+        let f = one(
+            "wrap",
+            1,
+            Comp::Return(Value::Ctor("Id".into(), 0, vec![Value::Var("p0".into())])),
+        );
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        let newtypes = users(&["Id"]);
+        assert!(check_fip(
+            &core,
+            &fbip_of(&f),
+            &BTreeMap::new(),
+            &users(&["wrap"]),
+            &newtypes,
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn zero_alloc_still_rejects_ordinary_one_field_constructor() {
+        let f = one(
+            "wrap",
+            1,
+            Comp::Return(Value::Ctor("Box".into(), 0, vec![Value::Var("p0".into())])),
+        );
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        let err = check_fip(
+            &core,
+            &fbip_of(&f),
+            &BTreeMap::new(),
+            &users(&["wrap"]),
+            &BTreeSet::new(),
+        )
+        .expect_err("ordinary one-field data must still allocate");
+        assert!(err.contains("constructor `Box` is built fresh"), "{err}");
+    }
+
+    #[test]
+    fn zero_alloc_checks_allocations_inside_newtype_payload() {
+        let f = one(
+            "wrap",
+            1,
+            Comp::Return(Value::Ctor(
+                "Id".into(),
+                0,
+                vec![Value::Tuple(vec![Value::Var("p0".into())])],
+            )),
+        );
+        let core = Core {
+            fns: vec![f.clone()],
+        };
+        let err = check_fip(
+            &core,
+            &fbip_of(&f),
+            &BTreeMap::new(),
+            &users(&["wrap"]),
+            &users(&["Id"]),
+        )
+        .expect_err("allocation in an erased wrapper payload must remain visible");
+        assert!(err.contains("a tuple is built fresh"), "{err}");
     }
 
     #[test]
@@ -899,7 +1012,7 @@ mod tests {
     }
 
     fn pair_ctors(field0: Type, field1: Type) -> BTreeMap<String, CtorInfo> {
-        std::iter::once((
+        iter::once((
             "Pair".to_string(),
             CtorInfo {
                 type_name: "P".into(),

@@ -1,5 +1,10 @@
 use std::fmt;
 
+/// Prefix on every stable diagnostic code.
+pub const ERROR_CODE_PREFIX: char = 'E';
+/// Number of decimal digits following [`ERROR_CODE_PREFIX`].
+pub const ERROR_CODE_DIGITS: usize = 4;
+
 /// Compiler subsystem that owns a diagnostic code range.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ErrorPhase {

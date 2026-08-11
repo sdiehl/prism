@@ -128,19 +128,21 @@ impl Fmt<'_> {
                 .trim_start()
                 .to_string(),
             (Expr::Sugar(Sugar::Assign(x, v)), _) => {
-                if let Some((op, rhs)) = as_compound_assign(x, v) {
-                    format!(
-                        "{x} {}= {}",
-                        op.spelling(),
-                        self.fmt_expr(rhs, indent, Mode::Flat)
-                    )
-                } else {
-                    format!(
-                        "{x} {} {}",
-                        kw::COLON_EQ,
-                        self.fmt_expr(v, indent, Mode::Flat)
-                    )
-                }
+                self.fmt_path_assign(x, v).unwrap_or_else(|| {
+                    if let Some((op, rhs)) = as_compound_assign(x, v) {
+                        format!(
+                            "{x} {}= {}",
+                            op.spelling(),
+                            self.fmt_expr(rhs, indent, Mode::Flat)
+                        )
+                    } else {
+                        format!(
+                            "{x} {} {}",
+                            kw::COLON_EQ,
+                            self.fmt_expr(v, indent, Mode::Flat)
+                        )
+                    }
+                })
             }
             (Expr::Handle(body, arms, handler_mode), _) => {
                 self.fmt_handle_flat(body, arms, *handler_mode, indent, mode)

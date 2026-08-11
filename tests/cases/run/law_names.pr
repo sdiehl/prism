@@ -4,13 +4,9 @@
 -- explicit error, never a fallback.
 
 import Quickcheck (..)
-
 import Data.Name (..)
-
 import Data.Scope (..)
-
 import Control.Fresh (Fresh, run_fresh, run_fresh_from)
-
 import Data.Result (result_or)
 
 type TermSpace = TermTag

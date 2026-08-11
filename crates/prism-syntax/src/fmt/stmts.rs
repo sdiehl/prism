@@ -71,6 +71,38 @@ impl Fmt<'_> {
         )
     }
 
+    // `let pat = value else fallback`: the binding line, then the value the
+    // block takes when the pattern does not match. Both share the binding's
+    // line when they fit; otherwise the fallback lays out offside under its own
+    // `else`, the shape `transact` already uses for the same keyword.
+    pub(super) fn fmt_let_else_line(
+        &self,
+        name: &str,
+        value: &S<Expr>,
+        fallback: &S<Expr>,
+        indent: usize,
+        from: usize,
+    ) -> String {
+        let ind = INDENT.repeat(indent);
+        let head = self.fmt_let_line(name, value, indent, from);
+        let breakable = !head.contains('\n')
+            && !self.has_comments(value.span.end, fallback.span.end)
+            && !forces_break(fallback);
+        if breakable {
+            if let Some(inline) = self.fmt_expr_inline(fallback, Mode::Layout) {
+                let prefix = format!("{head} {} ", kw::ELSE);
+                if fits_at(text_width(&prefix), &inline) {
+                    return format!("{prefix}{inline}");
+                }
+            }
+        }
+        format!(
+            "{head}\n{ind}{}\n{}",
+            kw::ELSE,
+            self.fmt_block(fallback, indent + 1, value.span.end)
+        )
+    }
+
     pub(super) fn fmt_transact_layout(
         &self,
         e: &S<Expr>,

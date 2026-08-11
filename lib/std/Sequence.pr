@@ -64,7 +64,6 @@
 -- here; list append is written locally as `app_list` because `append` is the
 -- sequence combinator below. Bytes iteration rides the `Data.Bytes` vocabulary.
 import Data.List (reverse, tail)
-
 import Data.Bytes (Bytes, bytes_empty, bytes_push, bytes_length, bytes_index)
 
 -- The pull step: `SDone` ends the stream, `SMore(x, rest)` yields `x` and the thunk

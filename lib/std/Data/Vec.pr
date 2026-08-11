@@ -25,7 +25,7 @@
 import Data.List (..)
 
 -- | A vector of `a` with a type-level length `n`.
-pub type Vec(a, n : Nat) = MkVec(List(a))
+opaque type Vec(a, n : Nat) = MkVec(List(a))
 
 -- | The empty vector, length `0`.
 pub fn vempty() : Vec(a, 0) = MkVec([])

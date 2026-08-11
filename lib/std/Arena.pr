@@ -28,7 +28,7 @@ pub effect Alloc
 -- | An opaque handle to a raw cell handed out by an allocator. It carries no
 -- observable payload; the arena-lowering pass writes a constructor into it, and
 -- user code never inspects it. The vestigial field keeps the type nominal.
-pub type Cell = Cell(Int)
+opaque newtype Cell = Cell(Int)
 
 -- | Run `body`, servicing each eligible allocation out of this activation's
 -- region and reclaiming the whole region when the handler returns. Anything the

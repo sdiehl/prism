@@ -20,19 +20,19 @@ type GeneratedSeparatedDecision = GSEnter | GSReject(Cursor)
 
 ### `generated_bind`
 
-```prism,sig,h-b89fb7ca87be35ee5eac9a37340b44c63bf60809a1b13ff5cec9967143293d9d
+```prism,sig,h-02469869074fa16cb6efe677faef2deeacc62ac1f5c279f30a6c5f286b7f2037
 generated_bind : forall a b. (Syntax.Parse.Support.Parsed(a), (a, Syntax.Cursor.Cursor) -> Syntax.Parse.Support.Parsed(b)) -> Syntax.Parse.Support.Parsed(b)
 ```
 
 ### `generated_spend`
 
-```prism,sig,h-1335e916cecf750c8e73c017e7919e4f27144a03aa7801c8f565fd814739fa27
+```prism,sig,h-b308d91c00fb47adf93e84f4ea181529dd209ea35007fab718a570420ddb8d0d
 generated_spend : forall a. (Syntax.Cursor.Cursor, Int, (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(a)) -> Syntax.Parse.Support.Parsed(a)
 ```
 
 ### `generated_repeat`
 
-```prism,sig,h-227d298b2b1ed37a6feb10d6a6c51a4f5206c2a7808c30907150f19fdcd9d8ef
+```prism,sig,h-e3a873b53be4a4a53b6492ada97500afef8a7088dd88c1fff9a585b932357cb2
 generated_repeat : forall a. (Syntax.Cursor.Cursor, Int, Int, (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(a)) -> Syntax.Parse.Support.Parsed(List(a))
 ```
 

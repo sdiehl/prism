@@ -14,8 +14,8 @@ Values are heterogeneous across a single run (an `Int` total beside a `Map` of s
 
 ### `Incr`
 
-```prism,def,h-fb2dee65c7ba2649618f404ae49b2264783798d661123b0d62febb5a0b6a5976
-type Incr(a) = IncrRef(String)
+```prism,def,h-c9a7102d09e0cc369e3cf8117e2ab15af0e2ead7e9d09075ee113596b8bc4f88
+newtype Incr(a) = IncrRef(String)
 ```
 
 A handle to an incremental node carrying values of type `a`. It is a phantom-typed wrapper over the node's content key; `get` on it returns `a`.
@@ -36,7 +36,7 @@ effect IncrRaw
 
 ### `run_incr`
 
-```prism,sig,h-1d7907b52d677520464e85bd008ad5b35400c7b5ae312780d7c23bc1523f5c8c
+```prism,sig,h-662a1da43c85d67c45d984bd6856930e4451c43fdf2dae41910c32b01882d604
 run_incr : forall e0 a. (() -> a ! {Incr.IncrRaw, e0}) -> a ! {e0}
 ```
 
@@ -55,8 +55,8 @@ run_incr() fn
 
 ### `input`
 
-```prism,sig,h-c377035869ca8eaec7cbce5fb6bd39b9c929b7183f39e31d59edcfea1b900c81
-input : forall a. (a) -> Incr.Incr(a) ! {Incr.IncrRaw}
+```prism,sig,h-211cf0c7b76fe42cfc411a22c164b5b9360c132951cfe4bd2cbdb21a2c094ff4
+input : forall a. (a) -> Incr.Incr(a) ! {Incr.IncrRaw} given Wire.Serialize(a)
 ```
 
 Create an input node holding `v`. Its key is its creation order in the run.
@@ -71,8 +71,8 @@ run_incr(\() -> get(input(42)))
 
 ### `get`
 
-```prism,sig,h-491dbfb74f987c01648050fa2fd5c692aa16204ced2c470ecf28ff0f47a22682
-get : forall a. (Incr.Incr(a)) -> a ! {Fail, Incr.IncrRaw}
+```prism,sig,h-ef432e06c21a56a56956bc8a88103b359ac42eaab1e19d427e7e38192634babb
+get : forall a. (Incr.Incr(a)) -> a ! {Fail, Incr.IncrRaw} given Wire.Serialize(a)
 ```
 
 Read a node, recording a dependency edge from the memo currently being computed (if any) to this node.
@@ -90,8 +90,8 @@ run_incr() fn
 
 ### `set`
 
-```prism,sig,h-918bc7faec7a7d8678e02dc115a946000de3ca82f31b55a9cf2958d1a426e2a0
-set : forall a. (Incr.Incr(a), a) -> Unit ! {Incr.IncrRaw}
+```prism,sig,h-73a6427f07954aa64c8a448bb768f9fd205aef8f8138c5d06a05f11927ff0ff6
+set : forall a. (Incr.Incr(a), a) -> Unit ! {Incr.IncrRaw} given Wire.Serialize(a)
 ```
 
 Update an input node. A no-op when `v` is equal (by content) to the node's current value.
@@ -109,8 +109,8 @@ run_incr() fn
 
 ### `memo`
 
-```prism,sig,h-788d071dbb8673920453a5c153f83c3586fe2844b43528d94db65ee608ce5a9b
-memo : forall e0 a. (() -> a ! {Incr.IncrRaw, e0}) -> Incr.Incr(a) ! {Incr.IncrRaw, e0}
+```prism,sig,h-1efc9915be8ed0266cfe2961a62852dd904d1c389842080341e62e74aab44c0a
+memo : forall e0 a. (() -> a ! {Incr.IncrRaw, e0}) -> Incr.Incr(a) ! {Incr.IncrRaw, e0} given Wire.Serialize(a)
 ```
 
 A derived node caching `thunk` by content, with early cutoff on its result: a cache hit reuses the value and skips the thunk, so a memo that does not recompute does not re-perform its (replayable) effects. Its key is its creation order in the run.
@@ -138,7 +138,7 @@ run_incr() fn
 
 ### `run_incr_durable`
 
-```prism,sig,h-47f57bc64e4c2d79292e48b6a722f07a8ba0b6b2a4e900f8a9b9d427cf124b48
+```prism,sig,h-61197e9693b22eab6a0928bd7bb742fc6352e6df2d6bf591e4231e3ea7212dc9
 run_incr_durable : forall a. (String, String, () -> a ! {Fail, Incr.IncrRaw}) -> a ! {Fail, IO}
 ```
 
@@ -154,7 +154,7 @@ run_incr_durable("totals.snap", "report") fn
 
 ### `run_incr_store`
 
-```prism,sig,h-a62174d93bc7993dce2829a2f58b3bfc68256b23723d764b0914e734fca86c8f
+```prism,sig,h-f2b7bb3b2a235c68d5070e997f6a37569eb21de703260e0e0e3aba96be68d1ca
 run_incr_store : forall a. (String, String, () -> a ! {Fail, Incr.IncrRaw}) -> a ! {Fail, IO}
 ```
 
@@ -170,7 +170,7 @@ run_incr_store(".prism-store", "report") fn
 
 ### `run_incr_durable_replay`
 
-```prism,sig,h-8d10391da8e5baa19d509327e5eaa216c384b276c26cdd269b6efcc5850d7ab1
+```prism,sig,h-478cad66a2cb5ffa5ac0526d5eb53ef02a36db73894ff75292049c54da8479fe
 run_incr_durable_replay : forall e0 a. (String, String, () -> a ! {Fail, IO, Incr.IncrRaw, Output, e0}) -> a ! {Fail, IO, e0}
 ```
 
@@ -184,7 +184,7 @@ run_incr_durable_replay("run.snap", "job") fn
 
 ### `run_incr_store_replay`
 
-```prism,sig,h-e237e2955c5a4328428f4471bd895e98c451b66a1b225aa43d2779c978a70027
+```prism,sig,h-65b6be690aaa118239be9db28fadcf230bf9a924b51e4ad39c986e3e6a792fbd
 run_incr_store_replay : forall e0 a. (String, String, () -> a ! {Fail, IO, Incr.IncrRaw, Output, e0}) -> a ! {Fail, IO, e0}
 ```
 

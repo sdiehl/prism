@@ -932,8 +932,8 @@ fn parse_manifest(text: &str) -> BTreeMap<String, String> {
 
 // Refuse to regenerate from a corpus that lost programs to a broken tree.
 //
-// `support::corpus` keeps only programs that currently interpret, so a tree that
-// does not compile yields a short corpus (an empty one, at the limit) rather than
+// `support::corpus` keeps only programs that interpret successfully, so a tree
+// that does not compile yields a short corpus (an empty one, at the limit) rather than
 // an error. Writing that out would truncate the golden and report success, and
 // the gate would then pass forever against the survivors. Regenerating is exactly
 // when the tree is most likely to be mid-change, so the accept path is the one

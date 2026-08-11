@@ -7,13 +7,22 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::types::ty::{EffRow, Kind, Label};
-use crate::types::{CtorInfo, EffOpInfo, Type};
 use prism_common::sym::Sym;
 use prism_syntax::error::{Error, TypedCoreConstructionFailure, TypedCoreEnvironmentFailure};
 use prism_syntax::kw;
 use prism_syntax::names::{self, IO_EFFECT};
 
+use crate::core::builtins::Builtin;
+use crate::core::CoreOp::{
+    Add, Addf, Div, Divf, Eq, Eqf, Ge, Gef, Gt, Gtf, Le, Lef, Lt, Ltf, Mul, Mulf, Ne, Nef, Rem,
+    Sub, Subf,
+};
+use crate::core::{CheckedHandler, Comp, Core, CoreOp, CorePat, IoOp, NegLane, Value};
+use crate::types::sig::parse_checked_signature;
+use crate::types::ty::{EffRow, Kind, Label};
+use crate::types::{CtorInfo, EffOpInfo, Type};
+
+use super::verify::{representation_preserving_stable, row_included};
 use super::{
     instantiate_constructor, instantiate_fn, instantiate_operation, scheme_to_fn_sig, CompSig,
     ConstructorSig, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, Elaborated,
@@ -21,12 +30,6 @@ use super::{
     TypedForward, TypedHandleOp, TypedHandler, TypedPattern, TypedValue, TypedValueKind, VerifyEnv,
 };
 use super::{CORE_GROW_STACK, CORE_MIN_STACK};
-use crate::core::builtins::Builtin;
-use crate::core::CoreOp::{
-    Add, Addf, Div, Divf, Eq, Eqf, Ge, Gef, Gt, Gtf, Le, Lef, Lt, Ltf, Mul, Mulf, Ne, Nef, Rem,
-    Sub, Subf,
-};
-use crate::core::{CheckedHandler, Comp, Core, CoreOp, CorePat, IoOp, NegLane, Value};
 
 /// Translate a checked source function scheme to its Core calling convention.
 ///
@@ -430,12 +433,12 @@ pub fn build_verify_env(
         (Builtin::StringOfBytes, "(Array(Int)) -> String"),
         (Builtin::SortPrim, "forall a. (Int, List(a)) -> List(a)"),
     ] {
-        let ty = crate::types::sig::parse_checked_signature(builtin.name(), signature).map_err(
-            |error| TypedCoreEnvironmentFailure::InvalidSignature {
+        let ty = parse_checked_signature(builtin.name(), signature).map_err(|error| {
+            TypedCoreEnvironmentFailure::InvalidSignature {
                 item: builtin.name().into(),
                 detail: error.to_string(),
-            },
-        )?;
+            }
+        })?;
         let signature = scheme_to_fn_sig(ty).map_err(|detail| {
             TypedCoreEnvironmentFailure::InvalidSignature {
                 item: builtin.name().into(),
@@ -495,31 +498,19 @@ pub(crate) fn source_type(ty: &CoreType) -> Result<Type, String> {
     }
 }
 
+/// The elaboration-time cast rule is the substitution-stable one: an expected
+/// row whose tail is still an open variable absorbs nothing, because at this
+/// point an open tail means the solver has not committed the row, and taking
+/// the cast would skip the subsumption that records the actual row's labels
+/// into that variable. The solver would then be free to close it without
+/// them, leaving a cast the final verifier rejects as effect laundering.
 fn representation_preserving(actual: &CoreType, expected: &CoreType) -> bool {
-    if matches!(
-        (actual, expected),
-        (CoreType::Source(Type::Int), CoreType::Source(Type::Char))
-            | (CoreType::Source(Type::Char), CoreType::Source(Type::Int))
-    ) {
-        return true;
-    }
-    let (CoreType::Thunk(actual), CoreType::Thunk(expected)) = (actual, expected) else {
-        return false;
-    };
-    let (CoreType::Function(actual_fn), CoreType::Function(expected_fn)) =
-        (actual.result(), expected.result())
-    else {
-        return false;
-    };
-    actual.effects() == expected.effects()
-        && actual_fn.quantifiers() == expected_fn.quantifiers()
-        && actual_fn.params() == expected_fn.params()
-        && actual_fn.body().result() == expected_fn.body().result()
+    representation_preserving_stable(actual, expected)
 }
 
 fn intrinsic_sig(text: &str) -> Result<CoreFnSig, String> {
-    let ty = crate::types::sig::parse_checked_signature("typed Core intrinsic", text)
-        .map_err(|error| error.to_string())?;
+    let ty =
+        parse_checked_signature("typed Core intrinsic", text).map_err(|error| error.to_string())?;
     scheme_to_fn_sig(ty)
 }
 
@@ -3027,6 +3018,21 @@ fn build_typed_on_grown_stack(
                 builder.solver.final_row(body.sig().effects())
             };
             if inferred != *signature.body().effects() {
+                // The refinement may only widen a declared row toward what the
+                // body performs; a replacement that drops a declared effect
+                // would launder the very rows the verifier checks.
+                if !row_included(signature.body().effects(), &inferred) {
+                    return Err(TypedCoreConstructionFailure::InvalidWitness {
+                        function: function.name.to_string(),
+                        path: "effect refinement monotonicity".into(),
+                        detail: format!(
+                            "refined row {} does not include the declared row {}",
+                            inferred.show(),
+                            signature.body().effects().show()
+                        ),
+                    }
+                    .into());
+                }
                 signatures.insert(
                     function.name,
                     CoreFnSig::new(

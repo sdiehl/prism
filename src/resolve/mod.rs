@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use marginalia::Span;
 
-use crate::error::{Error, TypeError};
+use crate::error::{suggest, Error, TypeError};
 use crate::syntax::ast::{
     Constraint, Decl, EffLabel, Expr, HandlerArm, ImportDecl, MigrationDir, MigrationRoute,
     Pattern, Program, Qualifier, Row, Sugar, SugarArm, Surface, Ty, S,
@@ -528,6 +528,14 @@ fn moved_prelude(prelude_own: &Own) -> Own {
 /// Two modules opening the same short name is recorded, not rejected: the
 /// ambiguity belongs to a bare reference that has to choose between them, and
 /// [`Rw::pick`] reports it there.
+// An import whose module path names no loaded module, offering the loaded paths
+// the spelling is closest to.
+fn unresolved_import(path: &str, by_path: &BTreeMap<String, usize>) -> Error {
+    let hint = suggest::suggestion(path, by_path.keys().map(String::as_str))
+        .map_or_else(String::new, |s| format!("; {s}"));
+    Error::ResolveModule(format!("cannot resolve import of module `{path}`{hint}"))
+}
+
 fn build_scope(
     imports: &[ImportDecl],
     by_path: &BTreeMap<String, usize>,
@@ -536,9 +544,9 @@ fn build_scope(
     let mut scope = Scope::default();
     for imp in imports {
         let path = imp.path.join(".");
-        let idx = *by_path.get(path.as_str()).ok_or_else(|| {
-            Error::ResolveModule(format!("cannot resolve import of module `{path}`"))
-        })?;
+        let idx = *by_path
+            .get(path.as_str())
+            .ok_or_else(|| unresolved_import(&path, by_path))?;
         // A glob import (`import M (..)`) opens every exported name into
         // unqualified scope; a selective import opens just the listed names.
         let opened: Vec<(String, CanonicalName)> = if imp.glob {
@@ -551,8 +559,10 @@ fn build_scope(
             let mut v = Vec::with_capacity(names.len());
             for n in names {
                 let Some(canon) = mods[idx].exports.get(n) else {
+                    let hint = suggest::suggestion(n, mods[idx].exports.keys().map(String::as_str))
+                        .map_or_else(String::new, |s| format!("; {s}"));
                     return Err(Error::ResolveModule(format!(
-                        "module `{path}` does not export `{n}`"
+                        "module `{path}` does not export `{n}`{hint}"
                     )));
                 };
                 v.push((n.clone(), canon.clone()));
@@ -639,9 +649,9 @@ fn add_reexports(
         for (ti, m) in modules.iter().enumerate() {
             for imp in m.prog.imports.iter().filter(|i| i.reexport) {
                 let path = imp.path.join(".");
-                let si = *by_path.get(path.as_str()).ok_or_else(|| {
-                    Error::ResolveModule(format!("cannot resolve import of module `{path}`"))
-                })?;
+                let si = *by_path
+                    .get(path.as_str())
+                    .ok_or_else(|| unresolved_import(&path, by_path))?;
                 let src = &snapshot[si];
                 let names: Vec<String> = imp
                     .names

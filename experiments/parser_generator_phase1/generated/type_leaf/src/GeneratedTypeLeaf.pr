@@ -4,21 +4,13 @@
 -- Checked TypeArg hooks remain pinned in the typed action schema.
 
 import Data.List (..)
-
 import Data.Maybe (..)
-
 import Data.String (ends_with)
-
 import Syntax.Token (..)
-
 import Syntax.Ast (..)
-
 import Syntax.Cursor (..)
-
 import Syntax.Parse.Support (..)
-
 import Syntax.Parse.GeneratedControl (..)
-
 import Syntax.Parse.TypeSemantics (..)
 
 -- | Exact completed-Type state used by generated delimiters.

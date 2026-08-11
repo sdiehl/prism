@@ -18,21 +18,18 @@
 -- (the Conditional opener rule), so a one-line `let x = e` stays flat.
 
 import Data.List (..)
-
 import Data.Maybe (..)
-
 import Data.Result (..)
-
 import Syntax.Source (..)
-
 import Syntax.Token (..)
-
 import Syntax.Lex (..)
 
 -- The offside driver's state: the indent stack (top = head), whether the last
 -- opener is still pending a block, whether an opener is being carried across a
--- bracket group, the open-bracket depth, the line of the previous token, and the
--- end offset of the previous token (where a virtual close or separator anchors).
+-- bracket group, the open-bracket depth, the line of the previous token, the
+-- start offset of the line that token sits on (the origin every column is
+-- measured from), and the end offset of the previous token (where a virtual
+-- close or separator anchors).
 type LState = LState {
   stack: List(Int),
   pending_opener: Bool,
@@ -40,6 +37,7 @@ type LState = LState {
   bracket_depth: Int,
   prev_line: Option(Int),
   prev_off: Int,
+  line_off: Int,
   last_hi: Int
 }
 
@@ -70,31 +68,26 @@ type Close3 = CPop | CSep | CNone
 -- head's end offset, and the reversed entries with the head tokens appended.
 type HeadR = HeadR { rest: List(Token), endoff: Int, acc: List(LEntry) }
 
--- The offset of the first byte of the line containing `off`: scan left to the
--- byte after the previous newline, or the start of input.
-fn ly_line_start(text : String, off : Int) : Int =
-  var j := off
-  while j > 0 && byte_at(text, j - 1) /= 10 do
-    j -= 1
-  j
-
--- The column of `off`: its byte distance from the line start. Tabs count as one
--- column and every other byte counts as one, matching the compiler's ordinal
--- (non-display) column used for layout decisions.
-fn ly_col(text : String, off : Int) : Int = off - ly_line_start(text, off)
-
--- The newlines in [a, b): the line increment from `a` to `b`. Entries are
--- scanned in offset order, so the driver advances the line number by the gap it
--- just crossed. Recounting from byte zero at each entry would instead cost
--- entries times bytes.
-fn ly_count_nl(text : String, a : Int, b : Int) : Int =
+-- What crossing the gap [a, b) does to the driver's line bookkeeping: the number
+-- of newlines in it, and the start of the line `b` sits on, which is the byte
+-- after the last of those newlines, or the unchanged `keep` when the gap holds
+-- none. Entries are scanned in offset order, so one forward pass over the gap
+-- just crossed carries both facts and every byte of the source is read once.
+--
+-- Counting lines from byte zero, or scanning left from each entry to find its
+-- line start, would instead cost entries times bytes. A file whose tokens all
+-- sit on one long line is exactly where that bites, and that is the shape a
+-- deeply nested type, pattern, or expression has.
+fn ly_gap(text : String, a : Int, b : Int, keep : Int) : (Int, Int) =
   var i := a
-  var c := 0
+  var lines := 0
+  var start := keep
   while i < b do
     if byte_at(text, i) == 10 then
-      c += 1
+      lines += 1
+      start := i + 1
     i += 1
-  c
+  (lines, start)
 
 -- The line `prev_off` sits on: zero before any entry has been seen, which is
 -- the line byte zero sits on.
@@ -115,11 +108,13 @@ fn ly_pop(xs : List(Int)) : List(Int) =
     Nil => Nil
     Cons(_, t) => t
 
--- The number of frames on an indent stack.
-fn ly_depth(xs : List(Int)) : Int =
+-- Whether an indent stack holds more than `floor` frames. Answered by walking
+-- `floor` frames rather than the whole stack, since the floor is a small
+-- constant and the stack is as deep as the source nests.
+fn ly_deeper_than(xs : List(Int), floor : Int) : Bool =
   match xs of
-    Nil => 0
-    Cons(_, t) => 1 + ly_depth(t)
+    Nil => false
+    Cons(_, t) => floor <= 0 || ly_deeper_than(t, floor - 1)
 
 -- A zero-width virtual token of the given kind at `off`.
 fn ly_virt(k : TokenKind, off : Int) : Token =
@@ -284,7 +279,7 @@ fn ly_stack_step(stack : List(Int), col : Int, floor : Int) : Close3 =
   match ly_top(stack) of
     None => CNone
     Some(top) =>
-      if top > col && ly_depth(stack) > floor then
+      if top > col && ly_deeper_than(stack, floor) then
         CPop
       elif top == col then
         CSep
@@ -398,8 +393,9 @@ fn ly_phase2(
 fn ly_step(text : String, e : LEntry, st : LState, out : List(Token)) : StepR =
   let lo = ly_e_lo(e)
   let hi = ly_e_hi(e)
-  let col = ly_col(text, lo)
-  let cur_line = ly_prev_line(st) + ly_count_nl(text, st.prev_off, lo)
+  let (crossed, line_off) = ly_gap(text, st.prev_off, lo, st.line_off)
+  let col = lo - line_off
+  let cur_line = ly_prev_line(st) + crossed
   let new_line = ly_is_newline(st.prev_line, cur_line)
   let in_brackets = st.bracket_depth > 0
   let bopen = ly_e_bopen(e)
@@ -417,14 +413,16 @@ fn ly_step(text : String, e : LEntry, st : LState, out : List(Token)) : StepR =
               hi - 1
             else
               lo
+          let (inner, ploff_line) = ly_gap(text, lo, ploff, line_off)
           let st2 =
             LState {
               stack = stack1,
               pending_opener = po2,
               carrying = carry2,
               bracket_depth = depth2,
-              prev_line = Some(cur_line + ly_count_nl(text, lo, ploff)),
+              prev_line = Some(cur_line + inner),
               prev_off = ploff,
+              line_off = ploff_line,
               last_hi = hi
             }
           StepR(st2, out3)
@@ -458,6 +456,7 @@ fn ly_layout(text : String, toks : List(Token)) : List(Token) =
       bracket_depth = 0,
       prev_line = None,
       prev_off = 0,
+      line_off = 0,
       last_hi = 0
     }
   ly_run(text, entries, st0, Nil)

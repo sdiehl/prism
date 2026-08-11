@@ -34,6 +34,14 @@ parsed_fault : forall a. (Syntax.Parse.Support.Parsed(a)) -> Option(Syntax.Diagn
 
 Finish a parse outcome as the diagnostic it refuses with: the cursor's own merged-expectation diagnostic for a stuck parse, the carried diagnostic for a fault, and None for a success.
 
+### `parsed_refused`
+
+```prism,sig,h-b35ff07a77cd381670f2a8e26ea851837b9573552a0a76264d730c2653a379e0
+parsed_refused : forall a b. (Syntax.Parse.Support.Parsed(a)) -> Syntax.Parse.Support.Parsed(b)
+```
+
+Carry a refusal through to the next step's result type. A production that sequences several steps passes an earlier step's refusal along unchanged, and only the value type differs between the two, so this re-tags a refusal without inspecting it. Applied to a success it stops at the cursor reached, which is what a caller that has already bound the value never asks for; it is the `else` half of a pattern binding whose `PTook` half took the value.
+
 ### `refuse`
 
 ```prism,sig,h-97aa8f9af2ae137f69c6e0f24e8901708c93430b71f9ff2b1e37d6280f518cce

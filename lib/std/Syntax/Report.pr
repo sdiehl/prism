@@ -33,9 +33,7 @@
 -- no use for, so the predicate below declines those lines instead.
 
 import Data.String (pad_left, slice_bytes, str_repeat)
-
 import Syntax.Diagnostic (..)
-
 import Syntax.Source (..)
 
 -- The line table entry the compiler's renderer works from: a zero-based line

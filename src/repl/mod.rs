@@ -19,9 +19,10 @@ use rustyline::history::DefaultHistory;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Context, Editor, Helper};
 
+use crate::cli::explain::{lookup, render};
 use crate::core::{builtin_arities, elaborate, elaborate_expr_defs, CoreFn};
 use crate::driver::PRELUDE;
-use crate::error::Error;
+use crate::error::{suggest, Error};
 use crate::eval::{globals, Machine};
 use crate::fmt::decl::fmt_class;
 use crate::lex::Token as K;
@@ -40,8 +41,8 @@ use crate::types::{
 // Canonical commands. Any unambiguous prefix resolves to one (`:lo` -> :load,
 // `:r` -> :reload), ghci style, so no separate aliases are needed.
 const COMMANDS: &[&str] = &[
-    ":browse", ":core", ":edit", ":help", ":info", ":kind", ":load", ":quit", ":reload", ":set",
-    ":type",
+    ":browse", ":core", ":edit", ":explain", ":help", ":info", ":kind", ":load", ":quit",
+    ":reload", ":set", ":type",
 ];
 
 // Syntax-highlight styles, one per token category, plus the dim style used for
@@ -1050,7 +1051,9 @@ fn step(session: &mut Session, built: &mut Built, line: &str) -> bool {
             match resolve(&format!(":{word}")) {
                 Ok(cmd) => return command(session, built, cmd, arg.trim()),
                 Err(hits) if hits.is_empty() => {
-                    eprintln!("unknown command `:{word}` (:help for the list)");
+                    let near = suggest::suggestion(&format!(":{word}"), COMMANDS.iter().copied())
+                        .map_or_else(String::new, |s| format!("; {s}"));
+                    eprintln!("unknown command `:{word}`{near} (:help for the list)");
                 }
                 Err(hits) => eprintln!("ambiguous `:{word}`: {}", hits.join(", ")),
             }
@@ -1203,6 +1206,7 @@ fn command(session: &mut Session, built: &mut Built, cmd: &str, arg: &str) -> bo
         ":core" => core(session),
         ":info" => info(session, built, arg),
         ":kind" => kind(built, arg),
+        ":explain" => explain(arg),
         ":set" => {
             let holes_before = session.flags.holes;
             set(session, arg);
@@ -1227,13 +1231,14 @@ fn help() {
     println!(":kind <type>   show the kind of a type constructor");
     println!(":info <name>   describe a binding, type, or class");
     println!(":browse [M]    list session bindings, or the public names in module M");
+    println!(":explain Ennnn explain a diagnostic code, as `prism explain` does");
     println!(":core          dump the lowered core IR of this session");
     println!(":load <file>   load declarations from a file");
     println!(":reload        re-read the active file from disk");
     println!(":edit [file]   open a file (or scratch) in $EDITOR, then load it");
     println!(":set [+-]tsh   toggle options (bare :set lists them)");
     println!(":quit          quit");
-    println!("any unambiguous prefix works, ghci style (:r, :lo, :e)");
+    println!("any unambiguous prefix works, ghci style (:r, :lo, :ed)");
     println!(":{{ ... :}}       enter a multi-line block (also auto-detected)");
     println!("let x = e      bind a variable (re-evaluated per use); `it` is the last result");
     println!("<expr>         evaluate an expression");
@@ -1266,7 +1271,7 @@ fn browse(session: &Session, built: &Built, module: &str) {
     // though its declarations are checked and live in `built.checked`.
     for d in &built.checked.decls {
         if !d.name.contains(['.', '@']) && !session.base.contains(&d.name) {
-            println!("{} : {}", d.name, d.ty.show());
+            println!("{} : {}", d.name, built.checked.show_sig(d));
             any = true;
         }
     }
@@ -1283,7 +1288,7 @@ fn browse(session: &Session, built: &Built, module: &str) {
             continue;
         }
         if let Some(d) = built.checked.decls.iter().find(|d| &d.name == canonical) {
-            println!("{name} : {}", d.ty.show());
+            println!("{name} : {}", built.checked.show_sig(d));
             any = true;
         } else if let Some(c) = built.checked.ctors.get(canonical) {
             println!("{name} : {}", ctor_type(c).show());
@@ -1431,6 +1436,22 @@ fn kind(built: &Built, name: &str) {
             println!("{name} : {k}");
         }
         None => eprintln!("'{name}' is not a known type"),
+    }
+}
+
+// The same page `prism explain` prints, so a code read off a REPL diagnostic
+// can be looked up without leaving the session.
+fn explain(code: &str) {
+    if code.is_empty() {
+        eprintln!("usage: :explain <code>, e.g. :explain E1021");
+        return;
+    }
+    match lookup(code) {
+        Some(entry) => print!("{}", render(entry)),
+        None => eprintln!(
+            "'{code}' is not a diagnostic code; codes are spelled Ennnn, as printed at the head \
+             of a diagnostic"
+        ),
     }
 }
 
@@ -1717,6 +1738,17 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["Data.Vec"]
         );
+    }
+
+    // `:explain` shares a first letter with `:edit`, so the shortest unique
+    // prefixes are `:ed` and `:ex`, which is what the `:help` line quotes. Keep
+    // that line synchronized with the command table.
+    #[test]
+    fn explain_resolves_by_prefix() {
+        assert_eq!(resolve(":explain"), Ok(":explain"));
+        assert_eq!(resolve(":ex"), Ok(":explain"));
+        assert_eq!(resolve(":ed"), Ok(":edit"));
+        assert_eq!(resolve(":e"), Err(vec![":edit", ":explain"]));
     }
 
     #[test]

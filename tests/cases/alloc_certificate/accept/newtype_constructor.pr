@@ -1,0 +1,9 @@
+newtype Id = Id(Int)
+
+fn wrap(x : Int) : Id @ noalloc = Id(x)
+
+fn unwrap(x : Id) : Int @ noalloc =
+  match x of
+    Id(n) => n
+
+fn roundtrip(x : Int) : Int @ noalloc = unwrap(wrap(x))

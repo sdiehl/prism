@@ -22,7 +22,6 @@
 -- than a hang.
 
 import Control.Layer (..)
-
 import Data.List (append, map, reverse)
 
 -- | A partial rewrite on nodes of sort `a`: `Some` for a rule that applied here,

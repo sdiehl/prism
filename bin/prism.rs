@@ -1,11 +1,12 @@
 #![allow(clippy::multiple_crate_versions)]
 
+use std::path::{Path, PathBuf};
 use std::process::{self, ExitCode};
 
 use clap::{Parser, Subcommand};
+use prism::cli::type_query::{default_search_limit, default_synth_depth, default_synth_limit};
 use prism::cli::{self, CmdResult, ExampleStdin};
 use prism::error::Error;
-use std::path::{Path, PathBuf};
 
 const DEFAULT_EXAMPLES_DIR: &str = "examples";
 
@@ -181,6 +182,55 @@ enum Cmd {
     Check {
         /// A `.pr` file or project to type-check; omitted checks the enclosing project
         file: Option<PathBuf>,
+        /// Report each typed hole: expected type, effect row, in-scope candidates
+        #[arg(long)]
+        at_hole: bool,
+        /// Fill each hole with exactly one exact-type in-scope candidate, in place
+        #[arg(long)]
+        fill: bool,
+        /// Emit hole reports as JSON (with --at-hole or --fill)
+        #[arg(long)]
+        json: bool,
+    },
+    /// Search checked project, package, and standard-library interfaces by type
+    Search {
+        /// Type required at the use site
+        #[arg(value_name = "TYPE")]
+        ty: String,
+        /// File or project whose dependency universe to search
+        #[arg(long = "in", value_name = "PATH")]
+        input: Option<PathBuf>,
+        /// Maximum number of results
+        #[arg(long, default_value_t = default_search_limit())]
+        limit: usize,
+        /// Emit results as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Synthesize bounded, rechecked expressions for one typed hole
+    Synth {
+        /// A `.pr` file or project; omitted uses the enclosing project
+        file: Option<PathBuf>,
+        /// Named hole to synthesize, with or without the leading `?`
+        #[arg(long, value_name = "NAME")]
+        at_hole: String,
+        /// Maximum expression depth
+        #[arg(long, default_value_t = default_synth_depth())]
+        depth: usize,
+        /// Maximum number of verified candidates
+        #[arg(long, default_value_t = default_synth_limit())]
+        limit: usize,
+        /// Emit synthesis reports as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run the Prism-written bootstrap checker as shadow evidence
+    #[command(subcommand)]
+    Bootstrap(BootstrapCmd),
+    /// Explain a diagnostic code: what it means, a minimal example, and the fix
+    Explain {
+        /// A diagnostic code such as E1001 (a bare 1001 is accepted)
+        code: String,
     },
     /// Discharge a file's function contracts through an external SMT solver
     Verify {
@@ -202,7 +252,8 @@ enum Cmd {
     /// PHASE is one of: tokens, syntax-tokens, surface-syntax, ast, types, typespans, hir,
     /// interface, module-graph, core, core-json, core-identity, core-hash, tc-input, tc-facts,
     /// elab-input, native-kont-table, native-kont-state-map, shape, dupes,
-    /// namespace, stdlib-hash, fbip, lowered, tier, effect-plan, captures, usage-summary,
+    /// namespace, stdlib-hash, fbip, lowered, tier, effect-plan, tier-explain, captures,
+    /// usage-summary,
     /// usage-summary-md, usage-summary-json, llvm, mlir, verify, smt, totality.
     Dump { phase: String, file: PathBuf },
     /// Behavior or lineage diff by content hash
@@ -324,6 +375,18 @@ enum Cmd {
         /// arrives on stdin.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         rest: Vec<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum BootstrapCmd {
+    /// Compare the T1 Prism checker with authoritative Rust facts
+    Check {
+        /// A `.pr` file or project to shadow-check
+        file: PathBuf,
+        /// Emit the parity and coverage report as JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -914,7 +977,35 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
             }
         }
         Cmd::Clean { path } => cli::clean_cmd(&path),
-        Cmd::Check { file } => cli::check_cmd(file.as_deref(), cfg),
+        Cmd::Check {
+            file,
+            at_hole,
+            fill,
+            json,
+        } => {
+            if at_hole || fill {
+                cli::holes::at_hole_cmd(file.as_deref(), fill, json, cfg)
+            } else {
+                cli::check_cmd(file.as_deref(), cfg)
+            }
+        }
+        Cmd::Search {
+            ty,
+            input,
+            limit,
+            json,
+        } => cli::type_query::search_cmd(&ty, input.as_deref(), limit, json, cfg),
+        Cmd::Synth {
+            file,
+            at_hole,
+            depth,
+            limit,
+            json,
+        } => cli::type_query::synth_cmd(file.as_deref(), &at_hole, depth, limit, json, cfg),
+        Cmd::Bootstrap(BootstrapCmd::Check { file, json }) => {
+            cli::bootstrap::check_cmd(&file, json, cfg)
+        }
+        Cmd::Explain { code } => cli::explain::explain_cmd(&code),
         Cmd::Test {
             file,
             filter,

@@ -33,13 +33,9 @@
 -- ```
 
 import Data.String (split, str_of_char)
-
 import Data.Bytes (Bytes, bytes_concat, bytes_index, bytes_length, bytes_slice, bytes_to_string, string_to_bytes)
-
 import Data.Pretty as Pretty
-
 import Typst.Value (..)
-
 pub import Typst.Value (..)
 
 -- | A markup-mode document fragment.

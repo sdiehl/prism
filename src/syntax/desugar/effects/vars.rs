@@ -24,7 +24,14 @@ pub(super) fn rw_var_decl(
     let n = cx.next.bump();
     let get = names::var_get(x, n);
     let put = names::var_set(x, n);
-    let st = Ty::State(n);
+    // `var x : T := e` arrives with the annotation riding the initializer; the
+    // cell's ops are then declared at `T` directly, so a read of the var has a
+    // concrete type while the body is checked (a var-rooted path update resolves
+    // its fields against it). Unannotated vars keep the inference placeholder.
+    let st = match &init.node {
+        Expr::Ann(_, ty) => ty.clone(),
+        _ => Ty::State(n),
+    };
     cx.effects.push(EffectDecl {
         name: names::var_effect(x, n),
         params: Vec::new(),

@@ -6,11 +6,8 @@
 -- shape the module does not draw prints the decline marker instead, so the
 -- boundary is reported rather than approximated.
 import Syntax.Codec (..)
-
 import Syntax.Diagnostic (..)
-
 import Syntax.Report (..)
-
 import Syntax.Source (..)
 
 -- The name the compiler stamps in the location line when reporting on a single

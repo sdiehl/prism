@@ -1,0 +1,37 @@
+-- Exercises the field lenses `deriving (Lens)` synthesizes: one value per field,
+-- named for its type so two records with a field of the same name keep distinct
+-- lenses, read and written and modified through the optic library rather than
+-- through the accessor pair by hand. Composition is the point of paying for the
+-- value, so a lens into a nested record is built once and used three ways.
+--
+-- `Tagged` carries a phantom brand no field mentions: its lenses demand nothing
+-- of the brand, and neither does its derived `Show`, so both work at a brand type
+-- that has no instances of anything.
+
+import Data.Optic (..)
+
+type Point = Point { x: Int, y: Int } deriving (Lens, Show)
+
+type Line = Line { start: Point, weight: Int } deriving (Lens, Show)
+
+type Metric = Metric
+
+type Tagged(brand) = Tagged { label: String, count: Int } deriving (Lens, Show)
+
+let line_start_x = compose_lens(line_start, point_x)
+
+fn hits() : Tagged(Metric) = Tagged { label = "hits", count = 1 }
+
+fn main() =
+  let p = Point { x = 1, y = 2 }
+  println(show(view(point_x, p)))
+  println(show(lens_set(point_y, p, 9)))
+  println(show(over(point_x, \(n) -> n * 10, p)))
+  let l = Line { start = p, weight = 3 }
+  println(show(view(line_start_x, l)))
+  println(show(lens_set(line_start_x, l, 40)))
+  println(show(over(line_weight, \(w) -> w + 1, l)))
+  let t = hits()
+  println(show(view(tagged_count, t)))
+  println(show(over(tagged_label, \(s) -> "{s}!", t)))
+  println(show(lens_set(tagged_count, t, 7)))

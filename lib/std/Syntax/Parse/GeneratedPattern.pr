@@ -3,19 +3,12 @@
 -- Complete frozen Pattern-family control with explicit LR receipts.
 
 import Data.List (..)
-
 import Syntax.Token (..)
-
 import Syntax.Ast (..)
-
 import Syntax.Cursor (..)
-
 import Syntax.Parse.Support (..)
-
 import Syntax.Parse.Build (..)
-
 import Syntax.Parse.GeneratedControl (..)
-
 import Syntax.Parse.PatternSemantics (..)
 
 pub type GeneratedPatternReceipt = PRPlain | PRBareUid | PRBareQual
@@ -395,10 +388,9 @@ fn generated_record_rest(
   rev : List(PatField),
   c : Cursor
 ) : Parsed(GeneratedPatternDone) =
-  match take_fixed(cursor_advance(c), "\}") of
-    PStuck(c1) => PStuck(c1)
-    PFault(d) => PFault(d)
-    PTook(_, c1) => generated_record_done(start, name, rev, true, c1)
+  let p1 = take_fixed(cursor_advance(c), "\}")
+  let PTook(_, c1) = p1 else parsed_refused(p1)
+  generated_record_done(start, name, rev, true, c1)
 
 fn generated_record_done(
   start : Cursor,
@@ -413,31 +405,29 @@ fn generated_record_field(
   c : Cursor,
   depth : Int
 ) : Parsed(GeneratedFieldDone) =
-  match take_word(c, TIdent) of
-    PStuck(c1) => PStuck(c1)
-    PFault(d) => PFault(d)
-    PTook(name, c1) =>
-      if at_fixed(c1, "=") then
-        generated_bind(generated_parse_pattern(cursor_advance(c1), depth)) fn(done, c2)
-          PTook(
-              FieldDone(
-                  PatField { name = name, pat = pattern_value(done) },
-                  GFExplicit(pattern_receipt(done)),
-                ),
-              c2,
-            )
-      else
-        let span = cursor_since(c, c1)
-        PTook(
-            FieldDone(
-                PatField {
-                  name = name,
-                  pat = authored(PVar(name), span.lo, span.hi)
-                },
-                GFShorthand,
-              ),
-            c1,
-          )
+  let p1 = take_word(c, TIdent)
+  let PTook(name, c1) = p1 else parsed_refused(p1)
+  if at_fixed(c1, "=") then
+    generated_bind(generated_parse_pattern(cursor_advance(c1), depth)) fn(done, c2)
+      PTook(
+          FieldDone(
+              PatField { name = name, pat = pattern_value(done) },
+              GFExplicit(pattern_receipt(done)),
+            ),
+          c2,
+        )
+  else
+    let span = cursor_since(c, c1)
+    PTook(
+        FieldDone(
+            PatField {
+              name = name,
+              pat = authored(PVar(name), span.lo, span.hi)
+            },
+            GFShorthand,
+          ),
+        c1,
+      )
 
 fn generated_field_follow(
   c : Cursor,

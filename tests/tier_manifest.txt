@@ -173,6 +173,8 @@ tests/cases/run/default_args.pr	pure
 tests/cases/run/default_or.pr	selective-free-monad
 tests/cases/run/deriving.pr	pure
 tests/cases/run/deriving_json.pr	selective-free-monad
+tests/cases/run/deriving_lens.pr	pure
+tests/cases/run/deriving_phantom.pr	pure
 tests/cases/run/deriving_plate.pr	whole-program-free-monad
 tests/cases/run/dot_chains.pr	pure
 tests/cases/run/dot_records.pr	pure
@@ -221,6 +223,7 @@ tests/cases/run/incr_diff.pr	whole-program-free-monad
 tests/cases/run/indexing_ops.pr	selective-free-monad
 tests/cases/run/int_boundary.pr	pure
 tests/cases/run/int_low64_neg.pr	pure
+tests/cases/run/intern_replay.pr	pure
 tests/cases/run/interp_basic.pr	pure
 tests/cases/run/interp_effects.pr	evidence
 tests/cases/run/interp_show.pr	evidence
@@ -232,6 +235,8 @@ tests/cases/run/law_names.pr	whole-program-free-monad
 tests/cases/run/law_reader.pr	whole-program-free-monad
 tests/cases/run/law_state.pr	whole-program-free-monad
 tests/cases/run/law_ufp.pr	whole-program-free-monad
+tests/cases/run/let_else.pr	pure
+tests/cases/run/list_diff.pr	pure
 tests/cases/run/list_ops.pr	pure
 tests/cases/run/list_show.pr	pure
 tests/cases/run/list_singleton.pr	pure
@@ -261,7 +266,9 @@ tests/cases/run/nursery_name_collision.pr	whole-program-free-monad
 tests/cases/run/once.pr	pure
 tests/cases/run/open_nontail.pr	selective-free-monad
 tests/cases/run/opt_chain.pr	selective-free-monad
+tests/cases/run/optic_lens.pr	evidence
 tests/cases/run/optic_prism_modify.pr	pure
+tests/cases/run/optic_solver.pr	whole-program-free-monad
 tests/cases/run/optics_each.pr	pure
 tests/cases/run/optics_index.pr	selective-free-monad
 tests/cases/run/optics_index_effect.pr	selective-free-monad
@@ -277,6 +284,8 @@ tests/cases/run/ordered_wire_stopgap.pr	whole-program-free-monad
 tests/cases/run/param_eff.pr	evidence
 tests/cases/run/param_patterns.pr	pure
 tests/cases/run/parse_float.pr	pure
+tests/cases/run/path_lit.pr	evidence
+tests/cases/run/path_sugar.pr	whole-program-free-monad
 tests/cases/run/pattern_views.pr	pure
 tests/cases/run/poly_print.pr	pure
 tests/cases/run/portable.pr	pure

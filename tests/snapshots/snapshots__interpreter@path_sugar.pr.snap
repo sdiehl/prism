@@ -1,0 +1,13 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/path_sugar.pr
+---
+Solver { metas = Metas { forest = [1, 2, 3], next = 5 } }
+38
+Solver { metas = Metas { forest = [10, 20, 30], next = 3 } }
+Solver { metas = Metas { forest = [9, 8], next = 5 } }
+(0, 1)
+Solver { metas = Metas { forest = [], next = 2 } }
+Solver { metas = Metas { forest = [2], next = 2 } }
+=> ()

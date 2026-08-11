@@ -1,4 +1,3 @@
-pub mod block_index;
 pub mod builtins;
 pub mod cbpv;
 pub mod effect_abi;

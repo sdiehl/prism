@@ -18,16 +18,16 @@ A channel carries the shared result type `a`; fibers in one run share `a` (use a
 
 ### `Fiber`
 
-```prism,def,h-ed3c7353d697084b07d3778f931516a9f90f3ef459428755cc75ed40fdd1eaf1
-type Fiber = Fiber(Int)
+```prism,def,h-f4153f5f960d5df810e8493989ffe66c7e9a29953d4ecf1c41c99fda6527eee0
+newtype Fiber = Fiber(Int)
 ```
 
 A handle to a spawned fiber, returned by `fork` and passed to `await`/`cancel`.
 
 ### `Chan`
 
-```prism,def,h-8a63be3e588a043fd44720a255353740400dbb4b9ac57b5e86deae5ac81c514a
-type Chan = Chan(Int)
+```prism,def,h-e503dca856791765b6ac54bd331f545c747004430d6f634dbfdd24f5b678bb7d
+newtype Chan = Chan(Int)
 ```
 
 A handle to a buffered FIFO channel, opened with `channel`.
@@ -75,6 +75,14 @@ effect Clock
 A logical-time capability: `now` reads the current tick and `sleep` advances it. Discharged by `run_clock`, which threads a pure counter, so time is virtual and deterministic: advance it in a test and behaviour is a function of it, with no real clock and no time primitive. A fiber may perform `Clock`; since the scheduler does not handle it, it flows out of `run_async` to an enclosing `run_clock` like any other capability. `now`/`sleep` are the logical scheduler clock (virtual ticks). `wall_now` and `mono_now` are the real-time reads (nanoseconds): the system wall clock (Unix epoch, UTC) and a monotonic counter. All four share the one `Clock` capability; which reading you get is a property of the installed handler, not the call. `run_clock` serves every op from the virtual counter (deterministic tests); `Time.run_clock_real` serves `wall_now`/`mono_now` from the recorded OS clock.
 
 ## Functions and Values
+
+### `cancel_root`
+
+```prism,sig,h-968a27c17fa4820e4018543d9a1a1ddf47280af43c2d49c02a3ba0cf4e3528f1
+cancel_root : forall a. () -> Unit ! {Concurrent.Async(a)}
+```
+
+Cancel the root fiber and, by structured descent, every live child. This is the deliberate surface for aborting an entire cooperative run; keeping the numeric handle private prevents callers from forging arbitrary fiber ids.
 
 ### `yield`
 

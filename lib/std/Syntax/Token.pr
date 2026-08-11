@@ -6,7 +6,6 @@
 -- grammar's terminal aliases.
 
 import Data.Maybe (..)
-
 import Syntax.Source (..)
 
 -- | A token kind: a fixed token by exact spelling, or one of the special

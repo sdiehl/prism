@@ -107,10 +107,9 @@ impl fmt::Display for Repr {
 
 /// The runtime representation of a type.
 ///
-/// Reads the scalar built-ins and, once the unboxed forms exist, the product and
-/// null-option types; everything else is the boxed `Value` (or `Immediate` for the
-/// non-pointer words). Type variables and abstract heads default to `Value`,
-/// matching the pre-unboxed world.
+/// Reads scalar built-ins and unboxed products; everything else is the boxed
+/// `Value` (or `Immediate` for non-pointer words). Type variables and abstract
+/// heads default to `Value`.
 #[must_use]
 pub fn repr_of_type(ty: &Type) -> Repr {
     match ty {

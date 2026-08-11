@@ -7,11 +7,8 @@
 -- line: the Prism-side traversal the checker join is diffed against, reading
 -- only the artifact bytes. A refusal prints one structured error line.
 import Data.Foldable (length)
-
 import Data.List (concat_map)
-
 import Syntax.Codec (..)
-
 import Syntax.Resolved (..)
 
 fn main() =

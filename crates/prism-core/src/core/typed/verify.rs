@@ -789,7 +789,7 @@ impl<'a, P: TypedCorePhase> Checker<'a, P> {
                 self.value(value);
                 match value.ty() {
                     CoreType::Thunk(sig) => {
-                        self.expect_subtype_sig(comp.sig(), sig, "force");
+                        self.expect_supertype_sig(comp.sig(), sig, "force");
                     }
                     other => self.fail(format!("force operand is not a thunk: {other:?}")),
                 }
@@ -1822,6 +1822,22 @@ impl<'a, P: TypedCorePhase> Checker<'a, P> {
         }
     }
 
+    /// The Bind discipline for a node whose signature is derived from a
+    /// subcomputation it observes: the stored result may refine the derived
+    /// result, but the stored row must include every derived effect. A node
+    /// never sheds effects it observes (forcing Thunk(Int ! {IO}) cannot be
+    /// labelled Int ! {}).
+    fn expect_supertype_sig(&mut self, actual: &CompSig, derived: &CompSig, context: &str) {
+        self.expect_subtype_type(actual.result(), derived.result(), context);
+        if !row_included(derived.effects(), actual.effects()) {
+            self.fail(format!(
+                "{context} row mismatch: stored {}, does not include derived {}",
+                actual.effects().show(),
+                derived.effects().show()
+            ));
+        }
+    }
+
     fn scoped_quantifiers(&mut self, quantifiers: &[CoreQuantifier], f: impl FnOnce(&mut Self)) {
         let old_types = self.allowed_types.clone();
         let old_rows = self.allowed_rows.clone();
@@ -2800,6 +2816,31 @@ pub fn lowered_representation_conversion(actual: &CoreType, expected: &CoreType)
 
 #[must_use]
 pub fn representation_preserving(actual: &CoreType, expected: &CoreType) -> bool {
+    representation_preserving_by(actual, expected, row_reinterpretable)
+}
+
+/// The substitution-stable restriction of [`representation_preserving`]: the
+/// target row's abstract tail absorbs nothing.
+///
+/// `row_reinterpretable`'s absorb rule is sound only at verification time,
+/// when every remaining row variable is rigid for good; a pass that may still
+/// substitute rows through the coercion's types (elaboration solving,
+/// specialization, inlining) must not mint a cast a later instantiation can
+/// turn into a concrete label vanishing into a smaller concrete row, which the
+/// verifier rejects as laundering.
+#[must_use]
+pub fn representation_preserving_stable(actual: &CoreType, expected: &CoreType) -> bool {
+    representation_preserving_by(actual, expected, |actual, expected| {
+        let closed = EffRow::canonical(actual.labels().into_iter().cloned(), EffRow::Empty);
+        row_included(&closed, expected)
+    })
+}
+
+fn representation_preserving_by(
+    actual: &CoreType,
+    expected: &CoreType,
+    rows: impl Fn(&EffRow, &EffRow) -> bool,
+) -> bool {
     if matches!(
         (actual, expected),
         (CoreType::Source(Type::Int), CoreType::Source(Type::Char))
@@ -2821,6 +2862,25 @@ pub fn representation_preserving(actual: &CoreType, expected: &CoreType) -> bool
     actual.effects() == expected.effects()
         && actual_fn.params() == expected_fn.params()
         && actual_fn.body().result() == expected_fn.body().result()
+        && rows(actual_fn.body().effects(), expected_fn.body().effects())
+}
+
+/// Whether a representation-preserving coercion may relabel a thunk's inner
+/// row from `actual` to `expected`. A target row with an abstract tail
+/// absorbs anything: no consumer can prove purity from an open row, so no
+/// effect is laundered by hiding it there (the evidence tier's flow-planned
+/// recast relies on this). Against a concrete target, the source's own
+/// abstract tail may instantiate away, but every concrete label the source
+/// names must survive into the target. The one locally refutable laundering
+/// shape, a concrete label vanishing into a smaller concrete row (`{IO}` to
+/// `{}`), stays rejected: it would let a later pass treat an effectful thunk
+/// as pure.
+pub(super) fn row_reinterpretable(actual: &EffRow, expected: &EffRow) -> bool {
+    if matches!(expected.tail(), EffRow::Var(_)) {
+        return true;
+    }
+    let closed = EffRow::canonical(actual.labels().into_iter().cloned(), EffRow::Empty);
+    row_included(&closed, expected)
 }
 
 fn fn_sig_subtype(actual: &CoreFnSig, expected: &CoreFnSig) -> bool {
@@ -2922,7 +2982,7 @@ fn sig_subtype(actual: &CompSig, expected: &CompSig) -> bool {
         && row_included(actual.effects(), expected.effects())
 }
 
-fn row_included(actual: &EffRow, expected: &EffRow) -> bool {
+pub(super) fn row_included(actual: &EffRow, expected: &EffRow) -> bool {
     if actual == expected || actual == &EffRow::Empty {
         return true;
     }

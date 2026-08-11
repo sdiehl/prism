@@ -12,6 +12,12 @@ fn main() =
   -- Strided reads through the multi-index sugar.
   println(t[[0, 0]])
   println(t[[1, 2]])
+  -- A flat offset that happens to land in the buffer is still invalid when an
+  -- individual coordinate is out of range; rank and shape construction are
+  -- checked at the same boundary.
+  println(default(\() -> at_tensor(t, [0, 3]), -1.0))
+  println(default(\() -> at_tensor(t, [1]), -2.0))
+  println(default(\() -> size(new([-1, 2], 0.0)), -3))
   -- Functional set returns a new tensor; the original is untouched.
   let t2 = tensor_set(t, [0, 0], 100.0)
   println(t2[[0, 0]])

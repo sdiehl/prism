@@ -1,0 +1,11 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/optic_solver.pr
+---
+[TFun(TInt, TMeta(2)), TFun(TInt, TInt), TMeta(9)]
+5
+[TInt, TFun(TMeta(0), TMeta(2))]
+[(0, TFun(TInt, TInt)), (1, TFun(TFun(TMeta(0), TMeta(2)), TFun(TMeta(0), TMeta(2))))]
+Solver { subst = [(0, TInt), (1, TInt)], steps = 0 }
+=> ()

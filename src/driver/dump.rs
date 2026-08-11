@@ -14,19 +14,24 @@ use std::path::Path;
 use crate::core::cbpv::calls_in;
 use crate::core::fbip::borrow_sigs;
 use crate::core::fv::comp as fv_comp;
+use crate::core::hash::hex as hash_hex;
 use crate::core::{
-    captures, core_identity_json, fip_annots, hash_program, insert_rc, pp_core_pretty, reuse,
-    scc_groups, Core, CoreFn, DepGraph, Digest, HASH_SCHEME,
+    captures, core_identity_json, core_to_json, fip_annots, hash_program, insert_rc,
+    pp_core_pretty, reuse, scc_groups, shape_digests, Core, CoreFn, DepGraph, Digest, Hashes,
+    HASH_PREFIX_HEX, HASH_SCHEME,
 };
+use crate::docs::extract_typespans;
 use crate::error::{Error, SourceMap};
 use crate::hir::{HandlerResidual, NodeRes};
 use crate::lex::lex;
+use crate::names;
 use crate::parse::parse;
-use crate::resolve::{default_roots, Root};
+use crate::resolve::{default_roots, resolve_modules_in, serving_root, Root};
 use crate::sym::Sym;
-use crate::syntax::ast::{Core as CorePhase, Expr, Program, Span, S};
+use crate::syntax::ast::{Core as CorePhase, Decl, Expr, Program, Span, S};
 use crate::syntax::reflect::parse_unit;
 use crate::types::{show_effects, Checked, Dict, Type};
+use crate::verify::{check_program, ranking, totality, vc};
 use serde::Serialize;
 
 #[cfg(feature = "mlir")]
@@ -43,8 +48,8 @@ use super::module_graph::module_graph;
 use super::report::types_section;
 use super::{
     check_on, elaborated, frontend, hash_meta, lowered_core, prelude_fn_names, stdlib_hash,
-    strip_prelude, tooltip_checked_on, typed_effect_facts, typed_effect_plan, Config, WireKind,
-    NAMESPACE_FORMAT,
+    strip_prelude, tooltip_checked_on, typed_effect_facts, typed_effect_plan, typed_tier_explain,
+    Config, WireKind, NAMESPACE_FORMAT,
 };
 
 /// Format tag shared by all three usage-summary projections (`usage-summary`,
@@ -114,12 +119,12 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         "types" => Ok(types_section(&check_on(src, roots)?)),
         "typespans" => {
             let (program, checked) = tooltip_checked_on(src, roots, cfg)?;
-            crate::docs::extract_typespans(src, &program, &checked)?
+            extract_typespans(src, &program, &checked)?
                 .to_json()
                 .map_err(|error| Error::CodegenDump(error.to_string()))
         }
         "interface" => {
-            let entry = crate::error::SourceMap::new(src).user();
+            let entry = SourceMap::new(src).user();
             module_interface(entry, src, roots)?
                 .to_json()
                 .map_err(|e| Error::CodegenDump(e.to_string()))
@@ -163,7 +168,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                 schema: RESOLVED_SYNTAX_SCHEMA,
                 compiler: COMPILER_VERSION,
                 source: ResolvedSource {
-                    digest: crate::core::hash::hex(user).to_string(),
+                    digest: hash_hex(user).to_string(),
                     text: user.to_string(),
                 },
                 functions: resolved_syntax_body(&program, src),
@@ -203,25 +208,22 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // contract summaries with digests). Runs the solver-free logical checker
         // on the resolved surface program; a malformed contract is a source error.
         "verify" => {
-            let program = crate::resolve::resolve_modules_in(parse_unit(src)?, roots)?;
-            Ok(crate::verify::check_program(&program)?.render())
+            let program = resolve_modules_in(parse_unit(src)?, roots)?;
+            Ok(check_program(&program)?.render())
         }
         // The verification conditions, one canonical SMT query per
         // postcondition, then the termination ranking obligations of every
         // `total fn` with a `decreases` measure, under distinct banners so the two
         // certificate families stay separate. Solver-free.
         "smt" => {
-            let program = crate::resolve::resolve_modules_in(parse_unit(src)?, roots)?;
-            Ok(
-                crate::verify::vc::render(&program)?
-                    + &crate::verify::ranking::render_smt(&program),
-            )
+            let program = resolve_modules_in(parse_unit(src)?, roots)?;
+            Ok(vc::render(&program)? + &ranking::render_smt(&program))
         }
         // Per-function totality status (checked-trivial, checked-structural,
         // trusted assumption, or pending with a precise reason). Solver-free.
         "totality" => {
-            let program = crate::resolve::resolve_modules_in(parse_unit(src)?, roots)?;
-            Ok(crate::verify::totality::render(&program))
+            let program = resolve_modules_in(parse_unit(src)?, roots)?;
+            Ok(totality::render(&program))
         }
         "core" => {
             let (_, _, core) = frontend(src, roots, cfg)?;
@@ -232,7 +234,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         }
         "core-json" => {
             let (_, _, core) = frontend(src, roots, cfg)?;
-            Ok(crate::core::core_to_json(&core))
+            Ok(core_to_json(&core))
         }
         // The identity inputs of the entry file's own definitions: pre-optimizer
         // Core tagged by the identifiers the content hash commits to, each
@@ -261,7 +263,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                 writeln!(
                     out,
                     "{}  {}",
-                    &hashes[name][..crate::core::HASH_PREFIX_HEX],
+                    &hashes[name][..HASH_PREFIX_HEX],
                     name.as_str()
                 )
                 .unwrap();
@@ -311,10 +313,10 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // included, like `core-hash` shows prelude fns). One line per declaration.
         "shape" => {
             let (program, _, _) = frontend(src, roots, cfg)?;
-            let shapes = crate::core::shape_digests(&program.types, &program.effects);
+            let shapes = shape_digests(&program.types, &program.effects);
             let mut out = String::new();
             for (name, h) in &shapes {
-                writeln!(out, "{}  {name}", &h[..crate::core::HASH_PREFIX_HEX]).unwrap();
+                writeln!(out, "{}  {name}", &h[..HASH_PREFIX_HEX]).unwrap();
             }
             Ok(out)
         }
@@ -338,13 +340,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
             for (h, members) in groups {
                 let mut names: Vec<&str> = members.iter().map(|s| s.as_str()).collect();
                 names.sort_unstable();
-                writeln!(
-                    out,
-                    "{}  {}",
-                    &h[..crate::core::HASH_PREFIX_HEX],
-                    names.join(", ")
-                )
-                .unwrap();
+                writeln!(out, "{}  {}", &h[..HASH_PREFIX_HEX], names.join(", ")).unwrap();
             }
             if out.is_empty() {
                 out.push_str("no structural duplicates\n");
@@ -425,19 +421,19 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                 writeln!(
                     out,
                     "def   {}  {}",
-                    &h.defs[name][..crate::core::HASH_PREFIX_HEX],
+                    &h.defs[name][..HASH_PREFIX_HEX],
                     name.as_str()
                 )
                 .unwrap();
             }
             for (name, dg) in &h.shapes {
-                writeln!(out, "shape {}  {name}", &dg[..crate::core::HASH_PREFIX_HEX]).unwrap();
+                writeln!(out, "shape {}  {name}", &dg[..HASH_PREFIX_HEX]).unwrap();
             }
             for (name, dg) in &h.classes {
-                writeln!(out, "class {}  {name}", &dg[..crate::core::HASH_PREFIX_HEX]).unwrap();
+                writeln!(out, "class {}  {name}", &dg[..HASH_PREFIX_HEX]).unwrap();
             }
             for (name, dg) in &h.instances {
-                writeln!(out, "inst  {}  {name}", &dg[..crate::core::HASH_PREFIX_HEX]).unwrap();
+                writeln!(out, "inst  {}  {name}", &dg[..HASH_PREFIX_HEX]).unwrap();
             }
             Ok(out)
         }
@@ -467,6 +463,11 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         // program, so a rung is read off the analysis the cascade consulted
         // rather than inferred from which passes fired.
         "effect-plan" => typed_effect_plan(src, roots, cfg),
+        // The same facts as prose: one sentence per region naming the rung it
+        // lowered to and the recorded fact that put it there, so a tier nobody
+        // expected is read back to its cause without decoding the plan's rows.
+        // A rendering of the plan above, deciding nothing of its own.
+        "tier-explain" => typed_tier_explain(src, roots, cfg),
         // Closure-capture facts: for each of the program's own lambdas and
         // thunks, the bindings it closes over and the scoped operations it
         // performs, each classified portable / nonportable / unknown for a move
@@ -482,7 +483,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
             let code_names: BTreeSet<Sym> = user_fns
                 .iter()
                 .map(|f| f.name)
-                .filter(|n| !crate::names::is_synthesized(n.as_str()))
+                .filter(|n| !names::is_synthesized(n.as_str()))
                 .collect();
             let decl_ty: BTreeMap<Sym, Type> = checked
                 .decls
@@ -588,16 +589,16 @@ fn usage_summary_data(
     let mut own: BTreeSet<Sym> = BTreeSet::new();
     for f in &core.fns {
         let name = f.name.as_str();
-        if prelude.contains(&f.name) || crate::names::is_synthesized(name) {
+        if prelude.contains(&f.name) || names::is_synthesized(name) {
             continue;
         }
-        let module = crate::names::module_of(name);
+        let module = names::module_of(name);
         let foreign = if module.is_empty() {
             false
         } else if let Some(&cached) = foreign_modules.get(module) {
             cached
         } else {
-            let served = crate::resolve::serving_root(module, roots)?;
+            let served = serving_root(module, roots)?;
             let foreign = !matches!(served, Some(Root::Dir(_)));
             foreign_modules.insert(module.to_string(), foreign);
             foreign
@@ -617,7 +618,7 @@ fn usage_rows(
     own: &BTreeSet<Sym>,
 ) -> Vec<UsageRow> {
     let sigs = borrow_sigs(program);
-    let decls: BTreeMap<&str, &crate::syntax::ast::Decl<CorePhase>> =
+    let decls: BTreeMap<&str, &Decl<CorePhase>> =
         program.fns.iter().map(|d| (d.name.as_str(), d)).collect();
     let mut rows: Vec<UsageRow> = Vec::new();
     for info in &checked.decls {
@@ -784,7 +785,7 @@ pub(super) const COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 fn core_identity(
     core: &Core,
     metas: &BTreeMap<Sym, String>,
-    hashes: &crate::core::Hashes,
+    hashes: &Hashes,
     prelude: &HashSet<Sym>,
 ) -> String {
     let defs: Vec<&CoreFn> = core
@@ -952,7 +953,7 @@ fn hir_nodes(checked: &Checked) -> BTreeMap<u32, HirNode> {
 }
 
 fn render_handler_residual(residual: &HandlerResidual) -> HirHandlerResidual {
-    let names = |symbols: &[crate::sym::Sym]| {
+    let names = |symbols: &[Sym]| {
         symbols
             .iter()
             .map(|symbol| symbol.as_str().to_string())
@@ -1204,10 +1205,10 @@ struct ElabInput {
 // interface does (`src/driver/modules.rs`); the names are the canonical constants
 // in `names.rs`, never re-spelled here.
 fn is_control_effect(name: &str) -> bool {
-    name == crate::names::FAIL_EFFECT
-        || name == crate::names::BREAK_EFFECT
-        || name == crate::names::CONTINUE_EFFECT
-        || name == crate::names::RETURN_EFFECT
+    name == names::FAIL_EFFECT
+        || name == names::BREAK_EFFECT
+        || name == names::CONTINUE_EFFECT
+        || name == names::RETURN_EFFECT
 }
 
 // A span rendered relative to the user's own source, so it is stable whether or
@@ -1375,7 +1376,7 @@ fn tc_input_body(program: &Program<CorePhase>, checked: &Checked, src: &str) -> 
     let functions = program
         .fns
         .iter()
-        .filter(|decl| !crate::names::is_synthesized(&decl.name))
+        .filter(|decl| !names::is_synthesized(&decl.name))
         .map(|decl| {
             let params = decl
                 .params
@@ -1532,7 +1533,7 @@ fn resolved_syntax_body(program: &Program<CorePhase>, src: &str) -> Vec<Resolved
         // definitions survive optimization surfaces those too (a self-contained
         // module, the common case, resolves to exactly the user's functions).
         .filter(|decl| decl.span.start >= user_start)
-        .filter(|decl| !crate::names::is_synthesized(&decl.name))
+        .filter(|decl| !names::is_synthesized(&decl.name))
         .map(|decl| ResolvedFunction {
             name: decl.name.clone(),
             params: decl

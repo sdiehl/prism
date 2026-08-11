@@ -15,6 +15,8 @@
 //! is what makes cross-solver agreement meaningful.
 
 use std::io::{Read, Write};
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
@@ -262,9 +264,6 @@ fn run_process(exe: &str, args: &[&str], input: &str, timeout: Duration) -> Run 
 /// distinguish it. On others, never.
 #[cfg(unix)]
 fn is_signaled(status: ExitStatus) -> bool {
-    // `ExitStatusExt::signal` is a Unix-only trait method, so its import is kept
-    // local to this cfg-gated function; hoisting it would break the non-unix build.
-    use std::os::unix::process::ExitStatusExt;
     status.signal().is_some()
 }
 

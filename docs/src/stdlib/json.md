@@ -79,7 +79,9 @@ class FromJson(a)
 
 Recover a value from a `Json` tree, failing (through `Fail`) on a structural mismatch. A decode of foreign data is one ordinary failure channel.
 
-`deriving (FromJson)` reads back exactly what the derived `ToJson` wrote, by the same keys: `from_json(to_json(x))` is `x`. A tree that is not an object, a sum whose `$` names no constructor of the type, a missing key, and a field that will not itself decode all leave through the same `Fail`. That failure carries no payload, so it reports that the document did not fit and not where: `Fail` is a nullary operation, and reporting a path would mean a different effect on this class's signature and so on every hand-written instance too. Catch it with `optional`, `default`, or `succeeds`, as with any other `Fail`.
+`deriving (FromJson)` reads back exactly what the derived `ToJson` wrote, by the same keys: `from_json(to_json(x))` is `x`, with one stated exception. An option adds no marker of its own to the document, so nesting collapses: `Some(None)` encodes as `null` and reads back as `None`. Every other value, and every option of a non-option, round-trips exactly.
+
+A tree that is not an object, a sum whose `$` names no constructor of the type, a missing key, and a field that will not itself decode all leave through the same `Fail`. That failure carries no payload, so it reports that the document did not fit and not where: `Fail` is a nullary operation, and reporting a path would mean a different effect on this class's signature and so on every hand-written instance too. Catch it with `optional`, `default`, or `succeeds`, as with any other `Fail`.
 
 ```prism,mod=Json
 from_json(JInt(41)) + 1
@@ -260,7 +262,7 @@ Json.JInt(2)
 ### `to_json_string`
 
 ```prism,sig,h-8e0a1c390ac05fa4df9aa312bcefbb1e517fedb8117b487e3cc49a4fc0165066
-to_json_string : forall a. (a) -> String
+to_json_string : forall a. (a) -> String given Json.ToJson(a)
 ```
 
 Encode a typed value straight to a canonical JSON string.

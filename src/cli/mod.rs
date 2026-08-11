@@ -24,10 +24,13 @@ use crate::store::disk::{resolve_store_path, Store};
 use crate::syntax::reflect::parse_unit;
 use crate::verify::run::VerifyOptions;
 
+pub mod bootstrap;
 pub mod check_world;
 pub mod docs;
 pub mod exec;
+pub mod explain;
 pub mod fmt;
+pub mod holes;
 pub mod lineage;
 pub mod patch;
 pub mod pkg;
@@ -35,6 +38,7 @@ pub mod render;
 pub mod run;
 pub mod store;
 pub mod test;
+pub mod type_query;
 
 pub use run::ExampleStdin;
 
@@ -68,7 +72,7 @@ struct WatchHistory {
 
 // A CLI path argument names a project when it is a directory or points directly
 // at a `prism.toml`; otherwise it is a single-file program.
-fn is_project(arg: &Path) -> bool {
+pub(crate) fn is_project(arg: &Path) -> bool {
     arg.is_dir() || arg.file_name().is_some_and(|n| n == PRISM_MANIFEST)
 }
 
@@ -642,28 +646,34 @@ pub fn clean_cmd(path: &Path) -> CmdResult {
     Ok(())
 }
 
+// The input a `check` names: the explicit path, or the enclosing project's
+// manifest when none is given. Shared by the plain verdict and the typed-hole
+// query so both resolve a bare `prism check` the same way.
+pub fn check_input(file: Option<&Path>) -> Result<PathBuf, CmdError> {
+    if let Some(path) = file {
+        return Ok(path.to_path_buf());
+    }
+    let start = Path::new(CURRENT_DIR)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(CURRENT_DIR));
+    crate::project::find_manifest(&start).ok_or_else(|| {
+        (
+            Error::ResolveCommand(
+                "no prism.toml found: `prism check` without FILE checks the enclosing \
+                 project; pass a `.pr` file to check a single source"
+                    .into(),
+            ),
+            String::new(),
+            start.display().to_string(),
+        )
+    })
+}
+
 // `prism check [FILE]`: with an explicit path, type-check exactly that file or
 // project input; with no path, find the enclosing project and check its manifest
 // entry. Success is quiet and reported by exit status.
 pub fn check_cmd(file: Option<&Path>, cfg: &crate::Config) -> CmdResult {
-    let input = if let Some(path) = file {
-        path.to_path_buf()
-    } else {
-        let start = Path::new(".")
-            .canonicalize()
-            .unwrap_or_else(|_| PathBuf::from("."));
-        crate::project::find_manifest(&start).ok_or_else(|| {
-            (
-                Error::ResolveCommand(
-                    "no prism.toml found: `prism check` without FILE checks the enclosing \
-                     project; pass a `.pr` file to check a single source"
-                        .into(),
-                ),
-                String::new(),
-                start.display().to_string(),
-            )
-        })?
-    };
+    let input = check_input(file)?;
     let (full, roots, name, _) = resolve_input(&input, cfg)?;
     // The warm no-op cutoff: this exact source tree, configuration, mode, and
     // stable-lock manifest already passed a warning-free validated check, so the

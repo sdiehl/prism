@@ -13,7 +13,8 @@ use std::collections::BTreeSet;
 
 use crate::core::fbip::borrow_sigs;
 use crate::core::{
-    check_fip, check_fip_linear, fip_annots, insert_rc, replayable_annots, reuse, Core,
+    check_fip, check_fip_linear, fip_annots, insert_rc, newtype_ctors, replayable_annots, reuse,
+    Core,
 };
 use crate::error::{Error, TypeError};
 use crate::sym::Sym;
@@ -307,8 +308,16 @@ pub(super) fn fip_check(
     };
     let sigs = borrow_sigs(program);
     let users: std::collections::BTreeSet<Sym> = core.fns.iter().map(|f| f.name).collect();
+    let newtypes = newtype_ctors(program);
     check_fip_linear(core, &annots, &checked.decls, &checked.ctors).map_err(to_err)?;
-    check_fip(&reuse(&insert_rc(core, &sigs)), &annots, &sigs, &users).map_err(to_err)
+    check_fip(
+        &reuse(&insert_rc(core, &sigs)),
+        &annots,
+        &sigs,
+        &users,
+        &newtypes,
+    )
+    .map_err(to_err)
 }
 
 fn allocation_certificate_message(kind: &str, name: Option<&str>, msg: &str) -> String {

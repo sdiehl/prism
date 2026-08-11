@@ -14,17 +14,25 @@ Opt-in: this module is not in Base, so ambient effect rows and the unbranded `Ma
 
 ### `OrdWitness`
 
-```prism,def,h-d8f957841e13dc6862da0279999df6d4f46f18a5ea874dfd56934b93b0da55b7
-type OrdWitness(k, brand) = OrdBy((k, k) -> Int)
+```prism,def,h-3f7b432495bade83b7f13a098beeeca56dea56c1668bd2deb28f0ceceb9fea68
+newtype OrdWitness(k, brand) = OrdBy((k, k) -> Int)
 ```
 
 An ordering witness: a comparator branded by the phantom `brand`. The only way to obtain one is `with_ordering`, which mints a fresh brand per call, so two witnesses always carry incompatible brands.
+
+### `OrderedMap`
+
+```prism,def,h-db9f25e3fdf3a56a43e718354950db2d0170e3abdc9f73c67e6708a1a0a43cb3
+newtype OrderedMap(k, v, brand) = OrderedMap(Map(k, v, brand))
+```
+
+A map whose representation is sealed to the comparator carried by its witness. Hiding this wrapper matters as much as hiding `OrdWitness`: a raw `Map(k, v, brand)` can otherwise be instantiated at any phantom brand and smuggled into the explicit-ordering API after being built by another comparator.
 
 ## Functions and Values
 
 ### `with_ordering`
 
-```prism,sig,h-0f31f3c7c409261c6ff2bcd4a58ad1530c90b1bfba4a4594aa9f9bac09d550aa
+```prism,sig,h-aa977320bb7e04168d01c6a0bb21bea4ec2324c26f3ccd144b9efb1faac49a17
 with_ordering : forall a b. ((a, a) -> Int, forall brand. (Data.Ordered.OrdWitness(a, brand)) -> b) -> b
 ```
 
@@ -43,16 +51,16 @@ Some(a)
 
 ### `ord_empty`
 
-```prism,sig,h-a6f0d96a2e55d7ab3eb5a9ee9211ad85557ed96106f6431aa6119a48360834e0
-ord_empty : forall a b c. (Data.Ordered.OrdWitness(a, b)) -> Map(a, c, b)
+```prism,sig,h-8159146d7f73826c9861e1f5e7e73fd7c5febb65525c53ecd879a3fc8f58c585
+ord_empty : forall a b c. (Data.Ordered.OrdWitness(a, b)) -> Data.Ordered.OrderedMap(a, c, b)
 ```
 
 The empty map under witness `w`, carrying `w`'s brand.
 
 ### `ord_insert`
 
-```prism,sig,h-076192c58b63f03343a0d25ff16f90a439eab10a63b8c760d7730f719c65c80b
-ord_insert : forall a b c. (Data.Ordered.OrdWitness(a, b), a, c, Map(a, c, b)) -> Map(a, c, b)
+```prism,sig,h-a6dcc7ec75101002feee1377a51d7bc46a1a2f9d673d64199449813bbc1b9692
+ord_insert : forall a b c. (Data.Ordered.OrdWitness(a, b), a, c, Data.Ordered.OrderedMap(a, c, b)) -> Data.Ordered.OrderedMap(a, c, b)
 ```
 
 Insert under witness `w`; the result carries `w`'s brand.
@@ -68,8 +76,8 @@ with_ordering(\(a, b) -> cmp(a, b), \(w) ->
 
 ### `ord_lookup`
 
-```prism,sig,h-9472de7d80cb104ba54cd9d07c231d633e129b96640aba50de404069e01ac5bc
-ord_lookup : forall a b c. (Data.Ordered.OrdWitness(a, b), a, Map(a, c, b)) -> Option(c)
+```prism,sig,h-bef1061678756f8c95fb81bf9e8dfc6fa5279d565b656449c08ab68b71b927aa
+ord_lookup : forall a b c. (Data.Ordered.OrdWitness(a, b), a, Data.Ordered.OrderedMap(a, c, b)) -> Option(c)
 ```
 
 Look `key` up under witness `w`. Only a map of `w`'s brand type-checks here.
@@ -85,8 +93,8 @@ None
 
 ### `ord_member`
 
-```prism,sig,h-cc209227b2bb80ce7dd9cabc222ad1d95790c9631379e5342b1ce960ca0431e2
-ord_member : forall a b c. (Data.Ordered.OrdWitness(a, b), a, Map(a, c, b)) -> Bool
+```prism,sig,h-8ae61ecb90fe899a95533255867337511f1b2d352b97302730a885ffd480929a
+ord_member : forall a b c. (Data.Ordered.OrdWitness(a, b), a, Data.Ordered.OrderedMap(a, c, b)) -> Bool
 ```
 
 True when `key` is present under witness `w`.
@@ -102,8 +110,8 @@ true
 
 ### `ord_to_list`
 
-```prism,sig,h-e243d29fef1502361e9c7e492a1072e1cd9d86285006c409038761c3206be31f
-ord_to_list : forall a b c. (Data.Ordered.OrdWitness(a, b), Map(a, c, b)) -> List((a, c))
+```prism,sig,h-1993e628d1e3d0f8ec7973b733af8d9caf5eb4bf687cb1e822986ba0af395508
+ord_to_list : forall a b c. (Data.Ordered.OrdWitness(a, b), Data.Ordered.OrderedMap(a, c, b)) -> List((a, c))
 ```
 
 The `(key, value)` pairs of a `w`-branded map, in tree (in-order) order.
@@ -119,8 +127,8 @@ with_ordering(\(a, b) -> cmp(a, b), \(w) ->
 
 ### `ord_size`
 
-```prism,sig,h-df5dc62073a16309c9b80642a2c12b08f01885b91f0b5e861d0a3d25127fba24
-ord_size : forall a b c. (Data.Ordered.OrdWitness(a, b), Map(a, c, b)) -> Int
+```prism,sig,h-cec650645ff1759a8f4479f553f6f93b5d3a432a0dd109bb76c3728184572153
+ord_size : forall a b c. (Data.Ordered.OrdWitness(a, b), Data.Ordered.OrderedMap(a, c, b)) -> Int
 ```
 
 The number of entries in a `w`-branded map.

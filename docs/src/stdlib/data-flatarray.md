@@ -12,7 +12,7 @@ The buffers underneath follow the array's rc==1 in-place / shared-copy disciplin
 
 ### `FlatArray`
 
-```prism,def,h-5df9d0661f86eafd6aeae2d3dbf87b1779d0884846ada41a5a8d103aa6540c0c
+```prism,def,h-b26201cbdaaf39c93bff0dbd054180d39e108295b455ebcc1a431c102eeda384
 type FlatArray(a) = FloatArr(FloatBuf) | IntArr(IntBuf)
 ```
 
@@ -43,13 +43,13 @@ fa_get(fa_set(fa_new(3, 0.0), 1, 9.0), 1)
 
 ### `flatFloat`
 
-```prism,def,h-b57e6e582b0b9082cd4a59c44524b932892d9372116e21df05223ec739da94ef
+```prism,def,h-03c708037112fd1e8494a28139c43b8f120b7af400fdbacc1f76158291d899b4
 instance flatFloat : FlatElem(Float)
 ```
 
 ### `flatI64`
 
-```prism,def,h-0b1e24fd63a87e2c3884e8aeb2e3e59e88c690221b3727fa9a8f60076e79ef1c
+```prism,def,h-1e2136aedb09fff24cd5893f4f81ff5e0e0f6af4f3f35a9a76d7922c73b661d3
 instance flatI64 : FlatElem(I64)
 ```
 
@@ -57,7 +57,7 @@ instance flatI64 : FlatElem(I64)
 
 ### `fa_len`
 
-```prism,sig,h-2424a832724829151297f9dad20c90da34288235b6b5335e300c239617e46679
+```prism,sig,h-b9c5dd36d5b900ed76e29b843068e2755963470d49a26b05e1154473fa9be4ab
 fa_len : forall a. (Data.FlatArray.FlatArray(a)) -> Int
 ```
 

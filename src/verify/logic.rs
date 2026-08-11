@@ -9,8 +9,8 @@ use num_bigint::BigInt;
 use crate::verify::registry::LogicBuiltin;
 
 /// A logical sort. `Int` is mathematical (arbitrary precision), matching Prism's
-/// `Int`. Bit-vector and datatype sorts are not yet supported; the supported
-/// fragment is the `Bool` + `Int` quantifier-free linear-integer core.
+/// `Int`. The supported fragment is the `Bool` + `Int` quantifier-free
+/// linear-integer core; bit-vector and datatype sorts are unsupported.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub(crate) enum LogicSort {
     Bool,

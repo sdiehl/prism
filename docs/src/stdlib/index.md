@@ -5,8 +5,8 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 ## Merkle root
 
 - **Scheme**: `prism-core-hash-v2`
-- **Hash**: `bc97598730932d105fe5269a08ba230ce0c2955dcfc475f671ba5b23109e31ef`
-- **Compiler version**: Prism v0.17.0
+- **Hash**: `80303809162f28f277bc5587d17f115db91817dec5cc85cb79673defb9214f2e`
+- **Compiler version**: Prism v0.18.0
 
 ## Modules
 
@@ -18,10 +18,13 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 - [Control.State](./control-state.md) - The canonical `State(s)` effect: a threaded piece of mutable-looking state, interpreted through a private cell scoped to the run.
 - [Control.Validate](./control-validate.md) - Validation as an algebraic effect.
 - [Control.Writer](./control-writer.md) - The canonical `Writer(w)` effect: accumulate output on the side.
+- [Data.Bifunctor](./data-bifunctor.md) - Functors of two arguments: map both payloads of a two-parameter type at once.
 - [Data.Bind](./data-bind.md) - Binders, the two nameless coordinate systems, and the canonical rendering that makes alpha-equivalent terms identical.
 - [Data.Bytes](./data-bytes.md) - Byte strings: the `String`/`Bytes` boundary, and the hex and base64 codecs.
 - [Data.Char](./data-char.md) - ASCII character classification.
 - [Data.Checked](./data-checked.md) - Safe arithmetic families over the machine-integer lanes.
+- [Data.Contravariant](./data-contravariant.md) - Consumers of values: functors that map over their input, not their output.
+- [Data.Diff](./data-diff.md) - First-divergence reporting for two lists.
 - [Data.Fixpoint](./data-fixpoint.md) - Least fixed points over a join-semilattice, solved by worklist.
 - [Data.FlatArray](./data-flatarray.md) - Flat, unboxed-element arrays: one typed surface over the raw-word buffers.
 - [Data.Foldable](./data-foldable.md) - Generic operations over any `Foldable` container.
@@ -29,11 +32,15 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 - [Data.Graph](./data-graph.md) - Directed graphs over an ordered node type, with the deterministic algorithms the compiler relies on internally, mirrored into Prism.
 - [Data.IntMap](./data-intmap.md) - Persistent integer-keyed map: a big-endian patricia trie over 64-bit keys.
 - [Data.IntSet](./data-intset.md) - Sets of 64-bit integers, reusing the patricia trie.
+- [Data.Intern](./data-intern.md) - A deterministic first-seen interner: names to dense integer ids.
+- [Data.Lattice](./data-lattice.md) - Join-semilattices: carriers ordered by a least upper bound.
 - [Data.List](./data-list.md) - Singly-linked list operations.
 - [Data.Map](./data-map.md) - Persistent ordered map: an AVL-balanced binary search tree over keys.
 - [Data.Maybe](./data-maybe.md) - Operations over `Option`.
 - [Data.Monad](./data-monad.md) - Generic operations derived from the `Applicative` and `Monad` classes.
+- [Data.Monoid](./data-monoid.md) - Semigroups and monoids: associative combination, with and without an identity.
 - [Data.Name](./data-name.md) - Deterministic nominal identities with phantom namespace brands.
+- [Data.Optic](./data-optic.md) - Lenses: a getter and a setter carried together as one first-class value.
 - [Data.Ordered](./data-ordered.md) - Explicit ordering witnesses: the branded, statically coherent path to ordered maps.
 - [Data.Pretty](./data-pretty.md) - A Leijen-style pretty printer.
 - [Data.Result](./data-result.md) - Operations over `Result`.
@@ -74,6 +81,7 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 - [Syntax.Report](./syntax-report.md) - Caret rendering for `Syntax.Diagnostic`: the plain-text report the compiler prints for a refused source.
 - [Syntax.Resolved](./syntax-resolved.md) - The typed vocabulary of the `prism-resolved-syntax-v1` artifact.
 - [Syntax.Source](./syntax-source.md) - Source identity for the versioned syntax artifacts: source files and half-open byte spans.
+- [Syntax.TcInput](./syntax-tcinput.md) - Typed vocabulary for the `prism-tc-input-v1` checker-input artifact.
 - [Syntax.Token](./syntax-token.md) - The token vocabulary of the `prism-syntax-tokens-v1` artifact.
 - [Syntax.Walk](./syntax-walk.md) - Generic traversal over the surface syntax tree.
 - [Arena](./arena.md) - Arena: allocation as an algebraic effect.

@@ -4,7 +4,8 @@ use marginalia::Span;
 
 use crate::ast::{
     call, evar, sp, sp_sugar, Arm, BinOp, Converter, Expr, Marker, Migration, MigrationDir, NodeId,
-    Param, Pattern, PatternDecl, ReflectKind, Rung, Spanned, StableDecl, Sugar, Total, Ty, S,
+    Param, PathOp, PathStep, Pattern, PatternDecl, ReflectKind, Rung, Spanned, StableDecl, Sugar,
+    Total, Ty, S,
 };
 use crate::kw;
 use crate::names;
@@ -421,6 +422,168 @@ pub fn let_pat(pat: S<Pattern>, v: S<Expr>, rest: S<Expr>, l: usize) -> S<Expr> 
     }
 }
 
+// `let pat = v else fallback`: the rest of the block is what the pattern binds
+// into, and `fallback` is the block's value when the pattern does not match, so
+// a failed binding leaves the enclosing block at that point. A two-arm match
+// whose `synth` flag (set by `sp_sugar`) marks it for the formatter; the
+// fallback arm is a wildcard, which is what tells it apart from the `?` desugar
+// (whose second arm is always an `Err` constructor). The wildcard carries the
+// fallback's span, so a pattern that cannot fail reports its dead arm there.
+#[must_use]
+pub fn let_else(
+    pat: S<Pattern>,
+    v: S<Expr>,
+    fallback: S<Expr>,
+    rest: S<Expr>,
+    l: usize,
+) -> S<Expr> {
+    let wild = Spanned {
+        id: NodeId::DUMMY,
+        synth: false,
+        node: Pattern::Wild,
+        span: fallback.span,
+    };
+    let arms = vec![
+        Arm {
+            pat,
+            guard: None,
+            body: rest,
+            alt: false,
+        },
+        Arm {
+            pat: wild,
+            guard: None,
+            body: fallback,
+            alt: false,
+        },
+    ];
+    sp_sugar(Expr::Match(Box::new(v), arms), Span::empty(l))
+}
+
+// Shown when a path literal reaches for a step that focuses more than one place.
+// The literal denotes a lens, which names exactly one focus, so admitting a
+// fan-out step would change what the literal is rather than extend it; the
+// message points at the traversal the program can build by hand instead.
+pub const PATH_FIELDS_ONLY: &str =
+    "a path literal takes field steps only (`#path a.b.c`): `each`, `[i]`, `?Ctor` and `where` \
+     focus more than one place, so build those with `traversal` instead of a path literal";
+
+// Shown when the sigil is followed by some other word. The `#` has already
+// committed the expression to this form, so a different word is a misspelling
+// rather than a new construct.
+pub const PATH_EXPECTED: &str = "expected `path` after `#` here";
+
+// Shown when an anchored literal names a type and then stops: the anchor only
+// says what the whole is, so without a field there is nothing to focus.
+pub const PATH_ANCHOR_NEEDS_FIELD: &str =
+    "an anchored path literal needs at least one field after the type: `#path Type.field`";
+
+// The field names a path literal's operand denotes, outermost first. The operand
+// is whatever the ordinary expression rules made of the path, so the root is the
+// first field rather than a value: `#path a.b.c` arrives as the field access
+// `a.b.c` and means the three steps `a`, `b`, `c`. The bracketed read spelling is
+// the same path written another way and flattens to the same steps. Anything else
+// focuses something other than one field chain and is refused here.
+fn path_fields(e: &Expr, out: &mut Vec<String>) -> Result<(), String> {
+    match e {
+        // A qualified head (`Solver.metas.next`) lexes as one dotted token, so
+        // the root may carry several segments; split them here and let
+        // `path_lit` decide whether the first is a type anchor.
+        Expr::Var(root) => out.extend(root.split('.').map(str::to_string)),
+        Expr::FieldAccess(base, f) => {
+            path_fields(&base.node, out)?;
+            out.push(f.clone());
+        }
+        Expr::Sugar(Sugar::ReadPath(base, steps)) => {
+            path_fields(&base.node, out)?;
+            for s in steps {
+                let PathStep::Field(f) = s else {
+                    return Err(PATH_FIELDS_ONLY.to_string());
+                };
+                out.push(f.clone());
+            }
+        }
+        _ => return Err(PATH_FIELDS_ONLY.to_string()),
+    }
+    Ok(())
+}
+
+/// Build the optic literal `#path a.b.c`.
+///
+/// It expands to the lens over the getter and setter a reader would otherwise
+/// write out: the getter reads the field chain, the setter rebuilds it through
+/// the same update path a record update takes. Both halves are ordinary surface
+/// syntax, so the literal introduces nothing below the parser and performs
+/// nothing. The binders are `@` sigiled and so cannot be captured by a field name
+/// along the path, and that unspellable pair is what the formatter matches on to
+/// print the literal back.
+///
+/// # Errors
+/// Fails when the sigil is followed by a word other than `path`, and when the
+/// operand is anything but a chain of plain field steps.
+pub fn path_lit(word: &str, e: &S<Expr>, span: Span) -> Result<S<Expr>, String> {
+    if word != kw::PATH {
+        return Err(PATH_EXPECTED.to_string());
+    }
+    let mut fields = Vec::new();
+    path_fields(&e.node, &mut fields)?;
+    // `#path Type.a.b`: an uppercase head is a root-type anchor rather than a
+    // field (fields are lowercase), carried onto both `whole@` binders as an
+    // ordinary annotation. That is what lets the literal sit inline where
+    // nothing else names the whole type, e.g. `gets_at(#path Solver.metas.next)`.
+    let anchor = if fields
+        .first()
+        .is_some_and(|f| f.starts_with(char::is_uppercase))
+    {
+        Some(fields.remove(0))
+    } else {
+        None
+    };
+    if fields.is_empty() {
+        return Err(PATH_ANCHOR_NEEDS_FIELD.to_string());
+    }
+    let whole_ty = anchor.map(|t| Ty::Con(t, Vec::new()));
+    let par = |name: &str, ty: Option<Ty>| Param {
+        name: name.into(),
+        ty,
+        borrow: false,
+        pat: None,
+        default: None,
+    };
+    let read = fields.iter().fold(evar(names::PATH_WHOLE, span), |acc, f| {
+        sp(Expr::FieldAccess(Box::new(acc), f.clone()), span)
+    });
+    let getter = sp(
+        Expr::Lam(
+            vec![par(names::PATH_WHOLE, whole_ty.clone())],
+            Box::new(read),
+        ),
+        span,
+    );
+    let steps: Vec<PathStep> = fields.into_iter().map(PathStep::Field).collect();
+    let write = sp(
+        Expr::RecordUpdatePath(
+            Box::new(evar(names::PATH_WHOLE, span)),
+            vec![(steps, PathOp::Set(evar(names::PATH_PART, span)))],
+        ),
+        span,
+    );
+    let setter = sp(
+        Expr::Lam(
+            vec![
+                par(names::PATH_WHOLE, whole_ty),
+                par(names::PATH_PART, None),
+            ],
+            Box::new(write),
+        ),
+        span,
+    );
+    Ok(sp_sugar(
+        Expr::Call(Box::new(evar(names::LENS_FN, span)), vec![getter, setter]),
+        span,
+    ))
+}
+
 // An interpolated literal parses to an `Interp`-marker call alternating literal
 // segments and hole expressions; the `Interp` callee is the marker the formatter
 // keys on to restore the string surface, and segment spans are zero-width
@@ -546,10 +709,104 @@ pub fn let_stmt(x: String, v: S<Expr>, rest: S<Expr>, l: usize, r: usize) -> S<E
     }
 }
 
-// `lvalue := value`: assign to a `var` (`Sugar::Assign`) or an index target
-// `a[i]` (`Sugar::IndexAssign`). Any other left side is a parse error.
+// The lvalue shapes a statement assignment accepts beyond a bare name: a chain
+// of field accesses and index steps over a root variable, flattened to the
+// path-update steps the brace form takes. Dotted (qualified) and uppercase
+// roots are constructor references, never assignable, so they return `None`.
+fn lvalue_path(e: &Expr) -> Option<(String, Vec<PathStep>)> {
+    match e {
+        Expr::Var(x) if !x.contains('.') && !x.starts_with(char::is_uppercase) => {
+            Some((x.clone(), Vec::new()))
+        }
+        Expr::FieldAccess(base, f) => {
+            let (root, mut steps) = lvalue_path(&base.node)?;
+            steps.push(PathStep::Field(f.clone()));
+            Some((root, steps))
+        }
+        Expr::Index(base, key) => {
+            let (root, mut steps) = lvalue_path(&base.node)?;
+            steps.push(PathStep::Index((**key).clone()));
+            Some((root, steps))
+        }
+        _ => None,
+    }
+}
+
+// `x.a[i].b OP rhs`: the statement is the brace update it abbreviates,
+// `x := { x | a[i].b OP rhs }`. The brace node is synth, which is what the
+// formatter matches on to restore the statement surface; a hand-written
+// `x := { x | ... }` is non-synth and keeps its explicit form.
+fn path_assign(root: String, steps: Vec<PathStep>, op: PathOp, l: usize, r: usize) -> S<Expr> {
+    let span = Span::new(l, r);
+    let update = Spanned {
+        id: NodeId::DUMMY,
+        synth: true,
+        node: Expr::RecordUpdatePath(Box::new(evar(&root, span)), vec![(steps, op)]),
+        span,
+    };
+    sp(Expr::Sugar(Sugar::Assign(root, Box::new(update))), span)
+}
+
+// Whether a flattened lvalue needs the path route: any field step does. A pure
+// var/index chain keeps the older `Assign`/`IndexAssign` forms, so existing
+// programs desugar exactly as before.
+fn has_field_step(steps: &[PathStep]) -> bool {
+    steps.iter().any(|s| matches!(s, PathStep::Field(_)))
+}
+
+// The ambient-state lvalue: a nonempty path rooted at a literal `get()` call,
+// as in `get().metas.next += 1`. The root spells the effect operation actually
+// performed, so nothing implicit is invented.
+fn state_lvalue(e: &Expr) -> Option<Vec<PathStep>> {
+    match e {
+        Expr::Call(f, args)
+            if args.is_empty() && matches!(&f.node, Expr::Var(n) if n == names::STATE_GET) =>
+        {
+            Some(Vec::new())
+        }
+        Expr::FieldAccess(base, f) => {
+            let mut steps = state_lvalue(&base.node)?;
+            steps.push(PathStep::Field(f.clone()));
+            Some(steps)
+        }
+        Expr::Index(base, key) => {
+            let mut steps = state_lvalue(&base.node)?;
+            steps.push(PathStep::Index((**key).clone()));
+            Some(steps)
+        }
+        _ => None,
+    }
+}
+
+// `get().a.b OP rhs`: the statement is the longhand it abbreviates,
+// `put({ get() | a.b OP rhs })`, with both names resolving in the program's
+// own scope. The brace node is synth, which is what the formatter matches on
+// to restore the statement surface.
+fn state_assign(steps: Vec<PathStep>, op: PathOp, l: usize, r: usize) -> S<Expr> {
+    let span = Span::new(l, r);
+    let get_call = call(evar(names::STATE_GET, span), vec![], span);
+    let update = Spanned {
+        id: NodeId::DUMMY,
+        synth: true,
+        node: Expr::RecordUpdatePath(Box::new(get_call), vec![(steps, op)]),
+        span,
+    };
+    call(evar(names::STATE_PUT, span), vec![update], span)
+}
+
+const ASSIGN_LHS_MSG: &str =
+    "the left side of `:=` must be a variable, an index `a[i]`, or a field path rooted at a \
+     variable (`x.a[i].b`)";
+
+const COMPOUND_LHS_MSG: &str =
+    "the left side of a compound assignment must be a variable, an index `a[i]`, or a field \
+     path rooted at a variable (`x.a[i].b`)";
+
+// `lvalue := value`: assign to a `var` (`Sugar::Assign`), an index target
+// `a[i]` (`Sugar::IndexAssign`), or a field path rooted at a `var` (the brace
+// update it abbreviates). Any other left side is a parse error.
 /// # Errors
-/// Fails when the left side is neither a variable nor an index.
+/// Fails when the left side is none of those shapes.
 pub fn assign_stmt(
     lhs: S<Expr>,
     value: S<Expr>,
@@ -557,23 +814,31 @@ pub fn assign_stmt(
     r: usize,
 ) -> Result<S<Expr>, (Span, String)> {
     let span = Span::new(l, r);
+    if let Some((root, steps)) = lvalue_path(&lhs.node) {
+        if has_field_step(&steps) {
+            return Ok(path_assign(root, steps, PathOp::Set(value), l, r));
+        }
+    }
+    if let Some(steps) = state_lvalue(&lhs.node) {
+        if !steps.is_empty() {
+            return Ok(state_assign(steps, PathOp::Set(value), l, r));
+        }
+    }
     match lhs.node {
         Expr::Var(name) => Ok(sp(Expr::Sugar(Sugar::Assign(name, Box::new(value))), span)),
         Expr::Index(recv, key) => Ok(sp(
             Expr::Sugar(Sugar::IndexAssign(recv, key, Box::new(value))),
             span,
         )),
-        _ => Err((
-            lhs.span,
-            "the left side of `:=` must be a variable or an index `a[i]`".into(),
-        )),
+        _ => Err((lhs.span, ASSIGN_LHS_MSG.into())),
     }
 }
 
-// `lvalue <op>= e` on a `var` or index target. The index form reads the element
-// with a synth `Index` so the formatter restores the `a[i] <op>= e` surface.
+// `lvalue <op>= e` on a `var`, index, or field-path target. The index form
+// reads the element with a synth `Index` so the formatter restores the
+// `a[i] <op>= e` surface; the field-path form routes through the brace update.
 /// # Errors
-/// Fails when the left side is neither a variable nor an index.
+/// Fails when the left side is none of those shapes.
 pub fn compound_stmt(
     lhs: S<Expr>,
     op: BinOp,
@@ -582,6 +847,38 @@ pub fn compound_stmt(
     r: usize,
 ) -> Result<S<Expr>, (Span, String)> {
     let span = Span::new(l, r);
+    // Statement compounds read the focus first and set it, the shape
+    // `a[i] += e` already has, rather than closing over the right operand in a
+    // modifier lambda: the roots here are var cells or `get()`, so the re-read
+    // is a pure perform, and no lambda means nothing for the var escape
+    // analysis to mistake for a captured cell.
+    let read_back = |lhs: &S<Expr>, value: S<Expr>| Spanned {
+        id: NodeId::DUMMY,
+        synth: true,
+        node: Expr::Bin(
+            op,
+            Box::new(Spanned {
+                id: NodeId::DUMMY,
+                synth: true,
+                node: lhs.node.clone(),
+                span,
+            }),
+            Box::new(value),
+        ),
+        span,
+    };
+    if let Some((root, steps)) = lvalue_path(&lhs.node) {
+        if has_field_step(&steps) {
+            let rhs = read_back(&lhs, value);
+            return Ok(path_assign(root, steps, PathOp::Set(rhs), l, r));
+        }
+    }
+    if let Some(steps) = state_lvalue(&lhs.node) {
+        if !steps.is_empty() {
+            let rhs = read_back(&lhs, value);
+            return Ok(state_assign(steps, PathOp::Set(rhs), l, r));
+        }
+    }
     match lhs.node {
         Expr::Var(name) => Ok(compound_assign(name, op, value, l, r)),
         Expr::Index(recv, key) => {
@@ -602,10 +899,7 @@ pub fn compound_stmt(
                 span,
             ))
         }
-        _ => Err((
-            lhs.span,
-            "the left side of a compound assignment must be a variable or an index `a[i]`".into(),
-        )),
+        _ => Err((lhs.span, COMPOUND_LHS_MSG.into())),
     }
 }
 
@@ -623,6 +917,70 @@ pub fn compound_assign(x: String, op: BinOp, v: S<Expr>, l: usize, r: usize) -> 
         span,
     };
     sp(Expr::Sugar(Sugar::Assign(x, Box::new(rhs))), span)
+}
+
+// `var x : T := e`: the annotation rides the initializer as a synth `Ann`, so
+// `VarDecl`'s shape (and the codec seam that mirrors it) is unchanged while the
+// var-cell desugar reads the type off the initializer and declares its get/put
+// ops at `T` instead of an inference placeholder. That is what lets a
+// var-rooted path update resolve its fields without an inline ascription.
+#[must_use]
+pub fn var_decl(
+    x: String,
+    ty: Option<Ty>,
+    v: S<Expr>,
+    rest: S<Expr>,
+    l: usize,
+    r: usize,
+) -> S<Expr> {
+    let span = Span::new(l, r);
+    let init = match ty {
+        Some(t) => Spanned {
+            id: NodeId::DUMMY,
+            synth: true,
+            node: Expr::Ann(Box::new(v), t),
+            span,
+        },
+        None => v,
+    };
+    sp(
+        Expr::Sugar(Sugar::VarDecl(x, Box::new(init), Box::new(rest))),
+        span,
+    )
+}
+
+// `p <op>= e` inside a path update is sugar for `p ~ \(focus@) -> focus@ <op> e`.
+// A modifier rather than a set-with-read so the base is evaluated once and an
+// `each` step applies the operation at every focus. The lambda and its `Bin`
+// body are synth and the binder is the unspellable `focus@`, which together are
+// what the formatter matches on to restore `p <op>= e`; a hand-written
+// `p ~ \(k) -> k + e` keeps its explicit form.
+#[must_use]
+pub fn compound_path_op(op: BinOp, v: S<Expr>, l: usize, r: usize) -> PathOp {
+    let span = Span::new(l, r);
+    let focus = evar(names::PATH_FOCUS, span);
+    let body = Spanned {
+        id: NodeId::DUMMY,
+        synth: true,
+        node: Expr::Bin(op, Box::new(focus), Box::new(v)),
+        span,
+    };
+    let lam = Spanned {
+        id: NodeId::DUMMY,
+        synth: true,
+        node: Expr::Lam(
+            vec![Param {
+                name: names::PATH_FOCUS.into(),
+                ty: None,
+                borrow: false,
+                pat: None,
+                default: None,
+            }],
+            Box::new(body),
+        ),
+        span,
+    };
+    PathOp::Modify(lam)
 }
 
 // Assemble a `pattern` declaration from its parsed clauses: exactly one

@@ -23,9 +23,7 @@
 -- exist for the loops that this discipline cannot rule out, the ones a rewrite
 -- rule creates by feeding its own output back in.
 
-import Data.Foldable (length)
-
-import Data.List (append, concat_map, filter, foldl, map, nth)
+import Data.List (append, concat_map, foldl, map, nth)
 
 -- | One node sort's one-layer view: its immediate children and the inverse that
 -- replaces them. `rebuild(x, kids(x))` must return a node equal to `x`, and
@@ -76,7 +74,8 @@ pub fn lay_universe(p : Layer(a), x : a) : List(a) =
 -- ```output
 -- 4
 -- ```
-pub fn lay_size(p : Layer(a), x : a) : Int = length(lay_universe(p, x))
+pub fn lay_size(p : Layer(a), x : a) : Int =
+  1 + foldl(\(n, c) -> n + lay_size(p, c), 0, lay_kids(p, x))
 
 -- | The height of the tree: `1` at a leaf.
 --
@@ -105,7 +104,12 @@ pub fn lay_collect(
   q : (a) -> Bool ! {| e},
   x : a
 ) : List(a) ! { | e} =
-  filter(q, lay_universe(p, x))
+  let keep = q(x)
+  let descendants = concat_map(\(c) -> lay_collect(p, q, c), lay_kids(p, x))
+  if keep then
+    Cons(x, descendants)
+  else
+    descendants
 
 -- | How many nodes satisfy `q`.
 pub fn lay_count_where(
@@ -113,7 +117,12 @@ pub fn lay_count_where(
   q : (a) -> Bool ! {| e},
   x : a
 ) : Int ! { | e} =
-  length(lay_collect(p, q, x))
+  let here =
+    if q(x) then
+      1
+    else
+      0
+  foldl(\(n, c) -> n + lay_count_where(p, q, c), here, lay_kids(p, x))
 
 -- | Whether any node satisfies `q`. Short-circuits: the first accepting node
 -- ends the walk, so a hit near the root costs nothing.
@@ -147,7 +156,20 @@ pub fn lay_summarize(
   unit : b,
   x : a
 ) : b ! { | e} =
-  foldl(\(acc, n) -> combine(acc, measure(n)), unit, lay_universe(p, x))
+  lay_summarize_go(p, measure, combine, unit, x)
+
+fn lay_summarize_go(
+  p : Layer(a),
+  measure : (a) -> b ! {| e},
+  combine : (b, b) -> b ! {| e},
+  acc : b,
+  x : a
+) : b ! { | e} =
+  foldl(
+      \(current, child) -> lay_summarize_go(p, measure, combine, current, child),
+      combine(acc, measure(x)),
+      lay_kids(p, x),
+    )
 
 -- | The preorder index of every node satisfying `q`. An index is a
 -- deterministic address into the tree: `0` is the root, and the numbering is

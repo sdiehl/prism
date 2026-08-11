@@ -12,10 +12,12 @@
 // artifact round trip already pins, and a focused file of grammar edges that
 // are easy to lose in handwritten maintenance.
 
-use std::fs;
 use std::path::{Path, PathBuf};
+use std::{env, fs};
 
 use prism::{default_roots, dump_on, interpret_io_on_with_args, with_prelude, Config, Root};
+
+use super::fixture_stems;
 
 const SYNTAX_FIXTURES: &str = "tests/fixtures/syntax";
 const PARSER_FIXTURES: &str = "tests/fixtures/parser";
@@ -83,7 +85,7 @@ fn parity(artifact: &Path, mismatch: &Path) -> String {
 // Assert that re-parsing a source through the Prism parser reproduces the Rust
 // parser's artifact byte for byte.
 fn assert_parses_identically(label: &str, artifact: &Path) {
-    let mismatch = std::env::temp_dir().join(format!("prism-parity-{label}.json"));
+    let mismatch = env::temp_dir().join(format!("prism-parity-{label}.json"));
     let _ = fs::remove_file(&mismatch);
     let verdict = parity(artifact, &mismatch);
     assert_eq!(
@@ -136,7 +138,7 @@ fn parity_grammar_edges() {
     let source = fs::read_to_string(&source_path).expect("edge-case source");
     let artifact = dump_on(SURFACE_PHASE, &source, &roots(), &Config::from_env())
         .expect("Rust parser must accept the edge-case source");
-    let path = std::env::temp_dir().join("prism-parity-edges.surface-syntax.json");
+    let path = env::temp_dir().join("prism-parity-edges.surface-syntax.json");
     fs::write(&path, artifact).expect("write generated oracle");
     assert_parses_identically("edge_parity", &path);
 }
@@ -179,16 +181,8 @@ fn parity_self_parse() {
 // corpus file without extending the gate is a test failure, not a silent skip.
 #[test]
 fn parity_covers_every_stem() {
-    let mut found: Vec<String> = fs::read_dir(fixture(SYNTAX_FIXTURES))
-        .expect("fixture dir")
-        .filter_map(Result::ok)
-        .filter_map(|e| {
-            let name = e.file_name().into_string().ok()?;
-            let stem = name.strip_suffix(&format!(".{SURFACE_PHASE}.json"))?;
-            (!stem.starts_with("mismatch")).then(|| stem.to_string())
-        })
-        .collect();
-    found.sort_unstable();
+    let suffix = format!(".{SURFACE_PHASE}.json");
+    let found = fixture_stems(&fixture(SYNTAX_FIXTURES), &suffix, "mismatch");
     assert_eq!(
         found, STEMS,
         "fixture stems and the static parity list have drifted apart"
@@ -361,7 +355,7 @@ fn assert_depth_axis(axis: &'static str) {
     let harness = fs::read_to_string(fixture(PARSER_FIXTURES).join(SELF_PARSE))
         .expect("self-parse harness source");
     let full = with_prelude(&harness);
-    let dir = std::env::temp_dir().join("prism-depth-ledger");
+    let dir = env::temp_dir().join("prism-depth-ledger");
     fs::create_dir_all(&dir).expect("depth scratch dir");
     let (ok_src, beyond_src) = depth_probe(axis);
     let ok_path = dir.join(format!("{axis}-ok.pr"));
@@ -415,7 +409,7 @@ fn depth_default_budget_magnitude() {
     let harness = fs::read_to_string(fixture(PARSER_FIXTURES).join(SELF_PARSE))
         .expect("self-parse harness source");
     let full = with_prelude(&harness);
-    let dir = std::env::temp_dir().join("prism-depth-ledger");
+    let dir = env::temp_dir().join("prism-depth-ledger");
     fs::create_dir_all(&dir).expect("depth scratch dir");
     let ok_src = nested("fn f() : Int = ", "(", "1", ")", DEPTH_OK, "");
     let beyond_src = nested("fn f() : Int = ", "(", "1", ")", DEPTH_FULL, "");

@@ -20,11 +20,8 @@
 -- result parses, typechecks, or means what the caller intended.
 
 import Data.Foldable (length)
-
 import Data.List (foldl)
-
 import Syntax.Lex (..)
-
 import Syntax.Source (..)
 
 -- | One edit: the byte span it replaces and the text that replaces it. An

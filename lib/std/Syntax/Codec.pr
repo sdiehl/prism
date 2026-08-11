@@ -14,24 +14,16 @@
 -- omitted rather than null.
 
 import Data.List (..)
-
 import Data.Maybe (..)
-
 import Data.Result (..)
-
 import Data.String (..)
-
 import Json (Json, JNull, JBool, JInt, JFloat, JStr, JArr, JObj, decode, json_error_message)
-
 import Syntax.Source (..)
-
 import Syntax.Token (..)
-
 import Syntax.Ast (..)
-
 import Syntax.Diagnostic (..)
-
 import Syntax.Resolved (..)
+import Syntax.TcInput (..)
 
 -- | The schema tag of the token-stream artifact.
 pub fn tokens_schema() : String = "prism-syntax-tokens-v1"
@@ -2740,3 +2732,128 @@ pub fn encode_resolved(d : ResolvedDoc) : String =
         ]),
       0,
     )
+
+-- | Decode the resolved declaration interface consumed by the checker.
+-- Malformed shapes and wrong schema tags fail with the same structured error
+-- discipline as the syntax-family artifacts.
+pub fn decode_tc_input(text : String) : Result(TcInputDoc, CodecError) =
+  run_decode(\() -> decode_tc_input_doc(text))
+
+fn decode_tc_input_doc(text : String) : TcInputDoc ! {Decode} =
+  let j = ok_or_bail(decode_or_codec_error(text))
+  let fields = obj_at(j, "$")
+  TcInputDoc {
+    schema = schema_at(fields, tc_input_schema()),
+    compiler = str_at(fields, "compiler", "$"),
+    imports = req_arr(fields, "imports", "$", tc_import_of),
+    types = req_arr(fields, "types", "$", tc_data_of),
+    effects = req_arr(fields, "effects", "$", tc_effect_of),
+    classes = req_arr(fields, "classes", "$", tc_class_of),
+    instances = req_arr(fields, "instances", "$", tc_instance_of),
+    functions = req_arr(fields, "functions", "$", tc_function_of)
+  }
+
+-- Unlike syntax spans, tc-input spells a span as `{start, end}`. Keep that
+-- wire distinction here while exposing the shared typed `Span` vocabulary.
+fn tc_span_of(j : Json, path : String) : Span ! {Decode} =
+  let fields = obj_at(j, path)
+  let span = Span {
+    lo = int_at(fields, "start", path),
+    hi = int_at(fields, "end", path)
+  }
+  if span_valid(span) then
+    span
+  else
+    fail_decode(
+        CodecError { path = path, reason = "inverted or negative span" },
+      )
+
+fn tc_import_of(j : Json, path : String) : TcImport ! {Decode} =
+  let f = obj_at(j, path)
+  TcImport {
+    path = str_at(f, "path", path),
+    names = strs_at(f, "names", path),
+    glob = req_at(f, "glob", path, bool_of)
+  }
+
+fn tc_ctor_of(j : Json, path : String) : TcCtor ! {Decode} =
+  let f = obj_at(j, path)
+  TcCtor {
+    name = str_at(f, "name", path),
+    tag = int_at(f, "tag", path),
+    fields = req_arr(f, "fields", path, str_of),
+    args = req_arr(f, "args", path, str_of)
+  }
+
+fn tc_data_of(j : Json, path : String) : TcData ! {Decode} =
+  let f = obj_at(j, path)
+  TcData {
+    name = str_at(f, "name", path),
+    params = req_arr(f, "params", path, str_of),
+    is_newtype = req_at(f, "newtype", path, bool_of),
+    derivs = req_arr(f, "deriving", path, str_of),
+    ctors = req_arr(f, "ctors", path, tc_ctor_of),
+    span = req_at(f, "span", path, tc_span_of)
+  }
+
+fn tc_op_of(j : Json, path : String) : TcOp ! {Decode} =
+  let f = obj_at(j, path)
+  TcOp {
+    name = str_at(f, "name", path),
+    grade = str_at(f, "grade", path),
+    params = req_arr(f, "params", path, str_of),
+    ret = str_at(f, "ret", path)
+  }
+
+fn tc_effect_of(j : Json, path : String) : TcEffect ! {Decode} =
+  let f = obj_at(j, path)
+  TcEffect {
+    name = str_at(f, "name", path),
+    params = req_arr(f, "params", path, str_of),
+    ops = req_arr(f, "ops", path, tc_op_of),
+    span = req_at(f, "span", path, tc_span_of)
+  }
+
+fn tc_method_of(j : Json, path : String) : TcMethod ! {Decode} =
+  let f = obj_at(j, path)
+  TcMethod { name = str_at(f, "name", path), ty = str_at(f, "ty", path) }
+
+fn tc_class_of(j : Json, path : String) : TcClass ! {Decode} =
+  let f = obj_at(j, path)
+  TcClass {
+    name = str_at(f, "name", path),
+    param = str_at(f, "param", path),
+    supers = req_arr(f, "supers", path, str_of),
+    methods = req_arr(f, "methods", path, tc_method_of),
+    span = req_at(f, "span", path, tc_span_of)
+  }
+
+fn tc_constraint_of(j : Json, path : String) : TcConstraint ! {Decode} =
+  let f = obj_at(j, path)
+  TcConstraint { cls = str_at(f, "class", path), ty = str_at(f, "ty", path) }
+
+fn tc_instance_of(j : Json, path : String) : TcInstance ! {Decode} =
+  let f = obj_at(j, path)
+  TcInstance {
+    cls = str_at(f, "class", path),
+    head = str_at(f, "head", path),
+    module_name = str_at(f, "module", path),
+    context = req_arr(f, "context", path, tc_constraint_of)
+  }
+
+fn tc_param_of(j : Json, path : String) : TcParam ! {Decode} =
+  let f = obj_at(j, path)
+  TcParam {
+    name = str_at(f, "name", path),
+    is_borrow = req_at(f, "borrow", path, bool_of)
+  }
+
+fn tc_function_of(j : Json, path : String) : TcFunction ! {Decode} =
+  let f = obj_at(j, path)
+  TcFunction {
+    name = str_at(f, "name", path),
+    params = req_arr(f, "params", path, tc_param_of),
+    constraints = req_arr(f, "constraints", path, str_of),
+    body = int_at(f, "body", path),
+    span = req_at(f, "span", path, tc_span_of)
+  }

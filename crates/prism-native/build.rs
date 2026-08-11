@@ -70,6 +70,141 @@ fn warning_flags(manifest_dir: &str) -> Vec<String> {
         .collect()
 }
 
+// The header carrying the runtime's cell ABI: the reserved heap-tag family and
+// the header-word layout. The generated mirror below is parsed out of it, so
+// admitting a new runtime cell kind is one line in C and zero here.
+const ABI_HEADER: &str = "prism_internal.h";
+
+// The layout defines mirrored into Rust alongside the tag family. Each is a
+// plain numeric define; a missing one is a build error, not a silent zero.
+const ABI_RC_WORD: &str = "PRISM_RC_W";
+const ABI_TAG_WORD: &str = "PRISM_TAG_W";
+const ABI_ARITY_WORD: &str = "PRISM_ARITY_W";
+const ABI_HEADER_WORDS: &str = "PRISM_HDR_WORDS";
+const ABI_WORD_BYTES: &str = "PRISM_WORD_BYTES";
+
+// The reserved-tag family must at least contain the four cell kinds the runtime
+// has always claimed; fewer means the parser regressed, not that C shrank.
+const ABI_MIN_HEAP_TAGS: usize = 4;
+const EXPECTED_RC_WORD_INDEX: i64 = 0;
+const ARITY_TRAILING_WORDS: i64 = 1;
+const C_HEX_PREFIX: &str = "0x";
+const C_LONG_SUFFIX: char = 'L';
+const HEX_RADIX: u32 = 16;
+const HEX_GROUP_DIGITS: usize = 4;
+
+// A `#define NAME value` numeric define: decimal or 0x hex, optional L suffix.
+// Expressions and shifts are deliberately not parsed; nothing in the mirrored
+// ABI uses them.
+fn c_define(header: &str, name: &str) -> Option<i64> {
+    let prefix = format!("#define {name} ");
+    let raw = header.lines().find_map(|l| l.strip_prefix(&prefix))?.trim();
+    let raw = raw.strip_suffix(C_LONG_SUFFIX).unwrap_or(raw);
+    raw.strip_prefix(C_HEX_PREFIX).map_or_else(
+        || raw.parse().ok(),
+        |hex| i64::from_str_radix(hex, HEX_RADIX).ok(),
+    )
+}
+
+fn required_c_define(header: &str, name: &str) -> i64 {
+    c_define(header, name).unwrap_or_else(|| panic!("{ABI_HEADER} no longer defines {name}"))
+}
+
+// Every `#define PRISM_*_TAG <number>` in the ABI header, in definition order:
+// the heap tags the runtime claims for its own cell kinds.
+fn heap_tags(header: &str) -> Vec<(String, i64)> {
+    header
+        .lines()
+        .filter_map(|line| {
+            let rest = line.strip_prefix("#define ")?;
+            let (name, _) = rest.split_once(' ')?;
+            if !(name.starts_with("PRISM_") && name.ends_with("_TAG")) {
+                return None;
+            }
+            Some((name.to_string(), c_define(header, name)?))
+        })
+        .collect()
+}
+
+// Rust-readable hex with a separator every four digits from the right. The ABI
+// tags are bit patterns, so retaining hex in the generated mirror is useful;
+// grouping keeps the generated source under the workspace's literal lint.
+fn rust_hex(value: i64) -> String {
+    assert!(value >= 0, "runtime ABI tags must be non-negative");
+    let digits = format!("{value:x}");
+    let mut out = String::from(C_HEX_PREFIX);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(HEX_GROUP_DIGITS) {
+            out.push('_');
+        }
+        out.push(digit);
+    }
+    out
+}
+
+// The generated ABI mirror (`runtime_abi.rs`, included by src/codegen/abi.rs):
+// one Rust constant per reserved heap tag, the tag family as a named array the
+// tag-collision guards iterate, and the header layout as compile-time facts.
+fn runtime_abi(manifest_dir: &str) -> String {
+    let path = format!("{manifest_dir}/{RUNTIME_DIR}/{ABI_HEADER}");
+    let header = fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {path}: {e}"));
+    let tags = heap_tags(&header);
+    assert!(
+        tags.len() >= ABI_MIN_HEAP_TAGS,
+        "parsed only {} PRISM_*_TAG defines from {ABI_HEADER}; the tag parser regressed",
+        tags.len()
+    );
+    let rc_word = required_c_define(&header, ABI_RC_WORD);
+    let tag_word = required_c_define(&header, ABI_TAG_WORD);
+    let arity_word = required_c_define(&header, ABI_ARITY_WORD);
+    let header_words = required_c_define(&header, ABI_HEADER_WORDS);
+    let word_bytes = required_c_define(&header, ABI_WORD_BYTES);
+    let tag_offset = tag_word * word_bytes;
+    let header_bytes = header_words * word_bytes;
+    assert_eq!(
+        rc_word, EXPECTED_RC_WORD_INDEX,
+        "runtime rc word moved off offset 0"
+    );
+    assert_eq!(
+        (arity_word + ARITY_TRAILING_WORDS) * word_bytes,
+        header_bytes,
+        "arity is no longer the last header word"
+    );
+    let mut out = String::from(
+        "// Generated from runtime/prism_internal.h by build.rs: the runtime's\n\
+         // reserved heap-tag family and cell layout, mirrored so Rust codegen\n\
+         // cannot drift from the C. Do not edit; edit the header.\n",
+    );
+    for (name, value) in &tags {
+        let short = name.strip_prefix("PRISM_").unwrap();
+        writeln!(out, "pub(crate) const {short}: i64 = {};", rust_hex(*value)).unwrap();
+    }
+    writeln!(
+        out,
+        "/// Every heap tag the runtime claims for its own cell kinds. Codegen\n\
+         /// must never mint a closure or constructor tag equal to one of these,\n\
+         /// or refcounting misclassifies the cell and walks (or skips) the wrong\n\
+         /// payload. Paired with the C define name so the layout test can check\n\
+         /// each entry against the embedded header text independently.\n\
+         pub(crate) const RESERVED_HEAP_TAGS: [(&str, i64); {}] = [",
+        tags.len()
+    )
+    .unwrap();
+    for (name, _) in &tags {
+        writeln!(
+            out,
+            "    (\"{name}\", {}),",
+            name.strip_prefix("PRISM_").unwrap()
+        )
+        .unwrap();
+    }
+    out.push_str("];\n");
+    writeln!(out, "pub(crate) const WORD_BYTES: i64 = {word_bytes};").unwrap();
+    writeln!(out, "pub(crate) const TAG_OFF: i64 = {tag_offset};").unwrap();
+    writeln!(out, "pub(crate) const HDR_BYTES: i64 = {header_bytes};").unwrap();
+    out
+}
+
 // Vendored libm units excluded from the compile and every native link.
 // `nearbyint.c` is the only vendored file that calls libm's floating-point
 // environment (`fetestexcept`/`feclearexcept`), which on glibc live in the system
@@ -204,6 +339,14 @@ fn main() {
     manifest.push_str("];\n");
     let out_dir = env::var("OUT_DIR").unwrap();
     fs::write(Path::new(&out_dir).join("runtime_manifest.rs"), manifest).unwrap();
+
+    // The ABI mirror for src/codegen/abi.rs, regenerated whenever the header
+    // changes (its rerun-if-changed is declared with the manifest above).
+    fs::write(
+        Path::new(&out_dir).join("runtime_abi.rs"),
+        runtime_abi(&manifest_dir),
+    )
+    .unwrap();
 
     // The C runtime is linked only into natively compiled programs; a wasm build
     // runs the interpreter alone, so skip it (and the bogus -lm).

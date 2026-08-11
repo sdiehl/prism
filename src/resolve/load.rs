@@ -15,7 +15,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::error::Error;
+use crate::error::{suggest, Error};
 use crate::syntax::ast::Program;
 use crate::syntax::reflect::parse_unit;
 
@@ -248,6 +248,21 @@ pub fn serving_root<'r>(path: &str, roots: &'r [Root]) -> Result<Option<&'r Root
     Ok(None)
 }
 
+// The module paths a not-found diagnostic can offer as near misses: every name a
+// root can enumerate without touching the filesystem. A `Dir` root answers by
+// probing one path at a time and has no listing, so its modules are absent here;
+// the suggestion is a hint, and a missing candidate only costs the hint.
+fn listable_modules(roots: &[Root]) -> Vec<String> {
+    roots
+        .iter()
+        .flat_map(|r| match r {
+            Root::Dir(_) => Vec::new(),
+            Root::Embedded(table) => table.iter().map(|(name, _)| (*name).to_string()).collect(),
+            Root::SourceBundle { modules, .. } => modules.keys().cloned().collect(),
+        })
+        .collect()
+}
+
 // Where the search looked, for a not-found diagnostic.
 fn searched(roots: &[Root]) -> String {
     roots
@@ -321,8 +336,11 @@ fn fetch_module(path: &[String], roots: &[Root]) -> Result<(String, Program), Er
              (case-insensitive filesystem). Rename the file or drop the self-import."
         )
     } else {
+        let known = listable_modules(roots);
+        let hint = suggest::suggestion(&dotted, known.iter().map(String::as_str))
+            .map_or_else(String::new, |s| format!("; {s}"));
         format!(
-            "cannot resolve module `{dotted}` (searched: {})",
+            "cannot resolve module `{dotted}` (searched: {}){hint}",
             searched(roots)
         )
     }))

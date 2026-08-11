@@ -156,3 +156,20 @@ fn usage_summary_columns_carry_each_fact() {
 fn usage_summary_is_deterministic() {
     assert_eq!(usage(USAGE_SRC), usage(USAGE_SRC));
 }
+
+#[test]
+fn constrained_borrow_mask_includes_owned_dictionary_prefix() {
+    let out = usage(
+        "fn same(borrow x : a) : Bool given Eq(a) = x == x\n\
+         fn main() = println(same(1))\n",
+    );
+    let line = out
+        .lines()
+        .find(|line| line.split('\t').next() == Some("same"))
+        .unwrap_or_else(|| panic!("no usage row for constrained function:\n{out}"));
+    assert_eq!(
+        line.split('\t').nth(3),
+        Some("-b"),
+        "the owned dictionary must precede the borrowed source parameter"
+    );
+}

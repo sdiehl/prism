@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use marginalia::Span;
 
-use crate::error::{ErrKind, TypeError};
+use crate::error::{suggest, ErrKind, TypeError};
 use crate::names;
 use crate::syntax::ast::{Decl, EffLabel, Program, Row, Ty};
 
@@ -97,7 +97,11 @@ fn resolve_alias(
                 eff: l.name.clone(),
                 alias: name.into(),
             }
-            .at(a.span));
+            .at(a.span)
+            .maybe_help(suggest::suggestion(
+                &l.name,
+                known.iter().map(String::as_str),
+            )));
         };
         for x in exp {
             if !out.contains(&x) {

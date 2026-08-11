@@ -3,9 +3,7 @@
 -- `Data.Map`/`Data.Set` on a generated key sequence.
 
 import Data.IntMap (..)
-
 import Data.IntSet (..)
-
 import Quickcheck (Config, Cfg, check_with, show_outcome, gen_list, gen_pair, gen_i64, gen_int)
 
 -- Rotate a list left by `n`, a cheap way to spell a different insertion order.

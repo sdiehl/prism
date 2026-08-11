@@ -9,7 +9,6 @@
 -- identity: two programs that differ only in comments or formatting print
 -- different reports here yet elaborate to the identical Core.
 import Syntax.Codec (..)
-
 import Syntax.Query (..)
 
 fn main() =

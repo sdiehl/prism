@@ -26,7 +26,7 @@ const WORLD_WORKER: &str = "prism-world-worker.ts";
 struct Resident {
     slug: &'static str,
     // Listed on the gallery page. A resident can be built, wired, and reachable
-    // by URL while deliberately unlisted (the world resident currently is).
+    // by URL while deliberately unlisted, as the world resident is.
     gallery: bool,
     route: &'static str,
     page: &'static str,

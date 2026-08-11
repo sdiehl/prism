@@ -44,6 +44,11 @@ fn zstd_archive() -> Option<PathBuf> {
 }
 
 fn main() {
+    // This script reads only env vars and system library paths, never package
+    // files. Saying so keeps cargo from rerunning it (and relinking every test
+    // binary) whenever any file in the package changes, e.g. a snapshot accept.
+    println!("cargo:rerun-if-changed=build.rs");
+
     // The target triple for the banner and artifact identity; TARGET is set by
     // cargo for build scripts. The C-toolchain identity lives with the native
     // backend's build script (`crates/prism-native/build.rs`).

@@ -25,13 +25,9 @@
 -- phantom-typed key, so `get` on it round-trips back to `a`.
 
 import Data.Map (..)
-
 import Data.List (..)
-
 import Data.Foldable (..)
-
 import Data.String (..)
-
 import Wire (..)
 
 -- The raw, type-erased effect the engine actually handles: node handles are
@@ -89,61 +85,37 @@ type Warm = Warm(List((String, String)), Bytes)
 -- input-dependent (its index could name a different site on another run), so it is
 -- scratch-only: never cached, never persisted, always recomputed. That is what
 -- keeps a warm run's output byte-identical to a cold run.
-type St(e : Row) = St(
-  Map(String, Node(e), Canonical),
-  List(String),
-  Int,
-  Map(String, Warm, Canonical),
-  Bool,
-  List(String)
-)
+type St(e : Row) = St {
+  tbl: Map(String, Node(e), Canonical),
+  stack: List(String),
+  next: Int,
+  warm: Map(String, Warm, Canonical),
+  prefix_open: Bool,
+  persist_keys: List(String)
+}
 
-fn st_tbl(s) =
-  match s of
-    St(m, _, _, _, _, _) => m
+fn st_put(s : St(e), key : String, n : Node(e)) : St(e) =
+  St { ..s, tbl = map_insert(key, n, s.tbl) }
 
-fn st_put(s, key, n) =
-  match s of
-    St(m, d, c, w, p, ps) => St(map_insert(key, n, m), d, c, w, p, ps)
+fn st_push(s : St(e), key : String) : St(e) =
+  St { ..s, stack = Cons(key, s.stack) }
 
-fn st_push(s, key) =
-  match s of
-    St(m, d, c, w, p, ps) => St(m, Cons(key, d), c, w, p, ps)
-
-fn st_pop(s) =
-  match s of
-    St(m, d, c, w, p, ps) =>
-      match d of
-        Cons(_, r) => St(m, r, c, w, p, ps)
-        Nil => St(m, Nil, c, w, p, ps)
+fn st_pop(s : St(e)) : St(e) =
+  match s.stack of
+    Cons(_, rest) => St { ..s, stack = rest }
+    Nil => s
 
 -- Take the next fresh node key and advance the counter.
-fn st_fresh(s) =
-  match s of
-    St(m, d, c, w, p, ps) => (St(m, d, c + 1, w, p, ps), show_int(c))
+fn st_fresh(s : St(e)) : (St(e), String) =
+  (St { ..s, next = s.next + 1 }, show_int(s.next))
 
 -- The durable side of `St`: the loaded warm cache, whether the creation prefix is
 -- still open, appending an eligible (prefix) memo key, and reading the eligible
 -- set back out at snapshot time.
-fn st_warm(s) =
-  match s of
-    St(_, _, _, w, _, _) => w
+fn st_close_prefix(s : St(e)) : St(e) = St { ..s, prefix_open = false }
 
-fn st_prefix_open(s) =
-  match s of
-    St(_, _, _, _, p, _) => p
-
-fn st_close_prefix(s) =
-  match s of
-    St(m, d, c, w, _, ps) => St(m, d, c, w, false, ps)
-
-fn st_add_persist(s, key) =
-  match s of
-    St(m, d, c, w, p, ps) => St(m, d, c, w, p, Cons(key, ps))
-
-fn st_persist_keys(s) =
-  match s of
-    St(_, _, _, _, _, ps) => ps
+fn st_add_persist(s : St(e), key : String) : St(e) =
+  St { ..s, persist_keys = Cons(key, s.persist_keys) }
 
 -- An injective string rendering of a byte string (decimal bytes, comma
 -- delimited), hashed by `blake3`. Equal values serialize to equal `Bytes` (the
@@ -156,20 +128,18 @@ fn vhash(bs) = blake3(bytes_str(bs))
 
 -- Attach an edge from the current demander (stack head) to `dep` at `dep`'s
 -- current hash, by prepending to the demander's in-progress dep list.
-fn record_edge(s, dep, dephash) =
-  match s of
-    St(m, d, _c, _w, _p, _ps) =>
-      match d of
-        Nil => s
-        Cons(cur, _) =>
-          match map_lookup(cur, m) of
-            Some(MemoN(th, deps, res)) =>
-              st_put(s, cur, MemoN(th, Cons((dep, dephash), deps), res))
-            _ => s
+fn record_edge(s : St(e), dep : String, dephash : String) : St(e) =
+  match s.stack of
+    Nil => s
+    Cons(cur, _) =>
+      match map_lookup(cur, s.tbl) of
+        Some(MemoN(th, deps, res)) =>
+          st_put(s, cur, MemoN(th, Cons((dep, dephash), deps), res))
+        _ => s
 
 -- Demand a node, returning (state', valueBytes). The heart of the engine.
 fn demand(s : St(e), key : String) : (St(e), Bytes) =
-  match map_lookup(key, st_tbl(s)) of
+  match map_lookup(key, s.tbl) of
     None => (s, wire_empty)
     Some(InputN(bytes, _h)) => (s, bytes)
     Some(MemoN(th, deps, res)) =>
@@ -208,7 +178,7 @@ fn recompute(
   let (s3, rbytes) = run_thunk(s2, th)
   let s4 = st_pop(s3)
   let deps =
-    match map_lookup(key, st_tbl(s4)) of
+    match map_lookup(key, s4.tbl) of
       Some(MemoN(_, ds, _)) => ds
       _ => Nil
   let s5 = st_put(s4, key, MemoN(th, deps, Some((rbytes, vhash(rbytes)))))
@@ -225,8 +195,8 @@ fn reg_input(s, bytes) =
 -- node is scratch-only: cold, never persisted.
 fn reg_memo(s, th) =
   let (s1, key) = st_fresh(s)
-  if st_prefix_open(s1) then
-    match map_lookup(key, st_warm(s1)) of
+  if s1.prefix_open then
+    match map_lookup(key, s1.warm) of
       Some(Warm(deps, bytes)) =>
         (
             st_add_persist(
@@ -241,8 +211,8 @@ fn reg_memo(s, th) =
 
 -- `set` is a no-op when the new value hashes equal to the current one, so an
 -- assignment that does not change anything propagates to nothing.
-fn do_set(s, key, bytes) =
-  match map_lookup(key, st_tbl(s)) of
+fn do_set(s : St(e), key : String, bytes : Bytes) : St(e) =
+  match map_lookup(key, s.tbl) of
     Some(InputN(_old, oh)) =>
       if str_eq(vhash(bytes), oh) then
         s
@@ -289,14 +259,24 @@ fn run_thunk(s : St(e), action : () -> a ! {IncrRaw | e}) : (St(e), a) =
 -- 20
 -- ```
 pub fn run_incr(action : () -> a ! {IncrRaw | e}) : a =
-  let r = run_thunk(St(map_empty, Nil, 0, map_empty, false, Nil), action)
+  let r = run_thunk(
+      St {
+        tbl = map_empty,
+        stack = Nil,
+        next = 0,
+        warm = map_empty,
+        prefix_open = false,
+        persist_keys = Nil
+      },
+      action,
+    )
   snd(r)
 
 -- ---------- typed surface over the erased engine ----------
 
 -- | A handle to an incremental node carrying values of type `a`. It is a
 -- phantom-typed wrapper over the node's content key; `get` on it returns `a`.
-pub type Incr(a) = IncrRef(String)
+opaque newtype Incr(a) = IncrRef(String)
 
 -- Decode bytes we ourselves encoded, keeping only the value. `decode` is total
 -- over hostile input and so carries `Fail`; on bytes the engine round-tripped it
@@ -377,19 +357,22 @@ pub fn memo(thunk : () -> a ! {IncrRaw | e}) : Incr(a) given Serialize(a) =
 
 -- ---------- durable snapshot: warm the graph across process restarts ----------
 
--- The four parallel lists a snapshot stores: for each eligible memo, its key, its
--- dep keys, its dep hashes, and its result bytes. Parallel lists sidestep a tuple
--- codec, exactly as `Serialize(Map)` does.
-type Snap = Snap(
-  List(String),
-  List(List(String)),
-  List(List(String)),
-  List(Bytes)
-)
+-- A snapshot is a list of complete memo records. Keeping each key, dependency
+-- set, and value together makes mismatched parallel-list lengths impossible and
+-- lets the derived codec own the positional wire layout.
+type SnapEntry = SnapEntry {
+  key: String,
+  deps: List((String, String)),
+  value: Bytes
+} deriving (Serialize)
+
+type Snap = Snap(List(SnapEntry)) deriving (Serialize)
 
 let snap_name : String = "prism-incr-snapshot"
 
-let snap_version : String = "1"
+-- Version 2 is the entry-record format. Version 1 snapshots used four parallel
+-- lists; the header mismatch intentionally turns those into a safe cold start.
+let snap_version : String = "2"
 
 let snap_sep : String = "\t"
 
@@ -435,93 +418,32 @@ fn snap_ints(pieces) =
 
 fn snap_parse_bytes(s) = bytes_of_list(snap_ints(split(char_at(",", 0), s)))
 
--- Gather the eligible (prefix) memos that have a computed result into four
--- parallel lists; a memo without a result yet is dropped.
-fn snap_collect(s, keys) =
+-- Gather eligible prefix memos that have a computed result. A memo without a
+-- result yet is dropped.
+fn snap_collect(s : St(e), keys : List(String)) : List(SnapEntry) =
   match keys of
-    Nil => Snap(Nil, Nil, Nil, Nil)
-    Cons(key, rest) =>
-      match snap_collect(s, rest) of
-        Snap(ks, dks, dhs, bys) =>
-          match map_lookup(key, st_tbl(s)) of
-            Some(MemoN(_, deps, Some((bytes, _h)))) =>
-              Snap(
-                  Cons(key, ks),
-                  Cons(map(fst, deps), dks),
-                  Cons(map(snd, deps), dhs),
-                  Cons(bytes, bys),
-                )
-            _ => Snap(ks, dks, dhs, bys)
-
-fn snap_encode(s) =
-  match snap_collect(s, st_persist_keys(s)) of
-    Snap(ks, dks, dhs, bys) =>
-      wire_cat(
-          encode(ks),
-          wire_cat(encode(dks), wire_cat(encode(dhs), encode(bys))),
-        )
-
-fn snap_zip_deps(
-  ks : List(String),
-  hs : List(String)
-) : List((String, String)) =
-  match ks of
     Nil => Nil
-    Cons(k, kr) =>
-      match hs of
-        Nil => Nil
-        Cons(h, hr) => Cons((k, h), snap_zip_deps(kr, hr))
+    Cons(key, rest) =>
+      let entries = snap_collect(s, rest)
+      match map_lookup(key, s.tbl) of
+        Some(MemoN(_, deps, Some((bytes, _h)))) =>
+          Cons(SnapEntry { key = key, deps = deps, value = bytes }, entries)
+        _ => entries
 
-fn snap_build(
-  ks : List(String),
-  dks : List(List(String)),
-  dhs : List(List(String)),
-  bys : List(Bytes)
-) : Map(String, Warm) =
-  match ks of
+fn snap_encode(s : St(e)) : Bytes =
+  encode(Snap(snap_collect(s, s.persist_keys)))
+
+fn snap_build(entries : List(SnapEntry)) : Map(String, Warm) =
+  match entries of
     Nil => map_empty
-    Cons(k, kr) =>
-      match dks of
-        Cons(dk, dkr) =>
-          match dhs of
-            Cons(dh, dhr) =>
-              match bys of
-                Cons(by, byr) =>
-                  map_insert(
-                      k,
-                      Warm(snap_zip_deps(dk, dh), by),
-                      snap_build(kr, dkr, dhr, byr),
-                    )
-                Nil => map_empty
-            Nil => map_empty
-        Nil => map_empty
+    Cons(entry, rest) =>
+      map_insert(entry.key, Warm(entry.deps, entry.value), snap_build(rest))
 
-fn snap_len_ok(
-  ks : List(a),
-  dks : List(b),
-  dhs : List(c),
-  bys : List(d)
-) : Bool =
-  length(ks) == length(dks)
-    && length(dks) == length(dhs)
-    && length(dhs) == length(bys)
-
--- Decode the four lists and rebuild the cache. A length mismatch is a corrupt
--- snapshot and cold-starts wholesale (never a partial load). Runs under a Fail
--- handler at the call site, so a truncated or malformed body cold-starts too.
+-- Decode complete entries and rebuild the cache. Runs under a Fail handler at
+-- the call site, so a truncated or malformed body cold-starts wholesale.
 fn snap_decode(body : String) : Map(String, Warm) =
   match decode(snap_parse_bytes(body)) of
-    (ks, r1) =>
-      match decode(r1) of
-        (dks, r2) =>
-          match decode(r2) of
-            (dhs, r3) =>
-              match decode(r3) of
-                (bys, _r4) =>
-                  if snap_len_ok(ks, dks, dhs, bys) then
-                    snap_build(ks, dks, dhs, bys)
-                  else
-                    map_empty
+    (Snap(entries), _rest) => snap_build(entries)
 
 fn snap_try(body) =
   handle snap_decode(body) with
@@ -619,7 +541,17 @@ pub fn run_incr_durable(
   action : () -> a ! {IncrRaw, Fail}
 ) : a =
   let warm = snap_load(path, tag)
-  let (sfin, result) = run_thunk(St(map_empty, Nil, 0, warm, true, Nil), action)
+  let (sfin, result) = run_thunk(
+      St {
+        tbl = map_empty,
+        stack = Nil,
+        next = 0,
+        warm = warm,
+        prefix_open = true,
+        persist_keys = Nil
+      },
+      action,
+    )
   snap_save(path, tag, sfin)
   result
 
@@ -646,7 +578,17 @@ pub fn run_incr_store(
   action : () -> a ! {IncrRaw, Fail}
 ) : a =
   let warm = store_load(root, tag)
-  let (sfin, result) = run_thunk(St(map_empty, Nil, 0, warm, true, Nil), action)
+  let (sfin, result) = run_thunk(
+      St {
+        tbl = map_empty,
+        stack = Nil,
+        next = 0,
+        warm = warm,
+        prefix_open = true,
+        persist_keys = Nil
+      },
+      action,
+    )
   store_save(root, tag, sfin)
   result
 
@@ -739,78 +681,47 @@ type TWarm = TWarm(List((String, String)), Bytes, TraceLog)
 -- The seventh field is the root observer's output trace: output produced with no
 -- memo on the demander stack (the root action's own prints) lands here rather than
 -- on any node, so no synthetic node with an ill-typed placeholder thunk is needed.
-type TSt(e : Row) = TSt(
-  Map(String, TNode(e), Canonical),
-  List(String),
-  Int,
-  Map(String, TWarm, Canonical),
-  Bool,
-  List(String),
-  TraceLog
-)
+type TSt(e : Row) = TSt {
+  tbl: Map(String, TNode(e), Canonical),
+  stack: List(String),
+  next: Int,
+  warm: Map(String, TWarm, Canonical),
+  prefix_open: Bool,
+  persist_keys: List(String),
+  root_trace: TraceLog
+}
 
-fn t_tbl(s) =
-  match s of
-    TSt(m, _, _, _, _, _, _) => m
+fn t_put(s : TSt(e), key : String, n : TNode(e)) : TSt(e) =
+  TSt { ..s, tbl = map_insert(key, n, s.tbl) }
 
-fn t_put(s, key, n) =
-  match s of
-    TSt(m, d, c, w, p, ps, rt) => TSt(map_insert(key, n, m), d, c, w, p, ps, rt)
+fn t_push(s : TSt(e), key : String) : TSt(e) =
+  TSt { ..s, stack = Cons(key, s.stack) }
 
-fn t_push(s, key) =
-  match s of
-    TSt(m, d, c, w, p, ps, rt) => TSt(m, Cons(key, d), c, w, p, ps, rt)
+fn t_pop(s : TSt(e)) : TSt(e) =
+  match s.stack of
+    Cons(_, rest) => TSt { ..s, stack = rest }
+    Nil => s
 
-fn t_pop(s) =
-  match s of
-    TSt(m, d, c, w, p, ps, rt) =>
-      match d of
-        Cons(_, r) => TSt(m, r, c, w, p, ps, rt)
-        Nil => TSt(m, Nil, c, w, p, ps, rt)
+fn t_fresh(s : TSt(e)) : (TSt(e), String) =
+  (TSt { ..s, next = s.next + 1 }, show_int(s.next))
 
-fn t_fresh(s) =
-  match s of
-    TSt(m, d, c, w, p, ps, rt) => (TSt(m, d, c + 1, w, p, ps, rt), show_int(c))
+fn t_close_prefix(s : TSt(e)) : TSt(e) = TSt { ..s, prefix_open = false }
 
-fn t_warm(s) =
-  match s of
-    TSt(_, _, _, w, _, _, _) => w
+fn t_add_persist(s : TSt(e), key : String) : TSt(e) =
+  TSt { ..s, persist_keys = Cons(key, s.persist_keys) }
 
-fn t_prefix_open(s) =
-  match s of
-    TSt(_, _, _, _, p, _, _) => p
-
-fn t_close_prefix(s) =
-  match s of
-    TSt(m, d, c, w, _, ps, rt) => TSt(m, d, c, w, false, ps, rt)
-
-fn t_add_persist(s, key) =
-  match s of
-    TSt(m, d, c, w, p, ps, rt) => TSt(m, d, c, w, p, Cons(key, ps), rt)
-
-fn t_persist_keys(s) =
-  match s of
-    TSt(_, _, _, _, _, ps, _) => ps
-
-fn t_root_trace(s) =
-  match s of
-    TSt(_, _, _, _, _, _, rt) => rt
-
-fn t_root_prepend(s, frame) =
-  match s of
-    TSt(m, d, c, w, p, ps, rt) => TSt(m, d, c, w, p, ps, Cons(frame, rt))
+fn t_root_prepend(s : TSt(e), frame : Frame) : TSt(e) =
+  TSt { ..s, root_trace = Cons(frame, s.root_trace) }
 
 -- The node currently being computed (demander-stack head), or `None` at the top
 -- of the graph, where output lands on the root trace instead of any node.
-fn t_cur(s) =
-  match s of
-    TSt(_, d, _, _, _, _, _) =>
-      match d of
-        Cons(cur, _) => Some(cur)
-        Nil => None
+fn t_cur(s : TSt(e)) : Option(String) =
+  match s.stack of
+    Cons(cur, _) => Some(cur)
+    Nil => None
 
-fn t_prepend_frame(s, cur, frame) =
-  match map_lookup(cur, t_tbl(s)) of
+fn t_prepend_frame(s : TSt(e), cur : String, frame : Frame) : TSt(e) =
+  match map_lookup(cur, s.tbl) of
     Some(TMemo(th, deps, res, tr, em)) =>
       t_put(s, cur, TMemo(th, deps, res, Cons(frame, tr), em))
     _ => s
@@ -823,30 +734,28 @@ fn t_capture(s, frame) =
     None => t_root_prepend(s, frame)
     Some(cur) => t_prepend_frame(s, cur, frame)
 
-fn t_record_edge(s, dep, dephash) =
-  match s of
-    TSt(m, d, _c, _w, _p, _ps, _rt) =>
-      match d of
-        Nil => s
-        Cons(cur, _) =>
-          match map_lookup(cur, m) of
-            Some(TMemo(th, deps, res, tr, em)) =>
-              t_put(s, cur, TMemo(th, Cons((dep, dephash), deps), res, tr, em))
-            _ => s
+fn t_record_edge(s : TSt(e), dep : String, dephash : String) : TSt(e) =
+  match s.stack of
+    Nil => s
+    Cons(cur, _) =>
+      match map_lookup(cur, s.tbl) of
+        Some(TMemo(th, deps, res, tr, em)) =>
+          t_put(s, cur, TMemo(th, Cons((dep, dephash), deps), res, tr, em))
+        _ => s
 
 -- Splice a memo's recorded output onto whatever node is now current, in call
 -- order (its trace is stored reversed), then mark it emitted. At the top of the
 -- graph the frames land on the root's trace; within a parent's recompute they
 -- land on the parent's, exactly where the live run produced them.
 fn t_replay(s : TSt(e), key : String) : TSt(e) =
-  match map_lookup(key, t_tbl(s)) of
+  match map_lookup(key, s.tbl) of
     Some(TMemo(_th, _deps, _res, tr, _em)) =>
       let s1 = foldl(t_capture, s, reverse(tr))
       t_mark_emitted(s1, key)
     _ => s
 
-fn t_mark_emitted(s, key) =
-  match map_lookup(key, t_tbl(s)) of
+fn t_mark_emitted(s : TSt(e), key : String) : TSt(e) =
+  match map_lookup(key, s.tbl) of
     Some(TMemo(th, deps, res, tr, _em)) =>
       t_put(s, key, TMemo(th, deps, res, tr, true))
     _ => s
@@ -857,7 +766,7 @@ fn t_mark_emitted(s, key) =
 -- `verify` demands its deps with `loud` false, so a hash re-check never emits and
 -- a dep that recomputes captures onto its own trace without producing output.
 fn t_demand(s : TSt(e), key : String, loud : Bool) : (TSt(e), Bytes) =
-  match map_lookup(key, t_tbl(s)) of
+  match map_lookup(key, s.tbl) of
     None => (s, wire_empty)
     Some(TInput(bytes, _h)) => (s, bytes)
     Some(TMemo(th, deps, res, _tr, emitted)) =>
@@ -910,11 +819,11 @@ fn t_recompute(
   let (s3, rbytes) = t_run_thunk(s2, th)
   let s4 = t_pop(s3)
   let deps =
-    match map_lookup(key, t_tbl(s4)) of
+    match map_lookup(key, s4.tbl) of
       Some(TMemo(_, ds, _, _, _)) => ds
       _ => Nil
   let tr =
-    match map_lookup(key, t_tbl(s4)) of
+    match map_lookup(key, s4.tbl) of
       Some(TMemo(_, _, _, t, _)) => t
       _ => Nil
   let s5 =
@@ -936,8 +845,8 @@ fn t_reg_input(s, bytes) =
 -- memo starts un-emitted (`false`): its first demand replays the recorded trace.
 fn t_reg_memo(s, th) =
   let (s1, key) = t_fresh(s)
-  if t_prefix_open(s1) then
-    match map_lookup(key, t_warm(s1)) of
+  if s1.prefix_open then
+    match map_lookup(key, s1.warm) of
       Some(TWarm(deps, bytes, trace)) =>
         (
             t_add_persist(
@@ -967,8 +876,8 @@ fn t_reg_memo(s, th) =
   else
     (t_put(s1, key, TMemo(t_widen(th), Nil, None, Nil, false)), key)
 
-fn t_do_set(s, key, bytes) =
-  match map_lookup(key, t_tbl(s)) of
+fn t_do_set(s : TSt(e), key : String, bytes : Bytes) : TSt(e) =
+  match map_lookup(key, s.tbl) of
     Some(TInput(_old, oh)) =>
       if str_eq(vhash(bytes), oh) then
         s
@@ -1018,124 +927,70 @@ fn t_emit_frames(frames) =
       prim_print(x)
       t_emit_frames(rest)
 
-fn t_emit_root(s) = t_emit_frames(reverse(t_root_trace(s)))
+fn t_emit_root(s : TSt(e)) = t_emit_frames(reverse(s.root_trace))
 
 -- The initial state: an empty graph with the creation prefix open and an empty
 -- root trace.
 -- ---------- trace-replay snapshot ----------
 
--- The five parallel lists a traced snapshot stores: for each eligible memo, its
--- key, its dep keys, its dep hashes, its result bytes, and its encoded output
--- trace. The trace is the one field beyond the pure snapshot.
-type TSnap = TSnap(
-  List(String),
-  List(List(String)),
-  List(List(String)),
-  List(Bytes),
-  List(String)
-)
+-- The traced format extends each complete memo record with its encoded output
+-- trace. As in the pure format, there are no parallel lists to get out of sync.
+type TSnapEntry = TSnapEntry {
+  key: String,
+  deps: List((String, String)),
+  value: Bytes,
+  trace: String
+} deriving (Serialize)
+
+type TSnap = TSnap(List(TSnapEntry)) deriving (Serialize)
 
 let t_snap_name : String = "prism-incr-trace-snapshot"
 
-let t_snap_version : String = "1"
+-- Version 2 is the entry-record format; version 1 safely cold-starts.
+let t_snap_version : String = "2"
 
--- Gather eligible memos with a computed result into the five lists. Each trace is
--- reversed back to call order before encoding, so the snapshot stores it forward.
-fn t_snap_collect(s, keys) =
+-- Gather eligible memos with a computed result. Each trace is reversed back to
+-- call order before encoding, so the snapshot stores it forward.
+fn t_snap_collect(s : TSt(e), keys : List(String)) : List(TSnapEntry) =
   match keys of
-    Nil => TSnap(Nil, Nil, Nil, Nil, Nil)
+    Nil => Nil
     Cons(key, rest) =>
-      match t_snap_collect(s, rest) of
-        TSnap(ks, dks, dhs, bys, trs) =>
-          match map_lookup(key, t_tbl(s)) of
-            Some(TMemo(_, deps, Some((bytes, _h)), trace, _em)) =>
-              TSnap(
-                  Cons(key, ks),
-                  Cons(map(fst, deps), dks),
-                  Cons(map(snd, deps), dhs),
-                  Cons(bytes, bys),
-                  Cons(t_trace_encode(reverse(trace)), trs),
-                )
-            _ => TSnap(ks, dks, dhs, bys, trs)
+      let entries = t_snap_collect(s, rest)
+      match map_lookup(key, s.tbl) of
+        Some(TMemo(_, deps, Some((bytes, _h)), trace, _em)) =>
+          Cons(
+              TSnapEntry {
+                key = key,
+                deps = deps,
+                value = bytes,
+                trace = t_trace_encode(reverse(trace))
+              },
+              entries,
+            )
+        _ => entries
 
-fn t_snap_encode(s) =
-  match t_snap_collect(s, t_persist_keys(s)) of
-    TSnap(ks, dks, dhs, bys, trs) =>
-      wire_cat(
-          encode(ks),
-          wire_cat(
-              encode(dks),
-              wire_cat(encode(dhs), wire_cat(encode(bys), encode(trs))),
-            ),
-        )
+fn t_snap_encode(s : TSt(e)) : Bytes =
+  encode(TSnap(t_snap_collect(s, s.persist_keys)))
 
 -- Rebuild the warm cache. A stored trace is decoded to call order then reversed to
 -- the engine's newest-first storage, so a warm memo's trace matches a live one.
-fn t_snap_build(
-  ks : List(String),
-  dks : List(List(String)),
-  dhs : List(List(String)),
-  bys : List(Bytes),
-  trs : List(String)
-) : Map(String, TWarm) =
-  match ks of
+fn t_snap_build(entries : List(TSnapEntry)) : Map(String, TWarm) =
+  match entries of
     Nil => map_empty
-    Cons(k, kr) =>
-      match dks of
-        Cons(dk, dkr) =>
-          match dhs of
-            Cons(dh, dhr) =>
-              match bys of
-                Cons(by, byr) =>
-                  match trs of
-                    Cons(tr, trr) =>
-                      map_insert(
-                          k,
-                          TWarm(
-                              snap_zip_deps(dk, dh),
-                              by,
-                              reverse(t_trace_decode(tr)),
-                            ),
-                          t_snap_build(kr, dkr, dhr, byr, trr),
-                        )
-                    Nil => map_empty
-                Nil => map_empty
-            Nil => map_empty
-        Nil => map_empty
-
-fn t_snap_len_ok(
-  ks : List(a),
-  dks : List(b),
-  dhs : List(c),
-  bys : List(d),
-  trs : List(f)
-) : Bool =
-  length(ks) == length(dks)
-    && length(dks) == length(dhs)
-    && length(dhs) == length(bys)
-    && length(bys) == length(trs)
+    Cons(entry, rest) =>
+      map_insert(
+          entry.key,
+          TWarm(entry.deps, entry.value, reverse(t_trace_decode(entry.trace))),
+          t_snap_build(rest),
+        )
 
 -- Decode the five lists and rebuild the warm cache, the traced counterpart of
--- `snap_decode`. It is a separate function rather than a reuse because the
--- traced format is a different format: five parallel lists instead of four,
--- `TWarm` instead of `Warm`, and its own name and version, so a snapshot of one
--- can never be read as the other. A length mismatch cold-starts wholesale, and
--- the Fail handler at the call site covers a truncated or malformed body.
+-- `snap_decode`. It is a separate function because the traced entries carry a
+-- trace and build `TWarm`; its own name and version ensure the two snapshot
+-- formats cannot be confused. A malformed body cold-starts wholesale.
 fn t_snap_decode(body : String) : Map(String, TWarm) =
   match decode(snap_parse_bytes(body)) of
-    (ks, r1) =>
-      match decode(r1) of
-        (dks, r2) =>
-          match decode(r2) of
-            (dhs, r3) =>
-              match decode(r3) of
-                (bys, r4) =>
-                  match decode(r4) of
-                    (trs, _r5) =>
-                      if t_snap_len_ok(ks, dks, dhs, bys, trs) then
-                        t_snap_build(ks, dks, dhs, bys, trs)
-                      else
-                        map_empty
+    (TSnap(entries), _rest) => t_snap_build(entries)
 
 fn t_snap_try(body) =
   handle t_snap_decode(body) with
@@ -1216,8 +1071,18 @@ pub fn run_incr_durable_replay(
   action : () -> a ! {IncrRaw, Output, Fail | e}
 ) : a =
   let warm = t_snap_load(path, tag)
-  let (sfin, result) =
-    t_run_thunk(TSt(map_empty, Nil, 0, warm, true, Nil, Nil), action)
+  let (sfin, result) = t_run_thunk(
+      TSt {
+        tbl = map_empty,
+        stack = Nil,
+        next = 0,
+        warm = warm,
+        prefix_open = true,
+        persist_keys = Nil,
+        root_trace = Nil
+      },
+      action,
+    )
   let _e = t_emit_root(sfin)
   let _s = t_snap_save(path, tag, sfin)
   result
@@ -1238,8 +1103,18 @@ pub fn run_incr_store_replay(
   action : () -> a ! {IncrRaw, Output, Fail | e}
 ) : a =
   let warm = t_store_load(root, tag)
-  let (sfin, result) =
-    t_run_thunk(TSt(map_empty, Nil, 0, warm, true, Nil, Nil), action)
+  let (sfin, result) = t_run_thunk(
+      TSt {
+        tbl = map_empty,
+        stack = Nil,
+        next = 0,
+        warm = warm,
+        prefix_open = true,
+        persist_keys = Nil,
+        root_trace = Nil
+      },
+      action,
+    )
   let _e = t_emit_root(sfin)
   let _s = t_store_save(root, tag, sfin)
   result

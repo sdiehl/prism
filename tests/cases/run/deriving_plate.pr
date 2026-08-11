@@ -8,11 +8,8 @@
 -- children).
 
 import Control.Layer (lay_depth, lay_size, plate_layer)
-
 import Control.Rewrite (rw_everywhere)
-
 import Data.Foldable (length)
-
 import Data.List (map)
 
 type Arm = Arm { tag: Int, body: Expr } deriving (Show)

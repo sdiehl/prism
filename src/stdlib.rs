@@ -26,6 +26,15 @@ pub const STDLIB: &[(&str, &str)] = &[
     ("Data.Pretty", include_str!("../lib/std/Data/Pretty.pr")),
     ("Data.Foldable", include_str!("../lib/std/Data/Foldable.pr")),
     ("Data.Monad", include_str!("../lib/std/Data/Monad.pr")),
+    ("Data.Monoid", include_str!("../lib/std/Data/Monoid.pr")),
+    (
+        "Data.Contravariant",
+        include_str!("../lib/std/Data/Contravariant.pr"),
+    ),
+    (
+        "Data.Bifunctor",
+        include_str!("../lib/std/Data/Bifunctor.pr"),
+    ),
     ("Data.Checked", include_str!("../lib/std/Data/Checked.pr")),
     ("Data.Vec", include_str!("../lib/std/Data/Vec.pr")),
     ("Data.Tensor", include_str!("../lib/std/Data/Tensor.pr")),
@@ -50,6 +59,7 @@ pub const STDLIB: &[(&str, &str)] = &[
     ("Arena", include_str!("../lib/std/Arena.pr")),
     ("Math", include_str!("../lib/std/Math.pr")),
     ("Data.Graph", include_str!("../lib/std/Data/Graph.pr")),
+    ("Data.Lattice", include_str!("../lib/std/Data/Lattice.pr")),
     ("Data.Fixpoint", include_str!("../lib/std/Data/Fixpoint.pr")),
     ("Control.State", include_str!("../lib/std/Control/State.pr")),
     (
@@ -72,6 +82,10 @@ pub const STDLIB: &[(&str, &str)] = &[
     ("Syntax.Layout", include_str!("../lib/std/Syntax/Layout.pr")),
     ("Syntax.Query", include_str!("../lib/std/Syntax/Query.pr")),
     ("Syntax.Ast", include_str!("../lib/std/Syntax/Ast.pr")),
+    (
+        "Syntax.TcInput",
+        include_str!("../lib/std/Syntax/TcInput.pr"),
+    ),
     ("Syntax.Codec", include_str!("../lib/std/Syntax/Codec.pr")),
     ("Syntax.Walk", include_str!("../lib/std/Syntax/Walk.pr")),
     (
@@ -167,4 +181,7 @@ pub const STDLIB: &[(&str, &str)] = &[
     ("Data.Name", include_str!("../lib/std/Data/Name.pr")),
     ("Data.Scope", include_str!("../lib/std/Data/Scope.pr")),
     ("Data.Bind", include_str!("../lib/std/Data/Bind.pr")),
+    ("Data.Intern", include_str!("../lib/std/Data/Intern.pr")),
+    ("Data.Diff", include_str!("../lib/std/Data/Diff.pr")),
+    ("Data.Optic", include_str!("../lib/std/Data/Optic.pr")),
 ];

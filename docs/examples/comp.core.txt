@@ -9,6 +9,6 @@ fn main() =
   } to t@736
   smap(t@733, t@736) to t@737
   scollect(t@737) to t@738
-  Data.Foldable.sum$sp2(t@738) to t@740
-  print t@740 to t@741
+  Data.Foldable.sum$sp2(t@738) to t@741
+  print t@741 to t@742
   print_nl

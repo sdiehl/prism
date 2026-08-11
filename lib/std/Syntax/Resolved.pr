@@ -9,9 +9,7 @@
 -- traversable subset of the surface expression vocabulary.
 
 import Control.Layer (..)
-
 import Data.Foldable (elem, length)
-
 import Syntax.Source (..)
 
 -- | One resolved expression node: its NodeId (the join key), its
@@ -187,7 +185,7 @@ pub fn rnode_children(n : RNode) : List(RNode) = n.children
 -- unchanged.
 pub fn rnode_rebuild(n : RNode, cs : List(RNode)) : RNode =
   if length(cs) == length(n.children) then
-    RNode { id = n.id, kind = n.kind, span = n.span, children = cs }
+    RNode { ..n, children = cs }
   else
     n
 

@@ -7,18 +7,18 @@
       "type": 668
     },
     "generator_code_lines": 2867,
-    "maintained_t_delta": 301,
-    "maintained_t_lines": 4033,
+    "maintained_t_delta": 288,
+    "maintained_t_lines": 4020,
     "maintained_t_verdict": "regressed",
     "pattern": {
-      "facade": 20,
+      "facade": 15,
       "generated": 0,
       "semantics": 43
     },
-    "shared_control_code_lines": 206,
+    "shared_control_code_lines": 202,
     "status": "pattern-scaffold",
     "type": {
-      "facade": 22,
+      "facade": 18,
       "generated": 777,
       "semantics": 98
     }
@@ -434,13 +434,13 @@
     ],
     "artifact": "lib/std/Syntax/Parse/GeneratedControl.pr",
     "classification": "handwritten-family-neutral-runtime",
-    "code_lines": 206,
-    "sha256": "ef02cc68783747d7fad5b90998405e598b14e62d2634c01315cb53fa0369c3b5",
+    "code_lines": 202,
+    "sha256": "0d2c28f7d74b4ec409fba7f7226f35536899f7a56a5fc2be283c15429d8dac9b",
     "test_fixture": {
       "artifact": "experiments/parser_generator_phase1/generated/type_leaf/tests/pattern_contract.pr",
       "classification": "independent-handwritten",
       "generated": false,
-      "sha256": "c14ace32b196215420bfc20b95622f57e995e36dc197e5764b40ac7a58b1f096",
+      "sha256": "4823230f3fecef6e391d672fd5ee437de74979ef9fbaa1456fa353e78643db3b",
       "test_count": 1,
       "transitive": false
     }
@@ -459,13 +459,13 @@
       "sha256": "eb6e5d36fab08fce7ada02dd5db601afa755d3bf724576589dd0c20f80d380d3"
     },
     "artifact": "experiments/parser_generator_phase1/generated/type_leaf/src/GeneratedTypeLeaf.pr",
-    "artifact_sha256": "df494064c565751182aec5afe9b292d44e47b5c563a160346029bc854ec27670",
+    "artifact_sha256": "21f5ed56a15b255778411de27a33675caeb2567486859d8fa3c67a45fe4107b4",
     "production_artifact": "lib/std/Syntax/Parse/GeneratedType.pr",
     "test_fixture": {
       "artifact": "experiments/parser_generator_phase1/generated/type_leaf/tests/type_leaf.pr",
       "classification": "independent-handwritten",
       "generated": false,
-      "sha256": "ef459f81df12e22a16d75f347787a79f6cf9296a08a84fa2776e0bac2edeb9f5",
+      "sha256": "8d445619cc972cd39da96088383f09e94e8cdbc22bc991699b41c246dc7a38b3",
       "test_count": 55,
       "transitive": false
     }

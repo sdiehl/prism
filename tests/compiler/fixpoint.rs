@@ -7,10 +7,9 @@
 // their answers are compared byte for byte, once on a fixture graph with a
 // self-loop, a mutual-recursion cycle, and a chain, and once on the call graph
 // of a real `prism-resolved-syntax-v1` document that each side extracts for
-// itself. The remaining gates are the ones a fixpoint has to earn: the
-// semilattice laws hold on every instance, the answer does not depend on the
-// order the relation was built in, and a transfer function that ascends forever
-// exhausts the budget and fails instead of spinning.
+// itself. The tests also require the semilattice laws on every instance,
+// independence from relation construction order, and bounded failure for a
+// transfer function that ascends forever.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -254,6 +253,8 @@ fn fixpoint_solution_is_independent_of_input_order() {
 #[test]
 fn semilattice_laws_hold_on_every_instance() {
     let src = r#"import Data.Fixpoint (..)
+
+import Data.Lattice (..)
 
 fn holds(x : a, y : a, z : a) : Bool given Semilattice(a) =
   lat_equiv(lat_join(x, lat_join(y, z)), lat_join(lat_join(x, y), z))

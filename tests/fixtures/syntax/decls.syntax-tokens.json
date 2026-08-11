@@ -1,9 +1,9 @@
 {
   "schema": "prism-syntax-tokens-v1",
-  "compiler": "0.17.0",
+  "compiler": "0.18.0",
   "source": {
-    "digest": "f8ee1e543384e46f4ba1a050c3697b7a7280750acc419a266d278f32eac64a20",
-    "text": "-- Declaration families: imports, datatypes, aliases, constants, visibility.\nimport Data.List (map, filter)\n\nimport Json as J\n\nimport Data.Map (..)\n\npub type Color = Red | Green | Blue deriving (Eq, Show)\n\nopaque type Token = MkToken(Int)\n\nnewtype Meters = Meters(Float) deriving (Eq)\n\ntype Point = Point { x: Int, y: Int }\n\nalias Pair(a) = (a, a)\n\nerror NotFound(String)\n\nlet limit = 512\n\ndeprecated \"use limit\"\nlet old_limit = 256\n\npub fn origin() : Point = Point { x = 0, y = 0 }\n"
+    "digest": "c4c274309273958eba2bb8f5bf75f63b47455c5d720cabc3e66e11bee4d86564",
+    "text": "-- Declaration families: imports, datatypes, aliases, constants, visibility.\nimport Data.List (map, filter)\nimport Json as J\nimport Data.Map (..)\n\npub type Color = Red | Green | Blue deriving (Eq, Show)\n\nopaque type Token = MkToken(Int)\n\nnewtype Meters = Meters(Float) deriving (Eq)\n\ntype Point = Point { x: Int, y: Int }\n\nalias Pair(a) = (a, a)\n\nerror NotFound(String)\n\nlet limit = 512\n\ndeprecated \"use limit\"\nlet old_limit = 256\n\npub fn origin() : Point = Point { x = 0, y = 0 }\n"
   },
   "raw": [
     {
@@ -61,459 +61,474 @@
     {
       "kind": "import",
       "span": [
-        109,
-        115
+        108,
+        114
       ]
     },
     {
       "kind": "uid",
       "span": [
-        116,
-        120
+        115,
+        119
       ],
       "value": "Json"
     },
     {
       "kind": "as",
       "span": [
-        121,
-        123
+        120,
+        122
       ]
     },
     {
       "kind": "uid",
       "span": [
-        124,
-        125
+        123,
+        124
       ],
       "value": "J"
     },
     {
       "kind": "import",
       "span": [
-        127,
-        133
+        125,
+        131
       ]
     },
     {
       "kind": "qual",
       "span": [
-        134,
-        142
+        132,
+        140
       ],
       "value": "Data.Map"
     },
     {
       "kind": "(",
       "span": [
-        143,
-        144
+        141,
+        142
       ]
     },
     {
       "kind": "..",
       "span": [
-        144,
-        146
+        142,
+        144
       ]
     },
     {
       "kind": ")",
       "span": [
-        146,
-        147
+        144,
+        145
       ]
     },
     {
       "kind": "pub",
       "span": [
-        149,
-        152
+        147,
+        150
       ]
     },
     {
       "kind": "type",
       "span": [
-        153,
-        157
+        151,
+        155
       ]
     },
     {
       "kind": "uid",
       "span": [
-        158,
-        163
+        156,
+        161
       ],
       "value": "Color"
     },
     {
       "kind": "=",
       "span": [
-        164,
-        165
+        162,
+        163
       ]
     },
     {
       "kind": "uid",
       "span": [
-        166,
-        169
+        164,
+        167
       ],
       "value": "Red"
     },
     {
       "kind": "|",
       "span": [
-        170,
-        171
+        168,
+        169
       ]
     },
     {
       "kind": "uid",
       "span": [
-        172,
-        177
+        170,
+        175
       ],
       "value": "Green"
     },
     {
       "kind": "|",
       "span": [
-        178,
-        179
+        176,
+        177
       ]
     },
     {
       "kind": "uid",
       "span": [
-        180,
-        184
+        178,
+        182
       ],
       "value": "Blue"
     },
     {
       "kind": "deriving",
       "span": [
-        185,
-        193
+        183,
+        191
       ]
     },
     {
       "kind": "(",
       "span": [
-        194,
-        195
+        192,
+        193
       ]
     },
     {
       "kind": "uid",
       "span": [
-        195,
-        197
+        193,
+        195
       ],
       "value": "Eq"
     },
     {
       "kind": ",",
       "span": [
-        197,
-        198
+        195,
+        196
       ]
     },
     {
       "kind": "uid",
       "span": [
-        199,
-        203
+        197,
+        201
       ],
       "value": "Show"
     },
     {
       "kind": ")",
       "span": [
-        203,
-        204
+        201,
+        202
       ]
     },
     {
       "kind": "opaque",
       "span": [
-        206,
-        212
+        204,
+        210
       ]
     },
     {
       "kind": "type",
       "span": [
-        213,
-        217
+        211,
+        215
       ]
     },
     {
       "kind": "uid",
       "span": [
-        218,
-        223
+        216,
+        221
       ],
       "value": "Token"
     },
     {
       "kind": "=",
       "span": [
-        224,
-        225
+        222,
+        223
       ]
     },
     {
       "kind": "uid",
       "span": [
-        226,
-        233
+        224,
+        231
       ],
       "value": "MkToken"
     },
     {
       "kind": "(",
       "span": [
-        233,
-        234
+        231,
+        232
       ]
     },
     {
       "kind": "Int",
       "span": [
-        234,
-        237
+        232,
+        235
       ]
     },
     {
       "kind": ")",
       "span": [
-        237,
-        238
+        235,
+        236
       ]
     },
     {
       "kind": "newtype",
       "span": [
-        240,
-        247
+        238,
+        245
       ]
     },
     {
       "kind": "uid",
       "span": [
-        248,
-        254
+        246,
+        252
       ],
       "value": "Meters"
     },
     {
       "kind": "=",
       "span": [
-        255,
-        256
+        253,
+        254
       ]
     },
     {
       "kind": "uid",
       "span": [
-        257,
-        263
+        255,
+        261
       ],
       "value": "Meters"
     },
     {
       "kind": "(",
       "span": [
-        263,
-        264
+        261,
+        262
       ]
     },
     {
       "kind": "Float",
       "span": [
-        264,
-        269
+        262,
+        267
       ]
     },
     {
       "kind": ")",
       "span": [
-        269,
-        270
+        267,
+        268
       ]
     },
     {
       "kind": "deriving",
       "span": [
-        271,
-        279
+        269,
+        277
       ]
     },
     {
       "kind": "(",
       "span": [
-        280,
-        281
+        278,
+        279
       ]
     },
     {
       "kind": "uid",
       "span": [
-        281,
-        283
+        279,
+        281
       ],
       "value": "Eq"
     },
     {
       "kind": ")",
       "span": [
-        283,
-        284
+        281,
+        282
       ]
     },
     {
       "kind": "type",
       "span": [
-        286,
-        290
+        284,
+        288
       ]
     },
     {
       "kind": "uid",
       "span": [
-        291,
-        296
+        289,
+        294
       ],
       "value": "Point"
     },
     {
       "kind": "=",
       "span": [
-        297,
-        298
+        295,
+        296
       ]
     },
     {
       "kind": "uid",
       "span": [
-        299,
-        304
+        297,
+        302
       ],
       "value": "Point"
     },
     {
       "kind": "{",
       "span": [
-        305,
-        306
+        303,
+        304
       ]
     },
     {
       "kind": "ident",
       "span": [
-        307,
-        308
+        305,
+        306
       ],
       "value": "x"
     },
     {
       "kind": ":",
       "span": [
-        308,
-        309
+        306,
+        307
       ]
     },
     {
       "kind": "Int",
       "span": [
-        310,
-        313
+        308,
+        311
       ]
     },
     {
       "kind": ",",
       "span": [
-        313,
-        314
+        311,
+        312
       ]
     },
     {
       "kind": "ident",
       "span": [
-        315,
-        316
+        313,
+        314
       ],
       "value": "y"
     },
     {
       "kind": ":",
       "span": [
-        316,
-        317
+        314,
+        315
       ]
     },
     {
       "kind": "Int",
       "span": [
-        318,
-        321
+        316,
+        319
       ]
     },
     {
       "kind": "}",
       "span": [
-        322,
-        323
+        320,
+        321
       ]
     },
     {
       "kind": "alias",
       "span": [
-        325,
-        330
+        323,
+        328
       ]
     },
     {
       "kind": "uid",
       "span": [
-        331,
-        335
+        329,
+        333
       ],
       "value": "Pair"
     },
     {
       "kind": "(",
       "span": [
-        335,
-        336
+        333,
+        334
       ]
     },
     {
       "kind": "ident",
       "span": [
-        336,
-        337
+        334,
+        335
       ],
       "value": "a"
     },
     {
       "kind": ")",
       "span": [
+        335,
+        336
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
         337,
         338
       ]
     },
     {
-      "kind": "=",
+      "kind": "(",
       "span": [
         339,
         340
       ]
     },
     {
-      "kind": "(",
+      "kind": "ident",
+      "span": [
+        340,
+        341
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
       "span": [
         341,
         342
@@ -522,276 +537,261 @@
     {
       "kind": "ident",
       "span": [
-        342,
-        343
-      ],
-      "value": "a"
-    },
-    {
-      "kind": ",",
-      "span": [
         343,
         344
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        345,
-        346
       ],
       "value": "a"
     },
     {
       "kind": ")",
       "span": [
-        346,
-        347
+        344,
+        345
       ]
     },
     {
       "kind": "error",
       "span": [
-        349,
-        354
+        347,
+        352
       ]
     },
     {
       "kind": "uid",
       "span": [
-        355,
-        363
+        353,
+        361
       ],
       "value": "NotFound"
     },
     {
       "kind": "(",
       "span": [
-        363,
-        364
+        361,
+        362
       ]
     },
     {
       "kind": "String",
       "span": [
-        364,
-        370
+        362,
+        368
       ]
     },
     {
       "kind": ")",
       "span": [
-        370,
-        371
+        368,
+        369
       ]
     },
     {
       "kind": "let",
       "span": [
-        373,
-        376
+        371,
+        374
       ]
     },
     {
       "kind": "ident",
       "span": [
-        377,
-        382
+        375,
+        380
       ],
       "value": "limit"
     },
     {
       "kind": "=",
       "span": [
-        383,
-        384
+        381,
+        382
       ]
     },
     {
       "kind": "int",
       "span": [
-        385,
-        388
+        383,
+        386
       ],
       "value": "512"
     },
     {
       "kind": "ident",
       "span": [
-        390,
-        400
+        388,
+        398
       ],
       "value": "deprecated"
     },
     {
       "kind": "str",
       "span": [
-        401,
-        412
+        399,
+        410
       ],
       "value": "use limit"
     },
     {
       "kind": "let",
       "span": [
-        413,
-        416
+        411,
+        414
       ]
     },
     {
       "kind": "ident",
       "span": [
-        417,
-        426
+        415,
+        424
       ],
       "value": "old_limit"
     },
     {
       "kind": "=",
       "span": [
-        427,
-        428
+        425,
+        426
       ]
     },
     {
       "kind": "int",
       "span": [
-        429,
-        432
+        427,
+        430
       ],
       "value": "256"
     },
     {
       "kind": "pub",
       "span": [
-        434,
-        437
+        432,
+        435
       ]
     },
     {
       "kind": "fn",
       "span": [
-        438,
-        440
+        436,
+        438
       ]
     },
     {
       "kind": "ident",
       "span": [
-        441,
-        447
+        439,
+        445
       ],
       "value": "origin"
     },
     {
       "kind": "(",
       "span": [
-        447,
-        448
+        445,
+        446
       ]
     },
     {
       "kind": ")",
+      "span": [
+        446,
+        447
+      ]
+    },
+    {
+      "kind": ":",
       "span": [
         448,
         449
       ]
     },
     {
-      "kind": ":",
-      "span": [
-        450,
-        451
-      ]
-    },
-    {
       "kind": "uid",
       "span": [
-        452,
-        457
+        450,
+        455
       ],
       "value": "Point"
     },
     {
       "kind": "=",
       "span": [
-        458,
-        459
+        456,
+        457
       ]
     },
     {
       "kind": "uid",
       "span": [
-        460,
-        465
+        458,
+        463
       ],
       "value": "Point"
     },
     {
       "kind": "{",
       "span": [
-        466,
-        467
+        464,
+        465
       ]
     },
     {
       "kind": "ident",
       "span": [
-        468,
-        469
+        466,
+        467
       ],
       "value": "x"
     },
     {
       "kind": "=",
       "span": [
-        470,
-        471
+        468,
+        469
       ]
     },
     {
       "kind": "int",
       "span": [
-        472,
-        473
+        470,
+        471
       ],
       "value": "0"
     },
     {
       "kind": ",",
       "span": [
-        473,
-        474
+        471,
+        472
       ]
     },
     {
       "kind": "ident",
       "span": [
-        475,
-        476
+        473,
+        474
       ],
       "value": "y"
     },
     {
       "kind": "=",
       "span": [
-        477,
-        478
+        475,
+        476
       ]
     },
     {
       "kind": "int",
       "span": [
-        479,
-        480
+        477,
+        478
       ],
       "value": "0"
     },
     {
       "kind": "}",
       "span": [
-        481,
-        482
+        479,
+        480
       ]
     }
   ],
@@ -865,501 +865,516 @@
     {
       "kind": "import",
       "span": [
-        109,
-        115
+        108,
+        114
       ]
     },
     {
       "kind": "uid",
       "span": [
-        116,
-        120
+        115,
+        119
       ],
       "value": "Json"
     },
     {
       "kind": "as",
       "span": [
-        121,
-        123
+        120,
+        122
       ]
     },
     {
       "kind": "uid",
       "span": [
-        124,
-        125
+        123,
+        124
       ],
       "value": "J"
     },
     {
       "kind": "v;",
       "span": [
-        125,
-        125
+        124,
+        124
       ]
     },
     {
       "kind": "import",
       "span": [
-        127,
-        133
+        125,
+        131
       ]
     },
     {
       "kind": "qual",
       "span": [
-        134,
-        142
+        132,
+        140
       ],
       "value": "Data.Map"
     },
     {
       "kind": "(",
       "span": [
-        143,
-        144
+        141,
+        142
       ]
     },
     {
       "kind": "..",
       "span": [
-        144,
-        146
+        142,
+        144
       ]
     },
     {
       "kind": ")",
       "span": [
-        146,
-        147
+        144,
+        145
       ]
     },
     {
       "kind": "v;",
       "span": [
-        147,
-        147
+        145,
+        145
       ]
     },
     {
       "kind": "pub",
       "span": [
-        149,
-        152
+        147,
+        150
       ]
     },
     {
       "kind": "type",
       "span": [
-        153,
-        157
+        151,
+        155
       ]
     },
     {
       "kind": "uid",
       "span": [
-        158,
-        163
+        156,
+        161
       ],
       "value": "Color"
     },
     {
       "kind": "=",
       "span": [
-        164,
-        165
+        162,
+        163
       ]
     },
     {
       "kind": "uid",
       "span": [
-        166,
-        169
+        164,
+        167
       ],
       "value": "Red"
     },
     {
       "kind": "|",
       "span": [
-        170,
-        171
+        168,
+        169
       ]
     },
     {
       "kind": "uid",
       "span": [
-        172,
-        177
+        170,
+        175
       ],
       "value": "Green"
     },
     {
       "kind": "|",
       "span": [
-        178,
-        179
+        176,
+        177
       ]
     },
     {
       "kind": "uid",
       "span": [
-        180,
-        184
+        178,
+        182
       ],
       "value": "Blue"
     },
     {
       "kind": "deriving",
       "span": [
-        185,
-        193
+        183,
+        191
       ]
     },
     {
       "kind": "(",
       "span": [
-        194,
-        195
+        192,
+        193
       ]
     },
     {
       "kind": "uid",
       "span": [
-        195,
-        197
+        193,
+        195
       ],
       "value": "Eq"
     },
     {
       "kind": ",",
       "span": [
-        197,
-        198
+        195,
+        196
       ]
     },
     {
       "kind": "uid",
       "span": [
-        199,
-        203
+        197,
+        201
       ],
       "value": "Show"
     },
     {
       "kind": ")",
       "span": [
-        203,
-        204
+        201,
+        202
       ]
     },
     {
       "kind": "v;",
       "span": [
-        204,
-        204
+        202,
+        202
       ]
     },
     {
       "kind": "opaque",
       "span": [
-        206,
-        212
+        204,
+        210
       ]
     },
     {
       "kind": "type",
       "span": [
-        213,
-        217
+        211,
+        215
       ]
     },
     {
       "kind": "uid",
       "span": [
-        218,
-        223
+        216,
+        221
       ],
       "value": "Token"
     },
     {
       "kind": "=",
       "span": [
-        224,
-        225
+        222,
+        223
       ]
     },
     {
       "kind": "uid",
       "span": [
-        226,
-        233
+        224,
+        231
       ],
       "value": "MkToken"
     },
     {
       "kind": "(",
       "span": [
-        233,
-        234
+        231,
+        232
       ]
     },
     {
       "kind": "Int",
       "span": [
-        234,
-        237
+        232,
+        235
       ]
     },
     {
       "kind": ")",
       "span": [
-        237,
-        238
+        235,
+        236
       ]
     },
     {
       "kind": "v;",
       "span": [
-        238,
-        238
+        236,
+        236
       ]
     },
     {
       "kind": "newtype",
       "span": [
-        240,
-        247
+        238,
+        245
       ]
     },
     {
       "kind": "uid",
       "span": [
-        248,
-        254
+        246,
+        252
       ],
       "value": "Meters"
     },
     {
       "kind": "=",
       "span": [
-        255,
-        256
+        253,
+        254
       ]
     },
     {
       "kind": "uid",
       "span": [
-        257,
-        263
+        255,
+        261
       ],
       "value": "Meters"
     },
     {
       "kind": "(",
       "span": [
-        263,
-        264
+        261,
+        262
       ]
     },
     {
       "kind": "Float",
       "span": [
-        264,
-        269
+        262,
+        267
       ]
     },
     {
       "kind": ")",
       "span": [
-        269,
-        270
+        267,
+        268
       ]
     },
     {
       "kind": "deriving",
       "span": [
-        271,
-        279
+        269,
+        277
       ]
     },
     {
       "kind": "(",
       "span": [
-        280,
-        281
+        278,
+        279
       ]
     },
     {
       "kind": "uid",
       "span": [
-        281,
-        283
+        279,
+        281
       ],
       "value": "Eq"
     },
     {
       "kind": ")",
       "span": [
-        283,
-        284
+        281,
+        282
       ]
     },
     {
       "kind": "v;",
       "span": [
-        284,
-        284
+        282,
+        282
       ]
     },
     {
       "kind": "type",
       "span": [
-        286,
-        290
+        284,
+        288
       ]
     },
     {
       "kind": "uid",
       "span": [
-        291,
-        296
+        289,
+        294
       ],
       "value": "Point"
     },
     {
       "kind": "=",
       "span": [
-        297,
-        298
+        295,
+        296
       ]
     },
     {
       "kind": "uid",
       "span": [
-        299,
-        304
+        297,
+        302
       ],
       "value": "Point"
     },
     {
       "kind": "{",
       "span": [
-        305,
-        306
+        303,
+        304
       ]
     },
     {
       "kind": "ident",
       "span": [
-        307,
-        308
+        305,
+        306
       ],
       "value": "x"
     },
     {
       "kind": ":",
       "span": [
-        308,
-        309
+        306,
+        307
       ]
     },
     {
       "kind": "Int",
       "span": [
-        310,
-        313
+        308,
+        311
       ]
     },
     {
       "kind": ",",
       "span": [
-        313,
-        314
+        311,
+        312
       ]
     },
     {
       "kind": "ident",
       "span": [
-        315,
-        316
+        313,
+        314
       ],
       "value": "y"
     },
     {
       "kind": ":",
       "span": [
-        316,
-        317
+        314,
+        315
       ]
     },
     {
       "kind": "Int",
       "span": [
-        318,
-        321
+        316,
+        319
       ]
     },
     {
       "kind": "}",
       "span": [
-        322,
-        323
+        320,
+        321
       ]
     },
     {
       "kind": "v;",
       "span": [
-        323,
-        323
+        321,
+        321
       ]
     },
     {
       "kind": "alias",
       "span": [
-        325,
-        330
+        323,
+        328
       ]
     },
     {
       "kind": "uid",
       "span": [
-        331,
-        335
+        329,
+        333
       ],
       "value": "Pair"
     },
     {
       "kind": "(",
       "span": [
-        335,
-        336
+        333,
+        334
       ]
     },
     {
       "kind": "ident",
       "span": [
-        336,
-        337
+        334,
+        335
       ],
       "value": "a"
     },
     {
       "kind": ")",
       "span": [
+        335,
+        336
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
         337,
         338
       ]
     },
     {
-      "kind": "=",
+      "kind": "(",
       "span": [
         339,
         340
       ]
     },
     {
-      "kind": "(",
+      "kind": "ident",
+      "span": [
+        340,
+        341
+      ],
+      "value": "a"
+    },
+    {
+      "kind": ",",
       "span": [
         341,
         342
@@ -1368,318 +1383,303 @@
     {
       "kind": "ident",
       "span": [
-        342,
-        343
-      ],
-      "value": "a"
-    },
-    {
-      "kind": ",",
-      "span": [
         343,
         344
-      ]
-    },
-    {
-      "kind": "ident",
-      "span": [
-        345,
-        346
       ],
       "value": "a"
     },
     {
       "kind": ")",
       "span": [
-        346,
-        347
+        344,
+        345
       ]
     },
     {
       "kind": "v;",
       "span": [
-        347,
-        347
+        345,
+        345
       ]
     },
     {
       "kind": "error",
       "span": [
-        349,
-        354
+        347,
+        352
       ]
     },
     {
       "kind": "uid",
       "span": [
-        355,
-        363
+        353,
+        361
       ],
       "value": "NotFound"
     },
     {
       "kind": "(",
       "span": [
-        363,
-        364
+        361,
+        362
       ]
     },
     {
       "kind": "String",
       "span": [
-        364,
-        370
+        362,
+        368
       ]
     },
     {
       "kind": ")",
       "span": [
-        370,
-        371
+        368,
+        369
       ]
     },
     {
       "kind": "v;",
       "span": [
-        371,
-        371
+        369,
+        369
       ]
     },
     {
       "kind": "let",
       "span": [
-        373,
-        376
+        371,
+        374
       ]
     },
     {
       "kind": "ident",
       "span": [
-        377,
-        382
+        375,
+        380
       ],
       "value": "limit"
     },
     {
       "kind": "=",
       "span": [
-        383,
-        384
+        381,
+        382
       ]
     },
     {
       "kind": "int",
       "span": [
-        385,
-        388
+        383,
+        386
       ],
       "value": "512"
     },
     {
       "kind": "v;",
       "span": [
-        388,
-        388
+        386,
+        386
       ]
     },
     {
       "kind": "ident",
       "span": [
-        390,
-        400
+        388,
+        398
       ],
       "value": "deprecated"
     },
     {
       "kind": "str",
       "span": [
-        401,
-        412
+        399,
+        410
       ],
       "value": "use limit"
     },
     {
       "kind": "v;",
       "span": [
-        412,
-        412
+        410,
+        410
       ]
     },
     {
       "kind": "let",
       "span": [
-        413,
-        416
+        411,
+        414
       ]
     },
     {
       "kind": "ident",
       "span": [
-        417,
-        426
+        415,
+        424
       ],
       "value": "old_limit"
     },
     {
       "kind": "=",
       "span": [
-        427,
-        428
+        425,
+        426
       ]
     },
     {
       "kind": "int",
       "span": [
-        429,
-        432
+        427,
+        430
       ],
       "value": "256"
     },
     {
       "kind": "v;",
       "span": [
-        432,
-        432
+        430,
+        430
       ]
     },
     {
       "kind": "pub",
       "span": [
-        434,
-        437
+        432,
+        435
       ]
     },
     {
       "kind": "fn",
       "span": [
-        438,
-        440
+        436,
+        438
       ]
     },
     {
       "kind": "ident",
       "span": [
-        441,
-        447
+        439,
+        445
       ],
       "value": "origin"
     },
     {
       "kind": "(",
       "span": [
-        447,
-        448
+        445,
+        446
       ]
     },
     {
       "kind": ")",
+      "span": [
+        446,
+        447
+      ]
+    },
+    {
+      "kind": ":",
       "span": [
         448,
         449
       ]
     },
     {
-      "kind": ":",
-      "span": [
-        450,
-        451
-      ]
-    },
-    {
       "kind": "uid",
       "span": [
-        452,
-        457
+        450,
+        455
       ],
       "value": "Point"
     },
     {
       "kind": "=",
       "span": [
-        458,
-        459
+        456,
+        457
       ]
     },
     {
       "kind": "uid",
       "span": [
-        460,
-        465
+        458,
+        463
       ],
       "value": "Point"
     },
     {
       "kind": "{",
       "span": [
-        466,
-        467
+        464,
+        465
       ]
     },
     {
       "kind": "ident",
       "span": [
-        468,
-        469
+        466,
+        467
       ],
       "value": "x"
     },
     {
       "kind": "=",
       "span": [
-        470,
-        471
+        468,
+        469
       ]
     },
     {
       "kind": "int",
       "span": [
-        472,
-        473
+        470,
+        471
       ],
       "value": "0"
     },
     {
       "kind": ",",
       "span": [
-        473,
-        474
+        471,
+        472
       ]
     },
     {
       "kind": "ident",
       "span": [
-        475,
-        476
+        473,
+        474
       ],
       "value": "y"
     },
     {
       "kind": "=",
       "span": [
-        477,
-        478
+        475,
+        476
       ]
     },
     {
       "kind": "int",
       "span": [
-        479,
-        480
+        477,
+        478
       ],
       "value": "0"
     },
     {
       "kind": "}",
       "span": [
-        481,
-        482
+        479,
+        480
       ]
     },
     {
       "kind": "v}",
       "span": [
-        482,
-        482
+        480,
+        480
       ]
     }
   ],
@@ -1694,78 +1694,64 @@
     {
       "kind": "blank",
       "span": [
-        107,
-        109
+        145,
+        147
       ]
     },
     {
       "kind": "blank",
       "span": [
-        125,
-        127
+        202,
+        204
       ]
     },
     {
       "kind": "blank",
       "span": [
-        147,
-        149
+        236,
+        238
       ]
     },
     {
       "kind": "blank",
       "span": [
-        204,
-        206
+        282,
+        284
       ]
     },
     {
       "kind": "blank",
       "span": [
-        238,
-        240
+        321,
+        323
       ]
     },
     {
       "kind": "blank",
       "span": [
-        284,
-        286
+        345,
+        347
       ]
     },
     {
       "kind": "blank",
       "span": [
-        323,
-        325
+        369,
+        371
       ]
     },
     {
       "kind": "blank",
       "span": [
-        347,
-        349
+        386,
+        388
       ]
     },
     {
       "kind": "blank",
       "span": [
-        371,
-        373
-      ]
-    },
-    {
-      "kind": "blank",
-      "span": [
-        388,
-        390
-      ]
-    },
-    {
-      "kind": "blank",
-      "span": [
-        432,
-        434
+        430,
+        432
       ]
     }
   ]

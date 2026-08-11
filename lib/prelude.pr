@@ -7,21 +7,13 @@
 -- without an explicit import.
 
 import Data.List (..)
-
 import Data.Maybe (..)
-
 import Data.Result (..)
-
 import Data.Map (..)
-
 import Data.Set (..)
-
 import Data.Char (..)
-
 import Data.String (..)
-
 import Data.Foldable (..)
-
 import Data.Monad (..)
 
 -- | The optional type: `None`, or `Some(a)` holding a value.
@@ -302,9 +294,6 @@ fn fib(n) =
 -- owned builtins routing through the vendored libm, identical on every backend;
 -- only the named constants live here.
 let pi = 3.141592653589793
-
--- | Euler's number.
-let e = 2.718281828459045
 
 -- | Tau, `2 * pi`.
 let tau = 6.283185307179586

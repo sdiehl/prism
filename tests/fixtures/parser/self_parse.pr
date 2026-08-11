@@ -6,11 +6,8 @@
 -- for thousands of nesting levels.
 
 import Syntax.Lex (..)
-
 import Syntax.Parse (..)
-
 import Data.String (starts_with)
-
 import Syntax.Parse.Support (depth_budget)
 
 fn budget_of(arg : String) : Option(Int) =

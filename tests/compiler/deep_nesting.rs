@@ -4,9 +4,8 @@
 // typed-Core builder, its zonker, and the typed verifier) grow stack segments
 // on demand, so a generated file of a few thousand sequential `let`s compiles
 // instead of overflowing the stack; this pins that. Release-only: debug frames
-// are several times fatter and some unguarded analysis walks still bound depth
-// there, which is the remaining bounded-traversal work, so the debug profile
-// asserts nothing.
+// are several times fatter and unguarded analysis walks hit the debug stack limit,
+// so the debug profile asserts nothing.
 #![cfg(not(debug_assertions))]
 
 use std::fmt::Write as _;

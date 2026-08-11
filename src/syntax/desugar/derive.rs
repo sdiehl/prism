@@ -8,7 +8,7 @@ use super::synonyms::subst_ty;
 use super::{call, eint, evar, lam1, sp, spat};
 use crate::core::builtins::Builtin;
 use crate::core::contract_digest;
-use crate::error::{ErrKind, TypeError};
+use crate::error::{suggest, ErrKind, TypeError};
 use crate::fmt::decl::fmt_ty;
 use crate::names::{
     self, ARBITRARY_METHOD, CHILDREN_METHOD, DECODE_METHOD, ENCODE_METHOD, EQ_METHOD, FAIL_OP,
@@ -19,7 +19,7 @@ use crate::names::{
 };
 use crate::syntax::ast::{
     Arm, BigInt, BinOp, Constraint, Ctor, CtorShape, DataDecl, Decl, Expr, Fip, InstanceDecl,
-    IntLit, Param, PathOp, PathStep, Pattern, Program, Suffix, Total, Ty, S,
+    IntLit, Param, PathOp, PathStep, Pattern, Program, Row, Suffix, Total, Ty, S,
 };
 use crate::types::{
     ARBITRARY_CLASS, CONS, EQ_CLASS, FROM_JSON_CLASS, HASH_CLASS, IDENTIFIABLE,
@@ -133,6 +133,11 @@ pub(super) fn derive_instances(
     // derive (or hand-write) a `Stable` instance. Read once so a `deriving
     // (Stable)` can check its fields structurally at the derive site.
     let stable_types = stable_type_set(prog);
+    // The optic library's lens constructor, canonically spelled, when the module
+    // imports it. Presence in the value namespace is the whole condition: a
+    // derived field lens is one application of it, so where it is out of scope
+    // `deriving (Lens)` synthesizes the accessor pair alone.
+    let mk_lens = value_canon.get(names::OPTIC_MK_LENS).cloned();
     // Every data declaration in the merged program, by canonical name. A derived
     // `Plate` reads the whole set, not just the derived type: seeing through the
     // carrier records an AST holds its nodes in (a match arm, a spanned wrapper)
@@ -142,20 +147,28 @@ pub(super) fn derive_instances(
         prog.types.iter().map(|d| (d.name.as_str(), d)).collect();
     let mut out = Vec::new();
     let mut fns = Vec::new();
+    // Which type claimed each accessor name, so a second record deriving `Lens`
+    // over a field name the first one already took is reported here rather than
+    // reaching Core as two definitions of one name at two types.
+    let mut accessors: BTreeMap<String, String> = BTreeMap::new();
     for d in &prog.types {
         let derives = expand_derives(&d.deriving);
         for (class, cspan) in &derives {
             // Lens is not a class: it synthesizes plain `<f>_of` / `with_<f>`
             // accessors, so it bypasses the class-existence and instance paths.
             if class == LENS {
-                fns.extend(derive_lens(d, *cspan)?);
+                fns.extend(derive_lens(d, *cspan, mk_lens.as_deref(), &mut accessors)?);
                 continue;
             }
             let Some(canon) = class_canon.get(class.as_str()) else {
                 return Err(ErrKind::UnknownDerivingClass {
                     class: class.clone(),
                 }
-                .at(*cspan));
+                .at(*cspan)
+                .maybe_help(suggest::suggestion(
+                    class,
+                    class_canon.keys().map(String::as_str),
+                )));
             };
             out.push(match class.as_str() {
                 EQ_CLASS => derive_eq(d, canon),
@@ -191,7 +204,31 @@ pub(super) fn derive_instances(
 // `<f>_of(r) = r.f` and a functional setter `with_<f>(r, v) = T { ..r, f = v }`.
 // These are ordinary functions (composable with `.`, FBIP-reused on unique
 // values), not optic types.
-fn derive_lens(d: &DataDecl, cspan: Span) -> Result<Vec<Decl>, TypeError> {
+//
+// When the optic library is in scope, each field also gets the two of them paired
+// into one first-class lens value named for its type and field (`Point.x` gives
+// `point_x`), which is what composition and lens-taking functions need. The pair
+// is what the optic type holds, so the value is the constructor applied to the
+// two functions and nothing more: no constraint on any type parameter (a lens
+// neither shows nor compares anything, so a phantom-branded record derives lenses
+// demanding nothing of its brand), no effect, and no new kind of node.
+//
+// `mk_lens` is the canonical name of that constructor, or `None` when the module
+// does not import the optic library, in which case only the accessor pair is
+// synthesized: the accessors predate the library and cost nothing, so a program
+// that never mentions lens values keeps working with no import.
+//
+// `accessors` carries the accessor names earlier derives in the same program
+// already claimed, mapped to the type that claimed them. The pair is named after
+// the field alone, so two records sharing a field name would define one name
+// twice at two types; the collision is refused here, where both types can be
+// named, rather than surfacing as an unbuildable Core witness.
+fn derive_lens(
+    d: &DataDecl,
+    cspan: Span,
+    mk_lens: Option<&str>,
+    accessors: &mut BTreeMap<String, String>,
+) -> Result<Vec<Decl>, TypeError> {
     let z = Z;
     let [ctor] = d.ctors.as_slice() else {
         return Err(ErrKind::LensNeedsRecord { ty: d.name.clone() }.at(cspan));
@@ -209,23 +246,79 @@ fn derive_lens(d: &DataDecl, cspan: Span) -> Result<Vec<Decl>, TypeError> {
     );
     let mut out = Vec::new();
     for (f, fty) in fields {
-        let get = sp(Expr::FieldAccess(Box::new(evar("_r", z)), f.clone()), z);
-        let mut g = mdecl(&format!("{f}_of"), &["_r"], get, z);
+        let getter = names::lens_getter(f);
+        let setter = names::lens_setter(f);
+        // The first type to claim a name owns it, so the report is the same
+        // whichever of the two is declared first: it always names the claimant.
+        let claimed = accessors.get(&getter).or_else(|| accessors.get(&setter));
+        if let Some(prior) = claimed.filter(|prior| *prior != &d.name) {
+            return Err(ErrKind::LensAccessorCollision {
+                ty: d.name.clone(),
+                prior_ty: prior.clone(),
+                field: f.clone(),
+                getter: getter.clone(),
+                setter: setter.clone(),
+            }
+            .at(cspan)
+            .with_help(format!(
+                "rename `{f}` on one of the two types, or drop `Lens` from one of the \
+                 `deriving` clauses and write the accessors by hand"
+            ))
+            .note(format!(
+                "the accessor pair is named after the field alone, and top-level names \
+                 share one flat namespace that holds one definition per name. The lens \
+                 values are named after their type, so `{}` and `{}` do not collide and \
+                 that half of the derivation is unaffected.",
+                names::lens_value(prior, f),
+                names::lens_value(&d.name, f)
+            )));
+        }
+        accessors.insert(getter.clone(), d.name.clone());
+        accessors.insert(setter.clone(), d.name.clone());
+        // Both accessors are built twice over the same receiver expression: once
+        // named, once anonymous inside the lens value below.
+        let read = |r| sp(Expr::FieldAccess(Box::new(r), f.clone()), z);
+        let write = |r| {
+            sp(
+                Expr::RecordUpdatePath(
+                    Box::new(r),
+                    vec![(vec![PathStep::Field(f.clone())], PathOp::Set(evar("_v", z)))],
+                ),
+                z,
+            )
+        };
+        let mut g = mdecl(&getter, &["_r"], read(evar("_r", z)), z);
         g.params[0].ty = Some(self_ty.clone());
         g.ret = Some(fty.clone());
         out.push(g);
-        let set = sp(
-            Expr::RecordUpdatePath(
-                Box::new(evar("_r", z)),
-                vec![(vec![PathStep::Field(f.clone())], PathOp::Set(evar("_v", z)))],
-            ),
-            z,
-        );
-        let mut s = mdecl(&format!("with_{f}"), &["_r", "_v"], set, z);
+        let mut s = mdecl(&setter, &["_r", "_v"], write(evar("_r", z)), z);
         s.params[0].ty = Some(self_ty.clone());
         s.params[1].ty = Some(fty.clone());
         s.ret = Some(self_ty.clone());
         out.push(s);
+        if let Some(mk) = mk_lens {
+            // The lens holds its own copy of the two accessors rather than naming
+            // them: the accessor names carry the field but not the type, so two
+            // records sharing a field name share their accessors, and a lens that
+            // referred to them by name would silently be a lens into whichever
+            // record was declared last. The receiver is ascribed because a lambda
+            // parameter is otherwise unknown at the field access, and which record
+            // a field belongs to is what resolves the access.
+            let recv = || sp(Expr::Ann(Box::new(evar("_r", z)), self_ty.clone()), z);
+            let read = lamn(&["_r"], read(recv()), z);
+            let write = lamn(&["_r", "_v"], write(recv()), z);
+            // A top-level value, not a function: it is inlined at each use site,
+            // so a lens on a polymorphic record is as general as its fields are
+            // without an annotation naming the optic type here.
+            let mut l = mdecl(
+                &names::lens_value(&d.name, f),
+                &[],
+                call(evar(mk, z), vec![read, write], z),
+                z,
+            );
+            l.konst = true;
+            out.push(l);
+        }
     }
     Ok(out)
 }
@@ -237,11 +330,50 @@ fn fvars(pre: &str, n: usize, z: Span) -> Vec<S<Pattern>> {
 }
 
 // One derived instance. `class` is the canonical class name (`Module.Class` for
-// an imported class, a bare name for a prelude one); the per-parameter context
-// requires the same class of each type argument, so a derived instance for
+// an imported class, a bare name for a prelude one); the context requires the
+// same class of each type argument a field mentions, so a derived instance for
 // `T(a)` reads `given C(a)`. `prefix` disambiguates the instance's own name.
 fn inst_skel(d: &DataDecl, class: &str, prefix: &str, methods: Vec<Decl>, z: Span) -> InstanceDecl {
     inst_with_ctx(d, class, prefix, methods, z, Some(class))
+}
+
+// Every type-variable name occurring syntactically in a type expression: a bare
+// variable, the head of a higher-kinded application (`f(a)` occurs `f` as well as
+// `a`), and the tail of an effect row (`! {E | e}` occurs `e`). Nesting is looked
+// through, so a variable is found however deep the constructors bury it. A name
+// bound by a nested `forall` counts too: the walk is deliberately syntactic, and
+// a shadowed name can only over-approximate, which is the conservative direction.
+fn ty_var_names(t: &Ty, out: &mut BTreeSet<String>) {
+    match t {
+        Ty::Var(n) | Ty::App(n, _) => {
+            out.insert(n.clone());
+        }
+        Ty::Fun(_, Row::Cons(_, Some(tail)), _) | Ty::RowLit(Row::Cons(_, Some(tail))) => {
+            out.insert(tail.clone());
+        }
+        _ => {}
+    }
+    t.each_child(&mut |c| ty_var_names(c, out));
+}
+
+// The type parameters a derived instance constrains: those a constructor's field
+// types actually mention. A phantom parameter (a phase brand, a unit marker) can
+// reach no derived method, so requiring an instance of it would reject the type
+// at every argument that has none, for a dictionary nothing could call. Occurrence
+// is transitive through type application, so a field typed `Option(List(a))` still
+// constrains `a`, and a recursive constructor's own occurrences are just more
+// field types.
+fn constrained_params(d: &DataDecl) -> Vec<&String> {
+    let mut occurring = BTreeSet::new();
+    for c in &d.ctors {
+        for a in &c.args {
+            ty_var_names(a, &mut occurring);
+        }
+    }
+    d.params
+        .iter()
+        .filter(|p| occurring.contains(p.as_str()))
+        .collect()
 }
 
 // As `inst_skel`, with the per-parameter context named separately. A derived
@@ -257,6 +389,7 @@ fn inst_with_ctx(
     z: Span,
     ctx: Option<&str>,
 ) -> InstanceDecl {
+    let params = constrained_params(d);
     InstanceDecl {
         name: format!("{prefix}{}", d.name),
         class: class.into(),
@@ -267,9 +400,9 @@ fn inst_with_ctx(
         context: ctx
             .into_iter()
             .flat_map(|c| {
-                d.params.iter().map(move |p| Constraint {
+                params.iter().map(move |p| Constraint {
                     class: c.into(),
-                    ty: Ty::Var(p.clone()),
+                    ty: Ty::Var((*p).clone()),
                     span: z,
                 })
             })
@@ -280,6 +413,21 @@ fn inst_with_ctx(
         module: crate::names::module_of(&d.name).to_string(),
         span: z,
     }
+}
+
+// A lambda of any arity, for the cases `lam1` cannot express.
+fn lamn(params: &[&str], body: S<Expr>, z: Span) -> S<Expr> {
+    let ps = params
+        .iter()
+        .map(|name| Param {
+            name: (*name).into(),
+            ty: None,
+            borrow: false,
+            pat: None,
+            default: None,
+        })
+        .collect();
+    sp(Expr::Lam(ps, Box::new(body)), z)
 }
 
 fn mdecl(name: &str, params: &[&str], body: S<Expr>, z: Span) -> Decl {
@@ -1770,4 +1918,88 @@ fn derive_plate<'a>(
         inst_with_ctx(d, class, "plate", vec![children, rebuild], Z, None),
         helpers,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{constrained_params, Ctor, DataDecl, Row, Ty, Z};
+    use crate::syntax::ast::EffLabel;
+    use crate::types::{LIST, OPTION};
+
+    fn decl(params: &[&str], args: Vec<Ty>) -> DataDecl {
+        DataDecl {
+            name: "T".into(),
+            params: params.iter().map(|p| (*p).to_string()).collect(),
+            param_kinds: Vec::new(),
+            ctors: vec![Ctor {
+                name: "MkT".into(),
+                args,
+                fields: None,
+            }],
+            deriving: Vec::new(),
+            newtype: false,
+            span: Z,
+        }
+    }
+
+    fn names(d: &DataDecl) -> Vec<String> {
+        constrained_params(d).into_iter().cloned().collect()
+    }
+
+    #[test]
+    fn phantom_param_is_unconstrained() {
+        let d = decl(&["a", "brand"], vec![Ty::Var("a".into())]);
+        assert_eq!(names(&d), ["a"]);
+    }
+
+    #[test]
+    fn occurrence_looks_through_nesting() {
+        let nested = Ty::Con(
+            OPTION.into(),
+            vec![Ty::Con(LIST.into(), vec![Ty::Var("a".into())])],
+        );
+        let d = decl(&["a"], vec![nested]);
+        assert_eq!(names(&d), ["a"]);
+    }
+
+    #[test]
+    fn higher_kinded_head_and_argument_both_occur() {
+        let d = decl(
+            &["f", "a"],
+            vec![Ty::App("f".into(), vec![Ty::Var("a".into())])],
+        );
+        assert_eq!(names(&d), ["f", "a"]);
+    }
+
+    #[test]
+    fn a_recursive_field_constrains_what_it_mentions() {
+        let d = decl(
+            &["a", "brand"],
+            vec![Ty::Con(
+                "T".into(),
+                vec![Ty::Var("a".into()), Ty::Var("brand".into())],
+            )],
+        );
+        assert_eq!(names(&d), ["a", "brand"]);
+    }
+
+    #[test]
+    fn a_row_tail_occurs() {
+        let field = Ty::Fun(
+            vec![Ty::Int],
+            Row::Cons(vec![EffLabel::bare("IO")], Some("e".into())),
+            Box::new(Ty::Int),
+        );
+        let d = decl(&["e", "brand"], vec![field]);
+        assert_eq!(names(&d), ["e"]);
+    }
+
+    #[test]
+    fn declaration_order_is_kept() {
+        let d = decl(
+            &["a", "b", "c"],
+            vec![Ty::Var("c".into()), Ty::Var("a".into())],
+        );
+        assert_eq!(names(&d), ["a", "c"]);
+    }
 }

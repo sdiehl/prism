@@ -2,13 +2,13 @@ fn main() =
   return 1 to t@731
   return 5 to t@732
   enum_from_to(t@731, t@732) to t@733
-  Data.Foldable.sum$sp2(t@733) to t@735
-  print t@735 to t@736
+  Data.Foldable.sum$sp2(t@733) to t@736
+  print t@736 to t@737
   print_nl
-  return 1 to t@737
-  return 3 to t@738
-  return 9 to t@739
-  enum_from_then_to(t@737, t@738, t@739) to t@740
-  Data.Foldable.sum$sp2(t@740) to t@742
-  print t@742 to t@743
+  return 1 to t@738
+  return 3 to t@739
+  return 9 to t@740
+  enum_from_then_to(t@738, t@739, t@740) to t@741
+  Data.Foldable.sum$sp2(t@741) to t@744
+  print t@744 to t@745
   print_nl

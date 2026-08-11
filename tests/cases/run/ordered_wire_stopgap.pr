@@ -14,7 +14,6 @@
 --   FAULT: map arrived ordered by a different Ord(k)
 
 import Wire (..)
-
 import Data.Map (..)
 
 fn body_ok(body : Bytes) : String =

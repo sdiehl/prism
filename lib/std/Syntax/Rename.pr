@@ -30,17 +30,11 @@
 -- without an interface change.
 
 import Data.Foldable (length)
-
 import Data.List (concat_map, filter, map)
-
 import Syntax.Edit (..)
-
 import Syntax.Lex (..)
-
 import Syntax.Resolved (..)
-
 import Syntax.Source (..)
-
 import Syntax.Token (..)
 
 -- | One variable reference: the node id the checker facts join on, the exact

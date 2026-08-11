@@ -1,0 +1,395 @@
+-- | Lenses: a getter and a setter carried together as one first-class value.
+--
+-- A `Lens(s, a)` names one `a` sitting inside an `s`, so reading it, writing it
+-- and modifying it are three calls against one value instead of three separate
+-- spellings of the same route. The usual constructor is the path literal:
+-- `#path pos.x` expands to exactly the `lens` call below, and the anchored form
+-- `#path Player.pos.x` names its root type so it sits inline with no
+-- surrounding annotation, a route of any depth in one spelling. `deriving
+-- (Lens)` also synthesizes a getter `f_of` and a functional setter `with_f` for
+-- every record field, and that pair is exactly what this type holds, so a field
+-- lens is also `lens(hp_of, with_hp)`; where this module is imported the
+-- derivation goes one step further and pairs them itself, giving one lens value
+-- per field named for its type and field (`Player.hp` gives `player_hp`).
+--
+-- What paying for the value buys is composition and abstraction:
+-- `compose_lens` glues a lens into the whole to a lens into the part, and the
+-- result is an ordinary lens that a caller reads and writes without knowing how
+-- deep it reaches or which fields it crosses. A function that takes a `Lens(s,
+-- a)` works against any state that has an `a` somewhere in it.
+--
+-- Both halves are pure, so a lens hides no effects and every operation here is a
+-- direct call with a known shape. The `Control.State` bridge (`gets_at`,
+-- `set_at`, `modify_at`) is where that pays off for threaded state: a rule
+-- reaches one field of the state without spelling a `get`, a `put` and a record
+-- update at every step.
+--
+-- A well-behaved lens satisfies three laws, which the ones built here do and
+-- which a hand-written pair should be checked against: reading back what was
+-- just written returns it (`view(l, lens_set(l, x, v)) == v`), writing what was
+-- just read changes nothing (`lens_set(l, x, view(l, x)) == x`), and the last
+-- write wins (`lens_set(l, lens_set(l, x, u), v) == lens_set(l, x, v)`).
+--
+-- A `Traversal(s, a)` is the same idea with many foci instead of one: it reads
+-- every `a` in an `s` and rebuilds the `s` from replacements. Lenses and
+-- traversals compose in either order, and the result is a traversal, so a route
+-- that crosses a list stays one value. `over_eff` and `traverse_of_eff` take a
+-- modifying function carrying an open effect row, which is what a rewriting pass
+-- needs: the rule reads and writes state while the optic decides where it lands.
+--
+-- ```prism
+-- # import Control.State (..)
+-- type Point = Point { x : Int, y : Int }
+-- type Box = Box { at : Point, w : Int }
+--
+-- let box_x : Lens(Box, Int) = #path Box.at.x
+--
+-- fn main() =
+--   let b = Box { at = Point { x = 1, y = 2 }, w = 10 }
+--   println(view(box_x, b))
+--   println(view(box_x, lens_set(box_x, b, 9)))
+--   let bumped = exec_state(b, \() -> modify_at(#path Box.at.x, \(n) -> n + 41))
+--   println(bumped.at.x)
+-- ```
+-- ```output
+-- 1
+-- 9
+-- 42
+-- ```
+--
+-- Opt-in: not in Base.
+
+import Control.State (..)
+import Data.List (map, zip_with)
+
+-- | A getter and a setter for one `part` inside one `whole`, paired.
+--
+-- The constructor is spelled `MkLens` rather than `Lens` on purpose:
+-- constructors share one flat namespace with every module in the program, so a
+-- constructor named for its type is a name every other module has to avoid.
+-- Build one through `lens`, which is the door this module documents.
+pub type Lens(whole, part) = MkLens((whole) -> part, (whole, part) -> whole)
+
+-- | Pair a getter with a setter. `read(x)` extracts the focus; `write(x, v)`
+-- returns `x` with the focus replaced by `v` and everything else untouched.
+--
+-- The two arguments have the shapes `deriving (Lens)` synthesizes, so a lens on
+-- a record field is the getter and the setter handed straight over.
+--
+-- ```prism
+-- view(lens(fst, \(p, v) -> (v, snd(p))), (1, 2))
+-- ```
+-- ```output
+-- 1
+-- ```
+pub fn lens(read : (s) -> a, write : (s, a) -> s) : Lens(s, a) = MkLens(read, write)
+
+-- | Read the focus of `l` out of `x`.
+--
+-- ```prism
+-- view(lens_snd, (1, 2))
+-- ```
+-- ```output
+-- 2
+-- ```
+pub fn view(l : Lens(s, a), x : s) : a =
+  match l of
+    MkLens(read, _write) => read(x)
+
+-- | Replace the focus of `l` in `x` with `v`, leaving the rest of `x` alone.
+--
+-- Named `lens_set` rather than `set`, which `Incr` already exports: a program
+-- importing both would have to qualify every use of the shorter name.
+--
+-- ```prism
+-- lens_set(lens_fst, (1, 2), 9)
+-- ```
+-- ```output
+-- (9, 2)
+-- ```
+pub fn lens_set(l : Lens(s, a), x : s, v : a) : s =
+  match l of
+    MkLens(_read, write) => write(x, v)
+
+-- | Apply `f` to the focus of `l` in `x`. One read and one write, so a lens
+-- whose setter reuses a uniquely owned value updates in place.
+--
+-- ```prism
+-- over(lens_snd, \(n) -> n * 10, (1, 2))
+-- ```
+-- ```output
+-- (1, 20)
+-- ```
+pub fn over(l : Lens(s, a), f : (a) -> a, x : s) : s =
+  match l of
+    MkLens(read, write) => write(x, f(read(x)))
+
+-- | `over` for a modifying function that carries effects. The row is open, so
+-- the rewrite inherits whatever the function does and nothing else: handing it a
+-- pure function gives back a pure result.
+--
+-- This is the shape a rewriting pass wants. A rule that reads and writes solver
+-- state while it rebuilds a term is a `(a) -> a ! {State(m)}`, and putting it
+-- through a lens leaves it a rule about the part, never about the whole.
+--
+-- ```prism
+-- # import Control.State (..)
+-- fn ticked(n : Int) : Int ! {State(Int)} =
+--   modify(\(c) -> c + 1)
+--   n * 10
+--
+-- fn main() =
+--   println(run_state(0, \() -> over_eff(lens_snd, ticked, (1, 2))))
+-- ```
+-- ```output
+-- ((1, 20), 1)
+-- ```
+pub fn over_eff(l : Lens(s, a), f : (a) -> a ! {| e}, x : s) : s ! { | e} =
+  let v = f(view(l, x))
+  lens_set(l, x, v)
+
+-- | Focus through `outer` and then through `inner`, giving one lens that
+-- reaches the inner part of the outer whole. Composition is associative and
+-- preserves the three laws, so a route of any depth stays one ordinary lens.
+--
+-- ```prism
+-- let deep = compose_lens(lens_snd, lens_fst)
+-- (view(deep, (1, (2, 3))), lens_set(deep, (1, (2, 3)), 9))
+-- ```
+-- ```output
+-- (2, (1, (9, 3)))
+-- ```
+pub fn compose_lens(outer : Lens(s, a), inner : Lens(a, b)) : Lens(s, b) =
+  let read = \(x) -> view(inner, view(outer, x))
+  let write = \(x, v) -> lens_set(outer, x, lens_set(inner, view(outer, x), v))
+  lens(read, write)
+
+-- | The lens that focuses the whole value: composing with it changes nothing.
+--
+-- ```prism
+-- lens_set(lens_id, 1, 2)
+-- ```
+-- ```output
+-- 2
+-- ```
+pub let lens_id : Lens(a, a) = MkLens(\(x) -> x, \(_x, v) -> v)
+
+-- | The first component of a pair.
+--
+-- ```prism
+-- over(lens_fst, \(n) -> n + 1, (1, 2))
+-- ```
+-- ```output
+-- (2, 2)
+-- ```
+pub let lens_fst : Lens((a, b), a) = MkLens(fst, \(p, v) -> (v, snd(p)))
+
+-- | The second component of a pair.
+--
+-- ```prism
+-- over(lens_snd, \(n) -> n + 1, (1, 2))
+-- ```
+-- ```output
+-- (1, 3)
+-- ```
+pub let lens_snd : Lens((a, b), b) = MkLens(snd, \(p, v) -> (fst(p), v))
+
+-- | Read the part of the threaded state that `l` focuses.
+--
+-- ```prism
+-- # import Control.State (..)
+-- eval_state((1, 2), \() -> gets_at(lens_snd))
+-- ```
+-- ```output
+-- 2
+-- ```
+pub fn gets_at(l : Lens(s, a)) : a ! {State(s)} = view(l, get())
+
+-- | Overwrite the part of the threaded state that `l` focuses, leaving the rest
+-- of the state as it was.
+--
+-- ```prism
+-- # import Control.State (..)
+-- exec_state((1, 2), \() -> set_at(lens_fst, 9))
+-- ```
+-- ```output
+-- (9, 2)
+-- ```
+pub fn set_at(l : Lens(s, a), v : a) : Unit ! {State(s)} =
+  put(lens_set(l, get(), v))
+
+-- | Apply `f` to the part of the threaded state that `l` focuses. This is the
+-- one-line form of a get, a modify of one field and a put.
+--
+-- ```prism
+-- # import Control.State (..)
+-- let deep = compose_lens(lens_snd, lens_fst)
+-- exec_state((1, (2, 3)), \() -> modify_at(deep, \(n) -> n * 10))
+-- ```
+-- ```output
+-- (1, (20, 3))
+-- ```
+pub fn modify_at(l : Lens(s, a), f : (a) -> a) : Unit ! {State(s)} =
+  put(over(l, f, get()))
+
+-- | Many foci instead of one: a read of every `part` inside a `whole`, and a
+-- rebuild of the `whole` from replacements for exactly those parts.
+--
+-- The pair is the same children-and-rebuild shape a generic walk runs on, which
+-- is what keeps a traversal first-order: nothing here is a higher-rank function
+-- and no effect hides inside the value. Effects enter at the call, not in the
+-- optic, which is why `traverse_of_eff` can carry an open row while the
+-- traversal it runs stays a plain pair of pure functions.
+--
+-- The obligation on a hand-written pair: `write_all` is only ever handed a list
+-- as long as the one `read_all` returned, in the same order, and rebuilding with
+-- the parts just read has to give the original back
+-- (`set_all(t, x, collect_of(t, x)) == x`). Every traversal built here holds to
+-- that, and composition preserves it.
+pub type Traversal(whole, part) = MkTraversal(
+  (whole) -> List(part),
+  (whole, List(part)) -> whole
+)
+
+-- | Pair a reader of every focus with a rebuilder, in that order.
+--
+-- ```prism
+-- fn pair_kids(p : (Int, Int)) : List(Int) = [fst(p), snd(p)]
+--
+-- fn pair_fill(p : (Int, Int), vs : List(Int)) : (Int, Int) =
+--   match vs of
+--     Cons(a, Cons(b, _)) => (a, b)
+--     _ => p
+--
+-- fn main() =
+--   println(over_all(traversal(pair_kids, pair_fill), \(n) -> n + 1, (1, 2)))
+-- ```
+-- ```output
+-- (2, 3)
+-- ```
+pub fn traversal(
+  read_all : (s) -> List(a),
+  write_all : (s, List(a)) -> s
+) : Traversal(s, a) =
+  MkTraversal(read_all, write_all)
+
+-- | Every focus of `t` in `x`, in traversal order. The `view` of many foci.
+--
+-- ```prism
+-- collect_of(each_of_list, [1, 2, 3])
+-- ```
+-- ```output
+-- [1, 2, 3]
+-- ```
+pub fn collect_of(t : Traversal(s, a), x : s) : List(a) =
+  match t of
+    MkTraversal(read_all, _write_all) => read_all(x)
+
+-- | Rebuild `x` with `vs` standing in for its foci. The list has to be the one
+-- `collect_of` returned, modified elementwise: a shorter or reordered list is
+-- outside what a traversal promises.
+--
+-- ```prism
+-- set_all(compose_lens_traversal(lens_snd, each_of_list), (1, [2, 3]), [8, 9])
+-- ```
+-- ```output
+-- (1, [8, 9])
+-- ```
+pub fn set_all(t : Traversal(s, a), x : s, vs : List(a)) : s =
+  match t of
+    MkTraversal(_read_all, write_all) => write_all(x, vs)
+
+-- | Apply `f` to every focus of `t` in `x`. The `over` of many foci.
+--
+-- ```prism
+-- over_all(each_of_list, \(n) -> n * 2, [1, 2, 3])
+-- ```
+-- ```output
+-- [2, 4, 6]
+-- ```
+pub fn over_all(t : Traversal(s, a), f : (a) -> a, x : s) : s =
+  set_all(t, x, map(f, collect_of(t, x)))
+
+-- | `over_all` for a modifying function that carries effects: the result carries
+-- whatever the function does and nothing else. Foci are visited in traversal
+-- order, so the effects happen in that order too.
+--
+-- ```prism
+-- # import Control.State (..)
+-- fn counted(n : Int) : Int ! {State(Int)} =
+--   modify(\(c) -> c + n)
+--   n * 2
+--
+-- fn main() =
+--   println(run_state(0, \() -> traverse_of_eff(each_of_list, counted, [1, 2, 3])))
+-- ```
+-- ```output
+-- ([2, 4, 6], 6)
+-- ```
+pub fn traverse_of_eff(
+  t : Traversal(s, a),
+  f : (a) -> a ! {| e},
+  x : s
+) : s ! { | e} =
+  let vs = map(f, collect_of(t, x))
+  set_all(t, x, vs)
+
+-- | Every element of a list. The traversal composition usually starts from.
+--
+-- ```prism
+-- over_all(each_of_list, \(n) -> n + 1, [1, 2, 3])
+-- ```
+-- ```output
+-- [2, 3, 4]
+-- ```
+pub let each_of_list : Traversal(List(a), a) =
+  MkTraversal(\(xs) -> xs, \(_xs, ys) -> ys)
+
+-- | Focus through a lens and then through a traversal. One `a` inside the whole,
+-- then every `b` inside that `a`, so the result is a traversal.
+--
+-- ```prism
+-- collect_of(compose_lens_traversal(lens_snd, each_of_list), (1, [2, 3]))
+-- ```
+-- ```output
+-- [2, 3]
+-- ```
+pub fn compose_lens_traversal(
+  outer : Lens(s, a),
+  inner : Traversal(a, b)
+) : Traversal(s, b) =
+  let read_all = \(x) -> collect_of(inner, view(outer, x))
+  let write_all =
+    \(x, vs) -> lens_set(outer, x, set_all(inner, view(outer, x), vs))
+  traversal(read_all, write_all)
+
+-- | Focus through a traversal and then through a lens. Every `a` inside the
+-- whole, then the one `b` inside each of those, so the result is again a
+-- traversal: one focus per focus of the outer one, in the same order.
+--
+-- ```prism
+-- over_all(compose_traversal_lens(each_of_list, lens_fst), \(n) -> n * 10, [(1, 2), (3, 4)])
+-- ```
+-- ```output
+-- [(10, 2), (30, 4)]
+-- ```
+pub fn compose_traversal_lens(
+  outer : Traversal(s, a),
+  inner : Lens(a, b)
+) : Traversal(s, b) =
+  let read_all = \(x) -> map(\(y) -> view(inner, y), collect_of(outer, x))
+  let write_all = \(x, vs) -> set_all(outer, x, zip_with(\(y, v) -> lens_set(inner, y, v), collect_of(outer, x), vs))
+  traversal(read_all, write_all)
+
+-- | Apply `f` to every part of the threaded state that `t` focuses, the many
+-- foci form of `modify_at`.
+--
+-- ```prism
+-- # import Control.State (..)
+-- exec_state([1, 2, 3], \() -> modify_all_at(each_of_list, \(n) -> n * 2))
+-- ```
+-- ```output
+-- [2, 4, 6]
+-- ```
+pub fn modify_all_at(t : Traversal(s, a), f : (a) -> a) : Unit ! {State(s)} =
+  put(over_all(t, f, get()))

@@ -12,7 +12,7 @@ The public functions start at the declaration keyword and return a complete `Ite
 
 ### `parse_pattern_decl`
 
-```prism,sig,h-ff531a5ef091a4294287761140053ae9f25822e8981e8673fd683db343666f64
+```prism,sig,h-98711f5784452933b4921acc4d37ad88eff73e9f94e2ac0b3f6612931724cd3b
 parse_pattern_decl : (Syntax.Cursor.Cursor, Int, Option(String)) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Item)
 ```
 
@@ -22,7 +22,7 @@ The clause assembler enforces the surface contract at parse time: one one-argume
 
 ### `parse_stable_decl`
 
-```prism,sig,h-e5c71c794fb627a76dfb83ccddc31c9bfb3ef19fd5944e107d5fa0519f2c773f
+```prism,sig,h-57744d805fe9060e76f26175d3316e98fe53286111ddfd1618ec0a92f27c62a2
 parse_stable_decl : (Syntax.Cursor.Cursor, Int, Option(String)) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Item)
 ```
 

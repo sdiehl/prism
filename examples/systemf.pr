@@ -22,17 +22,12 @@
 --   bad branches       : error: cannot unify Int with Bool
 
 import Control.State (..)
-
 import Control.Fresh (Fresh, run_fresh)
-
+import Data.Optic (Lens, lens, gets_at, modify_at)
 import Data.String (contains)
-
 import Data.Result (result_or)
-
 import Data.Name (Name, Binder, fresh_binder, bound_name, name_id)
-
 import Data.Scope (Scope, scope_empty, scope_push, scope_lookup)
-
 import Data.UnionFind.Payload (UnionFind, ufp_empty, ufp_find, ufp_insert, ufp_set, ufp_union_with)
 
 -- The surface syntax: types and terms as the programmer spells them.
@@ -217,6 +212,11 @@ type Metas = Metas { forest: UnionFind(Int, Meta), next: Int }
 
 type Solver = Solver { metas: Metas }
 
+-- The one stored route every forest update takes. The literal is anchored at
+-- its root type, so it composes both field steps in one spelling and the
+-- binding needs no annotation; rules below never unpack either record.
+let solver_forest = #path Solver.metas.forest
+
 -- The checker stack has one name at every recursive boundary.
 alias Tc = {State(Solver), TypeError}
 
@@ -233,38 +233,32 @@ fn merge_meta(kept : Meta, lost : Meta) : Meta =
     (Unsolved, other) => other
 
 -- The three state changes below are the whole mutable-looking solver: every
--- one is an update of `metas.forest`, and allocation also ticks `metas.next`.
--- The `result_or` fallbacks are for keys the forest cannot actually lack: a
--- meta is inserted the moment it is allocated, and `next` never repeats.
+-- one is an update of `metas.forest`, and allocation also ticks `metas.next`,
+-- which the ambient-state statement bumps in place. The `result_or` fallbacks
+-- are for keys the forest cannot actually lack: a meta is inserted the moment
+-- it is allocated, and `next` never repeats.
 fn fresh_meta() : RTy ! {State(Solver)} =
-  let s = get()
-  let n = s.metas.next
-  let grown = result_or(s.metas.forest, ufp_insert(s.metas.forest, n, Unsolved))
-  put({ s | metas = Metas { forest = grown, next = n + 1 } })
+  let n = get().metas.next
+  modify_at(solver_forest, \(f) -> result_or(f, ufp_insert(f, n, Unsolved)))
+  get().metas.next += 1
   RMeta(n)
 
 fn root(a : Int) : Int ! {State(Solver)} =
-  let s = get()
-  match ufp_find(s.metas.forest, a) of
+  match ufp_find(gets_at(solver_forest), a) of
     Some((r, _meta)) => r
     None => a
 
 fn link(a : Int, b : Int) : Unit ! {State(Solver)} =
-  let s = get()
-  let joined =
-    result_or(s.metas.forest, ufp_union_with(merge_meta, s.metas.forest, a, b))
-  put({ s | metas.forest = joined })
+  modify_at(solver_forest) fn(f)
+    result_or(f, ufp_union_with(merge_meta, f, a, b))
 
 fn solution(a : Int) : Option(RTy) ! {State(Solver)} =
-  let s = get()
-  match ufp_find(s.metas.forest, a) of
+  match ufp_find(gets_at(solver_forest), a) of
     Some((_r, Solved(t))) => Some(t)
     _ => None
 
 fn assign(a : Int, ty : RTy) : Unit ! {State(Solver)} =
-  let s = get()
-  let solved = result_or(s.metas.forest, ufp_set(s.metas.forest, a, Solved(ty)))
-  put({ s | metas.forest = solved })
+  modify_at(solver_forest, \(f) -> result_or(f, ufp_set(f, a, Solved(ty))))
 
 fn zonk(ty : RTy) : RTy ! {State(Solver)} =
   match ty of
@@ -429,54 +423,26 @@ fn infer(env : Env, expr : RExpr) : RTy ! {Tc} =
 
 fn infer_binop(env : Env, op : Op, x : RExpr, y : RExpr) : RTy ! {Tc} =
   match op of
-    Add =>
-      subsume(infer(env, x), RInt)
-      subsume(infer(env, y), RInt)
-      RInt
-    Sub =>
-      subsume(infer(env, x), RInt)
-      subsume(infer(env, y), RInt)
-      RInt
-    Mul =>
-      subsume(infer(env, x), RInt)
-      subsume(infer(env, y), RInt)
-      RInt
-    Div =>
-      subsume(infer(env, x), RInt)
-      subsume(infer(env, y), RInt)
-      RInt
-    Lt =>
-      subsume(infer(env, x), RInt)
-      subsume(infer(env, y), RInt)
-      RBool
-    Le =>
-      subsume(infer(env, x), RInt)
-      subsume(infer(env, y), RInt)
-      RBool
-    Gt =>
-      subsume(infer(env, x), RInt)
-      subsume(infer(env, y), RInt)
-      RBool
-    Ge =>
-      subsume(infer(env, x), RInt)
-      subsume(infer(env, y), RInt)
-      RBool
-    And =>
-      subsume(infer(env, x), RBool)
-      subsume(infer(env, y), RBool)
-      RBool
-    Or =>
-      subsume(infer(env, x), RBool)
-      subsume(infer(env, y), RBool)
-      RBool
-    Eq =>
-      let a = infer(env, x)
-      subsume(infer(env, y), a)
-      RBool
-    Ne =>
-      let a = infer(env, x)
-      subsume(infer(env, y), a)
-      RBool
+    Add | Sub | Mul | Div => infer_uniform_binop(env, x, y, RInt, RInt)
+    Lt | Le | Gt | Ge => infer_uniform_binop(env, x, y, RInt, RBool)
+    And | Or => infer_uniform_binop(env, x, y, RBool, RBool)
+    Eq | Ne => infer_equality(env, x, y)
+
+fn infer_uniform_binop(
+  env : Env,
+  x : RExpr,
+  y : RExpr,
+  operand : RTy,
+  result : RTy
+) : RTy ! {Tc} =
+  subsume(infer(env, x), operand)
+  subsume(infer(env, y), operand)
+  result
+
+fn infer_equality(env : Env, x : RExpr, y : RExpr) : RTy ! {Tc} =
+  let operand = infer(env, x)
+  subsume(infer(env, y), operand)
+  RBool
 
 fn check_resolved(r : RExpr) : RTy ! {Tc} = zonk(infer(empty_env(), r))
 

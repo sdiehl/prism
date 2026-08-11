@@ -15,7 +15,7 @@
 -- | A dense array of unboxed one-word elements. The payload variant is chosen
 -- by the element's `FlatElem` instance; the phantom parameter keeps the two
 -- payloads from ever mixing at the type level.
-pub type FlatArray(a) = FloatArr(FloatBuf) | IntArr(IntBuf)
+opaque type FlatArray(a) = FloatArr(FloatBuf) | IntArr(IntBuf)
 
 -- | The element contract: how a one-word scalar enters and leaves the flat
 -- storage. Instances exist for `Float` and `I64`.
@@ -61,7 +61,7 @@ instance flatI64 : FlatElem(I64)
 -- ```output
 -- 3
 -- ```
-pub fn fa_len(xs : FlatArray(a)) : Int =
+pub fn fa_len(borrow xs : FlatArray(a)) : Int =
   match xs of
     FloatArr(b) => tbuf_len(b)
     IntArr(b) => ibuf_len(b)

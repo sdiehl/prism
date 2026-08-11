@@ -8,7 +8,7 @@
 -- a frozen view can never observe later writes to its source.
 
 -- | An immutable array of `a`.
-pub type Frozen(a) = Frz(Array(a))
+opaque newtype Frozen(a) = Frz(Array(a))
 
 -- | Freeze a growable array, O(1). Value semantics guarantee the frozen view
 -- is independent of any later writes to `arr`.
@@ -19,7 +19,7 @@ pub type Frozen(a) = Frz(Array(a))
 -- ```output
 -- 3
 -- ```
-pub fn fz_freeze(arr : Array(a)) : Frozen(a) = Frz(arr)
+pub fn fz_freeze(arr : Array(a)) : Frozen(a) @ noalloc = Frz(arr)
 
 -- | Build a frozen array from a list.
 --
@@ -33,12 +33,12 @@ pub fn fz_of_list(xs : List(a)) : Frozen(a) = Frz(array_of_list(xs))
 
 -- | A growable array with the frozen contents. The frozen view is unaffected
 -- by writes to the result (a shared array copies on write).
-pub fn fz_thaw(xs : Frozen(a)) : Array(a) =
+pub fn fz_thaw(xs : Frozen(a)) : Array(a) @ noalloc =
   match xs of
     Frz(arr) => arr
 
 -- | The element count.
-pub fn fz_len(xs : Frozen(a)) : Int =
+pub fn fz_len(borrow xs : Frozen(a)) : Int =
   match xs of
     Frz(arr) => array_len(arr)
 

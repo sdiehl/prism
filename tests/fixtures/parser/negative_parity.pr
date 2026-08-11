@@ -7,13 +7,9 @@
 -- span. Prints `ok` on agreement and one named divergence otherwise.
 
 import Syntax.Lex (..)
-
 import Syntax.Codec (..)
-
 import Syntax.Parse (..)
-
 import Syntax.Diagnostic (..)
-
 import Syntax.Source (Span)
 
 fn sorted(xs : List(String)) : List(String) = sort(xs)

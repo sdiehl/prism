@@ -2649,8 +2649,8 @@ mod tests {
     //
     // Tested here rather than on a program because the pull-`Sequence` element
     // type stores its tail as a pure thunk, so no source pipeline can carry an
-    // effectful step past the checker today. The gate is what keeps that true
-    // of a combinator set that later admits one.
+    // effectful step past the checker. This gate also covers any combinator whose
+    // step arrives through an effectful parameter.
     #[test]
     fn an_effectful_thunk_parameter_cannot_pass_as_pure() {
         let mapper = CoreFnSig::new(
@@ -2743,12 +2743,10 @@ mod tests {
     }
 
     // Defense-in-depth guard, tested directly because no curated pipeline can
-    // reach it: every tail-advance value residualized into a join body
-    // references only the abstracted stream variables plus top-level functions
-    // and literals, never a binder introduced during driving. The guard exists
-    // so that if a future combinator shape breaks that invariant, the seed
-    // silently degrades to not-fusing instead of emitting an open join (a
-    // miscompile).
+    // reach it: every tail-advance value residualized into a join body references
+    // only the abstracted stream variables plus top-level functions and literals,
+    // never a binder introduced during driving. An open tail makes the seed
+    // degrade to not-fusing instead of emitting an open join (a miscompile).
     #[test]
     fn scope_guard_refuses_a_leaked_local() {
         let p = sym("p0");

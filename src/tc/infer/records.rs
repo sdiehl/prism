@@ -1,7 +1,8 @@
 use marginalia::Span;
 
 use super::paths::{field_prefix, show_path};
-use crate::error::{ErrKind, TypeError};
+use crate::error::{suggest, ErrKind, TypeError};
+use crate::names;
 use crate::syntax::ast::{Core, Expr, NodeId, PathOp, PathStep, S};
 use crate::types::ty::Type;
 
@@ -20,6 +21,10 @@ impl Tc<'_> {
                 ctor: ctor_name.to_string(),
             }
             .at(span)
+            .maybe_help(suggest::suggestion(
+                ctor_name,
+                self.ctors.keys().map(|k| names::bare_name(k)),
+            ))
         })?;
         if info.fields.is_empty() {
             return Err(ErrKind::NotRecordCtor {
@@ -39,6 +44,10 @@ impl Tc<'_> {
                         ctor: ctor_name.to_string(),
                     }
                     .at(span)
+                    .maybe_help(suggest::suggestion(
+                        field_name,
+                        info.fields.iter().map(|f| f.as_str()),
+                    ))
                 })?;
             let mut ft = info.args[fi].clone();
             for (pn, t) in &tsubs {
@@ -79,6 +88,10 @@ impl Tc<'_> {
                 ctor: ctor_name.to_string(),
             }
             .at(span)
+            .maybe_help(suggest::suggestion(
+                ctor_name,
+                self.ctors.keys().map(|k| names::bare_name(k)),
+            ))
         })?;
         let (result_ty, tsubs, rsubs) = self.open_ctor(&info);
         self.check(env, base_expr, &result_ty)?;
@@ -93,6 +106,10 @@ impl Tc<'_> {
                         ctor: ctor_name.to_string(),
                     }
                     .at(span)
+                    .maybe_help(suggest::suggestion(
+                        field_name,
+                        info.fields.iter().map(|f| f.as_str()),
+                    ))
                 })?;
             let mut ft = info.args[fi].clone();
             for (pn, t) in &tsubs {

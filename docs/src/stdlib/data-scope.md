@@ -41,7 +41,7 @@ The empty scope: no spelling resolves.
 
 ### `scope_push`
 
-```prism,sig,h-7189095879747c2140a0430c071f09118dc03ec0abcb68f76ef212cdaeaa50a3
+```prism,sig,h-69ace4f7b553da3cd2ddbc91f0664e39ca2adfa051a150c6804a0fe9138ff769
 scope_push : forall a. (Data.Scope.Scope(a), Data.Name.Binder(a)) -> Data.Scope.Scope(a)
 ```
 
@@ -49,7 +49,7 @@ Bring `binder` into force for its own hint spelling, shadowing any binder alread
 
 ### `scope_lookup`
 
-```prism,sig,h-b1ef075c3019fd9d9cecd2dbecadda88c7f35fc6675b8ff6f0096776ab0cbcbc
+```prism,sig,h-9f518cff5f8ea2f08a956e8a3984b0da572a8acaf6106cf43cbaed073fce24d4
 scope_lookup : forall a. (Data.Scope.Scope(a), String) -> Result(Data.Name.Binder(a), Data.Scope.ScopeError)
 ```
 
@@ -57,7 +57,7 @@ The innermost binder in force for `spelling`, or `ScopeUnknown`.
 
 ### `scope_pop`
 
-```prism,sig,h-d6953cf82b24b1143900a1643efc5700ce993e634ca97614acac9fc494fa5e5f
+```prism,sig,h-1b40042294d32d30b1abf73e25f854edfa75da002831485cb3a0028220e087b3
 scope_pop : forall a. (Data.Scope.Scope(a), String) -> Result(Data.Scope.Scope(a), Data.Scope.ScopeError)
 ```
 
@@ -65,7 +65,7 @@ Leave the innermost binding for `spelling`, restoring whatever it shadowed; popp
 
 ### `scope_depth`
 
-```prism,sig,h-f343f4c490c7692819d7e554b5023f87bd61ed14e8e8c478d3ee0eae03364e0b
+```prism,sig,h-835e188fd382faa5df7372ae06faf166374fa3f3a4779c181104ae596cee8b38
 scope_depth : forall a. (Data.Scope.Scope(a), String) -> Int
 ```
 

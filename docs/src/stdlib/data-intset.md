@@ -4,16 +4,26 @@
 
 Sets of 64-bit integers, reusing the patricia trie.
 
-An `IntSet` is `IntMap(Unit)`, the same big-endian radix trie carrying no payload, exactly as `Data.Set` is `Data.Map` at `Unit`. Sharing the type rather than declaring a second one keeps a single trie implementation, so the canonical-shape argument in `Data.IntMap` is made once and covers both: a set is determined by its elements, its iteration order is ascending regardless of insertion order, and structural equality is set equality. Set algebra is the map algebra at `Unit`, where the union's left bias cannot be observed. Sharing the type also avoids a second instance head; instance resolution keys on the head type constructor, so a distinct `IntSet` newtype would need its own `Eq` and `Show` while an alias-free reuse inherits `IntMap`'s.
+`IntSet` is an opaque, zero-cost newtype over `IntMap(Unit)`. The wrapper keeps the set/map APIs distinct while reusing the single canonical trie implementation: a set is determined by its elements, iteration is ascending regardless of insertion order, and structural equality is set equality.
 
 Elements are `I64` for the reason keys are in `Data.IntMap`: branching is a bit test on a fixed-width word. Opt-in: not in Base.
+
+## Types
+
+### `IntSet`
+
+```prism,def,h-ff17748d7423626fada3122ed59d125fc875b8fdea2427ed741c7c653777e99c
+newtype IntSet = IntSet(IntMap(Unit))
+```
+
+A set of fixed-width integers. Its trie and unit payload are private.
 
 ## Functions and Values
 
 ### `intset_empty`
 
-```prism,sig,h-8f731050b711689c817b8da694a863ece70d5b8770fd56007f09666464d65af9
-intset_empty : Data.IntMap.IntMap(Unit)
+```prism,sig,h-64884280d336b314c43ead62404d3aea1d027ba677f6e7a04808d62093f5c7df
+intset_empty : Data.IntSet.IntSet
 ```
 
 The empty set.
@@ -28,8 +38,8 @@ true
 
 ### `intset_singleton`
 
-```prism,sig,h-75a2e73310eb98c74b565a2f699897ead3d296eca51899a1d0d32f7f39c5575d
-intset_singleton : (I64) -> Data.IntMap.IntMap(Unit)
+```prism,sig,h-51357ba3990682896f135a46657b1d2ae9f64635ec31457f50a0cf61581fd7ee
+intset_singleton : (I64) -> Data.IntSet.IntSet
 ```
 
 The set containing `x` alone.
@@ -44,8 +54,8 @@ intset_to_list(intset_singleton(7i64))
 
 ### `intset_insert`
 
-```prism,sig,h-f1d5889da30203784a4333c5a0bce7f01ca3704ce6bdc8c7a5a70d60d0f13137
-intset_insert : (I64, Data.IntMap.IntMap(Unit)) -> Data.IntMap.IntMap(Unit)
+```prism,sig,h-a78e01a7cd63818ac7511326bd0b76daaf356739ae240449e46aa511e512a6ec
+intset_insert : (I64, Data.IntSet.IntSet) -> Data.IntSet.IntSet
 ```
 
 Add `x` (a no-op when already present).
@@ -60,8 +70,8 @@ intset_to_list(intset_insert(2i64, intset_insert(1i64, intset_empty)))
 
 ### `intset_member`
 
-```prism,sig,h-d7e75bc12aaff77f8c0661851f85860099958f164babec9f122f2514bf98c82b
-intset_member : (I64, Data.IntMap.IntMap(Unit)) -> Bool
+```prism,sig,h-18dff83cf7618bfc1578dba25cfb39f0d4b22bbede7446ebff2a8d9b5d945640
+intset_member : (I64, Data.IntSet.IntSet) -> Bool
 ```
 
 True when `x` is a member.
@@ -76,8 +86,8 @@ true
 
 ### `intset_delete`
 
-```prism,sig,h-23ab67718351abc482adadf588552dfe033f0bec843d14eafbeca299b34af882
-intset_delete : (I64, Data.IntMap.IntMap(Unit)) -> Data.IntMap.IntMap(Unit)
+```prism,sig,h-017710845fff4e3a0c1f068489011193e8150b4164e0d0fae36fa6e74ddc3204
+intset_delete : (I64, Data.IntSet.IntSet) -> Data.IntSet.IntSet
 ```
 
 Remove `x` (a no-op when absent).
@@ -92,8 +102,8 @@ intset_to_list(intset_delete(2i64, intset_from_list([1i64, 2i64, 3i64])))
 
 ### `intset_size`
 
-```prism,sig,h-23f3d4b46f2be712f2feab545ef1b2d9e7c0d565fcdb071dd3bbd0eca2aaa3a9
-intset_size : (Data.IntMap.IntMap(Unit)) -> Int
+```prism,sig,h-bd6f7691136c4ba5acc457ebc1043053d676ca3b3cace8837f5a73d82dfa76a6
+intset_size : (Data.IntSet.IntSet) -> Int
 ```
 
 The number of elements.
@@ -108,8 +118,8 @@ intset_size(intset_from_list([1i64, 2i64, 2i64, 3i64]))
 
 ### `intset_is_empty`
 
-```prism,sig,h-55cdfebb61f9bfca98d5b58be38127c525db8573b3e5d99aef7ecba6e0a3748e
-intset_is_empty : (Data.IntMap.IntMap(Unit)) -> Bool
+```prism,sig,h-4fe2eb2639f63a88b8889da5ea9fcd54cde856b0a5cbe4a24515929035ad31e7
+intset_is_empty : (Data.IntSet.IntSet) -> Bool
 ```
 
 True when the set has no elements.
@@ -124,8 +134,8 @@ true
 
 ### `intset_to_list`
 
-```prism,sig,h-901ac1ec9a6d13ed1295b912e72fa707e2c4e75d4d0e65edee972bf96730a997
-intset_to_list : (Data.IntMap.IntMap(Unit)) -> List(I64)
+```prism,sig,h-ce5e81945b31ba4590bac42d19be93c6d6f5999530fde7078bd3cf678c97e545
+intset_to_list : (Data.IntSet.IntSet) -> List(I64)
 ```
 
 The elements in ascending order, negatives first.
@@ -140,8 +150,8 @@ intset_to_list(intset_from_list([3i64, 1i64, 2i64, 1i64]))
 
 ### `intset_from_list`
 
-```prism,sig,h-645c3cac4b00f0faf9d86480cf59127a468b04a839f5d263b85cc9f420c2e78d
-intset_from_list : (List(I64)) -> Data.IntMap.IntMap(Unit)
+```prism,sig,h-ec880ff3a665527debe642f871eb4ea65ff0088d6c585975f1792012fd774fe3
+intset_from_list : (List(I64)) -> Data.IntSet.IntSet
 ```
 
 Build a set from a list, dropping duplicates.
@@ -156,8 +166,8 @@ intset_to_list(intset_from_list([3i64, 1i64, 2i64, 1i64]))
 
 ### `intset_union`
 
-```prism,sig,h-8b549e1729f777fa2a3755ee93eec8d8ce2d69126add02f2db6845f16eede3a2
-intset_union : (Data.IntMap.IntMap(Unit), Data.IntMap.IntMap(Unit)) -> Data.IntMap.IntMap(Unit)
+```prism,sig,h-bb7835eb39606c1d72c65bae89d80680e3423545d57b18891ecebb74530dd556
+intset_union : (Data.IntSet.IntSet, Data.IntSet.IntSet) -> Data.IntSet.IntSet
 ```
 
 Every element in either set, merged by walking the two tries together.
@@ -172,8 +182,8 @@ intset_to_list(intset_union(intset_from_list([1i64, 2i64]), intset_from_list([2i
 
 ### `intset_intersection`
 
-```prism,sig,h-55b68d98914c14e88bec75e97706526a4aaa22f29ca5a24bd8f212960b8dbd09
-intset_intersection : (Data.IntMap.IntMap(Unit), Data.IntMap.IntMap(Unit)) -> Data.IntMap.IntMap(Unit)
+```prism,sig,h-266fa41d2fd1176bb423e610ff973b15fa9279a2694e59cd7288f9a839c270ec
+intset_intersection : (Data.IntSet.IntSet, Data.IntSet.IntSet) -> Data.IntSet.IntSet
 ```
 
 The elements in both sets.
@@ -193,8 +203,8 @@ intset_to_list(
 
 ### `intset_difference`
 
-```prism,sig,h-a92a03ef6adf1b4362cf0b595bd419eff9678bfb0643b630784b82dd953c3100
-intset_difference : (Data.IntMap.IntMap(Unit), Data.IntMap.IntMap(Unit)) -> Data.IntMap.IntMap(Unit)
+```prism,sig,h-2b9a1804df3ac0c1b46d6dfa87d975f91decd9ef44b43632ab6181f9d457b948
+intset_difference : (Data.IntSet.IntSet, Data.IntSet.IntSet) -> Data.IntSet.IntSet
 ```
 
 The elements of `s1` that are not in `s2`.
@@ -211,8 +221,8 @@ intset_to_list(
 
 ### `intset_filter`
 
-```prism,sig,h-c6695b16b4217e012298ea5ad6dc9bd0feb8111257de966140e1445d9fee843e
-intset_filter : forall e0. ((I64) -> Bool ! {e0}, Data.IntMap.IntMap(Unit)) -> Data.IntMap.IntMap(Unit) ! {e0}
+```prism,sig,h-d78f9f62659b774845d641f10aa6fda97e6d5486ef4f9c91e439e1feb24cdce0
+intset_filter : forall e0. ((I64) -> Bool ! {e0}, Data.IntSet.IntSet) -> Data.IntSet.IntSet ! {e0}
 ```
 
 The elements satisfying `keep`.
@@ -227,8 +237,8 @@ intset_to_list(intset_filter(\(x) -> x > 1i64, intset_from_list([1i64, 2i64, 3i6
 
 ### `intset_fold`
 
-```prism,sig,h-d91a0be482ee1f6ef299bdfa9b1c57f5a5d510e90f775d56b2bc01162e6c341f
-intset_fold : forall e0 a. ((a, I64) -> a ! {e0}, a, Data.IntMap.IntMap(Unit)) -> a ! {e0}
+```prism,sig,h-7598a981b5f2ccffbc9eaffda4b89633385ca6cccf13b9ddd1b628615fc9e5c7
+intset_fold : forall e0 a. ((a, I64) -> a ! {e0}, a, Data.IntSet.IntSet) -> a ! {e0}
 ```
 
 Fold `f(acc, x)` over the elements in ascending order.
@@ -243,8 +253,8 @@ intset_fold(\(acc, x) -> acc + x, 0i64, intset_from_list([1i64, 2i64, 3i64]))
 
 ### `intset_map`
 
-```prism,sig,h-d14889c57029651eafc68e78eb5909ae92d25f35ab6528d5c300d6e9a6b60d24
-intset_map : forall e0. ((I64) -> I64 ! {e0}, Data.IntMap.IntMap(Unit)) -> Data.IntMap.IntMap(Unit) ! {e0}
+```prism,sig,h-2ab555895a9f40fe0d5c76dda25933ecf409df808a0d7310bff033ab5c30cc1e
+intset_map : forall e0. ((I64) -> I64 ! {e0}, Data.IntSet.IntSet) -> Data.IntSet.IntSet ! {e0}
 ```
 
 Apply `f` to every element, rebuilding the set (`f` need not be injective).

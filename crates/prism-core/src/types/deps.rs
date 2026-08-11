@@ -3,8 +3,8 @@
 //! the polymorphic-recursion hint.
 //!
 //! This is structural (who references whom), not an effect analysis: effect
-//! rows are discovered by principal inference, so the old syntactic effect
-//! set-pass that once lived here is gone.
+//! rows are discovered by principal inference over the components this module
+//! orders.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::iter;

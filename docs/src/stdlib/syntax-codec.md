@@ -147,7 +147,7 @@ Run a decoding computation, turning a `fail_decode` into `Err` and a completed d
 
 ### `decode_resolved`
 
-```prism,sig,h-8684747bc3c8b2d43336eff63db2df89e48df5e2af868ae2d198c9bc49db4e16
+```prism,sig,h-b5d47674c7f2037a945ee9656d6b219473745892288a63b5efac7cb9498c42cf
 decode_resolved : (String) -> Result(Syntax.Resolved.ResolvedDoc, Syntax.Codec.CodecError)
 ```
 
@@ -158,3 +158,11 @@ Decode a `prism-resolved-syntax-v1` document. Total: every malformed input lands
 ```prism,sig,h-a6055170caddf10b5d0af005b026501c9d8e132985a87656f09e9d5ea506f9d7
 encode_resolved : (Syntax.Resolved.ResolvedDoc) -> String
 ```
+
+### `decode_tc_input`
+
+```prism,sig,h-e78850ac5dca2fbb0831bbe1794361db9b924f357ee35ecd8d2f1d3a42b6f4d7
+decode_tc_input : (String) -> Result(Syntax.TcInput.TcInputDoc, Syntax.Codec.CodecError)
+```
+
+Decode the resolved declaration interface consumed by the checker. Malformed shapes and wrong schema tags fail with the same structured error discipline as the syntax-family artifacts.

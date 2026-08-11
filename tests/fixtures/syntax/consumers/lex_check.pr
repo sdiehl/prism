@@ -12,13 +12,9 @@
 -- covers identifiers, qualified paths, separator-stripped integers, and the
 -- cooked and interpolated string segments.
 import Data.Foldable (length)
-
 import Syntax.Source (..)
-
 import Syntax.Token (..)
-
 import Syntax.Codec (..)
-
 import Syntax.Lex (..)
 
 -- Renormalize a float spelling to the runtime's canonical form so two spellings

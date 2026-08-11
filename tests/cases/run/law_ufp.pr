@@ -5,13 +5,9 @@
 -- absence and duplication are explicit errors, never silent states.
 
 import Quickcheck (..)
-
 import Data.UnionFind.Payload (..)
-
 import Data.Result (result_or)
-
 import Data.List (foldl, reverse)
-
 import Control.State (..)
 
 -- Eight singleton classes 0..7, each carrying its key as the descriptor.

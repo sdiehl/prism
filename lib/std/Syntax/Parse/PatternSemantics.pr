@@ -1,15 +1,10 @@
 -- | Pure Pattern action lowerings used by the generated structural parser.
 
 import Data.List (..)
-
 import Data.String (ends_with)
-
 import Syntax.Source (..)
-
 import Syntax.Ast (..)
-
 import Syntax.Parse.Build (..)
-
 import Syntax.Parse.Support (surface_float, surface_int)
 
 pub fn pattern_int(raw : String, negative : Bool, span : Span) : Sp(Pat) =

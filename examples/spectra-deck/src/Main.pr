@@ -1,5 +1,4 @@
 import Spectra (..)
-
 import Data.String (str_join)
 
 -- | The artifact chain the opening slide shows, arrowed together.

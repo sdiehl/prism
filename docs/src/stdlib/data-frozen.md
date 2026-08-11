@@ -10,8 +10,8 @@ A `Frozen(a)` is an `Array(a)` with the write surface removed at the type level:
 
 ### `Frozen`
 
-```prism,def,h-1cf6a8b6a0743ffb9bf14cbde2c106796c995251310491edc5ed73db28ff0e8f
-type Frozen(a) = Frz(Array(a))
+```prism,def,h-6dd4092d3861d0131ea02c617996aee8e4faf900f9c5c4bec0584d6a5bd5b6a6
+newtype Frozen(a) = Frz(Array(a))
 ```
 
 An immutable array of `a`.
@@ -20,7 +20,7 @@ An immutable array of `a`.
 
 ### `fz_freeze`
 
-```prism,sig,h-d34ccc9781a4a8d4b2bc2ad08ee16e0232e25f714995b27047767a670f54303d
+```prism,sig,h-b3038c3ae846a33c2ed8f16a4f862d4132a1bd6850a3c82533178598956a4cc6
 fz_freeze : forall a. (Array(a)) -> Data.Frozen.Frozen(a)
 ```
 
@@ -36,7 +36,7 @@ fz_len(fz_freeze(array_of_list([1, 2, 3])))
 
 ### `fz_of_list`
 
-```prism,sig,h-725496453dd06e967447abd5ea199978fa9ff7f571ce9824940f62a80ab5a396
+```prism,sig,h-c9e3fc28fa9c9fe6564fb02e68ea360dc1832d6d7be711bd9f0234c41555d0ef
 fz_of_list : forall a. (List(a)) -> Data.Frozen.Frozen(a)
 ```
 
@@ -52,7 +52,7 @@ fz_get(fz_of_list([5, 6, 7]), 2)
 
 ### `fz_thaw`
 
-```prism,sig,h-3ad90d296e01a83e2a81ff6d494ef9050479993e50fdba3950aed788f14d9ad8
+```prism,sig,h-1e295448c9bcd09bc2d513124789f376b760bdc9bbccbc7d00aa426ebe722c29
 fz_thaw : forall a. (Data.Frozen.Frozen(a)) -> Array(a)
 ```
 
@@ -60,7 +60,7 @@ A growable array with the frozen contents. The frozen view is unaffected by writ
 
 ### `fz_len`
 
-```prism,sig,h-70fd1c35793a5f0863be19c9cb4fc96c322bcb356d583f490269b875ae120bc5
+```prism,sig,h-55d6a00604bdab013a19819fe124ed33462ae3bea8b8c90d959fceeb3e03de8e
 fz_len : forall a. (Data.Frozen.Frozen(a)) -> Int
 ```
 
@@ -68,7 +68,7 @@ The element count.
 
 ### `fz_get`
 
-```prism,sig,h-b090cebc84f59a953ad5b44607c821cf90162b695f85191467876a5caa144fbf
+```prism,sig,h-743b494d73813834d1e1993219b4e862d0985af9a3a31636bfa8288d0dd52b2a
 fz_get : forall a. (Data.Frozen.Frozen(a), Int) -> a ! {Fail}
 ```
 
@@ -84,7 +84,7 @@ fz_get(fz_of_list([5, 6, 7]), 0)
 
 ### `fz_foldl`
 
-```prism,sig,h-5e5ebc670cacf92a7f8eb12dcd63c9c4984eb30f3246e5a943a0a78ec176db49
+```prism,sig,h-3edb1061a98ae54122f824f46c99e7e1e15c1ce5bdbcfcd87fd9d908572957fb
 fz_foldl : forall e0 a b. ((a, b) -> a ! {e0}, a, Data.Frozen.Frozen(b)) -> a ! {e0}
 ```
 
@@ -100,7 +100,7 @@ fz_foldl(\(acc, x) -> acc + x, 0, fz_of_list([1, 2, 3]))
 
 ### `fz_to_list`
 
-```prism,sig,h-f5092706ee2924cad7419ab7e1ff82c93697f07834ce71aaa15ca746dd93e66b
+```prism,sig,h-01f9662cf7ce9a784d526014729d38dc2e19951fd0834383948cae8e57ecb0e3
 fz_to_list : forall a. (Data.Frozen.Frozen(a)) -> List(a)
 ```
 
@@ -116,7 +116,7 @@ fz_to_list(fz_of_list([1, 2, 3]))
 
 ### `fz_map`
 
-```prism,sig,h-bb0e8261bc6c74205352a8da7451035fec6da4e1af175adae1ea0ad6882e7ed0
+```prism,sig,h-b648ba0c4d20ce627a8b155c487c81c3c85d07994a6b2c5c10a627970df17b28
 fz_map : forall e0 a b. ((b) -> a ! {e0}, Data.Frozen.Frozen(b)) -> Data.Frozen.Frozen(a) ! {e0}
 ```
 

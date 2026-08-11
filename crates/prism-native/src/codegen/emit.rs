@@ -23,7 +23,7 @@ const CLOSURE_TAG_MASK: u64 = i64::MAX.cast_unsigned();
 // forking the two tiers; such a literal must reach codegen boxed as I64/bignum.
 const TAGGED_INT_VALUE_BITS: u32 = i64::BITS - 2;
 
-use super::abi::{ctor_tag, idx64, BIG_TAG, HDR_BYTES, NULL_WORD, STR_TAG, TAG_OFF, WORD_BYTES};
+use super::abi::{ctor_tag, idx64, HDR_BYTES, NULL_WORD, RESERVED_HEAP_TAGS, TAG_OFF, WORD_BYTES};
 use super::dispatch::partial_app_body;
 use super::isa::{Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa};
 use super::rt;
@@ -54,7 +54,10 @@ fn closure_tag(owner: Sym, ordinal: usize) -> usize {
     let mut bytes = [0; size_of::<u64>()];
     bytes.copy_from_slice(&hasher.finalize().as_bytes()[..size_of::<u64>()]);
     let mut tag = u64::from_le_bytes(bytes) & CLOSURE_TAG_MASK;
-    while tag == BIG_TAG.cast_unsigned() || tag == STR_TAG.cast_unsigned() {
+    while RESERVED_HEAP_TAGS
+        .iter()
+        .any(|(_, reserved)| tag == reserved.cast_unsigned())
+    {
         tag = (tag + 1) & CLOSURE_TAG_MASK;
     }
     usize::try_from(tag).expect("closure tags fit the native target word")
@@ -190,7 +193,9 @@ impl<'a, I: Isa> Cg<'a, I> {
 
     fn fill_obj(&mut self, ptr: &str, tag: i64, fields: &[String]) -> String {
         assert!(
-            tag < BIG_TAG.min(STR_TAG),
+            RESERVED_HEAP_TAGS
+                .iter()
+                .all(|(_, reserved)| tag < *reserved),
             "ICE: ctor tag collides with reserved heap tags"
         );
         self.fill_tagged_obj(ptr, tag, fields)
@@ -1746,6 +1751,8 @@ pub(super) fn str_builtin_decls() -> impl Iterator<Item = (String, usize)> {
 mod tests {
     use prism_core::core::builtins::{Builtin, BuiltinKind, BUILTINS};
 
+    use super::super::abi;
+
     fn c_def(name: &str) -> i64 {
         let prefix = format!("#define {name} ");
         let line = super::rt::RUNTIME_FILES
@@ -1762,8 +1769,26 @@ mod tests {
 
     #[test]
     fn layout_matches_runtime() {
-        assert_eq!(c_def("PRISM_STR_TAG"), super::STR_TAG);
-        assert_eq!(c_def("PRISM_BIG_TAG"), super::BIG_TAG);
+        // The generated mirror against the embedded header text, parsed here
+        // by an independent reader: a radix or suffix bug in the build-script
+        // parser cannot survive this, and a tag added to the C header without
+        // reaching the mirror fails the count below.
+        for (name, value) in abi::RESERVED_HEAP_TAGS {
+            assert_eq!(c_def(name), value, "{name} drifted from the C header");
+        }
+        assert_eq!(
+            abi::RESERVED_HEAP_TAGS.len(),
+            super::rt::RUNTIME_FILES
+                .iter()
+                .flat_map(|(_, body, _)| body.lines())
+                .filter(|l| {
+                    l.strip_prefix("#define PRISM_")
+                        .and_then(|rest| rest.split_once(' '))
+                        .is_some_and(|(name, _)| name.ends_with("_TAG"))
+                })
+                .count(),
+            "the runtime defines a PRISM_*_TAG the generated mirror missed"
+        );
         assert_eq!(c_def("PRISM_TAG_W") * super::WORD_BYTES, super::TAG_OFF);
         assert_eq!(
             c_def("PRISM_HDR_WORDS") * super::WORD_BYTES,

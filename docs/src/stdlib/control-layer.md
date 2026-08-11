@@ -27,7 +27,7 @@ One node sort's one-layer view: its immediate children and the inverse that repl
 ### `plate_layer`
 
 ```prism,sig,h-3b389c20fba668732b3a6e57e7b2e196d9f19267fc393f25e1f868b374657ba2
-plate_layer : forall a. () -> Control.Layer.Layer(a)
+plate_layer : forall a. () -> Control.Layer.Layer(a) given Plate(a)
 ```
 
 The layer a `Plate` instance supplies, so a sort that derived `Plate` joins every traversal here and in `Control.Rewrite` without a hand-written pair.
@@ -60,7 +60,7 @@ Apply `f` to each immediate child of `x` and rebuild. The one-layer map: it neve
 
 ### `lay_universe`
 
-```prism,sig,h-de4e0df77eeca3589c9e4ffba73c08f4149266052c3d8b5fbe77e46d62ca3923
+```prism,sig,h-1645e6404680a5bdc97f4ad52ef1fb8233aaae4c25046a7a63ad894f275d1e5f
 lay_universe : forall a. (Control.Layer.Layer(a), a) -> List(a)
 ```
 
@@ -68,7 +68,7 @@ Every node of the tree, root first, depth first in `kids` order.
 
 ### `lay_size`
 
-```prism,sig,h-75e52ab6662ac28b6fbf014b2322cfc0bd6165c146ef94dd01c29a4542cd17c4
+```prism,sig,h-778ae0636f14998a8b4d762a713d6d06b7404faff0724ddbeeddfb81e72422a7
 lay_size : forall a. (Control.Layer.Layer(a), a) -> Int
 ```
 
@@ -102,7 +102,7 @@ lay_depth(countdown, 3)
 
 ### `lay_collect`
 
-```prism,sig,h-dba73c8c014afe825b31b355d42851281c4eadb02a61ceaa43c903bd90ebe105
+```prism,sig,h-8edd5f5d85f75d350290edca7bda66124d136c728a518735ad73eb4d13a47840
 lay_collect : forall e0 a. (Control.Layer.Layer(a), (a) -> Bool ! {e0}, a) -> List(a) ! {e0}
 ```
 
@@ -119,7 +119,7 @@ lay_collect(countdown, even, 3)
 
 ### `lay_count_where`
 
-```prism,sig,h-00932f55fa3cd113cd8fc40175531445770e576cbfbe25fb92f0e94d90a349f4
+```prism,sig,h-66941d4d906acbecaa59e9702b7bf48b63c757bd023c6557f252e4ce650ee0d0
 lay_count_where : forall e0 a. (Control.Layer.Layer(a), (a) -> Bool ! {e0}, a) -> Int ! {e0}
 ```
 
@@ -135,7 +135,7 @@ Whether any node satisfies `q`. Short-circuits: the first accepting node ends th
 
 ### `lay_summarize`
 
-```prism,sig,h-a5f8b65dcc939694f106862670cd42ea894da6d64a41ca12e28e3b8dcb18d46c
+```prism,sig,h-2ec981686117e497f998f9974edee5aee5ff42e32c98b759277c79871c2f1821
 lay_summarize : forall e0 a b. (Control.Layer.Layer(a), (a) -> b ! {e0}, (b, b) -> b ! {e0}, b, a) -> b ! {e0}
 ```
 
@@ -143,7 +143,7 @@ Fold a per-node summary over the whole tree: `measure` scores one node and `comb
 
 ### `lay_index_where`
 
-```prism,sig,h-1b7fb201fc643e9fa34eaf6377d7aee1c16cc2a2de88768e8c9f8844e0e52729
+```prism,sig,h-1f1d01ab755dfeaa03fb54a40b8056a73beb78ec7141264f0366059b95a772cd
 lay_index_where : forall e0 a. (Control.Layer.Layer(a), (a) -> Bool ! {e0}, a) -> List(Int) ! {e0}
 ```
 
@@ -151,7 +151,7 @@ The preorder index of every node satisfying `q`. An index is a deterministic add
 
 ### `lay_at_index`
 
-```prism,sig,h-4abddd46a6c3813003b75f91be6371fa304218d7850facef18178d650cdf543e
+```prism,sig,h-175839a45db0496587e8e8084708c74e299f5fe22198f6c0d5e6e7a28fff2e01
 lay_at_index : forall a. (Control.Layer.Layer(a), Int, a) -> Option(a)
 ```
 
@@ -159,7 +159,7 @@ The node at a preorder index, or `None` when the index is past the end.
 
 ### `lay_path_to`
 
-```prism,sig,h-1121d5c4bf086da6b9a4923adec0b71a43ae95feef002ed4e0bd855877141ffa
+```prism,sig,h-4d2f76bc0128088d5896182e1c3f17fc694034a982a9d56a5ddb20ee3d454860
 lay_path_to : forall a. (Control.Layer.Layer(a), Int, a) -> Option(List(Int))
 ```
 
@@ -176,7 +176,7 @@ Some([0, 1, 2, 3])
 
 ### `lay_indexed`
 
-```prism,sig,h-c58f78ead9ee3e3e584bed5f7f315fa4f6702863bfeb072319e57ee96028f0ab
+```prism,sig,h-b834014d1cbfa8492928f167c93b8ba62af0aefa115db46c67ac3994ea5d5b94
 lay_indexed : forall a. (Control.Layer.Layer(a), a) -> List((Int, a))
 ```
 
@@ -184,7 +184,7 @@ Every node's preorder index paired with the node, root first. The indexed walk a
 
 ### `lay_edges`
 
-```prism,sig,h-dd2bd105d2e9866753bab31f7bd645653904eeced119f14d8a69bf068065f106
+```prism,sig,h-3368cbbd497a1724590140c168b91d23ace1d5fc3bd6276012eccedf8d33f582
 lay_edges : forall a. (Control.Layer.Layer(a), a) -> List((a, a))
 ```
 

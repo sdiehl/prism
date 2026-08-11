@@ -17,9 +17,7 @@
 -- `clean_project` removes only `target/spectra`.
 
 import Data.String (contains, ends_with, starts_with, str_of_char, trim)
-
 import Data.Result (map_err)
-
 import Json (Json, JObj, JStr, JInt, decode, encode, json_error_message)
 
 pub type DeckEnvelope = DeckEnvelope {

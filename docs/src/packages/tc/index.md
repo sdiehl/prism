@@ -1,8 +1,9 @@
 # tc
 
-API documentation generated from the project's source by `prism docs`. Function and value signatures are the typechecker's inferred types; prose comes from `-- |` doc comments.
+The type-and-row core of a self-hosted Prism typechecker.
 
 ## Modules
 
+- [Bootstrap](./bootstrap.md) - T1 bootstrap checker workbench.
 - [Tc](./tc.md) - The type-and-row core of a Prism typechecker, written in Prism.
 - [TcLaws](./tclaws.md) - The property laws of the type-and-row core, run by `prism test`.

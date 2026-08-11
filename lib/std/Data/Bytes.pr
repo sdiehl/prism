@@ -41,7 +41,6 @@
 -- lone `0xFF` survives a round trip verbatim.
 
 import Wire (..)
-
 -- Re-export the `Bytes` type (and its empty/concat/length vocabulary) so a caller
 -- who imports `Data.Bytes` can name the type and thread values without also
 -- reaching into `Wire`; the concrete representation stays owned by `Wire`.

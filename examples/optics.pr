@@ -1,12 +1,14 @@
 -- A concise tour of optics by path. A path is a sequence of steps between `|`
 -- and the operator (or inside `s.[ ... ]`): `.field` descends, `each`
 -- traverses a functor, `[i]` indexes, `?Ctor` focuses a constructor, and
--- `(each where p)` filters. End with `= v` to set or `~ f` to modify; wrap in
+-- `(each where p)` filters. End with `= v` to set, `~ f` to modify, or a
+-- compound `+= e` (and `-=`, `*=`, `%=`) to update arithmetically; wrap in
 -- `s.[ path ]` to read every focus into a list.
 --
 -- Expected output:
 --   Vec2(1, 4)
 --   Player(hero, Vec2(7, 4), 30, [])
+--   Player(hero, Vec2(3, 8), 25, [])
 --   [Player(a, Vec2(0, 0), 15, []), Player(b, Vec2(0, 0), 10, [])]
 --   World([Player(a, Vec2(1, 2), 100, []), Player(b, Vec2(1, 2), 0, [])], 1)
 --   Circle(20)
@@ -41,6 +43,8 @@ fn main() =
   println({ v | x ~ \(n) -> n - 2 })
   let hero = Player { name = "hero", pos = v, hp = 20, bag = Nil }
   println({ hero | pos.x = 7, hp ~ heal })
+  -- A compound terminal is the modify it abbreviates.
+  println({ hero | hp += 5, pos.y *= 2 })
   -- Traverse with `each`, then descend; modify and set per element.
   let party = [mk("a", 5), mk("b", 0)]
   println({ party | each.hp ~ heal, each.pos = Vec2 { x = 0, y = 0 } })

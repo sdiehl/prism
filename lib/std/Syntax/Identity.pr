@@ -17,15 +17,10 @@
 -- behavior.
 
 import Control.Rewrite (..)
-
 import Data.List (filter)
-
 import Data.Result (map_result)
-
 import Json (..)
-
 import Syntax.Codec (..)
-
 import Syntax.Source (..)
 
 -- | The source identity of an artifact: the digest of its exact bytes.

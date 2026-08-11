@@ -680,8 +680,10 @@ pub const OUTPUT_BUILTINS: &[&str] = &["print", "println"];
 
 #[cfg(test)]
 mod tag_tests {
-    use super::{Builtin, FloatOp};
     use std::collections::BTreeSet;
+
+    use super::{Builtin, FloatOp};
+    use crate::core::simd::SimdOp;
 
     // Assert a frozen `variant -> tag` table: every entry's `hash_tag` reproduces
     // its frozen spelling, no two variants share one, and the table covers every
@@ -897,7 +899,6 @@ mod tag_tests {
     // identity. Keyed by surface name, the one string both registries agree on.
     #[test]
     fn simd_builtin_tags_match_registry() {
-        use crate::core::simd::SimdOp;
         for op in SimdOp::ALL {
             let b = Builtin::from_name(op.name())
                 .unwrap_or_else(|| panic!("simd op `{}` has no wired builtin", op.name()));

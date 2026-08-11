@@ -6,23 +6,14 @@
 -- token stream without calling back into Rust.
 
 import Syntax.Source (..)
-
 import Syntax.Token (..)
-
 import Syntax.Lex (..)
-
 import Syntax.Layout (..)
-
 import Syntax.Ast (..)
-
 import Syntax.Diagnostic (..)
-
 import Syntax.Cursor (..)
-
 import Syntax.Parse.Support (..)
-
 import Syntax.Parse.Expr (..)
-
 import Syntax.Parse.Decl (..)
 
 -- | A source-level parse failure, preserving whether lexing or parsing refused

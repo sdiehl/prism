@@ -2,9 +2,14 @@
 --
 -- Purely additive: the transcendental functions (`sin`, `cos`, `exp`, `ln`,
 -- `sqrt`, ...) stay owned builtins routing through the vendored libm, and
--- `pi`/`e`/`tau` stay Base-global. This module only names the derived
--- constants, as exact `Float` literals pinned bit-for-bit, so importing it never
--- shadows a Base name. Opt-in: not in Base.
+-- `pi`/`tau` stay Base-global. This module names the remaining constants, as
+-- exact `Float` literals pinned bit-for-bit, so importing it never shadows a
+-- Base name. Euler's number lives here rather than in Base so that the
+-- single-letter name `e` stays free in the flat top-level namespace. Opt-in:
+-- not in Base.
+
+-- | Euler's number, the base of the natural logarithm.
+pub let e : Float = 2.718281828459045
 
 -- | The square root of 2.
 pub let sqrt2 : Float = 1.4142135623730951

@@ -17,10 +17,13 @@ use crate::types::ty::EffRow;
 use prism_common::sym::Sym;
 use prism_syntax::names::{self, ENTRY_POINT};
 
+use super::effect_lower::walk;
 use super::specialize_support::{
     free_comp_vars, freshen_with, next_fresh, substitute_witnesses, Rewrite,
 };
-use super::verify::substitute_core_type;
+use super::verify::{
+    representation_preserving, representation_preserving_stable, substitute_core_type,
+};
 use super::{
     CompSig, CoreInstantiation, TypedBinder, TypedComp, TypedCompKind, TypedCore, TypedCoreFn,
     TypedValue, TypedValueKind,
@@ -281,12 +284,26 @@ impl Rewrite for Inliner {
                 if function.params.len() == args.len() {
                     let args: Vec<TypedValue> =
                         args.iter().map(|arg| self.value(arg, cx)).collect();
-                    self.ticks += 1;
-                    let spliced = inline_call(&function, instantiation, &args, &mut self.counter);
-                    // Recurse into the spliced body: a single-call-site callee
-                    // it in turn calls is still single-site (its one site just
-                    // moved here), so one sweep inlines the whole chain.
-                    return self.comp(&spliced, cx);
+                    if arguments_admissible(&function, instantiation, &args) {
+                        if let Some(spliced) =
+                            inline_call(&function, instantiation, &args, &mut self.counter)
+                        {
+                            self.ticks += 1;
+                            // Recurse into the spliced body: a single-call-site
+                            // callee it in turn calls is still single-site (its
+                            // one site just moved here), so one sweep inlines
+                            // the whole chain.
+                            return self.comp(&spliced, cx);
+                        }
+                    }
+                    return TypedComp::new(
+                        comp.sig.clone(),
+                        TypedCompKind::Call {
+                            callee: *callee,
+                            instantiation: instantiation.clone(),
+                            args,
+                        },
+                    );
                 }
             }
         }
@@ -305,13 +322,74 @@ impl Rewrite for Inliner {
 // coercion the verifier accepts (rows are representation-irrelevant).
 // `counter` is the caller's per-compilation freshening counter, threaded so
 // every binder across every site gets a distinct deterministic name.
+/// Whether every argument can cross into its parameter binder. An argument
+/// whose type differs from the declared (instantiated) binder type crosses
+/// through a representation-preserving coercion; a pair that coercion cannot
+/// bless would splice a cast the verifier rejects, so the call site is kept
+/// as a call instead. The substitution-stable rule is required, not the
+/// verifier's: a declared row whose tail is an enclosing function's row
+/// quantifier is still substitutable, and chain inlining will substitute
+/// through the minted cast, so a cast blessed only by the abstract-tail
+/// absorb rule can become a concrete label vanishing into a smaller concrete
+/// row, which the verifier rejects as effect laundering.
+fn arguments_admissible(
+    callee: &TypedCoreFn,
+    instantiation: &[CoreInstantiation],
+    args: &[TypedValue],
+) -> bool {
+    callee.params.iter().zip(args).all(|(param, arg)| {
+        let declared = substitute_core_type(&param.ty, callee.sig.quantifiers(), instantiation);
+        arg.ty == declared || representation_preserving_stable(&arg.ty, &declared)
+    })
+}
+
+/// Every representation-preserving coercion in the tree still satisfies the
+/// verifier's rule. Witness substitution can break one: a cast that erased a
+/// row quantifier's abstract tail (`!{X | e}` to `!{X}`) is legal until the
+/// call instantiates `e` to a row with more labels, which widens the cast's
+/// source but not its already-closed target, leaving a concrete label
+/// vanishing into a smaller concrete row. Such a body must not be spliced.
+fn casts_verify(c: &TypedComp) -> bool {
+    fn value_ok(v: &TypedValue) -> bool {
+        match &v.kind {
+            TypedValueKind::Reinterpret(inner) => {
+                representation_preserving(inner.ty(), v.ty()) && value_ok(inner)
+            }
+            TypedValueKind::LoweredRepr { value: inner, .. }
+            | TypedValueKind::NewtypeRepr { value: inner, .. } => value_ok(inner),
+            TypedValueKind::Thunk(body) => casts_verify(body),
+            TypedValueKind::Ctor { fields, .. }
+            | TypedValueKind::Tuple(fields)
+            | TypedValueKind::UnboxedTuple(fields) => fields.iter().all(value_ok),
+            TypedValueKind::UnboxedRecord(fields) => {
+                fields.iter().all(|(_, field)| value_ok(field))
+            }
+            TypedValueKind::Var { .. }
+            | TypedValueKind::Int(_)
+            | TypedValueKind::I64(_)
+            | TypedValueKind::U64(_)
+            | TypedValueKind::Float(_)
+            | TypedValueKind::Bool(_)
+            | TypedValueKind::Unit
+            | TypedValueKind::Str(_) => true,
+        }
+    }
+    let mut ok = true;
+    walk::each_value(c, &mut |v| ok &= value_ok(v));
+    walk::each_subcomp(c, &mut |sc| ok &= casts_verify(sc));
+    ok
+}
+
 fn inline_call(
     callee: &TypedCoreFn,
     instantiation: &[CoreInstantiation],
     args: &[TypedValue],
     counter: &mut u32,
-) -> TypedComp {
+) -> Option<TypedComp> {
     let body = substitute_witnesses(&callee.body, callee.sig.quantifiers(), instantiation);
+    if !casts_verify(&body) {
+        return None;
+    }
     let mut renames: BTreeMap<Sym, Sym> = BTreeMap::new();
     for param in &callee.params {
         renames.insert(param.name, next_fresh(counter, names::FRESH_INLINE));
@@ -341,7 +419,7 @@ fn inline_call(
             ),
         );
     }
-    out
+    Some(out)
 }
 
 #[cfg(test)]

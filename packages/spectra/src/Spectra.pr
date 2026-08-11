@@ -29,29 +29,17 @@
 -- which is what makes a deck that explains its own code an ordinary program.
 
 import Layout as L
-
 import Theme as Themes
-
 import Code as SourceCode
-
 import Example as Examples
-
 import Example (Example, Doc)
-
 import Backend as TypstBackend
-
 import Backend (TypstDocument)
-
 import Layout (Align, Left, Center, Right, Inline, Plain, Emphasis, Strong, InlineCode, Link, Colored, TextStyle, Pict, Empty, Text, CodeBlock, Image, Rectangle, Row, Column, Overlay, Inset, Fit, Fragment, RawTypst)
-
 import Theme (Theme)
-
 import Data.List (map, reverse, foldl, append)
-
 import Data.Foldable (length)
-
 import Data.String (str_join)
-
 import Json (Json, JObj, JArr, JStr, JInt, encode)
 
 pub type Metadata = Metadata {

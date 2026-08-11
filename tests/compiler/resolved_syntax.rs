@@ -30,6 +30,8 @@ use std::path::{Path, PathBuf};
 use prism::{default_roots, dump_at, interpret_io_on_with_args, with_prelude, Config};
 use serde_json::Value;
 
+use super::fixture_stems;
+
 const FIXTURE_DIR: &str = "tests/fixtures/syntax";
 const HARNESS: &str = "roundtrip.pr";
 const ARTIFACT: &str = "resolved-syntax";
@@ -199,16 +201,7 @@ stem_tests! {
 #[test]
 fn resolved_covers_every_stem() {
     let suffix = format!(".{ARTIFACT}.json");
-    let mut found: Vec<String> = fs::read_dir(fixture_dir())
-        .expect("fixture dir")
-        .filter_map(Result::ok)
-        .filter_map(|e| {
-            let name = e.file_name().into_string().ok()?;
-            let stem = name.strip_suffix(&suffix)?;
-            (!stem.starts_with("mismatch")).then(|| stem.to_string())
-        })
-        .collect();
-    found.sort_unstable();
+    let found = fixture_stems(&fixture_dir(), &suffix, "mismatch");
     assert_eq!(
         found, STEMS,
         "resolved-syntax fixture stems and the static list have drifted apart"

@@ -144,11 +144,15 @@ tests/cases/run/named_handlers.pr: selective-free-monad
 tests/cases/run/nursery_name_collision.pr: whole-program-free-monad
 tests/cases/run/open_nontail.pr: selective-free-monad
 tests/cases/run/opt_chain.pr: selective-free-monad
+tests/cases/run/optic_lens.pr: evidence
+tests/cases/run/optic_solver.pr: whole-program-free-monad
 tests/cases/run/optics_index.pr: selective-free-monad
 tests/cases/run/optics_index_effect.pr: selective-free-monad
 tests/cases/run/optics_read.pr: selective-free-monad
 tests/cases/run/ordered_wire_stopgap.pr: whole-program-free-monad
 tests/cases/run/param_eff.pr: evidence
+tests/cases/run/path_lit.pr: evidence
+tests/cases/run/path_sugar.pr: whole-program-free-monad
 tests/cases/run/quickcheck_detect.pr: whole-program-free-monad
 tests/cases/run/read_bad_utf8.pr: evidence
 tests/cases/run/reified_under_world.pr: whole-program-free-monad

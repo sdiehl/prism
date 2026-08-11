@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/deriving_phantom.pr
+---
+D { text = "hi", revision = 0 }
+D { text = "hi", revision = 1 }
+true
+false
+Bag([1, 2])
+false
+=> ()

@@ -20,14 +20,11 @@ use super::pretty::pp_core_pretty;
 use crate::flags::DynFlags;
 use prism_common::sym::Sym;
 use prism_syntax::ast::{Core as CorePhase, Program};
+use prism_syntax::error::suggest;
 
 mod lint;
 
 const PASS_FINGERPRINT_SCHEMA: &[u8] = b"prism-core-pass-fingerprint-v1";
-
-// How far a misspelling may sit from a pass name before the suggestion is more
-// confusing than no suggestion.
-const SUGGESTION_MAX_DISTANCE: usize = 3;
 
 pub use lint::lint;
 
@@ -239,32 +236,10 @@ fn split_section(segment: &str) -> (PassStage, &str) {
 
 // An "unknown pass" message, suggesting the closest known name when one is near.
 fn unknown_pass(name: &str) -> String {
-    let suggestion = CorePass::ALL
-        .into_iter()
-        .map(|p| (edit_distance(name, p.name()), p.name()))
-        .filter(|(d, _)| *d <= SUGGESTION_MAX_DISTANCE)
-        .min()
-        .map(|(_, n)| n);
-    suggestion.map_or_else(
+    suggest::did_you_mean(name, CorePass::ALL.into_iter().map(CorePass::name)).map_or_else(
         || format!("unknown pass `{name}`"),
         |n| format!("unknown pass `{name}` (did you mean `{n}`?)"),
     )
-}
-
-// Levenshtein distance, for the closest-name suggestion only.
-fn edit_distance(a: &str, b: &str) -> usize {
-    let b: Vec<char> = b.chars().collect();
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
-    let mut cur = vec![0; b.len() + 1];
-    for (i, ca) in a.chars().enumerate() {
-        cur[0] = i + 1;
-        for (j, &cb) in b.iter().enumerate() {
-            let cost = usize::from(ca != cb);
-            cur[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(cur[j] + 1);
-        }
-        std::mem::swap(&mut prev, &mut cur);
-    }
-    prev[b.len()]
 }
 
 /// Per-pass tick counts (rewrites fired), in run order. Dumped under

@@ -57,8 +57,8 @@ pub fn query_on(
             let mut hits: Vec<String> = checked
                 .decls
                 .iter()
-                .filter(|d| type_mentions(&d.ty.show(), target))
-                .map(|d| format!("  {} : {}", d.name, d.ty.show()))
+                .filter(|d| type_mentions(&checked.show_sig(d), target))
+                .map(|d| format!("  {} : {}", d.name, checked.show_sig(d)))
                 .collect();
             hits.sort_unstable();
             hits.dedup();

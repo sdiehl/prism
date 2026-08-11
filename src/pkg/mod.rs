@@ -76,9 +76,9 @@ pub fn stdlib_root() -> Result<String, Error> {
 /// Where a lockfile's Std pin stands against the standard library this compiler
 /// embeds.
 ///
-/// The three cases are the whole distribution story the store supports
-/// today: a lock can be unpinned, agree, or disagree, and a disagreement is
-/// named exactly (both roots) rather than papered over.
+/// The store distinguishes three cases: a lock can be unpinned, agree, or
+/// disagree. A disagreement names both roots rather than papering over the
+/// mismatch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StdPin {
     /// The lock records no Std root; the build runs against the embedded stdlib.

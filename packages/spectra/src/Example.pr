@@ -34,11 +34,8 @@
 -- ```
 
 import Layout (Pict, column)
-
 import Code (code_block, prism_code)
-
 import Data.String (contains, lines_of, split, starts_with, trim)
-
 import Data.List (map, reverse)
 
 -- | One fenced example: the source a slide shows, and the output the doctest

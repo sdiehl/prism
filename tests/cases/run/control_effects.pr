@@ -1,9 +1,6 @@
 import Control.State (..)
-
 import Control.Reader (..)
-
 import Control.Writer (..)
-
 import Control.Fresh (..)
 
 fn count_up() : Int ! {State(Int)} =

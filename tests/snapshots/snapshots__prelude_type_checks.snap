@@ -16,8 +16,8 @@ Data.Foldable.elem : forall a b. (a, b(a)) -> Bool
 Data.Foldable.find : forall a b. ((a) -> Bool, b(a)) -> Option(a)
 Data.Foldable.is_empty : forall a b. (a(b)) -> Bool
 Data.Foldable.length : forall a b. (a(b)) -> Int
-Data.Foldable.product : forall a. (a(Int)) -> Int
-Data.Foldable.sum : forall a. (a(Int)) -> Int
+Data.Foldable.product : forall a b. (a(b)) -> b
+Data.Foldable.sum : forall a b. (a(b)) -> b
 Data.Foldable.to_list : forall a b. (a(b)) -> List(b)
 Data.List.append : forall a. (List(a), List(a)) -> List(a)
 Data.List.chunks_of : forall a. (Int, List(a)) -> List(List(a))
@@ -55,6 +55,8 @@ Data.List.take_while : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {
 Data.List.unzip : forall a b. (List((a, b))) -> (List(a), List(b))
 Data.List.zip : forall a b. (List(a), List(b)) -> List((a, b))
 Data.List.zip_with : forall e0 a b c. ((b, c) -> a ! {e0}, List(b), List(c)) -> List(a) ! {e0}
+Data.List@count_go : forall e0 a. ((a) -> Bool ! {e0}, List(a), Int) -> Int ! {e0}
+Data.List@tabulate_go : forall e0 a. (Int, Int, (Int) -> a ! {e0}) -> List(a) ! {e0}
 Data.Map.map_balance : forall a b c. (Map(a, b, c)) -> Map(a, b, c)
 Data.Map.map_bf : forall a b c. (Map(a, b, c)) -> Int
 Data.Map.map_delete : forall a b c. (b, Map(b, c, a)) -> Map(b, c, a)
@@ -72,7 +74,13 @@ Data.Map.map_rot_left : forall a b c. (Map(a, b, c)) -> Map(a, b, c)
 Data.Map.map_rot_right : forall a b c. (Map(a, b, c)) -> Map(a, b, c)
 Data.Map.map_size : forall a b c. (Map(a, b, c)) -> Int
 Data.Map.map_to_list : forall a b c. (Map(a, b, c)) -> List((a, b))
+Data.Map.map_to_lists : forall a b c. (Map(a, b, c)) -> (List(a), List(b))
 Data.Map.map_values : forall a b c. (Map(a, b, c)) -> List(b)
+Data.Map@map_extract_min : forall a b c. (Map(a, b, c)) -> Option(((a, b), Map(a, b, c)))
+Data.Map@map_keys_go : forall a b c. (Map(a, b, c), List(a)) -> List(a)
+Data.Map@map_lists_go : forall a b c. (Map(a, b, c), List(a), List(b)) -> (List(a), List(b))
+Data.Map@map_pairs_go : forall a b c. (Map(a, b, c), List((a, b))) -> List((a, b))
+Data.Map@map_values_go : forall a b c. (Map(a, b, c), List(b)) -> List(b)
 Data.Maybe.and_then : forall e0 a b. ((a) -> Option(b) ! {e0}, Option(a)) -> Option(b) ! {e0}
 Data.Maybe.both : forall a b. (Option(a), Option(b)) -> Option((a, b))
 Data.Maybe.is_none : forall a. (Option(a)) -> Bool
@@ -161,7 +169,6 @@ concat_all : (List(String)) -> String
 concat_map : forall e0 a b. ((a) -> List(b) ! {e0}, List(a)) -> List(b) ! {e0}
 const : forall a b. (a, b) -> a
 default : forall e0 a. (() -> a ! {e0}, a) -> a ! {e0}
-e : Float
 entropy : () -> Int ! {Entropy} ! {Entropy}
 enum_from_then_to : (Int, Int, Int) -> List(Int)
 enum_from_to : (Int, Int) -> List(Int)
@@ -228,7 +235,7 @@ read_line : () -> String ! {Console} ! {Console}
 repeat : forall e0 a. (Int, () -> a ! {e0}) -> Unit ! {e0}
 repeat_while : forall e0 a. (() -> Bool ! {e0}, () -> a ! {e0}) -> Unit ! {e0}
 run_io : forall e0 a. ((Unit) -> a ! {Console, Entropy, Env, FileSystem, IO, Output, Random, e0}) -> a ! {IO, e0} ! {IO}
-scollect : forall e0 a b. ((Unit) -> a ! {Emit(b), e0}) -> List(b) ! {e0}
+scollect : forall e0 a b. ((Unit) -> b ! {Emit(a), e0}) -> List(a) ! {e0}
 sfold : forall e0 a b c. ((Unit) -> b ! {Emit(c), e0}, a, (a, c) -> a ! {e0}) -> a ! {e0}
 show_list_body : forall a. (List(a), Bool) -> String
 signum : (Int) -> Int

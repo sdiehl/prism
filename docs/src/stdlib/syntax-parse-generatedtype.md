@@ -52,7 +52,7 @@ type GeneratedRowItem(a) = GeneratedRowItem(a, GeneratedRowReceipt)
 
 ### `generated_parse_atype`
 
-```prism,sig,h-8044796255257961b8e8815b3b1b82434870e58aeb4ff9f64e3337be5596997f
+```prism,sig,h-9f4ca973b9b6a31d4807b8648dfa8d0fdb70e086b597402a132c7cf2e1dad862
 generated_parse_atype : (Syntax.Cursor.Cursor, Int, (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Parse.GeneratedType.GeneratedChild(Syntax.Ast.Ty)), (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Parse.GeneratedType.GeneratedChild(Syntax.Ast.Ty))) -> Syntax.Parse.Support.Parsed(Syntax.Parse.GeneratedType.GeneratedChild(Syntax.Ast.Ty))
 ```
 
@@ -116,7 +116,7 @@ generated_parse_dim_term : (Syntax.Cursor.Cursor) -> Syntax.Parse.Support.Parsed
 
 ### `generated_parse_type_arg_with`
 
-```prism,sig,h-00eef6b5e600e31c4edf472c4baee6eb784798e26681de3c2cdb300a42eb6090
+```prism,sig,h-595c348e47545508c1276e451faaa299c8c34ed6bc0be4feedf93e7545cc66e2
 generated_parse_type_arg_with : (Syntax.Cursor.Cursor, Int, (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Parse.GeneratedType.GeneratedChild(Syntax.Ast.Ty)), (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Row)) -> Syntax.Parse.Support.Parsed(Syntax.Parse.GeneratedType.GeneratedChild(Syntax.Ast.Ty))
 ```
 
@@ -124,30 +124,30 @@ Injectable TypeArg entry used by the isolated behavior fixture. Like every publi
 
 ### `generated_parse_type`
 
-```prism,sig,h-145428a3cc9580e17ba4a00dce75241c37677e5e21ca32af5178ada7c28e3648
+```prism,sig,h-f4ae7f69f07f534397f3efbe68e00da66f816b6959cdb07779b25dec9b6e26e5
 generated_parse_type : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Parse.GeneratedType.GeneratedChild(Syntax.Ast.Ty))
 ```
 
 ### `generated_parse_type_head`
 
-```prism,sig,h-7d43ed9549d7675afc081ade749abce692682b60bcc865dba9b7948054a616db
+```prism,sig,h-761b0cf4e305e83502869c1209eda9cfd37697d0ab83943677fef25e06dcaa2a
 generated_parse_type_head : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Parse.GeneratedType.GeneratedChild(Syntax.Ast.Ty))
 ```
 
 ### `generated_parse_type_arg`
 
-```prism,sig,h-5f6cc3927b6ca0e0f242c4b4bf821f7c36622438b9d1ad9ae3c24cf6b59519e2
+```prism,sig,h-41a78f0f5eff6e040d12c07ca5f48ccbc90e0e9b73f3889f85c785ba7ca941af
 generated_parse_type_arg : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Parse.GeneratedType.GeneratedChild(Syntax.Ast.Ty))
 ```
 
 ### `generated_parse_effect_row`
 
-```prism,sig,h-f4437077fee2722aeedd32d464755f93cf0cc91b5f67f9b248e56f1cc1e705d4
+```prism,sig,h-61ed3f80817dbd1d75ac52d554448c76f2b94330b7275ab5d8a51f8d1683bff8
 generated_parse_effect_row : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Row)
 ```
 
 ### `generated_parse_eff_label`
 
-```prism,sig,h-ba8d6444d5643f37b68e4a4c5c66a3357ef7fd38d4a03da3042c18f3c878b871
+```prism,sig,h-8f2a63da6739d3cb594e17776c969fd00bb571735edb9e9f3bdcf399663fdac4
 generated_parse_eff_label : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.EffLabel)
 ```

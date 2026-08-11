@@ -197,7 +197,7 @@ A boolean switch: true when present, false when absent, never valued.
 
 ### `arg_str`
 
-```prism,sig,h-8812c3cdd6c2b122e9ec0608ba555628035156074f3e18bfb1d241850354c630
+```prism,sig,h-3a304ef144c8198d3e3af51dee8ac49c91ec28ec454ddf425c7afa1c5d247c9f
 arg_str : (String, String) -> Cli.Parser(String)
 ```
 
@@ -205,7 +205,7 @@ A required string positional, consumed in declaration order.
 
 ### `arg_str_default`
 
-```prism,sig,h-228654a62f102dea885f90c6e349755c540da3eed1d72e58333b7af849d52be4
+```prism,sig,h-6114cdc4b280d71a3c667f97884da9e243a2081aa67a8ea645d230d89b5a5d67
 arg_str_default : (String, String, String) -> Cli.Parser(String)
 ```
 
@@ -213,7 +213,7 @@ An optional string positional, consumed in declaration order and yielding `defau
 
 ### `arg_int`
 
-```prism,sig,h-907a4e2ce5a8bc3ba77f8a35b4e8835cf7a92abc982ae14e775ce93586bda824
+```prism,sig,h-8c99e84c864642d0b212485fb805cb6cefbda046d86fdc01022d9de30ad97155
 arg_int : (String, String) -> Cli.Parser(Int)
 ```
 
@@ -229,7 +229,7 @@ Lex argv against the option specs (which say whether each flag takes a value). O
 
 ### `run_argv`
 
-```prism,sig,h-2f84a36124a0084821e45dda45c6be21b2a288c9a2714bd9e7e9789c4b790975
+```prism,sig,h-3b8921ccbaa9ee247991f7176451f979585f3e6ba6b458ffb58ce3572735ff00
 run_argv : forall a. (Cli.Command(a), List(String)) -> Cli.Outcome(a)
 ```
 
@@ -288,7 +288,7 @@ error: required flag '--host' was not provided
 
 ### `run_args`
 
-```prism,sig,h-e251e3f7b65652c7c8e5538e1b2fb669bde877b2b1f8054a913b9925898eada2
+```prism,sig,h-c841d68c603c455302a9c9abc322ac9f1edd26966425671ebd67453e92fd27c1
 run_args : forall a. (Cli.Command(a)) -> Cli.Outcome(a) ! {Env}
 ```
 

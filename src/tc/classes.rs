@@ -219,6 +219,10 @@ impl Tc<'_> {
                     name: name.to_string(),
                 }
                 .at(span)
+                .maybe_help(suggest::suggestion(
+                    name,
+                    self.instances.keys().map(|k| names::bare_name(k.as_str())),
+                ))
             })?;
             if info.class.as_str() != class {
                 return Err(ErrKind::InstanceClassMismatch {
@@ -684,7 +688,11 @@ fn convert_instance_head(
                 return Err(ErrKind::UnknownType {
                     name: n.to_string(),
                 }
-                .at(i.span));
+                .at(i.span)
+                .maybe_help(suggest::suggestion(
+                    n.as_str(),
+                    data.keys().map(|k| names::bare_name(k)),
+                )));
             }
             args
         }
@@ -716,7 +724,11 @@ fn instance_context(
             return Err(ErrKind::UnknownClass {
                 class: ct.class.clone(),
             }
-            .at(ct.span));
+            .at(ct.span)
+            .maybe_help(suggest::suggestion(
+                &ct.class,
+                classes.keys().map(|k| names::bare_name(k.as_str())),
+            )));
         }
         match &ct.ty {
             ast::Ty::Var(v) if head_vars.contains(&Sym::from(v)) => {
@@ -794,9 +806,9 @@ fn check_instance_methods(class: &ClassInfo, i: &ast::InstanceDecl<Core>) -> Res
 }
 
 // The orphan rule: an instance must be anchored to the module that defines its
-// class or its head type. Returns a warning when it is anchored to neither
-// (primitive heads count as prelude-defined). Once packages and separate
-// compilation land, a cross-package orphan becomes an error.
+// class or its head type. Returns a warning when it is anchored to neither;
+// primitive heads count as prelude-defined. Package boundaries do not participate
+// in this check.
 fn orphan_warning(i: &ast::InstanceDecl<Core>, head: &Type) -> Option<Warning> {
     let inst_mod = i.module.as_str();
     let class_mod = module_of(&i.class);

@@ -7,7 +7,8 @@
 
 use std::process::Command;
 
-use prism::{build, interpret, with_prelude};
+use prism::error::Diag;
+use prism::{build, interpret, with_prelude, Error, TypeError};
 
 // Interpret a prelude-wrapped program, returning its terminal output.
 fn run(src: &str) -> String {
@@ -21,6 +22,16 @@ fn check_err(src: &str) -> String {
     match prism::check(&with_prelude(src)) {
         Ok(_) => panic!("expected a type error, but the program checked"),
         Err(e) => format!("{e}"),
+    }
+}
+
+// The structured diagnostic of a program expected not to type-check, for the
+// cases that assert on the code, the help, or the notes rather than the message.
+fn check_diag(src: &str) -> Diag {
+    match prism::check(&with_prelude(src)) {
+        Ok(_) => panic!("expected a type error, but the program checked"),
+        Err(Error::Type(TypeError::Kind(diag))) => *diag,
+        Err(e) => panic!("expected a coded diagnostic, got: {e}"),
     }
 }
 
@@ -193,6 +204,171 @@ fn arbitrary_is_deterministic_under_a_seed() {
 #[test]
 fn arbitrary_native_matches_interpreter() {
     assert_eq!(native_out("arb", ARB_SRC), run(ARB_SRC));
+}
+
+// A type parameter no field mentions is a brand: it exists to keep two uses of
+// one shape from being interchanged, and no derived method can ever reach a value
+// of it. The derived context therefore omits it, so branding at a type with no
+// `Show` or `Eq` instance of its own still compiles and runs.
+const PHANTOM_SRC: &str = r#"
+type Draft = Draft
+type Final = Final
+
+type Doc(phase) = D { text : String, revision : Int } deriving (Eq, Show)
+
+fn drafted(t : String) : Doc(Draft) = D { text = t, revision = 0 }
+
+fn published(d : Doc(Draft)) : Doc(Final) =
+  D { text = d.text, revision = d.revision + 1 }
+
+fn main() =
+  let d = drafted("hi")
+  println(show(d))
+  println(show(published(d)))
+  println(show(d == drafted("hi")))
+  println(show(d == drafted("bye")))
+"#;
+
+#[test]
+fn a_phantom_parameter_needs_no_instance() {
+    assert_eq!(
+        run(PHANTOM_SRC),
+        "D { text = \"hi\", revision = 0 }\nD { text = \"hi\", revision = 1 }\ntrue\nfalse\n"
+    );
+}
+
+// The other side of the same rule: a parameter a field does mention is reached by
+// the derived method, so its instance is still required and its absence is still
+// an error. The occurrence is nested (`List(a)`), proving the rule looks through
+// type application rather than only at a bare parameter.
+#[test]
+fn an_occurring_parameter_still_demands_its_instance() {
+    let src = r"
+type Opaque = Opaque
+type Bag(a) = Bag(List(a)) deriving (Show)
+fn bagged() : Bag(Opaque) = Bag([Opaque])
+fn main() = println(show(bagged()))
+";
+    let err = check_err(src);
+    assert!(
+        err.contains("Show") && err.contains("Opaque"),
+        "a mentioned parameter must still require its instance: {err}"
+    );
+}
+
+// `deriving (Lens)` with the optic library in scope: one lens value per field,
+// named for its type and field, read and written through the library. `Tagged`
+// carries a brand no field mentions, and a lens shows and compares nothing, so
+// neither the lenses nor the derived `Show` demands anything of a brand type that
+// has no instances at all.
+const LENS_SRC: &str = r"
+import Data.Optic (..)
+
+type Point = Point { x: Int, y: Int } deriving (Lens, Show)
+
+type Metric = Metric
+
+type Tagged(brand) = Tagged { count: Int } deriving (Lens, Show)
+
+fn hits() : Tagged(Metric) = Tagged { count = 1 }
+
+fn main() =
+  let p = Point { x = 1, y = 2 }
+  println(show(view(point_x, p)))
+  println(show(lens_set(point_y, p, 9)))
+  println(show(over(tagged_count, \(n) -> n + 1, hits())))
+";
+
+#[test]
+fn field_lenses_are_type_qualified_and_brand_free() {
+    assert_eq!(
+        run(LENS_SRC),
+        "1\nPoint { x = 1, y = 9 }\nTagged { count = 2 }\n"
+    );
+}
+
+// The accessor pair predates the optic library and costs no import, so a program
+// that never mentions a lens value still derives `<f>_of` and `with_<f>` and never
+// has to import anything.
+#[test]
+fn lens_accessors_need_no_optic_import() {
+    let src = r"
+type Point = Point { x: Int, y: Int } deriving (Lens)
+fn main() =
+  println(x_of(with_x(Point { x = 1, y = 2 }, 7)))
+";
+    assert_eq!(run(src), "7\n");
+}
+
+// A lens names one part inside one whole, so there has to be exactly one whole to
+// take apart and its parts have to have names. Both rejections name the type.
+#[test]
+fn lens_rejects_a_type_that_is_not_one_record() {
+    let many = check_err(
+        r"
+type Shape = Circle { r: Int } | Square { s: Int } deriving (Lens)
+fn main() = println(1)
+",
+    );
+    assert!(
+        many.contains("cannot derive Lens for Shape") && many.contains("single record constructor"),
+        "{many}"
+    );
+    let positional = check_err(
+        r"
+type Pair = Pair(Int, Int) deriving (Lens)
+fn main() = println(1)
+",
+    );
+    assert!(
+        positional.contains("cannot derive Lens for Pair") && positional.contains("named fields"),
+        "{positional}"
+    );
+}
+
+// The accessor pair is named after the field alone, so two records sharing a
+// field name would define `x_of` and `with_x` twice at two unrelated types. That
+// is refused at the derive, where both types can be named, rather than becoming
+// an unbuildable Core witness later. The report is the same whichever type is
+// declared first: it names the one that claimed the name.
+#[test]
+fn lens_rejects_two_records_claiming_one_accessor() {
+    let both = |first: &str, second: &str| {
+        check_diag(&format!(
+            "type {first} = {first} {{ x: Int }} deriving (Lens)
+type {second} = {second} {{ x: Int }} deriving (Lens)
+fn main() = println(1)
+"
+        ))
+    };
+    for diag in [both("Point", "Vec"), both("Vec", "Point")] {
+        assert_eq!(diag.kind.code(), "E6072");
+        let msg = diag.to_string();
+        assert!(msg.contains("Point") && msg.contains("Vec"), "{msg}");
+        assert!(
+            msg.contains("x_of") && msg.contains("with_x"),
+            "both accessor names belong in the report: {msg}"
+        );
+        let note = diag.notes.join(" ");
+        assert!(
+            note.contains("point_x") && note.contains("vec_x"),
+            "the note must say the lens values are unaffected: {note}"
+        );
+        assert!(diag.help.is_some(), "the report offers no fix");
+    }
+}
+
+// One type deriving lenses over two fields claims four accessor names and is not
+// a collision with itself, and neither is a field name two types share when only
+// one of them derives lenses.
+#[test]
+fn lens_accessor_names_collide_only_across_deriving_types() {
+    let src = r"
+type Point = Point { x: Int, y: Int } deriving (Lens)
+type Vec = Vec { x: String }
+fn main() = println(x_of(Point { x = 1, y = 2 }))
+";
+    assert_eq!(run(src), "1\n");
 }
 
 // The blake3 builtin the interpreter and native runtime share must agree on the

@@ -23,12 +23,11 @@
 -- pinned. Opt-in: not in Base.
 
 import Data.Map (map_empty, map_lookup, map_insert, map_delete, map_to_list)
-
 import Data.Result (result_or)
 
 -- | A payload-carrying forest over ordered keys. The constructor is the
 -- module's private representation; go through the `ufp_` functions.
-pub type UnionFind(k, a) = Ufp { parents: Map(k, k), payloads: Map(k, a) }
+opaque type UnionFind(k, a) = Ufp { parents: Map(k, k), payloads: Map(k, a) }
 
 -- | Why a forest operation refused.
 pub type UfError = UfDuplicate | UfAbsent deriving (Eq, Show)
@@ -39,14 +38,14 @@ pub let ufp_empty : UnionFind(k, a) =
 
 -- The canonical root of `x`, which must be a member. Walks parent links; the
 -- chain is as long as the joins that built it, never compressed.
-fn root_of(uf : UnionFind(k, a), x : k) : k given Ord(k) =
+fn root_of(borrow uf : UnionFind(k, a), x : k) : k given Ord(k) =
   match map_lookup(x, uf.parents) of
     None => x
     Some(p) => root_of(uf, p)
 
 -- Whether `x` was ever inserted: members are exactly the keys that either
 -- carry a descriptor (roots) or a parent link (absorbed members).
-fn member(uf : UnionFind(k, a), x : k) : Bool given Ord(k) =
+fn member(borrow uf : UnionFind(k, a), x : k) : Bool given Ord(k) =
   match map_lookup(x, uf.payloads) of
     Some(_a) => true
     None =>
@@ -82,7 +81,7 @@ pub fn ufp_insert(
 -- ```output
 -- None
 -- ```
-pub fn ufp_find(uf : UnionFind(k, a), x : k) : Option((k, a)) given Ord(k) =
+pub fn ufp_find(borrow uf : UnionFind(k, a), x : k) : Option((k, a)) given Ord(k) =
   if member(uf, x) then
     let r = root_of(uf, x)
     match map_lookup(r, uf.payloads) of
@@ -168,12 +167,16 @@ pub fn ufp_union_with(
 -- ```output
 -- [(1, ab)]
 -- ```
-pub fn ufp_roots(uf : UnionFind(k, a)) : List((k, a)) given Ord(k) =
+pub fn ufp_roots(borrow uf : UnionFind(k, a)) : List((k, a)) given Ord(k) =
   map_to_list(uf.payloads)
 
 -- | Whether `x` and `y` are members of the same class; `None` when either was
 -- never inserted.
-pub fn ufp_equiv(uf : UnionFind(k, a), x : k, y : k) : Option(Bool) given Ord(k) =
+pub fn ufp_equiv(
+  borrow uf : UnionFind(k, a),
+  x : k,
+  y : k
+) : Option(Bool) given Ord(k) =
   if member(uf, x) && member(uf, y) then
     Some(cmp(root_of(uf, x), root_of(uf, y)) == 0)
   else

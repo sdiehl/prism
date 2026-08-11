@@ -8,9 +8,7 @@
 -- ```
 
 import Cli as C
-
 import SpectraCli (SpectraCommand, Check, Build, Clean, spectra_command)
-
 import SpectraBuild (check_project, build_project, clean_project)
 
 fn dispatch(command : SpectraCommand) : Int ! {FileSystem, IO, Output} =

@@ -7,29 +7,17 @@
 -- without changing expression precedence or cursor mechanics.
 
 import Data.Foldable (length)
-
 import Data.List (..)
-
 import Data.String (..)
-
 import Syntax.Source (..)
-
 import Syntax.Token (..)
-
 import Syntax.Ast (..)
-
 import Syntax.Cursor (..)
-
 import Syntax.Parse.Support (..)
-
 import Syntax.Parse.Type (..)
-
 import Syntax.Parse.Pattern (..)
-
 import Syntax.Parse.Expr (..)
-
 import Syntax.Parse.DeclClass (..)
-
 import Syntax.Parse.DeclStable (..)
 
 -- A visibility prefix in the surface vocabulary.
@@ -102,25 +90,17 @@ fn parse_visibility(c : Cursor) : (PVis, Cursor) =
 
 -- | Parse the complete post-layout token stream as a whole source file.
 pub fn parse_program(c : Cursor, depth : Int) : Parsed(List(Item)) =
-  match descend(depth, c) of
-    PFault(d) => PFault(d)
-    PStuck(c1) => PStuck(c1)
-    PTook(d, c1) =>
-      match take_kind(c1, TVOpen) of
-        PFault(e) => PFault(e)
-        PStuck(c2) => PStuck(c2)
-        PTook(_, c2) =>
-          match parse_items(c2, d, Nil) of
-            PFault(e) => PFault(e)
-            PStuck(c3) => PStuck(c3)
-            PTook(items, c3) =>
-              match take_kind(c3, TVClose) of
-                PFault(e) => PFault(e)
-                PStuck(c4) => PStuck(c4)
-                PTook(_, c4) =>
-                  match cursor_expect_end(c4) of
-                    Took(_, c5) => PTook(items, c5)
-                    Stuck(c5) => PStuck(c5)
+  let p1 = descend(depth, c)
+  let PTook(d, c1) = p1 else parsed_refused(p1)
+  let p2 = take_kind(c1, TVOpen)
+  let PTook(_, c2) = p2 else parsed_refused(p2)
+  let p3 = parse_items(c2, d, Nil)
+  let PTook(items, c3) = p3 else parsed_refused(p3)
+  let p4 = take_kind(c3, TVClose)
+  let PTook(_, c4) = p4 else parsed_refused(p4)
+  match cursor_expect_end(c4) of
+    Took(_, c5) => PTook(items, c5)
+    Stuck(c5) => PStuck(c5)
 
 fn parse_items(c : Cursor, depth : Int, rev : List(Item)) : Parsed(List(Item)) =
   if at_kind(c, TVClose) then
@@ -128,14 +108,12 @@ fn parse_items(c : Cursor, depth : Int, rev : List(Item)) : Parsed(List(Item)) =
   elif at_kind(c, TVSemi) then
     parse_items(cursor_advance(c), depth, rev)
   else
-    match parse_item(c, depth) of
-      PFault(d) => PFault(d)
-      PStuck(c1) => PStuck(c1)
-      PTook(item, c1) =>
-        if c1.pos == c.pos then
-          PFault(refuse(cursor_span(c), "declaration parser made no progress"))
-        else
-          parse_items(skip_sep(c1), depth, Cons(item, rev))
+    let p1 = parse_item(c, depth)
+    let PTook(item, c1) = p1 else parsed_refused(p1)
+    if c1.pos == c.pos then
+      PFault(refuse(cursor_span(c), "declaration parser made no progress"))
+    else
+      parse_items(skip_sep(c1), depth, Cons(item, rev))
 
 -- | Parse one top-level item, including its optional visibility prefix.
 pub fn parse_item(c : Cursor, depth : Int) : Parsed(Item) =
@@ -183,39 +161,31 @@ pub fn parse_item(c : Cursor, depth : Int) : Parsed(Item) =
 
 fn parse_deprecated(c : Cursor, depth : Int) : Parsed(Item) =
   let saved = c
-  match take_word(c, TIdent) of
-    PFault(d) => PFault(d)
-    PStuck(c1) => PStuck(c1)
-    PTook(_, c1) =>
-      match take_word(c1, TStr) of
-        PFault(d) => PFault(d)
-        PStuck(c2) => PStuck(c2)
-        PTook(msg, c2) =>
-          match take_kind(c2, TVSemi) of
-            PFault(d) => PFault(d)
-            PStuck(c3) => PStuck(c3)
-            PTook(_, c3) =>
-              if (at_kind(c3, TIdent) && peek_word(c3) == "deprecated") then
-                PFault(
-                    refuse(
-                        cursor_since(saved, c2),
-                        "a `deprecated` annotation must be followed by a declaration",
-                      ),
-                  )
-              else
-                match parse_item(c3, depth) of
-                  PFault(d) => PFault(d)
-                  PStuck(c4) => PStuck(c4)
-                  PTook(item, c4) =>
-                    match attach_deprecation(item, msg) of
-                      None =>
-                        PFault(
-                            refuse(
-                                cursor_since(saved, c2),
-                                "a `deprecated` annotation must precede a named declaration",
-                              ),
-                          )
-                      Some(tagged) => PTook(tagged, c4)
+  let p1 = take_word(c, TIdent)
+  let PTook(_, c1) = p1 else parsed_refused(p1)
+  let p2 = take_word(c1, TStr)
+  let PTook(msg, c2) = p2 else parsed_refused(p2)
+  let p3 = take_kind(c2, TVSemi)
+  let PTook(_, c3) = p3 else parsed_refused(p3)
+  if at_kind(c3, TIdent) && peek_word(c3) == "deprecated" then
+    PFault(
+        refuse(
+            cursor_since(saved, c2),
+            "a `deprecated` annotation must be followed by a declaration",
+          ),
+      )
+  else
+    let p4 = parse_item(c3, depth)
+    let PTook(item, c4) = p4 else parsed_refused(p4)
+    match attach_deprecation(item, msg) of
+      None =>
+        PFault(
+            refuse(
+                cursor_since(saved, c2),
+                "a `deprecated` annotation must precede a named declaration",
+              ),
+          )
+      Some(tagged) => PTook(tagged, c4)
 
 fn attach_deprecation(item : Item, msg : String) : Option(Item) =
   match item of
@@ -372,42 +342,33 @@ fn attach_deprecation(item : Item, msg : String) : Option(Item) =
 -- -------------------------------------------------------------------------
 
 fn parse_import(saved : Cursor, c : Cursor, vis : PVis) : Parsed(Item) =
-  match take_fixed(c, "import") of
-    PFault(d) => PFault(d)
-    PStuck(c1) => PStuck(c1)
-    PTook(_, c1) =>
-      match upper_name(c1) of
-        PFault(d) => PFault(d)
-        PStuck(c2) => PStuck(c2)
-        PTook(path, c2) =>
-          match parse_import_alias(c2) of
-            PFault(d) => PFault(d)
-            PStuck(c3) => PStuck(c3)
-            PTook(mod_alias, c3) =>
-              match parse_import_names(c3) of
-                PFault(d) => PFault(d)
-                PStuck(c4) => PStuck(c4)
-                PTook(spec, c4) =>
-                  match spec of
-                    (names, glob) =>
-                      PTook(
-                          IImport {
-                            path = path_parts(path),
-                            mod_alias = mod_alias,
-                            names = names,
-                            glob = glob,
-                            reexport = vis == VPublic,
-                            span = cursor_since(saved, c4)
-                          },
-                          c4,
-                        )
+  let p1 = take_fixed(c, "import")
+  let PTook(_, c1) = p1 else parsed_refused(p1)
+  let p2 = upper_name(c1)
+  let PTook(path, c2) = p2 else parsed_refused(p2)
+  let p3 = parse_import_alias(c2)
+  let PTook(mod_alias, c3) = p3 else parsed_refused(p3)
+  let p4 = parse_import_names(c3)
+  let PTook(spec, c4) = p4 else parsed_refused(p4)
+  match spec of
+    (names, glob) =>
+      PTook(
+          IImport {
+            path = path_parts(path),
+            mod_alias = mod_alias,
+            names = names,
+            glob = glob,
+            reexport = vis == VPublic,
+            span = cursor_since(saved, c4)
+          },
+          c4,
+        )
 
 fn parse_import_alias(c : Cursor) : Parsed(Option(String)) =
   if at_fixed(c, "as") then
-    match take_word(cursor_advance(c), TUid) of
-      PTook(n, c1) => PTook(Some(n), c1)
-      PStuck(c1) => PStuck(c1)
-      PFault(d) => PFault(d)
+    let p1 = take_word(cursor_advance(c), TUid)
+    let PTook(n, c1) = p1 else parsed_refused(p1)
+    PTook(Some(n), c1)
   else
     PTook(None, c)
 
@@ -417,15 +378,13 @@ fn parse_import_names(c : Cursor) : Parsed((Option(List(String)), Bool)) =
   else
     let c1 = cursor_advance(c)
     if at_fixed(c1, "..") then
-      match take_fixed(cursor_advance(c1), ")") of
-        PTook(_, c2) => PTook((None, true), c2)
-        PStuck(c2) => PStuck(c2)
-        PFault(d) => PFault(d)
+      let p2 = take_fixed(cursor_advance(c1), ")")
+      let PTook(_, c2) = p2 else parsed_refused(p2)
+      PTook((None, true), c2)
     else
-      match parse_names_until(c1, ")", Nil) of
-        PTook(ns, c2) => PTook((Some(ns), false), c2)
-        PStuck(c2) => PStuck(c2)
-        PFault(d) => PFault(d)
+      let p1 = parse_names_until(c1, ")", Nil)
+      let PTook(ns, c2) = p1 else parsed_refused(p1)
+      PTook((Some(ns), false), c2)
 
 fn parse_names_until(
   c : Cursor,
@@ -435,16 +394,14 @@ fn parse_names_until(
   if at_fixed(c, close) then
     PTook(reverse(rev), cursor_advance(c))
   else
-    match name_token(c) of
-      PFault(d) => PFault(d)
-      PStuck(c1) => PStuck(c1)
-      PTook(n, c1) =>
-        if at_fixed(c1, ",") then
-          parse_names_until(cursor_advance(c1), close, Cons(n, rev))
-        elif at_fixed(c1, close) then
-          PTook(reverse(Cons(n, rev)), cursor_advance(c1))
-        else
-          PStuck(cursor_note_name(c1, close))
+    let p1 = name_token(c)
+    let PTook(n, c1) = p1 else parsed_refused(p1)
+    if at_fixed(c1, ",") then
+      parse_names_until(cursor_advance(c1), close, Cons(n, rev))
+    elif at_fixed(c1, close) then
+      PTook(reverse(Cons(n, rev)), cursor_advance(c1))
+    else
+      PStuck(cursor_note_name(c1, close))
 
 -- -------------------------------------------------------------------------
 -- Algebraic data and aliases
@@ -458,57 +415,47 @@ fn parse_data(
   depth : Int
 ) : Parsed(Item) =
   let c1 = cursor_advance(c)
-  match take_word(c1, TUid) of
-    PFault(d) => PFault(d)
-    PStuck(c2) => PStuck(c2)
-    PTook(name, c2) =>
-      match parse_type_params(c2) of
-        PFault(d) => PFault(d)
-        PStuck(c3) => PStuck(c3)
-        PTook(tp, c3) =>
-          match take_fixed(c3, "=") of
-            PFault(d) => PFault(d)
-            PStuck(c4) => PStuck(c4)
-            PTook(_, c4) =>
-              match parse_ctors(c4, depth, Nil) of
-                PFault(d) => PFault(d)
-                PStuck(c5) => PStuck(c5)
-                PTook(ctor_spec, c5) =>
-                  match ctor_spec of
-                    (ctors, opened) =>
-                      match parse_deriving(c5, Nil) of
-                        PFault(d) => PFault(d)
-                        PStuck(c6) => PStuck(c6)
-                        PTook(derivs, c6) =>
-                          let c7 =
-                            if opened && at_kind(c6, TVClose) then
-                              cursor_advance(c6)
-                            else
-                              c6
-                          match tp of
-                            (params, kinds) =>
-                              if (is_newtype && not(newtype_shape(ctors))) then
-                                PFault(
-                                    refuse(
-                                        cursor_since(saved, c7),
-                                        "a newtype must have exactly one constructor with one field",
-                                      ),
-                                  )
-                              else
-                                PTook(
-                                    IData {
-                                      nt = is_newtype,
-                                      name = name,
-                                      params = params,
-                                      param_kinds = if is_newtype then Nil else kinds,
-                                      ctors = ctors,
-                                      derivs = derivs,
-                                      span = cursor_since(saved, c7),
-                                      vis = vis_value(vis),
-                                      dep = None
-                                    },
-                                    c7,
-                                  )
+  let p2 = take_word(c1, TUid)
+  let PTook(name, c2) = p2 else parsed_refused(p2)
+  let p3 = parse_type_params(c2)
+  let PTook(tp, c3) = p3 else parsed_refused(p3)
+  let p4 = take_fixed(c3, "=")
+  let PTook(_, c4) = p4 else parsed_refused(p4)
+  let p5 = parse_ctors(c4, depth, Nil)
+  let PTook(ctor_spec, c5) = p5 else parsed_refused(p5)
+  match ctor_spec of
+    (ctors, opened) =>
+      let p6 = parse_deriving(c5, Nil)
+      let PTook(derivs, c6) = p6 else parsed_refused(p6)
+      let c7 =
+        if opened && at_kind(c6, TVClose) then
+          cursor_advance(c6)
+        else
+          c6
+      match tp of
+        (params, kinds) =>
+          if is_newtype && not(newtype_shape(ctors)) then
+            PFault(
+                refuse(
+                    cursor_since(saved, c7),
+                    "a newtype must have exactly one constructor with one field",
+                  ),
+              )
+          else
+            PTook(
+                IData {
+                  nt = is_newtype,
+                  name = name,
+                  params = params,
+                  param_kinds = if is_newtype then Nil else kinds,
+                  ctors = ctors,
+                  derivs = derivs,
+                  span = cursor_since(saved, c7),
+                  vis = vis_value(vis),
+                  dep = None
+                },
+                c7,
+              )
 
 fn newtype_shape(ctors : List(Ctor)) : Bool =
   match ctors of
@@ -533,44 +480,38 @@ fn parse_type_params_go(
   if at_fixed(c, ")") then
     PTook((reverse(names), reverse(kinds)), cursor_advance(c))
   else
-    match take_word(c, TIdent) of
-      PFault(d) => PFault(d)
-      PStuck(c1) => PStuck(c1)
-      PTook(name, c1) =>
-        match parse_kind_ann(c1) of
-          PFault(d) => PFault(d)
-          PStuck(c2) => PStuck(c2)
-          PTook(kind, c2) =>
-            if at_fixed(c2, ",") then
-              parse_type_params_go(
-                  cursor_advance(c2),
-                  Cons(name, names),
-                  Cons(kind, kinds),
-                )
-            elif at_fixed(c2, ")") then
-              PTook(
-                  (reverse(Cons(name, names)), reverse(Cons(kind, kinds))),
-                  cursor_advance(c2),
-                )
-            else
-              PStuck(cursor_note_name(c2, ")"))
+    let p1 = take_word(c, TIdent)
+    let PTook(name, c1) = p1 else parsed_refused(p1)
+    let p2 = parse_kind_ann(c1)
+    let PTook(kind, c2) = p2 else parsed_refused(p2)
+    if at_fixed(c2, ",") then
+      parse_type_params_go(
+          cursor_advance(c2),
+          Cons(name, names),
+          Cons(kind, kinds),
+        )
+    elif at_fixed(c2, ")") then
+      PTook(
+          (reverse(Cons(name, names)), reverse(Cons(kind, kinds))),
+          cursor_advance(c2),
+        )
+    else
+      PStuck(cursor_note_name(c2, ")"))
 
 fn parse_kind_ann(c : Cursor) : Parsed(Kind) =
   if not(at_fixed(c, ":")) then
     PTook(KType, c)
   else
-    match take_word(cursor_advance(c), TUid) of
-      PFault(d) => PFault(d)
-      PStuck(c1) => PStuck(c1)
-      PTook(k, c1) =>
-        if k == "Type" then
-          PTook(KType, c1)
-        elif k == "Row" then
-          PTook(KRow, c1)
-        elif k == "Nat" then
-          PTook(KNat, c1)
-        else
-          PFault(refuse(cursor_since(c, c1), "unknown kind `{k}`"))
+    let p1 = take_word(cursor_advance(c), TUid)
+    let PTook(k, c1) = p1 else parsed_refused(p1)
+    if k == "Type" then
+      PTook(KType, c1)
+    elif k == "Row" then
+      PTook(KRow, c1)
+    elif k == "Nat" then
+      PTook(KNat, c1)
+    else
+      PFault(refuse(cursor_since(c, c1), "unknown kind `{k}`"))
 
 fn parse_ctors(
   c : Cursor,
@@ -583,10 +524,9 @@ fn parse_ctors(
       cursor_advance(c)
     else
       c
-  match parse_ctors_go(c1, depth, rev, opened) of
-    PFault(d) => PFault(d)
-    PStuck(c2) => PStuck(c2)
-    PTook(ctors, c2) => PTook((ctors, opened), c2)
+  let p2 = parse_ctors_go(c1, depth, rev, opened)
+  let PTook(ctors, c2) = p2 else parsed_refused(p2)
+  PTook((ctors, opened), c2)
 
 fn parse_ctors_go(
   c : Cursor,
@@ -611,35 +551,28 @@ fn parse_ctors_go(
   elif not(virtual) && not(at_kind(c0, TUid)) then
     PTook(reverse(rev), c0)
   else
-    match parse_ctor(c0, depth) of
-      PFault(d) => PFault(d)
-      PStuck(c1) => PStuck(c1)
-      PTook(ctor, c1) =>
-        if at_fixed(c1, "|") || at_kind(c1, TVSemi) then
-          parse_ctors_go(c1, depth, Cons(ctor, rev), virtual)
-        elif virtual && at_kind(c1, TVClose) then
-          PTook(reverse(Cons(ctor, rev)), cursor_advance(c1))
-        else
-          PTook(reverse(Cons(ctor, rev)), c1)
+    let p1 = parse_ctor(c0, depth)
+    let PTook(ctor, c1) = p1 else parsed_refused(p1)
+    if at_fixed(c1, "|") || at_kind(c1, TVSemi) then
+      parse_ctors_go(c1, depth, Cons(ctor, rev), virtual)
+    elif virtual && at_kind(c1, TVClose) then
+      PTook(reverse(Cons(ctor, rev)), cursor_advance(c1))
+    else
+      PTook(reverse(Cons(ctor, rev)), c1)
 
 fn parse_ctor(c : Cursor, depth : Int) : Parsed(Ctor) =
-  match take_word(c, TUid) of
-    PFault(d) => PFault(d)
-    PStuck(c1) => PStuck(c1)
-    PTook(name, c1) =>
-      if at_fixed(c1, "\{") then
-        match parse_ctor_fields(cursor_advance(c1), depth, Nil) of
-          PTook(fs, c2) => PTook(Ctor { name = name, shape = CRecord(fs) }, c2)
-          PStuck(c2) => PStuck(c2)
-          PFault(d) => PFault(d)
-      elif at_fixed(c1, "(") then
-        match parse_types_until(cursor_advance(c1), ")", depth, Nil) of
-          PTook(ts, c2) =>
-            PTook(Ctor { name = name, shape = CPositional(ts) }, c2)
-          PStuck(c2) => PStuck(c2)
-          PFault(d) => PFault(d)
-      else
-        PTook(Ctor { name = name, shape = CPositional(Nil) }, c1)
+  let p1 = take_word(c, TUid)
+  let PTook(name, c1) = p1 else parsed_refused(p1)
+  if at_fixed(c1, "\{") then
+    let p2 = parse_ctor_fields(cursor_advance(c1), depth, Nil)
+    let PTook(fs, c2) = p2 else parsed_refused(p2)
+    PTook(Ctor { name = name, shape = CRecord(fs) }, c2)
+  elif at_fixed(c1, "(") then
+    let p3 = parse_types_until(cursor_advance(c1), ")", depth, Nil)
+    let PTook(ts, c2) = p3 else parsed_refused(p3)
+    PTook(Ctor { name = name, shape = CPositional(ts) }, c2)
+  else
+    PTook(Ctor { name = name, shape = CPositional(Nil) }, c1)
 
 fn parse_ctor_fields(
   c : Cursor,
@@ -649,26 +582,20 @@ fn parse_ctor_fields(
   if at_fixed(c, "\}") then
     PTook(reverse(rev), cursor_advance(c))
   else
-    match take_word(c, TIdent) of
-      PFault(d) => PFault(d)
-      PStuck(c1) => PStuck(c1)
-      PTook(name, c1) =>
-        match take_fixed(c1, ":") of
-          PFault(d) => PFault(d)
-          PStuck(c2) => PStuck(c2)
-          PTook(_, c2) =>
-            match parse_type(c2, depth) of
-              PFault(d) => PFault(d)
-              PStuck(c3) => PStuck(c3)
-              PTook(ty, c3) =>
-                let field = CField { name = name, ty = ty }
-                if at_fixed(c3, ",") then
-                  parse_ctor_fields(cursor_advance(c3), depth, Cons(field, rev))
-                elif at_fixed(c3, "\}") then
-                  PTook(reverse(Cons(field, rev)), cursor_advance(c3))
-                else
-                  let c4 = cursor_note(c3, TFixed(","))
-                  PStuck(cursor_note(c4, TFixed("\}")))
+    let p1 = take_word(c, TIdent)
+    let PTook(name, c1) = p1 else parsed_refused(p1)
+    let p2 = take_fixed(c1, ":")
+    let PTook(_, c2) = p2 else parsed_refused(p2)
+    let p3 = parse_type(c2, depth)
+    let PTook(ty, c3) = p3 else parsed_refused(p3)
+    let field = CField { name = name, ty = ty }
+    if at_fixed(c3, ",") then
+      parse_ctor_fields(cursor_advance(c3), depth, Cons(field, rev))
+    elif at_fixed(c3, "\}") then
+      PTook(reverse(Cons(field, rev)), cursor_advance(c3))
+    else
+      let c4 = cursor_note(c3, TFixed(","))
+      PStuck(cursor_note(c4, TFixed("\}")))
 
 fn parse_types_until(
   c : Cursor,
@@ -679,26 +606,23 @@ fn parse_types_until(
   if at_fixed(c, close) then
     PTook(reverse(rev), cursor_advance(c))
   else
-    match parse_type_arg(c, depth) of
-      PFault(d) => PFault(d)
-      PStuck(c1) => PStuck(c1)
-      PTook(ty, c1) =>
-        if at_fixed(c1, ",") then
-          parse_types_until(cursor_advance(c1), close, depth, Cons(ty, rev))
-        elif at_fixed(c1, close) then
-          PTook(reverse(Cons(ty, rev)), cursor_advance(c1))
-        else
-          let c2 = cursor_note(c1, TFixed(","))
-          PStuck(cursor_note(c2, TFixed(close)))
+    let p1 = parse_type_arg(c, depth)
+    let PTook(ty, c1) = p1 else parsed_refused(p1)
+    if at_fixed(c1, ",") then
+      parse_types_until(cursor_advance(c1), close, depth, Cons(ty, rev))
+    elif at_fixed(c1, close) then
+      PTook(reverse(Cons(ty, rev)), cursor_advance(c1))
+    else
+      let c2 = cursor_note(c1, TFixed(","))
+      PStuck(cursor_note(c2, TFixed(close)))
 
 fn parse_deriving(c : Cursor, rev : List(Deriving)) : Parsed(List(Deriving)) =
   if not(at_fixed(c, "deriving")) then
     PTook(reverse(rev), c)
   else
-    match take_fixed(cursor_advance(c), "(") of
-      PFault(d) => PFault(d)
-      PStuck(c1) => PStuck(c1)
-      PTook(_, c1) => parse_deriving_go(c1, Nil)
+    let p1 = take_fixed(cursor_advance(c), "(")
+    let PTook(_, c1) = p1 else parsed_refused(p1)
+    parse_deriving_go(c1, Nil)
 
 fn parse_deriving_go(
   c : Cursor,
@@ -708,17 +632,15 @@ fn parse_deriving_go(
     PTook(reverse(rev), cursor_advance(c))
   else
     let start = c
-    match take_word(c, TUid) of
-      PFault(d) => PFault(d)
-      PStuck(c1) => PStuck(c1)
-      PTook(name, c1) =>
-        let d = Deriving { name = name, span = cursor_since(start, c1) }
-        if at_fixed(c1, ",") then
-          parse_deriving_go(cursor_advance(c1), Cons(d, rev))
-        elif at_fixed(c1, ")") then
-          PTook(reverse(Cons(d, rev)), cursor_advance(c1))
-        else
-          PStuck(cursor_note_name(c1, ")"))
+    let p1 = take_word(c, TUid)
+    let PTook(name, c1) = p1 else parsed_refused(p1)
+    let d = Deriving { name = name, span = cursor_since(start, c1) }
+    if at_fixed(c1, ",") then
+      parse_deriving_go(cursor_advance(c1), Cons(d, rev))
+    elif at_fixed(c1, ")") then
+      PTook(reverse(Cons(d, rev)), cursor_advance(c1))
+    else
+      PStuck(cursor_note_name(c1, ")"))
 
 fn parse_error_decl(
   saved : Cursor,
@@ -726,36 +648,32 @@ fn parse_error_decl(
   vis : PVis,
   depth : Int
 ) : Parsed(Item) =
-  match take_word(cursor_advance(c), TUid) of
-    PFault(d) => PFault(d)
-    PStuck(c1) => PStuck(c1)
-    PTook(name, c1) =>
-      if at_fixed(c1, "(") then
-        match parse_types_until(cursor_advance(c1), ")", depth, Nil) of
-          PTook(ts, c2) =>
-            PTook(
-                IError {
-                  name = name,
-                  arg_types = ts,
-                  span = cursor_since(saved, c2),
-                  vis = vis_value(vis),
-                  dep = None
-                },
-                c2,
-              )
-          PStuck(c2) => PStuck(c2)
-          PFault(d) => PFault(d)
-      else
-        PTook(
-            IError {
-              name = name,
-              arg_types = Nil,
-              span = cursor_since(saved, c1),
-              vis = vis_value(vis),
-              dep = None
-            },
-            c1,
-          )
+  let p1 = take_word(cursor_advance(c), TUid)
+  let PTook(name, c1) = p1 else parsed_refused(p1)
+  if at_fixed(c1, "(") then
+    let p2 = parse_types_until(cursor_advance(c1), ")", depth, Nil)
+    let PTook(ts, c2) = p2 else parsed_refused(p2)
+    PTook(
+        IError {
+          name = name,
+          arg_types = ts,
+          span = cursor_since(saved, c2),
+          vis = vis_value(vis),
+          dep = None
+        },
+        c2,
+      )
+  else
+    PTook(
+        IError {
+          name = name,
+          arg_types = Nil,
+          span = cursor_since(saved, c1),
+          vis = vis_value(vis),
+          dep = None
+        },
+        c1,
+      )
 
 -- -------------------------------------------------------------------------
 -- Function and constant declarations
@@ -771,111 +689,78 @@ fn parse_fn(
   depth : Int,
   kind : String
 ) : Parsed(Item) =
-  match parse_fn_mods(c) of
-    PFault(d) => PFault(d)
-    PStuck(c1) => PStuck(c1)
-    PTook(mods, c1) =>
-      match take_fixed(c1, "fn") of
-        PFault(d) => PFault(d)
-        PStuck(c2) => PStuck(c2)
-        PTook(_, c2) =>
-          match take_word(c2, TIdent) of
-            PFault(d) => PFault(d)
-            PStuck(c3) => PStuck(c3)
-            PTook(name, c3) =>
-              match take_fixed(c3, "(") of
-                PFault(d) => PFault(d)
-                PStuck(c4) => PStuck(c4)
-                PTook(_, c4) =>
-                  match parse_params(c4, depth, 0, Nil) of
-                    PFault(d) => PFault(d)
-                    PStuck(c5) => PStuck(c5)
-                    PTook(params, c5) =>
-                      match parse_fn_spec(c5, depth) of
-                        PFault(d) => PFault(d)
-                        PStuck(c6) => PStuck(c6)
-                        PTook(spec, c6) =>
-                          match take_fixed(c6, "=") of
-                            PFault(d) => PFault(d)
-                            PStuck(c7) => PStuck(c7)
-                            PTook(_, c7) =>
-                              match parse_expr_or_block(c7, depth) of
-                                PFault(d) => PFault(d)
-                                PStuck(c8) => PStuck(c8)
-                                PTook(body, c8) =>
-                                  match parse_where_block(c8, depth) of
-                                    PFault(d) => PFault(d)
-                                    PStuck(c9) => PStuck(c9)
-                                    PTook(wheres, c9) =>
-                                      match mods of
-                                        (
-                                          is_test,
-                                          totality,
-                                          fip_mode,
-                                          is_replayable
-                                        ) =>
-                                          let decl =
-                                            Decl {
-                                              name = name,
-                                              params = params,
-                                              ret = spec.ret,
-                                              eff = spec.eff,
-                                              constraints = spec.constraints,
-                                              body = body,
-                                              wheres = wheres,
-                                              reqs = spec.reqs,
-                                              enss = spec.enss,
-                                              measure = spec.measure,
-                                              is_test = is_test,
-                                              totality = totality,
-                                              fip_word = fip_mode,
-                                              is_replayable = is_replayable,
-                                              is_no_alloc = spec.no_alloc,
-                                              span = cursor_since(saved, c9)
-                                            }
-                                          PTook(
-                                              IDecl {
-                                                decl = decl,
-                                                declkind = kind,
-                                                vis = vis_value(vis),
-                                                dep = None
-                                              },
-                                              c9,
-                                            )
+  let p1 = parse_fn_mods(c)
+  let PTook(mods, c1) = p1 else parsed_refused(p1)
+  let p2 = take_fixed(c1, "fn")
+  let PTook(_, c2) = p2 else parsed_refused(p2)
+  let p3 = take_word(c2, TIdent)
+  let PTook(name, c3) = p3 else parsed_refused(p3)
+  let p4 = take_fixed(c3, "(")
+  let PTook(_, c4) = p4 else parsed_refused(p4)
+  let p5 = parse_params(c4, depth, 0, Nil)
+  let PTook(params, c5) = p5 else parsed_refused(p5)
+  let p6 = parse_fn_spec(c5, depth)
+  let PTook(spec, c6) = p6 else parsed_refused(p6)
+  let p7 = take_fixed(c6, "=")
+  let PTook(_, c7) = p7 else parsed_refused(p7)
+  let p8 = parse_expr_or_block(c7, depth)
+  let PTook(body, c8) = p8 else parsed_refused(p8)
+  let p9 = parse_where_block(c8, depth)
+  let PTook(wheres, c9) = p9 else parsed_refused(p9)
+  match mods of
+    (is_test, totality, fip_mode, is_replayable) =>
+      let decl =
+        Decl {
+          name = name,
+          params = params,
+          ret = spec.ret,
+          eff = spec.eff,
+          constraints = spec.constraints,
+          body = body,
+          wheres = wheres,
+          reqs = spec.reqs,
+          enss = spec.enss,
+          measure = spec.measure,
+          is_test = is_test,
+          totality = totality,
+          fip_word = fip_mode,
+          is_replayable = is_replayable,
+          is_no_alloc = spec.no_alloc,
+          span = cursor_since(saved, c9)
+        }
+      PTook(
+          IDecl {
+            decl = decl,
+            declkind = kind,
+            vis = vis_value(vis),
+            dep = None
+          },
+          c9,
+        )
 
 fn parse_fn_spec(c : Cursor, depth : Int) : Parsed(FnSpec) =
-  match parse_ret_spec(c, depth) of
-    PFault(d) => PFault(d)
-    PStuck(c1) => PStuck(c1)
-    PTook(ret, c1) =>
-      match parse_given(c1, depth) of
-        PFault(d) => PFault(d)
-        PStuck(c2) => PStuck(c2)
-        PTook(constraints, c2) =>
-          match parse_requires(c2, depth, Nil) of
-            PFault(d) => PFault(d)
-            PStuck(c3) => PStuck(c3)
-            PTook(reqs, c3) =>
-              match parse_ensures(c3, depth, Nil) of
-                PFault(d) => PFault(d)
-                PStuck(c4) => PStuck(c4)
-                PTook(enss, c4) =>
-                  match parse_decreases(c4, depth) of
-                    PFault(d) => PFault(d)
-                    PStuck(c5) => PStuck(c5)
-                    PTook(measure, c5) =>
-                      PTook(
-                          FnSpec {
-                            ret = ret.ret,
-                            eff = ret.eff,
-                            constraints = constraints,
-                            reqs = reqs,
-                            enss = enss,
-                            measure = measure,
-                            no_alloc = ret.no_alloc
-                          },
-                          c5,
-                        )
+  let p1 = parse_ret_spec(c, depth)
+  let PTook(ret, c1) = p1 else parsed_refused(p1)
+  let p2 = parse_given(c1, depth)
+  let PTook(constraints, c2) = p2 else parsed_refused(p2)
+  let p3 = parse_requires(c2, depth, Nil)
+  let PTook(reqs, c3) = p3 else parsed_refused(p3)
+  let p4 = parse_ensures(c3, depth, Nil)
+  let PTook(enss, c4) = p4 else parsed_refused(p4)
+  let p5 = parse_decreases(c4, depth)
+  let PTook(measure, c5) = p5 else parsed_refused(p5)
+  PTook(
+      FnSpec {
+        ret = ret.ret,
+        eff = ret.eff,
+        constraints = constraints,
+        reqs = reqs,
+        enss = enss,
+        measure = measure,
+        no_alloc = ret.no_alloc
+      },
+      c5,
+    )
 
 fn parse_ret_spec(c : Cursor, depth : Int) : Parsed(RetSpec) =
   if not(at_fixed(c, ":")) then
@@ -896,33 +781,31 @@ fn parse_ret_spec(c : Cursor, depth : Int) : Parsed(RetSpec) =
             PStuck(c1)
         PTook(raw, c1) =>
           if at_fixed(c1, "!") then
-            match parse_effect_row(c1, depth) of
-              PFault(d) => PFault(d)
-              PStuck(c2) => PStuck(c2)
-              PTook(row, c2) =>
-                match attach_return_effect(raw, row) of
-                  Some(with_eff) =>
-                    match lift_noalloc(with_eff) of
-                      (ret, no_alloc) =>
-                        PTook(
-                            RetSpec {
-                              ret = Some(ret),
-                              eff = None,
-                              no_alloc = no_alloc
-                            },
-                            c2,
-                          )
-                  None =>
-                    match lift_noalloc(raw) of
-                      (ret, no_alloc) =>
-                        PTook(
-                            RetSpec {
-                              ret = Some(ret),
-                              eff = Some(row),
-                              no_alloc = no_alloc
-                            },
-                            c2,
-                          )
+            let p2 = parse_effect_row(c1, depth)
+            let PTook(row, c2) = p2 else parsed_refused(p2)
+            match attach_return_effect(raw, row) of
+              Some(with_eff) =>
+                match lift_noalloc(with_eff) of
+                  (ret, no_alloc) =>
+                    PTook(
+                        RetSpec {
+                          ret = Some(ret),
+                          eff = None,
+                          no_alloc = no_alloc
+                        },
+                        c2,
+                      )
+              None =>
+                match lift_noalloc(raw) of
+                  (ret, no_alloc) =>
+                    PTook(
+                        RetSpec {
+                          ret = Some(ret),
+                          eff = Some(row),
+                          no_alloc = no_alloc
+                        },
+                        c2,
+                      )
           else
             match lift_noalloc(raw) of
               (ret, no_alloc) =>
@@ -941,24 +824,22 @@ fn parse_retired_ret_spec(
   depth : Int
 ) : Parsed(RetSpec) =
   let braced = at_fixed(cursor_advance(bang), "\{")
-  match parse_effect_row(bang, depth) of
+  let p1 = parse_effect_row(bang, depth)
+  let PTook(_, c1) = p1 else parsed_refused(p1)
+  match parse_type(c1, depth) of
     PFault(d) => PFault(d)
-    PStuck(c1) => PStuck(c1)
-    PTook(_, c1) =>
-      match parse_type(c1, depth) of
-        PFault(d) => PFault(d)
-        PStuck(c2) =>
-          if not(braced) && c2.pos == c1.pos then
-            PStuck(cursor_note(c2, TFixed("\{")))
-          else
-            PStuck(c2)
-        PTook(_, c2) =>
-          PFault(
-              refuse(
-                  cursor_since(start, c2),
-                  "the effect row now follows the result type: write `: Result ! \{Effects\}` instead of `: !\{Effects\} Result`",
-                ),
-            )
+    PStuck(c2) =>
+      if not(braced) && c2.pos == c1.pos then
+        PStuck(cursor_note(c2, TFixed("\{")))
+      else
+        PStuck(c2)
+    PTook(_, c2) =>
+      PFault(
+          refuse(
+              cursor_since(start, c2),
+              "the effect row now follows the result type: write `: Result ! \{Effects\}` instead of `: !\{Effects\} Result`",
+            ),
+        )
 
 fn lift_noalloc(t : Ty) : (Ty, Bool) =
   match t of
@@ -996,31 +877,19 @@ fn parse_constraints(
   rev : List(Constraint)
 ) : Parsed(List(Constraint)) =
   let saved = c
-  match take_word(c, TUid) of
-    PFault(d) => PFault(d)
-    PStuck(c1) => PStuck(c1)
-    PTook(cls, c1) =>
-      match take_fixed(c1, "(") of
-        PFault(d) => PFault(d)
-        PStuck(c2) => PStuck(c2)
-        PTook(_, c2) =>
-          match parse_type(c2, depth) of
-            PFault(d) => PFault(d)
-            PStuck(c3) => PStuck(c3)
-            PTook(ty, c3) =>
-              match take_fixed(c3, ")") of
-                PFault(d) => PFault(d)
-                PStuck(c4) => PStuck(c4)
-                PTook(_, c4) =>
-                  let con = Constraint {
-                    cls = cls,
-                    ty = ty,
-                    span = cursor_since(saved, c4)
-                  }
-                  if at_fixed(c4, ",") then
-                    parse_constraints(cursor_advance(c4), depth, Cons(con, rev))
-                  else
-                    PTook(reverse(Cons(con, rev)), c4)
+  let p1 = take_word(c, TUid)
+  let PTook(cls, c1) = p1 else parsed_refused(p1)
+  let p2 = take_fixed(c1, "(")
+  let PTook(_, c2) = p2 else parsed_refused(p2)
+  let p3 = parse_type(c2, depth)
+  let PTook(ty, c3) = p3 else parsed_refused(p3)
+  let p4 = take_fixed(c3, ")")
+  let PTook(_, c4) = p4 else parsed_refused(p4)
+  let con = Constraint { cls = cls, ty = ty, span = cursor_since(saved, c4) }
+  if at_fixed(c4, ",") then
+    parse_constraints(cursor_advance(c4), depth, Cons(con, rev))
+  else
+    PTook(reverse(Cons(con, rev)), c4)
 
 fn parse_requires(
   c : Cursor,
@@ -1030,10 +899,9 @@ fn parse_requires(
   if not(at_fixed(c, "requires")) then
     PTook(reverse(rev), c)
   else
-    match parse_expr(cursor_advance(c), depth) of
-      PFault(d) => PFault(d)
-      PStuck(c1) => PStuck(c1)
-      PTook(e, c1) => parse_requires(c1, depth, Cons(e, rev))
+    let p1 = parse_expr(cursor_advance(c), depth)
+    let PTook(e, c1) = p1 else parsed_refused(p1)
+    parse_requires(c1, depth, Cons(e, rev))
 
 fn parse_ensures(
   c : Cursor,
@@ -1043,45 +911,31 @@ fn parse_ensures(
   if not(at_fixed(c, "ensures")) then
     PTook(reverse(rev), c)
   else
-    match take_fixed(cursor_advance(c), "|") of
-      PFault(d) => PFault(d)
-      PStuck(c1) => PStuck(c1)
-      PTook(_, c1) =>
-        match take_word(c1, TIdent) of
-          PFault(d) => PFault(d)
-          PStuck(c2) => PStuck(c2)
-          PTook(binder, c2) =>
-            match take_fixed(c2, "|") of
-              PFault(d) => PFault(d)
-              PStuck(c3) => PStuck(c3)
-              PTook(_, c3) =>
-                match parse_expr(c3, depth) of
-                  PFault(d) => PFault(d)
-                  PStuck(c4) => PStuck(c4)
-                  PTook(e, c4) =>
-                    parse_ensures(
-                        c4,
-                        depth,
-                        Cons(Ensure { binder = binder, expr = e }, rev),
-                      )
+    let p1 = take_fixed(cursor_advance(c), "|")
+    let PTook(_, c1) = p1 else parsed_refused(p1)
+    let p2 = take_word(c1, TIdent)
+    let PTook(binder, c2) = p2 else parsed_refused(p2)
+    let p3 = take_fixed(c2, "|")
+    let PTook(_, c3) = p3 else parsed_refused(p3)
+    let p4 = parse_expr(c3, depth)
+    let PTook(e, c4) = p4 else parsed_refused(p4)
+    parse_ensures(c4, depth, Cons(Ensure { binder = binder, expr = e }, rev))
 
 fn parse_decreases(c : Cursor, depth : Int) : Parsed(Option(Sp(Expr))) =
   if peek_word(c) /= "decreases" then
     PTook(None, c)
   else
-    match parse_expr(cursor_advance(c), depth) of
-      PTook(e, c1) => PTook(Some(e), c1)
-      PStuck(c1) => PStuck(c1)
-      PFault(d) => PFault(d)
+    let p1 = parse_expr(cursor_advance(c), depth)
+    let PTook(e, c1) = p1 else parsed_refused(p1)
+    PTook(Some(e), c1)
 
 fn parse_where_block(c : Cursor, depth : Int) : Parsed(List(NamedExpr)) =
   if not(at_fixed(c, "where")) then
     PTook(Nil, c)
   else
-    match take_kind(cursor_advance(c), TVOpen) of
-      PFault(d) => PFault(d)
-      PStuck(c1) => PStuck(c1)
-      PTook(_, c1) => parse_where_bindings(c1, depth, Nil)
+    let p1 = take_kind(cursor_advance(c), TVOpen)
+    let PTook(_, c1) = p1 else parsed_refused(p1)
+    parse_where_bindings(c1, depth, Nil)
 
 fn parse_where_bindings(
   c : Cursor,
@@ -1093,23 +947,17 @@ fn parse_where_bindings(
   elif at_kind(c, TVSemi) then
     parse_where_bindings(cursor_advance(c), depth, rev)
   else
-    match take_word(c, TIdent) of
-      PFault(d) => PFault(d)
-      PStuck(c1) => PStuck(c1)
-      PTook(name, c1) =>
-        match take_fixed(c1, "=") of
-          PFault(d) => PFault(d)
-          PStuck(c2) => PStuck(c2)
-          PTook(_, c2) =>
-            match parse_expr_or_block(c2, depth) of
-              PFault(d) => PFault(d)
-              PStuck(c3) => PStuck(c3)
-              PTook(value, c3) =>
-                parse_where_bindings(
-                    c3,
-                    depth,
-                    Cons(NamedExpr { name = name, value = value }, rev),
-                  )
+    let p1 = take_word(c, TIdent)
+    let PTook(name, c1) = p1 else parsed_refused(p1)
+    let p2 = take_fixed(c1, "=")
+    let PTook(_, c2) = p2 else parsed_refused(p2)
+    let p3 = parse_expr_or_block(c2, depth)
+    let PTook(value, c3) = p3 else parsed_refused(p3)
+    parse_where_bindings(
+        c3,
+        depth,
+        Cons(NamedExpr { name = name, value = value }, rev),
+      )
 
 fn parse_fn_mods(c : Cursor) : Parsed((Bool, Option(String), Option(String), Bool)) =
   let (words, c1, remaining) = take_fn_mod_words(c, 3, Nil)
@@ -1260,85 +1108,73 @@ fn parse_params(
         else
           PStuck(c1)
       PTook(pat, c1) =>
-        match parse_param_type(c1, depth) of
-          PFault(d) => PFault(d)
-          PStuck(c2) => PStuck(c2)
-          PTook(ty, c2) =>
-            let had_default = at_fixed(c2, ":=")
-            match parse_param_default(c2, depth) of
-              PFault(d) => PFault(d)
-              PStuck(c3) => PStuck(c3)
-              PTook(dflt, c3) =>
-                let param =
-                  match pat.node of
-                    PVar(n) =>
-                      Param {
-                        name = n,
-                        pat = None,
-                        ty = ty,
-                        is_borrow = borrowed,
-                        dflt = dflt
-                      }
-                    PWild =>
-                      Param {
-                        name = "_",
-                        pat = None,
-                        ty = ty,
-                        is_borrow = borrowed,
-                        dflt = dflt
-                      }
-                    _ =>
-                      Param {
-                        name = "arg@{index}",
-                        pat = Some(pat),
-                        ty = ty,
-                        is_borrow = borrowed,
-                        dflt = dflt
-                      }
-                if at_fixed(c3, ",") then
-                  parse_params(
-                      cursor_advance(c3),
-                      depth,
-                      index + 1,
-                      Cons(param, rev),
-                    )
-                elif at_fixed(c3, ")") then
-                  PTook(reverse(Cons(param, rev)), cursor_advance(c3))
-                else
-                  -- Param has reduced at this exact position. The enclosing
-                  -- comma list and the optional default are all still live.
-                  let c4 = cursor_note(c3, TFixed(","))
-                  let c5 =
-                    if had_default then
-                      c4
-                    else
-                      cursor_note(c4, TFixed(":="))
-                  PStuck(cursor_note(c5, TFixed(")")))
+        let p2 = parse_param_type(c1, depth)
+        let PTook(ty, c2) = p2 else parsed_refused(p2)
+        let had_default = at_fixed(c2, ":=")
+        let p3 = parse_param_default(c2, depth)
+        let PTook(dflt, c3) = p3 else parsed_refused(p3)
+        let param =
+          match pat.node of
+            PVar(n) =>
+              Param {
+                name = n,
+                pat = None,
+                ty = ty,
+                is_borrow = borrowed,
+                dflt = dflt
+              }
+            PWild =>
+              Param {
+                name = "_",
+                pat = None,
+                ty = ty,
+                is_borrow = borrowed,
+                dflt = dflt
+              }
+            _ =>
+              Param {
+                name = "arg@{index}",
+                pat = Some(pat),
+                ty = ty,
+                is_borrow = borrowed,
+                dflt = dflt
+              }
+        if at_fixed(c3, ",") then
+          parse_params(cursor_advance(c3), depth, index + 1, Cons(param, rev))
+        elif at_fixed(c3, ")") then
+          PTook(reverse(Cons(param, rev)), cursor_advance(c3))
+        else
+          -- Param has reduced at this exact position. The enclosing
+          -- comma list and the optional default are all still live.
+          let c4 = cursor_note(c3, TFixed(","))
+          let c5 =
+            if had_default then
+              c4
+            else
+              cursor_note(c4, TFixed(":="))
+          PStuck(cursor_note(c5, TFixed(")")))
 
 fn parse_param_type(c : Cursor, depth : Int) : Parsed(Option(Ty)) =
   if at_fixed(c, ":") then
-    match parse_type(cursor_advance(c), depth) of
-      PTook(t, c1) => PTook(Some(t), c1)
-      PStuck(c1) => PStuck(c1)
-      PFault(d) => PFault(d)
+    let p1 = parse_type(cursor_advance(c), depth)
+    let PTook(t, c1) = p1 else parsed_refused(p1)
+    PTook(Some(t), c1)
   else
     PTook(None, c)
 
 fn parse_param_default(c : Cursor, depth : Int) : Parsed(Option(Sp(Expr))) =
   if at_fixed(c, ":=") then
-    match parse_expr(cursor_advance(c), depth) of
-      PTook(e, c1) => PTook(Some(e), c1)
-      PStuck(c1) => PStuck(c1)
-      PFault(d) => PFault(d)
+    let p1 = parse_expr(cursor_advance(c), depth)
+    let PTook(e, c1) = p1 else parsed_refused(p1)
+    PTook(Some(e), c1)
   else
     PTook(None, c)
 
 fn parse_ret(c : Cursor, depth : Int) : Parsed(Option(Ty)) =
   if at_fixed(c, ":") then
-    match parse_type(cursor_advance(c), depth) of
-      PTook(t, c1) => PTook(Some(t), c1)
-      PStuck(c1) => PStuck(c1)
-      PFault(d) => PFault(d)
+    let p1 = parse_type(cursor_advance(c), depth)
+    let PTook(t, c1) = p1 else parsed_refused(p1)
+    PTook(Some(t), c1)
   else
     PTook(None, c)
 
@@ -1348,47 +1184,39 @@ fn parse_const(
   vis : PVis,
   depth : Int
 ) : Parsed(Item) =
-  match take_word(cursor_advance(c), TIdent) of
-    PFault(d) => PFault(d)
-    PStuck(c1) => PStuck(c1)
-    PTook(name, c1) =>
-      match parse_ret(c1, depth) of
-        PFault(d) => PFault(d)
-        PStuck(c2) => PStuck(c2)
-        PTook(ret, c2) =>
-          match take_fixed(c2, "=") of
-            PFault(d) => PFault(d)
-            PStuck(c3) => PStuck(c3)
-            PTook(_, c3) =>
-              match parse_expr_or_block(c3, depth) of
-                PFault(d) => PFault(d)
-                PStuck(c4) => PStuck(c4)
-                PTook(body, c4) =>
-                  let decl =
-                    Decl {
-                      name = name,
-                      params = Nil,
-                      ret = ret,
-                      eff = None,
-                      constraints = Nil,
-                      body = body,
-                      wheres = Nil,
-                      reqs = Nil,
-                      enss = Nil,
-                      measure = None,
-                      is_test = false,
-                      totality = None,
-                      fip_word = None,
-                      is_replayable = false,
-                      is_no_alloc = false,
-                      span = cursor_since(saved, c4)
-                    }
-                  PTook(
-                      IDecl {
-                        decl = decl,
-                        declkind = "const",
-                        vis = vis_value(vis),
-                        dep = None
-                      },
-                      c4,
-                    )
+  let p1 = take_word(cursor_advance(c), TIdent)
+  let PTook(name, c1) = p1 else parsed_refused(p1)
+  let p2 = parse_ret(c1, depth)
+  let PTook(ret, c2) = p2 else parsed_refused(p2)
+  let p3 = take_fixed(c2, "=")
+  let PTook(_, c3) = p3 else parsed_refused(p3)
+  let p4 = parse_expr_or_block(c3, depth)
+  let PTook(body, c4) = p4 else parsed_refused(p4)
+  let decl =
+    Decl {
+      name = name,
+      params = Nil,
+      ret = ret,
+      eff = None,
+      constraints = Nil,
+      body = body,
+      wheres = Nil,
+      reqs = Nil,
+      enss = Nil,
+      measure = None,
+      is_test = false,
+      totality = None,
+      fip_word = None,
+      is_replayable = false,
+      is_no_alloc = false,
+      span = cursor_since(saved, c4)
+    }
+  PTook(
+      IDecl {
+        decl = decl,
+        declkind = "const",
+        vis = vis_value(vis),
+        dep = None
+      },
+      c4,
+    )

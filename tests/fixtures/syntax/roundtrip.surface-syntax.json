@@ -1,9 +1,9 @@
 {
   "schema": "prism-surface-syntax-v1",
-  "compiler": "0.17.0",
+  "compiler": "0.18.0",
   "source": {
-    "digest": "824285947cca6219db9c0dc018a3aa859659730b55bf122b8fc3abc77867ab16",
-    "text": "-- The round-trip gate for the versioned syntax artifacts: read one artifact\n-- file, decode it into the typed Syntax vocabulary, re-encode, and print the\n-- exact bytes. arg(0) is the artifact path; arg(1) selects the family\n-- (\"tokens\", \"surface\", \"diagnostics\", or \"resolved\"). The \"resolved-nodes\"\n-- mode instead decodes the resolved document and prints the id of every node\n-- reached by traversing each function body with `rnode_universe`, one per\n-- line: the Prism-side traversal the checker join is diffed against, reading\n-- only the artifact bytes. A refusal prints one structured error line.\nimport Data.Foldable (length)\n\nimport Data.List (concat_map)\n\nimport Syntax.Codec (..)\n\nimport Syntax.Resolved (..)\n\nfn main() =\n  let text = read_file(arg(0))\n  if arg(1) == \"tokens\" then\n    match decode_tokens(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_tokens(d))\n  elif arg(1) == \"diagnostics\" then\n    match decode_diagnostics(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_diagnostics(d))\n  elif arg(1) == \"resolved\" then\n    match decode_resolved(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_resolved(d))\n  elif arg(1) == \"resolved-nodes\" then\n    match decode_resolved(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => print_resolved_ids(d)\n  else\n    match decode_surface(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_surface(d))\n\n-- Every node id reached by walking each function body with the Prism-side\n-- `rnode_universe`, sorted ascending, one per line under a `count` header. A\n-- pure function of the decoded document: no source file or compiler state is\n-- consulted.\nfn print_resolved_ids(d : ResolvedDoc) =\n  let ids = sort(\n      concat_map(\n          \\(f) -> map(\\(n) -> n.id, rnode_universe(f.body)),\n          d.functions,\n        ),\n    )\n  println(\"count {length(ids)}\")\n  print_ids(ids)\n\nfn print_ids(ids : List(Int)) : Unit ! {IO} =\n  match ids of\n    Nil => ()\n    Cons(i, rest) =>\n      println(\"{i}\")\n      print_ids(rest)\n"
+    "digest": "b2df556543bc484a6e7f6af2ba9ec0c0c2d72a7beb3d80df74821530dd3bc819",
+    "text": "-- The round-trip gate for the versioned syntax artifacts: read one artifact\n-- file, decode it into the typed Syntax vocabulary, re-encode, and print the\n-- exact bytes. arg(0) is the artifact path; arg(1) selects the family\n-- (\"tokens\", \"surface\", \"diagnostics\", or \"resolved\"). The \"resolved-nodes\"\n-- mode instead decodes the resolved document and prints the id of every node\n-- reached by traversing each function body with `rnode_universe`, one per\n-- line: the Prism-side traversal the checker join is diffed against, reading\n-- only the artifact bytes. A refusal prints one structured error line.\nimport Data.Foldable (length)\nimport Data.List (concat_map)\nimport Syntax.Codec (..)\nimport Syntax.Resolved (..)\n\nfn main() =\n  let text = read_file(arg(0))\n  if arg(1) == \"tokens\" then\n    match decode_tokens(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_tokens(d))\n  elif arg(1) == \"diagnostics\" then\n    match decode_diagnostics(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_diagnostics(d))\n  elif arg(1) == \"resolved\" then\n    match decode_resolved(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_resolved(d))\n  elif arg(1) == \"resolved-nodes\" then\n    match decode_resolved(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => print_resolved_ids(d)\n  else\n    match decode_surface(text) of\n      Err(e) => println(\"decode error: {codec_error_message(e)}\")\n      Ok(d) => println(encode_surface(d))\n\n-- Every node id reached by walking each function body with the Prism-side\n-- `rnode_universe`, sorted ascending, one per line under a `count` header. A\n-- pure function of the decoded document: no source file or compiler state is\n-- consulted.\nfn print_resolved_ids(d : ResolvedDoc) =\n  let ids = sort(\n      concat_map(\n          \\(f) -> map(\\(n) -> n.id, rnode_universe(f.body)),\n          d.functions,\n        ),\n    )\n  println(\"count {length(ids)}\")\n  print_ids(ids)\n\nfn print_ids(ids : List(Int)) : Unit ! {IO} =\n  match ids of\n    Nil => ()\n    Cons(i, rest) =>\n      println(\"{i}\")\n      print_ids(rest)\n"
   },
   "items": [
     {
@@ -30,8 +30,8 @@
         "List"
       ],
       "span": [
-        637,
-        666
+        636,
+        665
       ]
     },
     {
@@ -42,8 +42,8 @@
         "Codec"
       ],
       "span": [
-        668,
-        692
+        666,
+        690
       ]
     },
     {
@@ -54,8 +54,8 @@
         "Resolved"
       ],
       "span": [
-        694,
-        721
+        691,
+        718
       ]
     },
     {
@@ -68,8 +68,8 @@
                 {
                   "kind": "int",
                   "span": [
-                    775,
-                    776
+                    772,
+                    773
                   ],
                   "value": "1"
                 }
@@ -78,28 +78,28 @@
                 "kind": "var",
                 "name": "arg",
                 "span": [
-                  771,
-                  774
+                  768,
+                  771
                 ]
               },
               "kind": "call",
               "span": [
-                771,
-                777
+                768,
+                774
               ]
             },
             "op": "==",
             "rhs": {
               "kind": "str",
               "span": [
-                781,
-                789
+                778,
+                786
               ],
               "value": "tokens"
             },
             "span": [
-              771,
-              789
+              768,
+              786
             ]
           },
           "else": {
@@ -110,8 +110,8 @@
                   {
                     "kind": "int",
                     "span": [
-                      946,
-                      947
+                      943,
+                      944
                     ],
                     "value": "1"
                   }
@@ -120,28 +120,28 @@
                   "kind": "var",
                   "name": "arg",
                   "span": [
-                    942,
-                    945
+                    939,
+                    942
                   ]
                 },
                 "kind": "call",
                 "span": [
-                  942,
-                  948
+                  939,
+                  945
                 ]
               },
               "op": "==",
               "rhs": {
                 "kind": "str",
                 "span": [
-                  952,
-                  965
+                  949,
+                  962
                 ],
                 "value": "diagnostics"
               },
               "span": [
-                942,
-                965
+                939,
+                962
               ]
             },
             "else": {
@@ -152,8 +152,8 @@
                     {
                       "kind": "int",
                       "span": [
-                        1132,
-                        1133
+                        1129,
+                        1130
                       ],
                       "value": "1"
                     }
@@ -162,28 +162,28 @@
                     "kind": "var",
                     "name": "arg",
                     "span": [
-                      1128,
-                      1131
+                      1125,
+                      1128
                     ]
                   },
                   "kind": "call",
                   "span": [
-                    1128,
-                    1134
+                    1125,
+                    1131
                   ]
                 },
                 "op": "==",
                 "rhs": {
                   "kind": "str",
                   "span": [
-                    1138,
-                    1148
+                    1135,
+                    1145
                   ],
                   "value": "resolved"
                 },
                 "span": [
-                  1128,
-                  1148
+                  1125,
+                  1145
                 ]
               },
               "else": {
@@ -194,8 +194,8 @@
                       {
                         "kind": "int",
                         "span": [
-                          1309,
-                          1310
+                          1306,
+                          1307
                         ],
                         "value": "1"
                       }
@@ -204,28 +204,28 @@
                       "kind": "var",
                       "name": "arg",
                       "span": [
-                        1305,
-                        1308
+                        1302,
+                        1305
                       ]
                     },
                     "kind": "call",
                     "span": [
-                      1305,
-                      1311
+                      1302,
+                      1308
                     ]
                   },
                   "op": "==",
                   "rhs": {
                     "kind": "str",
                     "span": [
-                      1315,
-                      1331
+                      1312,
+                      1328
                     ],
                     "value": "resolved-nodes"
                   },
                   "span": [
-                    1305,
-                    1331
+                    1302,
+                    1328
                   ]
                 },
                 "else": {
@@ -238,8 +238,8 @@
                               {
                                 "kind": "str",
                                 "span": [
-                                  1540,
-                                  1540
+                                  1537,
+                                  1537
                                 ],
                                 "value": "decode error: "
                               },
@@ -249,8 +249,8 @@
                                     "kind": "var",
                                     "name": "e",
                                     "span": [
-                                      1576,
-                                      1577
+                                      1573,
+                                      1574
                                     ]
                                   }
                                 ],
@@ -258,21 +258,21 @@
                                   "kind": "var",
                                   "name": "codec_error_message",
                                   "span": [
-                                    1556,
-                                    1575
+                                    1553,
+                                    1572
                                   ]
                                 },
                                 "kind": "call",
                                 "span": [
-                                  1556,
-                                  1578
+                                  1553,
+                                  1575
                                 ]
                               },
                               {
                                 "kind": "str",
                                 "span": [
-                                  1540,
-                                  1540
+                                  1537,
+                                  1537
                                 ],
                                 "value": ""
                               }
@@ -281,14 +281,14 @@
                               "kind": "marker",
                               "marker": "interp",
                               "span": [
-                                1540,
-                                1540
+                                1537,
+                                1537
                               ]
                             },
                             "kind": "call",
                             "span": [
-                              1540,
-                              1580
+                              1537,
+                              1577
                             ]
                           }
                         ],
@@ -296,14 +296,14 @@
                           "kind": "var",
                           "name": "println",
                           "span": [
-                            1532,
-                            1539
+                            1529,
+                            1536
                           ]
                         },
                         "kind": "call",
                         "span": [
-                          1532,
-                          1581
+                          1529,
+                          1578
                         ]
                       },
                       "pat": {
@@ -312,16 +312,16 @@
                             "kind": "var",
                             "name": "e",
                             "span": [
-                              1526,
-                              1527
+                              1523,
+                              1524
                             ]
                           }
                         ],
                         "kind": "ctor",
                         "name": "Err",
                         "span": [
-                          1522,
-                          1528
+                          1519,
+                          1525
                         ]
                       }
                     },
@@ -334,8 +334,8 @@
                                 "kind": "var",
                                 "name": "d",
                                 "span": [
-                                  1620,
-                                  1621
+                                  1617,
+                                  1618
                                 ]
                               }
                             ],
@@ -343,14 +343,14 @@
                               "kind": "var",
                               "name": "encode_surface",
                               "span": [
-                                1605,
-                                1619
+                                1602,
+                                1616
                               ]
                             },
                             "kind": "call",
                             "span": [
-                              1605,
-                              1622
+                              1602,
+                              1619
                             ]
                           }
                         ],
@@ -358,14 +358,14 @@
                           "kind": "var",
                           "name": "println",
                           "span": [
-                            1597,
-                            1604
+                            1594,
+                            1601
                           ]
                         },
                         "kind": "call",
                         "span": [
-                          1597,
-                          1623
+                          1594,
+                          1620
                         ]
                       },
                       "pat": {
@@ -374,16 +374,16 @@
                             "kind": "var",
                             "name": "d",
                             "span": [
-                              1591,
-                              1592
+                              1588,
+                              1589
                             ]
                           }
                         ],
                         "kind": "ctor",
                         "name": "Ok",
                         "span": [
-                          1588,
-                          1593
+                          1585,
+                          1590
                         ]
                       }
                     }
@@ -395,8 +395,8 @@
                         "kind": "var",
                         "name": "text",
                         "span": [
-                          1507,
-                          1511
+                          1504,
+                          1508
                         ]
                       }
                     ],
@@ -404,25 +404,25 @@
                       "kind": "var",
                       "name": "decode_surface",
                       "span": [
-                        1492,
-                        1506
+                        1489,
+                        1503
                       ]
                     },
                     "kind": "call",
                     "span": [
-                      1492,
-                      1512
+                      1489,
+                      1509
                     ]
                   },
                   "span": [
-                    1486,
-                    1623
+                    1483,
+                    1620
                   ]
                 },
                 "kind": "if",
                 "span": [
-                  1297,
-                  1623
+                  1294,
+                  1620
                 ],
                 "then": {
                   "arms": [
@@ -434,8 +434,8 @@
                               {
                                 "kind": "str",
                                 "span": [
-                                  1396,
-                                  1396
+                                  1393,
+                                  1393
                                 ],
                                 "value": "decode error: "
                               },
@@ -445,8 +445,8 @@
                                     "kind": "var",
                                     "name": "e",
                                     "span": [
-                                      1432,
-                                      1433
+                                      1429,
+                                      1430
                                     ]
                                   }
                                 ],
@@ -454,21 +454,21 @@
                                   "kind": "var",
                                   "name": "codec_error_message",
                                   "span": [
-                                    1412,
-                                    1431
+                                    1409,
+                                    1428
                                   ]
                                 },
                                 "kind": "call",
                                 "span": [
-                                  1412,
-                                  1434
+                                  1409,
+                                  1431
                                 ]
                               },
                               {
                                 "kind": "str",
                                 "span": [
-                                  1396,
-                                  1396
+                                  1393,
+                                  1393
                                 ],
                                 "value": ""
                               }
@@ -477,14 +477,14 @@
                               "kind": "marker",
                               "marker": "interp",
                               "span": [
-                                1396,
-                                1396
+                                1393,
+                                1393
                               ]
                             },
                             "kind": "call",
                             "span": [
-                              1396,
-                              1436
+                              1393,
+                              1433
                             ]
                           }
                         ],
@@ -492,14 +492,14 @@
                           "kind": "var",
                           "name": "println",
                           "span": [
-                            1388,
-                            1395
+                            1385,
+                            1392
                           ]
                         },
                         "kind": "call",
                         "span": [
-                          1388,
-                          1437
+                          1385,
+                          1434
                         ]
                       },
                       "pat": {
@@ -508,16 +508,16 @@
                             "kind": "var",
                             "name": "e",
                             "span": [
-                              1382,
-                              1383
+                              1379,
+                              1380
                             ]
                           }
                         ],
                         "kind": "ctor",
                         "name": "Err",
                         "span": [
-                          1378,
-                          1384
+                          1375,
+                          1381
                         ]
                       }
                     },
@@ -528,8 +528,8 @@
                             "kind": "var",
                             "name": "d",
                             "span": [
-                              1472,
-                              1473
+                              1469,
+                              1470
                             ]
                           }
                         ],
@@ -537,14 +537,14 @@
                           "kind": "var",
                           "name": "print_resolved_ids",
                           "span": [
-                            1453,
-                            1471
+                            1450,
+                            1468
                           ]
                         },
                         "kind": "call",
                         "span": [
-                          1453,
-                          1474
+                          1450,
+                          1471
                         ]
                       },
                       "pat": {
@@ -553,16 +553,16 @@
                             "kind": "var",
                             "name": "d",
                             "span": [
-                              1447,
-                              1448
+                              1444,
+                              1445
                             ]
                           }
                         ],
                         "kind": "ctor",
                         "name": "Ok",
                         "span": [
-                          1444,
-                          1449
+                          1441,
+                          1446
                         ]
                       }
                     }
@@ -574,8 +574,8 @@
                         "kind": "var",
                         "name": "text",
                         "span": [
-                          1363,
-                          1367
+                          1360,
+                          1364
                         ]
                       }
                     ],
@@ -583,26 +583,26 @@
                       "kind": "var",
                       "name": "decode_resolved",
                       "span": [
-                        1347,
-                        1362
+                        1344,
+                        1359
                       ]
                     },
                     "kind": "call",
                     "span": [
-                      1347,
-                      1368
+                      1344,
+                      1365
                     ]
                   },
                   "span": [
-                    1341,
-                    1474
+                    1338,
+                    1471
                   ]
                 }
               },
               "kind": "if",
               "span": [
-                1120,
-                1623
+                1117,
+                1620
               ],
               "then": {
                 "arms": [
@@ -614,8 +614,8 @@
                             {
                               "kind": "str",
                               "span": [
-                                1213,
-                                1213
+                                1210,
+                                1210
                               ],
                               "value": "decode error: "
                             },
@@ -625,8 +625,8 @@
                                   "kind": "var",
                                   "name": "e",
                                   "span": [
-                                    1249,
-                                    1250
+                                    1246,
+                                    1247
                                   ]
                                 }
                               ],
@@ -634,21 +634,21 @@
                                 "kind": "var",
                                 "name": "codec_error_message",
                                 "span": [
-                                  1229,
-                                  1248
+                                  1226,
+                                  1245
                                 ]
                               },
                               "kind": "call",
                               "span": [
-                                1229,
-                                1251
+                                1226,
+                                1248
                               ]
                             },
                             {
                               "kind": "str",
                               "span": [
-                                1213,
-                                1213
+                                1210,
+                                1210
                               ],
                               "value": ""
                             }
@@ -657,14 +657,14 @@
                             "kind": "marker",
                             "marker": "interp",
                             "span": [
-                              1213,
-                              1213
+                              1210,
+                              1210
                             ]
                           },
                           "kind": "call",
                           "span": [
-                            1213,
-                            1253
+                            1210,
+                            1250
                           ]
                         }
                       ],
@@ -672,14 +672,14 @@
                         "kind": "var",
                         "name": "println",
                         "span": [
-                          1205,
-                          1212
+                          1202,
+                          1209
                         ]
                       },
                       "kind": "call",
                       "span": [
-                        1205,
-                        1254
+                        1202,
+                        1251
                       ]
                     },
                     "pat": {
@@ -688,16 +688,16 @@
                           "kind": "var",
                           "name": "e",
                           "span": [
-                            1199,
-                            1200
+                            1196,
+                            1197
                           ]
                         }
                       ],
                       "kind": "ctor",
                       "name": "Err",
                       "span": [
-                        1195,
-                        1201
+                        1192,
+                        1198
                       ]
                     }
                   },
@@ -710,8 +710,8 @@
                               "kind": "var",
                               "name": "d",
                               "span": [
-                                1294,
-                                1295
+                                1291,
+                                1292
                               ]
                             }
                           ],
@@ -719,14 +719,14 @@
                             "kind": "var",
                             "name": "encode_resolved",
                             "span": [
-                              1278,
-                              1293
+                              1275,
+                              1290
                             ]
                           },
                           "kind": "call",
                           "span": [
-                            1278,
-                            1296
+                            1275,
+                            1293
                           ]
                         }
                       ],
@@ -734,14 +734,14 @@
                         "kind": "var",
                         "name": "println",
                         "span": [
-                          1270,
-                          1277
+                          1267,
+                          1274
                         ]
                       },
                       "kind": "call",
                       "span": [
-                        1270,
-                        1297
+                        1267,
+                        1294
                       ]
                     },
                     "pat": {
@@ -750,16 +750,16 @@
                           "kind": "var",
                           "name": "d",
                           "span": [
-                            1264,
-                            1265
+                            1261,
+                            1262
                           ]
                         }
                       ],
                       "kind": "ctor",
                       "name": "Ok",
                       "span": [
-                        1261,
-                        1266
+                        1258,
+                        1263
                       ]
                     }
                   }
@@ -771,8 +771,8 @@
                       "kind": "var",
                       "name": "text",
                       "span": [
-                        1180,
-                        1184
+                        1177,
+                        1181
                       ]
                     }
                   ],
@@ -780,26 +780,26 @@
                     "kind": "var",
                     "name": "decode_resolved",
                     "span": [
-                      1164,
-                      1179
+                      1161,
+                      1176
                     ]
                   },
                   "kind": "call",
                   "span": [
-                    1164,
-                    1185
+                    1161,
+                    1182
                   ]
                 },
                 "span": [
-                  1158,
-                  1297
+                  1155,
+                  1294
                 ]
               }
             },
             "kind": "if",
             "span": [
-              934,
-              1623
+              931,
+              1620
             ],
             "then": {
               "arms": [
@@ -811,8 +811,8 @@
                           {
                             "kind": "str",
                             "span": [
-                              1033,
-                              1033
+                              1030,
+                              1030
                             ],
                             "value": "decode error: "
                           },
@@ -822,8 +822,8 @@
                                 "kind": "var",
                                 "name": "e",
                                 "span": [
-                                  1069,
-                                  1070
+                                  1066,
+                                  1067
                                 ]
                               }
                             ],
@@ -831,21 +831,21 @@
                               "kind": "var",
                               "name": "codec_error_message",
                               "span": [
-                                1049,
-                                1068
+                                1046,
+                                1065
                               ]
                             },
                             "kind": "call",
                             "span": [
-                              1049,
-                              1071
+                              1046,
+                              1068
                             ]
                           },
                           {
                             "kind": "str",
                             "span": [
-                              1033,
-                              1033
+                              1030,
+                              1030
                             ],
                             "value": ""
                           }
@@ -854,14 +854,14 @@
                           "kind": "marker",
                           "marker": "interp",
                           "span": [
-                            1033,
-                            1033
+                            1030,
+                            1030
                           ]
                         },
                         "kind": "call",
                         "span": [
-                          1033,
-                          1073
+                          1030,
+                          1070
                         ]
                       }
                     ],
@@ -869,14 +869,14 @@
                       "kind": "var",
                       "name": "println",
                       "span": [
-                        1025,
-                        1032
+                        1022,
+                        1029
                       ]
                     },
                     "kind": "call",
                     "span": [
-                      1025,
-                      1074
+                      1022,
+                      1071
                     ]
                   },
                   "pat": {
@@ -885,16 +885,16 @@
                         "kind": "var",
                         "name": "e",
                         "span": [
-                          1019,
-                          1020
+                          1016,
+                          1017
                         ]
                       }
                     ],
                     "kind": "ctor",
                     "name": "Err",
                     "span": [
-                      1015,
-                      1021
+                      1012,
+                      1018
                     ]
                   }
                 },
@@ -907,8 +907,8 @@
                             "kind": "var",
                             "name": "d",
                             "span": [
-                              1117,
-                              1118
+                              1114,
+                              1115
                             ]
                           }
                         ],
@@ -916,14 +916,14 @@
                           "kind": "var",
                           "name": "encode_diagnostics",
                           "span": [
-                            1098,
-                            1116
+                            1095,
+                            1113
                           ]
                         },
                         "kind": "call",
                         "span": [
-                          1098,
-                          1119
+                          1095,
+                          1116
                         ]
                       }
                     ],
@@ -931,14 +931,14 @@
                       "kind": "var",
                       "name": "println",
                       "span": [
-                        1090,
-                        1097
+                        1087,
+                        1094
                       ]
                     },
                     "kind": "call",
                     "span": [
-                      1090,
-                      1120
+                      1087,
+                      1117
                     ]
                   },
                   "pat": {
@@ -947,16 +947,16 @@
                         "kind": "var",
                         "name": "d",
                         "span": [
-                          1084,
-                          1085
+                          1081,
+                          1082
                         ]
                       }
                     ],
                     "kind": "ctor",
                     "name": "Ok",
                     "span": [
-                      1081,
-                      1086
+                      1078,
+                      1083
                     ]
                   }
                 }
@@ -968,8 +968,8 @@
                     "kind": "var",
                     "name": "text",
                     "span": [
-                      1000,
-                      1004
+                      997,
+                      1001
                     ]
                   }
                 ],
@@ -977,26 +977,26 @@
                   "kind": "var",
                   "name": "decode_diagnostics",
                   "span": [
-                    981,
-                    999
+                    978,
+                    996
                   ]
                 },
                 "kind": "call",
                 "span": [
-                  981,
-                  1005
+                  978,
+                  1002
                 ]
               },
               "span": [
-                975,
-                1120
+                972,
+                1117
               ]
             }
           },
           "kind": "if",
           "span": [
-            768,
-            1623
+            765,
+            1620
           ],
           "then": {
             "arms": [
@@ -1008,8 +1008,8 @@
                         {
                           "kind": "str",
                           "span": [
-                            852,
-                            852
+                            849,
+                            849
                           ],
                           "value": "decode error: "
                         },
@@ -1019,8 +1019,8 @@
                               "kind": "var",
                               "name": "e",
                               "span": [
-                                888,
-                                889
+                                885,
+                                886
                               ]
                             }
                           ],
@@ -1028,21 +1028,21 @@
                             "kind": "var",
                             "name": "codec_error_message",
                             "span": [
-                              868,
-                              887
+                              865,
+                              884
                             ]
                           },
                           "kind": "call",
                           "span": [
-                            868,
-                            890
+                            865,
+                            887
                           ]
                         },
                         {
                           "kind": "str",
                           "span": [
-                            852,
-                            852
+                            849,
+                            849
                           ],
                           "value": ""
                         }
@@ -1051,14 +1051,14 @@
                         "kind": "marker",
                         "marker": "interp",
                         "span": [
-                          852,
-                          852
+                          849,
+                          849
                         ]
                       },
                       "kind": "call",
                       "span": [
-                        852,
-                        892
+                        849,
+                        889
                       ]
                     }
                   ],
@@ -1066,14 +1066,14 @@
                     "kind": "var",
                     "name": "println",
                     "span": [
-                      844,
-                      851
+                      841,
+                      848
                     ]
                   },
                   "kind": "call",
                   "span": [
-                    844,
-                    893
+                    841,
+                    890
                   ]
                 },
                 "pat": {
@@ -1082,16 +1082,16 @@
                       "kind": "var",
                       "name": "e",
                       "span": [
-                        838,
-                        839
+                        835,
+                        836
                       ]
                     }
                   ],
                   "kind": "ctor",
                   "name": "Err",
                   "span": [
-                    834,
-                    840
+                    831,
+                    837
                   ]
                 }
               },
@@ -1104,8 +1104,8 @@
                           "kind": "var",
                           "name": "d",
                           "span": [
-                            931,
-                            932
+                            928,
+                            929
                           ]
                         }
                       ],
@@ -1113,14 +1113,14 @@
                         "kind": "var",
                         "name": "encode_tokens",
                         "span": [
-                          917,
-                          930
+                          914,
+                          927
                         ]
                       },
                       "kind": "call",
                       "span": [
-                        917,
-                        933
+                        914,
+                        930
                       ]
                     }
                   ],
@@ -1128,14 +1128,14 @@
                     "kind": "var",
                     "name": "println",
                     "span": [
-                      909,
-                      916
+                      906,
+                      913
                     ]
                   },
                   "kind": "call",
                   "span": [
-                    909,
-                    934
+                    906,
+                    931
                   ]
                 },
                 "pat": {
@@ -1144,16 +1144,16 @@
                       "kind": "var",
                       "name": "d",
                       "span": [
-                        903,
-                        904
+                        900,
+                        901
                       ]
                     }
                   ],
                   "kind": "ctor",
                   "name": "Ok",
                   "span": [
-                    900,
-                    905
+                    897,
+                    902
                   ]
                 }
               }
@@ -1165,8 +1165,8 @@
                   "kind": "var",
                   "name": "text",
                   "span": [
-                    819,
-                    823
+                    816,
+                    820
                   ]
                 }
               ],
@@ -1174,27 +1174,27 @@
                 "kind": "var",
                 "name": "decode_tokens",
                 "span": [
-                  805,
-                  818
+                  802,
+                  815
                 ]
               },
               "kind": "call",
               "span": [
-                805,
-                824
+                802,
+                821
               ]
             },
             "span": [
-              799,
-              934
+              796,
+              931
             ]
           }
         },
         "kind": "let",
         "name": "text",
         "span": [
-          737,
-          1623
+          734,
+          1620
         ],
         "value": {
           "args": [
@@ -1203,8 +1203,8 @@
                 {
                   "kind": "int",
                   "span": [
-                    762,
-                    763
+                    759,
+                    760
                   ],
                   "value": "0"
                 }
@@ -1213,14 +1213,14 @@
                 "kind": "var",
                 "name": "arg",
                 "span": [
-                  758,
-                  761
+                  755,
+                  758
                 ]
               },
               "kind": "call",
               "span": [
-                758,
-                764
+                755,
+                761
               ]
             }
           ],
@@ -1228,22 +1228,22 @@
             "kind": "var",
             "name": "read_file",
             "span": [
-              748,
-              757
+              745,
+              754
             ]
           },
           "kind": "call",
           "span": [
-            748,
-            765
+            745,
+            762
           ]
         }
       },
       "kind": "fn",
       "name": "main",
       "span": [
-        723,
-        1623
+        720,
+        1620
       ]
     },
     {
@@ -1255,8 +1255,8 @@
                 "kind": "var",
                 "name": "ids",
                 "span": [
-                  2093,
-                  2096
+                  2090,
+                  2093
                 ]
               }
             ],
@@ -1264,21 +1264,21 @@
               "kind": "var",
               "name": "print_ids",
               "span": [
-                2083,
-                2092
+                2080,
+                2089
               ]
             },
             "kind": "call",
             "span": [
-              2083,
-              2097
+              2080,
+              2094
             ]
           },
           "kind": "let",
           "name": "_",
           "span": [
-            2050,
-            2097
+            2047,
+            2094
           ],
           "value": {
             "args": [
@@ -1287,8 +1287,8 @@
                   {
                     "kind": "str",
                     "span": [
-                      2058,
-                      2058
+                      2055,
+                      2055
                     ],
                     "value": "count "
                   },
@@ -1298,8 +1298,8 @@
                         "kind": "var",
                         "name": "ids",
                         "span": [
-                          2073,
-                          2076
+                          2070,
+                          2073
                         ]
                       }
                     ],
@@ -1307,21 +1307,21 @@
                       "kind": "var",
                       "name": "length",
                       "span": [
-                        2066,
-                        2072
+                        2063,
+                        2069
                       ]
                     },
                     "kind": "call",
                     "span": [
-                      2066,
-                      2077
+                      2063,
+                      2074
                     ]
                   },
                   {
                     "kind": "str",
                     "span": [
-                      2058,
-                      2058
+                      2055,
+                      2055
                     ],
                     "value": ""
                   }
@@ -1330,14 +1330,14 @@
                   "kind": "marker",
                   "marker": "interp",
                   "span": [
-                    2058,
-                    2058
+                    2055,
+                    2055
                   ]
                 },
                 "kind": "call",
                 "span": [
-                  2058,
-                  2079
+                  2055,
+                  2076
                 ]
               }
             ],
@@ -1345,22 +1345,22 @@
               "kind": "var",
               "name": "println",
               "span": [
-                2050,
-                2057
+                2047,
+                2054
               ]
             },
             "kind": "call",
             "span": [
-              2050,
-              2080
+              2047,
+              2077
             ]
           }
         },
         "kind": "let",
         "name": "ids",
         "span": [
-          1913,
-          2097
+          1910,
+          2094
         ],
         "value": {
           "args": [
@@ -1375,15 +1375,15 @@
                             "kind": "var",
                             "name": "n",
                             "span": [
-                              1977,
-                              1978
+                              1974,
+                              1975
                             ]
                           },
                           "kind": "field",
                           "name": "id",
                           "span": [
-                            1977,
-                            1981
+                            1974,
+                            1978
                           ]
                         },
                         "kind": "lam",
@@ -1393,8 +1393,8 @@
                           }
                         ],
                         "span": [
-                          1969,
-                          1981
+                          1966,
+                          1978
                         ]
                       },
                       {
@@ -1404,15 +1404,15 @@
                               "kind": "var",
                               "name": "f",
                               "span": [
-                                1998,
-                                1999
+                                1995,
+                                1996
                               ]
                             },
                             "kind": "field",
                             "name": "body",
                             "span": [
-                              1998,
-                              2004
+                              1995,
+                              2001
                             ]
                           }
                         ],
@@ -1420,14 +1420,14 @@
                           "kind": "var",
                           "name": "rnode_universe",
                           "span": [
-                            1983,
-                            1997
+                            1980,
+                            1994
                           ]
                         },
                         "kind": "call",
                         "span": [
-                          1983,
-                          2005
+                          1980,
+                          2002
                         ]
                       }
                     ],
@@ -1435,14 +1435,14 @@
                       "kind": "var",
                       "name": "map",
                       "span": [
-                        1965,
-                        1968
+                        1962,
+                        1965
                       ]
                     },
                     "kind": "call",
                     "span": [
-                      1965,
-                      2006
+                      1962,
+                      2003
                     ]
                   },
                   "kind": "lam",
@@ -1452,8 +1452,8 @@
                     }
                   ],
                   "span": [
-                    1957,
-                    2006
+                    1954,
+                    2003
                   ]
                 },
                 {
@@ -1461,15 +1461,15 @@
                     "kind": "var",
                     "name": "d",
                     "span": [
-                      2018,
-                      2019
+                      2015,
+                      2016
                     ]
                   },
                   "kind": "field",
                   "name": "functions",
                   "span": [
-                    2018,
-                    2029
+                    2015,
+                    2026
                   ]
                 }
               ],
@@ -1477,14 +1477,14 @@
                 "kind": "var",
                 "name": "concat_map",
                 "span": [
-                  1935,
-                  1945
+                  1932,
+                  1942
                 ]
               },
               "kind": "call",
               "span": [
-                1935,
-                2040
+                1932,
+                2037
               ]
             }
           ],
@@ -1492,14 +1492,14 @@
             "kind": "var",
             "name": "sort",
             "span": [
-              1923,
-              1927
+              1920,
+              1924
             ]
           },
           "kind": "call",
           "span": [
-            1923,
-            2047
+            1920,
+            2044
           ]
         }
       },
@@ -1515,8 +1515,8 @@
         }
       ],
       "span": [
-        1870,
-        2097
+        1867,
+        2094
       ]
     },
     {
@@ -1526,16 +1526,16 @@
             "body": {
               "kind": "unit",
               "span": [
-                2171,
-                2173
+                2168,
+                2170
               ]
             },
             "pat": {
               "kind": "ctor",
               "name": "Nil",
               "span": [
-                2164,
-                2167
+                2161,
+                2164
               ]
             }
           },
@@ -1547,8 +1547,8 @@
                     "kind": "var",
                     "name": "rest",
                     "span": [
-                      2232,
-                      2236
+                      2229,
+                      2233
                     ]
                   }
                 ],
@@ -1556,21 +1556,21 @@
                   "kind": "var",
                   "name": "print_ids",
                   "span": [
-                    2222,
-                    2231
+                    2219,
+                    2228
                   ]
                 },
                 "kind": "call",
                 "span": [
-                  2222,
-                  2237
+                  2219,
+                  2234
                 ]
               },
               "kind": "let",
               "name": "_",
               "span": [
-                2201,
-                2237
+                2198,
+                2234
               ],
               "value": {
                 "args": [
@@ -1579,8 +1579,8 @@
                       {
                         "kind": "str",
                         "span": [
-                          2209,
-                          2209
+                          2206,
+                          2206
                         ],
                         "value": ""
                       },
@@ -1588,15 +1588,15 @@
                         "kind": "var",
                         "name": "i",
                         "span": [
-                          2211,
-                          2212
+                          2208,
+                          2209
                         ]
                       },
                       {
                         "kind": "str",
                         "span": [
-                          2209,
-                          2209
+                          2206,
+                          2206
                         ],
                         "value": ""
                       }
@@ -1605,14 +1605,14 @@
                       "kind": "marker",
                       "marker": "interp",
                       "span": [
-                        2209,
-                        2209
+                        2206,
+                        2206
                       ]
                     },
                     "kind": "call",
                     "span": [
-                      2209,
-                      2214
+                      2206,
+                      2211
                     ]
                   }
                 ],
@@ -1620,14 +1620,14 @@
                   "kind": "var",
                   "name": "println",
                   "span": [
-                    2201,
-                    2208
+                    2198,
+                    2205
                   ]
                 },
                 "kind": "call",
                 "span": [
-                  2201,
-                  2215
+                  2198,
+                  2212
                 ]
               }
             },
@@ -1637,24 +1637,24 @@
                   "kind": "var",
                   "name": "i",
                   "span": [
-                    2183,
-                    2184
+                    2180,
+                    2181
                   ]
                 },
                 {
                   "kind": "var",
                   "name": "rest",
                   "span": [
-                    2186,
-                    2190
+                    2183,
+                    2187
                   ]
                 }
               ],
               "kind": "ctor",
               "name": "Cons",
               "span": [
-                2178,
-                2191
+                2175,
+                2188
               ]
             }
           }
@@ -1664,13 +1664,13 @@
           "kind": "var",
           "name": "ids",
           "span": [
-            2153,
-            2156
+            2150,
+            2153
           ]
         },
         "span": [
-          2147,
-          2237
+          2144,
+          2234
         ]
       },
       "effects": {
@@ -1700,8 +1700,8 @@
         "kind": "unit"
       },
       "span": [
-        2099,
-        2237
+        2096,
+        2234
       ]
     }
   ]

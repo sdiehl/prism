@@ -29,7 +29,11 @@ pub use simplify::simplify;
 // Exposed for typed-lowering compatibility tests. The production route accepts
 // only strategies whose erased result is exact at the compatibility boundary.
 pub use effect_lower::abi::LoweredReprProof;
-pub use effect_lower::{lower_effects, prepare as prepare_effects, EffectPlan, TypedLowering};
+pub use effect_lower::decline::Decline;
+pub use effect_lower::explain::explain as explain_effect_tiers;
+pub use effect_lower::{
+    lower_effects, prepare as prepare_effects, EffectPlan, Prepared, TypedLowering,
+};
 pub use rc::insert_rc;
 pub use reuse::reuse;
 pub use verify::{
@@ -38,6 +42,7 @@ pub use verify::{
 };
 pub use verify::{verify, ConstructorSig, CoreViolation, OperationSig, TypedCorePhase, VerifyEnv};
 
+use std::collections::BTreeSet;
 use std::marker::PhantomData;
 
 use crate::types::ty::{EffRow, Label};
@@ -52,8 +57,9 @@ use super::{CheckedHandler, Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, IoOp,
 // guard the builder and the proof checker use bounds it, per top-level
 // function, so the depth a program may reach does not depend on which thread
 // happened to call it.
-pub(crate) const CORE_MIN_STACK: usize = 4 * 1024 * 1024;
-pub(crate) const CORE_GROW_STACK: usize = 8 * 1024 * 1024;
+const MEBIBYTE: usize = 1024 * 1024;
+pub(crate) const CORE_MIN_STACK: usize = 4 * MEBIBYTE;
+pub(crate) const CORE_GROW_STACK: usize = 8 * MEBIBYTE;
 
 /// A value type in typed Core.
 ///
@@ -282,8 +288,10 @@ impl TypedPattern {
 
 /// A typed Core value.
 ///
-/// Fields are private so only the checked builders in this module can pair a
-/// [`TypedValueKind`] with its witness type.
+/// Fields are private so a built value is read-only, but `new` is open:
+/// construction does not check that a [`TypedValueKind`] matches its witness
+/// type. The pairing is checked after the fact by the typed-Core verifier,
+/// which the test gates run over every pass output.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TypedValue {
     ty: CoreType,
@@ -539,7 +547,7 @@ impl TypedHandler {
     /// # Errors
     /// The duplicated operation name, when two arms handle the same operation.
     pub fn new(arms: Vec<TypedHandleOp>) -> Result<Self, Sym> {
-        let mut names = std::collections::BTreeSet::new();
+        let mut names = BTreeSet::new();
         let duplicate = arms
             .iter()
             .map(|arm| arm.name)
@@ -570,8 +578,10 @@ impl TypedHandler {
 
 /// A typed Core computation.
 ///
-/// Fields are private so a node cannot be paired with an arbitrary result and
-/// effect witness outside the typed builder boundary.
+/// Fields are private so a built node is read-only, but `new` is open:
+/// construction does not check the result and effect witness against the node.
+/// The pairing is checked after the fact by the typed-Core verifier, which the
+/// test gates run over every pass output.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TypedComp {
     sig: CompSig,

@@ -144,4 +144,6 @@ Program {
  5 │ fn main() = println(f(a := 1, z := 2))
    │                               ───┬──  
    │                                  ╰──── `f` has no parameter `z`
+   │ 
+   │ Help: did you mean `a` or `b`?
 ───╯

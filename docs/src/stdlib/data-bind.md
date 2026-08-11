@@ -12,8 +12,8 @@ The two coordinate systems are branded so they cannot be mixed up. An `Index` is
 
 ### `Index`
 
-```prism,def,h-baa25167702a166773009bf40367017ab6ed5b14626e48855f921499ec0fd64a
-type Index = MkIndex(Int) deriving (Eq, Ord, Show)
+```prism,def,h-a04524f7128a281f184deb257f1bf15f0980909c8e1f6d7d4c0ee886b34ea2c4
+newtype Index = MkIndex(Int) deriving (Eq, Ord, Show)
 ```
 
 The outward distance from a use site to the binder it refers to: `bind_index(0)` is the nearest enclosing binder.
@@ -22,8 +22,8 @@ The constructor is spelled `MkIndex` rather than `Index` on purpose: constructor
 
 ### `Level`
 
-```prism,def,h-f57f93735209e779d9dffaa4f78d1875cd2131bc256d815f440b5e0db187267a
-type Level = MkLevel(Int) deriving (Eq, Ord, Show)
+```prism,def,h-812e90b3bb1a97b28909785fbfaa4b3a69b4322958a7148f67b8d51154b0d8d1
+newtype Level = MkLevel(Int) deriving (Eq, Ord, Show)
 ```
 
 The inward distance from the root to a binder: `bind_level(0)` is the outermost binder in scope. Constructor named `MkLevel` for the same reason `Index` uses `MkIndex`.
@@ -58,7 +58,7 @@ The fold over it is the whole point: a term's own traversal decides which tokens
 
 ### `bind_index`
 
-```prism,sig,h-4b402f6c67eaaa61afd65e5398da245cd2f32bf476d03e8766db9442a4aae5a4
+```prism,sig,h-6c6b1768193932f7dffe79f44f99f846ebd948787ef88757464e4bc8d1bb5e58
 bind_index : (Int) -> Data.Bind.Index
 ```
 
@@ -74,7 +74,7 @@ bind_index_int(bind_index(2))
 
 ### `bind_level`
 
-```prism,sig,h-893004f94c73ce6ff1cd928ebd011652cee971bc14d66a87697522da13af9383
+```prism,sig,h-8614b9acf258c41f53c2803eaf14f4eefe33e43ded774c694a25b3b59bbaaf66
 bind_level : (Int) -> Data.Bind.Level
 ```
 
@@ -90,7 +90,7 @@ bind_level_int(bind_level(2))
 
 ### `bind_index_int`
 
-```prism,sig,h-c0ee9f717dad3de09e1d7165cc8caf73db512665f5ea6f7f58424464a65832e2
+```prism,sig,h-36d23b226ae0a7b12269f38bb4d9437a9f99955f9fa3cf2b09837ed038d21eff
 bind_index_int : (Data.Bind.Index) -> Int
 ```
 
@@ -98,7 +98,7 @@ The raw distance carried by an `Index`. One of the two ways out.
 
 ### `bind_level_int`
 
-```prism,sig,h-28bc264d5ee1a9ca909691631827d2947f5a2371ffe170d9ff9a21da9f66af91
+```prism,sig,h-e3d3a2b3404fffa41ec7fbdec19de54ceea119929c982e7d1c390fc66ac54541
 bind_level_int : (Data.Bind.Level) -> Int
 ```
 
@@ -106,7 +106,7 @@ The raw distance carried by a `Level`. One of the two ways out.
 
 ### `bind_index_at`
 
-```prism,sig,h-1f1acd479eba3deec6a33cec13aebc819f99c57944b8511ba466e850f3b9afa1
+```prism,sig,h-2175d818449c4a23d0af33b8dcd9cf78ca67ffc52a0da64c5b3b98787ef22ae4
 bind_index_at : (Int, Data.Bind.Level) -> Data.Bind.Index
 ```
 
@@ -124,7 +124,7 @@ bind_index_int(bind_index_at(3, bind_level(0)))
 
 ### `bind_level_at`
 
-```prism,sig,h-e120dfd04c2d50ccd85302b86585dbd25c6a6792575b548a27fcda673c6f664a
+```prism,sig,h-27ac2326df53c110cc8d168484a7def677d4925ac8aa547b9a48cbdfbd547f58
 bind_level_at : (Int, Data.Bind.Index) -> Data.Bind.Level
 ```
 
@@ -197,7 +197,7 @@ bind_names(bind_push_names(bind_empty, ["x", "y"]))
 
 ### `bind_depth`
 
-```prism,sig,h-d8225beadba0abee385c274ba949c566bc2952b097f06dbe391b904678cebe91
+```prism,sig,h-7014bfaa87f24f476aa001b3b3edd71c048c32d4ce50f21e55e8a6c885d850a6
 bind_depth : forall a. (Data.Bind.BindEnv(a)) -> Int
 ```
 
@@ -205,7 +205,7 @@ How many binders are in scope. A use site here writes indices below this and lev
 
 ### `bind_names`
 
-```prism,sig,h-b24005bc71a8e3270bf032811dc8aaf388f29164d31e4a286ccaec98a145b51c
+```prism,sig,h-1c3096e79d9d88569c216308c33dec1332bcacad3f56606c2d0aa8fe3d9c3b45
 bind_names : forall a. (Data.Bind.BindEnv(a)) -> List(String)
 ```
 
@@ -247,7 +247,7 @@ match bind_index_of(bind_push_names(bind_empty, ["x", "y"]), "y") of
 
 ### `bind_level_of`
 
-```prism,sig,h-e085669ae7c9ad7314feca83a21517e65065c0d152a81a8c1e62b6124a725a0b
+```prism,sig,h-e86cb2125baa15b52368047dfb53f3f6d2796252334e8eb7bbb3a4b65ba68534
 bind_level_of : forall a. (Data.Bind.BindEnv(a), String) -> Option(Data.Bind.Level)
 ```
 
@@ -255,7 +255,7 @@ The level of the innermost binder named `name`, or `None` when the name is free 
 
 ### `bind_slot_at`
 
-```prism,sig,h-683411dd115670a684bf14707fe0701f3982e9f6ac297f393f10cd284369713e
+```prism,sig,h-c53186c8c9cd212bc42da2268d1bcd729f8a97a4a5f02e21a7994c7d858b8bd6
 bind_slot_at : forall a. (Data.Bind.BindEnv(a), Data.Bind.Index) -> Option((String, a))
 ```
 
@@ -263,7 +263,7 @@ The binder an index points at, name and payload, or `None` when the index escape
 
 ### `bind_at`
 
-```prism,sig,h-b2fdbcb683a29825cd3b36c5fd89d62fcf7d647cc29e167c1c5b99a05822113a
+```prism,sig,h-e7433ce311b81870cb1c085553f1c4cbc5d31e76077ea1707b884bfddc8445a5
 bind_at : forall a. (Data.Bind.BindEnv(a), Data.Bind.Index) -> Option(a)
 ```
 
@@ -271,7 +271,7 @@ The payload an index points at.
 
 ### `bind_name_at`
 
-```prism,sig,h-5488cb1c6b8e070907e03d0552f56b12d7391e8fb4e3ec4f9dcff61071502ec9
+```prism,sig,h-86fff7a58c25c4d9b422337ac42bd7e5cb8cc1c150047427b0e6cd4b9a94aa42
 bind_name_at : forall a. (Data.Bind.BindEnv(a), Data.Bind.Index) -> Option(String)
 ```
 
@@ -279,7 +279,7 @@ The name an index points at, which is what an error message wants back.
 
 ### `bind_at_level`
 
-```prism,sig,h-7f15051a2b24bbc94f90b582db6709f23c603e51eecd8d43c40f80b6ac8a28a9
+```prism,sig,h-c42a942c74f7986e4e78b916dbf06ed65dcb1c8faf8d28dd035af52ac7c96714
 bind_at_level : forall a. (Data.Bind.BindEnv(a), Data.Bind.Level) -> Option(a)
 ```
 
@@ -295,7 +295,7 @@ Some(10)
 
 ### `bind_name_at_level`
 
-```prism,sig,h-4e4eb231708a9546f13649575cab11b10f8e91d0e733c46e972e37a9acb074ea
+```prism,sig,h-3bcbac8a2820f7a982e26ee5ed11783583d20671993abebea31bc023a1145817
 bind_name_at_level : forall a. (Data.Bind.BindEnv(a), Data.Bind.Level) -> Option(String)
 ```
 
@@ -329,7 +329,7 @@ Skeletons concatenate with no separator, so a digit run sitting beside a neighbo
 
 ### `bind_nameless`
 
-```prism,sig,h-a881a852263884956de1dc0835d00ca4370e892c75c3146fbbbf01d015e6dde5
+```prism,sig,h-cd3c257812321ebad8459fb748e28ad580192101ad7efc228cf4ee38ce17ff6e
 bind_nameless : ((String) -> String, Data.Bind.Nameless) -> String
 ```
 
@@ -347,7 +347,7 @@ bind_nameless(\(x) -> x, NScope(["a"], NSeq([NTok("lam"), NRef("a")])))
 
 ### `bind_nameless_show`
 
-```prism,sig,h-578e922cc0068c5447741d5976bfa23aed6d1f6f309d6a4b951aa6c2a3bde978
+```prism,sig,h-c34a15e7ff5292ec016bfb8cd426495f6530aee90a4da3feda135b174499f5e2
 bind_nameless_show : (Data.Bind.Nameless) -> String
 ```
 
@@ -365,7 +365,7 @@ f4:freeb0;
 
 ### `bind_alpha_eq`
 
-```prism,sig,h-f6ba932037cd6a354cc5aebe286e3272a018799eb16e1cb7101875360719b725
+```prism,sig,h-ae4eb48f2e2edb0c3c4f402fd5589530c18fe90ab4cf1854d204d10d92e0da70
 bind_alpha_eq : (Data.Bind.Nameless, Data.Bind.Nameless) -> Bool
 ```
 

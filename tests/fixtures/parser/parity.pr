@@ -3,9 +3,7 @@
 -- the exact re-encoded AST bytes (including spans and synth bits).
 
 import Syntax.Lex (..)
-
 import Syntax.Codec (..)
-
 import Syntax.Parse (..)
 
 fn main() =

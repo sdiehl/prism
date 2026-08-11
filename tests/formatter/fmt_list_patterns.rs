@@ -12,9 +12,8 @@
 // than a layout change: a file cannot both be `prism fmt --check` clean and
 // spell a list pattern. That is why the parser corpus no longer carries one.
 //
-// These tests assert the current behavior, not the desired one. Giving
-// `Pattern` a `List` variant is what fixes it, and when that lands these
-// assertions fail and must be inverted.
+// These tests pin that source rewrite so a change to the surface tree cannot
+// silently alter formatter behavior.
 
 fn formatted(src: &str) -> String {
     let once = prism::format(src).expect("input must parse");

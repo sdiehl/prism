@@ -3,7 +3,7 @@
 use marginalia::Span;
 
 use super::{rw, Vars};
-use crate::error::{ErrKind, TypeError};
+use crate::error::{suggest, ErrKind, TypeError};
 use crate::syntax::ast::{Core, Expr, Sugar, S};
 use crate::syntax::desugar::{call, evar, Cx};
 
@@ -52,7 +52,11 @@ pub(super) fn fill_call(
                     fn_name: name.to_string(),
                     param: k.clone(),
                 }
-                .at(a.span));
+                .at(a.span)
+                .maybe_help(suggest::suggestion(
+                    k,
+                    sig.iter().map(|(pn, _)| pn.as_str()),
+                )));
             };
             if slots[j].is_some() {
                 return Err(ErrKind::ArgGivenTwice {

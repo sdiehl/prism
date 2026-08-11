@@ -10,7 +10,7 @@ The ordinary productions below are direct recursive descent.  Only the prefix/in
 
 ### `parse_expr`
 
-```prism,sig,h-6c415ba956bfa873b53bba5278372e4ce532c3a541c6ac519b28c1f951908530
+```prism,sig,h-f338d69e53cd048f64b6974cc0156cf774ab4199ddd50b82057d64759afbb8e8
 parse_expr : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Sp(Syntax.Ast.Expr))
 ```
 
@@ -18,7 +18,7 @@ Parse one expression from `c`, leaving the first following token unconsumed. The
 
 ### `parse_expr_or_block`
 
-```prism,sig,h-896e2c5a740b1ee2723f5662c0856b7b90b8dafa327d11f2b92185eb70f0216a
+```prism,sig,h-2458460ef2f60de16fef8c9c077ff647e9c77cbf0ae752447f0acf72fb7ba07b
 parse_expr_or_block : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Sp(Syntax.Ast.Expr))
 ```
 

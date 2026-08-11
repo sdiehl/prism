@@ -528,6 +528,7 @@ fn short(digest: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::{classify, FunctionReport, ObVerdict, TermVerdict, Verdict, VerifyReport};
+    use crate::verify::result::ResultStatus::{Sat, Timeout, Unknown, Unsat};
     use crate::verify::result::{ResultStatus, SmtResult, SolverId, Trust};
 
     /// A single-contract report carrying `verdict`, for the exit-gate tests.
@@ -616,7 +617,6 @@ mod tests {
 
     #[test]
     fn agreement_classification() {
-        use ResultStatus::{Sat, Timeout, Unknown, Unsat};
         // A single solver, or several in agreement, on `unsat`: proved.
         assert!(matches!(classify(&[receipt(Unsat)]), ObVerdict::Proved));
         assert!(matches!(

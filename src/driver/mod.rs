@@ -5,8 +5,8 @@ use std::sync::OnceLock;
 use crate::core::fbip::{borrow_sigs, Fips, Sigs};
 use crate::core::opt::PassStage;
 use crate::core::typed::{
-    insert_rc as insert_typed_rc, lower_effects as lower_typed_effects, prepare_effects,
-    reuse as reuse_typed, EffectPlan, TypedLowering,
+    explain_effect_tiers, insert_rc as insert_typed_rc, lower_effects as lower_typed_effects,
+    prepare_effects, reuse as reuse_typed, Decline, EffectPlan, Prepared, TypedLowering,
 };
 use crate::core::{
     balanced, fip_annots, hash_program, hash_root, insert_rc, pp_core_pretty, reuse,
@@ -88,6 +88,8 @@ pub use execution::{
 };
 use front::{run_front, Front, FrontRequest};
 pub(crate) use identity::stdlib_driver_src;
+#[cfg(feature = "native")]
+pub(crate) use identity::stdlib_value_schemes;
 pub use identity::{
     module_interface, namespace_identity, namespace_root, public_surface, stdlib_hash,
     ModuleInterface, ModuleInterfaceEntry, NamespaceIdentity, PublicDef, StdlibHash,
@@ -389,6 +391,19 @@ pub fn check_with_seed(src: &str, seed: &crate::types::TypecheckSeed) -> Result<
 /// Fails on lex, parse, module, or type errors.
 pub fn check_on_in(src: &str, roots: &[Root], cfg: &Config) -> Result<Checked, Error> {
     Ok(run_front(src, roots, cfg, FrontRequest::Check)?.into_checked())
+}
+
+/// Like [`check_on_in`], but retaining typed holes as reports.
+///
+/// A typed hole is returned in [`Checked::holes`] instead of being raised, so a
+/// tool can ask what a hole's type and in-scope candidates are. Every other type
+/// error still fails exactly as it does under [`check_on_in`]: the query answers
+/// only about a program whose sole remaining question is the hole.
+///
+/// # Errors
+/// Fails on lex, parse, module, or type errors other than the holes themselves.
+pub fn check_allow_holes_on_in(src: &str, roots: &[Root], cfg: &Config) -> Result<Checked, Error> {
+    Ok(run_front(src, roots, cfg, FrontRequest::CheckHoles)?.into_checked())
 }
 
 // The checked Core-surface tree plus presentation facts used only by
@@ -1002,15 +1017,23 @@ fn typed_effect_facts(
     Ok((lowering.strategy, lowering.warning))
 }
 
-/// The effect plan the cascade reads for this program, rendered beside the tier
-/// it decided.
+/// The prepared tree, the plan solved for it, and what the cascade decided from
+/// them: everything the tier artifacts render, computed once from one front end.
+struct TierFacts {
+    prepared: Prepared,
+    plan: EffectPlan,
+    strategy: EffectStrategy,
+    // The refusal is an outcome of the cascade, not a fact about the tree, so it
+    // is read off the lowering that made the decision rather than re-derived
+    // beside it.
+    declined: Option<Decline>,
+}
+
+/// Solve the tier facts for one program.
 ///
 /// The plan is a fact about the prepared tree, so it is computed from the same
-/// preparation the strategy decision runs on, from one front end.
-///
-/// # Errors
-/// Fails on front-end or typed effect-lowering verification errors.
-pub(crate) fn typed_effect_plan(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
+/// preparation the strategy decision runs on.
+fn tier_facts(src: &str, roots: &[Root], cfg: &Config) -> Result<TierFacts, Error> {
     let mut cfg = cfg.clone();
     cfg.flags.quiet = true;
     let (_, checked, _, typed, verify_env) =
@@ -1023,10 +1046,38 @@ pub(crate) fn typed_effect_plan(src: &str, roots: &[Root], cfg: &Config) -> Resu
     let prepared = on_typed_lower_stack(|| {
         prepare_effects(echo, &verify_env, &checked.ctors, &cfg.flags, &grades)
     })?;
-    // The refusal is an outcome of the cascade, not a fact about the tree, so it
-    // is read off the lowering that made the decision rather than re-derived
-    // beside it.
-    Ok(EffectPlan::analyze(&prepared.fns).render(lowering.strategy, lowering.confined_decline))
+    let plan = EffectPlan::analyze(&prepared.fns);
+    Ok(TierFacts {
+        prepared,
+        plan,
+        strategy: lowering.strategy,
+        declined: lowering.confined_decline,
+    })
+}
+
+/// The effect plan the cascade reads for this program, rendered beside the tier
+/// it decided.
+///
+/// # Errors
+/// Fails on front-end or typed effect-lowering verification errors.
+pub(crate) fn typed_effect_plan(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
+    let facts = tier_facts(src, roots, cfg)?;
+    Ok(facts.plan.render(facts.strategy, facts.declined))
+}
+
+/// The same facts as prose: one sentence per region naming the rung it lowered
+/// to and the fact that put it there.
+///
+/// # Errors
+/// Fails on front-end or typed effect-lowering verification errors.
+pub(crate) fn typed_tier_explain(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
+    let facts = tier_facts(src, roots, cfg)?;
+    Ok(explain_effect_tiers(
+        &facts.prepared.fns,
+        &facts.plan,
+        facts.strategy,
+        facts.declined,
+    ))
 }
 
 /// The CBPV core IR of the snippet's own functions (prelude elided),
@@ -1087,7 +1138,7 @@ pub fn core_ir_full(full: &str, base: &Path) -> Result<String, Error> {
 ///
 /// # Errors
 /// Fails on front-end errors (lex, parse, module, type, fip).
-pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str>, Error> {
+pub fn off_platform_builtins(full: &str, roots: &[Root]) -> Result<Vec<&'static str>, Error> {
     // The input capability wrappers route host file/env IO through effects, so
     // the underlying prim builtin lives only in the always-reachable world
     // handler. Detect that usage from the surface wrapper a program reaches.
@@ -1187,7 +1238,7 @@ pub fn off_platform_builtins(full: &str, base: &Path) -> Result<Vec<&'static str
         }
     }
 
-    let (_, _, core) = frontend(full, &default_roots(base), &Config::from_env())?;
+    let (_, _, core) = frontend(full, roots, &Config::from_env())?;
     let reachable = crate::core::reachable_fns(&core);
     let mut out = Vec::new();
     for f in core.fns.iter().filter(|f| reachable.contains(&f.name)) {

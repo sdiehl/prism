@@ -69,6 +69,7 @@ impl IntOp {
     // Only the textual MLIR backend renders the mnemonic; the LLVM backend
     // matches the variant directly into an inkwell builder call.
     #[cfg(feature = "mlir")]
+    #[must_use]
     pub const fn mnemonic(self) -> &'static str {
         match self {
             Self::Add => "add",
@@ -99,6 +100,7 @@ impl Cmp {
     // MLIR spells the predicate as a quoted string; LLVM matches the variant
     // into an inkwell `IntPredicate`/`FloatPredicate` directly.
     #[cfg(feature = "mlir")]
+    #[must_use]
     pub const fn icmp_pred(self) -> &'static str {
         match self {
             Self::Eq => "eq",
@@ -111,6 +113,7 @@ impl Cmp {
     }
 
     #[cfg(feature = "mlir")]
+    #[must_use]
     pub const fn fcmp_pred(self) -> &'static str {
         match self {
             Self::Eq => "oeq",
@@ -134,6 +137,7 @@ pub enum FloatBinOp {
 
 impl FloatBinOp {
     #[cfg(feature = "mlir")]
+    #[must_use]
     pub const fn mnemonic(self) -> &'static str {
         match self {
             Self::Fadd => "fadd",

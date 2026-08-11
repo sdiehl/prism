@@ -1,0 +1,215 @@
+-- | Semigroups and monoids: associative combination, with and without an
+-- identity.
+--
+-- `Semigroup` is the associative operation alone; `Monoid` adds the identity
+-- as a superclass extension, so every `Monoid` carrier is a `Semigroup` and a
+-- constrained function asks for exactly the structure it uses: `Min`/`Max`
+-- combine associatively but have no identity without a greatest or least
+-- element, so they stop at `Semigroup`.
+--
+-- Instance resolution keys on the head type constructor, so a carrier admits
+-- exactly one instance. `Int` combines under both `+` and `*`, so `Int` itself
+-- gets no instance; the choice is spelled with a wrapper (`Sum`, `Product`),
+-- and the same convention picks between `&&` and `||` at `Bool` (`All`,
+-- `Any`). `List` and `String` each have one canonical combination
+-- (concatenation), so they carry instances directly. Opt-in: not in Base.
+
+import Data.List (append, foldl)
+
+-- | An associative combination: `mappend(x, mappend(y, z))` and
+-- `mappend(mappend(x, y), z)` agree for all `x`, `y`, `z`.
+pub class Semigroup(a)
+  mappend : (a, a) -> a
+
+-- | A `Semigroup` with an identity: `mappend(mempty(), x)` and
+-- `mappend(x, mempty())` are both `x`.
+pub class Monoid(a) given Semigroup(a)
+  mempty : () -> a
+
+-- | Addition, chosen by wrapper. `get_sum(mconcat(map(mk_sum, xs)))` is
+-- `sum(xs)`.
+pub newtype Sum(a) = MkSum(a) deriving (Eq, Show)
+
+-- | Multiplication, chosen by wrapper.
+pub newtype Product(a) = MkProduct(a) deriving (Eq, Show)
+
+-- | Conjunction: `mempty` is `true`, and a fold answers "did every element
+-- hold".
+pub newtype All = MkAll(Bool) deriving (Eq, Show)
+
+-- | Disjunction: `mempty` is `false`, and a fold answers "did any element
+-- hold".
+pub newtype Any = MkAny(Bool) deriving (Eq, Show)
+
+-- | The lesser of two values under `Ord`. A `Semigroup` only: with no greatest
+-- element there is no identity, which is exactly the Bounded requirement this
+-- library declines to invent.
+pub newtype Min(a) = MkMin(a) deriving (Eq, Show)
+
+-- | The greater of two values under `Ord`. A `Semigroup` only, for the dual
+-- reason.
+pub newtype Max(a) = MkMax(a) deriving (Eq, Show)
+
+instance semigroupList : Semigroup(List(a))
+  fn mappend(xs, ys) = append(xs, ys)
+
+instance monoidList : Monoid(List(a))
+  fn mempty() = Nil
+
+instance semigroupStr : Semigroup(String)
+  fn mappend(x, y) = concat(x, y)
+
+instance monoidStr : Monoid(String)
+  fn mempty() = ""
+
+instance semigroupUnit : Semigroup(Unit)
+  fn mappend(_x, _y) = ()
+
+instance monoidUnit : Monoid(Unit)
+  fn mempty() = ()
+
+-- | `None` is the identity; two `Some`s combine under the payload's own
+-- `Semigroup`. This is the classic lift of a semigroup to a monoid by
+-- adjoining a fresh identity.
+instance semigroupOption : Semigroup(Option(a)) given Semigroup(a)
+  fn mappend(x, y) = option_mappend(x, y)
+
+instance monoidOption : Monoid(Option(a)) given Semigroup(a)
+  fn mempty() = None
+
+fn option_mappend(x : Option(a), y : Option(a)) : Option(a) given Semigroup(a) =
+  match (x, y) of
+    (None, _) => y
+    (_, None) => x
+    (Some(u), Some(w)) => Some(mappend(u, w))
+
+instance semigroupSum : Semigroup(Sum(a)) given Num(a)
+  fn mappend(x, y) = sum_mappend(x, y)
+
+instance monoidSum : Monoid(Sum(a)) given Num(a)
+  fn mempty() = MkSum(0)
+
+fn sum_mappend(x : Sum(a), y : Sum(a)) : Sum(a) given Num(a) =
+  match (x, y) of
+    (MkSum(u), MkSum(w)) => MkSum(plus(u, w))
+
+instance semigroupProduct : Semigroup(Product(a)) given Num(a)
+  fn mappend(x, y) = product_mappend(x, y)
+
+instance monoidProduct : Monoid(Product(a)) given Num(a)
+  fn mempty() = MkProduct(1)
+
+fn product_mappend(x : Product(a), y : Product(a)) : Product(a) given Num(a) =
+  match (x, y) of
+    (MkProduct(u), MkProduct(w)) => MkProduct(times(u, w))
+
+instance semigroupAll : Semigroup(All)
+  fn mappend(x, y) = MkAll(get_all(x) && get_all(y))
+
+instance monoidAll : Monoid(All)
+  fn mempty() = MkAll(true)
+
+instance semigroupAny : Semigroup(Any)
+  fn mappend(x, y) = MkAny(get_any(x) || get_any(y))
+
+instance monoidAny : Monoid(Any)
+  fn mempty() = MkAny(false)
+
+instance semigroupMin : Semigroup(Min(a)) given Ord(a)
+  fn mappend(x, y) = min_mappend(x, y)
+
+fn min_mappend(x : Min(a), y : Min(a)) : Min(a) given Ord(a) =
+  match (x, y) of
+    (MkMin(u), MkMin(w)) =>
+      if cmp(u, w) <= 0 then
+        x
+      else
+        y
+
+instance semigroupMax : Semigroup(Max(a)) given Ord(a)
+  fn mappend(x, y) = max_mappend(x, y)
+
+fn max_mappend(x : Max(a), y : Max(a)) : Max(a) given Ord(a) =
+  match (x, y) of
+    (MkMax(u), MkMax(w)) =>
+      if cmp(u, w) >= 0 then
+        x
+      else
+        y
+
+-- | Wrap for a `Sum` fold.
+pub fn mk_sum(x : a) : Sum(a) @ noalloc = MkSum(x)
+
+-- | The payload of a `Sum`.
+pub fn get_sum(s : Sum(a)) : a @ noalloc =
+  match s of
+    MkSum(x) => x
+
+-- | Wrap for a `Product` fold.
+pub fn mk_product(x : a) : Product(a) @ noalloc = MkProduct(x)
+
+-- | The payload of a `Product`.
+pub fn get_product(p : Product(a)) : a @ noalloc =
+  match p of
+    MkProduct(x) => x
+
+-- | Wrap for an `All` fold.
+pub fn mk_all(b : Bool) : All @ noalloc = MkAll(b)
+
+-- | The payload of an `All`.
+pub fn get_all(x : All) : Bool @ noalloc =
+  match x of
+    MkAll(b) => b
+
+-- | Wrap for an `Any` fold.
+pub fn mk_any(b : Bool) : Any @ noalloc = MkAny(b)
+
+-- | The payload of an `Any`.
+pub fn get_any(x : Any) : Bool @ noalloc =
+  match x of
+    MkAny(b) => b
+
+-- | Wrap for a `Min` fold.
+pub fn mk_min(x : a) : Min(a) @ noalloc = MkMin(x)
+
+-- | The payload of a `Min`.
+pub fn get_min(m : Min(a)) : a @ noalloc =
+  match m of
+    MkMin(x) => x
+
+-- | Wrap for a `Max` fold.
+pub fn mk_max(x : a) : Max(a) @ noalloc = MkMax(x)
+
+-- | The payload of a `Max`.
+pub fn get_max(m : Max(a)) : a @ noalloc =
+  match m of
+    MkMax(x) => x
+
+-- | The combination of a list, identity-first.
+--
+-- ```prism
+-- mconcat([[1, 2], [3], [4, 5]])
+-- ```
+-- ```output
+-- [1, 2, 3, 4, 5]
+-- ```
+pub fn mconcat(xs : List(a)) : a given Monoid(a) =
+  foldl(\(acc, x) -> mappend(acc, x), mempty(), xs)
+
+-- | Map each element into a monoid and combine the results, in fold order.
+-- The effect row of `g` rides through, like every `Foldable` aggregation.
+--
+-- ```prism
+-- (
+--   get_all(fold_map(\(x) -> mk_all(x > 0), [1, 2, 3])),
+--   fold_map(\(x) -> show(x), [1, 2, 3]),
+-- )
+-- ```
+-- ```output
+-- (true, 123)
+-- ```
+pub fn fold_map(
+  g : (a) -> m ! {| e},
+  t : f(a)
+) : m ! { | e} given Foldable(f), Monoid(m) =
+  fold_l(\(acc, x) -> mappend(acc, g(x)), mempty(), t)

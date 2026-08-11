@@ -6,7 +6,6 @@
 -- output (the U+FFFD repair and the content hash included) and leak no cells.
 
 import Data.Bytes (..)
-
 import Wire (..)
 
 fn build(b : Buf, i : Int, n : Int) : Buf =

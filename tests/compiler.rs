@@ -1,3 +1,24 @@
+use std::fs;
+use std::path::Path;
+
+fn fixture_stems(dir: &Path, suffix: &str, excluded_prefix: &str) -> Vec<String> {
+    let mut stems: Vec<String> = fs::read_dir(dir)
+        .expect("fixture dir")
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let stem = name.strip_suffix(suffix)?;
+            if stem.starts_with(excluded_prefix) {
+                None
+            } else {
+                Some(stem.to_string())
+            }
+        })
+        .collect();
+    stems.sort_unstable();
+    stems
+}
+
 #[path = "compiler/alloc_certificate.rs"]
 mod alloc_certificate;
 #[path = "compiler/arena.rs"]
@@ -62,5 +83,7 @@ mod syntax_layout;
 mod syntax_lex;
 #[path = "compiler/syntax_roundtrip.rs"]
 mod syntax_roundtrip;
+#[path = "compiler/tc_input_codec.rs"]
+mod tc_input_codec;
 #[path = "compiler/typespans.rs"]
 mod typespans;

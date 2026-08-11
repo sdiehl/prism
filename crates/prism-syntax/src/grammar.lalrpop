@@ -1,6 +1,6 @@
 use marginalia::Span;
 use crate::ast::{Item, Vis, Fip, Total, DataDecl, Ctor, Decl, Param, Ty, Row, Expr, BinOp, Arm, Pattern, PatternDecl, PathOp, PathStep, ReflectKind, S, Spanned, EffectDecl, EffOp, EffLabel, Grade, HandlerArm, HandlerMode, Sugar, SugarArm, IntLit, ClassDecl, InstanceDecl, CanonicalDecl, Constraint, AliasDecl, AliasRhs, SynonymDecl, ErrorDecl, CatchArm, ImportDecl, Qualifier, StableDecl, Rung, RungField, Converter, ConvDir, Migration, MigrationRoute, VersionRoute, MigrationDir, CoeffectRow};
-use crate::sugar::{dot_call, param, params, with_stmt, with_rest, open_if, let_pat, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, lift_noalloc, decl_mods, grade_word_msg, dot_op_removed, mig_dir, reflect_expr, IfTail, FLIP_CLASS, FLIP_INSTANCE, FLIP_EFFECT, DECLINE_DIM_ARITH, GRADE_MANY_CLAUSE, MIGRATE_RESUME, MIGRATE_RET_ORDER};
+use crate::sugar::{dot_call, param, params, with_stmt, with_rest, open_if, let_else, let_pat, path_lit, let_stmt, seq_stmt, try_mark, interp_lit, pattern_decl, assign_stmt, compound_stmt, compound_path_op, var_decl, lift_noalloc, decl_mods, grade_word_msg, dot_op_removed, mig_dir, reflect_expr, IfTail, FLIP_CLASS, FLIP_INSTANCE, FLIP_EFFECT, DECLINE_DIM_ARITH, GRADE_MANY_CLAUSE, MIGRATE_RESUME, MIGRATE_RET_ORDER};
 use crate::lex::Token;
 use crate::kind::Kind;
 use crate::names;
@@ -741,12 +741,25 @@ Stmts: S<Expr> = {
         let_stmt(x, v, rest, l, r),
     <l:@L> "let" <x:"ident"> "=" <v:BlockExpr> "v;" <rest:Stmts> <r:@R> =>
         let_stmt(x, v, rest, l, r),
-    <l:@L> "let" <p:LetPat> "=" <v:Expr> ("in")? "v;" <rest:Stmts> =>
+    // The pattern binding and its early-return form. The `in` and the layout
+    // `v;` are spelled out rather than folded into optionals so that the token
+    // after the value decides the form with one token of lookahead: an `else`
+    // (on the value's line or the next) takes the fallback, anything else
+    // continues the block.
+    <l:@L> "let" <p:LetPat> "=" <v:Expr> "v;" <rest:Stmts> =>
+        let_pat(p, v, rest, l),
+    <l:@L> "let" <p:LetPat> "=" <v:Expr> "in" "v;" <rest:Stmts> =>
         let_pat(p, v, rest, l),
     <l:@L> "let" <p:LetPat> "=" <v:BlockExpr> "v;" <rest:Stmts> =>
         let_pat(p, v, rest, l),
-    <l:@L> "var" <x:"ident"> ":=" <v:Expr> "v;" <rest:Stmts> <r:@R> =>
-        Spanned::new(Expr::Sugar(Sugar::VarDecl(x, Box::new(v), Box::new(rest))), Span::new(l, r)),
+    <l:@L> "let" <p:LetPat> "=" <v:Expr> "else" <fb:ExprOrBlock> "v;" <rest:Stmts> =>
+        let_else(p, v, fb, rest, l),
+    <l:@L> "let" <p:LetPat> "=" <v:Expr> "v;" "else" <fb:ExprOrBlock> "v;" <rest:Stmts> =>
+        let_else(p, v, fb, rest, l),
+    <l:@L> "let" <p:LetPat> "=" <v:BlockExpr> "v;" "else" <fb:ExprOrBlock> "v;" <rest:Stmts> =>
+        let_else(p, v, fb, rest, l),
+    <l:@L> "var" <x:"ident"> <ty:(":" <Type>)?> ":=" <v:Expr> "v;" <rest:Stmts> <r:@R> =>
+        var_decl(x, ty, v, rest, l, r),
     // The `with` family. Each form takes an optional `; <Stmts>` continuation:
     // present, it is the block the `with` wraps; absent (a trailing `with` with
     // nothing after it), `with_rest` substitutes the rejection sentinel so a
@@ -1308,6 +1321,17 @@ Neg: S<Expr> = {
 Pow: S<Expr> = {
     <l:@L> <base:Call> "^" <exp:Neg> <r:@R> =>
         Spanned::new(Expr::Bin(BinOp::Pow, Box::new(base), Box::new(exp)), Span::new(l, r)),
+    // The optic literal, `#path a.b.c`. The sigil leads because an expression may
+    // not otherwise begin with `#` followed by a name (the unboxed forms take `(`
+    // or `{`, and `.#field` needs a receiver), so one token past the `#` decides
+    // this form and the word stays an ordinary identifier everywhere else. The
+    // path itself is an ordinary field-access chain, parsed by the rules below
+    // and flattened in the action, so the literal shares one spelling of a field
+    // path with the rest of the grammar instead of introducing a second.
+    <l:@L> "#" <w:"ident"> <e:Call> <r:@R> =>? {
+        let span = Span::new(l, r);
+        path_lit(&w, &e, span).map_err(|msg| lalrpop_util::ParseError::User { error: (span, msg) })
+    },
     Call,
 };
 
@@ -1483,6 +1507,11 @@ PathSteps: Vec<PathStep> = {
 PathUpdate: (Vec<PathStep>, PathOp) = {
     <p:PathSteps> "=" <e:Expr> => (p, PathOp::Set(e)),
     <p:PathSteps> "~" <e:Expr> => (p, PathOp::Modify(e)),
+    // `p <op>= e`: the compound terminals of the statement layer, applied at a
+    // path focus. Desugars at parse time to a synth modifier (see
+    // `compound_path_op`), so nothing below the parser changes.
+    <l:@L> <p:PathSteps> <op:CompoundOp> <e:Expr> <r:@R> =>
+        (p, compound_path_op(op, e, l, r)),
 };
 
 RecordExprField: (String, S<Expr>) = {

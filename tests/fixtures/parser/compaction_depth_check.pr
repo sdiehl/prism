@@ -5,27 +5,16 @@
 -- boundary calibration independent from self-parse throughput.
 
 import Syntax.Source (..)
-
 import Syntax.Token (..)
-
 import Syntax.Diagnostic (..)
-
 import Syntax.Cursor (..)
-
 import Syntax.Parse.Support (..)
-
 import Syntax.Parse.Type (parse_type)
-
 import Syntax.Parse.Pattern (parse_pattern)
-
 import Syntax.Parse.Expr (parse_expr)
-
 import Syntax.Parse.Decl (parse_program)
-
 import Syntax.Codec (..)
-
 import Data.List (..)
-
 import Json (..)
 
 fn phase_name(phase : DiagPhase) : String =

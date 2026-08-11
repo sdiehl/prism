@@ -118,10 +118,12 @@ pub enum Site {
     Shape(&'static str),
 }
 
-/// What a refusal with no declaration to attribute it to is named after. The
-/// whole-program builder walks the program as one unit, so what it refuses is
-/// the program.
-const PROGRAM: &str = "program";
+/// What a refusal with no declaration to attribute it to is named after.
+///
+/// The whole-program builder walks the program as one unit, so what it
+/// refuses is the program. The cost explainer names its whole-program row
+/// after the same word, from here rather than from a second spelling of it.
+pub const PROGRAM: &str = "program";
 
 /// A refusal, the declaration it was found in, and the site inside it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

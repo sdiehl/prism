@@ -1,0 +1,70 @@
+-- | Consumers of values: functors that map over their input, not their
+-- output.
+--
+-- A `Functor` produces `a`s and `fmap` transforms what comes out; a
+-- `Contravariant` consumes `a`s and `contramap` adapts what goes in. The
+-- arrow flips: to turn a consumer of `a` into a consumer of `b`, supply a
+-- function from `b` to `a`. The two carriers here are the archetypes: a
+-- `Predicate` tests a value, a `Comparison` orders two, and both are adapted
+-- to a new type by projecting into the one they already understand, the way a
+-- sort by key adapts an ordering on keys to an ordering on records.
+--
+-- `contramap` takes a pure projection: the carrier stores the function inside
+-- a closure, so an effectful projection would smuggle its row into every
+-- later call site unseen. Opt-in: not in Base.
+
+-- | A functor over input: `contramap(id, c)` is `c`, and
+-- `contramap(g, contramap(h, c))` is `contramap(\(x) -> h(g(x)), c)` (note
+-- the composition flips).
+pub class Contravariant(f)
+  contramap : ((b) -> a, f(a)) -> f(b)
+
+-- | A test on a single value.
+pub newtype Predicate(a) = MkPredicate((a) -> Bool)
+
+-- | A total ordering as a function: negative, zero, or positive, with the
+-- same convention as `cmp`.
+pub newtype Comparison(a) = MkComparison((a, a) -> Int)
+
+instance contravariantPredicate : Contravariant(Predicate)
+  fn contramap(g, p) = MkPredicate(\(x) -> run_predicate(p, g(x)))
+
+instance contravariantComparison : Contravariant(Comparison)
+  fn contramap(g, c) = MkComparison(\(x, y) -> run_comparison(c, g(x), g(y)))
+
+-- | Wrap a test as a `Predicate`.
+pub fn mk_predicate(g : (a) -> Bool) : Predicate(a) @ noalloc = MkPredicate(g)
+
+-- | Apply a `Predicate` to a value.
+--
+-- ```prism
+-- let evens = contramap(\(s) -> str_len(s), mk_predicate(\(n) -> n % 2 == 0))
+-- (run_predicate(evens, "hi"), run_predicate(evens, "hey"))
+-- ```
+-- ```output
+-- (true, false)
+-- ```
+pub fn run_predicate(p : Predicate(a), x : a) : Bool =
+  match p of
+    MkPredicate(g) => g(x)
+
+-- | Wrap an ordering function as a `Comparison`.
+pub fn mk_comparison(g : (a, a) -> Int) : Comparison(a) @ noalloc = MkComparison(g)
+
+-- | Apply a `Comparison` to two values.
+--
+-- ```prism
+-- let by_len = contramap(\(s) -> str_len(s), ord_comparison())
+-- (run_comparison(by_len, "hey", "hi"), run_comparison(by_len, "hi", "no"))
+-- ```
+-- ```output
+-- (1, 0)
+-- ```
+pub fn run_comparison(c : Comparison(a), x : a, y : a) : Int =
+  match c of
+    MkComparison(g) => g(x, y)
+
+-- | The ordering an `Ord` instance already carries, as a `Comparison` value
+-- that `contramap` can then re-aim at another type.
+pub fn ord_comparison() : Comparison(a) given Ord(a) =
+  MkComparison(\(x, y) -> cmp(x, y))

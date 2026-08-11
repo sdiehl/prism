@@ -6,7 +6,7 @@
 use logos::Logos;
 use wasm_bindgen::prelude::*;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write as _;
 use std::io;
 use std::path::Path;
@@ -19,7 +19,7 @@ use crate::lex::highlight::tok_class;
 use crate::lex::Token;
 use crate::resolve::{default_roots, Root};
 use crate::{
-    check, example_program, format as fmt_src, interpret, namespace_identity,
+    check, example_program, format as fmt_src, interpret, interpret_on, namespace_identity,
     off_platform_builtins, resume_on, suspend_line_cuts, suspend_on, with_prelude, Config,
     SuspendResult,
 };
@@ -47,13 +47,37 @@ const BROWSER_SERVABLE: &[&str] = &["getenv", "args_count", "arg"];
 #[wasm_bindgen]
 #[must_use]
 pub fn run(src: &str) -> String {
+    run_on_roots(src, &default_roots(Path::new(".")))
+}
+
+/// Run a snippet whose imports may resolve against an in-memory module bundle.
+///
+/// `names` and `sources` are parallel: `names[i]` is the dotted module path
+/// (`Tc`, `Data.Util`) that `sources[i]` provides. The docs' package pages ship
+/// their package sources this way, so a block that says `import Tc (..)` runs
+/// in the browser exactly as it does inside the package project. Bundle
+/// modules take priority over the embedded stdlib, mirroring a package's own
+/// source layout.
+#[wasm_bindgen]
+#[must_use]
+pub fn run_with_modules(src: &str, names: Vec<String>, sources: Vec<String>) -> String {
+    if names.len() != sources.len() {
+        return "error: module names and sources differ in length".to_string();
+    }
+    let modules: BTreeMap<String, String> = names.into_iter().zip(sources).collect();
+    let mut roots = vec![Root::source_bundle("docs-bundle".to_string(), modules)];
+    roots.extend(default_roots(Path::new(".")));
+    run_on_roots(src, &roots)
+}
+
+fn run_on_roots(src: &str, roots: &[Root]) -> String {
     // A doc snippet without `main` (a bare expression or `let`-block) is wrapped
     // as an implicit `main`; when wrapped, its result value is shown (`=> v`)
     // since it prints nothing. A full program is run and its transcript shown.
     let program = example_program(src);
     let wrapped = program != src;
     let full = with_prelude(&program);
-    match off_platform_builtins(&full, Path::new(".")) {
+    match off_platform_builtins(&full, roots) {
         Ok(off) => {
             let blocked: Vec<_> = off
                 .into_iter()
@@ -68,7 +92,7 @@ pub fn run(src: &str) -> String {
         }
         Err(e) => return format!("error: {e}"),
     }
-    match interpret(&full) {
+    match interpret_on(&full, roots) {
         // A full program: the exact transcript (real emitted newlines,
         // byte-for-byte what the oracle compares). A wrapped expression: the
         // value, after any transcript it produced.
@@ -636,7 +660,7 @@ pub fn dump(src: &str) -> String {
             .decls
             .iter()
             .filter(|d| !prelude.contains(&d.name))
-            .map(|d| format!("{} : {}", d.name, d.ty.show()))
+            .map(|d| format!("{} : {}", d.name, c.show_sig(d)))
             .collect::<Vec<_>>()
             .join("\n"),
         Err(e) => format!("error: {e}"),

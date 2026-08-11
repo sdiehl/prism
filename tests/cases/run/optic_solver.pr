@@ -1,0 +1,62 @@
+-- A miniature typechecker walk driven by optics: resolve every solved
+-- metavariable in a batch of goals while the solver state is threaded through
+-- lenses, then normalize the substitution itself through a composed traversal.
+import Data.Optic (..)
+import Control.State (..)
+
+type Ty = TInt | TMeta(Int) | TFun(Ty, Ty) deriving (Show, Eq)
+
+type Solver = Solver {
+  subst: List((Int, Ty)),
+  steps: Int
+} deriving (Lens, Show)
+
+let subst_l : Lens(Solver, List((Int, Ty))) = lens(subst_of, with_subst)
+
+let steps_l : Lens(Solver, Int) = lens(steps_of, with_steps)
+
+-- Every type bound in the substitution, reached from the solver in one value:
+-- a lens into the field, a traversal over the list, a lens into each pair.
+let bound_l : Traversal(Solver, Ty) =
+  compose_traversal_lens(
+      compose_lens_traversal(subst_l, each_of_list),
+      lens_snd,
+    )
+
+fn lookup_meta(n : Int, rows : List((Int, Ty))) : Option(Ty) =
+  match rows of
+    Nil => None
+    Cons(row, rest) =>
+      if fst(row) == n then
+        Some(snd(row))
+      else
+        lookup_meta(n, rest)
+
+-- The rewrite rule. It reads the substitution and bumps the step count through
+-- lenses, so nothing here spells a get, a record update and a put.
+fn resolve(t : Ty) : Ty ! {State(Solver)} =
+  match t of
+    TInt => TInt
+    TFun(a, b) =>
+      let ra = resolve(a)
+      let rb = resolve(b)
+      TFun(ra, rb)
+    TMeta(n) =>
+      modify_at(steps_l, \(c) -> c + 1)
+      let rows = gets_at(subst_l)
+      match lookup_meta(n, rows) of
+        None => TMeta(n)
+        Some(bound) => resolve(bound)
+
+fn main() =
+  let s0 =
+    Solver { subst = [(0, TInt), (1, TFun(TMeta(0), TMeta(2)))], steps = 0 }
+  let goals = [TMeta(1), TFun(TInt, TMeta(0)), TMeta(9)]
+  -- One optic-driven pass over the whole batch, threading the solver.
+  let done = run_state(s0, \() -> traverse_of_eff(each_of_list, resolve, goals))
+  println(fst(done))
+  println(steps_of(snd(done)))
+  -- The same optics read and rewrite the solver's own bindings.
+  println(collect_of(bound_l, s0))
+  println(subst_of(over_all(bound_l, \(t) -> TFun(t, t), s0)))
+  println(exec_state(s0, \() -> modify_all_at(bound_l, \(_t) -> TInt)))

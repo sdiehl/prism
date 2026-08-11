@@ -60,7 +60,7 @@ A human-readable account of a refusal.
 
 ### `rn_occurrences`
 
-```prism,sig,h-5258b1ac4690ced43e947cd4f5cfa53e20f8851269c4e339b8ec550c11bd1e08
+```prism,sig,h-cdd5f8fcd98232a3f202e0f3c52df14f2a8cf06006c49f737deb74f60128d57b
 rn_occurrences : (Syntax.Resolved.ResolvedDoc) -> List(Syntax.Rename.RnUse)
 ```
 
@@ -68,7 +68,7 @@ Every variable reference in the document, in source order: the occurrence table 
 
 ### `rn_unaddressed`
 
-```prism,sig,h-b943e1a01c394718718d0495243ad984de9e48092bf1b64a48f8bd8dd34ec21e
+```prism,sig,h-6bda3d31d30adbe8a0f6e7e824e11f97eb9d7384b80ef5a47d7a900573e873c1
 rn_unaddressed : (Syntax.Resolved.ResolvedDoc) -> List(Syntax.Source.Span)
 ```
 
@@ -76,7 +76,7 @@ Every reference the embedded source cannot address. Non-empty means the document
 
 ### `rn_uses_of`
 
-```prism,sig,h-d81ee6303a67bfde01669568056e67138dae61af01458f7af08c70f768c1167b
+```prism,sig,h-0cf2c37b5de613c58dba85dde7bd1623c6046b3f3a70a1b76e58579db59b2488
 rn_uses_of : (Syntax.Resolved.ResolvedDoc, String) -> List(Syntax.Rename.RnUse)
 ```
 
@@ -84,7 +84,7 @@ Every reference to one name, in source order.
 
 ### `rn_use_count`
 
-```prism,sig,h-ee0f37f9f1b996db3bdcf7c837a33d7fba61c6681de186544cb71ff1e7d3c4cc
+```prism,sig,h-3f16cfbb7403b1947b55400f8c4629112f3bf5930a23103f4f16e2289f607b4a
 rn_use_count : (Syntax.Resolved.ResolvedDoc, String) -> Int
 ```
 
@@ -108,7 +108,7 @@ The span of every identifier token spelling `name`, anywhere in the text. This i
 
 ### `rn_plan`
 
-```prism,sig,h-2107f972a93fd39bdbe10a001e957afdcd1236be438bbfebbe42b46a478b1a6d
+```prism,sig,h-ceed2ed2aea167223483ff3217c987511d6c00f1b0fe5e7bed77b124a29468c8
 rn_plan : (Syntax.Resolved.ResolvedDoc, String, String) -> Result(List(Syntax.Edit.Edit), Syntax.Rename.RenameRefusal)
 ```
 
@@ -118,7 +118,7 @@ The checks run in a fixed order, so the refusal a caller sees is always the firs
 
 ### `rn_rename`
 
-```prism,sig,h-ad919903fc84840f1561037163ddef5ceafab1c3e5879e2b702d85757500fea2
+```prism,sig,h-5bc34c59f90e9bb77f8cae85b130f74f1089817f7c04352296a1aa6dafeb5d55
 rn_rename : (Syntax.Resolved.ResolvedDoc, String, String) -> Result(String, Syntax.Rename.RenameError)
 ```
 

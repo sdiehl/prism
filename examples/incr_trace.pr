@@ -14,9 +14,7 @@
 -- cold start re-fires the memos and prints the very same lines.
 
 import Data.Map (..)
-
 import Data.List (..)
-
 import Incr (..)
 
 fn snap_path() = "target/incr_trace.snap"

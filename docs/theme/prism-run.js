@@ -52,6 +52,37 @@
     return code.dataset.prismSource || code.textContent;
   }
 
+  // Package pages ship their package sources as a JSON bundle (one script tag
+  // per page, emitted by the preprocessor), so a block that imports a package
+  // module runs in the browser the way it does inside the package project.
+  var modulesCache; // undefined = unread, null = none on this page
+  function pageModules() {
+    if (modulesCache === undefined) {
+      modulesCache = null;
+      var tag = document.querySelector("script.prism-modules");
+      if (tag) {
+        try {
+          modulesCache = JSON.parse(tag.textContent);
+        } catch (e) {
+          modulesCache = null;
+        }
+      }
+    }
+    return modulesCache;
+  }
+
+  function runSource(m, source) {
+    var mods = pageModules();
+    if (mods && typeof m.run_with_modules === "function") {
+      var names = Object.keys(mods);
+      var sources = names.map(function (n) {
+        return mods[n];
+      });
+      return m.run_with_modules(source, names, sources);
+    }
+    return m.run(source);
+  }
+
   // The full content hash a reference block carries, as an `h-<hex>` class, or
   // null. Rendered as a subdued pill beside the block's Σ badge (short prefix
   // shown, full hash copied on click).
@@ -163,7 +194,7 @@
           function (m) {
             var result;
             try {
-              result = m.run(source);
+              result = runSource(m, source);
             } catch (e) {
               result = "error: " + ((e && e.message) || e);
             }

@@ -10,14 +10,7 @@
 // change (the `using`-drift adds a Call node) survives the strip and shows up.
 use rstest::rstest;
 
-fn ast_no_spans(src: &str) -> String {
-    prism::dump("ast", src)
-        .expect("must parse")
-        .lines()
-        .filter(|l| !l.trim_start().starts_with("span:"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
+use super::ast_no_spans;
 
 // Format `src`, then assert: the output reparses, formatting is idempotent, and
 // the parsed meaning is unchanged (same span-stripped AST as the input).

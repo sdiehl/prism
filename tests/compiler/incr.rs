@@ -224,7 +224,7 @@ fn durable_warm_output_matches_cold() {
     let header = fs::read_to_string(snap).unwrap();
     let header = header.lines().next().unwrap();
     assert!(
-        header.starts_with("prism-incr-snapshot\t1\tincr-warm-v1\t"),
+        header.starts_with("prism-incr-snapshot\t2\tincr-warm-v1\t"),
         "snapshot carries a versioned, program-tagged header: {header:?}"
     );
 
@@ -258,16 +258,16 @@ fn durable_bad_snapshot_cold_starts() {
     };
     check("total garbage, not a snapshot", "garbage");
     check(
-        "prism-incr-snapshot\t1\tcc\t00\n9,9,notanint,,\n",
+        "prism-incr-snapshot\t2\tcc\t00\n9,9,notanint,,\n",
         "valid header, junk body",
     );
     check(
-        "prism-incr-snapshot\t1\tOTHER\t00\n2,1,50,\n",
+        "prism-incr-snapshot\t2\tOTHER\t00\n2,1,50,\n",
         "foreign tag",
     );
-    check("prism-incr-snapshot\t2\tcc\t00\n2,1,50,\n", "stale version");
+    check("prism-incr-snapshot\t1\tcc\t00\n2,1,50,\n", "stale version");
     check(
-        "prism-incr-snapshot\t1\tcc\tWRONGDIGEST\n2,1,50,\n",
+        "prism-incr-snapshot\t2\tcc\tWRONGDIGEST\n2,1,50,\n",
         "wrong digest",
     );
 
@@ -447,7 +447,7 @@ fn trace_replay_dropped_or_corrupt_cold_starts() {
     let _ = fs::remove_file(&snap);
     fs::write(
         &snap,
-        r"prism-incr-trace-snapshot	1	OTHER	00
+        r"prism-incr-trace-snapshot	2	OTHER	00
 
 ",
     )

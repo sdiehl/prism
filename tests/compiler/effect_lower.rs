@@ -3,6 +3,10 @@
 // they exercise the full front end (resolve, check, elaborate) that lives
 // above that crate.
 
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::Path;
+
 use prism::core::CoreOp;
 use prism::flags::EffectTier;
 use prism::types::ty::Label;
@@ -10,7 +14,6 @@ use prism_common::fresh::Fresh;
 
 use prism::core::typed::verify::OperationSig;
 use prism::core::typed::{CompSig, CoreFnSig, CoreQuantifier, CoreType, TypedBinder, TypedPattern};
-use std::collections::{BTreeMap, BTreeSet};
 
 use prism::core::typed::effect_lower::diagnostics::DriftLog;
 use prism::core::typed::effect_lower::*;
@@ -21,6 +24,9 @@ use prism::core::typed::effect_lower::{
 };
 use prism::core::typed::effect_lower::{LocalDeclinePoint, LocalSplit, LoweringAnalysis};
 use prism::core::typed::*;
+use prism::core::EffectStrategy::{
+    Evidence, LocalPartial, Pure, SelectiveFreeMonad, StateFusion, WholeProgramFreeMonad,
+};
 use prism::core::{EffectStrategy, OpGrades};
 use prism::flags::DynFlags;
 use prism::types::ty::EffRow;
@@ -317,10 +323,6 @@ fn every_effect_strategy_and_lowering_flag_boundary_is_accounted_for() {
         // One rung per knob position, in `EffectTier::ALL` order.
         expected: [EffectStrategy; EffectTier::ALL.len()],
     }
-
-    use EffectStrategy::{
-        Evidence, LocalPartial, Pure, SelectiveFreeMonad, StateFusion, WholeProgramFreeMonad,
-    };
 
     let fixtures = [
         Fixture {
@@ -815,7 +817,7 @@ fn threading_the_take_corpus_program_verifies() {
 // this is an always-run library test, not a cached native verdict.
 #[test]
 fn production_state_corpus_routes_and_eliminates_effects() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let corpus = [
         "examples/eff_state.pr",
         "examples/eff_writer.pr",
@@ -830,8 +832,7 @@ fn production_state_corpus_routes_and_eliminates_effects() {
         "tests/cases/run/streams_edge.pr",
     ];
     for path in corpus {
-        let src =
-            std::fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let src = fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("{path}: {e}"));
         let (typed, env, ctors, grades) = typed_from_program(&src);
         let flags = DynFlags::default();
         let threaded = lower_effects(typed, &env, &ctors, &flags, &grades)
@@ -851,7 +852,7 @@ fn production_state_corpus_routes_and_eliminates_effects() {
 // this runs per program so a violation names its program.
 #[test]
 fn threaded_state_corpus_verifies() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let corpus = [
         "examples/eff_state.pr",
         "examples/eff_writer.pr",
@@ -867,8 +868,7 @@ fn threaded_state_corpus_verifies() {
     ];
     let mut failures = Vec::new();
     for path in corpus {
-        let src =
-            std::fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let src = fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("{path}: {e}"));
         let (typed, env, ctors, grades) = typed_from_program(&src);
         let flags = DynFlags::default();
         let (threaded, env2) = threaded_state_typed(typed, &env, &ctors, &flags, &grades)
@@ -887,10 +887,9 @@ fn threaded_state_corpus_verifies() {
 
 #[test]
 fn threaded_state_bind_rows_cover_transformed_children() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for path in ["examples/eff_state.pr", "examples/param_effects.pr"] {
-        let src =
-            std::fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let src = fs::read_to_string(root.join(path)).unwrap_or_else(|e| panic!("{path}: {e}"));
         let (typed, env, ctors, grades) = typed_from_program(&src);
         let (threaded, env2) =
             threaded_state_typed(typed, &env, &ctors, &DynFlags::default(), &grades)
@@ -1218,7 +1217,7 @@ fn a_read_whose_value_is_computed_with_declines_below_the_gate() {
 //
 // The accumulator is therefore a property of a producer's own operations, not
 // of the program: reading every fold clause in the program and demanding one
-// type declines a program that is fused, and correctly fused, today.
+// type incorrectly declines this fusible program.
 #[test]
 fn two_chains_fold_at_their_own_accumulator_types() {
     assert_state_fusion_routes(

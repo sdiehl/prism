@@ -1,0 +1,81 @@
+-- | Typed vocabulary for the `prism-tc-input-v1` checker-input artifact.
+--
+-- The document is the declaration interface consumed by the Rust checker. Its
+-- function bodies are NodeIds into `prism-resolved-syntax-v1`; no inferred Rust
+-- facts appear here.
+
+import Syntax.Source (Span)
+
+pub type TcImport = TcImport { path: String, names: List(String), glob: Bool }
+
+pub type TcCtor = TcCtor {
+  name: String,
+  tag: Int,
+  fields: List(String),
+  args: List(String)
+}
+
+pub type TcData = TcData {
+  name: String,
+  params: List(String),
+  is_newtype: Bool,
+  derivs: List(String),
+  ctors: List(TcCtor),
+  span: Span
+}
+
+pub type TcOp = TcOp {
+  name: String,
+  grade: String,
+  params: List(String),
+  ret: String
+}
+
+pub type TcEffect = TcEffect {
+  name: String,
+  params: List(String),
+  ops: List(TcOp),
+  span: Span
+}
+
+pub type TcMethod = TcMethod { name: String, ty: String }
+
+pub type TcClass = TcClass {
+  name: String,
+  param: String,
+  supers: List(String),
+  methods: List(TcMethod),
+  span: Span
+}
+
+pub type TcConstraint = TcConstraint { cls: String, ty: String }
+
+pub type TcInstance = TcInstance {
+  cls: String,
+  head: String,
+  module_name: String,
+  context: List(TcConstraint)
+}
+
+pub type TcParam = TcParam { name: String, is_borrow: Bool }
+
+pub type TcFunction = TcFunction {
+  name: String,
+  params: List(TcParam),
+  constraints: List(String),
+  body: Int,
+  span: Span
+}
+
+pub type TcInputDoc = TcInputDoc {
+  schema: String,
+  compiler: String,
+  imports: List(TcImport),
+  types: List(TcData),
+  effects: List(TcEffect),
+  classes: List(TcClass),
+  instances: List(TcInstance),
+  functions: List(TcFunction)
+}
+
+pub fn tc_input_schema() : String = "prism-tc-input-v1"

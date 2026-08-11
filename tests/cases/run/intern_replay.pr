@@ -1,0 +1,31 @@
+-- Interning the same sequence of names twice, in two independently built
+-- tables, assigns the same ids: an id is a function of first-seen order alone,
+-- which is what makes an id-keyed pass replayable. The repeats in the sequence
+-- are what makes it interesting, since they must resolve to the id their first
+-- occurrence allocated rather than taking a fresh one.
+
+import Data.Intern (..)
+
+fn ids_of(names : List(String)) : List(Int) =
+  let (_t, ids) = intern_all(intern_empty, names)
+  ids
+
+fn main() =
+  let names = ["let", "fn", "let", "match", "fn", "of"]
+  let first = ids_of(names)
+  let second = ids_of(names)
+  println("ids: {show(first)}")
+  println("replay stable: {first == second}")
+  let (t, _ids) = intern_all(intern_empty, names)
+  println("size: {intern_size(t)}")
+  let known = intern_id(t, "match")
+  println("id of match: {show(known)}")
+  let unseen = intern_id(t, "where")
+  println("id of where: {show(unseen)}")
+  let back = intern_name(t, 2)
+  println("name of 2: {show(back)}")
+  -- Interning a name already present leaves the table exactly as it was.
+  let (again, repeat_id) = intern(t, "fn")
+  println(
+      "repeat id: {repeat_id}, size unchanged: {intern_size(again) == intern_size(t)}",
+    )

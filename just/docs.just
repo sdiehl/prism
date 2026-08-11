@@ -39,12 +39,16 @@ docs-gen:
 docs-packages:
     cargo build --release --features native
     ./target/release/prism docs packages/tzdb --out docs/src/packages/tzdb
+    ./target/release/prism docs packages/tzdb --out packages/tzdb/docs
     ./target/release/prism docs packages/tzdb --test
     ./target/release/prism docs packages/typst --out docs/src/packages/typst
+    ./target/release/prism docs packages/typst --out packages/typst/docs
     ./target/release/prism docs packages/typst --test
     ./target/release/prism docs packages/spectra --out docs/src/packages/spectra
+    ./target/release/prism docs packages/spectra --out packages/spectra/docs
     ./target/release/prism docs packages/spectra --test
     ./target/release/prism docs packages/tc --out docs/src/packages/tc
+    ./target/release/prism docs packages/tc --out packages/tc/docs
     ./target/release/prism docs packages/tc --test
 
 # Regenerate the compaction scoreboard; pass `--check` to verify it.

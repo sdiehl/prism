@@ -18,7 +18,7 @@ The one-element list `Cons(x, Nil)`.
 
 ### `is_nil`
 
-```prism,sig,h-25a926bd8943d2bcf4a44a427dc735f76ecc106d285eb337c3292f0d6fc12ea3
+```prism,sig,h-3e7df39ca0ee1696a0e290ae855602f999b20fde82e405252d532086473bff1e
 is_nil : forall a. (List(a)) -> Bool
 ```
 
@@ -26,7 +26,7 @@ True for the empty list.
 
 ### `head`
 
-```prism,sig,h-6b77a4f9bd7cb8a7590acebe1d2969526ffde6660e5f7d0fe59c8da952f206b7
+```prism,sig,h-117cfb94fb52dd6aaf6aa2ffd8f4b5bc2a109e8b121bc6031bf523aa24ed6e3c
 head : forall a. (List(a)) -> Option(a)
 ```
 
@@ -42,7 +42,7 @@ Some(1)
 
 ### `tail`
 
-```prism,sig,h-80500dc9873f7154aa9d9896e4ccd60b02d0d4e156e6eb5e045304c946ccd15a
+```prism,sig,h-d9ca469faabb3d77651cba304a23cda9e5cee107d357bf7c40324f4231213d04
 tail : forall a. (List(a)) -> List(a)
 ```
 
@@ -50,7 +50,7 @@ Everything after the first element (`Nil` for the empty list).
 
 ### `last`
 
-```prism,sig,h-04e82dbfd3a509db57b39bd9d7be15fc7f8302ad80fa64ec6a83305919d92472
+```prism,sig,h-cf811281a00c05474b0464e5f9a050bc3b2149485b61be2825031734d5722737
 last : forall a. (List(a)) -> Option(a)
 ```
 
@@ -66,7 +66,7 @@ Some(3)
 
 ### `nth`
 
-```prism,sig,h-e54067f9ceb430e4a752d5bd25562459a6233db1590b22b683ed1f7af92d509a
+```prism,sig,h-8cfadb8a41dc862480d8db03ba5f6dd9c9bf50a8e69df0d724fe3ab09fcd8daa
 nth : forall a. (Int, List(a)) -> Option(a)
 ```
 
@@ -146,11 +146,11 @@ drop_while(\(x) -> x < 3, [1, 2, 3, 1])
 
 ### `split_at`
 
-```prism,sig,h-00e881b2455448a75d6881e46225c58aade8b673b276d8c0bc299b787e3b83b1
+```prism,sig,h-acb5b6577aecbfbc7974a0c328a67ada438e369230ac422be754b371f5989142
 split_at : forall a. (Int, List(a)) -> (List(a), List(a))
 ```
 
-`(take(n, xs), drop(n, xs))` in one pass of intent.
+`(take(n, xs), drop(n, xs))`, sharing one traversal of the prefix.
 
 ### `map`
 
@@ -266,7 +266,7 @@ flatten([[1, 2], [3], [4, 5]])
 
 ### `concat_map`
 
-```prism,sig,h-c3b8f5b8f10f45ad6640355baa7a06c00cce32b9abbb5828d09fcaeb304194de
+```prism,sig,h-61f48dc5ce690aadbb04e165b345b6cab48f1aff0ea40efcb9ab717078490e55
 concat_map : forall e0 a b. ((a) -> List(b) ! {e0}, List(a)) -> List(b) ! {e0}
 ```
 
@@ -314,7 +314,7 @@ zip([1, 2], ["a", "b"])
 
 ### `unzip`
 
-```prism,sig,h-d8ac0868c6270504998eaa3900b5e040b55bb19bd4809fc110d070bc65f0d922
+```prism,sig,h-1cb889899d2e459a3a1aaa29d9e39b3db1cd3cd1b41e72be96d0189e5703d076
 unzip : forall a b. (List((a, b))) -> (List(a), List(b))
 ```
 
@@ -330,7 +330,7 @@ unzip([(1, "a"), (2, "b")])
 
 ### `count`
 
-```prism,sig,h-5077a97ff5c7c11911903e1a90150c075be6a0da0afbca8d73e3889644c9a218
+```prism,sig,h-b0c5db7dbe4be59c3fc279a593e40774d73e1b7899d21d1429de00b049984d71
 count : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> Int ! {e0}
 ```
 
@@ -370,7 +370,7 @@ Some(1)
 
 ### `maximum`
 
-```prism,sig,h-638da662ffad9ebff415ec500003756c75b89d1694715d3fdd43aaca4c61fd0f
+```prism,sig,h-c9e28fa55b3de46c1c0558e83c0ffd2a289198e93534ad5835663383e48ceb34
 maximum : (List(Int)) -> Option(Int)
 ```
 
@@ -386,7 +386,7 @@ Some(3)
 
 ### `minimum`
 
-```prism,sig,h-6d98c585df87fa734ef83bd47c5bb849989c69acc09866fbe311a4c8800f169a
+```prism,sig,h-01163e97a62f97d7b0fdb7f1f407258ca319abfd562d5be03579d43b57d7fe47
 minimum : (List(Int)) -> Option(Int)
 ```
 
@@ -434,7 +434,7 @@ range(0, 5)
 
 ### `tabulate`
 
-```prism,sig,h-210b3fb2350eb7093356f3c231014a7194adf74296ef74c08a022d208d7ee0ef
+```prism,sig,h-660e32f3aa3b39bf49591c39a7875713b03ea7a31ef917517bece57b6d07fa73
 tabulate : forall e0 a. (Int, (Int) -> a ! {e0}) -> List(a) ! {e0}
 ```
 
@@ -466,7 +466,7 @@ insert_sorted(3, [1, 2, 4])
 
 ### `list_to_option`
 
-```prism,sig,h-6b77a4f9bd7cb8a7590acebe1d2969526ffde6660e5f7d0fe59c8da952f206b7
+```prism,sig,h-117cfb94fb52dd6aaf6aa2ffd8f4b5bc2a109e8b121bc6031bf523aa24ed6e3c
 list_to_option : forall a. (List(a)) -> Option(a)
 ```
 
@@ -474,7 +474,7 @@ The first element as `Some`, or `None` (an `Option` view of the head).
 
 ### `partition`
 
-```prism,sig,h-a095cbdd787668373afeee2944840898503d2bea07877456f87873ec1a16fff2
+```prism,sig,h-913f37184db5989211a01f346fb773e635d2e68e34bcb25670cf4578673e4854
 partition : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> (List(a), List(a)) ! {e0}
 ```
 
@@ -490,7 +490,7 @@ partition(\(x) -> x > 1, [1, 2, 3])
 
 ### `chunks_of`
 
-```prism,sig,h-d10d88307be4f855dd5bbb253e27908c24dabf5120bb0f0e5eff4f71191f38c4
+```prism,sig,h-55f8adc72034a6c6f2be015c8e62869f2b9e8dce350dd0a3fdf733b502e1944a
 chunks_of : forall a. (Int, List(a)) -> List(List(a))
 ```
 
@@ -522,7 +522,7 @@ scan_left(\(a, b) -> a + b, 0, [1, 2, 3])
 
 ### `list_ap`
 
-```prism,sig,h-c2ddef8efc7cd48bd7d8ba20b27b3285cbf58b249dee173ce765309ef68dff62
+```prism,sig,h-1c344ade99ec1150773f040146609bdf4e40bb2222de7d8a9797f09521b39d14
 list_ap : forall e0 a b. (List((b) -> a ! {e0}), List(b)) -> List(a) ! {e0}
 ```
 

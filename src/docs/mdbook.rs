@@ -564,7 +564,7 @@ fn highlight_spans(body: &str) -> Result<Vec<(usize, &'static str, usize)>, Erro
 // Pre-render one tooltip block: ordinary highlight.js classes produced from the
 // real lexer and properly nested surface
 // expression ranges. The compact payload is embedded unchanged for the shared
-// browser/future-wasm schema even though the static spans need no wasm producer.
+// browser/Wasm schema even though the static spans need no Wasm producer.
 fn typed_html(
     body: &str,
     info: &str,
@@ -768,14 +768,59 @@ fn package_src_dirs(book_root: &Path) -> Vec<PathBuf> {
     dirs
 }
 
+// The module bundle a package page ships for its Run buttons: every `.pr`
+// under each package `src`, keyed by dotted module path, as one JSON script
+// tag. The browser passes the bundle to `run_with_modules`, so a block that
+// imports a package module runs against the same sources the page's checks
+// resolved against instead of failing to resolve the import. The `</` escape
+// keeps a source that happens to contain the sequence from closing the tag.
+fn package_bundle_html(package_dirs: &[PathBuf]) -> Option<String> {
+    fn collect(dir: &Path, prefix: &[String], out: &mut serde_json::Map<String, Value>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        let mut entries: Vec<PathBuf> = entries.filter_map(Result::ok).map(|e| e.path()).collect();
+        entries.sort();
+        for p in entries {
+            let Some(stem) = p.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if p.is_dir() {
+                let mut pre = prefix.to_vec();
+                pre.push(stem.to_string());
+                collect(&p, &pre, out);
+            } else if p.extension().and_then(|e| e.to_str()) == Some(crate::driver::SOURCE_EXT) {
+                if let Ok(src) = fs::read_to_string(&p) {
+                    let mut key = prefix.to_vec();
+                    key.push(stem.to_string());
+                    out.insert(key.join("."), Value::String(src));
+                }
+            }
+        }
+    }
+    let mut modules = serde_json::Map::new();
+    for dir in package_dirs {
+        collect(dir, &[], &mut modules);
+    }
+    if modules.is_empty() {
+        return None;
+    }
+    let json = Value::Object(modules).to_string().replace("</", "<\\/");
+    Some(format!(
+        "\n\n<script type=\"application/json\" class=\"prism-modules\">{json}</script>\n"
+    ))
+}
+
 // Walk the mdbook section tree, rewriting each chapter's content in place. A
-// chapter under `packages/` gets the package source roots for its doc blocks;
-// every other chapter resolves against the book root and stdlib alone.
+// chapter under `packages/` gets the package source roots for its doc blocks
+// (and ships the module bundle for its Run buttons); every other chapter
+// resolves against the book root and stdlib alone.
 fn walk(
     items: &mut Vec<Value>,
     warnings: &mut Vec<String>,
     book_root: &Path,
     package_dirs: &[PathBuf],
+    bundle: Option<&str>,
 ) {
     for item in items {
         let Some(chapter) = item.get_mut("Chapter") else {
@@ -787,12 +832,17 @@ fn walk(
             .is_some_and(|p| p.starts_with(PACKAGES_DIR));
         let extras = if in_packages { package_dirs } else { &[] };
         if let Some(content) = chapter.get("content").and_then(Value::as_str) {
-            let (new, mut w) = annotate_markdown(content, book_root, extras);
+            let (mut new, mut w) = annotate_markdown(content, book_root, extras);
+            if in_packages {
+                if let Some(tag) = bundle {
+                    new.push_str(tag);
+                }
+            }
             warnings.append(&mut w);
             chapter["content"] = Value::String(new);
         }
         if let Some(subs) = chapter.get_mut("sub_items").and_then(Value::as_array_mut) {
-            walk(subs, warnings, book_root, package_dirs);
+            walk(subs, warnings, book_root, package_dirs, bundle);
         }
     }
 }
@@ -833,7 +883,14 @@ pub fn preprocess_book(input: &str) -> Result<(String, Vec<String>), Error> {
         collect_source_paths(items, &mut existing);
         inject_generated(items, &src_dir, &existing, &mut warnings)?;
         let package_dirs = package_src_dirs(Path::new(root));
-        walk(items, &mut warnings, Path::new(root), &package_dirs);
+        let bundle = package_bundle_html(&package_dirs);
+        walk(
+            items,
+            &mut warnings,
+            Path::new(root),
+            &package_dirs,
+            bundle.as_deref(),
+        );
     }
     let json = serde_json::to_string(&book)
         .map_err(|e| Error::CodegenDocs(format!("mdbook preprocessor output: {e}")))?;
@@ -842,8 +899,42 @@ pub fn preprocess_book(input: &str) -> Result<(String, Vec<String>), Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::annotate_markdown;
+    use std::env;
+    use std::fs;
     use std::path::Path;
+    use std::process;
+    use std::slice;
+
+    use super::{annotate_markdown, package_bundle_html};
+
+    // The bundle a package page ships: every `.pr` under the package sources,
+    // keyed by dotted module path, in one script tag whose JSON can never close
+    // the tag early. The browser hands the map to `run_with_modules`, so a key
+    // that drifted from the dotted import spelling would break every package
+    // Run button at once.
+    #[test]
+    fn package_bundle_keys_are_dotted_and_tag_safe() {
+        let dir = env::temp_dir().join(format!("prism-bundle-test-{}", process::id()));
+        let nested = dir.join("Deep");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(dir.join("Tc.pr"), "-- s = \"</script>\"\n").unwrap();
+        fs::write(nested.join("Util.pr"), "fn u() : Int = 1\n").unwrap();
+        let html = package_bundle_html(slice::from_ref(&dir)).expect("bundle");
+        fs::remove_dir_all(&dir).unwrap();
+        assert!(html.contains("class=\"prism-modules\""));
+        assert!(
+            html.contains("\"Tc\""),
+            "top-level module keyed by stem: {html}"
+        );
+        assert!(
+            html.contains("\"Deep.Util\""),
+            "nested module keyed dotted: {html}"
+        );
+        assert!(
+            !html.contains("</script>\""),
+            "closing tag must be escaped: {html}"
+        );
+    }
 
     // Comments are lexed as trivia, so a renderer reading the token stream alone
     // emits them unclassed and they inherit the color of the surrounding code.

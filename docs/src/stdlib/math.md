@@ -4,9 +4,17 @@
 
 Named mathematical constants, matching Rust's `f64::consts` surface.
 
-Purely additive: the transcendental functions (`sin`, `cos`, `exp`, `ln`, `sqrt`, ...) stay owned builtins routing through the vendored libm, and `pi`/`e`/`tau` stay Base-global. This module only names the derived constants, as exact `Float` literals pinned bit-for-bit, so importing it never shadows a Base name. Opt-in: not in Base.
+Purely additive: the transcendental functions (`sin`, `cos`, `exp`, `ln`, `sqrt`, ...) stay owned builtins routing through the vendored libm, and `pi`/`tau` stay Base-global. This module names the remaining constants, as exact `Float` literals pinned bit-for-bit, so importing it never shadows a Base name. Euler's number lives here rather than in Base so that the single-letter name `e` stays free in the flat top-level namespace. Opt-in: not in Base.
 
 ## Functions and Values
+
+### `e`
+
+```prism,sig,h-200b68a290abf08dd532ef04b01b650b7cc034ee9b4c80ba25c1fb2353775d26
+e : Float
+```
+
+Euler's number, the base of the natural logarithm.
 
 ### `sqrt2`
 

@@ -15,9 +15,7 @@
 --   prism run examples/incr_warm.pr   # warm: reuses the snapshot, same output
 
 import Data.Map (..)
-
 import Data.List (..)
-
 import Incr (..)
 
 fn snap_path() = "target/incr_warm.snap"

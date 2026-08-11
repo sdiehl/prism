@@ -6,20 +6,30 @@ A persistent union-find (disjoint-set) over an ordered key type.
 
 A set is named by its canonical root, and `uf_union` always keeps the smaller key (by `Ord`) as the root, so a set's representative is a pure function of its members, never of the order unions ran in. There is no path compression (that needs mutation); `uf_find` walks parent links to the root on each call. A key absent from the map is its own singleton root, so `uf_empty` needs no pre-population. The occurs check an HM unifier layers on top is type-specific and lives with the unifier, not here. Opt-in: not in Base.
 
+## Types
+
+### `UnionFind`
+
+```prism,def,h-e398597bd6ed170baae6f14038c0a4b54210bdbdefdcea7312a8c12844d2a618
+newtype UnionFind(k) = UnionFind(Map(k, k))
+```
+
+A forest of parent links. The wrapper is opaque so callers cannot create cycles or install a non-canonical parent; only `uf_union` can add links.
+
 ## Functions and Values
 
 ### `uf_empty`
 
-```prism,sig,h-78a927fdf6d4d861736c18f59ada6aaa8a3183a64299f1860e595ced2274a36b
-uf_empty : forall a b. Map(a, a, b)
+```prism,sig,h-ea922ea156d139dfada10647deb2056565c4473459337b5c719d976230994547
+uf_empty : forall a. Data.UnionFind.UnionFind(a)
 ```
 
 The empty forest: every key is its own singleton root.
 
 ### `uf_find`
 
-```prism,sig,h-3951a568fe1de299a6b9fc5ca70964433d700504702a796a4e9f794d8be0db9e
-uf_find : forall a b. (Map(b, b, a), b) -> b
+```prism,sig,h-84989403b4639aebff1e268673607a81e018dab7443b7e69d38d34bd902491ad
+uf_find : forall a. (Data.UnionFind.UnionFind(a), a) -> a given Ord(a)
 ```
 
 The canonical root of `x`'s set.
@@ -34,8 +44,8 @@ uf_find(uf_union(uf_union(uf_empty, 3, 2), 2, 1), 3)
 
 ### `uf_union`
 
-```prism,sig,h-aaab0443f268fbfdb16e7b337c15f5f475786f89c30fadf0c7443ea318e88593
-uf_union : forall a b. (Map(b, b, a), b, b) -> Map(b, b, a)
+```prism,sig,h-4524199e238cac2fbdacb4e251513388e065c2b057fce728f467eb2a024b1561
+uf_union : forall a. (Data.UnionFind.UnionFind(a), a, a) -> Data.UnionFind.UnionFind(a) given Ord(a)
 ```
 
 Merge the sets of `x` and `y`, keeping the smaller root; a no-op when they are already joined.
@@ -50,8 +60,8 @@ true
 
 ### `uf_equiv`
 
-```prism,sig,h-7b999122e67219301e16c8a75573b75ec23febb8cc19f4a5453e1acf2b3d3d48
-uf_equiv : forall a b. (Map(b, b, a), b, b) -> Bool
+```prism,sig,h-98d8a4387177c376b6cf9236b54ebf654f17c8aa92429d358b8a51ce016ec466
+uf_equiv : forall a. (Data.UnionFind.UnionFind(a), a, a) -> Bool given Ord(a)
 ```
 
 True when `x` and `y` belong to the same set.

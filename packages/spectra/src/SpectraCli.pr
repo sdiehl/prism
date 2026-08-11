@@ -24,7 +24,6 @@
 -- ```
 
 import Cli as C
-
 import Cli (Command, Group, SubCmd)
 
 pub type SpectraCommand

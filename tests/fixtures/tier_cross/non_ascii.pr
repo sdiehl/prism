@@ -1,0 +1,20 @@
+-- Non-ASCII source text and multibyte payloads through a handler. The source
+-- itself carries multibyte literals (not just data built at runtime), so
+-- lexing, interning, and every tier's string
+-- plumbing all see UTF-8 that is wider than one byte per codepoint.
+effect Greeting
+  greet(String) : String
+
+fn greeting() : String ! {Greeting} =
+  let a = greet("héllo wörld")
+  let b = greet("日本語のテキスト")
+  let c = greet("𝔘𝔫𝔦𝔠𝔬𝔡𝔢")
+  "{a}|{b}|{c}"
+
+fn main() =
+  let s =
+    handle greeting() with
+      greet(w) resume k => k("«{w}»")
+      return r => r
+  println(s)
+  println(str_len(s))

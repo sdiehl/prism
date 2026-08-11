@@ -117,9 +117,9 @@ pub use docs::{
     TypeSpans, TYPESPANS_FORMAT,
 };
 pub use driver::{
-    apply_semantic_patch, check, check_at, check_modules_on, check_on, check_on_in,
-    check_validated_on_in, check_with_seed, commit_to_store, core_ir, core_ir_full, core_of,
-    debug_on, diff_on, dump, dump_at, dump_on, durable_run_on, effect_strategy_full,
+    apply_semantic_patch, check, check_allow_holes_on_in, check_at, check_modules_on, check_on,
+    check_on_in, check_validated_on_in, check_with_seed, commit_to_store, core_ir, core_ir_full,
+    core_of, debug_on, diff_on, dump, dump_at, dump_on, durable_run_on, effect_strategy_full,
     effect_strategy_on, effect_warnings_full, example_program, fetch_semantic_patch,
     impact_semantic_patch, interpret, interpret_at, interpret_deferred_holes, interpret_io_at,
     interpret_io_on, interpret_io_on_with_args, interpret_io_on_with_args_deferred_holes,

@@ -1,0 +1,66 @@
+-- The path terminals and lvalues are one grammar with four hosts, and every
+-- form here is the longhand it abbreviates: a compound terminal in a brace is
+-- a modifier lambda, a statement path is the brace assignment, the ambient
+-- form is a `put` of a `get`. Each host prints the value the longhand would
+-- produce, so a divergence between spelling and meaning is a visible diff.
+import Control.State (..)
+import Data.Optic (lens, gets_at, modify_at)
+
+type Metas = Metas { forest: List(Int), next: Int } deriving (Show)
+
+type Solver = Solver { metas: Metas } deriving (Show)
+
+fn start() : Solver =
+  Solver {
+    metas = Metas { forest = [], next = 0 }
+  }
+
+-- Brace host: compound terminals beside the older ones, and through `each`.
+fn braced(s : Solver) : Solver =
+  { s | metas.next += 5, metas.forest = [1, 2, 3] }
+
+fn everywhere(s : Solver) : Solver =
+  { s
+  | metas.forest.each *= 10
+  , metas.next -= 2
+  }
+
+-- Statement host: field paths and an index-rooted path over annotated vars.
+fn stately() : Solver =
+  var s : Solver := start()
+  s.metas.next += 40
+  s.metas.next %= 7
+  s.metas.forest := [9, 8]
+  s
+
+fn indexed() : Int ! {Fail} =
+  var xs : List(Int) := [10, 20, 30]
+  xs[1] += 1
+  xs[2] := 7
+  match xs of
+    Cons(a, Cons(b, Cons(c, Nil))) => a + b + c
+    _ => -1
+
+-- Reified host: anchored literals sit inline, with no annotation anywhere.
+fn bump_forest() : Unit ! {State(Solver)} =
+  let n = gets_at(#path Solver.metas.next)
+  modify_at(#path Solver.metas.forest, \(f) -> Cons(n, f))
+
+-- Ambient host: the statement spells the `get` it reads and the `put` it
+-- performs.
+fn fresh() : Int ! {State(Solver)} =
+  let n = get().metas.next
+  get().metas.next += 1
+  n
+
+fn main() : Unit ! {IO, Fail} =
+  println(braced(start()))
+  println(indexed())
+  println(everywhere(braced(start())))
+  println(stately())
+  match run_state(start(), \() -> (fresh(), fresh())) of
+    (pair, s1) =>
+      println(pair)
+      println(s1)
+      let s2 = exec_state(s1, bump_forest)
+      println(s2)

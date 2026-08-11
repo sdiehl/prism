@@ -1,0 +1,23 @@
+-- An effectful thunk-valued parameter joined from two different call sites.
+-- The joined slot is where evidence threading and the reified tiers have
+-- historically disagreed: each caller closes over a different handler
+-- discharge, and the callee forces whichever thunk it was handed.
+effect Ask
+  ask() : Int
+
+fn twice(step : () -> Int ! {Ask}) : Int ! {Ask} = step() + step()
+
+fn near() : Int ! {Ask} = twice(\() -> ask() + 1)
+
+fn far() : Int ! {Ask} = twice(\() -> ask() * 10)
+
+fn main() =
+  let a =
+    handle near() with
+      ask() resume k => k(2)
+      return r => r
+  let b =
+    handle far() with
+      ask() resume k => k(3)
+      return r => r
+  println(a + b)

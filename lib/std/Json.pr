@@ -37,19 +37,12 @@
 -- value-oriented and total.
 
 import Control.Layer (..)
-
 import Data.Foldable (length)
-
 import Data.List (..)
-
 import Data.Maybe (..)
-
 import Data.Result (..)
-
 import Data.String (..)
-
 import Data.Char (is_digit)
-
 import Data.Bytes (Bytes, bytes_concat, bytes_index, bytes_length, bytes_slice, bytes_to_string, string_to_bytes)
 
 -- | A dynamic JSON value. Numbers split into `JInt` and `JFloat` so the
@@ -730,7 +723,12 @@ pub class ToJson(a)
 -- mismatch. A decode of foreign data is one ordinary failure channel.
 --
 -- `deriving (FromJson)` reads back exactly what the derived `ToJson` wrote, by
--- the same keys: `from_json(to_json(x))` is `x`. A tree that is not an object, a
+-- the same keys: `from_json(to_json(x))` is `x`, with one stated exception. An
+-- option adds no marker of its own to the document, so nesting collapses:
+-- `Some(None)` encodes as `null` and reads back as `None`. Every other value,
+-- and every option of a non-option, round-trips exactly.
+--
+-- A tree that is not an object, a
 -- sum whose `$` names no constructor of the type, a missing key, and a field
 -- that will not itself decode all leave through the same `Fail`. That failure
 -- carries no payload, so it reports that the document did not fit and not where:
@@ -762,7 +760,10 @@ instance toJsonString : ToJson(String)
 instance toJsonList : ToJson(List(a)) given ToJson(a)
   fn to_json(xs) = JArr(map(to_json, xs))
 
--- `None` maps to `null`; `Some(x)` maps to the encoding of `x`.
+-- `None` maps to `null`; `Some(x)` maps to the encoding of `x`, with no marker
+-- of its own. The unmarked encoding is what collapses a nested option: `Some(None)`
+-- prints `null`, indistinguishable from `None`, the one exception to the
+-- read-back law stated on `FromJson`.
 instance toJsonOption : ToJson(Option(a)) given ToJson(a)
   fn to_json(o) =
     match o of

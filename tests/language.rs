@@ -12,6 +12,8 @@ mod effect_rows;
 mod grammar_ebnf;
 #[path = "language/hash_parity.rs"]
 mod hash_parity;
+#[path = "language/let_else.rs"]
+mod let_else;
 #[path = "language/local_generalize.rs"]
 mod local_generalize;
 #[path = "language/match_oracle.rs"]
@@ -24,6 +26,10 @@ mod modules;
 mod num_tower;
 #[path = "language/ordered_witness.rs"]
 mod ordered_witness;
+#[path = "language/param_annot.rs"]
+mod param_annot;
+#[path = "language/path_lit.rs"]
+mod path_lit;
 #[path = "language/query.rs"]
 mod query;
 #[path = "language/reflect.rs"]
@@ -34,5 +40,9 @@ mod rigid_sig_vars;
 mod skolem_escape;
 #[path = "language/soundness.rs"]
 mod soundness;
+#[path = "language/suggestions.rs"]
+mod suggestions;
+#[path = "language/tier_explain.rs"]
+mod tier_explain;
 #[path = "language/typed_holes.rs"]
 mod typed_holes;

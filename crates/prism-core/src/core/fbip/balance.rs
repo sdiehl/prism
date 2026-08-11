@@ -286,8 +286,46 @@ fn merge(
 
 #[cfg(test)]
 mod tests {
+    use std::iter;
+
     use super::*;
     use crate::core::cbpv::CoreFn;
+
+    #[test]
+    fn borrowed_immediate_needs_no_retained_token() {
+        let observe = Sym::new("observe_immediate");
+        let core = Core {
+            fns: vec![CoreFn {
+                name: Sym::new("caller_immediate"),
+                params: Vec::new(),
+                body: Comp::Call(observe, vec![Value::Int(42)]),
+                dict_arity: 0,
+            }],
+        };
+        let sigs = iter::once((observe, vec![true])).collect();
+
+        assert_eq!(balanced(&core, &sigs), Ok(()));
+    }
+
+    #[test]
+    fn borrowed_heap_temporary_must_be_let_bound() {
+        let observe = Sym::new("observe_heap");
+        let core = Core {
+            fns: vec![CoreFn {
+                name: Sym::new("caller_heap"),
+                params: Vec::new(),
+                body: Comp::Call(
+                    observe,
+                    vec![Value::Ctor("Box".into(), 0, vec![Value::Int(42)])],
+                ),
+                dict_arity: 0,
+            }],
+        };
+        let sigs = iter::once((observe, vec![true])).collect();
+
+        let error = balanced(&core, &sigs).expect_err("heap loan needs a caller-owned token");
+        assert!(error.contains("not a let-bound variable"), "{error}");
+    }
 
     #[test]
     fn rejects_a_drop_before_the_last_borrowed_call() {
@@ -306,7 +344,7 @@ mod tests {
                 dict_arity: 0,
             }],
         };
-        let sigs = std::iter::once((observe, vec![true])).collect();
+        let sigs = iter::once((observe, vec![true])).collect();
 
         let error = balanced(&core, &sigs).expect_err("pre-call drop must end the loan");
         assert!(error.contains("borrowed call argument retained is not live"));

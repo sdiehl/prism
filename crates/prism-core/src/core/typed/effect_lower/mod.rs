@@ -13,6 +13,8 @@
 //! strategies, including State fusion on its own and as the fused half of
 //! `LocalPartial`.
 
+#[cfg(any(test, feature = "test-hooks"))]
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub mod abi;
@@ -24,6 +26,7 @@ pub mod diagnostics;
 mod erase_control;
 mod erase_var;
 pub mod evidence;
+pub mod explain;
 #[cfg(test)]
 pub mod fixtures;
 pub mod flow;
@@ -492,8 +495,8 @@ pub enum LocalDeclinePoint {
 
 #[cfg(any(test, feature = "test-hooks"))]
 thread_local! {
-    static LOCAL_DECLINE_POINT: std::cell::Cell<Option<LocalDeclinePoint>> = const {
-        std::cell::Cell::new(None)
+    static LOCAL_DECLINE_POINT: Cell<Option<LocalDeclinePoint>> = const {
+        Cell::new(None)
     };
 }
 

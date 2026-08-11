@@ -11,9 +11,7 @@
 -- SCC. Opt-in: not in Base.
 
 import Data.Map (map_empty, map_lookup, map_insert, map_keys, map_member)
-
 import Data.Set (set_empty, set_insert, set_member, set_delete, set_to_list, set_union, set_from_list)
-
 import Data.List (append, reverse, foldl)
 
 -- | The empty graph.

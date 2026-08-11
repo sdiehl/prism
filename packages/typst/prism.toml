@@ -1,5 +1,6 @@
 [package]
 name = "typst"
+description = "Typed, deterministic construction of Typst source documents."
 
 [bin]
 entry = "src/Typst.pr"

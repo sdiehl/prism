@@ -235,3 +235,17 @@ trivia_case!(
      \x20   2,  -- y coord\n\
      \x20 )\n"
 );
+
+// Consecutive imports form one tight block: blank lines between two imports
+// collapse, a comment between them survives, and the block is separated from
+// the declarations below by a single blank line.
+trivia_case!(
+    import_block_spacing,
+    "import Data.List (append)\n\
+     \n\
+     import Data.Map (map_empty)\n\
+     -- picks the ordered set\n\
+     import Data.Set (set_from_list)\n\
+     \n\
+     fn main() = append([1], [2])\n"
+);

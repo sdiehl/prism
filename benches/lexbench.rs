@@ -2,10 +2,9 @@
 //! layer's count (tokens for the lex layers, top-level items for `parse`) and
 //! the nanoseconds the layer took.
 //!
-//! Its twin is `benches/lexbench.pr`, which does the same work in the same shape
-//! with the Prism-language lexer (and, once it exists, the Prism-language
-//! parser). `scripts/lexperf.py` runs the pair over one corpus and reports the
-//! Prism-to-Rust throughput and peak-memory ratio per layer.
+//! Its twin is `benches/lexbench.pr`, which runs the Prism-language lexer in the
+//! same shape. `scripts/lexperf.py` runs the pair over one corpus and reports the
+//! Prism-to-Rust throughput and peak-memory ratio.
 //!
 //! Only this side reports its own elapsed time. Reading a clock from Prism means
 //! installing an effect handler around the measured region, and a handler

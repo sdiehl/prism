@@ -232,7 +232,13 @@ impl Tc<'_> {
                     return Err(ErrKind::UnknownEffect {
                         name: l.name.clone(),
                     }
-                    .at(span));
+                    .at(span)
+                    .maybe_help(suggest::suggestion(
+                        &l.name,
+                        self.eff_ops
+                            .values()
+                            .map(|i| names::bare_name(i.effect_name.as_str())),
+                    )));
                 }
                 None => {}
             }

@@ -28,6 +28,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+use super::fixture_stems;
+
 const FIXTURE_DIR: &str = "tests/fixtures/syntax";
 const ACCEPT: &str = "PRISM_ACCEPT_SYNTAX_FIXTURES";
 
@@ -68,16 +70,7 @@ fn write_golden(path: &Path, bytes: &str) {
 // The positive corpus stems: every committed `.pr` fixture except the malformed
 // negatives, sorted for a stable iteration order.
 fn positive_stems() -> Vec<String> {
-    let mut stems: Vec<String> = fs::read_dir(fixture_dir())
-        .expect("fixture dir")
-        .filter_map(Result::ok)
-        .filter_map(|e| {
-            let name = e.file_name().into_string().ok()?;
-            let stem = name.strip_suffix(".pr")?;
-            (!stem.starts_with("malformed")).then(|| stem.to_string())
-        })
-        .collect();
-    stems.sort_unstable();
+    let stems = fixture_stems(&fixture_dir(), ".pr", "malformed");
     assert!(!stems.is_empty(), "no positive syntax fixtures found");
     stems
 }

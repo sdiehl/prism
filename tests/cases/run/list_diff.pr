@@ -1,0 +1,29 @@
+-- First-divergence reporting: the three ways two lists can part company, and
+-- the custom-sameness form a comparison that ignores part of an element needs.
+
+import Data.Diff (..)
+
+fn report_ints(xs : List(Int), ys : List(Int)) : String =
+  match first_diff(xs, ys) of
+    None => "same"
+    Some(d) => diff_message(d)
+
+-- Sameness that ignores the second component, so two lists of tagged values
+-- agree whenever their tags do.
+fn tags_only(p : (Int, String), q : (Int, String)) : Bool = fst(p) == fst(q)
+
+fn main() =
+  println(report_ints([1, 2, 3], [1, 2, 3]))
+  println(report_ints([1, 2, 3], [1, 9, 3]))
+  println(report_ints([1, 2], [1, 2, 3]))
+  println(report_ints([1, 2, 3], [1, 2]))
+  println(report_ints([], [7]))
+  -- The index is the length of the agreeing prefix, whatever the shape.
+  let d = first_diff([1, 2, 3], [1, 2])
+  match d of
+    None => println("no divergence")
+    Some(v) => println("index: {diff_index(v)}, shape: {show(v)}")
+  let tagged = [(1, "a"), (2, "b")]
+  let renamed = [(1, "x"), (2, "y")]
+  println("tags agree: {show(first_diff_by(tags_only, tagged, renamed))}")
+  println("values differ: {show(first_diff(tagged, renamed))}")

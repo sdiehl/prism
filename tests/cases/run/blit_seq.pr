@@ -5,7 +5,6 @@
 -- destination regardless of the underlying container.
 
 import Blit (..)
-
 import Data.Bytes (..)
 
 fn show_ints(xs : List(Int)) : String = show(xs)

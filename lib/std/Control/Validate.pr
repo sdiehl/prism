@@ -15,7 +15,6 @@
 -- Opt-in: not in Base.
 
 import Data.List (reverse)
-
 import Data.Validation (..)
 
 -- | Errors raised while validating values of type `e`.

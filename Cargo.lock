@@ -274,9 +274,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.6.4"
+version = "4.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d91e0c145792ef73a6ad36d27c75ac09f1832222a3c209689d90f534685ee5b7"
+checksum = "301b56658598e48f3648647ac6fc887be7e7108eddfa4e9b63fcf3ec58c0cadf"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -284,9 +284,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.6.2"
+version = "4.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f09628afdcc538b57f3c6341e9c8e9970f18e4a481690a64974d7023bd33548b"
+checksum = "94a65403d1a1bd28f7dc68eb8506e8874808ee5eecb59298de588e2e1407a078"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1114,7 +1114,7 @@ dependencies = [
 
 [[package]]
 name = "prism"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "anstyle",
  "ariadne",
@@ -1151,14 +1151,14 @@ dependencies = [
 
 [[package]]
 name = "prism-common"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "prism-core"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "blake3",
  "im",
@@ -1175,7 +1175,7 @@ dependencies = [
 
 [[package]]
 name = "prism-lineage"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "blake3",
  "prism-common",
@@ -1188,7 +1188,7 @@ dependencies = [
 
 [[package]]
 name = "prism-native"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "blake3",
  "cc",
@@ -1202,7 +1202,7 @@ dependencies = [
 
 [[package]]
 name = "prism-store"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "blake3",
  "prism-common",
@@ -1213,7 +1213,7 @@ dependencies = [
 
 [[package]]
 name = "prism-syntax"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "anstyle",
  "ariadne",
@@ -1571,9 +1571,9 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
 name = "stacker"
-version = "0.1.24"
+version = "0.1.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "640c8cdd92b6b12f5bcb1803ca3bbf5ab96e5e6b6b96b9ab77dabe9e880b3190"
+checksum = "707f49d46706bacf8a2b00d51dace3f9de527c13eec3778f570c411f89e69967"
 dependencies = [
  "cc",
  "cfg-if",

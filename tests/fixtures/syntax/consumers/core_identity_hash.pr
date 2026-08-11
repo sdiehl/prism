@@ -19,11 +19,8 @@
 -- compiler's, which is what this harness reports anyway; nothing is accepted on
 -- a missing field.
 import Json (Json, JNull, JBool, JInt, JFloat, JStr, JArr, JObj, decode, json_error_message)
-
 import Data.Bind (Nameless, NTok, NLit, NRef, NScope, NSeq, bind_nameless, bind_num_end, bind_token)
-
 import Control.State (..)
-
 import Wire (wire_scheme_tag)
 
 -- The schema this reader accepts. A different tag is refused outright.

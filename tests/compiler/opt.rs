@@ -1,8 +1,7 @@
 // The mid-level optimization tier (`src/core/opt/`) must actually fire. These
-// guard that dictionary specialization and newtype erasure transform the Core,
-// so a future change cannot silently degrade them into no-ops. Behavior is
-// checked separately by the parity oracle; this checks that the optimization
-// happened at all.
+// guard that dictionary specialization and newtype erasure transform the Core.
+// Behavior is checked separately by the parity oracle; this checks that the
+// optimization happened at all rather than silently degrading into a no-op.
 
 use std::path::Path;
 

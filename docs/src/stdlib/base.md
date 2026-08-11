@@ -616,7 +616,7 @@ instance foldableOption : Foldable(Option)
 
 ### `applicativeList`
 
-```prism,def,h-bc734c02440ebade1056a96aa3531340ad5d3a94ecd8ed41d8c9c081c1b7be1c
+```prism,def,h-59b014c6fa506e9a187121d24e2a11f89ecf3e7b07ca8adb6bd6d093dda915c0
 instance applicativeList : Applicative(List)
 ```
 
@@ -986,14 +986,6 @@ pi : Float
 
 Pi. The transcendental functions (`sin`, `cos`, `tan`, the inverse and hyperbolic families, `exp`, `ln`, `log2`, `log10`, `pow`, `cbrt`, ...) are owned builtins routing through the vendored libm, identical on every backend; only the named constants live here.
 
-### `e`
-
-```prism,sig,h-200b68a290abf08dd532ef04b01b650b7cc034ee9b4c80ba25c1fb2353775d26
-e : Float
-```
-
-Euler's number.
-
 ### `tau`
 
 ```prism,sig,h-89f022db0b1e80da622658fb0a3be38c35d18a66184a8be6a8ac18a13b423513
@@ -1180,7 +1172,7 @@ default(\() -> at_list([1, 2], 9), 0)
 
 ### `at_list`
 
-```prism,sig,h-a8f1e8bd961c9545f556b7707b9243b8d770742ea12e5d5dfd1fef1c65e47e9b
+```prism,sig,h-480098bba8ebae469a4b1952ba1512109d8b008b46a2ac3dab6602b09c1a2ab4
 at_list : forall a. (List(a), Int) -> a ! {Fail}
 ```
 
@@ -1196,8 +1188,8 @@ at_list([10, 20, 30], 1)
 
 ### `at_map`
 
-```prism,sig,h-acdfb42f36d202ab6c3afc7c83ec42d75e52c6b439569abaf743d7fcf7b76878
-at_map : forall a b c. (Map(b, c, a), b) -> c ! {Fail}
+```prism,sig,h-9df2fcbc04ab9cbc735ace6ae64f7abeba45c57070cf823cb960e6a8c60edf7f
+at_map : forall a b c. (Map(b, c, a), b) -> c ! {Fail} given Ord(b)
 ```
 
 The value bound to `key`, or `fail()` if absent. Backs `m[k]`.
@@ -1284,8 +1276,8 @@ list_set([1, 2, 3], 1, 9)
 
 ### `sort`
 
-```prism,sig,h-9a47f0ce9c02e6c621d0f21839e0ecb1158d23b559e209402bf8fe6cdf7445cb
-sort : forall a. (List(a)) -> List(a)
+```prism,sig,h-a495250fbb831becf00b1aa42d3070c06e1970d4056932a068a36e96c542986e
+sort : forall a. (List(a)) -> List(a) given Ord(a)
 ```
 
 Sort a list in ascending order, a stable O(n log n) merge sort. Primitive element types are specialized to a native kernel at the call site; any other `Ord` type uses the generic path.
@@ -1636,8 +1628,8 @@ ssum(srange(1, 5))
 
 ### `scollect`
 
-```prism,sig,h-31e2762ca8d6245459d35457fa81313b05a5db37b36a443605d0474c7144dc23
-scollect : forall e0 a b. ((Unit) -> a ! {Emit(b), e0}) -> List(b) ! {e0}
+```prism,sig,h-22cc634bdee91f85eac653e7af21304af80c5c352050a79cb194b525e4ee17dd
+scollect : forall e0 a b. ((Unit) -> b ! {Emit(a), e0}) -> List(a) ! {e0}
 ```
 
 Collect a stream into a list, in emission order.
@@ -2109,13 +2101,13 @@ escape_at : (Int, String, Int) -> String
 ### `show_list_body`
 
 ```prism,sig,h-d981255c1b05ec57c81fb72b9b2ac13b63ef5cd4bf7cbdc0b6b5f540416dd225
-show_list_body : forall a. (List(a), Bool) -> String
+show_list_body : forall a. (List(a), Bool) -> String given Show(a)
 ```
 
 ### `insert_by_ord`
 
 ```prism,sig,h-9fc7fec40351e0cf2c4fee45f77a33dfc0a1c06c5e73a47f8a51484336dc0969
-insert_by_ord : forall a. (a, List(a)) -> List(a)
+insert_by_ord : forall a. (a, List(a)) -> List(a) given Ord(a)
 ```
 
 Insert `x` into an already-sorted list, keeping it sorted (`Ord`).
@@ -2131,7 +2123,7 @@ insert_by_ord(3, [1, 2, 4])
 ### `merge_by_ord`
 
 ```prism,sig,h-20304a1e36065b3392a16820b41a3c7bff1fb00a786d9f5baf4a1af9a4d9b6d7
-merge_by_ord : forall a. (List(a), List(a)) -> List(a)
+merge_by_ord : forall a. (List(a), List(a)) -> List(a) given Ord(a)
 ```
 
 Stable merge of two already-sorted lists. The recursive `Cons` becomes a loop by tail-recursion-modulo-cons, and Perceus reuses the consumed cells.
@@ -2146,8 +2138,8 @@ merge_by_ord([1, 3], [2, 4])
 
 ### `sort_by_ord`
 
-```prism,sig,h-25b85a842e910a40f8457e508be2776636de4e84738ebf14de4fb70c85782ea8
-sort_by_ord : forall a. (List(a)) -> List(a)
+```prism,sig,h-9d9affa2c023b3712ecb9ab4333d650c1509b429b33f26cc4bda0fde86275431
+sort_by_ord : forall a. (List(a)) -> List(a) given Ord(a)
 ```
 
 The generic stable merge sort behind `sort`, for any `Ord` element type.

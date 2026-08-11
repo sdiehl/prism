@@ -15,11 +15,10 @@
 //! Optimization and disabled-pass labels remain part of artifact identity. The
 //! verification evaluator makes no allocator, RC-count, or reuse-cost claim.
 //!
-//! This is a standalone gate rather than part of the default test sweep:
-//!
-//! ```text
-//! just opt-equiv
-//! ```
+//! Both tests run in the default sweep: the representative sample is the fast
+//! path, and the whole-corpus test rides the nextest `corpus-compilers` group
+//! (single-threaded, scattered across the CI shards like the other heavy
+//! corpus gates). `just opt-equiv` runs the whole-corpus test by itself.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -29,12 +28,12 @@ use prism::{default_roots, Config, ObservationTrace, OptLevel};
 
 use crate::support::{corpus, parallel_check, source};
 
-const DISABLEABLE_PASSES: [CorePass; 5] = [
-    CorePass::Fuse,
-    CorePass::Specialize,
-    CorePass::Simplify,
-    CorePass::Inline,
-    CorePass::Cse,
+const DISABLEABLE_PASSES: &[(CorePass, &str)] = &[
+    (CorePass::Fuse, "o2-no-fuse"),
+    (CorePass::Specialize, "o2-no-specialize"),
+    (CorePass::Simplify, "o2-no-simplify"),
+    (CorePass::Inline, "o2-no-inline"),
+    (CorePass::Cse, "o2-no-cse"),
 ];
 
 #[derive(Debug)]
@@ -59,16 +58,17 @@ impl Variant {
 }
 
 fn variants() -> Vec<Variant> {
-    vec![
+    let mut variants = vec![
         Variant::level("o0", OptLevel::O0),
         Variant::level("o1", OptLevel::O1),
         Variant::level("o2", OptLevel::O2),
-        Variant::without("o2-no-fuse", DISABLEABLE_PASSES[0]),
-        Variant::without("o2-no-specialize", DISABLEABLE_PASSES[1]),
-        Variant::without("o2-no-simplify", DISABLEABLE_PASSES[2]),
-        Variant::without("o2-no-inline", DISABLEABLE_PASSES[3]),
-        Variant::without("o2-no-cse", DISABLEABLE_PASSES[4]),
-    ]
+    ];
+    variants.extend(
+        DISABLEABLE_PASSES
+            .iter()
+            .map(|(pass, label)| Variant::without(label, *pass)),
+    );
+    variants
 }
 
 fn record_lowered_activity(lowered: &[&str], activity: &[AtomicUsize]) {
@@ -143,7 +143,9 @@ const ACTIVITY_LABELS: [&str; 7] = [
 fn run_cases(cases: &[PathBuf], require_engagement: bool) {
     let roots = default_roots(Path::new("."));
     let variants = variants();
-    let activity: Vec<AtomicUsize> = (0..7).map(|_| AtomicUsize::new(0)).collect();
+    let activity: Vec<AtomicUsize> = (0..ACTIVITY_LABELS.len())
+        .map(|_| AtomicUsize::new(0))
+        .collect();
     let fails = parallel_check(cases, |case| check_case(case, &roots, &variants, &activity));
     assert!(
         fails.is_empty(),
@@ -172,7 +174,6 @@ fn run_cases(cases: &[PathBuf], require_engagement: bool) {
 }
 
 #[test]
-#[ignore = "focused optimizer-equivalence cost and correctness sample"]
 fn optimizer_equivalence_representative_sample() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let cases = [
@@ -194,7 +195,6 @@ fn optimizer_equivalence_representative_sample() {
 }
 
 #[test]
-#[ignore = "standalone whole-corpus lowered-Core optimizer-equivalence gate"]
 fn optimizer_configurations_have_identical_observation_traces() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut cases = corpus();

@@ -1,0 +1,1082 @@
+-- | T1 bootstrap checker workbench.
+--
+-- The Rust compiler exports the authoritative artifacts. This module decodes
+-- their declaration, resolved-tree, and rich surface views, checks the pure
+-- first-order subset with `Tc`, and uses `Data.Diff` to report the first fact
+-- that diverges. Unsupported forms are coverage, never disagreements.
+
+import Control.Fresh (Fresh, run_fresh)
+import Control.State (State)
+import Data.Diff (Divergence, DiffAt, DiffLeftEnd, DiffRightEnd, first_diff)
+import Data.Foldable (length)
+import Data.List (..)
+import Data.Name (Binder, fresh_binder, bound_name, name_id)
+import Data.String (split, starts_with)
+import Syntax.Ast (..)
+import Syntax.Codec (decode_resolved, decode_surface, decode_tc_input, codec_error_message)
+import Syntax.Resolved (ResolvedDoc, RFunction, rnode_count)
+import Syntax.Source (Span)
+import Syntax.TcInput (TcInputDoc)
+import Tc (..)
+
+type CtorInfo = CtorInfo(String, String, List(String), Scheme)
+
+fn ctor_name(info : CtorInfo) : String =
+  match info of
+    CtorInfo(name, _parent, _fields, _scheme) => name
+
+fn ctor_fields(info : CtorInfo) : List(String) =
+  match info of
+    CtorInfo(_name, _parent, fields, _scheme) => fields
+
+fn ctor_scheme(info : CtorInfo) : Scheme =
+  match info of
+    CtorInfo(_name, _parent, _fields, scheme) => scheme
+
+type Unsupported = Unsupported {
+  function_name: String,
+  kind: String,
+  span: Span,
+  reason: String,
+  nodes: Int
+}
+
+type ShadowFact = ShadowFact { name: String, scheme: String }
+
+type Workbench = Workbench {
+  facts: List(ShadowFact),
+  unsupported: List(Unsupported),
+  supported_nodes: Int,
+  total_nodes: Int,
+  first: Option(Divergence(String))
+}
+
+fn mono(ty : VTy) : Scheme = Scheme { tyvars = [], rowvars = [], body = ty }
+
+fn env_get(name : String, env : List((String, Scheme))) : Option(Scheme) =
+  match env of
+    Nil => None
+    Cons((key, value), rest) =>
+      if key == name then
+        Some(value)
+      else
+        env_get(name, rest)
+
+fn env_put(
+  name : String,
+  scheme : Scheme,
+  env : List((String, Scheme))
+) : List((String, Scheme)) =
+  Cons((name, scheme), env)
+
+fn tyname_get(name : String, names : List((String, VTy))) : Option(VTy) =
+  match names of
+    Nil => None
+    Cons((key, value), rest) =>
+      if key == name then
+        Some(value)
+      else
+        tyname_get(name, rest)
+
+fn ctor_get(name : String, ctors : List(CtorInfo)) : Option(CtorInfo) =
+  match ctors of
+    Nil => None
+    Cons(info, rest) =>
+      if ctor_name(info) == name then
+        Some(info)
+      else
+        ctor_get(name, rest)
+
+fn resolved_get(name : String, fs : List(RFunction)) : Option(RFunction) =
+  match fs of
+    Nil => None
+    Cons(f, rest) =>
+      if f.name == name then
+        Some(f)
+      else
+        resolved_get(name, rest)
+
+fn input_has(name : String, doc : TcInputDoc) : Bool =
+  match doc.functions of
+    Nil => false
+    Cons(f, rest) =>
+      if f.name == name then
+        true
+      else
+        input_has(name, { doc | functions = rest })
+
+fn item_decls(items : List(Item)) : List(Decl) =
+  match items of
+    Nil => []
+    Cons(item, rest) =>
+      match item of
+        IDecl { decl = decl, .. } => Cons(decl, item_decls(rest))
+        _ => item_decls(rest)
+
+fn item_data(items : List(Item)) : List(Item) = filter(is_data_item, items)
+
+fn is_data_item(item : Item) : Bool =
+  match item of
+    IData { .. } => true
+    _ => false
+
+fn names_of_params(params : List(String)) : (List((String, VTy)), List(Binder(TyVarSpace))) ! {Fresh} =
+  names_of_params_go(params, [], [])
+
+fn names_of_params_go(
+  params : List(String),
+  names : List((String, VTy)),
+  binders : List(Binder(TyVarSpace))
+) : (List((String, VTy)), List(Binder(TyVarSpace))) ! {Fresh} =
+  match params of
+    Nil => (reverse(names), reverse(binders))
+    Cons(name, rest) =>
+      let binder = fresh_binder(name)
+      names_of_params_go(
+          rest,
+          Cons((name, VVar(bound_name(binder))), names),
+          Cons(binder, binders),
+        )
+
+fn ty_of(ty : Ty, names : List((String, VTy))) : VTy =
+  match ty of
+    TyInt => VInt
+    TyI64 => VCon("I64", [])
+    TyU64 => VCon("U64", [])
+    TyBool => VBool
+    TyUnit => VUnit
+    TyFloat => VFloat
+    TyChar => VCon("Char", [])
+    TyStr => VString
+    TyVar(name) =>
+      match tyname_get(name, names) of
+        Some(found) => found
+        None => VCon(name, [])
+    TyApp(name, args) | TyCon(name, args) =>
+      VCon(name, map(\(t) -> ty_of(t, names), args))
+    TyTuple(items) => VTuple(map(\(t) -> ty_of(t, names), items))
+    TyFun(params, row, ret) =>
+      v_fun(
+          map(\(t) -> ty_of(t, names), params),
+          c_ret(ty_of(ret, names), row_of(row, names)),
+        )
+    TyForall(vars, body) =>
+      -- A nested forall is conservatively erased here. Top-level annotation
+      -- variables are branded before checking the declaration.
+      ty_of(body, append(map(\(v) -> (v, VCon(v, [])), vars), names))
+    TyUsage(body, _uses) => ty_of(body, names)
+    TyState(n) => VCon("State", [VCon("{n}", [])])
+    TyNat(n) => VCon("{n}", [])
+    TyRowLit(_row) => VCon("Row", [])
+    TyUnboxedTuple(items) => VCon("#Tuple", map(\(t) -> ty_of(t, names), items))
+    TyUnboxedRecord(fields) =>
+      VCon("#Record", map(\(field) -> ty_of(field.ty, names), fields))
+
+fn row_of(row : Syntax.Ast.Row, names : List((String, VTy))) : Tc.Row =
+  row_closed(
+      map(
+          \(label) -> Label { name = label.name, args = map(\(t) -> ty_of(t, names), label.args) },
+          row.labels,
+        ),
+    )
+
+fn ctor_infos(items : List(Item)) : List(CtorInfo) ! {Fresh} =
+  concat_map(ctors_of_item, item_data(items))
+
+fn ctors_of_item(item : Item) : List(CtorInfo) ! {Fresh} =
+  match item of
+    IData { name = name, params = params, ctors = ctors, .. } =>
+      let (names, binders) = names_of_params(params)
+      let result = VCon(name, map(snd, names))
+      map(\(ctor) -> ctor_info(name, names, binders, result, ctor), ctors)
+    _ => []
+
+fn ctor_info(
+  parent : String,
+  names : List((String, VTy)),
+  binders : List(Binder(TyVarSpace)),
+  result : VTy,
+  ctor : Ctor
+) : CtorInfo =
+  match ctor.shape of
+    CPositional(args) =>
+      let params = map(\(t) -> ty_of(t, names), args)
+      CtorInfo(
+          ctor.name,
+          parent,
+          [],
+          Scheme {
+            tyvars = binders,
+            rowvars = [],
+            body = if length(params) == 0
+              then result
+              else v_fun(params, c_ret(result, row_closed([])))
+          },
+        )
+    CRecord(fields) =>
+      let params = map(\(field) -> ty_of(field.ty, names), fields)
+      CtorInfo(
+          ctor.name,
+          parent,
+          map(\(field) -> field.name, fields),
+          Scheme {
+            tyvars = binders,
+            rowvars = [],
+            body = if length(params) == 0
+              then result
+              else v_fun(params, c_ret(result, row_closed([])))
+          },
+        )
+
+fn ctor_env(
+  ctors : List(CtorInfo),
+  env : List((String, Scheme))
+) : List((String, Scheme)) =
+  foldl(
+      \(out, info) -> env_put(ctor_name(info), ctor_scheme(info), out),
+      env,
+      ctors,
+    )
+
+fn kind_of_expr(e : Expr) : String =
+  match e of
+    EChar(_) => "char"
+    EHole(_) => "hole"
+    EList(_) => "list"
+    EField(_, _) => "field"
+    EUnboxedTuple(_) => "unboxed-tuple"
+    EUnboxedRecord(_) => "unboxed-record"
+    EUnboxedField(_, _) => "unboxed-field"
+    ERecordUpdate(_, _, _) => "record-update"
+    EPathUpdate(_, _) => "record-update-path"
+    EHandle(_, _, _) | ENamedHandle(_, _, _) => "handle"
+    EMask(_, _) => "mask"
+    EInst(_, _) => "inst"
+    EIndex(_, _) => "index"
+    EIndexSet(_, _, _) => "index-set"
+    EMarker(_) => "marker"
+    EVarDecl(_, _, _) | EAssign(_, _) | EIndexAssign(_, _, _) => "mutation"
+    EThrow(_, _) | ETryCatch(_, _) => "error"
+    EFor(_, _, _, _) | EWhile(_, _) | ELoop(_) | EBreak | EContinue => "loop"
+    EReturn(_) => "return"
+    EComp(_, _, _, _) => "comprehension"
+    EDefault(_, _) | ETransact(_, _) | EProbe(_, _) | EReflect(_, _) =>
+      "advanced"
+    EOptChain(_, _) | ERange(_, _) | ECompose(_, _, _) | EReadPath(_, _) =>
+      "surface-sugar"
+    _ => "supported"
+
+fn first_unsupported(sp : Sp(Expr)) : Option((String, Span, String)) =
+  let own = kind_of_expr(sp.node)
+  if not(own == "supported") then
+    Some((own, sp.span, "outside the T1 pure first-order subset"))
+  else
+    first_unsupported_supported(sp.node)
+
+fn first_unsupported_supported(e : Expr) : Option((String, Span, String)) =
+  match e of
+    EInt(_, _) | EFloat(_) | EBool(_) | EUnit | EStr(_) | EVar(_) => None
+    EBin(_, left, right) =>
+      first_some(first_unsupported(left), first_unsupported(right))
+    ENeg(value) => first_unsupported(value)
+    EIf(cond, yes, no) =>
+      first_some(
+          first_unsupported(cond),
+          first_some(first_unsupported(yes), first_unsupported(no)),
+        )
+    ELet(_, value, body) =>
+      first_some(first_unsupported(value), first_unsupported(body))
+    ELam(params, body) =>
+      match unsupported_params(params) of
+        None => first_unsupported(body)
+        some => some
+    ECall(callee, args) =>
+      first_some(first_unsupported(callee), first_unsupported_list(args))
+    EPipe(value, callee) =>
+      first_some(first_unsupported(value), first_unsupported(callee))
+    EMatch(scrutinee, arms) =>
+      first_some(first_unsupported(scrutinee), unsupported_arms(arms))
+    ETuple(items) => first_unsupported_list(items)
+    ERecord(_name, fields) => first_unsupported_named(fields)
+    EAnn(value, _ty) => first_unsupported(value)
+    _ =>
+      Some((
+          kind_of_expr(e),
+          Span { lo = 0, hi = 0 },
+          "outside the T1 pure first-order subset",
+        ))
+
+fn first_some(x : Option(a), y : Option(a)) : Option(a) =
+  match x of
+    Some(_) => x
+    None => y
+
+fn first_unsupported_list(xs : List(Sp(Expr))) : Option((String, Span, String)) =
+  match xs of
+    Nil => None
+    Cons(x, rest) =>
+      first_some(first_unsupported(x), first_unsupported_list(rest))
+
+fn first_unsupported_named(xs : List(NamedExpr)) : Option((String, Span, String)) =
+  match xs of
+    Nil => None
+    Cons(x, rest) =>
+      first_some(first_unsupported(x.value), first_unsupported_named(rest))
+
+fn unsupported_params(params : List(Param)) : Option((String, Span, String)) =
+  match params of
+    Nil => None
+    Cons(p, rest) =>
+      match (p.pat, p.dflt, p.is_borrow) of
+        (Some(pat), _, _) =>
+          Some(("pattern-parameter", pat.span, "pattern parameters are not T1"))
+        (_, Some(value), _) =>
+          Some((
+              "default-parameter",
+              value.span,
+              "default parameters are not T1",
+            ))
+        (_, _, true) =>
+          Some((
+              "borrow-parameter",
+              Span { lo = 0, hi = 0 },
+              "borrow parameters are not T1",
+            ))
+        _ => unsupported_params(rest)
+
+fn unsupported_decl(decl : Decl) : Option((String, Span, String)) =
+  match unsupported_params(decl.params) of
+    Some(found) => Some(found)
+    None =>
+      if length(decl.constraints) > 0 then
+        Some(("constraint", decl.span, "class constraints are not T1"))
+      elif length(decl.wheres) > 0 then
+        Some(("where", decl.span, "where bindings are not T1"))
+      elif length(decl.reqs) > 0 || length(decl.enss) > 0 then
+        Some(("contract", decl.span, "contracts are not T1"))
+      else
+        match decl.measure of
+          Some(_) =>
+            Some(("decreases", decl.span, "termination measures are not T1"))
+          None =>
+            if unsupported_modifier(decl) then
+              Some(("modifier", decl.span, "resource modifiers are not T1"))
+            else
+              match decl.eff of
+                Some(row) =>
+                  if (length(row.labels) > 0 || not(row.tail == None)) then
+                    Some((
+                        "effect-row",
+                        decl.span,
+                        "effectful functions are not T1",
+                      ))
+                  else
+                    None
+                None => None
+
+fn unsupported_modifier(decl : Decl) : Bool =
+  if decl.is_replayable || decl.is_no_alloc then
+    true
+  else
+    match decl.fip_word of
+      Some(_) => true
+      None => false
+
+fn unsupported_tc_error(err : TcError) : Option(String) =
+  match err of
+    Mismatch(want, got) =>
+      if want == "known T1 binding" then
+        Some("external or unresolved binding `{got}`")
+      else
+        None
+    _ => None
+
+fn unsupported_arms(arms : List(Arm)) : Option((String, Span, String)) =
+  match arms of
+    Nil => None
+    Cons(arm, rest) =>
+      match arm.guard of
+        Some(g) => Some(("guard", g.span, "guarded patterns are not T1"))
+        None =>
+          first_some(
+              unsupported_pat(arm.pat),
+              first_some(first_unsupported(arm.body), unsupported_arms(rest)),
+            )
+
+fn unsupported_pat(sp : Sp(Pat)) : Option((String, Span, String)) =
+  match sp.node of
+    POr(_) =>
+      Some((
+          "pattern-alternative",
+          sp.span,
+          "pattern alternatives are coverage-only in T1",
+        ))
+    PCtor(_, args) | PTuple(args) => unsupported_pats(args)
+    PRecord(_, fields, _) => unsupported_pat_fields(fields)
+    _ => None
+
+fn unsupported_pats(xs : List(Sp(Pat))) : Option((String, Span, String)) =
+  match xs of
+    Nil => None
+    Cons(x, rest) => first_some(unsupported_pat(x), unsupported_pats(rest))
+
+fn unsupported_pat_fields(xs : List(PatField)) : Option((String, Span, String)) =
+  match xs of
+    Nil => None
+    Cons(x, rest) =>
+      first_some(unsupported_pat(x.pat), unsupported_pat_fields(rest))
+
+fn infer_expr(
+  sp : Sp(Expr),
+  env : List((String, Scheme)),
+  ctors : List(CtorInfo),
+  names : List((String, VTy))
+) : VTy ! {State(Solver), TcFail, Fresh} =
+  match sp.node of
+    EInt(_, _) => VInt
+    EFloat(_) => VFloat
+    EBool(_) => VBool
+    EUnit => VUnit
+    EStr(_) => VString
+    EVar(name) =>
+      match env_get(name, env) of
+        Some(scheme) => instantiate(scheme)
+        None => tc_fail(Mismatch("known T1 binding", name))
+    EBin(op, left, right) => infer_bin(op, left, right, env, ctors, names)
+    ENeg(value) =>
+      let found = infer_expr(value, env, ctors, names)
+      unify_v(found, VInt)
+      VInt
+    EIf(cond, yes, no) =>
+      let ct = infer_expr(cond, env, ctors, names)
+      unify_v(ct, VBool)
+      let yt = infer_expr(yes, env, ctors, names)
+      let nt = infer_expr(no, env, ctors, names)
+      unify_v(yt, nt)
+      yt
+    ELet(name, value, body) =>
+      let value_ty = infer_expr(value, env, ctors, names)
+      let value_scheme = generalize([], value_ty)
+      infer_expr(body, env_put(name, value_scheme, env), ctors, names)
+    ELam(params, body) =>
+      let (param_tys, local) = infer_params(params, env, names)
+      let result = infer_expr(body, local, ctors, names)
+      v_fun(param_tys, c_ret(result, row_closed([])))
+    ECall(callee, args) =>
+      let callee_ty = infer_expr(callee, env, ctors, names)
+      let arg_tys = map(\(arg) -> infer_expr(arg, env, ctors, names), args)
+      let result = fresh_ty_meta()
+      unify_v(callee_ty, v_fun(arg_tys, c_ret(result, row_closed([]))))
+      result
+    EPipe(value, callee) =>
+      infer_expr(
+          Sp { node = ECall(callee, [value]), span = sp.span, synth = true },
+          env,
+          ctors,
+          names,
+        )
+    EMatch(scrutinee, arms) =>
+      let scrutinee_ty = infer_expr(scrutinee, env, ctors, names)
+      let result = fresh_ty_meta()
+      infer_arms(arms, scrutinee_ty, result, env, ctors, names)
+      result
+    ETuple(items) =>
+      VTuple(map(\(item) -> infer_expr(item, env, ctors, names), items))
+    ERecord(name, fields) => infer_record(name, fields, env, ctors, names)
+    EAnn(value, ty) =>
+      let wanted = ty_of(ty, names)
+      let found = infer_expr(value, env, ctors, names)
+      unify_v(found, wanted)
+      wanted
+    _ => tc_fail(Mismatch("T1 expression", kind_of_expr(sp.node)))
+
+fn infer_bin(
+  op : String,
+  left : Sp(Expr),
+  right : Sp(Expr),
+  env : List((String, Scheme)),
+  ctors : List(CtorInfo),
+  names : List((String, VTy))
+) : VTy ! {State(Solver), TcFail, Fresh} =
+  let lt = infer_expr(left, env, ctors, names)
+  let rt = infer_expr(right, env, ctors, names)
+  if op == "&&" || op == "||" then
+    unify_v(lt, VBool)
+    unify_v(rt, VBool)
+    VBool
+  elif op == "==" || op == "!=" then
+    unify_v(lt, rt)
+    VBool
+  elif op == "<" || op == "<=" || op == ">" || op == ">=" then
+    unify_v(lt, rt)
+    VBool
+  else
+    unify_v(lt, rt)
+    unify_v(lt, VInt)
+    VInt
+
+fn infer_params(
+  params : List(Param),
+  env : List((String, Scheme)),
+  names : List((String, VTy))
+) : (List(VTy), List((String, Scheme))) ! {State(Solver)} =
+  infer_params_go(params, env, names, [])
+
+fn infer_params_go(
+  params : List(Param),
+  env : List((String, Scheme)),
+  names : List((String, VTy)),
+  rev : List(VTy)
+) : (List(VTy), List((String, Scheme))) ! {State(Solver)} =
+  match params of
+    Nil => (reverse(rev), env)
+    Cons(param, rest) =>
+      let ty =
+        match param.ty of
+          Some(t) => ty_of(t, names)
+          None => fresh_ty_meta()
+      infer_params_go(
+          rest,
+          env_put(param.name, mono(ty), env),
+          names,
+          Cons(ty, rev),
+        )
+
+fn infer_arms(
+  arms : List(Arm),
+  scrutinee : VTy,
+  result : VTy,
+  env : List((String, Scheme)),
+  ctors : List(CtorInfo),
+  names : List((String, VTy))
+) : Unit ! {State(Solver), TcFail, Fresh} =
+  match arms of
+    Nil => ()
+    Cons(arm, rest) =>
+      let local = infer_pat(arm.pat, scrutinee, env, ctors, names)
+      let body_ty = infer_expr(arm.body, local, ctors, names)
+      unify_v(result, body_ty)
+      infer_arms(rest, scrutinee, result, env, ctors, names)
+
+fn infer_pat(
+  sp : Sp(Pat),
+  expected : VTy,
+  env : List((String, Scheme)),
+  ctors : List(CtorInfo),
+  names : List((String, VTy))
+) : List((String, Scheme)) ! {State(Solver), TcFail} =
+  match sp.node of
+    PWild => env
+    PVar(name) => env_put(name, mono(expected), env)
+    PInt(_, _) =>
+      unify_v(expected, VInt)
+      env
+    PFloat(_) =>
+      unify_v(expected, VFloat)
+      env
+    PChar(_) =>
+      unify_v(expected, VCon("Char", []))
+      env
+    PBool(_) =>
+      unify_v(expected, VBool)
+      env
+    PTuple(items) =>
+      let tys = map(\(_p) -> fresh_ty_meta(), items)
+      unify_v(expected, VTuple(tys))
+      infer_pats(items, tys, env, ctors, names)
+    PCtor(name, args) => infer_ctor_pat(name, args, expected, env, ctors, names)
+    PRecord(name, fields, _rest) =>
+      infer_record_pat(name, fields, expected, env, ctors, names)
+    POr(_) => env
+
+fn infer_pats(
+  pats : List(Sp(Pat)),
+  tys : List(VTy),
+  env : List((String, Scheme)),
+  ctors : List(CtorInfo),
+  names : List((String, VTy))
+) : List((String, Scheme)) ! {State(Solver), TcFail} =
+  match (pats, tys) of
+    (Nil, Nil) => env
+    (Cons(pat, prest), Cons(ty, trest)) =>
+      infer_pats(
+          prest,
+          trest,
+          infer_pat(pat, ty, env, ctors, names),
+          ctors,
+          names,
+        )
+    _ => tc_fail(Mismatch("pattern arity", "constructor arity"))
+
+fn split_ctor(ty : VTy) : (List(VTy), VTy) ! {State(Solver), TcFail} =
+  match ty of
+    VThunk(CFun(params, CRet(result, row))) =>
+      unify_row(row, row_closed([]))
+      (params, result)
+    value => ([], value)
+
+fn infer_ctor_pat(
+  name : String,
+  args : List(Sp(Pat)),
+  expected : VTy,
+  env : List((String, Scheme)),
+  ctors : List(CtorInfo),
+  names : List((String, VTy))
+) : List((String, Scheme)) ! {State(Solver), TcFail} =
+  match ctor_get(name, ctors) of
+    None => tc_fail(Mismatch("known constructor", name))
+    Some(info) =>
+      let instantiated = instantiate(ctor_scheme(info))
+      let (params, result) = split_ctor(instantiated)
+      unify_v(expected, result)
+      infer_pats(args, params, env, ctors, names)
+
+fn infer_record(
+  name : String,
+  fields : List(NamedExpr),
+  env : List((String, Scheme)),
+  ctors : List(CtorInfo),
+  names : List((String, VTy))
+) : VTy ! {State(Solver), TcFail, Fresh} =
+  match ctor_get(name, ctors) of
+    None => tc_fail(Mismatch("known record constructor", name))
+    Some(info) =>
+      let instantiated = instantiate(ctor_scheme(info))
+      let (params, result) = split_ctor(instantiated)
+      infer_record_fields(ctor_fields(info), params, fields, env, ctors, names)
+      result
+
+fn named_get(name : String, fields : List(NamedExpr)) : Option(Sp(Expr)) =
+  match fields of
+    Nil => None
+    Cons(field, rest) =>
+      if field.name == name then
+        Some(field.value)
+      else
+        named_get(name, rest)
+
+fn infer_record_fields(
+  labels : List(String),
+  tys : List(VTy),
+  fields : List(NamedExpr),
+  env : List((String, Scheme)),
+  ctors : List(CtorInfo),
+  names : List((String, VTy))
+) : Unit ! {State(Solver), TcFail, Fresh} =
+  match (labels, tys) of
+    (Nil, Nil) => ()
+    (Cons(label, lrest), Cons(ty, trest)) =>
+      match named_get(label, fields) of
+        None => tc_fail(Mismatch("record field", label))
+        Some(value) =>
+          unify_v(ty, infer_expr(value, env, ctors, names))
+          infer_record_fields(lrest, trest, fields, env, ctors, names)
+    _ => tc_fail(Mismatch("record fields", "constructor layout"))
+
+fn infer_record_pat(
+  name : String,
+  fields : List(PatField),
+  expected : VTy,
+  env : List((String, Scheme)),
+  ctors : List(CtorInfo),
+  names : List((String, VTy))
+) : List((String, Scheme)) ! {State(Solver), TcFail} =
+  match ctor_get(name, ctors) of
+    None => tc_fail(Mismatch("known record constructor", name))
+    Some(info) =>
+      let instantiated = instantiate(ctor_scheme(info))
+      let (params, result) = split_ctor(instantiated)
+      unify_v(expected, result)
+      infer_record_pat_fields(
+          ctor_fields(info),
+          params,
+          fields,
+          env,
+          ctors,
+          names,
+        )
+
+fn pat_field_get(name : String, fields : List(PatField)) : Option(Sp(Pat)) =
+  match fields of
+    Nil => None
+    Cons(field, rest) =>
+      if field.name == name then
+        Some(field.pat)
+      else
+        pat_field_get(name, rest)
+
+fn infer_record_pat_fields(
+  labels : List(String),
+  tys : List(VTy),
+  fields : List(PatField),
+  env : List((String, Scheme)),
+  ctors : List(CtorInfo),
+  names : List((String, VTy))
+) : List((String, Scheme)) ! {State(Solver), TcFail} =
+  match (labels, tys) of
+    (Nil, Nil) => env
+    (Cons(label, lrest), Cons(ty, trest)) =>
+      match pat_field_get(label, fields) of
+        None => infer_record_pat_fields(lrest, trest, fields, env, ctors, names)
+        Some(pat) =>
+          infer_record_pat_fields(
+              lrest,
+              trest,
+              fields,
+              infer_pat(pat, ty, env, ctors, names),
+              ctors,
+              names,
+            )
+    _ => tc_fail(Mismatch("record pattern", "constructor layout"))
+
+fn annotation_names(decl : Decl) : List((String, VTy)) ! {Fresh} =
+  let vars = unique_strings(
+      append(concat_map(param_tyvars, decl.params), option_tyvars(decl.ret)),
+    )
+  fst(names_of_params(vars))
+
+fn param_tyvars(param : Param) : List(String) =
+  match param.ty of
+    None => []
+    Some(ty) => tyvars_of(ty)
+
+fn option_tyvars(ty : Option(Ty)) : List(String) =
+  match ty of
+    None => []
+    Some(t) => tyvars_of(t)
+
+fn tyvars_of(ty : Ty) : List(String) =
+  match ty of
+    TyVar(name) => [name]
+    TyApp(_, args) | TyCon(_, args) | TyTuple(args) | TyUnboxedTuple(args) =>
+      concat_map(tyvars_of, args)
+    TyForall(vars, body) => append(vars, tyvars_of(body))
+    TyFun(params, row, ret) =>
+      append(
+          concat_map(tyvars_of, params),
+          append(
+              concat_map(\(l) -> concat_map(tyvars_of, l.args), row.labels),
+              tyvars_of(ret),
+            ),
+        )
+    TyUsage(body, _) => tyvars_of(body)
+    TyUnboxedRecord(fields) =>
+      concat_map(\(field) -> tyvars_of(field.ty), fields)
+    _ => []
+
+fn unique_strings(xs : List(String)) : List(String) =
+  reverse(
+      foldl(
+          \(out, x) -> if string_member(x, out) then out else Cons(x, out),
+          [],
+          xs,
+        ),
+    )
+
+fn string_member(x : String, xs : List(String)) : Bool =
+  match xs of
+    Nil => false
+    Cons(y, rest) => x == y || string_member(x, rest)
+
+fn infer_decl(
+  decl : Decl,
+  env : List((String, Scheme)),
+  ctors : List(CtorInfo)
+) : Result(Scheme, TcError) ! {Fresh} =
+  run_tc(\() -> infer_decl_action(decl, env, ctors))
+
+fn infer_decl_action(
+  decl : Decl,
+  env : List((String, Scheme)),
+  ctors : List(CtorInfo)
+) : Scheme ! {State(Solver), TcFail, Fresh} =
+  let names = annotation_names(decl)
+  let (params, local) = infer_params(decl.params, env, names)
+  let result =
+    match decl.ret of
+      Some(ty) => ty_of(ty, names)
+      None => fresh_ty_meta()
+  let self_ty = v_fun(params, c_ret(result, row_closed([])))
+  let self_env = env_put(decl.name, mono(self_ty), local)
+  let body_ty = infer_expr(decl.body, self_env, ctors, names)
+  unify_v(body_ty, result)
+  generalize([], self_ty)
+
+fn binder_index(
+  name : Int,
+  binders : List(Binder(TyVarSpace)),
+  i : Int
+) : Option(Int) =
+  match binders of
+    Nil => None
+    Cons(b, rest) =>
+      if name_id(bound_name(b)) == name then
+        Some(i)
+      else
+        binder_index(name, rest, i + 1)
+
+fn canon_v(ty : VTy, binders : List(Binder(TyVarSpace))) : String =
+  match ty of
+    VInt => "Int"
+    VFloat => "Float"
+    VBool => "Bool"
+    VUnit => "()"
+    VString => "String"
+    VCon(name, Nil) => name
+    VCon(name, args) => "{name}({canon_join(args, binders)})"
+    VTuple(items) => "({canon_join(items, binders)})"
+    VThunk(c) => canon_c(c, binders)
+    VVar(v) =>
+      match binder_index(name_id(v), binders, 0) of
+        Some(i) => "${i}"
+        None => "$rigid{name_id(v)}"
+    VMeta(_) => "?"
+
+fn canon_join(tys : List(VTy), binders : List(Binder(TyVarSpace))) : String =
+  match tys of
+    Nil => ""
+    Cons(ty, Nil) => canon_v(ty, binders)
+    Cons(ty, rest) => "{canon_v(ty, binders)}, {canon_join(rest, binders)}"
+
+fn canon_c(c : CTy, binders : List(Binder(TyVarSpace))) : String =
+  match c of
+    CRet(value, row) =>
+      if length(row.labels) == 0 && row.tail == TailClosed then
+        canon_v(value, binders)
+      else
+        "{canon_v(value, binders)} ! {show_row(row)}"
+    CFun(params, body) =>
+      "({canon_join(params, binders)}) -> {canon_c(body, binders)}"
+
+fn canon_scheme(scheme : Scheme) : String =
+  let body = canon_v(scheme.body, scheme.tyvars)
+  match scheme.tyvars of
+    Nil => body
+    binders => "forall {canon_binders(length(binders), 0)}. {body}"
+
+fn canon_binders(n : Int, i : Int) : String =
+  if i >= n then
+    ""
+  elif i + 1 == n then
+    "${i}"
+  else
+    "${i} {canon_binders(n, i + 1)}"
+
+fn fact_line(fact : ShadowFact) : String = "{fact.name} :: {fact.scheme}"
+
+fn expected_lines(text : String) : List(String) =
+  filter(\(line) -> not(line == ""), split(10, text))
+
+fn expected_for(names : List(String), lines : List(String)) : List(String) =
+  concat_map(
+      \(name) -> filter(\(line) -> starts_with("{name} :: ", line), lines),
+      names,
+    )
+
+fn check_decls(
+  decls : List(Decl),
+  resolved : ResolvedDoc,
+  input : TcInputDoc,
+  ctors : List(CtorInfo),
+  env : List((String, Scheme)),
+  facts : List(ShadowFact),
+  unsupported : List(Unsupported),
+  supported_nodes : Int,
+  total_nodes : Int
+) : (List(ShadowFact), List(Unsupported), Int, Int) ! {Fresh} =
+  match decls of
+    Nil => (reverse(facts), reverse(unsupported), supported_nodes, total_nodes)
+    Cons(decl, rest) =>
+      match resolved_get(decl.name, resolved.functions) of
+        None =>
+          check_decls(
+              rest,
+              resolved,
+              input,
+              ctors,
+              env,
+              facts,
+              unsupported,
+              supported_nodes,
+              total_nodes,
+            )
+        Some(rf) =>
+          let nodes = rnode_count(rf.body)
+          if not(input_has(decl.name, input)) then
+            let miss =
+              Unsupported {
+                function_name = decl.name,
+                kind = "artifact-join",
+                span = decl.span,
+                reason = "missing tc-input function",
+                nodes = nodes
+              }
+            check_decls(
+                rest,
+                resolved,
+                input,
+                ctors,
+                env,
+                facts,
+                Cons(miss, unsupported),
+                supported_nodes,
+                total_nodes + nodes,
+              )
+          else
+            match (first_some(unsupported_decl(decl), first_unsupported(decl.body))) of
+              Some((kind, span, reason)) =>
+                let miss =
+                  Unsupported {
+                    function_name = decl.name,
+                    kind = kind,
+                    span = span,
+                    reason = reason,
+                    nodes = nodes
+                  }
+                check_decls(
+                    rest,
+                    resolved,
+                    input,
+                    ctors,
+                    env,
+                    facts,
+                    Cons(miss, unsupported),
+                    supported_nodes,
+                    total_nodes + nodes,
+                  )
+              None =>
+                match infer_decl(decl, env, ctors) of
+                  Err(err) =>
+                    match unsupported_tc_error(err) of
+                      Some(reason) =>
+                        let miss =
+                          Unsupported {
+                            function_name = decl.name,
+                            kind = "external-binding",
+                            span = decl.body.span,
+                            reason = reason,
+                            nodes = nodes
+                          }
+                        check_decls(
+                            rest,
+                            resolved,
+                            input,
+                            ctors,
+                            env,
+                            facts,
+                            Cons(miss, unsupported),
+                            supported_nodes,
+                            total_nodes + nodes,
+                          )
+                      None =>
+                        let fact = ShadowFact {
+                          name = decl.name,
+                          scheme = "<checker-error {err}>"
+                        }
+                        check_decls(
+                            rest,
+                            resolved,
+                            input,
+                            ctors,
+                            env,
+                            Cons(fact, facts),
+                            unsupported,
+                            supported_nodes + nodes,
+                            total_nodes + nodes,
+                          )
+                  Ok(scheme) =>
+                    let fact = ShadowFact {
+                      name = decl.name,
+                      scheme = canon_scheme(scheme)
+                    }
+                    check_decls(
+                        rest,
+                        resolved,
+                        input,
+                        ctors,
+                        env_put(decl.name, scheme, env),
+                        Cons(fact, facts),
+                        unsupported,
+                        supported_nodes + nodes,
+                        total_nodes + nodes,
+                      )
+
+fn check_artifacts(
+  tc_input_text : String,
+  resolved_text : String,
+  surface_text : String,
+  oracle_text : String
+) : Result(Workbench, String) =
+  match decode_tc_input(tc_input_text) of
+    Err(e) => Err("tc-input: {codec_error_message(e)}")
+    Ok(input) =>
+      match decode_resolved(resolved_text) of
+        Err(e) => Err("resolved-syntax: {codec_error_message(e)}")
+        Ok(resolved) =>
+          match decode_surface(surface_text) of
+            Err(e) => Err("surface-syntax: {codec_error_message(e)}")
+            Ok(surface) =>
+              if not(surface.source.text == resolved.source.text) then
+                Err("artifact source mismatch")
+              else
+                Ok(
+                    run_fresh(
+                        \() -> build_workbench(surface.items, resolved, input, oracle_text),
+                      ),
+                  )
+
+fn build_workbench(
+  items : List(Item),
+  resolved : ResolvedDoc,
+  input : TcInputDoc,
+  oracle_text : String
+) : Workbench ! {Fresh} =
+  let ctors = ctor_infos(items)
+  let env = ctor_env(ctors, [])
+  let (facts, unsupported, supported_nodes, total_nodes) =
+    check_decls(item_decls(items), resolved, input, ctors, env, [], [], 0, 0)
+  let actual = map(fact_line, facts)
+  let selected =
+    expected_for(map(\(fact) -> fact.name, facts), expected_lines(oracle_text))
+  Workbench {
+    facts = facts,
+    unsupported = unsupported,
+    supported_nodes = supported_nodes,
+    total_nodes = total_nodes,
+    first = first_diff(selected, actual)
+  }
+
+fn print_unsupported(rows : List(Unsupported)) : Unit ! {IO} =
+  match rows of
+    Nil => ()
+    Cons(row, rest) =>
+      println(
+          "UNSUPPORTED\t{row.function_name}\t{row.kind}\t{row.span.lo}\t{row.span.hi}\t{row.nodes}\t{row.reason}",
+        )
+      print_unsupported(rest)
+
+fn print_facts(facts : List(ShadowFact)) : Unit ! {IO} =
+  match facts of
+    Nil => ()
+    Cons(fact, rest) =>
+      println("FACT\t{fact.name}\t{fact.scheme}")
+      print_facts(rest)
+
+fn print_diff(first : Option(Divergence(String))) : Unit ! {IO} =
+  match first of
+    None => println("DIFF\tNONE")
+    Some(DiffAt(i, rust, shadow)) => println("DIFF\tAT\t{i}\t{rust}\t{shadow}")
+    Some(DiffLeftEnd(i, shadow)) => println("DIFF\tLEFT_END\t{i}\t\t{shadow}")
+    Some(DiffRightEnd(i, rust)) => println("DIFF\tRIGHT_END\t{i}\t{rust}\t")
+
+-- Artifact bytes are supplied in memory by the Rust CLI. The only output is a
+-- compact protocol Rust renders as either text or the stable JSON report.
+fn main() =
+  match check_artifacts(arg(0), arg(1), arg(2), arg(3)) of
+    Err(message) => println("ERROR\t{message}")
+    Ok(report) =>
+      println("BOOTSTRAP\t1")
+      println("COVERAGE\t{report.supported_nodes}\t{report.total_nodes}")
+      print_unsupported(report.unsupported)
+      print_facts(report.facts)
+      print_diff(report.first)

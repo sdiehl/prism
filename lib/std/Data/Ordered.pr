@@ -21,13 +21,19 @@
 -- the unbranded `Map` surface are untouched unless a program imports it.
 
 import Data.Map (..)
-
 import Data.Maybe (is_some)
 
 -- | An ordering witness: a comparator branded by the phantom `brand`. The only
 -- way to obtain one is `with_ordering`, which mints a fresh brand per call, so
 -- two witnesses always carry incompatible brands.
-pub type OrdWitness(k, brand) = OrdBy((k, k) -> Int)
+opaque newtype OrdWitness(k, brand) = OrdBy((k, k) -> Int)
+
+-- | A map whose representation is sealed to the comparator carried by its
+-- witness. Hiding this wrapper matters as much as hiding `OrdWitness`: a raw
+-- `Map(k, v, brand)` can otherwise be instantiated at any phantom brand and
+-- smuggled into the explicit-ordering API after being built by another
+-- comparator.
+opaque newtype OrderedMap(k, v, brand) = OrderedMap(Map(k, v, brand))
 
 -- | Run `body` with a fresh ordering witness carrying `cmp`. The witness's brand
 -- is rigid and unique to this call: a map built under it cannot be handed to a
@@ -86,7 +92,8 @@ fn look_by(cmp : (k, k) -> Int, key : k, m : Map(k, v, brand)) : Option(v) =
         Some(v2)
 
 -- | The empty map under witness `w`, carrying `w`'s brand.
-pub fn ord_empty(_w : OrdWitness(k, brand)) : Map(k, v, brand) = map_empty
+pub fn ord_empty(_w : OrdWitness(k, brand)) : OrderedMap(k, v, brand) =
+  OrderedMap(map_empty)
 
 -- | Insert under witness `w`; the result carries `w`'s brand.
 --
@@ -101,10 +108,12 @@ pub fn ord_insert(
   w : OrdWitness(k, brand),
   key : k,
   x : v,
-  m : Map(k, v, brand)
-) : Map(k, v, brand) =
+  m : OrderedMap(k, v, brand)
+) : OrderedMap(k, v, brand) =
   match w of
-    OrdBy(cmp) => ins_by(cmp, key, x, m)
+    OrdBy(cmp) =>
+      match m of
+        OrderedMap(tree) => OrderedMap(ins_by(cmp, key, x, tree))
 
 -- | Look `key` up under witness `w`. Only a map of `w`'s brand type-checks here.
 --
@@ -116,12 +125,14 @@ pub fn ord_insert(
 -- None
 -- ```
 pub fn ord_lookup(
-  w : OrdWitness(k, brand),
+  borrow w : OrdWitness(k, brand),
   key : k,
-  m : Map(k, v, brand)
+  borrow m : OrderedMap(k, v, brand)
 ) : Option(v) =
   match w of
-    OrdBy(cmp) => look_by(cmp, key, m)
+    OrdBy(cmp) =>
+      match m of
+        OrderedMap(tree) => look_by(cmp, key, tree)
 
 -- | True when `key` is present under witness `w`.
 --
@@ -132,7 +143,11 @@ pub fn ord_lookup(
 -- ```output
 -- true
 -- ```
-pub fn ord_member(w : OrdWitness(k, brand), key : k, m : Map(k, v, brand)) : Bool =
+pub fn ord_member(
+  borrow w : OrdWitness(k, brand),
+  key : k,
+  borrow m : OrderedMap(k, v, brand)
+) : Bool =
   is_some(ord_lookup(w, key, m))
 
 -- | The `(key, value)` pairs of a `w`-branded map, in tree (in-order) order.
@@ -144,8 +159,12 @@ pub fn ord_member(w : OrdWitness(k, brand), key : k, m : Map(k, v, brand)) : Boo
 -- ```output
 -- [(1, a), (2, b)]
 -- ```
-pub fn ord_to_list(_w : OrdWitness(k, brand), m : Map(k, v, brand)) : List((k, v)) =
-  map_to_list(m)
+pub fn ord_to_list(
+  borrow _w : OrdWitness(k, brand),
+  borrow m : OrderedMap(k, v, brand)
+) : List((k, v)) =
+  match m of
+    OrderedMap(tree) => map_to_list(tree)
 
 -- | The number of entries in a `w`-branded map.
 --
@@ -156,4 +175,9 @@ pub fn ord_to_list(_w : OrdWitness(k, brand), m : Map(k, v, brand)) : List((k, v
 -- ```output
 -- 2
 -- ```
-pub fn ord_size(_w : OrdWitness(k, brand), m : Map(k, v, brand)) : Int = map_size(m)
+pub fn ord_size(
+  borrow _w : OrdWitness(k, brand),
+  borrow m : OrderedMap(k, v, brand)
+) : Int =
+  match m of
+    OrderedMap(tree) => map_size(tree)

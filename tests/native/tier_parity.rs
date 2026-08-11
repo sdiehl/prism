@@ -24,41 +24,26 @@
 // oracle from going vacuous if the forcing knob or the classifier silently
 // breaks.
 
-use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 
-use prism::error::Error;
-use prism::{default_roots, dump_on, Config, EffectTier, Root};
+use prism::{build_on, default_roots, Config, EffectTier, ObservationTrace};
+
+use super::{effect_plan, forced};
 
 use crate::support::{
-    check_native_parity, corpus, leak_free, parallel_check, require_cc, source, temp_bin,
+    check_native_parity, cleanup_bin, corpus, leak_free, parallel_check, program_stderr,
+    require_cc, source, temp_bin, CHECK_LEAKS,
 };
 
-/// The dump phase rendering the effect plan: the strategy the cascade picked,
-/// why a confined region was refused when one was attempted, and the
-/// per-function facts (reachable operations, thunk parameters, genuine /
-/// escaping / capturing marks) it decided from. Every input to the tier decision
-/// is a row, which is what makes it the right selection fact here.
-const EFFECT_PLAN: &str = "effect-plan";
-
-// The whole tier decision for `full` under `cfg`, as the artifact the cascade
-// explains itself with. Two configurations that render the same plan lower the
-// same way, so a program whose plan is unmoved by forcing is one the natural
-// parity oracle already covers; a program whose plan moves in any row (a
-// different tier, a confined region refused for a different reason, or different
-// per-function facts once an erasure is off) is one this gate must build.
-fn effect_plan(full: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
-    dump_on(EFFECT_PLAN, full, roots, cfg)
-}
-
-fn forced(tier: EffectTier, erasures: bool) -> Config {
-    let mut cfg = Config::from_env();
-    cfg.flags.effect_tier = tier;
-    cfg.flags.erasures = erasures;
-    cfg.flags.compiler_cache = false;
-    cfg
-}
+const PROCESS_FAULT_EXIT: i32 = -1;
+const MIN_STATE_FUSION_CASES: usize = 20;
+const MIN_LOCAL_PARTIAL_CASES: usize = 30;
+const MIN_FREE_MONAD_CASES: usize = 30;
+const MIN_WHOLE_PROGRAM_CASES: usize = 60;
+const MIN_ERASURE_CASES: usize = 20;
+const MIN_SLOWEST_CASES: usize = 75;
+const MIN_NATIVE_SUB_LOWERING_CASES: usize = 3;
 
 // Force one point of the (floor, erasures) grid over the corpus, exercising
 // exactly the programs whose effect plan moves under it, and require at least
@@ -97,7 +82,7 @@ fn run_forced(tier: EffectTier, erasures: bool, floor_count: usize) {
     );
     let fails = parallel_check(&cases, |case| {
         check_native_parity(case, tag, |full, bin| {
-            prism::build_on(full, &roots, bin, &forced_cfg)
+            build_on(full, &roots, bin, &forced_cfg)
         })
     });
     assert!(
@@ -109,24 +94,17 @@ fn run_forced(tier: EffectTier, erasures: bool, floor_count: usize) {
     );
 }
 
-fn cleanup_bin(bin: &Path) {
-    for ext in ["bc", "ll"] {
-        let _ = fs::remove_file(bin.with_extension(ext));
-    }
-    let _ = fs::remove_file(bin);
-}
-
-fn native_output(case: &Path, tag: &str, cfg: &Config) -> Result<std::process::Output, String> {
+fn native_output(case: &Path, tag: &str, cfg: &Config) -> Result<Output, String> {
     let roots = default_roots(Path::new("."));
     let full = source(case);
     let stem = case.file_stem().unwrap().to_string_lossy();
     let bin = temp_bin(tag, &stem);
-    if let Err(e) = prism::build_on(&full, &roots, &bin, cfg) {
+    if let Err(e) = build_on(&full, &roots, &bin, cfg) {
         cleanup_bin(&bin);
         return Err(format!("{}: {tag} build failed: {e}", case.display()));
     }
     let out = Command::new(&bin)
-        .env("PRISM_CHECK_LEAKS", "1")
+        .env(CHECK_LEAKS, "1")
         .output()
         .map_err(|e| format!("{}: {tag} spawn failed: {e}", case.display()));
     cleanup_bin(&bin);
@@ -181,22 +159,15 @@ fn run_native_diff(
                 b_err.trim()
             ));
         }
-        let program_stderr = |stderr: &str| {
-            stderr
-                .lines()
-                .filter(|line| !line.starts_with("prism: ") || !line.ends_with(" cells leaked"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-        let a_trace = prism::ObservationTrace::from_process(
+        let a_trace = ObservationTrace::from_process(
             &a.stdout,
             program_stderr(&a_err).as_bytes(),
-            a.status.code().unwrap_or(-1),
+            a.status.code().unwrap_or(PROCESS_FAULT_EXIT),
         );
-        let b_trace = prism::ObservationTrace::from_process(
+        let b_trace = ObservationTrace::from_process(
             &b.stdout,
             program_stderr(&b_err).as_bytes(),
-            b.status.code().unwrap_or(-1),
+            b.status.code().unwrap_or(PROCESS_FAULT_EXIT),
         );
         if a_trace != b_trace {
             return Err(format!(
@@ -231,29 +202,33 @@ fn run_native_diff(
 // is what `auto` already does.
 #[test]
 fn forced_state_fusion_matches_interpreter() {
-    run_forced(EffectTier::StateFusion, true, 20);
+    run_forced(EffectTier::StateFusion, true, MIN_STATE_FUSION_CASES);
 }
 
 #[test]
 fn forced_local_partial_matches_interpreter() {
-    run_forced(EffectTier::LocalPartial, true, 30);
+    run_forced(EffectTier::LocalPartial, true, MIN_LOCAL_PARTIAL_CASES);
 }
 
 #[test]
 fn forced_free_monad_matches_interpreter() {
-    run_forced(EffectTier::FreeMonad, true, 30);
+    run_forced(EffectTier::FreeMonad, true, MIN_FREE_MONAD_CASES);
 }
 
 #[test]
 fn forced_whole_program_free_monad_matches_interpreter() {
-    run_forced(EffectTier::WholeProgramFreeMonad, true, 60);
+    run_forced(
+        EffectTier::WholeProgramFreeMonad,
+        true,
+        MIN_WHOLE_PROGRAM_CASES,
+    );
 }
 
 // The other axis on its own: the erasures off, the cascade otherwise free, so a
 // divergence here is the erasures' and not the ladder's.
 #[test]
 fn disabled_erasures_match_interpreter() {
-    run_forced(EffectTier::Auto, false, 20);
+    run_forced(EffectTier::Auto, false, MIN_ERASURE_CASES);
 }
 
 // Both axes at their extreme: nothing erased, everything reified, the whole
@@ -261,7 +236,7 @@ fn disabled_erasures_match_interpreter() {
 // cascade's outer bound.
 #[test]
 fn slowest_lowering_matches_interpreter() {
-    run_forced(EffectTier::WholeProgramFreeMonad, false, 75);
+    run_forced(EffectTier::WholeProgramFreeMonad, false, MIN_SLOWEST_CASES);
 }
 
 #[test]
@@ -271,7 +246,14 @@ fn native_effects_toggle_matches_native() {
     fast.flags.compiler_cache = false;
     let mut slow = fast.clone();
     slow.flags.native_effects = false;
-    run_native_diff("native-effects", "on", &fast, "off", &slow, 3);
+    run_native_diff(
+        "native-effects",
+        "on",
+        &fast,
+        "off",
+        &slow,
+        MIN_NATIVE_SUB_LOWERING_CASES,
+    );
 }
 
 #[test]
@@ -283,5 +265,12 @@ fn trampoline_toggle_matches_native() {
     tramp.flags.compiler_cache = false;
     let mut no_tramp = tramp.clone();
     no_tramp.flags.trampoline = false;
-    run_native_diff("trampoline", "on", &tramp, "off", &no_tramp, 3);
+    run_native_diff(
+        "trampoline",
+        "on",
+        &tramp,
+        "off",
+        &no_tramp,
+        MIN_NATIVE_SUB_LOWERING_CASES,
+    );
 }

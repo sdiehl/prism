@@ -20,8 +20,10 @@
 //! back to `R`.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::iter;
 
 use crate::core::effect_abi::{DONE_TAG, MORE_TAG, SDONE, SMORE, STEP};
+use crate::core::CoreOp;
 use crate::types::ty::EffRow;
 use crate::types::Type;
 use prism_common::fresh::Fresh;
@@ -632,7 +634,7 @@ impl Eraser<'_> {
                         let saved: Vec<_> = op
                             .params()
                             .iter()
-                            .chain(std::iter::once(op.resume()))
+                            .chain(iter::once(op.resume()))
                             .map(|p| (p.name(), env.insert(p.name(), p.ty().clone())))
                             .collect();
                         let op_body2 = self.erase(op.body(), env);
@@ -1683,7 +1685,7 @@ impl Eraser<'_> {
 const fn prim_eq(a: TypedValue, b: TypedValue) -> TypedComp {
     TypedComp::new(
         CompSig::new(CoreType::Source(Type::Bool), EffRow::Empty),
-        TypedCompKind::Prim(crate::core::CoreOp::Eq, a, b),
+        TypedCompKind::Prim(CoreOp::Eq, a, b),
     )
 }
 
@@ -1826,9 +1828,8 @@ impl Eraser<'_> {
             ),
         };
         // The recursive call witnesses the complete generated-driver row.
-        // Conditions are currently required to be exactly pure, but retaining
-        // the explicit union here prevents the call and callee signatures from
-        // diverging if that conservative restriction is relaxed later.
+        // Conditions must be exactly pure. Retaining the explicit union also
+        // keeps the call and callee signatures derived from the same row data.
         let body_sig = CompSig::new(self_call_ty, driver_effects);
         let self_call = TypedComp::new(
             body_sig,
@@ -1987,9 +1988,9 @@ fn nullary_thunk(m: &TypedComp) -> Option<&TypedComp> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::verify::verify;
-    use super::super::super::Elaborated;
-    use super::super::super::{CoreFnSig, TypedCore, TypedCoreFn};
+    use crate::core::typed::{verify::verify, CoreFnSig, Elaborated, TypedCore, TypedCoreFn};
+    use crate::types::ty::Label;
+
     use super::*;
 
     fn test_eraser(plan: &EffectPlan) -> Eraser<'_> {
@@ -2077,14 +2078,14 @@ mod tests {
     fn active_variables_in_effect_label_arguments_are_not_closed() {
         let a = Sym::new("a");
         let open_arg = EffRow::Extend(
-            crate::types::ty::Label {
+            Label {
                 name: Sym::new("E"),
                 args: vec![Type::Var(a)],
             },
             Box::new(EffRow::Empty),
         );
         let closed_arg = EffRow::Extend(
-            crate::types::ty::Label {
+            Label {
                 name: Sym::new("E"),
                 args: vec![Type::Int],
             },

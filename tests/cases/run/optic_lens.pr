@@ -1,0 +1,39 @@
+import Data.Optic (..)
+import Control.State (..)
+
+type Pos = Pos { x: Int, y: Int } deriving (Lens, Show)
+
+type Player = Player { name: String, pos: Pos, hp: Int } deriving (Lens, Show)
+
+let pos_at : Lens(Player, Pos) = lens(pos_of, with_pos)
+
+let x_at : Lens(Pos, Int) = lens(x_of, with_x)
+
+let hp_at : Lens(Player, Int) = lens(hp_of, with_hp)
+
+let player_x : Lens(Player, Int) = compose_lens(pos_at, x_at)
+
+fn advance() : Int ! {State(Player)} =
+  modify_at(player_x, \(n) -> n + 5)
+  set_at(hp_at, 30)
+  gets_at(player_x)
+
+fn main() =
+  let p =
+    Player {
+      name = "ada",
+      pos = Pos { x = 1, y = 2 },
+      hp = 10
+    }
+  println(show(view(player_x, p)))
+  println(show(lens_set(player_x, p, 40)))
+  println(show(over(hp_at, \(h) -> h * 2, p)))
+  println(show(view(lens_fst, (1, 2))))
+  println(show(lens_set(lens_snd, (1, 2), 9)))
+  let nested = (1, (2, 3))
+  println(show(over(compose_lens(lens_snd, lens_fst), \(n) -> n * 10, nested)))
+  println(show(view(lens_id, 7)))
+  match run_state(p, advance) of
+    (seen, final) =>
+      println(show(seen))
+      println(show(final))

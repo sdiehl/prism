@@ -6,7 +6,7 @@ use prism_syntax::kind::Kind;
 use ty::EffRow;
 
 pub use prism_syntax::coeffect;
-pub mod effects;
+pub mod deps;
 pub mod repr;
 pub mod sig;
 pub mod ty;

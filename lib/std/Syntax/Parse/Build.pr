@@ -12,7 +12,6 @@
 -- conceptually occupies.
 
 import Syntax.Source (..)
-
 import Syntax.Ast (..)
 
 -- | An authored node covering `[lo, hi)`: written by the user, spanned by its

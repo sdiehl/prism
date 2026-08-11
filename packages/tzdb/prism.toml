@@ -1,5 +1,6 @@
 [package]
 name = "tzdb"
+description = "Deterministic timezone arithmetic over a pinned, curated zone table."
 
 [bin]
 entry = "src/Tzdb.pr"

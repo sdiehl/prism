@@ -8,7 +8,7 @@ use marginalia::Span;
 
 use super::escape::{escapes, free_resume};
 use super::{rw, Binding, InstanceOps, Vars};
-use crate::error::{ErrKind, TypeError};
+use crate::error::{suggest, ErrKind, TypeError};
 use crate::names::{self, CONT};
 use crate::syntax::ast::{
     Core, EffOp, EffectDecl, Expr, Grade, HandlerArm, HandlerMode, SugarArm, Ty, S,
@@ -302,7 +302,11 @@ pub(super) fn rw_named(
                 op: op.clone(),
                 handler: f.to_string(),
             }
-            .at(span));
+            .at(span)
+            .maybe_help(suggest::suggestion(
+                op,
+                cx.op_sigs.keys().map(|k| names::bare_name(k)),
+            )));
         };
         // All handled ops must come from one effect: the private EffectDecl below
         // records a single `eff_params`, so mixing effects would leave later ops'

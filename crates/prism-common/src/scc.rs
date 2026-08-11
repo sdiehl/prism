@@ -1,6 +1,6 @@
 //! Strongly-connected components of a directed graph in index-adjacency form.
 //!
-//! Shared by dependency-ordered type inference (`types::effects::dep_sccs`) and
+//! Shared by dependency-ordered type inference (`types::deps::dep_sccs`) and
 //! the content-hash cycle boundary (`core::hash`), which used to carry their own
 //! Tarjan copies, one of them recursive.
 

@@ -1,7 +1,5 @@
 import Syntax.Source (..)
-
 import Syntax.Walk (..)
-
 import Syntax.Ast (..)
 
 fn is_call(n : Sp(Expr)) : Bool =

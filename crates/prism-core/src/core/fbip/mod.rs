@@ -1,7 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use prism_common::sym::Sym;
-use prism_syntax::ast::{Core as CorePhase, Program};
+use prism_syntax::{
+    ast::{Core as CorePhase, Program},
+    names,
+};
 
 use super::cbpv::Value;
 use super::fv::comp as freev;
@@ -30,32 +33,74 @@ pub use reuse::reuse;
 
 type Set = BTreeSet<Sym>;
 
-// Per-function borrow mask, one bool per param in order. A borrow parameter is
-// borrowed by the callee (never dropped, dup'd before any consuming use) and
-// retained by the caller (not transferred at the call). Only pure functions may
-// carry a borrow param, so they all go through the untouched `lower_comp` path
-// and reach this pass as ordinary positional calls. Functions absent from the
-// map default to all-owned.
+// Per-function borrow mask, one bool per elaborated Core parameter in order
+// (including leading typeclass dictionaries). A borrow parameter is borrowed by
+// the callee (never dropped, dup'd before any consuming use) and retained by the
+// caller (not transferred at the call). Only pure functions may carry a borrow
+// param, so they all go through the untouched `lower_comp` path and reach this
+// pass as ordinary positional calls. Functions absent from the map default to
+// all-owned.
 pub type Sigs = BTreeMap<Sym, Vec<bool>>;
 
 #[must_use]
 pub fn borrow_sigs(prog: &Program<CorePhase>) -> Sigs {
-    prog.fns
+    let functions = prog
+        .fns
         .iter()
-        .filter(|d| d.params.iter().any(|p| p.borrow))
-        .map(|d| {
-            (
-                d.name.clone().into(),
-                d.params.iter().map(|p| p.borrow).collect(),
-            )
-        })
-        .collect()
+        .filter(|decl| decl.params.iter().any(|param| param.borrow))
+        .map(|decl| {
+            let mut mask = vec![false; decl.constraints.len()];
+            mask.extend(decl.params.iter().map(|param| param.borrow));
+            (decl.name.clone().into(), mask)
+        });
+    let methods = prog.instances.iter().flat_map(|instance| {
+        let superclasses = prog
+            .classes
+            .iter()
+            .find(|class| class.name == instance.class)
+            .map_or(0, |class| class.supers.len());
+        let dictionary_arity = instance.context.len() + superclasses;
+        instance
+            .methods
+            .iter()
+            .filter(|method| method.params.iter().any(|param| param.borrow))
+            .map(move |method| {
+                let mut mask = vec![false; dictionary_arity];
+                mask.extend(method.params.iter().map(|param| param.borrow));
+                (
+                    names::instance_method(&instance.name, &method.name).into(),
+                    mask,
+                )
+            })
+    });
+    functions.chain(methods).collect()
 }
 
-// A borrow-position call arg is always a `Value::Var` (call sites bind every
-// argument to a let before the call). The caller retains one ownership token
-// through the call and drops it afterward when the loan is its last use, so the
-// call itself is not a consuming use.
+// A borrow mask is indexed by the elaborated Core parameter list. Typeclass
+// dictionaries precede the explicit source parameters and are always owned, so
+// `borrow_sigs` prepends one `false` entry per dictionary. Keeping the mask in
+// Core order prevents a constrained function from accidentally borrowing its
+// last dictionary/first user argument while consuming the parameter that was
+// actually declared `borrow`.
+
+// A borrow-position call arg is normally a `Value::Var`: the caller retains one
+// ownership token through the call and drops it afterward when the loan is its
+// last use. Mandatory newtype erasure and scalar folding may expose a literal
+// immediate directly at the call. Such a value owns no heap cell and needs no
+// retained token; every other non-variable remains an invariant error rather
+// than silently leaking a temporary heap value.
+const fn immediate_borrow_arg(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Int(_)
+            | Value::I64(_)
+            | Value::U64(_)
+            | Value::Float(_)
+            | Value::Bool(_)
+            | Value::Unit
+    )
+}
+
 fn borrow_mask(name: Sym, sigs: &Sigs) -> Option<&[bool]> {
     sigs.get(&name).map(Vec::as_slice)
 }
@@ -71,11 +116,12 @@ fn borrowed_call_vars(name: Sym, args: &[Value], sigs: &Sigs) -> Result<Set, Str
     args.iter()
         .enumerate()
         .filter(|(index, _)| borrowed_at(mask, *index))
-        .map(|(_, arg)| match arg {
-            Value::Var(var) => Ok(*var),
-            _ => Err(format!(
-                "borrowed argument to {name} is not a let-bound variable"
-            )),
+        .filter_map(|(_, arg)| match arg {
+            Value::Var(var) => Some(Ok(*var)),
+            value if immediate_borrow_arg(value) => None,
+            _ => Some(Err(format!(
+                "borrowed argument to {name} is not a let-bound variable: {arg:?}"
+            ))),
         })
         .collect()
 }

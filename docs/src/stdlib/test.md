@@ -86,7 +86,7 @@ instance arbitraryList : Arbitrary(List(a))
 ### `arb_gen`
 
 ```prism,sig,h-1a5e6613b0a4226d4bf4a4db2bc8e03b3ffd252ae767d3c7a13c69669ffa8e7c
-arb_gen : forall a. () -> Quickcheck.Gen(a)
+arb_gen : forall a. () -> Quickcheck.Gen(a) given Test.Arbitrary(a)
 ```
 
 The generator of an `Arbitrary` type, as a `Quickcheck.Gen` ready for `quickcheck`/`gen_at`.

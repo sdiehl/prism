@@ -1,6 +1,6 @@
+use super::inline::path_op_surface;
 use super::{Fmt, Mode, INDENT};
 use crate::ast::{Expr, PathOp, PathStep, S};
-use crate::kw;
 
 impl Fmt<'_> {
     pub(super) fn fmt_record_break(
@@ -45,10 +45,7 @@ impl Fmt<'_> {
             let Some(path_s) = self.fmt_path(path) else {
                 return self.verbatim(e.span.start, e.span.end);
             };
-            let (sigil, value) = match op {
-                PathOp::Set(value) => (kw::EQ, value),
-                PathOp::Modify(value) => (kw::TILDE, value),
-            };
+            let (sigil, value) = path_op_surface(op);
             let lead = if index == 0 { "|" } else { "," };
             let value_s = self.fmt_expr(value, indent + 1, Mode::Flat);
             lines.push(format!("{ind}{lead} {path_s} {sigil} {value_s}"));

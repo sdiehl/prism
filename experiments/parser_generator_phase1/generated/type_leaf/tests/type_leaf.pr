@@ -2,19 +2,12 @@
 -- The generator reads and fingerprints this file but never emits or rewrites it.
 
 import Data.List (..)
-
 import Data.Maybe (..)
-
 import Syntax.Source (..)
-
 import Syntax.Token (..)
-
 import Syntax.Ast (..)
-
 import Syntax.Cursor (..)
-
 import Syntax.Parse.Support (..)
-
 import GeneratedTypeLeaf (..)
 
 fn generated_test_token(k : TokenKind, value : Option(String)) : Token =

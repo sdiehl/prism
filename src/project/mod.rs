@@ -43,6 +43,7 @@ pub fn parse_hash_pin(s: &str) -> Option<&str> {
 /// ```toml
 /// [package]
 /// name = "myproj"
+/// description = "What the package provides."
 ///
 /// [bin]
 /// entry = "src/main.pr"
@@ -50,6 +51,8 @@ pub fn parse_hash_pin(s: &str) -> Option<&str> {
 #[derive(Debug, Clone)]
 pub struct Manifest {
     pub name: String,
+    /// Optional package summary rendered at the top of generated API docs.
+    pub description: Option<String>,
     /// `[bin] entry`, relative to the project root.
     pub entry: PathBuf,
     /// Module root, relative to the project root (`[package] src`, default `src`).
@@ -93,7 +96,8 @@ impl Manifest {
     /// Parse the text of a `prism.toml`.
     ///
     /// # Errors
-    /// Fails on malformed TOML or a missing/ill-typed `name` or `[bin] entry`.
+    /// Fails on malformed TOML, a missing/ill-typed `name` or `[bin] entry`, or
+    /// an ill-typed optional `description`.
     pub fn parse(text: &str) -> Result<Self, Error> {
         let table: toml::Table =
             toml::from_str(text).map_err(|e| Error::ResolveProject(format!("prism.toml: {e}")))?;
@@ -108,6 +112,16 @@ impl Manifest {
                 Error::ResolveProject("prism.toml: [package] name must be a string".into())
             })?
             .to_string();
+        let description = pkg
+            .get("description")
+            .map(|value| {
+                value.as_str().map(str::to_string).ok_or_else(|| {
+                    Error::ResolveProject(
+                        "prism.toml: [package] description must be a string".into(),
+                    )
+                })
+            })
+            .transpose()?;
         let entry = table
             .get("bin")
             .and_then(toml::Value::as_table)
@@ -127,6 +141,7 @@ impl Manifest {
         let dependencies = Self::parse_deps(&table)?;
         Ok(Self {
             name,
+            description,
             entry: PathBuf::from(entry),
             src_dir: PathBuf::from(src_dir),
             prelude,
@@ -199,6 +214,8 @@ fn parse_dep_source(name: &str, val: &toml::Value) -> Result<DepSource, Error> {
 pub struct Project {
     pub root: PathBuf,
     pub name: String,
+    /// The optional `[package] description`, used by package-facing tools.
+    pub description: Option<String>,
     /// The base for module resolution (`root/src`).
     pub src_dir: PathBuf,
     /// The program to compile (`root/<entry>`).
@@ -327,6 +344,7 @@ fn load_project_rec(arg: &Path, visiting: &mut Vec<PathBuf>) -> Result<Project, 
         entry: root.join(&manifest.entry),
         prelude: manifest.prelude.map(|p| root.join(p)),
         name: manifest.name,
+        description: manifest.description,
         dep_src_dirs,
         dependencies: manifest.dependencies,
         root,
@@ -343,9 +361,23 @@ mod tests {
         let m = Manifest::parse("[package]\nname = \"demo\"\n\n[bin]\nentry = \"src/main.pr\"\n")
             .unwrap();
         assert_eq!(m.name, "demo");
+        assert_eq!(m.description, None);
         assert_eq!(m.entry.to_str(), Some("src/main.pr"));
         assert_eq!(m.src_dir.to_str(), Some("src"));
         assert_eq!(m.prelude, None);
+    }
+
+    #[test]
+    fn parses_optional_package_description() {
+        let m = Manifest::parse(
+            "[package]\nname = \"demo\"\ndescription = \"A small demo.\"\n\n[bin]\nentry = \"src/main.pr\"\n",
+        )
+        .unwrap();
+        assert_eq!(m.description.as_deref(), Some("A small demo."));
+        assert!(Manifest::parse(
+            "[package]\nname = \"demo\"\ndescription = 42\n\n[bin]\nentry = \"src/main.pr\"\n",
+        )
+        .is_err());
     }
 
     #[test]

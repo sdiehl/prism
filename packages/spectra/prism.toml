@@ -1,5 +1,6 @@
 [package]
 name = "spectra"
+description = "A typed Prism presentation DSL compiling deterministic decks to Typst and PDF."
 
 [bin]
 entry = "src/Main.pr"

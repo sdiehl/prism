@@ -14,17 +14,22 @@ The surface covers construction, indexing, transpose-by-name, a contiguity-check
 
 ### `Tensor`
 
-```prism,def,h-3b008fef87fab75946a2b14ac6b8fa3fba1e110889bd6a9090217e44b91a8658
-type Tensor = MkTensor(FloatBuf, List(Int), List(Int), List(String))
+```prism,def,h-ff23f13391ea93b018f5afe7c0a6ae02705a3e78e45ad958a520b6279de96c07
+type Tensor = MkTensor {
+  data: FloatBuf,
+  dims: List(Int),
+  steps: List(Int),
+  labels: List(String)
+}
 ```
 
-A dense tensor: flat storage plus per-axis shape, strides, and names.
+A dense tensor: flat storage plus per-axis shape, strides, and names. The representation is opaque so shape/stride/axis lengths cannot be put out of sync by constructing a value outside this module.
 
 ## Functions and Values
 
 ### `buf`
 
-```prism,sig,h-7654fc040134ba41fcc9d5b567c0a77b2c8353790e23ba022ec0d0cbb0a586bc
+```prism,sig,h-c64f88dffbf838582fba7fce1d1635c48229494803b87a610ec4a4f28da6f8cc
 buf : (Data.Tensor.Tensor) -> FloatBuf
 ```
 
@@ -32,7 +37,7 @@ The flat backing buffer.
 
 ### `shape`
 
-```prism,sig,h-674c82137c13dc5a46c57306229631891ec7bdc5350cd7e5a55910f32c2ef506
+```prism,sig,h-1fd801ce885b434414e214fa913df22ecb33b2f53e67980a7d207507caede4b7
 shape : (Data.Tensor.Tensor) -> List(Int)
 ```
 
@@ -48,7 +53,7 @@ shape(new([2, 3], 0.0))
 
 ### `strides`
 
-```prism,sig,h-2b7de391041218d0b71c5344dfa204d759aa961f1c602fc836e8ab7c338a32f8
+```prism,sig,h-76bd09eda86afbebf13a68d30f8402938dc5250aed9d730d68ec6ae5db60d35f
 strides : (Data.Tensor.Tensor) -> List(Int)
 ```
 
@@ -64,7 +69,7 @@ strides(new([2, 3], 0.0))
 
 ### `axes`
 
-```prism,sig,h-14862231b4124238be1a2b7e743fee20b7a51530aa94ea9915c07274d2f73a73
+```prism,sig,h-e0c1594353c2ed484156d13f16b028bd27d5781547d4ed53982040fad59936af
 axes : (Data.Tensor.Tensor) -> List(String)
 ```
 
@@ -80,7 +85,7 @@ axes(new([2, 3], 0.0))
 
 ### `rank`
 
-```prism,sig,h-86d0f28430970a0568e98243bad5a602a457f46441200fb9c5236054fbe0e877
+```prism,sig,h-97feba74e6a187592148e3eb5aac1c3c21c198fa5b472144964aeea0f7ab18e7
 rank : (Data.Tensor.Tensor) -> Int
 ```
 
@@ -96,7 +101,7 @@ rank(new([2, 3], 0.0))
 
 ### `size`
 
-```prism,sig,h-de110f1f9a3ccec0a41daa4afa1cb00fc0935314f2c5028d947dff79d3350a83
+```prism,sig,h-64907731e3c2747e1529a2383315af12e0524866f3dd6875178f12bafbdf2793
 size : (Data.Tensor.Tensor) -> Int
 ```
 
@@ -112,8 +117,8 @@ size(new([2, 3], 0.0))
 
 ### `new`
 
-```prism,sig,h-9ef678c7b7500da6c1d27df8b8e8a248cde8a25a61816c875f647b75ca3aeb0e
-new : (List(Int), Float) -> Data.Tensor.Tensor
+```prism,sig,h-c7f78dfca0bdfa762707a5484882442553c567fae394d6b8a88454dd29a1d4cc
+new : (List(Int), Float) -> Data.Tensor.Tensor ! {Fail}
 ```
 
 A tensor of the given shape with every element set to `fill`, row-major.
@@ -129,8 +134,8 @@ t[1, 1]
 
 ### `from_list`
 
-```prism,sig,h-8a1f064c28bf151b4b516fb8cc98b5744f0950206955ef4ff34b994f0cfe0282
-from_list : (List(Int), List(Float)) -> Data.Tensor.Tensor
+```prism,sig,h-3b8ab3537451f2c1619f24e416f77f3d806408588675b20f4e75cf702bc1340f
+from_list : (List(Int), List(Float)) -> Data.Tensor.Tensor ! {Fail}
 ```
 
 A row-major tensor of the given shape filled from a flat list of values. Extra list elements past the shape's size are ignored; missing ones stay 0.
@@ -146,7 +151,7 @@ t[1, 0]
 
 ### `at_tensor`
 
-```prism,sig,h-41544470b839fcd03fe408ca639b63db1206b132313ae57eaa0c97c7377d3bf7
+```prism,sig,h-80be4613e1c91375ba5b569d32e980f5fad212faa133a0f9ab7042f10333b908
 at_tensor : (Data.Tensor.Tensor, List(Int)) -> Float ! {Fail}
 ```
 
@@ -160,9 +165,19 @@ at_tensor(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), [0, 1])
 2
 ```
 
+Coordinates are checked per axis, not merely by their final flat offset:
+
+```prism,mod=Data.Tensor
+default(\() -> at_tensor(new([2, 2], 0.0), [0, 3]), -1.0)
+```
+
+```output
+-1
+```
+
 ### `tensor_set`
 
-```prism,sig,h-3407d979d08ca5151d7dc0cfbd291f62525502a423249044f50e75f7b6160aa8
+```prism,sig,h-0d82dbeb628212d4313c7e42b27589421f2d46921398cbcec0de581f49cfc391
 tensor_set : (Data.Tensor.Tensor, List(Int), Float) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -179,7 +194,7 @@ t[0, 1]
 
 ### `transpose`
 
-```prism,sig,h-3ba30e516f91af4afabf522b61c0232f6250572a949e485803f26cf58563d4ef
+```prism,sig,h-32c14fa82188cde51b8475c7be75d9b51c1cc4a31f54095cd8b1c840fe723b9d
 transpose : (Data.Tensor.Tensor, String, String) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -196,7 +211,7 @@ t[0, 1]
 
 ### `reshape`
 
-```prism,sig,h-81e934e4d13392898d41cb7a83d0f4d5cc17f7619f69d95d3459511bd268823b
+```prism,sig,h-7f491ee29eb900faedd67d562707153cb554ffeecacb192e0b5ff1da709c319a
 reshape : (Data.Tensor.Tensor, List(Int)) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -212,7 +227,7 @@ shape(reshape(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), [4]))
 
 ### `map_tensor`
 
-```prism,sig,h-9a68ec7c50b29c32a85d1514598e1b8750afbdd70494d76a77a3bd2edc84a78a
+```prism,sig,h-d87560b57c0353421eef58756cc0a99cdefd8fe98432a9d65f6a8ea9453c40c7
 map_tensor : forall e0. ((Float) -> Float ! {Fail, e0}, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail, e0}
 ```
 
@@ -228,7 +243,7 @@ sum_all(map_tensor(\(x) -> x + 1.0, from_list([2], [10.0, 20.0])))
 
 ### `zip_with_tensor`
 
-```prism,sig,h-be8c753842a246faf93c3b6d7eb47f4916245582b7d1a44d1dbec40c3ea65868
+```prism,sig,h-c98d827d06cfc475a314659764ba8bf12770a56930371232353d6d82ec89481b
 zip_with_tensor : forall e0. ((Float, Float) -> Float ! {Fail, e0}, Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail, e0}
 ```
 
@@ -244,7 +259,7 @@ sum_all(zip_with_tensor(\(x, y) -> x + y, from_list([2], [1.0, 2.0]), from_list(
 
 ### `add`
 
-```prism,sig,h-a4c858309e59cda1f9c5db2d3acd4e57713ba00b0fc2375fddd9aef36bde8a51
+```prism,sig,h-8fa1c8109c576ef67f4a9bd75697aa4b624640d37c1cb429b5dba4519f9ca601
 add : (Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -260,7 +275,7 @@ sum_all(add(from_list([2], [1.0, 2.0]), from_list([2], [3.0, 4.0])))
 
 ### `sub`
 
-```prism,sig,h-1de0727c3f714a1578045890f1721584eb473a53d34281f9b013e0b45fb82e62
+```prism,sig,h-e08539f0f0c473116731978fe15955b6555d0cf3fe21f5f82a44d108994eda94
 sub : (Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -268,7 +283,7 @@ Elementwise difference.
 
 ### `mul`
 
-```prism,sig,h-e854ed47df74d17a397e88a0505fc72a2aa3eafff6e08e8afecf80bc039fcb04
+```prism,sig,h-0dd4b86ac7612940e5e1af8a1dade702547944e5a10fe555d6ef4a6cdad57f03
 mul : (Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -284,7 +299,7 @@ sum_all(mul(from_list([2], [2.0, 3.0]), from_list([2], [4.0, 5.0])))
 
 ### `div`
 
-```prism,sig,h-b90e1194b57b2e7066bb96df9f00dd22d3164dcde913529a38be397f572d7a12
+```prism,sig,h-9d8c076e260ff8813f3282bd44d3ab0acde34d7911d2b67c2ed6cdef2999d0b8
 div : (Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -292,7 +307,7 @@ Elementwise quotient.
 
 ### `scale`
 
-```prism,sig,h-ff117090e6a2cfd3c35ff30bf8418bd29f4091f5bef4915f632322949493b322
+```prism,sig,h-8247a13b33eb4592383ee38550fcf2acba5618463634a922e129cb1962a71952
 scale : (Float, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -308,7 +323,7 @@ sum_all(scale(2.0, from_list([2], [1.0, 2.0])))
 
 ### `sum_all`
 
-```prism,sig,h-e7e9331464eaa763c57ab0cea47bcdc352a5c740838a1283832c24163492e5ea
+```prism,sig,h-e2f9f10fa126a9ab067774f449991c994221c3e3effe2f03b4f8fe8e98b5eb99
 sum_all : (Data.Tensor.Tensor) -> Float ! {Fail}
 ```
 
@@ -324,7 +339,7 @@ sum_all(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]))
 
 ### `prod_all`
 
-```prism,sig,h-4006de9070d8da15391f54f96606b058fb862391d1a1043b9e78157f5d9853c4
+```prism,sig,h-fdb85cc09cb068ffe3c1af024d235ecbe0bb4d06b1729e6035ba1ec99f9caee6
 prod_all : (Data.Tensor.Tensor) -> Float ! {Fail}
 ```
 
@@ -340,7 +355,7 @@ prod_all(from_list([2], [3.0, 4.0]))
 
 ### `mean`
 
-```prism,sig,h-c91f231404048f3f2077cf4d0313f199e1e8b55bb28a84b92990e09c9fd3032c
+```prism,sig,h-c707c278401462fb1acfb1a179f1bc5e0d132b4b696154e5b8b993c65895d107
 mean : (Data.Tensor.Tensor) -> Float ! {Fail}
 ```
 
@@ -356,7 +371,7 @@ mean(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]))
 
 ### `sum_axis`
 
-```prism,sig,h-34399c050fdee0ad0d85a58fcb80c2acc1633ef1e4f6e0de92f2b51de6016a32
+```prism,sig,h-acd5f3467ecf9be48482a09bd18031b4bddc7a53f241e4863d7b3f98b689cf6f
 sum_axis : (Data.Tensor.Tensor, String) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -373,7 +388,7 @@ let s = sum_axis(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), "0")
 
 ### `mean_axis`
 
-```prism,sig,h-773ed97cd8978c5dc01d58b468d2aa7caacf308ddbdf1136f5774a45fc84ab74
+```prism,sig,h-0360881d1ed09e1036268be94c3b2c3fb861b906b9c9f0e39850db96a22bf975
 mean_axis : (Data.Tensor.Tensor, String) -> Data.Tensor.Tensor ! {Fail}
 ```
 
@@ -390,7 +405,7 @@ let m = mean_axis(from_list([2, 2], [1.0, 2.0, 3.0, 4.0]), "1")
 
 ### `matmul`
 
-```prism,sig,h-857e49ea029928b8d5738c025533e638ce8c810e7076b07b768f43be173b536c
+```prism,sig,h-8bbe76b19c3159b45917ce1f488db6aaa4ae4c9182fe39968212ffffcf437d62
 matmul : (Data.Tensor.Tensor, Data.Tensor.Tensor) -> Data.Tensor.Tensor ! {Fail}
 ```
 

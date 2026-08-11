@@ -16,17 +16,11 @@
 -- three other ordinary functions and rewinds by hand. The cursor supplies the
 -- rewind that keeps the record, and nothing else.
 import Data.List (..)
-
 import Data.Maybe (..)
-
 import Data.String (..)
-
 import Syntax.Source (..)
-
 import Syntax.Token (..)
-
 import Syntax.Lex (..)
-
 import Syntax.Cursor (..)
 
 -- The text a literal or identifier token carries.

@@ -1,5 +1,4 @@
 import Counter
-
 import Shape
 
 fn main() =

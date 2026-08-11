@@ -1,20 +1,20 @@
 {
   "schema": "prism-resolved-syntax-v1",
-  "compiler": "0.15.0",
+  "compiler": "0.18.0",
   "source": {
-    "digest": "f8ee1e543384e46f4ba1a050c3697b7a7280750acc419a266d278f32eac64a20",
-    "text": "-- Declaration families: imports, datatypes, aliases, constants, visibility.\nimport Data.List (map, filter)\n\nimport Json as J\n\nimport Data.Map (..)\n\npub type Color = Red | Green | Blue deriving (Eq, Show)\n\nopaque type Token = MkToken(Int)\n\nnewtype Meters = Meters(Float) deriving (Eq)\n\ntype Point = Point { x: Int, y: Int }\n\nalias Pair(a) = (a, a)\n\nerror NotFound(String)\n\nlet limit = 512\n\ndeprecated \"use limit\"\nlet old_limit = 256\n\npub fn origin() : Point = Point { x = 0, y = 0 }\n"
+    "digest": "c4c274309273958eba2bb8f5bf75f63b47455c5d720cabc3e66e11bee4d86564",
+    "text": "-- Declaration families: imports, datatypes, aliases, constants, visibility.\nimport Data.List (map, filter)\nimport Json as J\nimport Data.Map (..)\n\npub type Color = Red | Green | Blue deriving (Eq, Show)\n\nopaque type Token = MkToken(Int)\n\nnewtype Meters = Meters(Float) deriving (Eq)\n\ntype Point = Point { x: Int, y: Int }\n\nalias Pair(a) = (a, a)\n\nerror NotFound(String)\n\nlet limit = 512\n\ndeprecated \"use limit\"\nlet old_limit = 256\n\npub fn origin() : Point = Point { x = 0, y = 0 }\n"
   },
   "functions": [
     {
       "name": "limit",
       "params": [],
       "body": {
-        "id": 1295,
+        "id": 1294,
         "kind": "int",
         "span": [
-          385,
-          388
+          383,
+          386
         ]
       }
     },
@@ -22,11 +22,11 @@
       "name": "old_limit",
       "params": [],
       "body": {
-        "id": 1296,
+        "id": 1295,
         "kind": "int",
         "span": [
-          429,
-          432
+          427,
+          430
         ]
       }
     },
@@ -34,27 +34,27 @@
       "name": "origin",
       "params": [],
       "body": {
-        "id": 1297,
+        "id": 1296,
         "kind": "record",
         "span": [
-          460,
-          482
+          458,
+          480
         ],
         "children": [
+          {
+            "id": 1297,
+            "kind": "int",
+            "span": [
+              470,
+              471
+            ]
+          },
           {
             "id": 1298,
             "kind": "int",
             "span": [
-              472,
-              473
-            ]
-          },
-          {
-            "id": 1299,
-            "kind": "int",
-            "span": [
-              479,
-              480
+              477,
+              478
             ]
           }
         ]

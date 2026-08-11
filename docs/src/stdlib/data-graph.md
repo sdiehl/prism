@@ -18,8 +18,8 @@ The empty graph.
 
 ### `graph_successors`
 
-```prism,sig,h-6fb8585bdbbb3dbad0bf6adfd4197d42e64756d6220f4e66728c3964881913da
-graph_successors : forall a b. (Map(b, List(b), a), b) -> List(b)
+```prism,sig,h-38e9f63e7af0f30f46bb38018b73a6bb1cb2b53989103a2a2a5395d71cbf23f9
+graph_successors : forall a b. (Map(b, List(b), a), b) -> List(b) given Ord(b)
 ```
 
 The successors of `u` in ascending order (empty if `u` has no out-edges).
@@ -34,32 +34,32 @@ graph_successors(graph_from_edges([(1, 3), (1, 2), (1, 2)]), 1)
 
 ### `graph_add_node`
 
-```prism,sig,h-631f4abde6e7eac53266f8384255da0d3429b0cb202a01c910b468d3afaa6bce
-graph_add_node : forall a b. (Map(b, List(b), a), b) -> Map(b, List(b), a)
+```prism,sig,h-a46e24bcc417842fb5b4ffac4cef91c161e3d9f2ea16a9d7037f6b2504ef7a43
+graph_add_node : forall a b. (Map(b, List(b), a), b) -> Map(b, List(b), a) given Ord(b)
 ```
 
 Add `u` as a node with no new edges (a no-op if already present).
 
 ### `graph_add_edge`
 
-```prism,sig,h-87a7e6c72f7c9f8d3ff0df119cf417c10f9808c7330b303d0210e61331d5f600
-graph_add_edge : forall a b. (Map(b, List(b), a), b, b) -> Map(b, List(b), a)
+```prism,sig,h-497a034913c17f1c152498517a011cd97ef136c073c77775d5c1a60fd8b8bd5c
+graph_add_edge : forall a b. (Map(b, List(b), a), b, b) -> Map(b, List(b), a) given Ord(b)
 ```
 
 Add the directed edge `u -> v`, keeping each successor list sorted and duplicate-free so iteration stays deterministic.
 
 ### `graph_from_edges`
 
-```prism,sig,h-820c056757a0f0f0b765807861e9cc3ebe62750f64509da681efe880903827f4
-graph_from_edges : forall a b. (List((b, b))) -> Map(b, List(b), a)
+```prism,sig,h-e2dbceeef4e9490f554fabe40acdc6b9755d1d89fc2b69cfe1d97a221ab06bbc
+graph_from_edges : forall a b. (List((b, b))) -> Map(b, List(b), a) given Ord(b)
 ```
 
 Build a graph from a list of directed `(from, to)` edges.
 
 ### `graph_nodes`
 
-```prism,sig,h-ac9e8483c1d1d9cc63f17e894a1498c31636e58a190b40a8fdd8660e14cfec83
-graph_nodes : forall a b. (Map(b, List(b), a)) -> List(b)
+```prism,sig,h-07db8bd9c91501d57b002511b1ce149c2dbf204b93918961ee4f3ed7db703ee3
+graph_nodes : forall a b. (Map(b, List(b), a)) -> List(b) given Ord(b)
 ```
 
 Every node, in ascending order: the sources plus everything pointed at, so a sink that only ever appears as a successor still shows up.
@@ -74,8 +74,8 @@ graph_nodes(graph_from_edges([(3, 1), (1, 2)]))
 
 ### `graph_reverse`
 
-```prism,sig,h-b7d9edd4cde8bce4d52ac91eae2a11dab15a03afd65c9fef1f542ef9bb3811bc
-graph_reverse : forall a b c. (Map(c, List(c), a)) -> Map(c, List(c), b)
+```prism,sig,h-8784b9a73e0b70e13075d45e693d081841917f829b842809b93b469074402a88
+graph_reverse : forall a b c. (Map(c, List(c), a)) -> Map(c, List(c), b) given Ord(c)
 ```
 
 The reverse graph: every edge `u -> v` becomes `v -> u`. Nodes are preserved, so an isolated node survives.
@@ -90,8 +90,8 @@ graph_successors(graph_reverse(graph_from_edges([(1, 2), (3, 2)])), 2)
 
 ### `graph_dfs`
 
-```prism,sig,h-ed22d014e614422457c922efc8e5975c3adbcb2c66c52a3581417251a8ed062d
-graph_dfs : forall a b. (Map(b, List(b), a), b) -> List(b)
+```prism,sig,h-8999b7ceec2c51a29ebf03f0e6a61c581dea61ff4cf953ce3202aef1552f404c
+graph_dfs : forall a b. (Map(b, List(b), a), b) -> List(b) given Ord(b)
 ```
 
 Depth-first preorder from `start`: `start`, then its successors' subtrees, successors taken in ascending order. Each node appears once.
@@ -107,24 +107,24 @@ Depth-first preorder from `start`: `start`, then its successors' subtrees, succe
 
 ### `graph_bfs`
 
-```prism,sig,h-db087f533d430a0c257055b9fb9a080f6b6696d0d377b9b9404eaba3021511c0
-graph_bfs : forall a b. (Map(b, List(b), a), b) -> List(b)
+```prism,sig,h-4d911073c50d870af4daa366b0aceaa5b4f713943cff708b5d8e7c4110a6ceab
+graph_bfs : forall a b. (Map(b, List(b), a), b) -> List(b) given Ord(b)
 ```
 
 Breadth-first order from `start`, successors taken in ascending order. Each node appears once.
 
 ### `graph_reachable`
 
-```prism,sig,h-57f0b30750f17731c0e87d5f2c82f52406c3ae3c3cfb7425f07f05fc438f9e10
-graph_reachable : forall a b. (Map(b, List(b), a), b) -> List(b)
+```prism,sig,h-198753b6d3049cf4705cc0893f44b562dbc3dbea963780833863d033770bebba
+graph_reachable : forall a b. (Map(b, List(b), a), b) -> List(b) given Ord(b)
 ```
 
 The nodes reachable from `start` (including `start`), in ascending order.
 
 ### `graph_transitive_closure`
 
-```prism,sig,h-de56e24b4518608cbdf3a7d7c3ac51bf1f0922eba9c8cb1a89dbecfedf59b51c
-graph_transitive_closure : forall a b c. (Map(c, List(c), a)) -> Map(c, List(c), b)
+```prism,sig,h-9600588eb6f08f3f7cfe420521b565c4a453a830820fce3c33070c15bc2d1d65
+graph_transitive_closure : forall a b c. (Map(c, List(c), a)) -> Map(c, List(c), b) given Ord(c)
 ```
 
 The transitive closure: an edge `u -> v` for every `v` reachable from `u` via at least one step (so `u -> u` only when `u` lies on a cycle).
@@ -139,8 +139,8 @@ graph_successors(graph_transitive_closure(graph_from_edges([(1, 2), (2, 3)])), 1
 
 ### `graph_topo_sort`
 
-```prism,sig,h-89e28c35263c7820c832b9e702481d481af8ccd532b0abc11a38d5e3b56539af
-graph_topo_sort : forall a b. (Map(b, List(b), a)) -> List(b)
+```prism,sig,h-d11513fe40737cd7b5c4e7edcffa2dfbdfb09cc960e639dceaaf344eb6ec3c0e
+graph_topo_sort : forall a b. (Map(b, List(b), a)) -> List(b) given Ord(b)
 ```
 
 Topological order: a node before every node it points to. Deterministic via a depth-first postorder over nodes in ascending order, reversed. A graph with a cycle still yields a total order, but not a valid topo sort (a cycle admits none); pair it with `graph_scc` when cycles are possible.
@@ -155,8 +155,8 @@ graph_topo_sort(graph_from_edges([(1, 2), (1, 3), (2, 3)]))
 
 ### `graph_scc`
 
-```prism,sig,h-aee3277aab4e7dec968ea15379acca52e272b6a4c676ac8ef78712c1bcbbef3a
-graph_scc : forall a b. (Map(b, List(b), a)) -> List(List(b))
+```prism,sig,h-111c86fa46e9a3fbe493db48349ba56868bcd26d7cf7c401bd6673115f547008
+graph_scc : forall a b. (Map(b, List(b), a)) -> List(List(b)) given Ord(b)
 ```
 
 Tarjan's strongly-connected components, returned callee-first: a component comes after every component reachable from it, and each component's members are in ascending order. A node with no self-loop is its own singleton component. This mirrors the compiler's own SCC ordering exactly.

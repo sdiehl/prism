@@ -22,7 +22,6 @@
 -- ```
 
 import Data.List (map)
-
 import Typst (..)
 
 fn content_text(value : String) : Doc = text_line(value)

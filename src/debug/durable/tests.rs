@@ -85,7 +85,7 @@ fn seed(path: &Path, frames: &[Obs]) {
     }
 }
 
-// -- Gate 1 and 2: append recovers to the committed prefix ----------------------
+// -- Append recovery ------------------------------------------------------------
 
 // A crash at any of the seven append steps leaves the previous committed prefix
 // intact and drops the torn tail; the retry commits the new observation. Restart
@@ -191,7 +191,7 @@ fn a_log_shorter_than_its_index_is_rejected() {
     );
 }
 
-// -- Gate 1: the atomic snapshot leaves the old or the new whole file -----------
+// -- Atomic snapshot recovery ---------------------------------------------------
 
 // A crash at any step of the snapshot write leaves the previous file complete and
 // readable; the retry replaces it atomically. Never a torn intermediate file.
@@ -223,7 +223,7 @@ fn snapshot_faults_leave_old_or_new_whole_file() {
     }
 }
 
-// -- Gates 3 and 4: durable resume is exactly-once and trace-preserving ---------
+// -- Exactly-once, trace-preserving resume --------------------------------------
 
 // One workflow step: an input observation yielding a pinned value, or an output
 // with its text.
@@ -331,15 +331,15 @@ fn durable_resume_is_exactly_once_and_trace_equals_uninterrupted() {
             // with no real effect and the remainder is performed.
             drive(&path, &script, &mut emitted, None).expect("resume finishes");
 
-            // Gate 4: the resumed run's observation trace equals the uninterrupted
-            // run's, byte for byte.
+            // The resumed observation trace equals the uninterrupted run's, byte
+            // for byte.
             assert_eq!(
                 committed_frames(&path).unwrap(),
                 ref_frames,
                 "{point:?}@{crash_at}: resumed trace equals the uninterrupted trace"
             );
-            // Gate 3: every output is emitted exactly once across crash and resume,
-            // never duplicated and (for a pre-commit crash) never lost.
+            // Every output is emitted exactly once across crash and resume, never
+            // duplicated and (for a pre-commit crash) never lost.
             assert_eq!(
                 emitted, ref_emitted,
                 "{point:?}@{crash_at}: exactly-once emission across the crash"

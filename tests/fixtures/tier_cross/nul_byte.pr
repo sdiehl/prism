@@ -1,0 +1,20 @@
+-- NUL bytes flowing through handled effect operations. A lowering that hands
+-- strings to C string functions truncates at the first NUL, so the byte after
+-- chr(0) only survives if every tier carries explicit lengths end to end.
+effect Emit
+  emit(String) : Unit
+
+fn speak() : Int ! {Emit} =
+  emit("a{chr(0)}b")
+  emit("{chr(0)}")
+  emit("tail{chr(0)}")
+  3
+
+fn main() =
+  let parts =
+    handle speak() with
+      emit(s) resume k => \(acc) -> k(())(Cons(s, acc))
+      return n => \(acc) -> Cons("{n}", acc)
+  let log = reverse(parts(Nil))
+  println(concat_all(log))
+  println(str_len(concat_all(log)))

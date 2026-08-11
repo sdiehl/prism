@@ -11,22 +11,24 @@
 -- identical to a left-to-right search. Every aggregation rides `fold_l`, which
 -- instances implement tail recursively, so a large container folds in constant
 -- stack on the native backend; only `to_list` uses `fold_r`, to build in order.
--- Arithmetic has no `Num` class, so `sum` and `product` are fixed to `Int`,
--- matching the operators `+` and `*`.
+-- `sum` and `product` aggregate through the `Num` class, so they work at any
+-- numeric carrier (`Int`, `I64`, `U64`, `Float`); the literal seeds `0` and
+-- `1` adapt to the carrier the way any numeric literal does.
 
 import Data.Maybe (is_some)
 
--- | The sum of a container of ints (`0` when empty).
+-- | The sum of a container of numbers (`0` when empty).
 --
 -- ```prism
--- sum([1, 2, 3, 4])
+-- (sum([1, 2, 3, 4]), sum([1.5, 2.75]))
 -- ```
 -- ```output
--- 10
+-- (10, 4.25)
 -- ```
-pub fn sum(t : f(Int)) : Int given Foldable(f) = fold_l(\(acc, x) -> acc + x, 0, t)
+pub fn sum(t : f(a)) : a given Foldable(f), Num(a) =
+  fold_l(\(acc, x) -> plus(acc, x), 0, t)
 
--- | The product of a container of ints (`1` when empty).
+-- | The product of a container of numbers (`1` when empty).
 --
 -- ```prism
 -- product([1, 2, 3, 4])
@@ -34,8 +36,8 @@ pub fn sum(t : f(Int)) : Int given Foldable(f) = fold_l(\(acc, x) -> acc + x, 0,
 -- ```output
 -- 24
 -- ```
-pub fn product(t : f(Int)) : Int given Foldable(f) =
-  fold_l(\(acc, x) -> acc * x, 1, t)
+pub fn product(t : f(a)) : a given Foldable(f), Num(a) =
+  fold_l(\(acc, x) -> times(acc, x), 1, t)
 
 -- | The number of elements.
 --

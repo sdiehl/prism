@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 
 use prism::{default_roots, interpret_io_on_with_args, with_prelude, Config};
 
+use super::fixture_stems;
+
 const FIXTURE_DIR: &str = "tests/fixtures/syntax";
 const HARNESS: &str = "consumers/layout_check.pr";
 
@@ -96,16 +98,7 @@ layout_gate! {
 // layout gate, so a new corpus file cannot slip past it.
 #[test]
 fn layout_covers_every_stem() {
-    let mut found: Vec<String> = fs::read_dir(fixture_dir())
-        .expect("fixture dir")
-        .filter_map(Result::ok)
-        .filter_map(|e| {
-            let name = e.file_name().into_string().ok()?;
-            let stem = name.strip_suffix(".syntax-tokens.json")?;
-            (!stem.starts_with("mismatch")).then(|| stem.to_string())
-        })
-        .collect();
-    found.sort_unstable();
+    let found = fixture_stems(&fixture_dir(), ".syntax-tokens.json", "mismatch");
 
     let mut expected: Vec<String> = STEMS.iter().map(ToString::to_string).collect();
     expected.sort_unstable();

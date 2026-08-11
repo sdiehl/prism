@@ -1,0 +1,15 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/optic_lens.pr
+---
+1
+Player { name = "ada", pos = Pos { x = 40, y = 2 }, hp = 10 }
+Player { name = "ada", pos = Pos { x = 1, y = 2 }, hp = 20 }
+1
+(1, 9)
+(1, (20, 3))
+7
+6
+Player { name = "ada", pos = Pos { x = 6, y = 2 }, hp = 30 }
+=> ()

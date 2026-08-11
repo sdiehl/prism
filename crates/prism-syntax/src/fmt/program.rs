@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use marginalia::{BuiltinKind, Trivia};
 
@@ -122,21 +122,37 @@ impl Fmt<'_> {
 
     pub(super) fn fmt_program(&self, prog: &Program) -> String {
         let items = self.items(prog);
+        let import_starts: BTreeSet<usize> = prog.imports.iter().map(|i| i.span.start).collect();
         let mut out = String::new();
         let mut prev_end: usize = 0;
+        let mut prev_import = false;
         for (idx, (start, end, s)) in items.into_iter().enumerate() {
+            let is_import = import_starts.contains(&start);
             let boundary = out.len();
             self.emit_leading_trivia(prev_end, start, &mut out);
-            // Top-level declarations are always separated by a blank line. The
-            // leading trivia already opens the gap with one when the source had it;
-            // otherwise insert one ahead of any attached doc comment so the comment
-            // stays with its declaration.
-            if idx > 0 && !out[boundary..].starts_with('\n') {
-                out.insert(boundary, '\n');
+            if idx > 0 {
+                if prev_import && is_import {
+                    // Consecutive imports form one tight block: no separating
+                    // blank line, and any blank lines the source carried between
+                    // two imports collapse. Comments between them survive.
+                    let seg = out.split_off(boundary);
+                    for line in seg.lines().filter(|l| !l.is_empty()) {
+                        out.push_str(line);
+                        out.push('\n');
+                    }
+                } else if !out[boundary..].starts_with('\n') {
+                    // Every other pair of top-level declarations is separated by
+                    // a blank line. The leading trivia already opens the gap with
+                    // one when the source had it; otherwise insert one ahead of
+                    // any attached doc comment so the comment stays with its
+                    // declaration.
+                    out.insert(boundary, '\n');
+                }
             }
             out.push_str(&s);
             out.push('\n');
             prev_end = end;
+            prev_import = is_import;
         }
 
         for ev in self.trivia.after(prev_end) {

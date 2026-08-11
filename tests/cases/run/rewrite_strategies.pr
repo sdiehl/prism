@@ -1,21 +1,12 @@
 import Control.Fresh (..)
-
 import Control.Layer (..)
-
 import Control.Rewrite (..)
-
 import Data.Foldable (length)
-
 import Data.List (map)
-
 import Data.String (str_join)
-
 import Syntax.Analysis (an_is_call)
-
 import Syntax.Ast (..)
-
 import Syntax.Source (..)
-
 import Syntax.Walk (..)
 
 fn zero_span() : Span = Span { lo = 0, hi = 0 }

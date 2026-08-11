@@ -179,8 +179,8 @@ pub enum EventValue {
     Bool(bool),
     Str(String),
     Bytes(Vec<u8>),
-    /// A read with no scalar result to record (there is currently none) or the
-    /// absent result of an argument-only position.
+    /// A read with no scalar result to record, or the absent result of an
+    /// argument-only position.
     Unit,
 }
 

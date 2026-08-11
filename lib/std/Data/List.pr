@@ -13,7 +13,7 @@ import Data.Foldable (..)
 pub fn singleton(x) = Cons(x, Nil)
 
 -- | True for the empty list.
-pub fn is_nil(xs) =
+pub fn is_nil(borrow xs) : Bool @ noalloc =
   match xs of
     Nil => true
     Cons(_x, _rest) => false
@@ -26,13 +26,13 @@ pub fn is_nil(xs) =
 -- ```output
 -- Some(1)
 -- ```
-pub fn head(xs) =
+pub fn head(borrow xs) =
   match xs of
     Nil => None
     Cons(x, _) => Some(x)
 
 -- | Everything after the first element (`Nil` for the empty list).
-pub fn tail(xs) =
+pub fn tail(borrow xs) =
   match xs of
     Nil => Nil
     Cons(_, rest) => rest
@@ -45,7 +45,7 @@ pub fn tail(xs) =
 -- ```output
 -- Some(3)
 -- ```
-pub fn last(xs) =
+pub fn last(borrow xs) =
   match xs of
     Nil => None
     Cons(x, Nil) => Some(x)
@@ -59,7 +59,7 @@ pub fn last(xs) =
 -- ```output
 -- Some(20)
 -- ```
-pub fn nth(n, xs) =
+pub fn nth(n, borrow xs) =
   if n == 0 then
     head(xs)
   else
@@ -133,8 +133,16 @@ pub fn drop_while(p, xs) =
       else
         xs
 
--- | `(take(n, xs), drop(n, xs))` in one pass of intent.
-pub fn split_at(n, xs) = (take(n, xs), drop(n, xs))
+-- | `(take(n, xs), drop(n, xs))`, sharing one traversal of the prefix.
+pub fn split_at(n, xs) =
+  if n == 0 then
+    (Nil, xs)
+  else
+    match xs of
+      Nil => (Nil, Nil)
+      Cons(x, rest) =>
+        match split_at(n - 1, rest) of
+          (prefix, suffix) => (Cons(x, prefix), suffix)
 
 -- | Apply `f` to every element, preserving order and length.
 --
@@ -233,7 +241,10 @@ pub fn flatten(xss) = foldr(append, Nil, xss)
 -- ```output
 -- [1, 1, 2, 2]
 -- ```
-pub fn concat_map(f, xs) = flatten(map(f, xs))
+pub fn concat_map(f, xs) =
+  match xs of
+    Nil => Nil
+    Cons(x, rest) => append(f(x), concat_map(f, rest))
 
 -- | Combine two lists elementwise with `f`, stopping at the shorter length.
 --
@@ -270,10 +281,11 @@ pub fn zip(xs, ys) = zip_with(\(x, y) -> (x, y), xs, ys)
 -- ([1, 2], [a, b])
 -- ```
 pub fn unzip(ps) =
-  (
-      map(\(p) -> match p of { (x, _) => x }, ps),
-      map(\(p) -> match p of { (_, y) => y }, ps),
-    )
+  match ps of
+    Nil => (Nil, Nil)
+    Cons((x, y), rest) =>
+      match unzip(rest) of
+        (xs, ys) => (Cons(x, xs), Cons(y, ys))
 
 -- | The number of elements satisfying `p`.
 --
@@ -283,7 +295,12 @@ pub fn unzip(ps) =
 -- ```output
 -- 2
 -- ```
-pub fn count(p, xs) = length(filter(p, xs))
+pub fn count(p, xs) = count_go(p, xs, 0)
+
+fn count_go(p, xs, acc) =
+  match xs of
+    Nil => acc
+    Cons(x, rest) => count_go(p, rest, if p(x) then acc + 1 else acc)
 
 -- | Helper for `position`: search from index `n`.
 pub fn position_go(p, n, xs) =
@@ -313,7 +330,7 @@ pub fn position(p, xs) = position_go(p, 0, xs)
 -- ```output
 -- Some(3)
 -- ```
-pub fn maximum(xs) =
+pub fn maximum(borrow xs) =
   match xs of
     Nil => None
     Cons(x, rest) => Some(foldl(max, x, rest))
@@ -326,7 +343,7 @@ pub fn maximum(xs) =
 -- ```output
 -- Some(1)
 -- ```
-pub fn minimum(xs) =
+pub fn minimum(borrow xs) =
   match xs of
     Nil => None
     Cons(x, rest) => Some(foldl(min, x, rest))
@@ -367,7 +384,13 @@ pub fn range(lo, hi) =
 -- ```output
 -- [0, 1, 4]
 -- ```
-pub fn tabulate(n, f) = map(f, range(0, n))
+pub fn tabulate(n, f) = tabulate_go(0, n, f)
+
+fn tabulate_go(i, n, f) =
+  if i >= n then
+    Nil
+  else
+    Cons(f(i), tabulate_go(i + 1, n, f))
 
 -- | Insert `x` into an already-ascending list, keeping it sorted.
 --
@@ -387,7 +410,7 @@ pub fn insert_sorted(x, xs) =
         Cons(y, insert_sorted(x, rest))
 
 -- | The first element as `Some`, or `None` (an `Option` view of the head).
-pub fn list_to_option(xs) =
+pub fn list_to_option(borrow xs) =
   match xs of
     Nil => None
     Cons(x, _) => Some(x)
@@ -400,7 +423,17 @@ pub fn list_to_option(xs) =
 -- ```output
 -- ([2, 3], [1])
 -- ```
-pub fn partition(p, xs) = (filter(p, xs), filter(\(x) -> not(p(x)), xs))
+pub fn partition(p, xs) =
+  match xs of
+    Nil => (Nil, Nil)
+    Cons(x, rest) =>
+      let keep = p(x)
+      match partition(p, rest) of
+        (yes, no) =>
+          if keep then
+            (Cons(x, yes), no)
+          else
+            (yes, Cons(x, no))
 
 -- | Break the list into consecutive chunks of up to `n` elements.
 --
@@ -416,7 +449,8 @@ pub fn chunks_of(n, xs) =
   elif is_nil(xs) then
     Nil
   else
-    Cons(take(n, xs), chunks_of(n, drop(n, xs)))
+    match split_at(n, xs) of
+      (chunk, rest) => Cons(chunk, chunks_of(n, rest))
 
 -- | Left scan: the running accumulators of `foldl`, starting from `z`.
 --

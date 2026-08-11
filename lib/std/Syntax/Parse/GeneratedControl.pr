@@ -2,11 +2,8 @@
 -- This module has no grammar-derived policy; generator output targets its stable API.
 
 import Data.List (..)
-
 import Syntax.Token (..)
-
 import Syntax.Cursor (..)
-
 import Syntax.Parse.Support (..)
 
 pub type GeneratedSeparatedPhase = GSRequiredFirst | GSInitial | GSAfterSeparator
@@ -17,20 +14,17 @@ pub fn generated_bind(
   parsed : Parsed(a),
   next : (a, Cursor) -> Parsed(b)
 ) : Parsed(b) =
-  match parsed of
-    PTook(value, c) => next(value, c)
-    PStuck(c) => PStuck(c)
-    PFault(d) => PFault(d)
+  let PTook(value, c) = parsed else parsed_refused(parsed)
+  next(value, c)
 
 pub fn generated_spend(
   c : Cursor,
   depth : Int,
   body : (Cursor, Int) -> Parsed(a)
 ) : Parsed(a) =
-  match descend(depth, c) of
-    PStuck(c1) => PStuck(c1)
-    PFault(d) => PFault(d)
-    PTook(d, c1) => body(c1, d)
+  let p1 = descend(depth, c)
+  let PTook(d, c1) = p1 else parsed_refused(p1)
+  body(c1, d)
 
 pub fn generated_repeat(
   c : Cursor,
@@ -39,10 +33,9 @@ pub fn generated_repeat(
   parse_item : (Cursor, Int) -> Parsed(a)
 ) : Parsed(List(a)) =
   if minimum > 0 then
-    match parse_item(c, depth) of
-      PTook(item, c1) => generated_repeat_more(c1, depth, parse_item, [item])
-      PStuck(c1) => PStuck(c1)
-      PFault(d) => PFault(d)
+    let p1 = parse_item(c, depth)
+    let PTook(item, c1) = p1 else parsed_refused(p1)
+    generated_repeat_more(c1, depth, parse_item, [item])
   else
     generated_repeat_more(c, depth, parse_item, Nil)
 

@@ -6,33 +6,33 @@ Generic operations over any `Foldable` container.
 
 Each function is a constrained free function, not a class default method: it is written once against the `Foldable(f)` class methods and works for every instance (`List`, `Option`, and any future container) without a per-type copy. Base includes this module, so these names are in scope unqualified everywhere and subsume the old `List`-only `sum`/`length`/etc.
 
-The folds are strict, so the short-circuiting versions (`all`, `any`, `find`, `elem`) still visit every element; for a pure predicate the result is identical to a left-to-right search. Every aggregation rides `fold_l`, which instances implement tail recursively, so a large container folds in constant stack on the native backend; only `to_list` uses `fold_r`, to build in order. Arithmetic has no `Num` class, so `sum` and `product` are fixed to `Int`, matching the operators `+` and `*`.
+The folds are strict, so the short-circuiting versions (`all`, `any`, `find`, `elem`) still visit every element; for a pure predicate the result is identical to a left-to-right search. Every aggregation rides `fold_l`, which instances implement tail recursively, so a large container folds in constant stack on the native backend; only `to_list` uses `fold_r`, to build in order. `sum` and `product` aggregate through the `Num` class, so they work at any numeric carrier (`Int`, `I64`, `U64`, `Float`); the literal seeds `0` and `1` adapt to the carrier the way any numeric literal does.
 
 ## Functions and Values
 
 ### `sum`
 
-```prism,sig,h-64f82de317aaedbde792027914eb35a25347cffeb110152e14f10f0ab5d3c2f3
-sum : forall a. (a(Int)) -> Int
+```prism,sig,h-fa63826a7518efdea8e4d39089f5ac3903a8be44cca78713ba42be7735ff7a79
+sum : forall a b. (a(b)) -> b given Foldable(a), Num(b)
 ```
 
-The sum of a container of ints (`0` when empty).
+The sum of a container of numbers (`0` when empty).
 
 ```prism,mod=Data.Foldable
-sum([1, 2, 3, 4])
+(sum([1, 2, 3, 4]), sum([1.5, 2.75]))
 ```
 
 ```output
-10
+(10, 4.25)
 ```
 
 ### `product`
 
-```prism,sig,h-91b90e20c2545dbf975512e34bfa5f07103e87419ca0e20dc53f277c268c794e
-product : forall a. (a(Int)) -> Int
+```prism,sig,h-0711fbe9b03e99dae6521a9ea873accbdfb0b54c641436bb7f51ab15f629ec87
+product : forall a b. (a(b)) -> b given Foldable(a), Num(b)
 ```
 
-The product of a container of ints (`1` when empty).
+The product of a container of numbers (`1` when empty).
 
 ```prism,mod=Data.Foldable
 product([1, 2, 3, 4])
@@ -45,7 +45,7 @@ product([1, 2, 3, 4])
 ### `length`
 
 ```prism,sig,h-cec46ea74d881f52185bf96112c88d947ee2e8fc76a9c83fe6bf21aeaa049be1
-length : forall a b. (a(b)) -> Int
+length : forall a b. (a(b)) -> Int given Foldable(a)
 ```
 
 The number of elements.
@@ -61,7 +61,7 @@ length([1, 2, 3])
 ### `is_empty`
 
 ```prism,sig,h-b89bad67d3a6bc0e4f918b911f6d3d8f2aa281bb5cefdc4d07dd7e0ce99e31b3
-is_empty : forall a b. (a(b)) -> Bool
+is_empty : forall a b. (a(b)) -> Bool given Foldable(a)
 ```
 
 True when the container has no elements.
@@ -77,7 +77,7 @@ false
 ### `all`
 
 ```prism,sig,h-60badfdd43432e8c06df0394867270f139c4c8804586bda79aced07747f6531c
-all : forall a b. ((a) -> Bool, b(a)) -> Bool
+all : forall a b. ((a) -> Bool, b(a)) -> Bool given Foldable(b)
 ```
 
 True when every element satisfies `p` (vacuously true when empty).
@@ -93,7 +93,7 @@ true
 ### `any`
 
 ```prism,sig,h-f50a9f10610bf6f0f45d5384815e1d8f816608b4be40c46738077c7cb292a666
-any : forall a b. ((a) -> Bool, b(a)) -> Bool
+any : forall a b. ((a) -> Bool, b(a)) -> Bool given Foldable(b)
 ```
 
 True when some element satisfies `p`.
@@ -109,7 +109,7 @@ true
 ### `find`
 
 ```prism,sig,h-b81bb2226c3931e1f010e10a6a0298513d8128f305f874a4591736bfac7dfd42
-find : forall a b. ((a) -> Bool, b(a)) -> Option(a)
+find : forall a b. ((a) -> Bool, b(a)) -> Option(a) given Foldable(b)
 ```
 
 The first element satisfying `p` as `Some` (leftmost match), or `None`.
@@ -125,7 +125,7 @@ Some(2)
 ### `elem`
 
 ```prism,sig,h-7c64d4f2a0a1a9d6059a48c97554e35b73539c7bd47a4bc40f81dcbe66912d48
-elem : forall a b. (a, b(a)) -> Bool
+elem : forall a b. (a, b(a)) -> Bool given Eq(a), Foldable(b)
 ```
 
 True when `x` is an element (`Eq`).
@@ -141,7 +141,7 @@ true
 ### `to_list`
 
 ```prism,sig,h-fd475483c34d0a3ea1fc8035dd5116997fcf6c0f951194c43b930a249fd0b0af
-to_list : forall a b. (a(b)) -> List(b)
+to_list : forall a b. (a(b)) -> List(b) given Foldable(a)
 ```
 
 The elements as a `List`, in fold order (`Option` yields zero or one).

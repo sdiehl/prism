@@ -45,12 +45,14 @@ pub fn mdbook_cmd(args: &[String], strict: bool) -> CmdResult {
 }
 
 // The modules to document, the roots that resolve their imports, the base to run
-// doctests from, the default output directory, and the index title.
+// doctests from, the default output directory, the index title, and its package
+// description (the generic project blurb for a loose directory or file).
 type DocsInput = (
     Vec<crate::ModuleSource>,
     Vec<crate::Root>,
     PathBuf,
     PathBuf,
+    String,
     String,
 );
 
@@ -89,9 +91,9 @@ pub fn docs_cmd(
             crate::stdlib_expect_files(),
         )
     } else {
-        let (modules, roots, base, default_out, title) = resolve_docs_input(path)?;
+        let (modules, roots, base, default_out, title, description) = resolve_docs_input(path)?;
         let files = crate::project_expect_files(&modules, &base);
-        let g = crate::project_pages(modules, &roots, &title)
+        let g = crate::docs::project_pages_with_description(modules, &roots, &title, &description)
             .map_err(|e| (e, String::new(), file_name(path)))?;
         (g, roots, base, default_out, files)
     };
@@ -283,14 +285,30 @@ pub(crate) fn resolve_docs_input(path: &Path) -> Result<DocsInput, (Error, Strin
         let modules = read_modules(&project.src_dir, &files, &project.root)?;
         let roots = crate::project_roots(&project.src_dir, &project.dep_src_dirs);
         let out = project.root.join("target").join("docs");
-        Ok((modules, roots, project.root.clone(), out, project.name))
+        Ok((
+            modules,
+            roots,
+            project.root.clone(),
+            out,
+            project.name,
+            project
+                .description
+                .unwrap_or_else(|| crate::docs::PROJECT_BLURB.to_string()),
+        ))
     } else if path.is_dir() {
         let files = glob_pr(path);
         let modules = read_modules(path, &files, path)?;
         let roots = crate::default_roots(path);
         let out = path.join("target").join("docs");
         let title = dir_title(path);
-        Ok((modules, roots, path.to_path_buf(), out, title))
+        Ok((
+            modules,
+            roots,
+            path.to_path_buf(),
+            out,
+            title,
+            crate::docs::PROJECT_BLURB.to_string(),
+        ))
     } else {
         let base = base_of(path);
         let modules = read_modules(&base, std::slice::from_ref(&path.to_path_buf()), &base)?;
@@ -300,7 +318,14 @@ pub(crate) fn resolve_docs_input(path: &Path) -> Result<DocsInput, (Error, Strin
             || "Documentation".into(),
             |s| s.to_string_lossy().into_owned(),
         );
-        Ok((modules, roots, base, out, title))
+        Ok((
+            modules,
+            roots,
+            base,
+            out,
+            title,
+            crate::docs::PROJECT_BLURB.to_string(),
+        ))
     }
 }
 

@@ -36,9 +36,9 @@ pub(crate) enum WfError {
 }
 
 impl WfError {
-    // Every variant shares one code, so `self` is unused today; the `&self`
-    // accessor keeps parity with every other error type's `.code()` and lets a
-    // future variant map to a distinct code without moving call sites.
+    // Every variant shares one code, so `self` is unused. Keeping `&self` matches
+    // every other error type's `.code()` accessor and permits distinct per-variant
+    // codes without changing call sites.
     #[allow(clippy::unused_self)]
     pub(crate) const fn code(&self) -> ErrorCode {
         SMT_LOGIC_WELLFORMED

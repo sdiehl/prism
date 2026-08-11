@@ -11,7 +11,7 @@
 /// to spell a symbol one of the others already defines.
 ///
 /// Detection is the wrong tool here: rejecting `fn bump` is a language
-/// regression, and a check against today's runtime symbol table would rot the
+/// regression, and a check against the current runtime symbol table would rot the
 /// moment the runtime gains a function. So the prefixes are chosen to make
 /// collision a *lexical impossibility*. Each is `prism` followed by a distinct
 /// character at index 5:

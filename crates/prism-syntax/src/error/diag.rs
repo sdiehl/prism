@@ -31,9 +31,8 @@ pub enum TypeError {
 /// One frame of an error's context stack: where the failure arose.
 ///
 /// Frames are pushed innermost-last as the error unwinds; the renderer shows them
-/// outermost-first as `in `...`:` prefixes. Structured (not a pre-rendered string)
-/// so a future renderer can present the descent as a list or use it for blame
-/// heuristics.
+/// outermost-first as `in `...`:` prefixes. Their structured form also supports
+/// list rendering and blame heuristics without reparsing text.
 #[derive(Debug, Clone)]
 pub enum Frame {
     /// Checking the body of the named top-level function or method.
@@ -587,6 +586,17 @@ pub enum ErrKind {
     #[error("cannot derive Lens for {ty}: `{ctor}` has no named fields")]
     LensNeedsNamedFields { ty: String, ctor: String },
     #[error(
+        "cannot derive Lens for {ty}: `{prior_ty}` derives Lens and also has a field \
+         `{field}`, so both would synthesize `{getter}` and `{setter}`"
+    )]
+    LensAccessorCollision {
+        ty: String,
+        prior_ty: String,
+        field: String,
+        getter: String,
+        setter: String,
+    },
+    #[error(
         "cannot derive Stable for {ty}: {field} has type `{field_ty}`, which is not Stable. \
          A frozen format cannot contain a value that is not itself serializable."
     )]
@@ -903,6 +913,7 @@ impl ErrKind {
             Self::PlateNotTraversable { .. } => "E6070",
             Self::LensNeedsRecord { .. } => "E6019",
             Self::LensNeedsNamedFields { .. } => "E6020",
+            Self::LensAccessorCollision { .. } => "E6072",
             Self::StableFieldNotStable { .. } => "E6021",
             Self::EmptyInterpolation { .. } => "E6022",
             Self::StableNeedsClass { .. } => "E6023",
@@ -1001,7 +1012,7 @@ impl TypeError {
     }
 
     /// The stable diagnostic code, when the error comes from the structured
-    /// catalogue ([`ErrKind`]); `None` for the transitional/legacy variants.
+    /// catalogue ([`ErrKind`]); `None` for unstructured legacy variants.
     #[must_use]
     pub const fn code(&self) -> Option<&'static str> {
         match self {
@@ -1275,6 +1286,13 @@ mod tests {
             PlateNotTraversable { ty, field, reached },
             LensNeedsRecord { ty },
             LensNeedsNamedFields { ty, ctor },
+            LensAccessorCollision {
+                ty,
+                prior_ty,
+                field,
+                getter,
+                setter
+            },
             StableFieldNotStable {
                 ty,
                 field,

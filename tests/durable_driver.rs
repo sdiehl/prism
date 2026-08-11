@@ -202,15 +202,15 @@ fn durable_resume_is_byte_identical_to_uninterrupted() {
         );
         assert_eq!(run2.exit, None);
 
-        // Gate: the resumed committed trace equals the uninterrupted trace.
+        // The resumed committed trace equals the uninterrupted trace.
         assert_eq!(
             committed_frames(&log).unwrap(),
             ref_frames,
             "{crash_at}: resumed trace equals the uninterrupted trace"
         );
 
-        // Gate: every output fires exactly once across the crash. A replayed prefix
-        // output is dropped (never re-emitted), so the two runs' streamed output
+        // Every output fires exactly once across the crash. A replayed prefix output
+        // is dropped (never re-emitted), so the two runs' streamed output
         // concatenates to exactly one uninterrupted run's.
         let mut joined = crashed_out.clone();
         joined.extend_from_slice(&resumed_out);

@@ -7,15 +7,12 @@
 -- `replay`.
 
 import Data.List (..)
-
 import Data.String (..)
-
 -- A raw byte read (`fs_read_bytes`) has no valid-UTF-8 string form, so it rides
 -- the trace as a `TStr` carrying lowercase hex (byte-identical to the interpreter
 -- recorder's frame). `hex_encode`/`hex_decode` and the `Buf` <-> `Bytes` seam do
 -- that conversion; no new trace tag is needed.
 import Data.Bytes (hex_encode, hex_decode)
-
 import Wire (bytes_of_buf, bytes_buf)
 
 type TraceEntry

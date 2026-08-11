@@ -14,8 +14,8 @@ Shrinking is intentionally omitted. The seam is the seed and size carried on a f
 
 ### `Gen`
 
-```prism,def,h-b14e25b2e371fb55daa22b7a2d5327058f6d6a0387796c4aa551dea6207b8a82
-type Gen(a) = Gen((Int) -> a ! {Random})
+```prism,def,h-ecb58e20c3e28430d72cc207dff81abc783ae9722c85cbed60963a4de2e0ee40
+newtype Gen(a) = Gen((Int) -> a ! {Random})
 ```
 
 A seeded, sized generator of `a`. Apply it with `gen_run`; build one with the combinators below. The size bounds recursive shapes (list length, tree depth); make it explicit so derived instances for recursive types stay finite.
@@ -417,7 +417,7 @@ true
 ### `show_outcome`
 
 ```prism,sig,h-020e309e97e3467d09953557c2845bf8ada69b09788bd563bbf9087107d04fac
-show_outcome : forall a. (String, Quickcheck.Outcome(a)) -> String
+show_outcome : forall a. (String, Quickcheck.Outcome(a)) -> String given Show(a)
 ```
 
 Render an outcome for `name` as one report line (pass) or a block naming the counterexample and the seed and size that reproduce it.

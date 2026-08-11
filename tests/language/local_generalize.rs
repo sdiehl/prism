@@ -1,11 +1,10 @@
-// Checks the current, deliberate limit on local `let` generalization:
+// Checks the deliberate limit on local `let` generalization:
 // `generalize` quantifies free type/row existentials but never class
 // constraints, and there is no surface syntax for a constraint on a `let`. So a
 // local binding whose body incurs a dictionary obligation over a variable it
 // would generalize cannot carry that obligation, and the orphaned constraint
-// surfaces as the standard unresolved-constraint diagnostic. This is not a bug
-// to fix here (constraint generalization is out of scope); the test exists so a
-// future change that alters the behavior is noticed and re-decided on purpose.
+// surfaces as the standard unresolved-constraint diagnostic. The test pins the
+// rejection so constraint evidence cannot be dropped silently.
 
 use prism::Error;
 
@@ -37,22 +36,22 @@ fn constrained_local_binding_is_rejected() {
     );
 }
 
-// The obligation is orphaned by generalization, not by a missing annotation:
-// annotating the parameter's type does not rescue the binding. Checking this
-// guards against a future reader "fixing" the test with an annotation and
-// concluding the limitation is gone.
+// Re-decided when lambda parameter annotations began feeding inference: with
+// `x : Int` honored, the obligation is the ground `Show Int`, discharged at the
+// binding like the fully applied case below, so no constraint is orphaned and
+// the binding checks. The rejection above stays the pin on the real limit,
+// which is generalizing over a constrained variable, not annotating one.
+// (Before that change the annotation was silently dropped, so this program
+// pinned the accident rather than a policy.)
 const ANNOTATED_LOCAL: &str = r"fn main() =
   let f = \(x : Int) -> show(x)
   println(f(1))
 ";
 
 #[test]
-fn annotation_does_not_rescue_constrained_local() {
+fn annotation_grounds_the_local_constraint() {
     let src = prism::with_prelude(ANNOTATED_LOCAL);
-    assert!(
-        prism::check(&src).is_err(),
-        "annotating the parameter must not make a constrained local binding check"
-    );
+    prism::check(&src).expect("a ground annotated obligation must discharge at the binding");
 }
 
 // The contrast: a fully applied class method (no local generalized function)

@@ -12,7 +12,7 @@ The pair is written out rather than derived, and the reason is the span. `derivi
 
 ### `expr_children`
 
-```prism,sig,h-8c68b6545a61ee7263957ae3d6bf8f431ffaecf9fc39398280b891e4e8bff2fe
+```prism,sig,h-8874debd28c911ce06854fb1d7c3371e2509d4eab853b3b30f2ab5326dacbae6
 expr_children : (Syntax.Ast.Sp(Syntax.Ast.Expr)) -> List(Syntax.Ast.Sp(Syntax.Ast.Expr))
 ```
 
@@ -20,7 +20,7 @@ The immediate `Expr` children of one node, in source order. Children held inside
 
 ### `expr_rebuild`
 
-```prism,sig,h-2b11a21e1a21ab997e7fd9ba0918a598022bba41415a140473c5bed5e4d9dbbc
+```prism,sig,h-4e746bfc41294a0d9bd997471819f7aabdb0aebfeab836f8123c188ef5d55c4b
 expr_rebuild : (Syntax.Ast.Sp(Syntax.Ast.Expr), List(Syntax.Ast.Sp(Syntax.Ast.Expr))) -> Syntax.Ast.Sp(Syntax.Ast.Expr)
 ```
 
@@ -30,7 +30,7 @@ This is the inverse half of `expr_children`, and the pair is everything a generi
 
 ### `expr_layer`
 
-```prism,sig,h-7c9ae5f1dbef8b78d580e27ccb1ef1c665d936977d4a283c0ab2b025891fa4ec
+```prism,sig,h-0688a5e33afc3640a4895d9cf68cd45f938f6102f240c0d90789bde3ea5bd181
 expr_layer : () -> Control.Layer.Layer(Syntax.Ast.Sp(Syntax.Ast.Expr))
 ```
 
@@ -38,7 +38,7 @@ The children-and-rebuild pair for spanned expressions, which is what every strat
 
 ### `expr_universe`
 
-```prism,sig,h-4f35a643e0958afba79e2faa60d72811c49e251e3054fa5be8625c945a2f25ac
+```prism,sig,h-254bf991be5962df08fa46aaf8b22d7cde85a8de6461354345649768bfb6b525
 expr_universe : (Syntax.Ast.Sp(Syntax.Ast.Expr)) -> List(Syntax.Ast.Sp(Syntax.Ast.Expr))
 ```
 
@@ -62,7 +62,7 @@ A span-zero literal, a convenience for building test trees.
 
 ### `expr_count`
 
-```prism,sig,h-8e4d14df20bee5a7bd0ec3cd2fa72d7aeb30eafd1a0caf4b90c9371319d0e63d
+```prism,sig,h-c1216e343d487075821a8d63fcf3a14c43f501d4ad7ebe6f5b02cb58def68340
 expr_count : (Syntax.Ast.Sp(Syntax.Ast.Expr)) -> Int
 ```
 
@@ -70,7 +70,7 @@ The number of nodes in the tree.
 
 ### `expr_any`
 
-```prism,sig,h-d6c109d729f07219e3a7d2db619446f228c468cf29d9bfdf16229f5163481657
+```prism,sig,h-37b2acb9a509570bcc260e9f08ede69fcf69367760ae720610b86a160cec85ca
 expr_any : ((Syntax.Ast.Sp(Syntax.Ast.Expr)) -> Bool, Syntax.Ast.Sp(Syntax.Ast.Expr)) -> Bool
 ```
 
@@ -78,7 +78,7 @@ Whether any node satisfies the predicate.
 
 ### `expr_fold`
 
-```prism,sig,h-cbc4efea868674b0c0b7c4b7be028fe1eacb0ff285921c342febe655d9dbf711
+```prism,sig,h-de767fe84c7747ce85a3213b3bbcf37aae92fad023fc23f5be913d46b1bfb803
 expr_fold : forall e0 a. ((a, Syntax.Ast.Sp(Syntax.Ast.Expr)) -> a ! {e0}, a, Syntax.Ast.Sp(Syntax.Ast.Expr)) -> a ! {e0}
 ```
 

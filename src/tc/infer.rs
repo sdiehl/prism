@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::{mem, slice};
 
 use marginalia::Span;
 
-use super::env::collect_type_vars;
+use super::env::{collect_type_vars, demand_var_kinds};
 use super::{
     EffectOperationUses, Entry, Env, HandlerFrame, HoleSite, IndexOp, OperationUses, RowScope, Tc,
     Wanted,
@@ -19,8 +20,9 @@ use crate::wired::Indexable;
 
 // Red zone / segment size for the checker's per-node recursion, matching the
 // desugar and typed-Core-builder guards.
-const TC_MIN_STACK: usize = 4 * 1024 * 1024;
-const TC_GROW_STACK: usize = 8 * 1024 * 1024;
+const MEBIBYTE: usize = 1024 * 1024;
+const TC_MIN_STACK: usize = 4 * MEBIBYTE;
+const TC_GROW_STACK: usize = 8 * MEBIBYTE;
 
 mod decl;
 mod defaulting;
@@ -137,6 +139,24 @@ impl Tc<'_> {
         self.with_tooltip_row(e.id, e.span, |tc| tc.check_node(env, e, ty))
     }
 
+    // The type an explicit annotation on a lambda parameter denotes, if it has
+    // one. A written annotation is the author's word about the binding and is
+    // honoured in both directions: inferring, it replaces the fresh existential
+    // the parameter would otherwise get; checking, it is what the body sees,
+    // with the expected domain held to it. The conversion is exactly the one a
+    // mid-body ascription uses, so a type variable named here is local to the
+    // annotation and does not capture an enclosing signature's rigid variable,
+    // matching what `(e : T)` already does.
+    fn param_annot(&mut self, p: &ast::Param<Core>, span: Span) -> Result<Option<Type>, TypeError> {
+        let Some(ann) = &p.ty else {
+            return Ok(None);
+        };
+        self.check_annot_rows(ann, span)?;
+        let mut var_kinds = BTreeMap::new();
+        demand_var_kinds(ann, self.data, &mut var_kinds, span)?;
+        Ok(Some(self.convert_annot_fresh(ann)))
+    }
+
     fn check_node(&mut self, env: &Env, e: &S<Expr<Core>>, ty: &Type) -> Result<(), TypeError> {
         // Checking recurses per surface node, so a long statement block (a
         // right-nested `Let` chain) is deep recursion; grow stack segments
@@ -182,7 +202,27 @@ impl Tc<'_> {
             (Expr::Lam(ps, body), Type::Fun(doms, eff, ret)) if ps.len() == doms.len() => {
                 let mut env2 = env.clone();
                 for (p, d) in ps.iter().zip(doms.iter()) {
-                    env2.insert(Sym::from(&p.name), d.clone());
+                    // With both an annotation and an expected domain in hand the
+                    // body binds at the annotation, and the domain is held to it.
+                    // The direction is contravariant and only looks reversible:
+                    // the caller supplies the domain's values while the body reads
+                    // them at the annotation, so every domain value must be usable
+                    // as the annotation, never the other way round.
+                    let bound = match self.param_annot(p, span)? {
+                        Some(ann) => {
+                            let d = self.apply(d);
+                            self.subtype(&d, &ann).map_err(|e| {
+                                e.or(TypeError::TypeMismatch {
+                                    span,
+                                    expected: ann.show(),
+                                    found: d.show(),
+                                })
+                            })?;
+                            ann
+                        }
+                        None => d.clone(),
+                    };
+                    env2.insert(Sym::from(&p.name), bound);
                 }
                 // Scope the body's effects into the expected arrow row: its fixed
                 // labels become the prefix (so a body that performs them adds
@@ -210,7 +250,7 @@ impl Tc<'_> {
                 // The exception is a thunk row explicitly tied to the ambient by
                 // an operation signature (`fork`-style): invoking that operation
                 // may run the thunk, so those uses belong to the perform site.
-                let outer_uses = std::mem::take(&mut self.operation_uses);
+                let outer_uses = mem::take(&mut self.operation_uses);
                 let checked = self.with_row_scope(
                     RowScope {
                         tail,
@@ -219,7 +259,7 @@ impl Tc<'_> {
                     },
                     |tc| tc.check(&env2, body, ret),
                 );
-                let latent_uses = std::mem::take(&mut self.operation_uses);
+                let latent_uses = mem::take(&mut self.operation_uses);
                 self.assert_uses_drained();
                 self.operation_uses = outer_uses;
                 if propagate_latent_uses {
@@ -345,7 +385,7 @@ impl Tc<'_> {
                 Ok(())
             }
             _ => {
-                let a = self.synth(env, e)?;
+                let a = self.synth_expecting(env, e, Some(ty))?;
                 let a = self.apply(&a);
                 let b = self.apply(ty);
                 self.subtype(&a, &b).map_err(|e| {
@@ -360,7 +400,22 @@ impl Tc<'_> {
     }
 
     pub(super) fn synth(&mut self, env: &Env, e: &S<Expr<Core>>) -> Result<Type, TypeError> {
-        let t = self.with_tooltip_row(e.id, e.span, |tc| tc.synth_node(env, e))?;
+        self.synth_expecting(env, e, None)
+    }
+
+    // Synthesize `e`'s type with what the surrounding context expects carried
+    // alongside. Only the application rule consults it, and only to solve the
+    // callee's own type arguments before the call's arguments are checked; every
+    // other form ignores it and synthesizes exactly as before. The expectation is
+    // a hint, never an obligation: what it means for the node to have the wrong
+    // type is still decided by the one subsumption the checker already performs.
+    fn synth_expecting(
+        &mut self,
+        env: &Env,
+        e: &S<Expr<Core>>,
+        expected: Option<&Type>,
+    ) -> Result<Type, TypeError> {
+        let t = self.with_tooltip_row(e.id, e.span, |tc| tc.synth_node(env, e, expected))?;
         self.pending.push((e.id, t.clone()));
         Ok(t)
     }
@@ -465,15 +520,25 @@ impl Tc<'_> {
         Ok(())
     }
 
-    fn synth_node(&mut self, env: &Env, e: &S<Expr<Core>>) -> Result<Type, TypeError> {
+    fn synth_node(
+        &mut self,
+        env: &Env,
+        e: &S<Expr<Core>>,
+        expected: Option<&Type>,
+    ) -> Result<Type, TypeError> {
         // See `check_node`: the same per-node recursion depth applies on the
         // synthesis path.
         stacker::maybe_grow(TC_MIN_STACK, TC_GROW_STACK, || {
-            self.synth_node_inner(env, e)
+            self.synth_node_inner(env, e, expected)
         })
     }
 
-    fn synth_node_inner(&mut self, env: &Env, e: &S<Expr<Core>>) -> Result<Type, TypeError> {
+    fn synth_node_inner(
+        &mut self,
+        env: &Env,
+        e: &S<Expr<Core>>,
+        expected: Option<&Type>,
+    ) -> Result<Type, TypeError> {
         let span = e.span;
         let id = e.id;
         match &e.node {
@@ -568,16 +633,20 @@ impl Tc<'_> {
                 let mut env2 = env.clone();
                 let mut doms = Vec::new();
                 for p in ps {
-                    let ex = self.push_ex();
-                    env2.insert(Sym::from(&p.name), Type::Exist(ex));
-                    doms.push(Type::Exist(ex));
+                    // An annotated parameter is already known; only an unannotated
+                    // one needs an existential to be solved from its uses.
+                    let dom = self
+                        .param_annot(p, span)?
+                        .unwrap_or_else(|| Type::Exist(self.push_ex()));
+                    env2.insert(Sym::from(&p.name), dom.clone());
+                    doms.push(dom);
                 }
                 let ret = self.push_ex();
                 // A lambda delimits its own effect row: its body's effects are
                 // captured on the arrow type, not bled into the enclosing
                 // function, and re-emerge only when the closure is applied.
                 let row = self.push_ex_row();
-                let outer_uses = std::mem::take(&mut self.operation_uses);
+                let outer_uses = mem::take(&mut self.operation_uses);
                 let checked = self.with_row_scope(
                     RowScope {
                         tail: row,
@@ -586,7 +655,7 @@ impl Tc<'_> {
                     },
                     |tc| tc.check(&env2, body, &Type::Exist(ret)),
                 );
-                let _latent_uses = std::mem::take(&mut self.operation_uses);
+                let _latent_uses = mem::take(&mut self.operation_uses);
                 self.assert_uses_drained();
                 self.operation_uses = outer_uses;
                 checked?;
@@ -645,8 +714,14 @@ impl Tc<'_> {
                             let fty = self.perform_ty(&info, span)?;
                             let mut direct = OperationUses::default();
                             direct.insert(info.effect_name, Sym::from(x));
-                            let result =
-                                self.app_synth_with_uses(env, &fty, args, span, Some(&direct));
+                            let result = self.app_synth_with_uses(
+                                env,
+                                &fty,
+                                args,
+                                span,
+                                Some(&direct),
+                                expected,
+                            );
                             // A free signature row is an interface boundary. Its
                             // concrete thunk uses (when the argument is a lambda)
                             // were merged above, but a closure value can hide any
@@ -672,7 +747,7 @@ impl Tc<'_> {
                     Expr::Var(name) => self.precise_call(env, name),
                     _ => None,
                 };
-                self.app_synth_with_uses(env, &tf, args, span, precise.as_ref())
+                self.app_synth_with_uses(env, &tf, args, span, precise.as_ref(), expected)
             }
             Expr::Pipe(x, f) => {
                 let tf = self.synth(env, f)?;
@@ -681,7 +756,14 @@ impl Tc<'_> {
                     Expr::Var(name) => self.precise_call(env, name),
                     _ => None,
                 };
-                self.app_synth_with_uses(env, &tf, std::slice::from_ref(x), span, precise.as_ref())
+                self.app_synth_with_uses(
+                    env,
+                    &tf,
+                    slice::from_ref(x),
+                    span,
+                    precise.as_ref(),
+                    expected,
+                )
             }
             Expr::Match(s, arms) => {
                 let ts = self.synth(env, s)?;
@@ -733,7 +815,11 @@ impl Tc<'_> {
                                 field: field.clone(),
                                 ctor: te.show(),
                             }
-                            .at(span));
+                            .at(span)
+                            .maybe_help(suggest::suggestion(
+                                field,
+                                fs.iter().map(|(n, _)| n.as_str()),
+                            )));
                         };
                         // Record the field's position and the record arity so
                         // elaboration can lower the projection to a positional
@@ -780,8 +866,8 @@ impl Tc<'_> {
             Expr::Mask(eff, body) => self.synth_mask(env, eff, body, span),
             Expr::Ann(inner, ann) => {
                 self.check_annot_rows(ann, span)?;
-                let mut var_kinds = std::collections::BTreeMap::new();
-                super::env::demand_var_kinds(ann, self.data, &mut var_kinds, span)?;
+                let mut var_kinds = BTreeMap::new();
+                demand_var_kinds(ann, self.data, &mut var_kinds, span)?;
                 let t = self.convert_annot_fresh(ann);
                 self.check(env, inner, &t)?;
                 Ok(self.apply(&t))
@@ -861,7 +947,7 @@ impl Tc<'_> {
                 msg: format!("handler node {} checked more than once", id.0),
             });
         }
-        let outer_uses = std::mem::take(&mut self.operation_uses);
+        let outer_uses = mem::take(&mut self.operation_uses);
         let mut scope = Vec::new();
         let mut seen = BTreeSet::new();
         for arm in arms {
@@ -927,7 +1013,11 @@ impl Tc<'_> {
                         return Err(ErrKind::UnknownEffectOp {
                             op: op_name.clone(),
                         }
-                        .at(span));
+                        .at(span)
+                        .maybe_help(suggest::suggestion(
+                            op_name,
+                            self.eff_ops.keys().map(|k| names::bare_name(k)),
+                        )));
                     }
                 }
                 #[expect(
@@ -937,7 +1027,7 @@ impl Tc<'_> {
                 HandlerArm::Sugar(never) => match *never {},
             }
         }
-        let residual = std::mem::take(&mut self.operation_uses);
+        let residual = mem::take(&mut self.operation_uses);
         let handled = self.handled_operations(arms);
         let forwarded_operations = body_residual
             .by_effect
@@ -1152,7 +1242,7 @@ impl Tc<'_> {
         args: &[S<Expr<Core>>],
         span: Span,
     ) -> Result<Type, TypeError> {
-        self.app_synth_with_uses(env, fty, args, span, None)
+        self.app_synth_with_uses(env, fty, args, span, None, None)
     }
 
     fn app_synth_with_uses(
@@ -1162,17 +1252,18 @@ impl Tc<'_> {
         args: &[S<Expr<Core>>],
         span: Span,
         precise: Option<&OperationUses>,
+        expected: Option<&Type>,
     ) -> Result<Type, TypeError> {
         match fty {
             Type::Forall(n, b) => {
                 let ex = self.push_ex();
                 let b2 = b.subst_var(*n, &Type::Exist(ex));
-                self.app_synth_with_uses(env, &b2, args, span, precise)
+                self.app_synth_with_uses(env, &b2, args, span, precise, expected)
             }
             Type::RowForall(n, b) => {
                 let r = self.push_ex_row();
                 let b2 = b.subst_row_var(*n, &EffRow::Exist(r));
-                self.app_synth_with_uses(env, &b2, args, span, precise)
+                self.app_synth_with_uses(env, &b2, args, span, precise, expected)
             }
             // Applying a usage-annotated closure strips the multiplicity and
             // applies its inner function. The call rule intentionally defers the
@@ -1183,7 +1274,9 @@ impl Tc<'_> {
             // the delegation direction (a `@ once` value handed to a `@ many`
             // slot), via the contravariant `check_mult` in `subtype`; direct reuse
             // is left entirely to the linear-use pass, its sole authority.
-            Type::Coeffect(inner, _) => self.app_synth_with_uses(env, inner, args, span, precise),
+            Type::Coeffect(inner, _) => {
+                self.app_synth_with_uses(env, inner, args, span, precise, expected)
+            }
             Type::Exist(a) => {
                 let ret = self.fresh_id();
                 let row = self.fresh_id();
@@ -1211,6 +1304,32 @@ impl Tc<'_> {
                         got: args.len(),
                     }
                     .at(span));
+                }
+                // Solve the result against the context before checking any
+                // argument. The callee's own type arguments appear in its result
+                // as well as its domains, so a signature like
+                // `((s) -> a, (s, a) -> s) -> Lens(s, a)` has `s` and `a` fixed
+                // by the expected type, and an annotation-free lambda argument
+                // then checks against a known domain instead of an existential
+                // nothing later can solve. This only ever adds information, and
+                // adds it earlier: the arguments are still checked afterwards, in
+                // the same order, against the same subsumption.
+                //
+                // Only a saturated call qualifies. A partial application's result
+                // is the residual arrow, not the callee's return type, so
+                // equating it with the context would constrain the wrong thing.
+                if let Some(want) = expected {
+                    if args.len() == doms.len() {
+                        let got = self.apply(r);
+                        let want = self.apply(want);
+                        self.subtype(&got, &want).map_err(|e| {
+                            e.or(TypeError::TypeMismatch {
+                                span,
+                                expected: want.show(),
+                                found: got.show(),
+                            })
+                        })?;
+                    }
                 }
                 // Check non-lambda arguments before lambda ones: a concrete
                 // argument can solve type variables a sibling lambda's body
@@ -1266,11 +1385,11 @@ impl Tc<'_> {
         let scheme = self.synth(env, f)?;
         let scheme = self.apply(&scheme);
         let Type::Forall(n, body) = &scheme else {
-            return self.app_synth(env, &scheme, std::slice::from_ref(arg), span);
+            return self.app_synth(env, &scheme, slice::from_ref(arg), span);
         };
         let ex = self.push_ex();
         let fun = body.subst_var(*n, &Type::Exist(ex));
-        let res = self.app_synth(env, &fun, std::slice::from_ref(arg), span)?;
+        let res = self.app_synth(env, &fun, slice::from_ref(arg), span)?;
         let at = self.apply(&Type::Exist(ex));
         let mut vars = BTreeSet::new();
         collect_type_vars(&at, &mut vars);
@@ -1434,9 +1553,9 @@ impl Tc<'_> {
             }
             .at(span));
         }
-        let outer_uses = std::mem::take(&mut self.operation_uses);
+        let outer_uses = mem::take(&mut self.operation_uses);
         let body_ty = self.synth(env, body);
-        let mut body_uses = std::mem::take(&mut self.operation_uses);
+        let mut body_uses = mem::take(&mut self.operation_uses);
         self.assert_uses_drained();
         self.operation_uses = outer_uses;
         let t = body_ty?;
@@ -1481,7 +1600,7 @@ impl Tc<'_> {
         mode: HandlerMode,
         span: Span,
     ) -> Result<(Type, OperationUses), TypeError> {
-        let handler_uses = std::mem::take(&mut self.operation_uses);
+        let handler_uses = mem::take(&mut self.operation_uses);
         let body_row = self.push_ex_row();
         // A handler scopes a fresh ambient tail for its body but keeps the
         // enclosing fixed prefix.
@@ -1510,7 +1629,7 @@ impl Tc<'_> {
         let body_ty = self.in_row_scope(scope, |tc| tc.synth(env, body));
         let frame = self.handler_stack.pop().expect("handler frame");
         self.cur_row = saved_row;
-        let mut body_uses = std::mem::take(&mut self.operation_uses);
+        let mut body_uses = mem::take(&mut self.operation_uses);
         self.assert_uses_drained();
         self.operation_uses = handler_uses;
         let body_ty = self.apply(&body_ty?);

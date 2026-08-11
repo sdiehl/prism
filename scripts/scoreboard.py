@@ -110,15 +110,17 @@ ROWS = [
             if ratio is None
             else f"{'met' if ratio <= PARSER_RATIO else 'FAILED'} at {ratio:.2f}."
             " The pre-registered bet was that the library floor had absorbed the"
-            " plumbing; the measured gap says it has not, and it decomposes into"
-            " named causes rather than standing as an adjective: every"
-            " sequencing point is a spelled-out three-way match because the"
-            " effect-styled formulation measurably lowers the whole program at"
-            " the free-monad tier (the thunk-evidence gap), the language has no"
-            " early-return binding form to collapse that threading, and the"
-            " generated side never pays line by line for the productions its"
-            " tables derive. The first two are compiler work with this parser as"
-            " their first customer; the row is re-judged when they land"
+            " plumbing. The first judgment decomposed the gap into three named"
+            " causes, and the two that were compiler work have landed: the"
+            " sequencing rewrite and the `let ... else` early-return binding"
+            " form, which the parser now uses throughout. Rewriting the parser"
+            " onto them removed 1,002 code lines, fourteen percent, while the"
+            " same release grew the Rust side by 279 lines of new surface"
+            " syntax, so the ratio fell from 4.31 at v0.17.0. The residual gap"
+            " stands on the remaining cause, that the generated side never pays"
+            " line by line for the productions its tables derive. No further"
+            " compiler work is pre-registered against this row; it stays failed"
+            " rather than re-excused"
         ),
         cost="measured, in the table above; a second receipt reproduced every ratio within noise",
     ),

@@ -1,0 +1,20 @@
+-- Codepoints on every UTF-8 width boundary, built with chr and pushed through
+-- a handled effect. 0x7F/0x80 is the 1-to-2 byte seam, 0x7FF/0x800 the 2-to-3,
+-- 0xFFFF/0x10000 the 3-to-4; a tier that measures, copies, or hashes strings
+-- by bytes in one lowering and by codepoints in another diverges exactly here.
+effect Probe
+  observe(String) : Unit
+
+fn seams() : Unit ! {Probe} =
+  observe("{chr(127)}{chr(128)}")
+  observe("{chr(2047)}{chr(2048)}")
+  observe("{chr(65535)}{chr(65536)}")
+
+fn main() =
+  let run =
+    handle seams() with
+      observe(s) resume k => \(acc) -> k(())(Cons(str_len(s), acc))
+      return _r => \(acc) -> acc
+  let lens = reverse(run(Nil))
+  println(lens)
+  println(sum(lens))

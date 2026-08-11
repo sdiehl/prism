@@ -1,6 +1,9 @@
 use std::fmt::Write;
 
-use super::call::{call_shape, callee_parens, dot_recv_parens, is_with_call, paren_if, CallShape};
+use super::call::{
+    call_shape, callee_parens, dot_recv_parens, is_with_call, paren_if, state_assign_parts,
+    CallShape,
+};
 use super::decl::fmt_ty;
 use super::lit::{escape_str, fmt_char, fmt_float};
 use super::ops::{
@@ -11,6 +14,7 @@ use super::{
     tuple_parens, BinOp, Expr, Fmt, Marker, Mode, PathOp, PathStep, Qualifier, Sugar, Surface, S,
 };
 use crate::kw;
+use crate::names;
 
 // The shared shape of `as_compound_assign`/`as_index_compound`: a synth
 // `Bin(op, lhs, rhs)` with a compound-eligible op whose `lhs` matches the
@@ -38,6 +42,88 @@ pub(super) fn as_compound_assign<'a>(x: &str, v: &'a S<Expr>) -> Option<(BinOp, 
 // non-synth `Bin`) keeps its explicit `:=` form.
 fn as_index_compound(v: &S<Expr>) -> Option<(BinOp, &S<Expr>)> {
     as_compound(v, |lhs| matches!(lhs, Expr::Index(..)))
+}
+
+// The path analogue of `as_compound_assign`: the synth `\(focus@) -> focus@ <op> rhs`
+// modifier that `compound_path_op` builds, so the formatter restores `p <op>= rhs`.
+// A hand-written modifier lambda (non-synth) keeps its explicit `~` form.
+fn as_path_compound(v: &S<Expr>) -> Option<(BinOp, &S<Expr>)> {
+    if !v.synth {
+        return None;
+    }
+    let Expr::Lam(ps, body) = &v.node else {
+        return None;
+    };
+    if ps.len() != 1 || ps[0].name != names::PATH_FOCUS {
+        return None;
+    }
+    as_compound(
+        body,
+        |lhs| matches!(lhs, Expr::Var(n) if n == names::PATH_FOCUS),
+    )
+}
+
+// A synth `x := { x | steps op }` built from a statement path lvalue; decoded
+// so the statement surface (`x.a[i].b := e` / `x.a[i].b <op>= e`) is restored.
+// A hand-written `x := { x | ... }` brace is non-synth and keeps its form.
+fn as_path_assign<'a>(x: &str, v: &'a S<Expr>) -> Option<(&'a [PathStep], &'a PathOp)> {
+    if !v.synth {
+        return None;
+    }
+    let Expr::RecordUpdatePath(base, ups) = &v.node else {
+        return None;
+    };
+    if !matches!(&base.node, Expr::Var(n) if n == x) {
+        return None;
+    }
+    let [(steps, op)] = ups.as_slice() else {
+        return None;
+    };
+    Some((steps, op))
+}
+
+// The statement spelling of a restored path terminal: `<op>=` for the synth
+// read-then-set a statement compound builds (a synth `Bin` whose left side is
+// the lvalue re-read, the same shape `a[i] += e` restores from), `:=` for any
+// other set. A synth modifier that is not compound-shaped has no statement
+// surface (nothing builds one), so the caller falls back.
+fn stmt_op_surface(op: &PathOp) -> Option<(String, &S<Expr>)> {
+    match op {
+        PathOp::Set(e) => {
+            let compound = as_compound(e, |lhs| {
+                matches!(lhs, Expr::FieldAccess(..) | Expr::Index(..))
+            });
+            Some(match compound {
+                Some((op, rhs)) => (format!("{}=", op.spelling()), rhs),
+                None => (kw::COLON_EQ.to_string(), e),
+            })
+        }
+        PathOp::Modify(e) => {
+            as_path_compound(e).map(|(op, rhs)| (format!("{}=", op.spelling()), rhs))
+        }
+    }
+}
+
+// A leading index step attaches to the root with no dot (`x[i].hp`), a field
+// step follows a dot (`x.hp`).
+const fn stmt_dot(steps: &[PathStep]) -> &'static str {
+    if matches!(steps.first(), Some(PathStep::Index(_))) {
+        ""
+    } else {
+        kw::DOT
+    }
+}
+
+// The surface spelling of a path update's terminal: `=`, `~`, or the restored
+// compound `<op>=`, paired with the expression printed after it.
+pub(super) fn path_op_surface(op: &PathOp) -> (String, &S<Expr>) {
+    match op {
+        PathOp::Set(e) => (kw::EQ.to_string(), e),
+        PathOp::Modify(e) => match as_path_compound(e) {
+            Some((op, rhs)) => (format!("{}=", op.spelling()), rhs),
+            None => (kw::TILDE.to_string(), e),
+        },
+    }
 }
 
 impl Fmt<'_> {
@@ -117,6 +203,31 @@ impl Fmt<'_> {
             out.push_str(text);
         }
         Some(out)
+    }
+
+    // The restored statement form of a synth path assignment
+    // (`x.a[i].b := e` / `x.a[i].b <op>= e`), or `None` when the value is not
+    // one; the caller then falls back to the plain `:=` print.
+    pub(super) fn fmt_path_assign(&self, x: &str, v: &S<Expr>) -> Option<String> {
+        let (steps, op) = as_path_assign(x, v)?;
+        let path = self.fmt_path(steps)?;
+        let (sigil, rhs) = stmt_op_surface(op)?;
+        let rhs_s = self.fmt_expr_inline(rhs, Mode::Flat)?;
+        Some(format!("{x}{}{path} {sigil} {rhs_s}", stmt_dot(steps)))
+    }
+
+    // The restored ambient-state statement `get().a.b := e` / `<op>= e` from
+    // the synth `put({ get() | ... })` it parses to; `None` for any other call.
+    pub(super) fn fmt_state_stmt(&self, f: &S<Expr>, args: &[S<Expr>]) -> Option<String> {
+        let (steps, op) = state_assign_parts(f, args)?;
+        let path = self.fmt_path(steps)?;
+        let (sigil, rhs) = stmt_op_surface(op)?;
+        let rhs_s = self.fmt_expr_inline(rhs, Mode::Flat)?;
+        Some(format!(
+            "{}(){}{path} {sigil} {rhs_s}",
+            names::STATE_GET,
+            stmt_dot(steps)
+        ))
     }
 
     // The bracket-key text of an index expression. A multi-index bracket
@@ -215,12 +326,16 @@ impl Fmt<'_> {
                 if self.has_comments(f.span.end, e.span.end) {
                     return None;
                 }
+                if let Some(s) = self.fmt_state_stmt(f, args) {
+                    return Some(s);
+                }
                 let flat_args = |xs: &[S<Expr>]| -> Option<Vec<String>> {
                     xs.iter()
                         .map(|a| self.fmt_expr_inline(a, Mode::Flat))
                         .collect()
                 };
                 match call_shape(f, args) {
+                    CallShape::Path(lit) => Some(lit),
                     CallShape::Recv(recv) => {
                         let recv_s = self.fmt_expr_inline(recv, Mode::Flat)?;
                         let recv_s = paren_if(dot_recv_parens(&recv.node), recv_s);
@@ -381,10 +496,7 @@ impl Fmt<'_> {
                 let us: Option<Vec<_>> = ups
                     .iter()
                     .map(|(p, op)| {
-                        let (sigil, e) = match op {
-                            PathOp::Set(e) => (kw::EQ, e),
-                            PathOp::Modify(e) => (kw::TILDE, e),
-                        };
+                        let (sigil, e) = path_op_surface(op);
                         let ps = self.fmt_path(p)?;
                         let e_s = self.fmt_expr_inline(e, Mode::Flat)?;
                         Some(format!("{ps} {sigil} {e_s}"))
@@ -447,7 +559,9 @@ impl Fmt<'_> {
                 Some(format!("{base_s}.[{path}]"))
             }
             Sugar::Assign(x, v) => {
-                if let Some((op, rhs)) = as_compound_assign(x, v) {
+                if let Some(s) = self.fmt_path_assign(x, v) {
+                    Some(s)
+                } else if let Some((op, rhs)) = as_compound_assign(x, v) {
                     let rhs_s = self.fmt_expr_inline(rhs, mode)?;
                     Some(format!("{x} {}= {rhs_s}", op.spelling()))
                 } else {

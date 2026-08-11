@@ -22,21 +22,13 @@
 -- interface change. Opt-in: not in Base.
 
 import Data.Fixpoint (fix_at, fix_propagate)
-
 import Data.Foldable (elem)
-
 import Data.Graph (graph_add_edge, graph_add_node, graph_empty, graph_reverse, graph_successors)
-
 import Data.List (concat_map, filter, foldl, map)
-
 import Data.Map (map_empty, map_insert, map_keys, map_to_list)
-
 import Data.Set (set_from_list, set_member, set_to_list)
-
 import Syntax.Edit (ed_span_text)
-
 import Syntax.Resolved (..)
-
 import Syntax.Source (..)
 
 -- | The names the document defines, as a set.

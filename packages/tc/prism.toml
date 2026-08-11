@@ -1,5 +1,6 @@
 [package]
 name = "tc"
+description = "The type-and-row core of a self-hosted Prism typechecker."
 
 [bin]
 entry = "src/Tc.pr"

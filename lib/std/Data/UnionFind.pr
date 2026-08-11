@@ -10,8 +10,21 @@
 
 import Data.Map (map_empty, map_lookup, map_insert)
 
+-- | A forest of parent links. The wrapper is opaque so callers cannot create
+-- cycles or install a non-canonical parent; only `uf_union` can add links.
+opaque newtype UnionFind(k) = UnionFind(Map(k, k))
+
 -- | The empty forest: every key is its own singleton root.
-pub let uf_empty : Map(k, k) = map_empty
+pub let uf_empty : UnionFind(k) = UnionFind(map_empty)
+
+fn root_of(borrow parents : Map(k, k), x : k) : k given Ord(k) =
+  match map_lookup(x, parents) of
+    None => x
+    Some(p) =>
+      if cmp(p, x) == 0 then
+        x
+      else
+        root_of(parents, p)
 
 -- | The canonical root of `x`'s set.
 --
@@ -21,14 +34,9 @@ pub let uf_empty : Map(k, k) = map_empty
 -- ```output
 -- 1
 -- ```
-pub fn uf_find(uf : Map(k, k), x : k) : k given Ord(k) =
-  match map_lookup(x, uf) of
-    None => x
-    Some(p) =>
-      if cmp(p, x) == 0 then
-        x
-      else
-        uf_find(uf, p)
+pub fn uf_find(borrow uf : UnionFind(k), x : k) : k given Ord(k) =
+  match uf of
+    UnionFind(parents) => root_of(parents, x)
 
 -- | Merge the sets of `x` and `y`, keeping the smaller root; a no-op when they
 -- are already joined.
@@ -39,17 +47,19 @@ pub fn uf_find(uf : Map(k, k), x : k) : k given Ord(k) =
 -- ```output
 -- true
 -- ```
-pub fn uf_union(uf : Map(k, k), x : k, y : k) : Map(k, k) given Ord(k) =
-  let rx = uf_find(uf, x)
-  let ry = uf_find(uf, y)
-  let c = cmp(rx, ry)
-  if c == 0 then
-    uf
-  elif c < 0 then
-    map_insert(ry, rx, uf)
-  else
-    map_insert(rx, ry, uf)
+pub fn uf_union(uf : UnionFind(k), x : k, y : k) : UnionFind(k) given Ord(k) =
+  match uf of
+    UnionFind(parents) =>
+      let rx = root_of(parents, x)
+      let ry = root_of(parents, y)
+      let c = cmp(rx, ry)
+      if c == 0 then
+        uf
+      elif c < 0 then
+        UnionFind(map_insert(ry, rx, parents))
+      else
+        UnionFind(map_insert(rx, ry, parents))
 
 -- | True when `x` and `y` belong to the same set.
-pub fn uf_equiv(uf : Map(k, k), x : k, y : k) : Bool given Ord(k) =
+pub fn uf_equiv(borrow uf : UnionFind(k), x : k, y : k) : Bool given Ord(k) =
   cmp(uf_find(uf, x), uf_find(uf, y)) == 0

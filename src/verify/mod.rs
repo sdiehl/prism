@@ -13,12 +13,10 @@
 //! independent of the Core content hash by construction: a solver never sees
 //! Core.
 
-// The verification read side (certificate decode and dependency-closure
-// verification, the reserved logic and trust discriminants) is built but not yet
-// reached by the `prism verify` flow or its tests; it is consumed once
-// modular-call verification conditions land. `expect` self-clears each item the
-// moment it is wired, so it cannot mask newly introduced debt the way a blanket
-// `allow` would.
+// The command path does not decode certificates or verify dependency closure, so
+// those read-side entry points and their reserved discriminants are unused there.
+// `expect` self-clears each item when it gains a caller and cannot mask newly
+// introduced debt the way a blanket `allow` would.
 #![expect(dead_code)]
 
 pub(crate) mod certificate;

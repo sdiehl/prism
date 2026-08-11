@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/let_else.pr
+---
+10
+0
+6
+100
+7
+-1
+=> ()

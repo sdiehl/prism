@@ -58,8 +58,8 @@ A compact, positional byte body: an unboxed byte buffer and a read cursor, `Byte
 
 ### `Loss`
 
-```prism,def,h-2781b1f696c1da803da82db325a5e74ccf73291d36b6581a314f838cdb028f44
-type Loss = Loss(List(String))
+```prism,def,h-10592e2985d5e277d2c9d324e8a45e36f5ad5d67ace0644119f39792a395007e
+newtype Loss = Loss(List(String)) deriving (Show)
 ```
 
 What a downgrade could not carry down: the names of the fields dropped when lowering a value to an older frozen version. A downgrade never silently discards, it reports every field it had to drop.
@@ -181,7 +181,7 @@ instance serializeTriple : Serialize((a, b, c))
 
 ### `serializeMap`
 
-```prism,def,h-989cf044223ab84dc2190fdad296dafb48c37b3b040d5daede24e273799a22a8
+```prism,def,h-1fd4115f38a9dafa7e4def1fcd64d974b91809f8d886c4e6ff8e2c2e53da5ccd
 instance serializeMap : Serialize(Map(k, v, ord))
 ```
 
@@ -456,7 +456,7 @@ dig
 ### `wire_encode_value_with_digest`
 
 ```prism,sig,h-644d9ca061aa79a698e6601f6961374b67b07a261d14aa2f91bcdce439b77255
-wire_encode_value_with_digest : forall a. (String, a) -> Wire.Bytes
+wire_encode_value_with_digest : forall a. (String, a) -> Wire.Bytes given Wire.Serialize(a)
 ```
 
 Encode a value as a `value`-kind frame carrying an explicitly supplied contract digest. This is the escape hatch: it trusts the caller's digest verbatim, so it is for code that already holds a compiler-computed digest (a `stable` block's generated frame helpers) or is exercising a hand-built frame in a test. Ordinary `Stable` code uses `wire_encode_stable`, which supplies the digest from the type.
@@ -472,7 +472,7 @@ Encode a value as a `value`-kind frame carrying an explicitly supplied contract 
 ### `wire_decode_value_with_digest`
 
 ```prism,sig,h-52019f23bbf4a24b99c8ef334b3230eb1abffe4c12c2aeb541db38630bb584de
-wire_decode_value_with_digest : forall a. (Wire.Bytes, String) -> a ! {Fail}
+wire_decode_value_with_digest : forall a. (Wire.Bytes, String) -> a ! {Fail} given Wire.Serialize(a)
 ```
 
 Decode a `value`-kind frame against an explicitly supplied contract digest: check the header, decode the body, and reject trailing bytes. A bodyless reference frame fails here, because a value cannot be materialized without its bytes. The digest-supplying counterpart to `wire_encode_value_with_digest`; ordinary `Stable` code uses `wire_decode_stable`.
@@ -480,7 +480,7 @@ Decode a `value`-kind frame against an explicitly supplied contract digest: chec
 ### `wire_encode_stable`
 
 ```prism,sig,h-88321ffc55eec8ac4b5d530df9e7a6d105e7da82949f2ac64ea930ae21dce1e0
-wire_encode_stable : forall a. (a) -> Wire.Bytes
+wire_encode_stable : forall a. (a) -> Wire.Bytes given Wire.Stable(a), Wire.Serialize(a)
 ```
 
 Encode a `Stable` value as a `value` frame under its own contract digest. The digest is `shape_digest_of`, a per-type constant the `deriving (Stable)` instance carries, so no digest string is hand-threaded. This is the ordinary encode for a frozen-serializable value.
@@ -488,7 +488,7 @@ Encode a `Stable` value as a `value` frame under its own contract digest. The di
 ### `wire_decode_stable`
 
 ```prism,sig,h-f832ada4ee65e0ede47d0563fe03e1c62e2278a00db1077db516c4e098ade1e8
-wire_decode_stable : forall a. (Wire.Bytes) -> a ! {Fail}
+wire_decode_stable : forall a. (Wire.Bytes) -> a ! {Fail} given Wire.Stable(a), Wire.Serialize(a)
 ```
 
 Decode a `Stable` value from a `value` frame, checking the frame's digest against the type's own `shape_digest_of` and rejecting trailing bytes. The result type comes from the use site; an unannotated call is ambiguous and asks for an annotation. A wrong digest, a wrong kind, a truncated body, and trailing bytes are all decode failures through `Fail`. The frame is opened without assuming its digest, the body decoded as the annotated type, and only then is the frame's digest required to equal that type's own, so a frame minted for another shape is refused.
@@ -586,7 +586,7 @@ compose_downgrade(\(z) -> (z - 1, dropped(["hi"])), \(m) -> (m, no_loss))(10)
 ```
 
 ```output
-(9, Wire.Loss([hi]))
+(9, [hi])
 ```
 
 ### `reconcile`
@@ -602,5 +602,5 @@ reconcile(LargestSafeSubset, \(x) -> (x - 1, no_loss), 5)
 ```
 
 ```output
-(4, Wire.Loss([]))
+(4, [])
 ```

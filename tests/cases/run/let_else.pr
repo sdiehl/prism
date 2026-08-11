@@ -1,0 +1,28 @@
+-- A refutable binding with a fallback: the names are in scope for the rest of
+-- the block when the pattern matches, and the block stops at the binding and
+-- takes the fallback when it does not.
+
+type Shape = Circle(Int) | Square(Int, Int)
+
+fn radius(s) =
+  let Circle(r) = s else 0
+  r * 2
+
+fn area(s) =
+  let Square(w, h) = s
+  else
+    let d = radius(s)
+    d * d
+  w * h
+
+fn first_of(xs) =
+  let Cons(x, _) = xs else -1
+  x
+
+fn main() =
+  println(radius(Circle(5)))
+  println(radius(Square(2, 3)))
+  println(area(Square(2, 3)))
+  println(area(Circle(5)))
+  println(first_of([7, 8, 9]))
+  println(first_of([]))

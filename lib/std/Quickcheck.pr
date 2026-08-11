@@ -19,7 +19,6 @@
 -- changing this surface.
 
 import Data.List (..)
-
 import Data.Foldable (..)
 
 -- The SplitMix64 mixing constants (the increment gamma and the two output
@@ -72,7 +71,7 @@ fn nat_below(n : Int) = int_of_u64(to_u64(rand()) % to_u64(n))
 -- | A seeded, sized generator of `a`. Apply it with `gen_run`; build one with
 -- the combinators below. The size bounds recursive shapes (list length, tree
 -- depth); make it explicit so derived instances for recursive types stay finite.
-pub type Gen(a) = Gen((Int) -> a ! {Random})
+pub newtype Gen(a) = Gen((Int) -> a ! {Random})
 
 -- | Draw one value from `g` at the given size, performing `Random`. Discharge the
 -- `Random` with `run_seeded` (or use `gen_at`) to run it.

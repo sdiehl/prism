@@ -10,39 +10,12 @@ use rstest::rstest;
 
 use prism::syntax::ast::{Expr, Pattern};
 
-fn ast_no_spans(src: &str) -> String {
-    prism::dump("ast", src)
-        .expect("must parse")
-        .lines()
-        .filter(|l| {
-            let t = l.trim_start();
-            let stripped = t.trim_end_matches(',');
-            let is_span = t.starts_with("span:")
-                || matches!(stripped.split_once(".."), Some((a, b)) if !a.is_empty()
-                    && a.bytes().all(|c| c.is_ascii_digit())
-                    && b.bytes().all(|c| c.is_ascii_digit()));
-            !is_span
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn pin(src: &str, want: &str) {
-    let once = prism::format(src).expect("input must parse");
-    assert_eq!(once, want, "layout drift:\n{once}");
-    let twice = prism::format(&once).expect("formatted output must reparse");
-    assert_eq!(once, twice, "not idempotent:\n{once}\n-->\n{twice}");
-    assert_eq!(
-        ast_no_spans(src),
-        ast_no_spans(&once),
-        "formatting changed the parsed meaning:\n{src}\n-->\n{once}"
-    );
-}
+use super::{assert_format_semantics, ast_no_spans};
 
 // A lone, control-free `try` stays inline when it fits.
 #[test]
 fn short_try_stays_inline() {
-    pin(
+    assert_format_semantics(
         "fn f() : Int = try g(x) catch { Bad(e) => 0 }\n",
         "fn f() : Int = try g(x) catch { Bad(e) => 0 }\n",
     );
@@ -61,7 +34,7 @@ fn short_try_stays_inline() {
     "fn f() : Int =\n  try\n    compute(x)\n  catch\n    Bad(e) => try recover(e) catch { Fatal(z) => 0 }\n"
 )]
 fn nested_control_breaks_vertically(#[case] src: &str, #[case] want: &str) {
-    pin(src, want);
+    assert_format_semantics(src, want);
 }
 
 #[test]

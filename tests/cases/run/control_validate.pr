@@ -1,5 +1,4 @@
 import Control.Validate (..)
-
 import Data.Validation (Validation)
 
 fn success() : Int = 42

@@ -6,11 +6,8 @@
 -- through recursive productions.
 
 import Data.List (..)
-
 import Syntax.Ast (..)
-
 import Syntax.Cursor (..)
-
 import Syntax.Parse.Support (..)
 
 pub fn validate_usage(

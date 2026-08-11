@@ -72,18 +72,19 @@ vsep     ->  "v;"   -- a newline at the same column (item / statement separator)
 (* ANCHOR: program *)
 program   ->  { topdecl }                       -- separated by layout
 
-topdecl   ->  [ deprecated ] [ "pub" | "opaque" ] item
+topdecl   ->  [ deprecated ] [ "pub" ] item
+           |  [ deprecated ] "opaque" ( datatype | newtype )
 deprecated -> "deprecated" string               -- annotation line: marks the next item superseded ("deprecated" is contextual, not reserved)
 item      ->  import | datatype | newtype | synonym | rowalias
            |  classdecl | instancedecl | canonicaldecl | effectdecl
            |  errordecl | patterndecl | stabledecl | constdecl | fundecl
 
-import    ->  "import" modpath [ "as" conid ] [ "(" name , ... ")" ]
-           |  "pub" "import" modpath [ "(" name , ... ")" ]
+import    ->  "import" modpath [ "as" conid ]
+                [ "(" ( [ name , ... ] | ".." ) ")" ]
 modpath   ->  conid { "." conid }
 name      ->  varid | conid
 
-datatype  ->  "type" conid [ kindedvars ] "=" ctor { "|" ctor } [ deriving ]
+datatype  ->  "type" conid [ kindedvars ] "=" ctorsrhs
 newtype   ->  "newtype" conid [ tyvars ] "=" ctor [ deriving ]
 synonym   ->  "alias" conid [ tyvars ] "=" type
 rowalias  ->  "alias" conid "=" "{" [ label , ... ] "}"
@@ -91,15 +92,17 @@ tyvars    ->  "(" varid , ... ")"
 kindedvars -> "(" tyvar , ... ")"               -- a data-type parameter may carry a kind
 tyvar     ->  varid [ ":" kind ]
 kind      ->  "Type" | "Row" | "Nat"            -- "Row" ranges over an effect row, "Nat" over a dimension
-ctor      ->  conid [ "(" type , ... ")" ]
-           |  conid "{" field , ... "}"
+ctorsrhs  ->  ctor { "|" ctor } [ deriving ]
+           |  vopen ctor { [ vsep ] "|" ctor } [ [ vsep ] deriving ] vclose
+ctor      ->  conid [ "(" typearg , ... ")" ]
+           |  conid "{" [ field , ... ] "}"
 field     ->  varid ":" type
-deriving  ->  "deriving" "(" conid , ... ")"
+deriving  ->  "deriving" "(" [ conid , ... ] ")"
 
-constdecl ->  "let" varid [ ":" type ] "=" expr
+constdecl ->  "let" varid [ ":" type ] "=" body
 fundecl   ->  [ "logic" ] [ "test" ] [ [ "assume" ] "total" ] [ "replayable" ] [ "fip" | "fbip" ]
                 "fn" varid "(" [ param , ... ] ")"
-                [ retann ] [ given ] { requires } { ensures } "=" expr [ wheres ]
+                [ retann ] [ given ] { requires } { ensures } [ decreases ] "=" body [ wheres ]
                 -- a usage row spelling exactly "@ noalloc" at the root of the
                 -- return annotation is the declaration's allocation certificate;
                 -- "logic fn" is a proof-level (SMT) declaration, never a runtime fn;
@@ -111,13 +114,15 @@ param     ->  [ "borrow" ] pattern [ ":" type ] [ ":=" expr ]
                 -- without testing; any other pattern is matched around the body and
                 -- must be irrefutable, so it has no name to pass by keyword
 retann    ->  ":" type [ decleff ]              -- result first, e.g. `: Int ! {State}`
-decleff   ->  "!" "{" [ label , ... ] "}"       -- the declaration's effect row (closed)
+decleff   ->  "!" "{" [ label , ... ] [ "|" varid ] "}"
            |  "!"                                -- an explicit empty effect row
 given     ->  "given" constraint , ...
 requires  ->  "requires" expr                    -- an SMT precondition clause
 ensures   ->  "ensures" "|" varid "|" expr       -- an SMT postcondition over the result binder
+decreases ->  "decreases" expr                    -- contextual; a ranking measure for a total fn
 constraint -> conid "(" type ")"
-wheres    ->  "where" "{" { varid "=" expr } "}"
+wheres    ->  "where" vopen [ wherebind { vsep wherebind } ] vclose
+wherebind ->  varid "=" body
 (* ANCHOR_END: program *)
 
 (* ANCHOR: decls *)
@@ -125,48 +130,62 @@ wheres    ->  "where" "{" { varid "=" expr } "}"
 -- the head ends the line and the members follow on indented lines. A brace here
 -- is a parse error. A marker class or its instance has no members, so the body is
 -- absent and the declaration is its bare head.
-classdecl    ->  "class" conid "(" varid ")" [ given ] [ vopen sig { vsep sig } vclose ]
+classdecl    ->  "class" conid "(" varid ")" [ given ] [ vopen [ sig { armsep sig } ] vclose ]
 instancedecl ->  "instance" varid ":" conid "(" type ")" [ given ]
-                   [ vopen fundecl { vsep fundecl } vclose ]
+                   [ vopen [ fundecl { armsep fundecl } ] vclose ]
 canonicaldecl -> "canonical" conid "(" type ")" "=" varid
 sig          ->  varid ":" type
 
-effectdecl   ->  "effect" conid [ tyvars ] vopen effop { vsep effop } vclose
-effop        ->  grade varid "(" [ type , ... ] ")" ":" type
-grade        ->  "ctl" | "fun" | "final" "ctl"  -- resumption multiplicity: many | once | never
-errordecl    ->  "error" conid [ "(" type , ... ")" ]
+effectdecl   ->  "effect" conid [ tyvars ] vopen [ effop { armsep effop } ] vclose
+effop        ->  [ grade ] varid "(" [ effparam , ... ] ")" ":" type
+effparam     ->  type | varid ":" type             -- a binder name is accepted but not retained
+grade        ->  "many" | "once" | "never"        -- many is the unmarked default
+armsep       ->  "," | vsep
+errordecl    ->  "error" conid [ "(" typearg , ... ")" ]
 
-patterndecl  ->  "pattern" conid "(" [ varid , ... ] ")" "for" conid "="
-                   "view" expr [ "make" expr ]
+patterndecl  ->  "pattern" conid "(" [ varid , ... ] ")" "for" conid "=" patclauses
+patclauses   ->  patclause | vopen patclause { vsep patclause } [ vsep ] vclose
+patclause    ->  ( "view" | "make" ) expr
 
 -- A `stable` block declares a serializable type's frozen version history:
--- the rungs, then the hand-written converters for the
--- type mutations the compiler cannot generate. Real braces, so entries are
+-- the rungs and migration routes, plus hand-written converters for the type
+-- mutations the compiler cannot generate. Real braces, so entries are
 -- comma-separated. "frozen", "upgrade", "downgrade", and "drop_loss" are
 -- contextual, recognized positionally inside the block rather than reserved.
-stabledecl   ->  "stable" conid "{" stableitem , ... "}"
-stableitem   ->  rung | converter
-rung         ->  conid "=" "{" [ ".." conid "," ] rungfield , ... "}" [ "frozen" string ]
+stabledecl   ->  "stable" conid "{" [ stableitem , ... ] "}"
+stableitem   ->  rung | converter | migrations
+rung         ->  conid "=" "{" [ ".." conid { "," rungfield }
+                                | rungfield { "," rungfield } ] "}" [ "frozen" string ]
 rungfield    ->  varid ":" type [ "=" expr ]     -- an additive field carries a default
 converter    ->  ( "upgrade" | "downgrade" ) conid "->" conid "="
-                   "{" ".." expr { "," varid "=" expr } "}" [ "drop_loss" "(" varid , ... ")" ]
+                   "{" ".." expr { "," varid "=" expr } "}" [ "drop_loss" "(" [ varid , ... ] ")" ]
+migrations   ->  "migrations" "{" { migration } "}"
+migration    ->  conid "->" conid "=" migrateroute
+migrateroute ->  "auto"
+              |  "version" "(" "upgrade" "=" migdir ","
+                   "downgrade" "=" migdir [ "," ] ")"
+migdir       ->  expr                                -- a bare varid `auto` is normalized to the derived route
 (* ANCHOR_END: decls *)
 
 (* ANCHOR: types *)
 type    ->  "forall" varid { varid } "." type
-         |  arrow [ row ]                       -- row applies to a function type
-arrow   ->  "(" [ type , ... ] ")" "->" arrow   -- n-ary domain
-         |  utype "->" arrow                     -- single domain
+         |  funarrow [ row ]                    -- row applies only to a function type
          |  utype
+arrow   ->  funarrow | utype
+funarrow -> "(" [ type , ... ] ")" "->" arrow   -- n-ary domain
+          | utype "->" arrow                    -- single domain
 utype   ->  atype [ "@" usagerow ]              -- usage (coeffect) row on an atomic type
 usagerow -> varid                               -- single-fact sugar: T @ noalloc
          |  "{" varid , ... "}"                 -- fact set, canonical order alphabetical
+                                                    -- an open `@ {fact | tail}` is reserved but rejected
 atype   ->  scalar
          |  "[" type "]"                          -- List(type)
-         |  conid [ "(" typearg , ... ")" ]       -- type constructor
+         |  ( conid | qualid ) [ "(" typearg , ... ")" ] -- type constructor
          |  varid [ "(" typearg , ... ")" ]       -- variable, possibly applied
          |  "(" type ")"
-         |  "(" type "," type , ... ")"           -- tuple
+         |  "(" type "," [ type , ... ] ")"       -- tuple (including a one-tuple)
+         |  "#" "(" [ type , ... ] ")"            -- unboxed tuple
+         |  "#" "{" [ field , ... ] "}"           -- unboxed record
 typearg ->  type
          |  rowlit                                -- argument for a Row-kinded parameter
          |  digits                                 -- dimension literal for a Nat-kinded parameter, e.g. Vec(Int, 3)
@@ -175,103 +194,140 @@ scalar  ->  "Int" | "I64" | "U64" | "Bool" | "Unit" | "Float" | "Char" | "String
 
 row     ->  "!" "{" [ label , ... ] [ "|" varid ] "}"
          |  "!"                                   -- empty row, effectful position
-label   ->  conid [ "(" type , ... ")" ]
+label   ->  ( varid | conid | qualid ) [ "(" typearg , ... ")" ]
 (* ANCHOR_END: types *)
 
 (* ANCHOR: expr *)
-expr    ->  "if" expr "then" expr { "elif" expr "then" expr } "else" expr
-         |  "let" ( varid | letpat ) "=" expr  expr -- bind, then continue
-         |  "var" varid ":=" expr  expr             -- local mutable, then continue
+body    ->  expr | block
+block   ->  vopen stmts vclose
+stmts   ->  expr
+         |  expr vsep stmts
+         |  "if" expr "then" body { [ vsep ] "elif" expr "then" body }
+                [ vsep stmts ]                       -- an open if need not have an else
+         |  "let" varid "=" expr [ "in" ] vsep stmts
+         |  "let" varid "=" block vsep stmts
+         |  "let" letpat "=" expr [ "in" ] vsep stmts
+         |  "let" letpat "=" block vsep stmts
+         |  "let" letpat "=" expr [ vsep ] "else" body vsep stmts
+         |  "let" letpat "=" block vsep "else" body vsep stmts
+         |  "var" varid [ ":" type ] ":=" expr vsep stmts
+         |  "with" [ varid "<-" ] "handler" handler vsep stmts
+         |  "with" [ varid "<-" ] appexpr vsep stmts
+
+expr    ->  "if" expr "then" body { [ vsep ] "elif" expr "then" body }
+                [ vsep ] "else" body
+         |  "let" ( varid | letpat ) "=" expr "in" expr
          |  "\\" "(" [ param , ... ] ")" "->" expr  -- lambda
-         |  "match" expr "of" { arm }
-         |  "handle" expr "with" handler
-         |  "with" [ varid "<-" ] "handler" handler  expr  -- scoped handler (named if `x <-`), then continue
-         |  "with" [ varid "<-" ] appexpr  expr            -- scoped resource from a call, then continue
+         |  "match" expr "of" matcharms
+         |  "handle" expr "with" [ "partial" ] handler
          |  "throw" conid [ "(" expr , ... ")" ]
-         |  "try" expr "catch" { catcharm }
-         |  "transact" expr "else" expr
-         |  "for" gen { "," qual } "do" expr
-         |  "while" expr "do" expr                    -- while loop
-         |  "loop" expr                               -- unconditional loop
-         |  "probe" string "do" expr                  -- named instrumentation; body runs only when enabled
-         |  "reflect" ( "fn" | "type" ) ident         -- quote a declaration of this file as a string
+         |  "try" body [ vsep ] "catch" catcharms
+         |  "transact" body [ vsep ] "else" body
+         |  "for" gen { "," qual } "do" body
+         |  "while" expr "do" body                    -- while loop
+         |  "loop" body                               -- unconditional loop
+         |  "probe" string "do" body                  -- named instrumentation; body runs only when enabled
+         |  "reflect" ( "fn" | "type" ) ( ident | qualid ) -- quote a declaration of this file as a string
          |  "return" expr                             -- early return
-         |  varid ":=" expr                          -- assignment
-         |  varid ( "+=" | "-=" | "*=" | "%=" ) expr  -- compound assignment
+         |  lvalue ":=" expr                          -- assignment
+         |  lvalue ( "+=" | "-=" | "*=" | "%=" ) expr  -- compound assignment
          |  opexpr
 
 opexpr  ->  opexpr binop opexpr                      -- binop and binding per 4.1
          |  negexpr
 negexpr ->  "-" negexpr                              -- unary minus, "tight prefix":
                                                      -- looser than application and
-                                                     -- projection, tighter than every
-                                                     -- binop, so `-f(x)` is `-(f(x))`
-                                                     -- and `-x * y` is `(-x) * y`
-         |  appexpr
+                                                     -- exponentiation, tighter than the
+                                                     -- remaining binops
+         |  powexpr
+powexpr ->  appexpr [ "^" negexpr ]                  -- exponentiation is right-associative
 appexpr ->  appexpr "(" [ arg , ... ] [ "using" iname , ... ] ")"
                                                      -- application; `using` selects instances
-arg     ->  [ varid ":=" ] expr                      -- an argument may be passed by name
-         |  appexpr "[" expr "]"                      -- indexed read a[i]
+         |  appexpr "(" [ arg , ... ] ")" "fn" trailerparams block
+                                                     -- trailing lambda argument
+         |  appexpr "[" expr [ "," expr , ... ] "]" -- indexed or multi-indexed read
          |  appexpr "." varid                         -- field access
+         |  appexpr "." "#" varid                    -- unboxed-field access
+         |  appexpr "." "[" path "]"                -- collect a path's foci
          |  appexpr "." varid "(" [ expr , ... ] ")" -- method call (UFCS)
+         |  appexpr "." varid "(" [ expr , ... ] ")" "fn" trailerparams block
+         |  appexpr "." varid "fn" trailerparams block
          |  appexpr "?." varid                        -- optional chaining
          |  appexpr "?"                               -- try marker
          |  atom
+arg     ->  [ varid ":=" ] expr                      -- an argument may be passed by name
+iname   ->  varid                                     -- an instance name
+trailerparams -> [ "(" param { "," param } ")" ]
 atom    ->  integer | float | char | string | "true" | "false" | "(" ")"
          |  "break" | "continue"                      -- loop control
          |  "?" varid                                  -- named typed hole
+         |  "error" "(" [ expr , ... ] ")"           -- the panic builtin remains callable
          |  varid | conid | qualid
          |  "(" expr ")" | "(" expr ":" type ")"
-         |  "(" expr "," expr , ... ")"               -- tuple
+         |  "(" expr "," [ expr , ... ] ")"           -- tuple (including a one-tuple)
+         |  "#" "(" [ expr , ... ] ")"                -- unboxed tuple
+         |  "#" "{" [ fieldval , ... ] "}"            -- unboxed record
          |  "[" [ expr , ... ] "]"                    -- list
-         |  "[" expr ".." expr "]"                    -- range
+         |  "[" expr { "," expr } ".." expr "]"      -- arithmetic range
          |  "[" expr "for" gen { "," qual } "]"       -- comprehension
-         |  conid "{" fieldval , ... "}"              -- record
-         |  conid "{" ".." expr "," fieldval , ... "}" -- record update
-         |  "{" expr "|" path "=" expr , ... "}"      -- path update
+         |  conid "{" [ fieldval , ... ] "}"          -- record
+         |  conid "{" ".." expr { "," fieldval } "}" -- record update
+         |  "{" expr "|" pathupdate , ... "}"        -- path update
+         |  "#" "path" ( varid { "." varid }
+                         | conid "." varid { "." varid } ) -- path literal; an uppercase head anchors its type
          |  "mask" "<" conid ">" "(" expr ")"
 
-arm      ->  pattern [ "if" expr ] "=>" expr
+arm      ->  pattern [ "if" expr ] "=>" body
+matcharms -> "{" [ arm { armsep arm } ] "}"
+           | vopen [ arm { armsep arm } ] vclose
 gen      ->  varid "in" expr
 qual     ->  "if" expr | "let" varid "=" expr
-iname    ->  varid | qualid                          -- an instance name
 fieldval ->  varid "=" expr                          -- a record field binding
 path     ->  pathseg { "." pathseg }                 -- a nested field path
-pathseg  ->  varid | "each" | "?" conid              -- field step, bulk map over a collection, or case-narrowing step
+pathseg  ->  varid | "each" | "?" ( conid | qualid ) -- field step, bulk map over a collection, or case-narrowing step
           |  pathseg "[" expr "]"                      -- indexed step
           |  "(" path "where" expr ")"                 -- filtered traversal
+          |  "[" expr "]" { "[" expr "]" }            -- a path may begin with an index
+pathupdate -> path ( "=" | "~" | "+=" | "-=" | "*=" | "%=" ) expr
+lvalue   ->  varid { "." varid | "[" expr [ "," expr , ... ] "]" }
+          |  "get" "(" ")" ( "." varid | "[" expr [ "," expr , ... ] "]" )
+                { "." varid | "[" expr [ "," expr , ... ] "]" }
 binop    ->  "??" | "|>" | ">>" | "<<" | "||" | "&&" -- binding given in 4.1
          |  "==" | "/=" | "<" | "<=" | ">" | ">="
-         |  "+" | "-" | "*" | "/" | "%" | "^"
-         |  "==." | "/=." | "<." | "<=." | ">." | ">=."
-         |  "+." | "-." | "*." | "/."
+         |  "+" | "-" | "*" | "/" | "%"
 (* ANCHOR_END: expr *)
 
 (* ANCHOR: pattern *)
 pattern  ->  patalt { "|" patalt }                   -- alternation: any alternative matches
 patalt   ->  conid [ "(" pattern , ... ")" ]         -- constructor
-          |  conid "{" fieldpat , ... "}"            -- record, ".." allowed
+          |  qualid [ "(" pattern , ... ")" ]        -- qualified constructor
+          |  conid "{" [ fieldpat { "," fieldpat } [ "," ".." ] | ".." ] "}"
+                                                       -- record fields may pun; ".." is trailing
           |  varid                                    -- variable binding
           |  "_"                                      -- wildcard
           |  integer | float | char | "true" | "false"
           |  "-" ( integer | float )                  -- negative literal
 
           |  "[" [ pattern , ... ] "]"                -- list
-          |  "(" pattern "," pattern , ... ")"        -- tuple
-fieldpat ->  varid "=" pattern  |  ".."
-letpat   ->  conid [ "(" pattern , ... ")" ]         -- a `let` destructures with a
-          |  "(" pattern "," pattern , ... ")"       -- constructor or tuple pattern only,
-                                                     -- and admits no alternation
+          |  "(" pattern "," [ pattern , ... ] ")"   -- tuple (including a one-tuple)
+fieldpat ->  varid [ "=" pattern ]                    -- a bare field is a pun
+letpat   ->  ( conid | qualid ) [ "(" pattern , ... ")" ] -- a `let` destructures with a
+          |  "(" pattern "," [ pattern , ... ] ")"   -- constructor or tuple pattern only,
+                                                     -- and admits no alternation; it may
+                                                     -- be refutable only under `else`
 (* ANCHOR_END: pattern *)
 
 (* ANCHOR: handler *)
-handler   ->  "{" hclause , ... "}"  |  hclause { hclause }   -- braces or layout
+handler   ->  "{" [ hclause , ... ] "}"
+           |  vopen [ hclause { armsep hclause } ] vclose
 
-hclause   ->  "return" varid "=>" expr                 -- result transform
-           |  varid "(" [ varid , ... ] ")" "resume" varid "=>" expr  -- multishot op: continuation after `resume`
-           |  "fun" varid "(" [ varid , ... ] ")" "=>" expr      -- tail-resumptive sugar
-           |  "final" "ctl" varid "(" [ varid , ... ] ")" "=>" expr  -- non-resumable
-           |  "val" varid "=" expr                     -- install-time constant
+hclause   ->  "return" varid "=>" body                 -- result transform
+           |  varid "(" [ varid , ... ] ")" "resume" varid "=>" body  -- multishot op: continuation after `resume`
+           |  "once" varid "(" [ varid , ... ] ")" "=>" body -- tail-resumptive sugar
+           |  "never" varid "(" [ varid , ... ] ")" "=>" body -- non-resumable
+           |  "val" varid "=" body                     -- install-time constant
 
-catcharm  ->  conid [ "(" varid , ... ")" ] "=>" expr
+catcharm  ->  conid [ "(" varid , ... ")" ] "=>" body
+catcharms ->  "{" [ catcharm , ... ] "}"
+            | vopen [ catcharm { armsep catcharm } ] vclose
 (* ANCHOR_END: handler *)

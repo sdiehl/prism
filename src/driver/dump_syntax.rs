@@ -1173,7 +1173,7 @@ struct SyntaxDiagnostics {
 // primary half-open byte span (a lex fault is a caret, `lo == hi`), and the
 // rendered message. `expected` carries the parser's canonical expectation set
 // when it has one; related spans are reserved (always present, possibly empty)
-// so a reader written today survives their arrival.
+// so existing readers accept populated lists without a schema change.
 #[derive(Serialize)]
 struct DiagnosticRow {
     code: &'static str,

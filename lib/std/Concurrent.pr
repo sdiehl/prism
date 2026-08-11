@@ -60,10 +60,15 @@ pub effect Async(a)
   never vanished() : b
 
 -- | A handle to a spawned fiber, returned by `fork` and passed to `await`/`cancel`.
-pub type Fiber = Fiber(Int)
+opaque newtype Fiber = Fiber(Int)
 
 -- | A handle to a buffered FIFO channel, opened with `channel`.
-pub type Chan = Chan(Int)
+opaque newtype Chan = Chan(Int)
+
+-- | Cancel the root fiber and, by structured descent, every live child. This is
+-- the deliberate surface for aborting an entire cooperative run; keeping the
+-- numeric handle private prevents callers from forging arbitrary fiber ids.
+pub fn cancel_root() : Unit ! {Async(a)} = cancel(Fiber(0))
 
 -- The scheduler's answer to a `poll_yield`/`poll_send`: `Go` resumes normally,
 -- `Stop` means this fiber has been cancelled and must unwind now.
