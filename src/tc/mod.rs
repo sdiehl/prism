@@ -23,7 +23,7 @@ use context::Renames;
 type DeferredSpans = (Vec<(NodeId, Type)>, Vec<(NodeId, EffRow)>);
 mod coverage;
 mod env;
-pub(crate) use env::is_builtin_effect;
+pub(crate) use env::{builtin_sigs, is_builtin_effect};
 mod infer;
 mod pat;
 mod subsume;

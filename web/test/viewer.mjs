@@ -71,14 +71,50 @@ check("a written type name is a link", one.includes('data-goto="Wire.Bytes"'));
 check("hover uses the fast path", one.includes("data-tip="));
 check("and no native title survives", !/\stitle="/.test(one));
 
+section("a builtin opens as a synthesized card");
+check("a primitive named in a body is a link to it", one.includes('data-goto="Int"'));
+v.show("Unit");
+const unit = card(deck.cards.innerHTML, "Unit");
+check("the card leads with name and signature", plain(unit).includes("Unit : Type"));
+check("and carries the compiler's sentence", plain(unit).includes("unit type"));
+check("badged as a builtin", unit.includes("kind--builtin"));
+check("and by its own kind besides", unit.includes("kind--type"));
+check("with no content address offered", unit.includes("hash--none"));
+check("and no relation strip", !unit.includes("card-rel"));
+v.show("print");
+const printCard = card(deck.cards.innerHTML, "print");
+check(
+  "a builtin function's signature comes from the checker's table",
+  plain(printCard).includes("print : forall a. (a) -> Unit ! {IO}"),
+);
+check(
+  "and the type names inside it are links",
+  printCard.includes('data-goto="Unit"') && printCard.includes('data-goto="IO"'),
+);
+v.show("simd_fmax4");
+const fmax4 = card(deck.cards.innerHTML, "simd_fmax4");
+check("a wired SIMD type is itself a linked primitive", fmax4.includes('data-goto="F32x4"'));
+
 section("the rail opens as a list of modules");
 const rail = () => deck.list.innerHTML;
 check("no definition row is drawn unasked", !rail().includes("rail-def"), rail().slice(0, 120));
+// One extra collapsed group: the compiler's builtins, offered above the modules.
 check(
   "every module is offered, collapsed, with its size",
   [...rail().matchAll(/data-mod="([^"]*)"[^>]*aria-expanded="false"/g)].length ===
-    new Set(index.defs.map((d) => d.module)).size,
+    new Set(index.defs.map((d) => d.module)).size + 1,
 );
+check("the builtins stand above the modules", rail().includes('data-mod="(builtins)"'));
+v.toggleModule("(builtins)");
+check(
+  "opened, the builtins divide into types, effects and functions",
+  rail().includes("rail-sub") &&
+    plain(rail()).includes("types") &&
+    plain(rail()).includes("effects") &&
+    plain(rail()).includes("functions"),
+);
+check("a wired storage type is offered", rail().includes('data-goto="FloatBuf"'));
+v.toggleModule("(builtins)");
 deck.search.value = "";
 v.toggleModule("Data.List");
 check("expanding one shows its definitions", rail().includes('data-goto="Data.List.map"'));

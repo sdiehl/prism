@@ -129,11 +129,13 @@ export interface Envelope {
   tests: "included" | "empty" | { unavailable: string };
 }
 
-/// One compiler primitive: what source calls it, and its type where the compiler
-/// records one.
+/// One compiler primitive: what source calls it, its type where the compiler
+/// records one, and the compiler's own sentence about it.
 export interface Primitive {
   name: string;
+  kind?: "value" | "type" | "effect";
   signature?: string;
+  doc?: string;
 }
 
 interface Wire {
@@ -214,7 +216,7 @@ export class Index {
     }
     const prim = this.primitive(target);
     if (prim) {
-      return [prim.name, prim.signature, "compiler builtin — no Prism definition"]
+      return [prim.name, prim.signature, prim.doc, "compiler builtin — no Prism definition"]
         .filter((l): l is string => Boolean(l))
         .join("\n");
     }

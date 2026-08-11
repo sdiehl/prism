@@ -50,9 +50,9 @@ index-web:
 index-diff REV="HEAD" PATH="packages/spectra":
     cargo build --release
     rm -rf target/index-diff-base
-    git worktree add -q --detach target/index-diff-base {{REV}}
-    ./target/release/prism index target/index-diff-base/{{PATH}} --out web/public/old-index.json
-    ./target/release/prism index {{PATH}} --out web/public/new-index.json
+    git worktree add -q --detach target/index-diff-base {{ REV }}
+    ./target/release/prism index target/index-diff-base/{{ PATH }} --out web/public/old-index.json
+    ./target/release/prism index {{ PATH }} --out web/public/new-index.json
     ./target/release/prism index --diff web/public/old-index.json web/public/new-index.json --out web/public/diff-index.json
     git worktree remove --force target/index-diff-base
     @echo ""

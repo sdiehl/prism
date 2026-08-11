@@ -167,17 +167,22 @@ fn calls_edges_are_the_core_dependency_graph() {
             .expect("elaborate");
     let graph = DepGraph::of(&surface.core);
     for name in ["double", "quad", "main"] {
+        // An instance-method target (`i@showInt@show`) is retargeted to its
+        // instance declaration, so the expectation folds Core's lowered names
+        // through the same canonical inverse the index applies.
         let mut expected: Vec<String> = graph
             .direct_deps(Sym::new(name))
             .iter()
-            .map(|s| s.as_str().to_string())
+            .map(|s| {
+                let raw = s.as_str();
+                crate::names::parse_instance_method(raw)
+                    .map_or_else(|| raw.to_string(), |(instance, _)| instance.to_string())
+            })
             .collect();
         let mut found: Vec<String> = targets(&index, EdgeKind::Calls, name)
             .into_iter()
             .map(str::to_string)
             .collect();
-        // An instance-method target is retargeted to its instance declaration,
-        // which this program has none of, so the two sets are equal here.
         expected.sort();
         found.sort();
         assert_eq!(found, expected, "`{name}`'s call edges");

@@ -12,7 +12,7 @@ use crate::kw;
 use crate::names;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core, Decl, Program};
-use crate::types::ty::{EffRow, Kind, Label, Type, CANONICAL, FLOAT_BUF, INT_BUF};
+use crate::types::ty::{EffRow, Kind, Label, Type, BUF, CANONICAL, FLOAT_BUF, INT_BUF};
 
 // Effects the compiler knows without an `effect` declaration: the IO/Exn
 // builtins, the indexing/`??` `Fail`, and the internal loop/return control
@@ -986,7 +986,7 @@ const NON_ENUM_SIGS: &[(&str, &str)] = &[
 /// signature each inline `FloatOp` carries on its registry row. `base_env` seeds
 /// the type environment from this; `Env` is keyed by `Sym`, so the order the
 /// sources arrive in does not matter.
-fn builtin_sigs() -> impl Iterator<Item = (&'static str, &'static str)> {
+pub(crate) fn builtin_sigs() -> impl Iterator<Item = (&'static str, &'static str)> {
     NON_ENUM_SIGS
         .iter()
         .map(|&(n, s)| (n, s))
@@ -1050,7 +1050,7 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
     // constructors, manipulated only through the `buf_*` builtins. It is the
     // storage under the stdlib `Bytes` type.
     data.insert(
-        "Buf".to_string(),
+        BUF.to_string(),
         DataInfo {
             params: vec![],
             param_kinds: vec![],

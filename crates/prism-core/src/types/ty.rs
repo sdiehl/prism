@@ -26,6 +26,11 @@ pub const NONE: &str = "None";
 // in a datatype field cannot be (the brand is not a parameter of the enclosing
 // type), so the field pins the omitted brand to this concrete default.
 pub const CANONICAL: &str = "Canonical";
+// The raw-storage cell types: an opaque byte buffer (the storage under the
+// stdlib `Bytes` type) and its unboxed f64/i64-element siblings, each a
+// 0-parameter built-in with no surface constructors, manipulated only through
+// its `buf_*`/`tbuf_*`/`ibuf_*` builtin family.
+pub const BUF: &str = "Buf";
 pub const FLOAT_BUF: &str = "FloatBuf";
 pub const INT_BUF: &str = "IntBuf";
 // The 128-bit SIMD vector types: two 64-bit lanes or four 32-bit lanes over

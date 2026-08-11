@@ -165,17 +165,21 @@ pub fn build(input: IndexInput<'_>) -> Result<Index, Error> {
 // other capability (`Console`, `Output`, `Alloc`) is declared in Prism and is
 // indexed like any other effect.
 fn builtin_names() -> Vec<Primitive> {
+    // The checker's seed table covers every surface builtin, including the ones
+    // (print, fatal, ord) whose registry row carries no signature of its own.
+    let sigs: BTreeMap<&str, &str> = crate::tc::builtin_sigs().collect();
     let mut arities = BTreeMap::new();
     crate::core::builtin_arities(&mut arities);
     let mut names: BTreeMap<String, Primitive> = arities
         .into_keys()
         .map(|name| {
+            let signature = sigs.get(name.as_str()).map(|s| (*s).to_string());
             (
                 name.clone(),
                 Primitive {
                     name,
                     kind: PrimitiveKind::Value,
-                    signature: None,
+                    signature,
                     doc: None,
                 },
             )
@@ -232,6 +236,55 @@ fn builtin_names() -> Vec<Primitive> {
             ),
         },
     );
+    // The wired opaque types: raw storage cells and 128-bit SIMD vectors with no
+    // surface constructors, produced and consumed only through their builtin
+    // families. Builtin signatures name them, so the index must too.
+    for (name, doc) in [
+        (
+            crate::types::BUF,
+            "An opaque byte buffer, manipulated through the buf_* builtins; the storage under \
+             the stdlib Bytes type.",
+        ),
+        (
+            crate::types::FLOAT_BUF,
+            "An unboxed buffer of raw 64-bit floats, manipulated through the tbuf_* builtins; \
+             the flat storage under the stdlib tensor library.",
+        ),
+        (
+            crate::types::INT_BUF,
+            "An unboxed buffer of raw 64-bit integers, manipulated through the ibuf_* builtins.",
+        ),
+        (
+            crate::types::F64X2,
+            "A 128-bit SIMD vector of two 64-bit float lanes, produced and consumed by the \
+             simd_f* builtins.",
+        ),
+        (
+            crate::types::I64X2,
+            "A 128-bit SIMD vector of two 64-bit integer lanes, produced and consumed by the \
+             simd_i* builtins.",
+        ),
+        (
+            crate::types::F32X4,
+            "A 128-bit SIMD vector of four 32-bit float lanes, produced and consumed by the \
+             simd_f*4 builtins.",
+        ),
+        (
+            crate::types::I32X4,
+            "A 128-bit SIMD vector of four 32-bit integer lanes, produced and consumed by the \
+             simd_i*4 builtins.",
+        ),
+    ] {
+        names.insert(
+            name.to_string(),
+            Primitive {
+                name: name.to_string(),
+                kind: PrimitiveKind::Type,
+                signature: Some("Type".into()),
+                doc: Some(doc.into()),
+            },
+        );
+    }
     for effect in [names::IO_EFFECT, names::EXN_EFFECT, names::FAIL_EFFECT] {
         names.insert(
             effect.to_string(),
@@ -640,10 +693,9 @@ fn attach_refs(defs: &mut [Def], seen: &occurrences::Occurrences, owners: &Membe
         if indexed.contains(target) {
             return target.to_string();
         }
-        match owners.get(target) {
-            Some(owner) => owner.clone(),
-            _ => target.to_string(),
-        }
+        owners
+            .get(target)
+            .map_or_else(|| target.to_string(), Clone::clone)
     };
     let mut by_owner: BTreeMap<&str, Vec<&occurrences::Ref>> = BTreeMap::new();
     for r in &seen.refs {

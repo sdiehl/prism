@@ -176,7 +176,9 @@ class Viewer {
   // file-and-line anchor is not.
   private fromUrl(): void {
     const id = decodeURIComponent(location.hash.replace(/^#/, ""));
-    if (id && id !== this.focused && this.lookup(id)) this.show(id);
+    if (id && id !== this.focused && (this.lookup(id) || this.index.builtins.has(id))) {
+      this.show(id);
+    }
   }
 
   // The definition to render for `id`: the current revision's, or — for an id
@@ -232,7 +234,7 @@ class Viewer {
   // which is the working-set model doing the job a history stack was bolted on to
   // do, less well.
   show(id: string): void {
-    if (!this.lookup(id)) return;
+    if (!this.lookup(id) && !this.index.builtins.has(id)) return;
     if (!this.open.includes(id)) this.open.push(id);
     this.focused = id;
     history.replaceState(null, "", `#${encodeURIComponent(id)}`);
@@ -311,7 +313,7 @@ class Viewer {
     const found = this.search(q);
     // With a revision pair, what the author touched leads: on a real change the
     // cone dwarfs it, and a list that mixes the two buries the review.
-    let html = this.changeList(q);
+    let html = this.changeList(q) + this.builtinGroup(q);
     let budget = ROWS;
     for (const g of found.groups) {
       const open = Boolean(q) || this.openMods.has(g.module);
@@ -338,6 +340,53 @@ class Viewer {
     const at = this.nodes.list.scrollTop;
     this.nodes.list.innerHTML = html;
     this.nodes.list.scrollTop = at;
+  }
+
+  // The compiler's primitives, above the modules: not a module (nothing
+  // declares them), but every program stands on them, and a reader who follows
+  // `Unit` or `byte_at` out of a body should find the same names browsable where
+  // the browsing starts. Collapsed by default like any module, expanded by a
+  // query that matches, and ranked the same way the modules rank their hits.
+  private builtinGroup(query: string): string {
+    const all = [...this.index.builtins.values()];
+    const hits = query
+      ? all
+          .map((p) => ({ p, score: rank(p.name, query) }))
+          .filter((h) => h.score >= 0)
+          .sort((a, b) => a.score - b.score)
+          .map((h) => h.p)
+      : all;
+    if (hits.length === 0) return "";
+    const key = "(builtins)";
+    const open = Boolean(query) || this.openMods.has(key);
+    const name = `Builtins<span class="rail-n">${hits.length}</span>`;
+    let html = `<li class="rail-mod">${
+      query
+        ? `<span class="rail-head">${name}</span>`
+        : `<button class="rail-head" data-mod="${esc(key)}" aria-expanded="${open}">${name}</button>`
+    }</li>`;
+    if (!open) return html;
+    // Three subcategories, each labelled: a wired type, a wired effect, and a
+    // builtin function are different answers to "what is this", and one flat
+    // run of 180 names buried the nine types and three effects entirely.
+    const sections: [string, string][] = [
+      ["type", "types"],
+      ["effect", "effects"],
+      ["value", "functions"],
+    ];
+    for (const [kind, label] of sections) {
+      const of = hits.filter((p) => (p.kind ?? "value") === kind);
+      if (of.length === 0) continue;
+      html += `<li class="rail-sub">${label}</li>`;
+      for (const p of of) {
+        html += `<li><button class="rail-def" data-goto="${esc(p.name)}"
+          data-tip="${esc(this.index.describe(p.name))}">
+          <span class="rail-name">${esc(p.name)}</span>
+          ${kindBadge(p.kind ?? "value")}
+        </button></li>`;
+      }
+    }
+    return html;
   }
 
   // What a query finds.
@@ -590,7 +639,7 @@ class Viewer {
 
   private card(id: string): string {
     const d = this.lookup(id);
-    if (!d) return "";
+    if (!d) return this.builtinCard(id);
     const focused = id === this.focused ? " is-focused" : "";
     const mark = this.review.get(id);
     // A definition's own text is what a reviewer reads, so the body is the card's
@@ -630,6 +679,49 @@ class Viewer {
           : ""
       }
     </article>`;
+  }
+
+  // A compiler primitive's card, synthesized from the artifact's `builtins` row.
+  //
+  // A builtin has no declaration, no content address and no revision history, so
+  // the card carries none of the review apparatus: no read mark, no note, no
+  // hash chip. And no relation strip either: a primitive is used from everywhere
+  // by definition, so "used by" would be a list of most of the index, which
+  // answers nothing. What the compiler recorded (the signature and a sentence of
+  // documentation) is the whole card.
+  private builtinCard(id: string): string {
+    const p = this.index.builtins.get(id);
+    if (!p) return "";
+    const focused = id === this.focused ? " is-focused" : "";
+    const shut = this.folded.has(id);
+    return `<article class="card card--builtin${focused}${shut ? " is-folded" : ""}" data-card="${esc(id)}">
+      <header class="card-head">
+        ${kindBadge(p.kind ?? "value")}
+        ${builtinBadge()}
+        <button class="card-name" data-fold aria-expanded="${!shut}">${esc(p.name)}</button>
+        <span class="grow"></span>
+        <span class="hash hash--none" data-tip="no content address: implemented in the compiler, not defined in Prism">&mdash;</span>
+        <button class="card-x" data-close="${esc(id)}" data-tip="close">&times;</button>
+      </header>
+      ${p.signature ? `<div class="card-sig"><code>${esc(p.name)} : ${this.linkedSig(p.signature)}</code></div>` : ""}
+      ${p.doc ? `<div class="card-doc"><p>${esc(p.doc)}</p></div>` : ""}
+    </article>`;
+  }
+
+  // A builtin's signature arrives as a plain string: no spans and no token
+  // table, because nothing lexed it. But the names inside it are the same names
+  // a painted body links, so the card resolves what it can: every identifier
+  // that names a definition or another primitive becomes the same navigation a
+  // painted reference is, and the rest stays text.
+  private linkedSig(sig: string): string {
+    return esc(sig).replace(/[A-Za-z_][A-Za-z0-9_]*/g, (word) => {
+      const prim = this.index.builtins.has(word);
+      if (!prim && !this.index.byId.has(word)) return word;
+      const cls = prim ? "ref ref--prim" : "ref";
+      return `<button class="${cls}" data-goto="${word}" data-tip="${esc(
+        this.index.describe(word),
+      )}">${word}</button>`;
+    });
   }
 
   // The read mark. Its freshness is a comparison against the revision the mark was
@@ -728,9 +820,9 @@ class Viewer {
   // a call is a click on the call rather than a hunt through a list. Offsets
   // index `source` directly, so it is a slice-and-join.
   //
-  // A target the index does not contain — a builtin like `print`, a prelude
-  // function outside this artifact — keeps its name and its tooltip but is not a
-  // link: the name is worth showing, a link to nothing is not.
+  // A compiler builtin like `print` links to its synthesized card; only a name
+  // that genuinely leaves the artifact keeps its text and its tooltip without
+  // becoming a link, because a link to nothing is worse than the name alone.
   private body(d: Def): string {
     return this.painted(d.source, this.marks(d), d.tokens, d);
   }
@@ -741,10 +833,11 @@ class Viewer {
   // but the artifact carries spans over it anyway, from the compiler's own lexer
   // run across the rendered string. So `List` and `Concurrent.Async` in a
   // signature are the same colour and the same link they are in a body, which is
-  // the point: the signature is the part a reader reads first.
+  // the point: the signature is the part a reader reads first. It leads with the
+  // name it types, so the line reads as the declaration a reader would write.
   private signature(d: Def): string {
     if (!d.ty) return "";
-    return `<div class="card-sig"><code>${this.painted(d.ty, d.ty_refs ?? [], d.ty_tokens, d, true)}</code></div>`;
+    return `<div class="card-sig"><code>${esc(d.name)} : ${this.painted(d.ty, d.ty_refs ?? [], d.ty_tokens, d, true)}</code></div>`;
   }
 
   private effectRow(d: Def): string {
@@ -837,16 +930,19 @@ class Viewer {
         continue;
       }
       // A primitive is named as one rather than reported missing: it has no
-      // definition to reach because it is implemented in the compiler, which is a
-      // different fact from a name this artifact happens not to cover.
+      // Prism definition because it is implemented in the compiler, which is a
+      // different fact from a name this artifact happens not to cover. It still
+      // leads somewhere, to the builtin's own synthesized card.
       const tip = `data-tip="${esc(this.index.describe(r.target))}"`;
       switch (this.index.classify(r.target)) {
         case "definition":
           html += `<button class="ref" data-goto="${esc(r.target)}" ${tip}>${name}</button>`;
           break;
-        case "builtin":
-          html += `<span class="ref ref--prim" ${tip}>${name}</span>`;
+        case "builtin": {
+          const to = this.index.primitive(r.target)?.name ?? r.target;
+          html += `<button class="ref ref--prim" data-goto="${esc(to)}" ${tip}>${name}</button>`;
           break;
+        }
         default:
           html += `<span class="ref ref--out" ${tip}>${name}</span>`;
       }
@@ -881,9 +977,10 @@ class Viewer {
   }
 
   // Every relation the index knows about this definition, in both directions. A
-  // target the index does not contain (a builtin effect like `IO`, a prelude
-  // function a project calls) is rendered as plain text rather than a dead link,
-  // so a link that leaves the index reads as one instead of looking broken.
+  // builtin target (an effect like `IO`, a primitive a body calls) links to its
+  // synthesized card; a target the index genuinely does not cover is rendered as
+  // plain text rather than a dead link, so it reads as leaving the index instead
+  // of looking broken.
   private relations(id: string): string {
     // Edges first, members after. On a type the member rows are the heaviest thing
     // on the card — `Option` has 127 uses of `None` and 135 of `Some` — and leading
@@ -978,8 +1075,10 @@ class Viewer {
         switch (this.index.classify(t)) {
           case "definition":
             return `<button class="chip${mark}" data-goto="${esc(t)}" ${tip}>${esc(short(t))}</button>`;
-          case "builtin":
-            return `<span class="chip chip--prim${mark}" ${tip}>${esc(short(t))}</span>`;
+          case "builtin": {
+            const to = this.index.primitive(t)?.name ?? t;
+            return `<button class="chip chip--prim${mark}" data-goto="${esc(to)}" ${tip}>${esc(short(t))}</button>`;
+          }
           default:
             return `<span class="chip chip--out${mark}" ${tip}>${esc(short(t))}</span>`;
         }
@@ -1131,6 +1230,13 @@ const kindBadge = (kind: string): string => {
   const tip = k ? `${k.label} — ${k.gloss}` : kind;
   return `<span class="kind kind--${kind}" data-tip="${esc(tip)}">${esc(k?.label ?? kind)}</span>`;
 };
+
+// The badge naming a compiler primitive, wherever one stands in for a kind
+// badge. One word for all three primitive kinds: the signature says the rest,
+// and "builtin" is the fact that distinguishes the row from every definition
+// around it.
+const builtinBadge = (): string =>
+  `<span class="kind kind--builtin" data-tip="builtin — implemented in the compiler, with no Prism definition">builtin</span>`;
 
 // `CSS.escape` is not in every target here, and card ids are canonical names that
 // can carry `.` and `@`; quoting them for an attribute selector is enough.

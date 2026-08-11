@@ -13,7 +13,7 @@ pub mod ty;
 
 pub use repr::{is_or_null_element, repr_of_type, Repr};
 pub use ty::{
-    show_effects, show_type_with_effects, Effects, Type, ARBITRARY_CLASS, CANONICAL, CONS,
+    show_effects, show_type_with_effects, Effects, Type, ARBITRARY_CLASS, BUF, CANONICAL, CONS,
     DIV_CLASS, EQ_CLASS, F32X4, F64X2, FLOAT_BUF, FROM_JSON_CLASS, HASH_CLASS, I32X4, I64X2,
     IDENTIFIABLE, IDENTIFIABLE_BUNDLE, INT_BUF, LENS, LIST, NIL, NONE, NUM_CLASS, OPTION,
     ORD_CLASS, PLATE_CLASS, SERIALIZE_CLASS, SHOW_CLASS, SOME, STABLE_CLASS, TO_JSON_CLASS,

@@ -137,6 +137,17 @@ button.rail-head:hover {
   color: var(--line-strong);
 }
 
+/* A subcategory label inside the builtins group: types, effects, functions. */
+.rail-sub {
+  padding: 5px 10px 2px 19px;
+  font-family: var(--ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--line-strong);
+  text-transform: uppercase;
+}
+
 .rail-def {
   display: flex;
   gap: 7px;
@@ -385,8 +396,10 @@ kbd {
   border-bottom-color: var(--accent);
 }
 
-/* A compiler primitive: not a link because there is nothing to link to, and
-   styled as ordinary code rather than as a broken reference. */
+/* A compiler primitive: quieter than a definition reference, because most of a
+   body's primitive names are scaffolding, but a button leads to the builtin's
+   synthesized card while a bare span (a member nothing uses) only answers on
+   hover. */
 .ref--prim {
   color: inherit;
   cursor: help;
@@ -395,6 +408,14 @@ kbd {
 
 .ref--prim:hover {
   border-bottom-color: var(--line-strong);
+}
+
+button.ref--prim {
+  cursor: pointer;
+}
+
+button.ref--prim:hover {
+  background: var(--accent-wash);
 }
 
 /* Where a declaration introduces one of its own members. Marked like a reference
@@ -655,11 +676,10 @@ kbd {
   border-color: var(--accent);
 }
 
-/* A compiler primitive, and a target this artifact does not cover: both shown,
-   neither a dead link, and distinguishable from each other. */
+/* A compiler primitive: muted like a name that leaves the index, but a live
+   link to the builtin's synthesized card. */
 .chip--prim {
   color: var(--muted);
-  cursor: help;
 }
 
 /* A chip the dependency graph reports and the source does not name: reached
@@ -740,6 +760,12 @@ kbd {
 
 .kind--test {
   color: var(--accent);
+}
+
+/* A compiler primitive's badge: its own colour, because "builtin" is a fact
+   about where the code lives rather than a declaring keyword. */
+.kind--builtin {
+  color: #8a5fa8;
 }
 
 .tag--pub {

@@ -1116,7 +1116,21 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
                 title.unwrap_or_else(|| "Prism Reference".into()),
                 out,
             ),
-            _ => cli::index::index_cmd(&path, out, stdlib, as_library, no_source, check, cfg),
+            _ => cli::index::index_cmd(
+                &path,
+                out,
+                cli::index::IndexOpts {
+                    stdlib,
+                    as_library,
+                    no_source,
+                    mode: if check {
+                        cli::index::IndexMode::Check
+                    } else {
+                        cli::index::IndexMode::Write
+                    },
+                },
+                cfg,
+            ),
         },
         Cmd::Mdbook { rest } => cli::docs::mdbook_cmd(&rest, cfg.flags.mdbook_strict),
     }

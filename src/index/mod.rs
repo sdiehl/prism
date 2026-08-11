@@ -33,6 +33,7 @@
 //! committed copy in CI the way `prism docs --check` gates committed pages.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
 
@@ -690,7 +691,7 @@ fn merge_packed(packed: &str, from: &[String], to: &mut Vec<String>) -> Result<S
         return Ok(String::new());
     }
     let fields: Vec<&str> = packed.split_whitespace().collect();
-    if fields.len() % 3 != 0 {
+    if !fields.len().is_multiple_of(3) {
         return Err(format!(
             "malformed packed spans: expected triples, found {} fields",
             fields.len()
@@ -717,7 +718,6 @@ fn merge_packed(packed: &str, from: &[String], to: &mut Vec<String>) -> Result<S
         if !out.is_empty() {
             out.push(' ');
         }
-        use std::fmt::Write as _;
         write!(out, "{gap} {len} {new}").expect("writing to a String cannot fail");
     }
     Ok(out)

@@ -12,6 +12,31 @@ use crate::index::{build, diff, Index, IndexInput, TestLayer};
 // writes.
 const INDEX_FILE: &str = "index.json";
 
+/// The switches `prism index` accepts, named rather than positional: four bare
+/// bools at the call site read as an opaque `true, false, false, true`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct IndexOpts {
+    /// Index the embedded standard library instead of PATH.
+    pub stdlib: bool,
+    /// Compile every project module through an import, entry included.
+    pub as_library: bool,
+    /// Omit definition source text from the artifact.
+    pub no_source: bool,
+    /// Write the artifact, or verify a committed copy without writing.
+    pub mode: IndexMode,
+}
+
+/// What `prism index` does with the artifact it builds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IndexMode {
+    /// Write the artifact to the output file.
+    #[default]
+    Write,
+    /// Verify a committed copy is current and write nothing, the
+    /// `prism docs --check` contract.
+    Check,
+}
+
 // `prism index [PATH] [--out FILE] [--stdlib] [--no-source] [--check]`.
 // Indexes the project/dir/file at PATH (or the embedded standard library with
 // `--stdlib`) into one JSON artifact. `--check` verifies a committed copy is
@@ -19,16 +44,13 @@ const INDEX_FILE: &str = "index.json";
 pub fn index_cmd(
     path: &Path,
     out: Option<PathBuf>,
-    stdlib: bool,
-    as_library: bool,
-    no_source: bool,
-    check: bool,
+    opts: IndexOpts,
     cfg: &crate::Config,
 ) -> CmdResult {
-    let (index, default_dir) = if stdlib {
-        (build_stdlib(!no_source)?, PathBuf::from("target"))
+    let (index, default_dir) = if opts.stdlib {
+        (build_stdlib(!opts.no_source)?, PathBuf::from("target"))
     } else {
-        build_project(path, !no_source, as_library, cfg)?
+        build_project(path, !opts.no_source, opts.as_library, cfg)?
     };
     let json = index.to_json().map_err(|e| {
         (
@@ -39,7 +61,7 @@ pub fn index_cmd(
     })?;
     let file = out.unwrap_or_else(|| default_dir.join(INDEX_FILE));
 
-    if check {
+    if opts.mode == IndexMode::Check {
         if std::fs::read_to_string(&file).unwrap_or_default() == json {
             return Ok(());
         }
