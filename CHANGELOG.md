@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.18.0
 
 - Code index: added `prism index`, one deterministic artifact describing every definition (content address, type, effect row, claims, doc comment, members, source range) and the `calls`/`uses-type`/`performs`/`handles`/`instance-of`/`tests` edges between them, for tools that read code rather than compile it.
 - Code viewer: added a page at `/viewer/` that reads code by definition rather than by file, following any relation in either direction. It is the one page that loads no wasm: every fact it renders is baked into the index, so it opens any artifact via `?src=`.
@@ -13,9 +13,6 @@
 - Revisions: added `prism index --diff OLD NEW`, comparing two index artifacts with no compiler. Because a content address folds in dependencies, it separates the definitions an author edited from the ones that merely re-hashed underneath them, reports a rename as a move rather than an add and a delete, and marks a reformat as behavior-preserving. The viewer overlays it via `?diff=`.
 - Occurrences: added `prism dump occurrences`, pairing each written name with the definition it resolves to (goto-definition forward, find-references reversed). Collected by the renamer itself, so it cannot disagree with the resolver about what a name means.
 - Identity: exposed the per-definition namespace layers (`prism::namespace_layers`) behind the whole-program root, so a tool can address individual definitions and not only the program.
-
-## 0.18.0
-
 - Diagnostics: added `prism explain CODE` and REPL `:explain`, one coverage-pinned page per emitted code, plus edit-distance did-you-mean corrections across compiler and REPL scopes.
 - Typed holes: `check --at-hole` reports the expected type, effect row, and ranked candidates, `--fill` substitutes a sole exact-type binding and restores on a failed re-check, and `run --defer-holes` turns reached holes into deterministic faults.
 - Type search: added `prism search TYPE` over project, package, and standard-library interfaces by subsumption, and bounded `prism synth --at-hole` whose candidates the ordinary checker re-verifies.
