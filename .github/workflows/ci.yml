@@ -2,16 +2,15 @@ name: CI
 
 on:
   # Gated once per change: pull requests run the full parity/perf ratchet before
-  # work lands, and pushes to main re-run it post-merge. Release branches (vX.Y.Z)
-  # get the same full run on every push, because their work accumulates for weeks
-  # without a pull request to gate it and the squash lands on main in one commit;
-  # waiting until then to learn the tree is red is too late. Ordinary feature
-  # branches still do not trigger their own run, so an open PR is not built twice.
+  # work lands, and pushes to main re-run it post-merge. Release branches are
+  # gated by their pull request alone; a push trigger for them would run every
+  # push twice (refs/heads/vX.Y.Z and refs/pull/N/merge are different refs, so
+  # the concurrency group cannot dedupe them). Branches without an open PR get
+  # no automatic run; use workflow_dispatch for those.
   pull_request:
   push:
     branches:
       - main
-      - "v*"
   workflow_dispatch:
 
 # A newer commit on the same ref supersedes an in-flight run, so rapid pushes do
