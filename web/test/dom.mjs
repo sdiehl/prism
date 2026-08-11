@@ -116,9 +116,15 @@ export function section(name) {
 }
 
 /// Strip markup and unescape, to compare rendered output against its source.
+/// The strip runs to a fixpoint so no partial tag can survive a single pass.
 export function plain(html) {
-  return html
-    .replace(/<[^>]+>/g, "")
+  let text = html;
+  let stripped = text.replace(/<[^>]*>?/g, "");
+  while (stripped !== text) {
+    text = stripped;
+    stripped = text.replace(/<[^>]*>?/g, "");
+  }
+  return stripped
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
