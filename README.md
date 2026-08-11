@@ -43,9 +43,15 @@ curl --proto '=https' --tlsv1.2 -fsSL https://sdiehl.github.io/prism/install.sh 
 
 The installer verifies the release tarball's SHA-256 against the release manifest (and its build-provenance attestation when an authenticated `gh` is available) before unpacking, and installs to `~/.local/bin` without sudo. If Nix is present it uses the flake instead, with hashes verified by the Nix store.
 
-Also available: `brew install sdiehl/prism/prism`, `docker run ghcr.io/sdiehl/prism`, and pinned x86-64 packages:
+Also available via a variety of other package managers:
 
 ```shell
+# Homebrew
+brew install sdiehl/prism/prism
+
+# Docker
+docker run ghcr.io/sdiehl/prism --version
+
 # Debian / Ubuntu (LLVM repository, then package)
 curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s 22
 curl -fLO https://github.com/sdiehl/prism/releases/download/v0.18.0/prism_0.18.0_amd64.deb && sudo apt install ./prism_0.18.0_amd64.deb
@@ -56,9 +62,6 @@ sudo dnf install https://github.com/sdiehl/prism/releases/download/v0.18.0/prism
 # Arch (prebuilt package or local PKGBUILD)
 sudo pacman -U https://github.com/sdiehl/prism/releases/download/v0.18.0/prism-0.18.0-1-x86_64.pkg.tar.zst
 curl -fLO https://github.com/sdiehl/prism/releases/download/v0.18.0/PKGBUILD && makepkg -si
-
-# Alpine / musl: no native package (the binary is glibc-linked). Use the image:
-docker run ghcr.io/sdiehl/prism --version
 ```
 
 ### From Source
@@ -92,13 +95,9 @@ prism build --watch --verbose        # rebuild on edits; show unit/Merkle impact
 prism clean                          # remove the project's target/ directory
 prism check                          # type check the enclosing project
 prism check program.pr               # type check one source file
-prism search '(String) -> Bool'       # search checked interfaces by type
-prism synth program.pr --at-hole name # propose bounded, rechecked hole terms
-prism bootstrap check program.pr      # compare the Prism T1 shadow checker
 prism pkg init                       # create a new package interactively
 prism fmt program.pr                 # format source
 prism dump core program.pr           # inspect one phase (`prism dump --help` lists every phase)
-prism dump surface-syntax program.pr # versioned JSON surface syntax for tools
 ```
 
 ## License
