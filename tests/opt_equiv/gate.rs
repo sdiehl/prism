@@ -201,6 +201,11 @@ fn optimizer_equivalence_representative_sample() {
 // processes cannot add their counters together. This scan stops as soon as all
 // configurations have changed Core somewhere and performs no evaluation, so it
 // retains the anti-vacuity contract without recreating the heavyweight sweep.
+// Each configuration counts as engaged when either the optimized Core or the
+// effect-lowered Core differs: a disabled pass whose pre-lowering
+// normalizations the remaining O2 passes re-derive (simplify) is only visible
+// after lowering, while one whose work lowering itself erases on small
+// programs (specialize) is only visible before it.
 #[test]
 fn optimizer_configurations_are_engaged() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -229,13 +234,15 @@ fn optimizer_configurations_are_engaged() {
         if !runnable_corpus_source(&full) {
             continue;
         }
-        let lowered = variants
-            .iter()
-            .map(|variant| prism::dump_on("core", &full, &roots, &variant.config))
-            .collect::<Result<Vec<_>, _>>();
-        let Ok(lowered) = lowered else { continue };
-        let lowered = lowered.iter().map(String::as_str).collect::<Vec<_>>();
-        record_lowered_activity(&lowered, &activity);
+        for phase in ["core", "lowered"] {
+            let dumped = variants
+                .iter()
+                .map(|variant| prism::dump_on(phase, &full, &roots, &variant.config))
+                .collect::<Result<Vec<_>, _>>();
+            let Ok(dumped) = dumped else { continue };
+            let dumped = dumped.iter().map(String::as_str).collect::<Vec<_>>();
+            record_lowered_activity(&dumped, &activity);
+        }
         if activity
             .iter()
             .all(|changed| changed.load(Ordering::Relaxed) > 0)
