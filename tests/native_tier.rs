@@ -13,6 +13,7 @@ fn forced(tier: EffectTier, erasures: bool) -> Config {
     cfg.flags.effect_tier = tier;
     cfg.flags.erasures = erasures;
     cfg.flags.compiler_cache = false;
+    cfg.flags.quiet = true;
     cfg
 }
 

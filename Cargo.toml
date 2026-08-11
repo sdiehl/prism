@@ -184,6 +184,9 @@ members = [
   "crates/prism-store",
   "crates/prism-syntax",
 ]
+# The toolchain installer is a standalone binary with its own lockfile and an
+# HTTP/TLS dependency tree the compiler build must never pay for.
+exclude = ["tools/prismup"]
 resolver = "2"
 
 [workspace.package]

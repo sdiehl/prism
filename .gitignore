@@ -1,5 +1,6 @@
 /target
 /target-mlir
+/tools/prismup/target/
 /docs/book
 /web/pkg
 /web/src/examples.ts

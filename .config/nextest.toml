@@ -73,10 +73,17 @@ filter = 'binary(native_tier)'
 test-group = 'native-oracles'
 slow-timeout = { period = "120s", terminate-after = 32 }
 
+# Fusion parity discovers its cases by compiling the whole corpus twice (fuse
+# off and on) before it builds a single binary, and the group below pins it to
+# one thread, so its honest runtime scales with the corpus like the tier and
+# MLIR oracles above, which already carry this allowance. A four-core debug CI
+# shard crossed the shared cap with the corpus still growing. Same rule as
+# every other entry here: the timeout catches a hang, it does not bound honest
+# work.
 [[profile.default.overrides]]
 filter = 'binary(native_fusion)'
 test-group = 'native-oracles'
-slow-timeout = { period = "120s", terminate-after = 16 }
+slow-timeout = { period = "120s", terminate-after = 32 }
 
 [[profile.default.overrides]]
 filter = 'binary(native_perf)'
@@ -140,7 +147,7 @@ slow-timeout = { period = "120s", terminate-after = 32 }
 [[profile.ci.overrides]]
 filter = 'binary(native_fusion)'
 test-group = 'native-oracles'
-slow-timeout = { period = "120s", terminate-after = 16 }
+slow-timeout = { period = "120s", terminate-after = 32 }
 
 [[profile.ci.overrides]]
 filter = 'binary(native_perf)'

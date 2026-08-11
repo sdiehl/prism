@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Route Prism's direct clang invocations through the same sccache service Cargo
+# uses in CI. Link commands remain ordinary clang work; cacheable `-c` calls
+# (runtime C and generated LLVM bitcode) gain content-addressed reuse.
+set -euo pipefail
+
+real_cc="${PRISM_REAL_CC:-}"
+if [[ -z "$real_cc" ]]; then
+    for candidate in /usr/lib/llvm-22/bin/clang /opt/homebrew/opt/llvm/bin/clang /usr/local/opt/llvm/bin/clang /usr/bin/clang; do
+        if [[ -x "$candidate" ]]; then
+            real_cc="$candidate"
+            break
+        fi
+    done
+fi
+if [[ -z "$real_cc" ]]; then
+    real_cc="$(command -v clang)"
+fi
+
+cacheable=0
+for arg in "$@"; do
+    if [[ "$arg" == "-c" ]]; then
+        cacheable=1
+        break
+    fi
+done
+
+if [[ "$cacheable" == 1 ]] && command -v sccache >/dev/null 2>&1; then
+    exec sccache "$real_cc" "$@"
+fi
+exec "$real_cc" "$@"

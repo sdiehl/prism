@@ -358,7 +358,7 @@ pub fn build_on_report(
                 |scc| cc_link_many(&scc.paths, out, cfg, RuntimeProfile::NativeBackend),
             )
         },
-        |()| timing::native_artifact(out),
+        |stats| timing::native_artifact(out).cc_link_stats(*stats),
     );
     let _ = std::fs::remove_dir_all(&scc_directory);
     link_result?;
@@ -543,7 +543,7 @@ pub fn build_mlir_on(src: &str, roots: &[Root], out: &Path, cfg: &Config) -> Res
     }
     fs::write(&ll_file, &translate_out.stdout)?;
 
-    let res = cc_link(&ll_file, out, cfg, RuntimeProfile::HostOracle);
+    let res = cc_link(&ll_file, out, cfg, RuntimeProfile::HostOracle).map(|_| ());
     let _ = fs::remove_file(&mlir_file);
     res
 }

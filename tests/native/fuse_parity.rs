@@ -13,15 +13,19 @@
 // determinism check covers the byte-stable join naming the anti-unifier promises.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use prism::{default_roots, dump_on, Config};
 
-use crate::support::{check_native_parity, corpus, parallel_check, require_cc, source};
+use crate::support::{
+    check_native_parity, heavy_corpus_delegated, parallel_check, require_cc, sharded_corpus, source,
+};
 
 fn fused() -> Config {
     let mut cfg = Config::from_env();
     cfg.flags.fuse = true;
     cfg.flags.compiler_cache = false;
+    cfg.flags.quiet = true;
     cfg
 }
 
@@ -46,7 +50,7 @@ fn fuse_cases() -> Vec<PathBuf> {
 // program the pass leaves byte-identical builds the same native binary either way,
 // so parity.rs already covers it and it is skipped here.
 fn touched_cases() -> Vec<PathBuf> {
-    // Discovery compiles the whole corpus twice. Debug builds exceed libtest's
+    // Discovery compiles this shard's corpus twice. Debug builds exceed libtest's
     // smaller worker stack even though the same scan passes on the public
     // compiler's 8 MiB main-thread stack. The selected cases still run through
     // `parallel_check`, whose workers retain their separate interpreter budget.
@@ -67,21 +71,27 @@ fn touched_cases_on_compiler_stack() -> Vec<PathBuf> {
     let roots = default_roots(base);
     let mut off = Config::from_env();
     off.flags.compiler_cache = false;
+    off.flags.quiet = true;
     let on = fused();
-    let mut cases: Vec<PathBuf> = corpus()
-        .into_iter()
-        .filter(|case| {
-            let full = source(case);
-            let a = dump_on("core", &full, &roots, &off);
-            let b = dump_on("core", &full, &roots, &on);
-            match (a, b) {
-                (Ok(a), Ok(b)) => a != b,
-                // A dump error under exactly one config is itself a divergence worth
-                // surfacing through the build below.
-                _ => true,
-            }
-        })
-        .collect();
+    let candidates = sharded_corpus();
+    let selected = Mutex::new(Vec::new());
+    let failures = parallel_check(&candidates, |case| {
+        let full = source(case);
+        let a = dump_on("core", &full, &roots, &off);
+        let b = dump_on("core", &full, &roots, &on);
+        let touched = match (a, b) {
+            (Ok(a), Ok(b)) => a != b,
+            // A dump error under exactly one config is itself a divergence worth
+            // surfacing through the build below.
+            _ => true,
+        };
+        if touched {
+            selected.lock().unwrap().push(case.to_path_buf());
+        }
+        Ok(())
+    });
+    debug_assert!(failures.is_empty());
+    let mut cases = selected.into_inner().unwrap();
     cases.extend(fuse_cases());
     cases.sort();
     cases.dedup();
@@ -110,6 +120,9 @@ fn run_touched(tag: &str, build: impl Fn(&str, &Path) -> Result<(), prism::Error
 
 #[test]
 fn fuse_on_matches_interpreter_llvm() {
+    if heavy_corpus_delegated() {
+        return;
+    }
     let roots = default_roots(Path::new("."));
     let cfg = fused();
     run_touched("fuse-llvm", |full, bin| {

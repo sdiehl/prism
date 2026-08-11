@@ -18,6 +18,11 @@ docker TAG="prism:dev":
 dist VERSION: (pkg VERSION)
     just docker "prism:{{ VERSION }}"
 
+# Build the prismup toolchain installer (release profile, host target).
+[group('release')]
+prismup:
+    cargo build --release --manifest-path tools/prismup/Cargo.toml
+
 # Refresh the committed Arch PKGBUILD from published checksums.
 [group('release')]
 pkgbuild VERSION:

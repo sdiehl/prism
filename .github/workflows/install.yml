@@ -54,6 +54,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: PRISM_NO_NIX=1 sh scripts/install.sh
+      # The installer lands in ~/.prismup/bin when the release ships prismup
+      # assets and ~/.local/bin when it predates them; resolve whichever this
+      # release produced so the workflow stays green across that boundary.
+      - name: Locate installed binary
+        run: |
+          for d in "$HOME/.prismup/bin" "$HOME/.local/bin"; do
+            if [ -x "$d/prism" ]; then echo "PRISM_BIN=$d/prism" >> "$GITHUB_ENV"; exit 0; fi
+          done
+          echo "no prism binary found in ~/.prismup/bin or ~/.local/bin"; exit 1
+
       # Informational, not a gate: this workflow runs against the *published*
       # release, so it reports what the shipped artifact loads rather than
       # failing on it. Anything outside /usr/lib and /System is a dyld abort
@@ -61,11 +71,11 @@ jobs:
       # enforced, at the commit that can still fix it.
       - name: Report dylib dependencies (macOS)
         if: runner.os == 'macOS'
-        run: otool -L "$HOME/.local/bin/prism"
+        run: otool -L "$(readlink -f "$PRISM_BIN")"
 
       - name: Installed binary runs
         run: |
-          bin="$HOME/.local/bin/prism"
+          bin="$PRISM_BIN"
           "$bin" --version
           printf 'fn main() : Unit ! {IO} = println("install ok")\n' > /tmp/smoke.pr
           out="$("$bin" run /tmp/smoke.pr)"

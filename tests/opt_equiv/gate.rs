@@ -15,10 +15,10 @@
 //! Optimization and disabled-pass labels remain part of artifact identity. The
 //! verification evaluator makes no allocator, RC-count, or reuse-cost claim.
 //!
-//! Both tests run in the default sweep: the representative sample is the fast
-//! path, and the whole-corpus test rides the nextest `corpus-compilers` group
-//! (single-threaded, scattered across the CI shards like the other heavy
-//! corpus gates). `just opt-equiv` runs the whole-corpus test by itself.
+//! All tests run in the default sweep: the representative sample is the fast
+//! semantic path, the early-exit discovery keeps every configuration engaged,
+//! and CI partitions the whole-corpus relation by source across its dedicated
+//! exact-cover matrix. `just opt-equiv` runs the whole-corpus test by itself.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -26,7 +26,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use prism::core::CorePass;
 use prism::{default_roots, Config, ObservationTrace, OptLevel};
 
-use crate::support::{corpus, parallel_check, source};
+use crate::support::{
+    corpus_candidates, corpus_is_sharded, heavy_corpus_delegated, parallel_check,
+    runnable_corpus_source, sharded_corpus, source,
+};
 
 const DISABLEABLE_PASSES: &[(CorePass, &str)] = &[
     (CorePass::Fuse, "o2-no-fuse"),
@@ -194,10 +197,68 @@ fn optimizer_equivalence_representative_sample() {
     run_cases(&cases, false);
 }
 
+// Keep engagement independent of the exact-cover CI split: isolated shard
+// processes cannot add their counters together. This scan stops as soon as all
+// configurations have changed Core somewhere and performs no evaluation, so it
+// retains the anti-vacuity contract without recreating the heavyweight sweep.
+#[test]
+fn optimizer_configurations_are_engaged() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let roots = default_roots(Path::new("."));
+    let variants = variants();
+    let activity: Vec<AtomicUsize> = (0..ACTIVITY_LABELS.len())
+        .map(|_| AtomicUsize::new(0))
+        .collect();
+    let mut cases = [
+        "tests/fixtures/opt_equiv/o2_fuse.pr",
+        "tests/fixtures/opt_equiv/cse.pr",
+        "examples/accum.pr",
+        "examples/deriving.pr",
+        "examples/eff_state.pr",
+        "examples/handlers_funval.pr",
+        "examples/fip_tree.pr",
+        "examples/newtype_order.pr",
+    ]
+    .into_iter()
+    .map(|case| root.join(case))
+    .collect::<Vec<_>>();
+    cases.extend(corpus_candidates());
+
+    for case in cases {
+        let full = source(&case);
+        if !runnable_corpus_source(&full) {
+            continue;
+        }
+        let lowered = variants
+            .iter()
+            .map(|variant| prism::dump_on("core", &full, &roots, &variant.config))
+            .collect::<Result<Vec<_>, _>>();
+        let Ok(lowered) = lowered else { continue };
+        let lowered = lowered.iter().map(String::as_str).collect::<Vec<_>>();
+        record_lowered_activity(&lowered, &activity);
+        if activity
+            .iter()
+            .all(|changed| changed.load(Ordering::Relaxed) > 0)
+        {
+            break;
+        }
+    }
+
+    for (slot, label) in ACTIVITY_LABELS.into_iter().enumerate() {
+        assert!(
+            activity[slot].load(Ordering::Relaxed) > 0,
+            "{label} changed no lowered Core in the runnable corpus; the sweep is vacuous"
+        );
+    }
+}
+
 #[test]
 fn optimizer_configurations_have_identical_observation_traces() {
+    if heavy_corpus_delegated() {
+        return;
+    }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut cases = corpus();
+    let mut cases = sharded_corpus();
     cases.extend(
         [
             "tests/fixtures/opt_equiv/cse.pr",
@@ -206,5 +267,8 @@ fn optimizer_configurations_have_identical_observation_traces() {
         .into_iter()
         .map(|case| root.join(case)),
     );
-    run_cases(&cases, true);
+    // A shard cannot see aggregate engagement counts from its siblings. The
+    // focused discovery test above retains that backstop; this sweep retains
+    // exact-cover semantic equivalence over the whole corpus.
+    run_cases(&cases, !corpus_is_sharded());
 }

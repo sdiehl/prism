@@ -56,6 +56,24 @@ fn run(file: &Path, time_compile: bool) -> Output {
     }
 }
 
+fn build_native(file: &Path, bin: &Path, store: &Path) -> Output {
+    let out = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg(file)
+        .arg("-o")
+        .arg(bin)
+        .env("PRISM_TIME_COMPILE", "1")
+        .env("PRISM_COMPILER_CACHE", "0")
+        .env("PRISM_STORE_PATH", store)
+        .stdin(Stdio::null())
+        .output()
+        .expect("spawn native prism build");
+    assert!(out.status.success(), "native prism build failed: {out:?}");
+    Output {
+        stdout: out.stdout,
+        stderr: String::from_utf8(out.stderr).expect("stderr utf8"),
+    }
+}
+
 // The timing rows on stderr, split into their tab-separated fields.
 fn phase_rows(stderr: &str) -> Vec<Vec<&str>> {
     stderr
@@ -77,6 +95,15 @@ fn is_abbrev_digest(field: &str, prefix: &str) -> bool {
     field
         .strip_prefix(prefix)
         .is_some_and(|h| !h.is_empty() && h.len() <= 8 && h.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+fn count_field(row: &[&str], name: &str) -> usize {
+    let prefix = format!("{name}=");
+    row.iter()
+        .find_map(|field| field.strip_prefix(&prefix))
+        .unwrap_or_else(|| panic!("missing {name} in timing row: {row:?}"))
+        .parse()
+        .unwrap_or_else(|error| panic!("invalid {name} in timing row {row:?}: {error}"))
 }
 
 #[test]
@@ -172,4 +199,55 @@ fn no_rows_when_the_flag_is_off() {
         off.stderr
     );
     let _ = std::fs::remove_dir_all(file.parent().unwrap());
+}
+
+#[test]
+fn native_link_reports_direct_cc_work_and_reuses_runtime_objects() {
+    let file = temp_program("native_cc");
+    let dir = file.parent().unwrap();
+    let store = dir.join("store");
+    let first = build_native(&file, &dir.join("first-bin"), &store);
+    let first_rows = phase_rows(&first.stderr);
+    let first_link = first_rows
+        .iter()
+        .find(|row| row[1] == "cc.link")
+        .unwrap_or_else(|| panic!("missing cc.link row:\n{}", first.stderr));
+
+    let first_probe = count_field(first_link, "cc_probe_invocations");
+    let first_compile = count_field(first_link, "cc_compile_invocations");
+    let first_links = count_field(first_link, "cc_link_invocations");
+    let first_runtime_misses = count_field(first_link, "runtime_object_misses");
+    assert_eq!(first_probe, 1, "one toolchain-version probe is cold");
+    assert!(first_compile > 0, "native build must compile an object");
+    assert_eq!(first_links, 1, "native build must invoke one final link");
+    assert!(
+        first_runtime_misses > 0,
+        "a clean cost cache must prebuild runtime objects"
+    );
+    assert_eq!(
+        count_field(first_link, "cc_invocations"),
+        first_probe + first_compile + first_links
+    );
+    for timing in ["cc_probe_ms", "cc_compile_ms", "cc_link_ms"] {
+        let _ = count_field(first_link, timing);
+    }
+
+    let second = build_native(&file, &dir.join("second-bin"), &store);
+    let second_rows = phase_rows(&second.stderr);
+    let second_link = second_rows
+        .iter()
+        .find(|row| row[1] == "cc.link")
+        .unwrap_or_else(|| panic!("missing warm cc.link row:\n{}", second.stderr));
+    assert_eq!(
+        count_field(second_link, "runtime_object_misses"),
+        0,
+        "warm build must not launch clang for invariant runtime objects"
+    );
+    assert_eq!(
+        count_field(second_link, "runtime_object_hits"),
+        first_runtime_misses,
+        "warm build must materialize every prebuilt runtime object"
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
 }

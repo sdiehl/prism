@@ -1,10 +1,11 @@
 name: Release
 
 # Cut a release by pushing a version tag (`git tag v0.4.0 && git push --tags`,
-# or `just release 0.4.0`). The build matrix produces the macOS arm64 and Linux
-# x64 binaries; a single publish job then attaches both tarballs, their
-# checksums, and build provenance to one GitHub Release and bumps the Homebrew
-# tap. A `gate` job asserts ci.yml already passed for the tagged commit, so the
+# or `just release 0.4.0`). The build matrix produces the compiler binaries for
+# macOS arm64 and Linux x64/arm64, plus a prismup toolchain-manager binary per
+# platform (static musl on Linux); a single publish job then attaches every
+# tarball, checksum, and build provenance to one GitHub Release and bumps the
+# Homebrew tap. A `gate` job asserts ci.yml already passed for the tagged commit, so the
 # release only builds + smokes (no full test re-run) and stays fast.
 #
 # The macOS binary loads only dylibs that ship with macOS, so `--version`,
@@ -200,6 +201,55 @@ jobs:
           echo "output: $out"
           [ "$out" = "42" ] || { echo "unexpected output: $out"; exit 1; }
 
+      # The toolchain installer ships beside the compiler from the same matrix
+      # job. Linux builds are static musl (each runner targets its own arch, so
+      # no cross toolchain), which runs on any distro regardless of libc; macOS
+      # is a plain host build. The binary is pure Rust + rustls, so unlike prism
+      # it needs no LLVM at build or run time.
+      - name: Build prismup (Linux, static musl)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          musl_target="$(uname -m)-unknown-linux-musl"
+          rustup target add "$musl_target"
+          sudo apt-get install -y musl-tools
+          env_suffix="$(printf '%s' "$musl_target" | tr '[:lower:]-' '[:upper:]_')"
+          export "CC_$(printf '%s' "$musl_target" | tr '-' '_')=musl-gcc"
+          export "CARGO_TARGET_${env_suffix}_LINKER=musl-gcc"
+          cargo build --release --locked \
+            --manifest-path tools/prismup/Cargo.toml --target "$musl_target"
+          bin="tools/prismup/target/$musl_target/release/prismup"
+          ldd "$bin" 2>&1 | grep -qE 'not a dynamic|statically linked' \
+            || { echo "prismup is not statically linked:"; ldd "$bin"; exit 1; }
+          echo "PRISMUP_BIN=$bin" >> "$GITHUB_ENV"
+          echo "PRISMUP_TARGET=$musl_target" >> "$GITHUB_ENV"
+
+      - name: Build prismup (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          cargo build --release --locked --manifest-path tools/prismup/Cargo.toml
+          echo "PRISMUP_BIN=tools/prismup/target/release/prismup" >> "$GITHUB_ENV"
+          echo "PRISMUP_TARGET=${{ matrix.target }}" >> "$GITHUB_ENV"
+
+      # Same layout as the compiler tarball (dir wrapping the binary, .sha256
+      # sidecar), so SHA256SUMS, provenance attestation, and the publish globs
+      # all pick it up without special cases.
+      - name: Package prismup
+        run: |
+          set -euo pipefail
+          "$PRISMUP_BIN" --version
+          pkgup="prismup-${VERSION}-${PRISMUP_TARGET}"
+          mkdir "$pkgup"
+          cp "$PRISMUP_BIN" "$pkgup/prismup"
+          tar -czf "$pkgup.tar.gz" "$pkgup"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$pkgup.tar.gz" | tee "$pkgup.tar.gz.sha256"
+          else
+            shasum -a 256 "$pkgup.tar.gz" | tee "$pkgup.tar.gz.sha256"
+          fi
+          echo "PKGUP=$pkgup" >> "$GITHUB_ENV"
+
       # Linux: also emit deb/rpm via the same `just pkg` used locally. No apk: the
       # glibc binary can't run on musl; Alpine uses the container image instead.
       - name: Install nfpm + just (Linux)
@@ -222,6 +272,8 @@ jobs:
           path: |
             ${{ env.PKG }}.tar.gz
             ${{ env.PKG }}.tar.gz.sha256
+            ${{ env.PKGUP }}.tar.gz
+            ${{ env.PKGUP }}.tar.gz.sha256
             dist/*.deb
             dist/*.rpm
             dist/*.pkg.tar.zst

@@ -77,7 +77,9 @@ cp -f web/dist/prism.png "$out/prism.png" 2>/dev/null || true
 typst compile --root "$root" \
   models/semantics/semantics.typ "$out/semantics.pdf"
 
-# 6. The shell installer, served at /install.sh for `curl ... | sh`.
+# 6. The shell installer, served at /install.sh for `curl ... | sh`, and the
+#    released-version manifest prismup reads at /versions.txt.
 cp -f scripts/install.sh "$out/install.sh"
+cp -f scripts/versions.txt "$out/versions.txt"
 
 echo "unified site assembled at $out (docs at /, playground at /play/, gallery at /gallery/, scrubber at /scrub/, pendulum at /pendulum/, branch at /branch/, chaos at /chaos/, schedule at /schedule/, teleport at /teleport/, merkle at /merkle/, incr at /incr/, world at /world/, code viewer at /viewer/)"

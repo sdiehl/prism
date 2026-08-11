@@ -29,8 +29,8 @@ use prism::{build_on, default_roots, Config};
 #[cfg(feature = "mlir")]
 use crate::support::have;
 use crate::support::{
-    check_native_parity, cleanup_bin, corpus, corpus_drops, interpreted, leak_free, parallel_check,
-    require_cc, shard, shard_by, source, temp_bin, CORPUS_SKIPS,
+    check_native_parity, cleanup_bin, corpus_drops, interpreted, leak_free, parallel_check,
+    require_cc, shard_by, sharded_corpus, source, temp_bin, CORPUS_SKIPS,
 };
 #[cfg(feature = "mlir")]
 use prism::build_mlir_on;
@@ -67,7 +67,7 @@ fn build_mlir_quiet(src: &str, out: &Path) -> Result<(), Error> {
 // oracle (`tests/tier_parity.rs`). Corpus shrinkage is guarded separately by
 // `corpus_skip_list_is_exact`, not a percentage floor.
 fn run_corpus(tag: &str, build: impl Fn(&str, &Path) -> Result<(), Error> + Sync) {
-    let cases = shard(corpus());
+    let cases = sharded_corpus();
     let fails = parallel_check(&cases, |case| check_native_parity(case, tag, &build));
     assert!(
         fails.is_empty(),

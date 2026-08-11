@@ -19,8 +19,9 @@ use prism::{build_on, default_roots, Config, EffectTier, ObservationTrace, Root}
 
 use super::{effect_plan, forced};
 use crate::support::{
-    canonical_process_exit, cleanup_bin, corpus, corpus_is_sharded, leak_free, parallel_check,
-    program_stderr, require_cc, shard, source, temp_bin, with_gate_cache, CHECK_LEAKS,
+    canonical_process_exit, cleanup_bin, corpus_is_sharded, heavy_corpus_delegated, leak_free,
+    parallel_check, program_stderr, require_cc, sharded_corpus, source, temp_bin, with_gate_cache,
+    CHECK_LEAKS,
 };
 
 /// Gate-cache tag for a cross-tier verdict: one marker covers the whole grid
@@ -45,6 +46,7 @@ const MIN_MOVED_CORPUS_CASES: usize = 60;
 fn grid() -> Vec<(String, Config)> {
     let mut auto_cfg = Config::from_env();
     auto_cfg.flags.compiler_cache = false;
+    auto_cfg.flags.quiet = true;
     let mut points = vec![("auto".to_string(), auto_cfg)];
     for tier in EffectTier::ALL
         .into_iter()
@@ -193,10 +195,13 @@ fn check_case(
 // floor is refreshed.
 #[test]
 fn tiers_match_each_other_on_the_corpus() {
+    if heavy_corpus_delegated() {
+        return;
+    }
     require_cc();
     let roots = default_roots(Path::new("."));
     let grid = grid();
-    let cases = shard(corpus());
+    let cases = sharded_corpus();
     let exercised = AtomicUsize::new(0);
     let fails = parallel_check(&cases, |case| check_case(case, &roots, &grid, &exercised));
     assert!(

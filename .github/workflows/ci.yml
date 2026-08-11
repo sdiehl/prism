@@ -24,9 +24,11 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # sccache caches per-crate rustc output in the GHA cache, shared across jobs, so
-  # the LLVM-linked crate is compiled once and reused by the parallel test /
-  # sanitizer / parity-shard jobs. Incremental must be off for sccache to hit.
+  # sccache caches per-crate rustc output and the direct Clang `-c` commands routed
+  # through scripts/clang-sccache in the GHA cache, shared across jobs. The
+  # LLVM-linked crate and byte-identical generated/runtime objects are therefore
+  # reusable by the parallel test / sanitizer / corpus-shard jobs. Incremental
+  # must be off for rustc sccache hits.
   # RUSTC_WRAPPER is set per-job (only where sccache-action installed the binary).
   SCCACHE_GHA_ENABLED: "true"
   CARGO_INCREMENTAL: "0"
@@ -39,6 +41,37 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: python3 scripts/check-readme-version.py
+
+  # The toolchain installer is excluded from the workspace (its HTTP/TLS tree
+  # must never burden the compiler build), so nothing else in CI compiles it; a
+  # broken prismup would otherwise surface only when a release tag runs the
+  # matrix. Build it the way release.yml does on Linux: static musl, clippy
+  # clean, format clean. No LLVM needed, so this stays a fast job.
+  prismup:
+    name: prismup builds (static musl)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup Rust toolchain
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/prismup
+      - name: Build, lint, format
+        run: |
+          set -euo pipefail
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get install -y musl-tools
+          export CC_x86_64_unknown_linux_musl=musl-gcc
+          export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc
+          cd tools/prismup
+          cargo fmt --check
+          cargo clippy --locked --target x86_64-unknown-linux-musl -- -D warnings
+          cargo build --release --locked --target x86_64-unknown-linux-musl
+          bin=target/x86_64-unknown-linux-musl/release/prismup
+          ldd "$bin" 2>&1 | grep -qE 'not a dynamic|statically linked' \
+            || { echo "prismup is not statically linked:"; ldd "$bin"; exit 1; }
+          "$bin" --version
 
   # docs/src cross-references anchors and {{#include}}s by hand; mdbook never
   # validates either, so a rename or a moved example silently rots a link.
@@ -123,7 +156,8 @@ jobs:
       LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
       MLIR_SYS_220_PREFIX: /usr/lib/llvm-22
       TABLEGEN_220_PREFIX: /usr/lib/llvm-22
-      PRISM_CC: /usr/lib/llvm-22/bin/clang
+      PRISM_REAL_CC: /usr/lib/llvm-22/bin/clang
+      PRISM_CC: ${{ github.workspace }}/scripts/clang-sccache
       RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v7
@@ -174,7 +208,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
-      PRISM_CC: /usr/lib/llvm-22/bin/clang
+      PRISM_REAL_CC: /usr/lib/llvm-22/bin/clang
+      PRISM_CC: ${{ github.workspace }}/scripts/clang-sccache
       RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v7
@@ -208,7 +243,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
-      PRISM_CC: /usr/lib/llvm-22/bin/clang
+      PRISM_REAL_CC: /usr/lib/llvm-22/bin/clang
+      PRISM_CC: ${{ github.workspace }}/scripts/clang-sccache
       RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v7
@@ -305,11 +341,10 @@ jobs:
         run: git diff --exit-code
 
   # The test runner, sharded across machines. nextest --partition splits the
-  # suite by a stable hash of each test id, so the heavy single-test corpus gates
-  # (opt_equiv, native_tier, native_fusion, typed_spine, snapshots) that the
-  # nextest test-groups force to run single-threaded scatter across shards and run
-  # in parallel instead of back-to-back on one runner. The heavy native-parity
-  # corpus stays delegated to the sharded `parity` job (PRISM_CORPUS_SHARDED).
+  # suite by a stable hash of each test id. Heavy whole-corpus relations are
+  # delegated to input-sharded jobs below; this matrix retains their focused
+  # engagement tests plus the ordinary and snapshot suite. Native parity remains
+  # delegated to its own input-sharded job (PRISM_CORPUS_SHARDED).
   test:
     name: Test (shard ${{ matrix.partition }})
     runs-on: ubuntu-latest
@@ -319,7 +354,8 @@ jobs:
         partition: [1, 2, 3, 4]
     env:
       LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
-      PRISM_CC: /usr/lib/llvm-22/bin/clang
+      PRISM_REAL_CC: /usr/lib/llvm-22/bin/clang
+      PRISM_CC: ${{ github.workspace }}/scripts/clang-sccache
       RUSTC_WRAPPER: sccache
       # Source-fingerprinted gate cache: only genuinely unchanged programs are
       # skipped, so a stale cache can never mask a regression.
@@ -358,6 +394,7 @@ jobs:
       - name: Run tests (shard ${{ matrix.partition }} of 4)
         env:
           PRISM_CORPUS_SHARDED: "1"
+          PRISM_HEAVY_CORPUS_SHARDED: "1"
           # Enlarge libtest's per-test thread stack so the deepest debug-profile
           # compiler recursion (Core Lint over the corpus, the scheduler
           # constant-stack perf gate) does not overflow the 2 MB default. Matches
@@ -365,19 +402,86 @@ jobs:
           RUST_MIN_STACK: "33554432"
         run: cargo nextest run --profile ci --workspace --partition hash:${{ matrix.partition }}/4
 
+  # Whole-corpus relational gates are individually too large for hash partitioning:
+  # one test id still lands on one runner. Partition their sorted inputs instead,
+  # then fan the independent relations out as a second matrix axis. For every
+  # oracle the four shard jobs are an exact cover; release latency is the slowest
+  # quarter-corpus relation rather than the sum of all four relations.
+  corpus-oracles:
+    name: Corpus ${{ matrix.oracle }} (shard ${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        oracle: [fusion, tier, optimizer, typed-spine]
+        shard: [0, 1, 2, 3]
+    env:
+      LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
+      PRISM_REAL_CC: /usr/lib/llvm-22/bin/clang
+      PRISM_CC: ${{ github.workspace }}/scripts/clang-sccache
+      RUSTC_WRAPPER: sccache
+      PRISM_GATE_CACHE: "1"
+      PRISM_GATE_FINGERPRINT: source
+      PRISM_SHARD_TOTAL: "4"
+      PRISM_SHARD_INDEX: ${{ matrix.shard }}
+      RUST_MIN_STACK: "33554432"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Rust toolchain
+        run: rustup show
+
+      - name: sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v1-libm"
+
+      - name: Cache gate verdicts
+        uses: actions/cache@v6
+        with:
+          path: target/gate-cache
+          key: gate-verdicts-corpus-${{ matrix.oracle }}-${{ matrix.shard }}-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            gate-verdicts-corpus-${{ matrix.oracle }}-${{ matrix.shard }}-${{ runner.os }}-
+
+      - name: Install LLVM 22
+        uses: ./.github/actions/setup-llvm
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Fusion relation (shard ${{ matrix.shard }} of 4)
+        if: ${{ matrix.oracle == 'fusion' }}
+        run: cargo nextest run --profile ci --test native_fusion -E 'test(fuse_on_matches_interpreter_llvm)'
+
+      - name: Effect-tier relations (shard ${{ matrix.shard }} of 4)
+        if: ${{ matrix.oracle == 'tier' }}
+        run: cargo nextest run --profile ci --test native_tier -E 'test(/tier_parity::(forced_|disabled_erasures|slowest_lowering)/) | test(tier_cross::tiers_match_each_other_on_the_corpus)'
+
+      - name: Optimizer relation (shard ${{ matrix.shard }} of 4)
+        if: ${{ matrix.oracle == 'optimizer' }}
+        run: cargo nextest run --profile ci --test opt_equiv -E 'test(optimizer_configurations_have_identical_observation_traces)'
+
+      - name: Typed-spine relations (shard ${{ matrix.shard }} of 4)
+        if: ${{ matrix.oracle == 'typed-spine' }}
+        run: cargo nextest run --profile ci --test typed_spine -E 'test(typed_erasure_preserves_corpus_core_identity) | test(full_front_crosses_typed_newtype_prefix_across_corpus)'
+
   # Branch-protection anchor: one "Test" check that is green only when Checks and
   # every test shard passed, so the required-status-check config need not
   # enumerate the matrix and the split does not weaken enforcement.
   test-complete:
     name: Test
-    needs: [checks, test]
+    needs: [checks, test, corpus-oracles]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Checks and all test shards passed
         run: |
-          if [ "${{ needs.checks.result }}" != "success" ] || [ "${{ needs.test.result }}" != "success" ]; then
-            echo "checks or a test shard failed"
+          if [ "${{ needs.checks.result }}" != "success" ] || [ "${{ needs.test.result }}" != "success" ] || [ "${{ needs.corpus-oracles.result }}" != "success" ]; then
+            echo "checks, a test shard, or a corpus-oracle shard failed"
             exit 1
           fi
 
@@ -386,7 +490,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
-      PRISM_CC: /usr/lib/llvm-22/bin/clang
+      PRISM_REAL_CC: /usr/lib/llvm-22/bin/clang
+      PRISM_CC: ${{ github.workspace }}/scripts/clang-sccache
       RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v7
@@ -579,6 +684,8 @@ jobs:
     name: MLIR backend
     runs-on: ubuntu-latest
     env:
+      PRISM_REAL_CC: /usr/lib/llvm-22/bin/clang
+      PRISM_CC: ${{ github.workspace }}/scripts/clang-sccache
       RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v7
@@ -630,7 +737,6 @@ jobs:
           LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
           MLIR_SYS_220_PREFIX: /usr/lib/llvm-22
           TABLEGEN_220_PREFIX: /usr/lib/llvm-22
-          PRISM_CC: /usr/lib/llvm-22/bin/clang
           PRISM_GATE_CACHE: "1"
           PRISM_GATE_FINGERPRINT: source
 
@@ -650,7 +756,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
-      PRISM_CC: /usr/lib/llvm-22/bin/clang
+      PRISM_REAL_CC: /usr/lib/llvm-22/bin/clang
+      PRISM_CC: ${{ github.workspace }}/scripts/clang-sccache
       RUSTC_WRAPPER: sccache
       # The parity smoke's verdict cache fingerprints the feature set, so these
       # markers never collide with the plain-build (default-feature) ones.
@@ -703,8 +810,9 @@ jobs:
 
   # The heavy native-parity corpus, split across N shards that run in parallel so
   # wall-clock is corpus/N rather than the whole thing serially in the Test job
-  # (which delegates it here via PRISM_CORPUS_SHARDED). Each shard runs the sorted
-  # corpus's cases at positions (mod N) == shard; together they cover every case.
+  # (which delegates it here via PRISM_CORPUS_SHARDED). Each shard takes positions
+  # (mod N) from the sorted candidate list before its runnable check; together the
+  # filtered partitions cover every runnable case exactly once.
   parity:
     name: Native parity (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
@@ -714,7 +822,8 @@ jobs:
         shard: [0, 1, 2, 3]
     env:
       LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
-      PRISM_CC: /usr/lib/llvm-22/bin/clang
+      PRISM_REAL_CC: /usr/lib/llvm-22/bin/clang
+      PRISM_CC: ${{ github.workspace }}/scripts/clang-sccache
       PRISM_GATE_CACHE: "1"
       PRISM_GATE_FINGERPRINT: source
       PRISM_SHARD_TOTAL: "4"

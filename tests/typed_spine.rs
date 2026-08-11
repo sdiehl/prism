@@ -4,6 +4,8 @@
 //! content identity. This test stays independent of the snapshot harness so the
 //! compatibility boundary can run in isolation.
 
+mod support;
+
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -35,6 +37,9 @@ fn on_compiler_stack(gate: fn()) {
 
 #[test]
 fn typed_erasure_preserves_corpus_core_identity() {
+    if support::heavy_corpus_delegated() {
+        return;
+    }
     on_compiler_stack(typed_erasure_preserves_corpus_core_identity_on_compiler_stack);
 }
 
@@ -48,7 +53,7 @@ fn typed_erasure_preserves_corpus_core_identity_on_compiler_stack() {
     let mut crossed = 0usize;
     let mut crossed_newtypes = 0usize;
 
-    for path in corpus_files(root) {
+    for path in support::shard(corpus_files(root)) {
         let relative = path.strip_prefix(root).expect("corpus path under root");
         let src = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("{}: {error}", relative.display()));
@@ -137,10 +142,12 @@ fn typed_erasure_preserves_corpus_core_identity_on_compiler_stack() {
         crossed > 0,
         "no corpus program crossed the typed elaboration boundary"
     );
-    assert!(
-        crossed_newtypes > 0,
-        "no successful newtype-bearing corpus program crossed the typed identity boundary"
-    );
+    if !support::corpus_is_sharded() {
+        assert!(
+            crossed_newtypes > 0,
+            "no successful newtype-bearing corpus program crossed the typed identity boundary"
+        );
+    }
 }
 
 // The identity gate above deliberately stops before optimization. This second
@@ -149,6 +156,9 @@ fn typed_erasure_preserves_corpus_core_identity_on_compiler_stack() {
 // cross the typed verifiers plus the E9994/E9993 compatibility differentials.
 #[test]
 fn full_front_crosses_typed_newtype_prefix_across_corpus() {
+    if support::heavy_corpus_delegated() {
+        return;
+    }
     on_compiler_stack(full_front_crosses_typed_newtype_prefix_across_corpus_on_compiler_stack);
 }
 
@@ -167,7 +177,7 @@ fn full_front_crosses_typed_newtype_prefix_across_corpus_on_compiler_stack() {
     let mut crossed_newtypes = 0usize;
     let mut crossed_specialization = 0usize;
 
-    for path in corpus_files(root) {
+    for path in support::shard(corpus_files(root)) {
         let relative = path.strip_prefix(root).expect("corpus path under root");
         let src = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("{}: {error}", relative.display()));
@@ -235,14 +245,16 @@ fn full_front_crosses_typed_newtype_prefix_across_corpus_on_compiler_stack() {
     }
 
     assert!(crossed > 0, "no corpus program crossed typed EraseNewtypes");
-    assert!(
-        crossed_newtypes > 0,
-        "no successful newtype-bearing corpus program crossed typed EraseNewtypes"
-    );
-    assert!(
-        crossed_specialization > 0,
-        "no successful corpus program produced a clone through typed Specialize"
-    );
+    if !support::corpus_is_sharded() {
+        assert!(
+            crossed_newtypes > 0,
+            "no successful newtype-bearing corpus program crossed typed EraseNewtypes"
+        );
+        assert!(
+            crossed_specialization > 0,
+            "no successful corpus program produced a clone through typed Specialize"
+        );
+    }
 }
 
 #[test]

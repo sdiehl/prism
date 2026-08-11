@@ -32,8 +32,8 @@ use prism::{build_on, default_roots, Config, EffectTier, ObservationTrace};
 use super::{effect_plan, forced};
 
 use crate::support::{
-    check_native_parity, cleanup_bin, corpus, leak_free, parallel_check, program_stderr,
-    require_cc, source, temp_bin, CHECK_LEAKS,
+    check_native_parity, cleanup_bin, corpus_is_sharded, heavy_corpus_delegated, leak_free,
+    parallel_check, program_stderr, require_cc, sharded_corpus, source, temp_bin, CHECK_LEAKS,
 };
 
 const PROCESS_FAULT_EXIT: i32 = -1;
@@ -49,6 +49,9 @@ const MIN_NATIVE_SUB_LOWERING_CASES: usize = 3;
 // exactly the programs whose effect plan moves under it, and require at least
 // `floor_count` of them so the oracle cannot silently become vacuous.
 fn run_forced(tier: EffectTier, erasures: bool, floor_count: usize) {
+    if heavy_corpus_delegated() {
+        return;
+    }
     require_cc();
     let tag = if erasures {
         tier.label().to_string()
@@ -58,10 +61,11 @@ fn run_forced(tier: EffectTier, erasures: bool, floor_count: usize) {
     let tag = tag.as_str();
     let mut auto_cfg = Config::from_env();
     auto_cfg.flags.compiler_cache = false;
+    auto_cfg.flags.quiet = true;
     let forced_cfg = forced(tier, erasures);
     let base = Path::new(".");
     let roots = default_roots(base);
-    let cases: Vec<_> = corpus()
+    let cases: Vec<_> = sharded_corpus()
         .into_iter()
         .filter(|case| {
             let full = source(case);
@@ -76,7 +80,7 @@ fn run_forced(tier: EffectTier, erasures: bool, floor_count: usize) {
         })
         .collect();
     assert!(
-        cases.len() >= floor_count,
+        corpus_is_sharded() || cases.len() >= floor_count,
         r"forcing {tag} moved only {} corpus programs off their natural lowering (floor {floor_count}); the forcing knob or the effect planner likely broke",
         cases.len()
     );

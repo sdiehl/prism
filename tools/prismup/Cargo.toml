@@ -1,0 +1,21 @@
+[package]
+name = "prismup"
+version = "1.1.0"
+authors = ["Michel Boucey <michel.boucey@gmail.com>"]
+edition = "2021"
+license = "BSD-3-Clause"
+repository = "https://github.com/sdiehl/prism"
+description = "Install and manage versions of the Prism language"
+
+[dependencies]
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+sha2 = "0.11"
+tar = "0.4"
+ureq = "3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

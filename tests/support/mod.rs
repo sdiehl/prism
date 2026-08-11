@@ -232,7 +232,7 @@ pub const CORPUS_SKIPS: &[(&str, &str)] = &[
 ];
 
 /// Every committed `.pr` under the corpus directories, as `(dir/name.pr, path)`,
-/// sorted. The single discovery pass behind `corpus()` and `corpus_drops()`.
+/// sorted. The single discovery pass behind the public corpus helpers.
 fn candidates() -> Vec<(String, PathBuf)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut out = Vec::new();
@@ -250,6 +250,13 @@ fn candidates() -> Vec<(String, PathBuf)> {
     out
 }
 
+/// Every committed candidate path in stable corpus order, before runnable
+/// filtering. Useful for early-exit structural discovery that should not eagerly
+/// interpret the whole corpus just to find its first few witnesses.
+pub fn corpus_candidates() -> Vec<PathBuf> {
+    candidates().into_iter().map(|(_, path)| path).collect()
+}
+
 /// The corpus membership predicate: the interpreter runs `full` cleanly on empty
 /// stdin and it stays on this platform (no file/env IO). The interpret-Ok arm
 /// excludes error cases, no-`main` library files, and the interactive examples
@@ -261,13 +268,31 @@ fn runnable(full: &str, root: &Path) -> bool {
     on_platform && prism::interpret(full).is_ok()
 }
 
+/// Whether a prelude-complete source belongs to the runnable corpus. Exposed for
+/// early-exit witness scans that must use the identical membership contract
+/// without first materializing the entire filtered corpus.
+pub fn runnable_corpus_source(full: &str) -> bool {
+    runnable(full, Path::new(env!("CARGO_MANIFEST_DIR")))
+}
+
 /// The runnable corpus: every candidate satisfying `runnable`.
 pub fn corpus() -> Vec<PathBuf> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    candidates()
+    corpus_candidates()
         .into_iter()
-        .filter(|(_, p)| runnable(&source(p), root))
-        .map(|(_, p)| p)
+        .filter(|path| runnable_corpus_source(&source(path)))
+        .collect()
+}
+
+/// The runnable corpus assigned to this CI shard.
+///
+/// Partition candidates before the expensive interpreter-based membership
+/// check. Filtering a disjoint exact-cover partition preserves both disjointness
+/// and coverage, while each shard now discovers only its own quarter instead of
+/// discovering the full corpus and throwing three quarters away afterward.
+pub fn sharded_corpus() -> Vec<PathBuf> {
+    shard(corpus_candidates())
+        .into_iter()
+        .filter(|path| runnable_corpus_source(&source(path)))
         .collect()
 }
 
@@ -276,6 +301,9 @@ pub fn corpus() -> Vec<PathBuf> {
 const SHARD_TOTAL_ENV: &str = "PRISM_SHARD_TOTAL";
 /// Env var naming this shard's 0-based index (`0 <= index < total`).
 const SHARD_INDEX_ENV: &str = "PRISM_SHARD_INDEX";
+/// Set by the umbrella CI test shards when the heavyweight whole-corpus
+/// relations are delegated to their own exact-cover matrix.
+const HEAVY_CORPUS_SHARDED_ENV: &str = "PRISM_HEAVY_CORPUS_SHARDED";
 const UNSHARDED_TOTAL: usize = 1;
 const DEFAULT_SHARD_INDEX: usize = 0;
 
@@ -291,11 +319,17 @@ pub fn corpus_is_sharded() -> bool {
     shard_total() > UNSHARDED_TOTAL
 }
 
+/// Whether the umbrella runner delegated heavyweight whole-corpus tests to the
+/// dedicated corpus-oracle matrix. Local runs leave this unset and remain full.
+pub fn heavy_corpus_delegated() -> bool {
+    env::var_os(HEAVY_CORPUS_SHARDED_ENV).is_some()
+}
+
 /// Partition a sorted corpus for CI sharding: with `PRISM_SHARD_TOTAL=n` (n > 1)
 /// set, keep only the cases whose position mod n equals `PRISM_SHARD_INDEX`, so n
 /// parallel CI jobs cover the corpus between them. Unset or `n <= 1` returns the
-/// list unchanged, so local runs and the tier oracle are unaffected. The corpus is
-/// already sorted, so the partition is identical on every machine.
+/// list unchanged, so local runs are unaffected. Inputs are already sorted, so
+/// the partition is identical on every machine.
 pub fn shard(cases: Vec<PathBuf>) -> Vec<PathBuf> {
     let total = shard_total();
     if total <= UNSHARDED_TOTAL {

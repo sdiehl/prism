@@ -149,6 +149,24 @@ pub(crate) enum CountKey {
     IrBytes,
     #[cfg(feature = "native")]
     ArtifactBytes,
+    #[cfg(feature = "native")]
+    CcInvocations,
+    #[cfg(feature = "native")]
+    CcProbeInvocations,
+    #[cfg(feature = "native")]
+    CcProbeMs,
+    #[cfg(feature = "native")]
+    CcCompileInvocations,
+    #[cfg(feature = "native")]
+    CcCompileMs,
+    #[cfg(feature = "native")]
+    CcLinkInvocations,
+    #[cfg(feature = "native")]
+    CcLinkMs,
+    #[cfg(feature = "native")]
+    RuntimeObjectHits,
+    #[cfg(feature = "native")]
+    RuntimeObjectMisses,
 }
 
 impl CountKey {
@@ -159,6 +177,24 @@ impl CountKey {
             Self::IrBytes => "ir_bytes",
             #[cfg(feature = "native")]
             Self::ArtifactBytes => "artifact_bytes",
+            #[cfg(feature = "native")]
+            Self::CcInvocations => "cc_invocations",
+            #[cfg(feature = "native")]
+            Self::CcProbeInvocations => "cc_probe_invocations",
+            #[cfg(feature = "native")]
+            Self::CcProbeMs => "cc_probe_ms",
+            #[cfg(feature = "native")]
+            Self::CcCompileInvocations => "cc_compile_invocations",
+            #[cfg(feature = "native")]
+            Self::CcCompileMs => "cc_compile_ms",
+            #[cfg(feature = "native")]
+            Self::CcLinkInvocations => "cc_link_invocations",
+            #[cfg(feature = "native")]
+            Self::CcLinkMs => "cc_link_ms",
+            #[cfg(feature = "native")]
+            Self::RuntimeObjectHits => "runtime_object_hits",
+            #[cfg(feature = "native")]
+            Self::RuntimeObjectMisses => "runtime_object_misses",
         }
     }
 }
@@ -185,6 +221,25 @@ impl RowExtras {
     #[must_use]
     pub(crate) fn count(mut self, key: CountKey, value: usize) -> Self {
         self.counts.push((key, value));
+        self
+    }
+
+    #[cfg(feature = "native")]
+    #[must_use]
+    pub(crate) fn cc_link_stats(mut self, stats: super::native::CcLinkStats) -> Self {
+        let duration_ms =
+            |duration: Duration| usize::try_from(duration.as_millis()).unwrap_or(usize::MAX);
+        self.counts.extend([
+            (CountKey::CcInvocations, stats.invocations()),
+            (CountKey::CcProbeInvocations, stats.probe_invocations),
+            (CountKey::CcProbeMs, duration_ms(stats.probe_time)),
+            (CountKey::CcCompileInvocations, stats.compile_invocations),
+            (CountKey::CcCompileMs, duration_ms(stats.compile_time)),
+            (CountKey::CcLinkInvocations, stats.link_invocations),
+            (CountKey::CcLinkMs, duration_ms(stats.link_time)),
+            (CountKey::RuntimeObjectHits, stats.runtime_object_hits),
+            (CountKey::RuntimeObjectMisses, stats.runtime_object_misses),
+        ]);
         self
     }
 }

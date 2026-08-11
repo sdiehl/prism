@@ -41,7 +41,7 @@ Then install prism (macOS Apple Silicon; Linux x86_64, aarch64):
 curl --proto '=https' --tlsv1.2 -fsSL https://sdiehl.github.io/prism/install.sh | PRISM_VERSION=v0.18.0 sh
 ```
 
-The installer verifies the release tarball's SHA-256 against the release manifest (and its build-provenance attestation when an authenticated `gh` is available) before unpacking, and installs to `~/.local/bin` without sudo. If Nix is present it uses the flake instead, with hashes verified by the Nix store.
+The installer verifies each release asset's SHA-256 against the release manifest (and its build-provenance attestation when an authenticated `gh` is available) before unpacking. It installs `prismup`, the Prism toolchain manager, to `~/.prismup/bin` and uses it to install the compiler; installed versions live under `~/.prismup/prism/` and `prismup -s <version>` switches between them. No sudo. If Nix is present it uses the flake instead, with hashes verified by the Nix store.
 
 Also available via a variety of other package managers:
 

@@ -54,7 +54,7 @@ const LLVM_BITCODE_SCHEMA: &str = "prism-llvm-bitcode-query-v1";
 #[cfg(feature = "native")]
 const NATIVE_OBJECT_SCHEMA: &str = "prism-native-object-query-v2";
 #[cfg(feature = "native")]
-const RUNTIME_OBJECT_SCHEMA: &str = "prism-runtime-object-query-v1";
+const RUNTIME_OBJECT_SCHEMA: &str = "prism-runtime-object-query-v2";
 #[cfg(feature = "native")]
 const IDENTITY_LINKED_RAW: &str = "linked-native-raw";
 #[cfg(feature = "native")]
@@ -108,6 +108,7 @@ pub(super) struct NativeArtifactCache {
     kind: &'static str,
     identity: String,
     key: String,
+    record_decisions: bool,
 }
 
 #[cfg(feature = "native")]
@@ -128,6 +129,7 @@ impl NativeArtifactCache {
             kind: LINKED_NATIVE_RAW_QUERY,
             identity: IDENTITY_LINKED_RAW.to_string(),
             key,
+            record_decisions: true,
         }))
     }
 
@@ -159,6 +161,7 @@ impl NativeArtifactCache {
             kind: LINKED_NATIVE_SEMANTIC_QUERY,
             identity: IDENTITY_LINKED_SEMANTIC.to_string(),
             key: h.finalize().to_hex().to_string(),
+            record_decisions: true,
         }))
     }
 
@@ -178,6 +181,7 @@ impl NativeArtifactCache {
             kind: LLVM_BITCODE_QUERY,
             identity: IDENTITY_WHOLE_BITCODE.to_string(),
             key: h.finalize().to_hex().to_string(),
+            record_decisions: true,
         }))
     }
 
@@ -200,16 +204,38 @@ impl NativeArtifactCache {
         name: &str,
         bytes: &[u8],
         profile: RuntimeProfile,
+        toolchain_context: &str,
         cfg: &Config,
     ) -> Result<Option<Self>, Error> {
-        Self::for_object(
-            RUNTIME_OBJECT_QUERY,
-            RUNTIME_OBJECT_SCHEMA,
-            name,
-            bytes,
-            Some(profile),
-            cfg,
-        )
+        if cfg.flags.store {
+            return Ok(None);
+        }
+        // Runtime translation units are identical across every program built by
+        // one corpus oracle. Recompiling all of them per program is pure
+        // toolchain overhead, not semantic coverage, so this object layer stays
+        // available even when the higher compiler caches are deliberately off.
+        // Its deliberately narrow key contains every input to clang but no Core
+        // or compiler-pass configuration: equal runtime bytes compiled by the
+        // same target toolchain are the same object whatever program later
+        // links them.
+        let store = Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?;
+        let mut hasher = blake3::Hasher::new();
+        field(&mut hasher, RUNTIME_OBJECT_SCHEMA.as_bytes());
+        field(&mut hasher, name.as_bytes());
+        field(&mut hasher, runtime_profile_digest(profile).as_bytes());
+        field(&mut hasher, toolchain_context.as_bytes());
+        field(&mut hasher, bytes);
+        Ok(Some(Self {
+            store,
+            kind: RUNTIME_OBJECT_QUERY,
+            identity: format!("{RUNTIME_OBJECT_QUERY}:{name}"),
+            key: hasher.finalize().to_hex().to_string(),
+            // This is a cost-only prebuild cache, not a semantic compiler
+            // query. In particular, --no-compiler-cache sessions must not gain
+            // lineage hits/misses merely because their invariant C runtime was
+            // reused.
+            record_decisions: false,
+        }))
     }
 
     fn for_object(
@@ -241,6 +267,7 @@ impl NativeArtifactCache {
             kind,
             identity: format!("{kind}:{name}"),
             key: hasher.finalize().to_hex().to_string(),
+            record_decisions: true,
         }))
     }
 
@@ -251,6 +278,9 @@ impl NativeArtifactCache {
         output: Option<String>,
         reason: &str,
     ) {
+        if !self.record_decisions {
+            return;
+        }
         let kind = if matches!(
             self.kind,
             LINKED_NATIVE_RAW_QUERY | LINKED_NATIVE_SEMANTIC_QUERY

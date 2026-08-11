@@ -34,7 +34,7 @@ brew install llvm@22
 curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s 22
 ```
 
-Then run the verified release installer. It installs `prism` under `~/.local/bin` by default and uses Nix automatically when Nix is available:
+Then run the verified release installer. It sets up `prismup`, the Prism toolchain manager, under `~/.prismup/bin` (which also carries the `prism` the manager currently points at, so add that directory to your `PATH`), and uses Nix automatically when Nix is available:
 
 ```shell
 curl --proto '=https' --tlsv1.2 -fsSL https://sdiehl.github.io/prism/install.sh | sh

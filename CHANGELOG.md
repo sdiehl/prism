@@ -3,6 +3,8 @@
 ## 0.18.0
 
 - Code index: added `prism index`, a whole-program artifact of definitions and their edges, and the `/viewer/` page that browses by definition.
+- Toolchain: added prismup, a version manager shipped as a static binary with each release; the installer delegates to it.
+- Builds: native links now reuse cached runtime objects and report per-clang timing; CI routes clang through sccache.
 - Diagnostics: added `prism explain CODE` and REPL `:explain`, one page per emitted code, plus did-you-mean corrections.
 - Typed holes: added `check --at-hole` reporting, `--fill` for a sole exact-type candidate, and `run --defer-holes` turning reached holes into deterministic faults.
 - Type search: added `prism search TYPE` over project and library interfaces by subsumption, and bounded `prism synth` whose candidates the checker re-verifies.

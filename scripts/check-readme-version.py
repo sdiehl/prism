@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Fail if README.md's prism version references don't match Cargo.toml."""
+"""Fail if README.md's prism version references don't match Cargo.toml,
+or if scripts/versions.txt (the manifest prismup reads) lacks that version."""
 import re
 import sys
 from pathlib import Path
@@ -11,6 +12,12 @@ m = re.search(r'(?m)^\s*version\s*=\s*"([^"]+)"', pkg.group(1)) if pkg else None
 if not m:
     sys.exit("could not find [package] version in Cargo.toml")
 want = m.group(1)
+
+manifest = (root / "scripts" / "versions.txt").read_text().split()
+if want not in manifest:
+    sys.exit(f"scripts/versions.txt lacks {want}; append it so prismup can see the release")
+if manifest != sorted(manifest, key=lambda v: [int(p) for p in v.split(".")]):
+    sys.exit("scripts/versions.txt is not in ascending version order")
 
 readme = (root / "README.md").read_text()
 refs = re.findall(r"releases/download/v(\d+\.\d+\.\d+)", readme)

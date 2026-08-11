@@ -3,23 +3,35 @@
 #
 #   curl --proto '=https' --tlsv1.2 -fsSL https://sdiehl.github.io/prism/install.sh | sh
 #
-# Downloads the release tarball for this platform from GitHub releases,
-# verifies its SHA-256 against the release's SHA256SUMS manifest before
-# anything is unpacked, optionally verifies the GitHub build-provenance
-# attestation when an authenticated `gh` CLI is available, and installs the
-# binary to ~/.local/bin. No sudo, no arbitrary code from the tarball is run.
+# Downloads release assets for this platform from GitHub releases, verifies
+# each SHA-256 against the release's SHA256SUMS manifest before anything is
+# unpacked, and optionally verifies the GitHub build-provenance attestation
+# when an authenticated `gh` CLI is available. No sudo, no arbitrary code from
+# a tarball is run.
+#
+# The preferred path installs prismup, the Prism toolchain manager, to
+# ~/.prismup/bin and lets it manage compiler versions: each release lands in
+# ~/.prismup/prism/<version>/ and ~/.prismup/bin/prism points at the current
+# one, so switching versions later is `prismup -s <version>` with no
+# re-download of this script. Releases that predate the prismup assets, or an
+# explicit PRISM_NO_PRISMUP=1 / PRISM_INSTALL_DIR override, fall back to
+# installing the compiler binary directly to ~/.local/bin.
 #
 # Supported platforms: macOS on Apple Silicon, Linux (glibc) on x86_64 and
-# aarch64. Alpine/musl is not supported by the prebuilt binary (it is
+# aarch64. Alpine/musl is not supported by the prebuilt compiler (it is
 # glibc-linked); use the bundled container image `ghcr.io/sdiehl/prism` instead.
 #
 # If Nix is installed, the installer uses it instead: `nix profile install
 # github:sdiehl/prism`, where the flake pin and the Nix store's own hash
 # verification replace the manual checksum path.
 #
+# Version selection: latest release by default. To pin one, pass it as an
+# argument (`... | sh -s -- 0.13.0`) or set PRISM_VERSION=v0.13.0.
+#
 # Overrides:
 #   PRISM_VERSION=v0.13.0   install a specific release (default: latest)
-#   PRISM_INSTALL_DIR=DIR   install directory (default: ~/.local/bin)
+#   PRISM_INSTALL_DIR=DIR   direct install to DIR, skipping prismup
+#   PRISM_NO_PRISMUP=1      skip prismup; direct install to ~/.local/bin
 #   PRISM_NO_NIX=1          skip the Nix path even if nix is installed
 #
 # Everything runs from main() invoked on the last line, so a truncated
@@ -55,17 +67,28 @@ detect_target() {
   case "$os" in
     Darwin)
       case "$arch" in
-        arm64) TARGET="aarch64-apple-darwin" ;;
+        arm64)
+          TARGET="aarch64-apple-darwin"
+          PRISMUP_TARGET="aarch64-apple-darwin"
+          ;;
         *) err "macOS on $arch is unsupported (Apple Silicon only); use Nix or build from source" ;;
       esac
       ;;
     Linux)
+      # prismup itself is static musl and would run here, but the compiler it
+      # installs is glibc-linked, so a musl host gets nothing useful from it.
       if [ -f /etc/alpine-release ] || (ldd --version 2>&1 | grep -qi musl); then
         err "musl libc detected; the prebuilt binary is glibc-linked and will not run. Use the container image: docker run ghcr.io/$REPO"
       fi
       case "$arch" in
-        x86_64) TARGET="x86_64-unknown-linux-gnu" ;;
-        aarch64 | arm64) TARGET="aarch64-unknown-linux-gnu" ;;
+        x86_64)
+          TARGET="x86_64-unknown-linux-gnu"
+          PRISMUP_TARGET="x86_64-unknown-linux-musl"
+          ;;
+        aarch64 | arm64)
+          TARGET="aarch64-unknown-linux-gnu"
+          PRISMUP_TARGET="aarch64-unknown-linux-musl"
+          ;;
         *) err "Linux on $arch is unsupported (x86_64 and aarch64 only)" ;;
       esac
       ;;
@@ -93,12 +116,13 @@ sha256_of() {
 }
 
 verify_checksum() {
-  fetch "$DOWNLOAD/$TAG/SHA256SUMS" "$TMP/SHA256SUMS"
-  expected="$(awk -v f="$PKG.tar.gz" '$2 == f { print $1 }' "$TMP/SHA256SUMS")"
-  [ -n "$expected" ] || err "no SHA256SUMS entry for $PKG.tar.gz in release $TAG"
-  actual="$(sha256_of "$TMP/$PKG.tar.gz")"
+  file="$1"
+  [ -f "$TMP/SHA256SUMS" ] || fetch "$DOWNLOAD/$TAG/SHA256SUMS" "$TMP/SHA256SUMS"
+  expected="$(awk -v f="$file" '$2 == f { print $1 }' "$TMP/SHA256SUMS")"
+  [ -n "$expected" ] || err "no SHA256SUMS entry for $file in release $TAG"
+  actual="$(sha256_of "$TMP/$file")"
   if [ "$actual" != "$expected" ]; then
-    err "checksum mismatch for $PKG.tar.gz
+    err "checksum mismatch for $file
   expected: $expected
   actual:   $actual
 The download is corrupt or has been tampered with. Nothing was installed."
@@ -107,11 +131,12 @@ The download is corrupt or has been tampered with. Nothing was installed."
 }
 
 verify_provenance() {
+  file="$1"
   if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-    if gh attestation verify "$TMP/$PKG.tar.gz" --repo "$REPO" >/dev/null 2>&1; then
+    if gh attestation verify "$TMP/$file" --repo "$REPO" >/dev/null 2>&1; then
       say "build provenance attestation verified"
     else
-      err "build provenance attestation FAILED for $PKG.tar.gz; refusing to install"
+      err "build provenance attestation FAILED for $file; refusing to install"
     fi
   else
     say "provenance check skipped (no authenticated gh CLI); checksum already verified"
@@ -162,7 +187,56 @@ try_nix() {
   say "nix install failed; falling back to the release tarball"
 }
 
+# Install through prismup, the toolchain manager, with the same verification
+# chain as the direct path (SHA256SUMS entry, then attestation when gh is
+# available). Returns nonzero to fall back when the release has no prismup
+# asset for this platform or prismup itself cannot complete the install; a
+# checksum or attestation failure still aborts outright, since a bad artifact
+# is never something to fall back around.
+try_prismup() {
+  [ -z "${PRISM_NO_PRISMUP:-}" ] || return 1
+  [ -z "${PRISM_INSTALL_DIR:-}" ] || return 1
+  UPKG="prismup-$VERSION-$PRISMUP_TARGET"
+  if ! curl --proto '=https' --tlsv1.2 -fsIL --retry 3 -o /dev/null \
+      "$DOWNLOAD/$TAG/$UPKG.tar.gz" 2>/dev/null; then
+    say "release $TAG has no prismup asset for $PRISMUP_TARGET; installing the tarball directly"
+    return 1
+  fi
+
+  say "installing prismup (the Prism toolchain manager) for $PRISMUP_TARGET"
+  fetch "$DOWNLOAD/$TAG/$UPKG.tar.gz" "$TMP/$UPKG.tar.gz"
+  verify_checksum "$UPKG.tar.gz"
+  verify_provenance "$UPKG.tar.gz"
+
+  tar -xzf "$TMP/$UPKG.tar.gz" -C "$TMP"
+  [ -f "$TMP/$UPKG/prismup" ] || err "tarball did not contain $UPKG/prismup"
+
+  updir="$HOME/.prismup/bin"
+  mkdir -p "$updir"
+  cp "$TMP/$UPKG/prismup" "$updir/prismup.tmp.$$"
+  chmod 755 "$updir/prismup.tmp.$$"
+  mv -f "$updir/prismup.tmp.$$" "$updir/prismup"
+  say "installed $updir/prismup"
+
+  # prismup downloads the compiler tarball itself and verifies it against the
+  # release's .sha256 sidecar before unpacking.
+  if ! "$updir/prismup" -i "$VERSION" || ! "$updir/prismup" -s "$VERSION"; then
+    say "prismup could not install prism $VERSION; falling back to the direct tarball"
+    return 1
+  fi
+
+  case ":$PATH:" in
+    *":$updir:"*) ;;
+    *) say "note: $updir is not on your PATH; add it, e.g.
+  export PATH=\"$updir:\$PATH\"" ;;
+  esac
+
+  smoke "$updir/prism"
+  exit 0
+}
+
 main() {
+  [ $# -eq 0 ] || PRISM_VERSION="$1"
   need_cmd curl
   need_cmd tar
   need_cmd uname
@@ -175,12 +249,14 @@ main() {
 
   detect_target
   resolve_version
+  try_prismup || true
+
   PKG="prism-$VERSION-$TARGET"
   say "installing prism $TAG for $TARGET"
 
   fetch "$DOWNLOAD/$TAG/$PKG.tar.gz" "$TMP/$PKG.tar.gz"
-  verify_checksum
-  verify_provenance
+  verify_checksum "$PKG.tar.gz"
+  verify_provenance "$PKG.tar.gz"
 
   tar -xzf "$TMP/$PKG.tar.gz" -C "$TMP"
   [ -f "$TMP/$PKG/prism" ] || err "tarball did not contain $PKG/prism"
@@ -201,4 +277,4 @@ main() {
   smoke "$dir/prism"
 }
 
-main
+main "$@"

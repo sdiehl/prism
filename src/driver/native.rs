@@ -1,7 +1,10 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::error::Error;
 use crate::lineage::FactOutcome;
@@ -15,6 +18,72 @@ const NO_FP_CONTRACT_FLAG: &str = "-ffp-contract=off";
 const NO_OVERRIDE_MODULE_WARNING_FLAG: &str = "-Wno-override-module";
 const COMPILE_ONLY_FLAG: &str = "-c";
 const OUTPUT_FLAG: &str = "-o";
+
+/// Direct C-toolchain work performed by one native link.
+///
+/// The phase timer reports the wall clock around the whole link. These counters
+/// expose the multiplicative work inside it: subprocess time is summed over the
+/// direct compiler commands (including a configured wrapper), while cache hits
+/// name runtime objects materialized without launching that command at all.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct CcLinkStats {
+    pub probe_invocations: usize,
+    pub probe_time: Duration,
+    pub compile_invocations: usize,
+    pub compile_time: Duration,
+    pub link_invocations: usize,
+    pub link_time: Duration,
+    pub runtime_object_hits: usize,
+    pub runtime_object_misses: usize,
+}
+
+impl CcLinkStats {
+    pub(super) const fn invocations(self) -> usize {
+        self.probe_invocations + self.compile_invocations + self.link_invocations
+    }
+
+    fn record_object(&mut self, object: ObjectCompileStats, runtime: bool) {
+        match object {
+            ObjectCompileStats::Hit => {
+                if runtime {
+                    self.runtime_object_hits += 1;
+                }
+            }
+            ObjectCompileStats::Invoked(elapsed) => {
+                self.compile_invocations += 1;
+                self.compile_time += elapsed;
+                if runtime {
+                    self.runtime_object_misses += 1;
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ObjectCompileStats {
+    Hit,
+    Invoked(Duration),
+}
+
+fn compile_runtime_object(
+    cc: &str,
+    args: &[String],
+    source: &Path,
+    object: &Path,
+    cache: Option<&NativeArtifactCache>,
+    cfg: &Config,
+) -> Result<ObjectCompileStats, Error> {
+    // Parallel corpus workers commonly reach the same cold runtime key at once.
+    // Serialize only that first materialize/compile/store critical section so
+    // one worker prebuilds each invariant object and every sibling gets a hit.
+    // Program objects and final links remain fully parallel.
+    static RUNTIME_COMPILE_LOCK: Mutex<()> = Mutex::new(());
+    let _guard = RUNTIME_COMPILE_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    compile_object(cc, args, source, object, cache, cfg)
+}
 
 pub(super) fn run_native(bin: &Path) -> Result<Vec<u8>, Error> {
     let out = Command::new(bin)
@@ -60,11 +129,11 @@ fn compile_object(
     object: &Path,
     cache: Option<&NativeArtifactCache>,
     cfg: &Config,
-) -> Result<(), Error> {
+) -> Result<ObjectCompileStats, Error> {
     if let Some(cache) = cache {
         if let Some(output) = cache.materialize_file(object, false)? {
             cache.record_decision(cfg, FactOutcome::Hit, Some(output), "");
-            return Ok(());
+            return Ok(ObjectCompileStats::Hit);
         }
     }
     let source_dir = source.parent().unwrap_or_else(|| Path::new("."));
@@ -74,6 +143,7 @@ fn compile_object(
     } else {
         env::current_dir().map_err(Error::Io)?.join(object)
     };
+    let started = Instant::now();
     let output = Command::new(cc)
         .current_dir(source_dir)
         .args(args)
@@ -85,6 +155,7 @@ fn compile_object(
         .map_err(|error| {
             Error::CodegenBackend(format!("running {cc}: {error} (is clang installed?)"))
         })?;
+    let elapsed = started.elapsed();
     if !output.status.success() {
         return Err(ir_failure(cc, source, &output.stderr));
     }
@@ -100,7 +171,45 @@ fn compile_object(
             "object input or compiler configuration changed",
         );
     }
-    Ok(())
+    Ok(ObjectCompileStats::Invoked(elapsed))
+}
+
+fn cc_version(cc: &str) -> (String, Option<Duration>) {
+    static VERSIONS: OnceLock<Mutex<BTreeMap<String, String>>> = OnceLock::new();
+    let versions = VERSIONS.get_or_init(|| Mutex::new(BTreeMap::new()));
+    let mut versions = versions
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(version) = versions.get(cc) {
+        return (version.clone(), None);
+    }
+    let started = Instant::now();
+    let version = Command::new(cc)
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .and_then(|output| output.lines().next().map(str::trim).map(str::to_string))
+        .filter(|version| !version.is_empty())
+        .unwrap_or_else(|| "unavailable".to_string());
+    let elapsed = started.elapsed();
+    versions.insert(cc.to_string(), version.clone());
+    drop(versions);
+    (version, Some(elapsed))
+}
+
+fn runtime_object_toolchain_context(cc: &str, args: &[String]) -> (String, Option<Duration>) {
+    let (version, probe_time) = cc_version(cc);
+    let mut context = format!(
+        "target={}\0cc={cc}\0cc-version={}\0",
+        env!("PRISM_TARGET"),
+        version
+    );
+    for arg in args {
+        context.push_str(arg);
+        context.push('\0');
+    }
+    (context, probe_time)
 }
 
 pub(super) fn cc_link(
@@ -108,7 +217,7 @@ pub(super) fn cc_link(
     out: &Path,
     cfg: &Config,
     runtime_profile: RuntimeProfile,
-) -> Result<(), Error> {
+) -> Result<CcLinkStats, Error> {
     cc_link_many(
         std::slice::from_ref(&ir.to_path_buf()),
         out,
@@ -122,15 +231,21 @@ pub(super) fn cc_link_many(
     out: &Path,
     cfg: &Config,
     runtime_profile: RuntimeProfile,
-) -> Result<(), Error> {
+) -> Result<CcLinkStats, Error> {
     let first_ir = ir.first().ok_or_else(|| {
         Error::CodegenBackend("cannot link an empty backend artifact set".to_string())
     })?;
     let cc = cc();
     let args = cc_args(cfg);
+    let (runtime_toolchain, probe_time) = runtime_object_toolchain_context(&cc, &args);
     let rt_dir = out.with_extension("prism_rt.d");
     let sources = write_runtime_for(&rt_dir, runtime_profile)?;
     let libm_archive = write_libm_archive(&rt_dir)?;
+    let mut stats = CcLinkStats::default();
+    if let Some(elapsed) = probe_time {
+        stats.probe_invocations += 1;
+        stats.probe_time += elapsed;
+    }
 
     let mut program_objects = Vec::with_capacity(ir.len());
     for (index, input) in ir.iter().enumerate() {
@@ -138,7 +253,8 @@ pub(super) fn cc_link_many(
         let object = rt_dir.join(format!("{name}.o"));
         let ir_bytes = fs::read(input)?;
         let cache = NativeArtifactCache::for_native_object(&name, &ir_bytes, cfg)?;
-        compile_object(&cc, &args, input, &object, cache.as_ref(), cfg)?;
+        let object_stats = compile_object(&cc, &args, input, &object, cache.as_ref(), cfg)?;
+        stats.record_object(object_stats, false);
         program_objects.push(object);
     }
 
@@ -150,11 +266,20 @@ pub(super) fn cc_link_many(
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("runtime");
-        let cache = NativeArtifactCache::for_runtime_object(name, &bytes, runtime_profile, cfg)?;
-        compile_object(&cc, &args, source, &object, cache.as_ref(), cfg)?;
+        let cache = NativeArtifactCache::for_runtime_object(
+            name,
+            &bytes,
+            runtime_profile,
+            &runtime_toolchain,
+            cfg,
+        )?;
+        let object_stats =
+            compile_runtime_object(&cc, &args, source, &object, cache.as_ref(), cfg)?;
+        stats.record_object(object_stats, true);
         runtime_objects.push(object);
     }
 
+    let link_started = Instant::now();
     let result = Command::new(&cc)
         .args(&args)
         .args(&program_objects)
@@ -167,12 +292,14 @@ pub(super) fn cc_link_many(
             Error::CodegenBackend(format!("running {cc}: {error} (is clang installed?)"))
         });
     let cc_out = result?;
+    stats.link_invocations += 1;
+    stats.link_time += link_started.elapsed();
     let _ = fs::remove_dir_all(&rt_dir);
     if cc_out.status.success() {
         if !cc_out.stderr.is_empty() {
             eprint!("{}", String::from_utf8_lossy(&cc_out.stderr));
         }
-        Ok(())
+        Ok(stats)
     } else {
         Err(ir_failure(&cc, first_ir, &cc_out.stderr))
     }
