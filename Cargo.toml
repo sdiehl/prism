@@ -150,6 +150,19 @@ multiple_crate_versions = "allow"
 debug = "line-tables-only"
 split-debuginfo = "unpacked"
 
+# The web playground bundle must stay within the size ratchet in CI, so the
+# wasm build trades compile time and speed for size: whole-program LTO, one
+# codegen unit, size-first codegen, and no unwinding machinery (nothing in the
+# wasm entry points catches panics). Native builds keep the default release
+# profile; this one is selected only by the wasm recipes.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
 # `cargo release <version>` bumps the manifest, stamps the changelog, tags
 # v<version>, and pushes; the Release workflow builds and publishes from the tag.
 # Not published to crates.io (the crate links system LLVM), so `cargo install`

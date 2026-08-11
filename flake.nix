@@ -89,7 +89,8 @@
           # Crane's default filter keeps only Cargo-relevant files. The compiler
           # embeds non-.rs inputs at build time: the stdlib via include_str!, the C
           # runtime compiled by build.rs, the LALRPOP grammar processed by build.rs,
-          # and the examples/*.pr the wasm feature embeds (src/wasm/mod.rs). Those paths
+          # the bootstrap shadow-checker sources (src/cli/bootstrap.rs), and the
+          # examples/*.pr the wasm feature embeds (src/wasm/mod.rs). Those paths
           # must be unioned back in or the build
           # fails (grammar) or embeds stale/absent sources (stdlib). A stdlib mismatch
           # would surface as a `dump stdlib-hash` divergence from `cargo build`.
@@ -108,6 +109,8 @@
               ./examples/fixtures/runtime/teleport.pr
               ./examples/world.pr
               ./crates/prism-syntax/src/grammar.lalrpop
+              ./packages/tc/src/Bootstrap.pr
+              ./packages/tc/src/Tc.pr
             ];
           };
 

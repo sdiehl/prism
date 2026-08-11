@@ -409,8 +409,8 @@ jobs:
       - name: Build wasm bundle
         run: |
           cargo rustc --lib --crate-type cdylib --target wasm32-unknown-unknown \
-            --release --no-default-features --features wasm
-          wasm-bindgen target/wasm32-unknown-unknown/release/prism.wasm \
+            --profile wasm-release --no-default-features --features wasm
+          wasm-bindgen target/wasm32-unknown-unknown/wasm-release/prism.wasm \
             --target web --out-dir web/pkg --out-name prism
 
       # The whole Prism compiler, gzipped, must still fit on a 3.5" floppy disk.

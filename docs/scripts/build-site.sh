@@ -15,8 +15,8 @@ out="${1:-$root/public}"
 #    --crate-type cdylib` asks for it only here, and wasm-bindgen (version-matched
 #    to the crate) produces the JS glue. This is `just wasm` without the just.
 cargo rustc --lib --crate-type cdylib --target wasm32-unknown-unknown \
-  --release --no-default-features --features wasm
-wasm-bindgen target/wasm32-unknown-unknown/release/prism.wasm \
+  --profile wasm-release --no-default-features --features wasm
+wasm-bindgen target/wasm32-unknown-unknown/wasm-release/prism.wasm \
   --target web --out-dir web/pkg --out-name prism
 mkdir -p docs/src/pkg
 cp -f web/pkg/prism.js web/pkg/prism_bg.wasm docs/src/pkg/

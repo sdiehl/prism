@@ -1,8 +1,8 @@
 # Build and sync the wasm playground bundle.
 [group('web')]
 wasm:
-    cargo rustc --lib --crate-type cdylib --target wasm32-unknown-unknown --release --no-default-features --features wasm
-    wasm-bindgen target/wasm32-unknown-unknown/release/prism.wasm --target web --out-dir web/pkg --out-name prism
+    cargo rustc --lib --crate-type cdylib --target wasm32-unknown-unknown --profile wasm-release --no-default-features --features wasm
+    wasm-bindgen target/wasm32-unknown-unknown/wasm-release/prism.wasm --target web --out-dir web/pkg --out-name prism
     cp web/pkg/prism.js web/pkg/prism_bg.wasm docs/src/pkg/
 
 # Regenerate embedded playground examples.
