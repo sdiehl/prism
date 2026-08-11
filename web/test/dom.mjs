@@ -116,15 +116,17 @@ export function section(name) {
 }
 
 /// Strip markup and unescape, to compare rendered output against its source.
-/// The strip runs to a fixpoint so no partial tag can survive a single pass.
+/// A single character scan rather than a regex replace: a scan cannot leave a
+/// partial tag behind, so there is no recomposition to defend against.
 export function plain(html) {
-  let text = html;
-  let stripped = text.replace(/<[^>]*>?/g, "");
-  while (stripped !== text) {
-    text = stripped;
-    stripped = text.replace(/<[^>]*>?/g, "");
+  let text = "";
+  let inTag = false;
+  for (const ch of html) {
+    if (ch === "<") inTag = true;
+    else if (ch === ">") inTag = false;
+    else if (!inTag) text += ch;
   }
-  return stripped
+  return text
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
