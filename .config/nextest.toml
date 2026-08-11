@@ -21,11 +21,14 @@ slow-timeout = { period = "120s", terminate-after = 16 }
 # The whole-corpus test lowers every runnable program under eight optimizer
 # configurations and interprets each; the sample test is its fast subset. Same
 # rule as every other entry here: the timeout catches a hang, it does not bound
-# honest work.
+# honest work. Measured at 26 minutes in the debug profile on an M-series
+# laptop; a four-core CI runner sharing those cores with the rest of its shard
+# crossed the previous 64-minute cap with the corpus still growing, so the cap
+# doubles to keep its only job: distinguishing a hang from a big corpus.
 [[profile.default.overrides]]
 filter = 'binary(opt_equiv)'
 test-group = 'corpus-compilers'
-slow-timeout = { period = "120s", terminate-after = 32 }
+slow-timeout = { period = "120s", terminate-after = 64 }
 
 [[profile.default.overrides]]
 filter = 'binary(compiler) & test(core_lint_clean_on_corpus)'
@@ -108,7 +111,7 @@ slow-timeout = { period = "120s", terminate-after = 16 }
 [[profile.ci.overrides]]
 filter = 'binary(opt_equiv)'
 test-group = 'corpus-compilers'
-slow-timeout = { period = "120s", terminate-after = 32 }
+slow-timeout = { period = "120s", terminate-after = 64 }
 
 [[profile.ci.overrides]]
 filter = 'binary(compiler) & test(core_lint_clean_on_corpus)'
