@@ -13,7 +13,7 @@ description = "Prism compiler workspace member: native"
 [dependencies]
 blake3 = "1"
 cc = "1"
-inkwell = { version = "0.9", features = ["llvm22-1"], optional = true }
+inkwell = { version = "0.10", features = ["llvm22-1"], optional = true }
 prism-common = { path = "../prism-common" }
 prism-core = { path = "../prism-core", features = ["native"] }
 prism-syntax = { path = "../prism-syntax" }
