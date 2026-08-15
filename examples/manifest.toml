@@ -631,6 +631,12 @@ category = "Showcases"
 role = "showcase"
 
 [[example]]
+path = "systemf_dk.pr"
+title = "Bidirectional System F with ordered contexts"
+category = "Showcases"
+role = "showcase"
+
+[[example]]
 path = "tagless.pr"
 title = "Tagless-final interpreters"
 category = "Languages"

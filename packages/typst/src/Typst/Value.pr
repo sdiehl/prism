@@ -57,11 +57,14 @@ pub fn show_length(l : Length) : String =
     Fr(n) => "{n}fr"
     Percent(n) => "{n}%"
 
+-- The largest value an 8-bit color channel can take.
+let channel_max : Int = 255
+
 fn clamp_channel(n : Int) : Int =
   if n < 0 then
     0
-  elif n > 255 then
-    255
+  elif n > channel_max then
+    channel_max
   else
     n
 

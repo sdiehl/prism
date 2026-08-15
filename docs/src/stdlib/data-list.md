@@ -270,7 +270,7 @@ flatten([[1, 2], [3], [4, 5]])
 concat_map : forall e0 a b. ((a) -> List(b) ! {e0}, List(a)) -> List(b) ! {e0}
 ```
 
-Map `f` over the list and concatenate the resulting lists.
+Map `f` over the list and concatenate the resulting lists. `Data.List` is where this name is defined; anything else answering to `concat_map` is a specialization of it.
 
 ```prism,mod=Data.List
 concat_map(\(x) -> [x, x], [1, 2])
@@ -279,6 +279,8 @@ concat_map(\(x) -> [x, x], [1, 2])
 ```output
 [1, 1, 2, 2]
 ```
+
+lint: allow(L0201)
 
 ### `zip_with`
 

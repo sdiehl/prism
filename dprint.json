@@ -21,6 +21,7 @@
     "LICENSE",
     "models/.lake",
     "models/fixtures/*.json",
+    "docs/internal/SCOREBOARD.md",
     "docs/src/stdlib",
     "docs/src/packages/*/",
     "tests/fixtures"

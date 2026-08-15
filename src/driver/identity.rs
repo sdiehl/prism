@@ -19,9 +19,11 @@ use prism_native::{native_kont_table, NativeKontIdentityRow};
 use serde::{Deserialize, Serialize};
 
 use crate::core::fbip::borrow_sigs;
+#[cfg(feature = "native")]
+use crate::core::hash_root;
 use crate::core::{
-    class_digests, fip_annots, hash_program, hash_root, instance_digest, konst_fns, shape_digests,
-    Digest, ElaboratedCore, Hashes, HASH_SCHEME,
+    class_digests, fip_annots, hash_program, instance_digest, konst_fns, shape_digests, Digest,
+    ElaboratedCore, Hashes, HASH_SCHEME,
 };
 use crate::error::Error;
 use crate::names::instance_method_prefix;

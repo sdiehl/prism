@@ -24,6 +24,9 @@ import Syntax.Source (..)
 import Syntax.Token (..)
 import Syntax.Lex (..)
 
+-- The line-feed byte, the only terminator the offside pass counts lines by.
+fn ly_lf() : Int = 10
+
 -- The offside driver's state: the indent stack (top = head), whether the last
 -- opener is still pending a block, whether an opener is being carried across a
 -- bracket group, the open-bracket depth, the line of the previous token, the
@@ -83,7 +86,7 @@ fn ly_gap(text : String, a : Int, b : Int, keep : Int) : (Int, Int) =
   var lines := 0
   var start := keep
   while i < b do
-    if byte_at(text, i) == 10 then
+    if byte_at(text, i) == ly_lf() then
       lines += 1
       start := i + 1
     i += 1
@@ -224,7 +227,7 @@ fn ly_e_carry(e : LEntry) : Bool =
 fn ly_has_nl(text : String, lo : Int, hi : Int) : Bool =
   if lo >= hi then
     false
-  elif byte_at(text, lo) == 10 then
+  elif byte_at(text, lo) == ly_lf() then
     true
   else
     ly_has_nl(text, lo + 1, hi)
@@ -316,6 +319,7 @@ fn ly_first(prev : Option(Int)) : Bool =
 -- pending opener that begins a deeper new line (or the very first token), else
 -- collapse the stack at a new line; then recompute the opener and carry flags.
 -- Inside brackets nothing is emitted and both flags are preserved.
+-- lint: allow(L0103)
 fn ly_phase1(
   e : LEntry,
   st : LState,
@@ -428,6 +432,7 @@ fn ly_step(text : String, e : LEntry, st : LState, out : List(Token)) : StepR =
           StepR(st2, out3)
 
 -- Close every open block at end of input, emitting a virtual close per frame.
+-- lint: allow(L0105)
 fn ly_drain(stack : List(Int), last_hi : Int, out : List(Token)) : List(Token) =
   match stack of
     Nil => reverse(out)

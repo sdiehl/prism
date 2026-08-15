@@ -22,7 +22,7 @@ type Cursor = Cursor {
 }
 ```
 
-A token cursor: the tokens being read, the read position, the byte offset the end-of-input caret points at, and the failure record (the furthest position at which an expectation was recorded, and the names recorded there). The failure record is part of the cursor rather than of a failure value because it must outlive every failure a parse recovers from.
+A token cursor: the tokens being read, the read position, the byte offset the end-of-input caret points at, and the failure record (the furthest position at which an expectation was recorded, and the names recorded there). The failure record is part of the cursor rather than of a failure value because it must outlive every failure a parse recovers from. lint: allow(L0203)
 
 ### `Reply`
 
@@ -30,12 +30,12 @@ A token cursor: the tokens being read, the read position, the byte offset the en
 type Reply(a) = Took(a, Cursor) | Stuck(Cursor)
 ```
 
-The reply of a cursor step: the value and the advanced cursor, or the cursor alone. A refusal still carries a cursor, because the failure record it accumulated is the part worth reporting.
+The reply of a cursor step: the value and the advanced cursor, or the cursor alone. A refusal still carries a cursor, because the failure record it accumulated is the part worth reporting. lint: allow(L0203)
 
 ### `Assoc`
 
 ```prism,def,h-a6e8abaab968e9650d7e082b3f735682297b3ac3d6575482e3bd239cde841630
-type Assoc = ALeft | ARight | ANone deriving (Eq)
+type Assoc = ALeft | ARight | ANone deriving (Eq, Show)
 ```
 
 How an infix operator groups a chain of its own level. A non-associative operator declines a second application at its level, leaving the second operator unconsumed for the caller to refuse.
@@ -43,7 +43,7 @@ How an infix operator groups a chain of its own level. A non-associative operato
 ### `Infix`
 
 ```prism,def,h-26b0ccd2a185fe148888ab6e9dacfb097a504ec2036c0524c80f8dcfc3402d83
-type Infix = Infix { op: String, level: Int, assoc: Assoc }
+type Infix = Infix { op: String, level: Int, assoc: Assoc } deriving (Eq, Show)
 ```
 
 One infix operator: the token spelling, its level (higher binds tighter), and how it associates.
@@ -51,7 +51,7 @@ One infix operator: the token spelling, its level (higher binds tighter), and ho
 ### `Prefix`
 
 ```prism,def,h-eb6e20d9f732bcfd0473745f904a5ded2c86e39b2d2e4c1f0f539474d954573d
-type Prefix = Prefix { op: String, level: Int }
+type Prefix = Prefix { op: String, level: Int } deriving (Eq, Show)
 ```
 
 One prefix operator: the token spelling and the level its operand is parsed at. An operator that binds tighter than that level is pulled into the operand; one that binds looser takes the prefix application as its left operand.

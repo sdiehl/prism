@@ -111,10 +111,11 @@ pub(super) const ENTRIES: &[Explanation] = &[
         code: "E7201",
         title: "project manifest error",
         prose: "`prism.toml` is malformed or missing a required field. The manifest must parse as \
-                TOML and carry a `[package] name` and a `[bin] entry`; a `[dependencies]` table, \
-                when present, maps each name to a path, a git source with a version, or a hash \
-                pin. A dependency whose path does not exist is reported here too, since it is the \
-                manifest that is wrong.",
+                TOML and carry package name, version, authors, maintainers, and a supported SPDX \
+                license identifier, \
+                plus a `[bin] entry`. Optional URLs are strings and metadata files are string \
+                arrays. A `[dependencies]` table maps each name to a path, a git source with a \
+                version, or a hash pin. A missing dependency path is also a manifest error.",
         example: "-- A `prism.toml` with no `[package]` table, then `prism check .`:\n--   \
                   Module Error[E7201]: prism.toml: missing [package] table\nfn main() : Int =\n  \
                   0",

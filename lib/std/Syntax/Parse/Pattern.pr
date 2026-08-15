@@ -5,6 +5,8 @@ import Syntax.Cursor (..)
 import Syntax.Parse.Support (..)
 import Syntax.Parse.GeneratedPattern (..)
 
+-- | Parse one pattern at `depth`, noting the receipt the generated parser
+-- completed it with.
 pub fn parse_pattern(c : Cursor, depth : Int) : Parsed(Sp(Pat)) =
   let p1 = generated_parse_pattern(c, depth)
   let PTook(done, c1) = p1 else parsed_refused(p1)
@@ -12,6 +14,8 @@ pub fn parse_pattern(c : Cursor, depth : Int) : Parsed(Sp(Pat)) =
     PatternDone(pat, receipt) =>
       PTook(pat, generated_pattern_note_receipt(c1, receipt))
 
+-- | Parse the pattern on the left of a `let` binding, where a bare
+-- constructor name binds rather than matches.
 pub fn parse_let_pattern(c : Cursor, depth : Int) : Parsed(Sp(Pat)) =
   let p1 = generated_parse_let_pattern(c, depth)
   let PTook(done, c1) = p1 else parsed_refused(p1)

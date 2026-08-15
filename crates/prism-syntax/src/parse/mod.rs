@@ -160,6 +160,9 @@ pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
             exports,
             opaques,
             deprecated,
+            // Filled by name resolution, which is where the prelude's import
+            // scope and the user's own binders are both in hand.
+            prelude_captures: BTreeMap::new(),
             prelude_end: SourceMap::new(src).prelude_len(),
         },
         trivia,

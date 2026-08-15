@@ -1,0 +1,358 @@
+-- | The rule fixtures, run by `prism test`: every rule firing and not firing
+-- over synthetic surface trees.
+--
+-- The trees are built by hand rather than parsed, which keeps the tests
+-- independent of the front end and pins exactly the shape each rule judges.
+-- Where a rule reads the embedded source text (docs and pragmas), the fixture
+-- carries a small real text and spans computed against it.
+
+import Data.Foldable (elem, length)
+import Data.List (map)
+import Data.String (index_of)
+import Findings (..)
+import Limits (..)
+import Pragma (pg_has_doc, pg_line_codes)
+import Rules (lint_doc, lint_report, rl_decl_rules, rl_family_prefix)
+import Syntax.Ast (..)
+import Syntax.Codec (SurfaceDoc)
+import Syntax.Source (SourceFile, Span)
+
+-- Fixture builders.
+
+fn lt_span() : Span = Span { lo = 0, hi = 0 }
+
+fn lt_e(node : Expr) : Sp(Expr) =
+  Sp { node = node, span = lt_span(), synth = false }
+
+fn lt_synth(node : Expr) : Sp(Expr) =
+  Sp { node = node, span = lt_span(), synth = true }
+
+fn lt_decl(name : String, params : List(Param), body : Sp(Expr)) : Decl =
+  Decl {
+    name = name,
+    params = params,
+    ret = None,
+    eff = None,
+    constraints = Nil,
+    body = body,
+    wheres = Nil,
+    reqs = Nil,
+    enss = Nil,
+    measure = None,
+    is_test = false,
+    totality = None,
+    fip_word = None,
+    is_replayable = false,
+    is_no_alloc = false,
+    span = lt_span()
+  }
+
+fn lt_param(name : String) : Param =
+  Param {
+    name = name,
+    pat = None,
+    ty = None,
+    is_borrow = false,
+    dflt = None
+  }
+
+fn lt_doc(text : String, items : List(Item)) : SurfaceDoc =
+  SurfaceDoc {
+    schema = "",
+    compiler = "",
+    source = SourceFile { digest = "", text = text },
+    items = items
+  }
+
+fn lt_fn(decl : Decl) : Item =
+  IDecl { decl = decl, declkind = "fn", vis = None, dep = None }
+
+fn lt_pub_fn(decl : Decl) : Item =
+  IDecl { decl = decl, declkind = "fn", vis = Some("pub"), dep = None }
+
+fn lt_import(
+  path : List(String),
+  names : Option(List(String)),
+  glob : Bool
+) : Item =
+  lt_import_re(path, names, glob, false)
+
+fn lt_import_re(
+  path : List(String),
+  names : Option(List(String)),
+  glob : Bool,
+  reexport : Bool
+) : Item =
+  IImport {
+    path = path,
+    mod_alias = None,
+    names = names,
+    glob = glob,
+    reexport = reexport,
+    span = lt_span()
+  }
+
+fn lt_fires(code : String, fs : List(Finding)) : Bool =
+  elem(code, map(lt_code, fs))
+
+fn lt_code(f : Finding) : String = f.code
+
+fn lt_unit_body() : Sp(Expr) = lt_e(EUnit)
+
+-- The registry.
+
+test fn registry_has_every_rule() = guard(length(fd_rules()) == 12)
+
+test fn registry_titles_resolve() =
+  guard(fd_known(fd_l0101) && not(fd_title(fd_l0204) == ""))
+
+-- L0101 deep nesting.
+
+fn lt_nested_if(n : Int) : Sp(Expr) =
+  if n <= 0 then
+    lt_unit_body()
+  else
+    lt_e(EIf(lt_e(EBool(true)), lt_nested_if(n - 1), lt_unit_body()))
+
+test fn nesting_fires_past_limit() =
+  let deep = lt_decl("deep", [], lt_nested_if(lm_max_nesting + 1))
+  guard(lt_fires(fd_l0101, rl_decl_rules(deep)))
+
+test fn nesting_holds_at_limit() =
+  let level = lt_decl("level", [], lt_nested_if(lm_max_nesting))
+  guard(not(lt_fires(fd_l0101, rl_decl_rules(level))))
+
+-- L0102 oversized function.
+
+fn lt_units(n : Int) : List(Sp(Expr)) =
+  if n <= 0 then
+    Nil
+  else
+    Cons(lt_unit_body(), lt_units(n - 1))
+
+test fn size_fires_past_limit() =
+  let fat = lt_decl("fat", [], lt_e(EList(lt_units(lm_max_body_nodes))))
+  guard(lt_fires(fd_l0102, rl_decl_rules(fat)))
+
+test fn size_holds_below_limit() =
+  let lean = lt_decl("lean", [], lt_e(EList(lt_units(3))))
+  guard(not(lt_fires(fd_l0102, rl_decl_rules(lean))))
+
+-- L0103 parameter count.
+
+fn lt_params(n : Int) : List(Param) =
+  if n <= 0 then
+    Nil
+  else
+    Cons(lt_param("p{n}"), lt_params(n - 1))
+
+test fn params_fire_past_limit() =
+  let wide = lt_decl("wide", lt_params(lm_max_params + 1), lt_unit_body())
+  guard(lt_fires(fd_l0103, rl_decl_rules(wide)))
+
+test fn params_hold_at_limit() =
+  let narrow = lt_decl("narrow", lt_params(lm_max_params), lt_unit_body())
+  guard(not(lt_fires(fd_l0103, rl_decl_rules(narrow))))
+
+-- L0104 lambda-chain depth.
+
+fn lt_lams(n : Int) : Sp(Expr) =
+  if n <= 0 then
+    lt_unit_body()
+  else
+    lt_e(ELam([lt_param("x{n}")], lt_lams(n - 1)))
+
+test fn lambda_chain_fires_past_limit() =
+  let curry = lt_decl("curry", [], lt_lams(lm_max_lambda_chain + 1))
+  guard(lt_fires(fd_l0104, rl_decl_rules(curry)))
+
+test fn lambda_chain_holds_at_limit() =
+  let stages = lt_decl("stages", [], lt_lams(lm_max_lambda_chain))
+  guard(not(lt_fires(fd_l0104, rl_decl_rules(stages))))
+
+-- L0105 accumulate-then-reverse.
+
+fn lt_call(name : String, args : List(Sp(Expr))) : Sp(Expr) =
+  lt_e(ECall(lt_e(EVar(name)), args))
+
+test fn accum_reverse_fires_on_recursive_reverse() =
+  let body = lt_e(ELet("flipped", lt_call("reverse", [lt_e(EVar("acc"))]), lt_call("go", [
+      lt_e(EVar("flipped")),
+    ])))
+  let go = lt_decl("go", [lt_param("acc")], body)
+  guard(lt_fires(fd_l0105, rl_decl_rules(go)))
+
+test fn accum_reverse_holds_without_recursion() =
+  let body = lt_call("reverse", [lt_e(EVar("acc"))])
+  let once = lt_decl("once", [lt_param("acc")], body)
+  guard(not(lt_fires(fd_l0105, rl_decl_rules(once))))
+
+-- L0108 magic literal.
+
+fn lt_int(digits : String) : Sp(Expr) = lt_e(EInt(digits, SufNone))
+
+test fn magic_fires_on_bare_literal() =
+  let salted = lt_decl("salted", [], lt_call("f", [lt_int("42")]))
+  guard(lt_fires(fd_l0108, rl_decl_rules(salted)))
+
+test fn magic_exempts_units() =
+  let stepped = lt_decl("stepped", [], lt_call("f", [lt_int("0"), lt_int("1")]))
+  guard(not(lt_fires(fd_l0108, rl_decl_rules(stepped))))
+
+test fn magic_exempts_named_binding() =
+  let body = lt_e(ELet("answer", lt_int("42"), lt_e(EVar("answer"))))
+  let named = lt_decl("named", [], body)
+  guard(not(lt_fires(fd_l0108, rl_decl_rules(named))))
+
+test fn magic_exempts_synth_nodes() =
+  let sugar =
+    lt_decl("sugar", [], lt_call("f", [lt_synth(EInt("42", SufNone))]))
+  guard(not(lt_fires(fd_l0108, rl_decl_rules(sugar))))
+
+test fn magic_exempts_tests() =
+  let sample = lt_decl("sample", [], lt_call("f", [lt_int("42")]))
+  guard(not(lt_fires(fd_l0108, rl_decl_rules({ sample | is_test = true }))))
+
+-- L0106 glob imports.
+
+test fn glob_fires_outside_vocabulary() =
+  let found = lint_doc(Nil, lt_doc("", [lt_import(["Json"], None, true)]))
+  guard(lt_fires(fd_l0106, found))
+
+test fn glob_allows_vocabulary_module() =
+  let found =
+    lint_doc(Nil, lt_doc("", [lt_import(["Data", "List"], None, true)]))
+  guard(not(lt_fires(fd_l0106, found)))
+
+test fn glob_allows_package_local_module() =
+  let found = lint_doc(Nil, lt_doc("", [lt_import(["Util"], None, true)]))
+  guard(not(lt_fires(fd_l0106, found)))
+
+test fn glob_allows_reexport() =
+  let items = [lt_import_re(["Json"], None, true, true)]
+  guard(not(lt_fires(fd_l0106, lint_doc(Nil, lt_doc("", items)))))
+
+-- L0107 unused imports.
+
+test fn unused_import_fires() =
+  let items = [lt_import(["Data", "Char"], Some(["chr"]), false)]
+  guard(lt_fires(fd_l0107, lint_doc(Nil, lt_doc("", items))))
+
+test fn used_import_holds() =
+  let user = lt_fn(lt_decl("use_it", [], lt_call("chr", [lt_int("0")])))
+  let items = [lt_import(["Data", "Char"], Some(["chr"]), false), user]
+  guard(not(lt_fires(fd_l0107, lint_doc(Nil, lt_doc("", items)))))
+
+test fn reexport_import_holds() =
+  let items = [
+      IImport {
+        path = ["Data", "Char"],
+        mod_alias = None,
+        names = Some(["chr"]),
+        glob = false,
+        reexport = true,
+        span = lt_span()
+      },
+    ]
+  guard(not(lt_fires(fd_l0107, lint_doc(Nil, lt_doc("", items)))))
+
+-- L0201 name capture.
+
+test fn capture_fires_on_known_name() =
+  let items = [lt_fn(lt_decl("map", [], lt_unit_body()))]
+  guard(lt_fires(fd_l0201, lint_doc(["map"], lt_doc("", items))))
+
+test fn capture_holds_on_fresh_name() =
+  let items = [lt_fn(lt_decl("map_go", [], lt_unit_body()))]
+  guard(not(lt_fires(fd_l0201, lint_doc(["map"], lt_doc("", items)))))
+
+-- L0202 missing docs, over real text.
+
+test fn missing_doc_fires_on_pub() =
+  let text = "fn f() = 0\n"
+  let items = [lt_pub_fn(lt_decl("f", [], lt_unit_body()))]
+  guard(lt_fires(fd_l0202, lint_doc(Nil, lt_doc(text, items))))
+
+test fn doc_comment_satisfies() =
+  let text = "-- | Documented.\nfn f() = 0\n"
+  guard(pg_has_doc(text, index_of("fn f", text)))
+
+-- L0203 underived basics.
+
+fn lt_data(derivs : List(Deriving), field : Ty) : Item =
+  IData {
+    nt = false,
+    name = "T",
+    params = Nil,
+    param_kinds = Nil,
+    ctors = [Ctor { name = "T", shape = CPositional([field]) }],
+    derivs = derivs,
+    span = lt_span(),
+    vis = Some("pub"),
+    dep = None
+  }
+
+fn lt_deriv(name : String) : Deriving =
+  Deriving { name = name, span = lt_span() }
+
+test fn underived_fires_without_eq_show() =
+  guard(lt_fires(fd_l0203, lint_doc(Nil, lt_doc("", [lt_data(Nil, TyInt)]))))
+
+test fn underived_holds_with_eq_show() =
+  let derived = lt_data([lt_deriv("Eq"), lt_deriv("Show")], TyInt)
+  guard(not(lt_fires(fd_l0203, lint_doc(Nil, lt_doc("", [derived])))))
+
+test fn underived_exempts_function_fields() =
+  let fun_ty = TyFun([TyInt], Row { labels = Nil, tail = None }, TyInt)
+  guard(not(lt_fires(fd_l0203, lint_doc(Nil, lt_doc("", [
+      lt_data(Nil, fun_ty),
+    ])))))
+
+-- L0204 family-prefix drift.
+
+fn lt_family(names : List(String)) : List(Item) =
+  map(\(name) -> lt_pub_fn(lt_decl(name, [], lt_unit_body())), names)
+
+test fn family_prefix_establishes() =
+  let items = lt_family(["ab_w", "ab_x", "ab_y", "ab_z", "stray"])
+  guard(rl_family_prefix(items) == Some("ab_"))
+
+test fn family_drift_fires_on_stray() =
+  let items = lt_family(["ab_w", "ab_x", "ab_y", "ab_z", "stray"])
+  guard(lt_fires(fd_l0204, lint_doc(Nil, lt_doc("", items))))
+
+test fn family_root_name_holds() =
+  let items = lt_family(["ab_w", "ab_x", "ab_y", "ab_z", "ab"])
+  guard(not(lt_fires(fd_l0204, lint_doc(Nil, lt_doc("", items)))))
+
+test fn family_below_coverage_holds() =
+  let items = lt_family(["ab_x", "ab_y", "ab_z", "stray", "loose"])
+  guard(not(lt_fires(fd_l0204, lint_doc(Nil, lt_doc("", items)))))
+
+-- Allow pragmas.
+
+test fn pragma_line_parses_codes() =
+  let codes = pg_line_codes("-- lint: allow(", "-- lint: allow(L0101, L0104)")
+  guard(codes == ["L0101", "L0104"])
+
+test fn allow_suppresses_and_counts() =
+  let text = "-- lint: allow(L0103)\nfn wide(a, b, c, d, e, f) = 0\n"
+  let lo = index_of("fn wide", text)
+  let base = lt_decl("wide", lt_params(lm_max_params + 1), lt_unit_body())
+  let decl = { base | span = Span { lo = lo, hi = lo + 1 } }
+  let report = lint_report(Nil, lt_doc(text, [lt_fn(decl)]))
+  guard(report.suppressed == 1 && not(lt_fires(fd_l0103, report.findings)))
+
+test fn allow_file_suppresses_everywhere() =
+  let text = "-- lint: allow-file(L0108)\nfn salted() = f(42)\n"
+  let salted = lt_decl("salted", [], lt_call("f", [lt_int("42")]))
+  let report = lint_report(Nil, lt_doc(text, [lt_fn(salted)]))
+  guard(report.suppressed == 1 && not(lt_fires(fd_l0108, report.findings)))
+
+test fn allow_does_not_leak_to_other_codes() =
+  let text = "-- lint: allow(L0101)\nfn wide(a, b, c, d, e, f) = 0\n"
+  let lo = index_of("fn wide", text)
+  let base = lt_decl("wide", lt_params(lm_max_params + 1), lt_unit_body())
+  let decl = { base | span = Span { lo = lo, hi = lo + 1 } }
+  let report = lint_report(Nil, lt_doc(text, [lt_fn(decl)]))
+  guard(lt_fires(fd_l0103, report.findings))

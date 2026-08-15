@@ -165,6 +165,7 @@ fn wk_leaf(e : Expr, cs : List(Sp(Expr))) : Option(Expr) =
 fn wk_same_len(xs : List(a), cs : List(Sp(Expr))) : Bool =
   length(xs) == length(cs)
 
+-- lint: allow(L0102)
 fn wk_node(e : Expr, cs : List(Sp(Expr))) : Option(Expr) =
   match e of
     EInt(_, _) => wk_leaf(e, cs)
@@ -582,6 +583,7 @@ pub fn expr_universe(e : Sp(Expr)) : List(Sp(Expr)) =
   Cons(e, concat_map(expr_universe, expr_children(e)))
 
 -- | A span-zero literal, a convenience for building test trees.
+-- lint: allow(L0204)
 pub fn lit_probe(n : Int) : Sp(Expr) =
   Sp {
     node = EInt(show(n), SufNone),

@@ -142,31 +142,10 @@ impl Input {
 
 fn resolve_input(file: Option<&Path>) -> Result<Input, CmdError> {
     match file {
-        Some(path) if path.is_dir() || is_manifest(path) => Ok(Input::Project(path.to_path_buf())),
+        Some(path) if crate::cli::is_project(path) => Ok(Input::Project(path.to_path_buf())),
         Some(path) => Ok(Input::File(path.to_path_buf())),
-        None => {
-            let start = Path::new(".")
-                .canonicalize()
-                .unwrap_or_else(|_| std::path::PathBuf::from("."));
-            crate::project::find_manifest(&start)
-                .map(Input::Project)
-                .ok_or_else(|| {
-                    (
-                        Error::ResolveCommand(
-                            "no prism.toml found: `prism test` without a path tests the enclosing \
-                             project; pass a `.pr` file to test a single source"
-                                .into(),
-                        ),
-                        String::new(),
-                        start.display().to_string(),
-                    )
-                })
-        }
+        None => crate::cli::enclosing_project(crate::cli::TEST_WITHOUT_PATH).map(Input::Project),
     }
-}
-
-fn is_manifest(path: &Path) -> bool {
-    path.file_name().is_some_and(|n| n == "prism.toml")
 }
 
 fn discover(input: &Input, cfg: &crate::Config) -> Result<TestPlan, Error> {

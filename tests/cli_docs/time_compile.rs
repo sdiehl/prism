@@ -23,6 +23,7 @@ const PIPELINE_ORDER: &[&str] = &[
     "opt.pre",
     "lower.effects",
     "opt.late",
+    "rc",
     "eval",
 ];
 

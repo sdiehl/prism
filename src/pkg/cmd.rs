@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use crate::core::{Digest, HASH_PREFIX_HEX};
 use crate::driver::Config;
 use crate::error::Error;
-use crate::project::{self, DepSource};
+use crate::project::{self, DepSource, License, LOCKFILE, MANIFEST};
 use crate::store::disk::{resolve_store_path, Store};
 
 use super::lock::{Lock, LockEntry};
@@ -21,16 +21,20 @@ use super::resolve::{resolve_closure, trace};
 use super::transport::DiskTransport;
 use super::writer::{render_source, set_dependency};
 
-const MANIFEST: &str = "prism.toml";
-const LOCKFILE: &str = "prism.lock";
-
 /// `prism pkg init`: create a minimal package directory from scratch.
 ///
 /// # Errors
 /// Fails when the package name or directory is empty, the package name is not a
 /// simple manifest name, the target directory already exists, or a filesystem
 /// write fails.
-pub fn init(name: &str, dir: &Path) -> Result<String, Error> {
+pub fn init(
+    name: &str,
+    dir: &Path,
+    version: &str,
+    author: &str,
+    maintainer: &str,
+    license: &str,
+) -> Result<String, Error> {
     let name = name.trim();
     if name.is_empty() {
         return Err(Error::ResolvePackage("package name cannot be empty".into()));
@@ -52,10 +56,29 @@ pub fn init(name: &str, dir: &Path) -> Result<String, Error> {
         )));
     }
 
+    let version = required_init_metadata("version", version)?;
+    let author = required_init_metadata("author", author)?;
+    let maintainer = required_init_metadata("maintainer", maintainer)?;
+    let license = required_init_metadata("license", license)?
+        .parse::<License>()
+        .map_err(|msg| Error::ResolvePackage(format!("package license: {msg}")))?;
+
     fs::create_dir_all(dir.join("src"))?;
     fs::write(
         dir.join(MANIFEST),
-        format!("[package]\nname = \"{name}\"\n\n[bin]\nentry = \"src/main.pr\"\n"),
+        format!(
+            r#"[package]
+name = {name:?}
+version = {version:?}
+authors = [{author:?}]
+maintainers = [{maintainer:?}]
+license = {:?}
+
+[bin]
+entry = "src/main.pr"
+"#,
+            license.as_str()
+        ),
     )?;
     fs::write(
         dir.join("src").join("main.pr"),
@@ -63,6 +86,17 @@ pub fn init(name: &str, dir: &Path) -> Result<String, Error> {
     )?;
 
     Ok(format!("created package `{name}` at {}", dir.display()))
+}
+
+fn required_init_metadata<'a>(field: &str, value: &'a str) -> Result<&'a str, Error> {
+    let value = value.trim();
+    if value.is_empty() {
+        Err(Error::ResolvePackage(format!(
+            "package {field} cannot be empty"
+        )))
+    } else {
+        Ok(value)
+    }
 }
 
 /// `prism add <git-url-or-hash>`: record a dependency in `prism.toml`, and pin its

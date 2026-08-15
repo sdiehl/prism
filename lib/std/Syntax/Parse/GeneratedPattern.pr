@@ -2,6 +2,8 @@
 -- Typed action schema SHA-256: @ACTION_SCHEMA_SHA256@
 -- Complete frozen Pattern-family control with explicit LR receipts.
 
+-- lint: allow-file(L0101, L0102, L0103, L0105, L0108, L0202, L0203, L0204)
+
 import Data.List (..)
 import Syntax.Token (..)
 import Syntax.Ast (..)

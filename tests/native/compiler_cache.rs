@@ -14,6 +14,9 @@ use prism::{
 
 use crate::support::{require_cc, TempDir};
 
+// The default worker count auto-detects host parallelism, so the sequential
+// arm of each byte-diff oracle must pin one worker explicitly.
+const SEQUENTIAL_QUERY_THREADS: usize = 1;
 const PARALLEL_QUERY_THREADS: usize = 4;
 const FINAL_EDIT_INDEX: usize = 4;
 const NATIVE_OBJECT_QUERIES: &str = "queries/native-object";
@@ -23,6 +26,22 @@ const LLVM_SCC_QUERIES: &str = "queries/llvm-scc-bitcode";
 const CLOSURE_SUMMARY_QUERIES: &str = "queries/llvm-scc-closure-summary";
 const RETIRED_EFFECT_PLAN_QUERIES: &str = "queries/effect-lowering-plan";
 const RETIRED_EFFECT_RESULT_QUERIES: &str = "queries/effect-lowering-result";
+const LINKED_NATIVE_RAW_QUERIES: &str = "queries/linked-native.raw";
+const LINKED_NATIVE_SEMANTIC_QUERIES: &str = "queries/linked-native.semantic";
+
+// Linked-artifact keys are output-path independent, so a rebuild of the same
+// program is a whole-binary hit that never replays the backend queries. The
+// corruption gates below need those queries to actually run, so they drop the
+// linked bindings first, forcing the rebuild to re-derive the binary from the
+// store's lower-level artifacts.
+fn drop_linked_queries(root: &Path) {
+    for kind in [LINKED_NATIVE_RAW_QUERIES, LINKED_NATIVE_SEMANTIC_QUERIES] {
+        let dir = root.join(kind);
+        if dir.exists() {
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+}
 
 fn query_bindings(root: &Path, kind: &str) -> BTreeMap<String, String> {
     fs::read_dir(root.join(kind))
@@ -118,6 +137,7 @@ fn warm_native_build_materializes_byte_identical_binary() {
     let mut cfg = Config::default();
     cfg.flags.compiler_cache = true;
     cfg.flags.store_path = Some(tmp.store_root());
+    cfg.flags.query_threads = SEQUENTIAL_QUERY_THREADS;
 
     let bin = tmp.join("program");
     let first = build_on_report(&src, &roots, &bin, &cfg).unwrap();
@@ -197,14 +217,17 @@ fn warm_native_build_materializes_byte_identical_binary() {
         "sequential and parallel query scheduling must be unobservable"
     );
 
+    // The linked key is output-path independent: the same program built to a
+    // new destination is a whole-binary hit, byte-identical to the first.
     let relocated = tmp.join("relocated");
     let relocation = build_on_report(&src, &roots, &relocated, &cfg).unwrap();
-    assert_eq!(relocation.cache, NativeCacheStatus::Write);
-    assert_eq!(relocation.bitcode_cache, NativeCacheStatus::Hit);
+    assert_eq!(relocation.cache, NativeCacheStatus::Hit);
+    assert_eq!(relocation.bitcode_cache, NativeCacheStatus::Disabled);
     assert_eq!(
         relocation.cache_explanation(),
-        "linked artifact key changed; LLVM bitcode key matched"
+        "linked artifact key matched"
     );
+    assert_eq!(fs::read(&relocated).unwrap(), cold);
     assert_eq!(
         fs::read_dir(tmp.store_root().join(NATIVE_OBJECT_QUERIES))
             .unwrap()
@@ -368,6 +391,9 @@ fn typed_route_second_build_preserves_warm_cache_artifacts() {
         "typed effect lowering must publish no retired legacy query family"
     );
 
+    // Drop the linked bindings so the rebuild exercises the warm bitcode
+    // level instead of returning the whole cached binary.
+    drop_linked_queries(&tmp.store_root());
     let observed_bin = tmp.join("observed");
     let observed_report = build_on_report(&src, &roots, &observed_bin, &cfg).unwrap();
     assert_eq!(observed_report.cache, NativeCacheStatus::Write);
@@ -429,6 +455,7 @@ fn incremental_store_reaches_the_fresh_final_artifacts() {
     let mut incremental_cfg = Config::default();
     incremental_cfg.flags.compiler_cache = true;
     incremental_cfg.flags.store_path = Some(incremental.store_root());
+    incremental_cfg.flags.query_threads = SEQUENTIAL_QUERY_THREADS;
     for (index, source) in [
         base,
         formatted,
@@ -451,6 +478,7 @@ fn incremental_store_reaches_the_fresh_final_artifacts() {
     let mut fresh_cfg = Config::default();
     fresh_cfg.flags.compiler_cache = true;
     fresh_cfg.flags.store_path = Some(fresh.store_root());
+    fresh_cfg.flags.query_threads = SEQUENTIAL_QUERY_THREADS;
     let fresh_bin = fresh.join("program");
     build_on_report(&final_source, &roots, &fresh_bin, &fresh_cfg).unwrap();
 
@@ -512,6 +540,7 @@ fn sequential_and_parallel_scc_artifacts_are_identical() {
     let mut sequential_cfg = Config::default();
     sequential_cfg.flags.compiler_cache = true;
     sequential_cfg.flags.store_path = Some(sequential.store_root());
+    sequential_cfg.flags.query_threads = SEQUENTIAL_QUERY_THREADS;
     let mut parallel_cfg = sequential_cfg.clone();
     parallel_cfg.flags.query_threads = PARALLEL_QUERY_THREADS;
     parallel_cfg.flags.store_path = Some(parallel.store_root());
@@ -801,6 +830,7 @@ fn corrupt_backend_scc_is_rejected() {
         .join(&object_hash[..2])
         .join(&object_hash[2..]);
     fs::write(object, b"corrupt").unwrap();
+    drop_linked_queries(&tmp.store_root());
 
     let error = build_on_report(&src, &roots, &tmp.join("relocated"), &cfg).unwrap_err();
     assert!(
@@ -836,6 +866,7 @@ fn corrupt_backend_closure_summary_is_rejected() {
         .join(&object_hash[..2])
         .join(&object_hash[2..]);
     fs::write(object, b"corrupt").unwrap();
+    drop_linked_queries(&tmp.store_root());
 
     let error = build_on_report(&src, &roots, &tmp.join("relocated"), &cfg).unwrap_err();
     assert!(
@@ -871,6 +902,7 @@ fn corrupt_optimized_scc_is_rejected() {
         .join(&object_hash[..2])
         .join(&object_hash[2..]);
     fs::write(object, b"corrupt").unwrap();
+    drop_linked_queries(&tmp.store_root());
 
     let error = build_on_report(&src, &roots, &tmp.join("relocated"), &cfg).unwrap_err();
     assert!(

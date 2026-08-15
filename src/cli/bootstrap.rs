@@ -7,14 +7,15 @@ use serde::{Deserialize, Serialize};
 
 use super::{file_name, resolve_input, CmdError, CmdResult};
 use crate::error::Error;
+use crate::scheme_canon::{canonical_scheme, SCHEME_CANON_CONTRACT};
 use crate::{dump_on, interpret_io_on_with_args, with_prelude, Config, OptLevel, Root};
 
-const REPORT_SCHEMA: &str = "prism-bootstrap-check-v1";
+const REPORT_SCHEMA: &str = "prism-bootstrap-check-v2";
 const SHADOW_NAME: &str = "prism-t1";
 const AUTHORITY: &str = "rust";
 const STATUS_PARITY: &str = "parity";
 const STATUS_DISAGREEMENT: &str = "disagreement";
-const PROTOCOL_VERSION: &str = "1";
+const PROTOCOL_VERSION: &str = "2";
 const RECORD_HEADER: &str = "BOOTSTRAP";
 const RECORD_COVERAGE: &str = "COVERAGE";
 const RECORD_UNSUPPORTED: &str = "UNSUPPORTED";
@@ -43,6 +44,7 @@ struct RustDecl {
 #[derive(Debug, Serialize)]
 struct BootstrapReport {
     schema: &'static str,
+    scheme_contract: &'static str,
     authority: &'static str,
     shadow: &'static str,
     status: &'static str,
@@ -194,6 +196,7 @@ pub fn check_cmd(file: &Path, json: bool, cfg: &Config) -> CmdResult {
     };
     let report = BootstrapReport {
         schema: REPORT_SCHEMA,
+        scheme_contract: SCHEME_CANON_CONTRACT,
         authority: AUTHORITY,
         shadow: SHADOW_NAME,
         status: if protocol.first.is_none() {
@@ -243,7 +246,17 @@ fn parse_protocol(text: &str) -> Result<Protocol, String> {
     for line in text.lines() {
         let fields: Vec<_> = line.split('\t').collect();
         match fields.as_slice() {
-            [RECORD_HEADER, PROTOCOL_VERSION] if !saw_header => saw_header = true,
+            // The header carries the shadow's scheme-contract version; refusing
+            // a mismatch is what keeps "agrees" one comparison, not two
+            // conventions that drifted apart.
+            [RECORD_HEADER, PROTOCOL_VERSION, contract] if !saw_header => {
+                if *contract != SCHEME_CANON_CONTRACT {
+                    return Err(format!(
+                        "Prism T1 shadow speaks scheme contract {contract}, expected {SCHEME_CANON_CONTRACT}"
+                    ));
+                }
+                saw_header = true;
+            }
             [RECORD_COVERAGE, supported, total] if !saw_coverage => {
                 saw_coverage = true;
                 report.supported_nodes = parse_u32(supported, "supported node count")?;
@@ -327,68 +340,17 @@ fn render_text(report: &BootstrapReport) {
     }
 }
 
-// Canonicalize only the binders introduced by a leading forall. The rest of
-// Rust's stable type spelling is already the spelling the T1 checker emits.
-fn canonical_scheme(scheme: &str) -> String {
-    let Some(rest) = scheme.strip_prefix("forall ") else {
-        return scheme.to_owned();
-    };
-    let Some((binders, body)) = rest.split_once(". ") else {
-        return scheme.to_owned();
-    };
-    let names: Vec<_> = binders.split_whitespace().collect();
-    let replacements: HashMap<_, _> = names
-        .iter()
-        .enumerate()
-        .map(|(index, name)| (*name, format!("${index}")))
-        .collect();
-    let mut normalized = String::with_capacity(body.len());
-    let mut token = String::new();
-    let flush = |token: &mut String, out: &mut String| {
-        if token.is_empty() {
-            return;
-        }
-        if let Some(replacement) = replacements.get(token.as_str()) {
-            out.push_str(replacement);
-        } else {
-            out.push_str(token);
-        }
-        token.clear();
-    };
-    for ch in body.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '_' {
-            token.push(ch);
-        } else {
-            flush(&mut token, &mut normalized);
-            normalized.push(ch);
-        }
-    }
-    flush(&mut token, &mut normalized);
-    let canonical_binders = (0..names.len())
-        .map(|index| format!("${index}"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    format!("forall {canonical_binders}. {normalized}")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{canonical_scheme, parse_protocol};
+    use super::parse_protocol;
 
-    #[test]
-    fn canonicalizes_forall_binders_without_touching_names() {
-        assert_eq!(
-            canonical_scheme("forall a b. (a, Maybe(b)) -> a"),
-            "forall $0 $1. ($0, Maybe($1)) -> $0"
-        );
-        assert_eq!(canonical_scheme("(Int) -> Bool"), "(Int) -> Bool");
-    }
+    const HEADER: &str = "BOOTSTRAP\t2\tprism-scheme-canon-v1";
 
     #[test]
     fn protocol_requires_and_decodes_every_singleton_record() {
-        let protocol = parse_protocol(
-            "BOOTSTRAP\t1\nCOVERAGE\t7\t9\nFACT\tmain\tInt\nDIFF\tAT\t2\tInt\tBool\n",
-        )
+        let protocol = parse_protocol(&format!(
+            "{HEADER}\nCOVERAGE\t7\t9\nFACT\tmain\tInt\nDIFF\tAT\t2\tInt\tBool\n"
+        ))
         .expect("complete protocol");
         assert_eq!(protocol.supported_nodes, 7);
         assert_eq!(protocol.total_nodes, 9);
@@ -400,13 +362,25 @@ mod tests {
 
     #[test]
     fn protocol_rejects_missing_or_duplicate_singleton_records() {
-        let missing_coverage = "BOOTSTRAP\t1\nDIFF\tNONE\n";
-        assert!(parse_protocol(missing_coverage).is_err());
+        let missing_coverage = format!("{HEADER}\nDIFF\tNONE\n");
+        assert!(parse_protocol(&missing_coverage).is_err());
 
-        let duplicate_diff = "BOOTSTRAP\t1\nCOVERAGE\t1\t1\nDIFF\tNONE\nDIFF\tNONE\n";
-        assert!(parse_protocol(duplicate_diff).is_err());
+        let duplicate_diff = format!("{HEADER}\nCOVERAGE\t1\t1\nDIFF\tNONE\nDIFF\tNONE\n");
+        assert!(parse_protocol(&duplicate_diff).is_err());
 
-        let impossible_coverage = "BOOTSTRAP\t1\nCOVERAGE\t2\t1\nDIFF\tNONE\n";
-        assert!(parse_protocol(impossible_coverage).is_err());
+        let impossible_coverage = format!("{HEADER}\nCOVERAGE\t2\t1\nDIFF\tNONE\n");
+        assert!(parse_protocol(&impossible_coverage).is_err());
+    }
+
+    #[test]
+    fn protocol_rejects_a_foreign_scheme_contract() {
+        let foreign = "BOOTSTRAP\t2\tprism-scheme-canon-v0\nCOVERAGE\t1\t1\nDIFF\tNONE\n";
+        let Err(error) = parse_protocol(foreign) else {
+            panic!("mismatched contract must refuse");
+        };
+        assert!(
+            error.contains("scheme contract"),
+            "unexpected error: {error}"
+        );
     }
 }

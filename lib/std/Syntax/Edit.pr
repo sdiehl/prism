@@ -26,7 +26,7 @@ import Syntax.Source (..)
 
 -- | One edit: the byte span it replaces and the text that replaces it. An
 -- insertion is an empty span, a deletion is empty text.
-pub type Edit = Edit { span: Span, text: String }
+pub type Edit = Edit { span: Span, text: String } deriving (Eq, Show)
 
 -- | Why an edit set was refused. Every case names the offending span, so a tool
 -- can point at the edit it got wrong.

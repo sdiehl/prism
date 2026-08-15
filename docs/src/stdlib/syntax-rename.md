@@ -17,7 +17,7 @@ The refusals are the useful part of the result, and they are the gap to report: 
 ### `RnUse`
 
 ```prism,def,h-222578f7643337b107f2f97e411f58cff68de07b85ed3642ad0719fe7d2597c6
-type RnUse = RnUse { id: Int, span: Span, name: String }
+type RnUse = RnUse { id: Int, span: Span, name: String } deriving (Eq, Show)
 ```
 
 One variable reference: the node id the checker facts join on, the exact span of the identifier, and the identifier text sliced from the embedded source.

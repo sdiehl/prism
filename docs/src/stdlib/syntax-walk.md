@@ -58,7 +58,7 @@ expr_count(lit_probe(7))
 lit_probe : (Int) -> Syntax.Ast.Sp(Syntax.Ast.Expr)
 ```
 
-A span-zero literal, a convenience for building test trees.
+A span-zero literal, a convenience for building test trees. lint: allow(L0204)
 
 ### `expr_count`
 

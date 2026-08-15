@@ -87,6 +87,8 @@ pub mod project;
 #[cfg(feature = "native")]
 pub mod repl;
 pub mod resolve;
+pub mod scheme_canon;
+pub use scheme_canon::{canonical_scheme, SCHEME_CANON_CONTRACT};
 pub mod stable;
 pub use stable::lock as stable_lock;
 pub mod stdlib;

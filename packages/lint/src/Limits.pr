@@ -1,0 +1,90 @@
+-- | The house numbers: every lint threshold in one table.
+--
+-- Each constant carries its one-line rationale. There is no config file and no
+-- per-project knob; changing a house number is one diff in this module, and
+-- the exemption lists below are data in the same spirit, never judgment
+-- scattered through rule bodies.
+
+-- | Match and if nesting deeper than this wants a rule split or an early
+-- refusal.
+pub let lm_max_nesting : Int = 6
+
+-- | A body with more nodes than this wants extraction, or names a traversal it
+-- is hand-implementing.
+pub let lm_max_body_nodes : Int = 400
+
+-- | More parameters than this want a record, or Reader and State for the
+-- context they are threading.
+pub let lm_max_params : Int = 5
+
+-- | Closures nested past this depth read as a pipeline that wants naming.
+pub let lm_max_lambda_chain : Int = 3
+
+-- | How many same-prefix public functions establish a module's family prefix.
+pub let lm_family_min : Int = 3
+
+-- | Of ten public functions, how many must share the prefix before outliers
+-- are drift rather than a second family: the numerator of eight tenths.
+pub let lm_family_num : Int = 8
+
+-- | The denominator of the family-coverage ratio.
+pub let lm_family_den : Int = 10
+
+-- | Integer literals that never count as magic: identity, unit steps, and
+-- their negations through the sign node.
+pub fn lm_exempt_ints() : List(String) = ["0", "1"]
+
+-- | Modules whose exported vocabulary is designed for glob import. Everywhere
+-- else, imports name what they take. A module inside the importing package
+-- (a dotless path) is its own vocabulary and is always allowed.
+pub fn lm_vocab_globs() : List(String) =
+  [
+      "Data.List",
+      "Data.Maybe",
+      "Data.Result",
+      "Data.Map",
+      "Data.String",
+      "Data.Foldable",
+      "Control.State",
+      "Control.Layer",
+      "Control.Rewrite",
+      "Quickcheck",
+      "Syntax.Source",
+      "Syntax.Token",
+      "Syntax.Ast",
+      "Syntax.Cursor",
+      "Syntax.Lex",
+      "Syntax.Layout",
+      "Syntax.Diagnostic",
+      "Syntax.Resolved",
+      "Syntax.Codec",
+      "Syntax.Walk",
+      "Syntax.TcInput",
+      "Syntax.Edit",
+    ]
+
+-- | The self-hosted parser's internal modules glob each other's vocabulary;
+-- the family is allowed by prefix rather than one entry per generated module.
+pub fn lm_vocab_prefixes() : List(String) = ["Syntax.Parse"]
+
+-- | The embedded stdlib's single-segment module names. A dotless glob import
+-- is package-local vocabulary unless it names one of these, since a stdlib
+-- module and a project module of the same shape are indistinguishable
+-- syntactically.
+pub fn lm_stdlib_singles() : List(String) =
+  [
+      "Teleport",
+      "Replay",
+      "Concurrent",
+      "Quickcheck",
+      "Wire",
+      "Incr",
+      "Test",
+      "Blit",
+      "Time",
+      "Json",
+      "Sequence",
+      "Cli",
+      "Arena",
+      "Math",
+    ]

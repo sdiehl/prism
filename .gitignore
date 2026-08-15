@@ -1,5 +1,6 @@
 /target
 /target-mlir
+/tests/projects/*/target/
 /tools/prismup/target/
 /docs/book
 /web/pkg
@@ -44,7 +45,7 @@
 setup.sh
 __pycache__
 # Internal parser-experiment working notes: kept on disk, never shipped.
-/docs/internal/SCOREBOARD.md
+# The scoreboard itself is committed: scripts/scoreboard.py --check pins it in CI.
 /docs/internal/PARSER_COMPACTION_BASELINE.md
 /docs/internal/PARSER_COMPACTION_CORPUS.md
 /docs/internal/PARSER_GENERATOR_SEMANTICS.md

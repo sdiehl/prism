@@ -1,0 +1,119 @@
+-- Effect handlers, the shadow checker's third class of evidence. A handle
+-- expression discharges the effects its operation clauses name, so what a
+-- declaration performs is what its handled body performs minus what the
+-- handler covers, joined with whatever the clauses themselves perform.
+
+effect Tick
+  tick() : Int
+
+effect Say
+  say(Int) : Unit
+
+effect Store
+  put(Int) : Unit
+  get() : Int
+
+fn double(n : Int) : Int = n + n
+
+-- The body performs Tick and the handler covers it, so the declaration is
+-- pure: discharge is subtraction from the row, not a mark on the declaration.
+fn discharged() : Int =
+  handle tick() with
+    tick() resume k => k(1)
+    return r => r
+
+-- The return arm transforms the handled result, so the handle expression's
+-- type is the arm's result rather than the body's.
+fn transformed() : Int =
+  handle tick() with
+    tick() resume k => k(2)
+    return r => double(r)
+
+-- A handler with no return arm returns what the body returns.
+fn no_return_arm() : Int =
+  handle tick() + 1 with
+    tick() resume k => k(3)
+
+-- The resumption is an ordinary function: calling it twice is two runs of the
+-- rest of the handled body, and neither is visible in the declaration's row.
+fn resumed_twice() : Int =
+  handle double(tick()) with
+    tick() resume k => k(1) + k(2)
+    return r => r
+
+-- A clause that never resumes abandons the body and answers with its own
+-- result, which is why the clause body is checked at the handle's type.
+fn abandoned() : Int =
+  handle double(tick()) with
+    tick() resume _k => 0
+    return r => r
+
+-- Two operations of one effect handled together.
+fn stored() : Int =
+  handle let _u = put(1) in get() + get() with
+    put(_v) resume k => k(())
+    get() resume k => k(7)
+    return r => r
+
+-- A handler covering one of the two effects the body performs leaves the other
+-- ambient, so the declaration still performs it.
+fn leftover() : Unit ! {Say} =
+  handle say(tick()) with
+    tick() resume k => k(4)
+    return r => r
+
+-- What a clause performs is performed where the handler is installed, not
+-- inside the handled body, so it lands in the enclosing row.
+fn clause_performs() : Int ! {Say} =
+  handle tick() with
+    tick() resume k =>
+      let _u = say(5)
+      k(6)
+    return r => r
+
+-- The tail-resumptive spelling: the clause body is the value the operation
+-- answers with, and the rest of the handled body runs on from there.
+fn tail_resumptive() : Int =
+  handle tick() + tick() with
+    once tick() => 8
+
+-- An operation answered by one install-time value, evaluated where the handler
+-- is installed rather than at each call.
+fn constant_answer() : Int =
+  handle tick() + tick() with
+    val tick = double(4)
+
+-- A clause that abandons the body, spelled as the sugar that forbids resuming.
+fn never_resumes() : Int =
+  handle double(tick()) with
+    never tick() => 9
+    return r => r
+
+-- Handlers nest: the inner one discharges Tick and the outer one Store, and
+-- what each discharges is subtracted where it is written.
+fn nested() : Int =
+  handle (handle get() + tick() with {
+      tick() resume k => k(1),
+      return r => r
+    }) with
+    put(_v) resume k => k(())
+    get() resume k => k(2)
+    return r => r
+
+-- A partial handler is deliberately outside the checked subset: it leaves the
+-- operations it does not name in the residual row, which the shadow has no way
+-- to spell without the effect's full operation table.
+fn partial_cover() : Int ! {Store} =
+  handle get() with partial {
+    put(_v) resume k => k(()),
+    return r => r
+  }
+
+-- A named handler instance is outside the subset for the same kind of reason:
+-- its operations are dispatched through a binding rather than by name, so the
+-- effect a clause discharges is not readable from the clause alone.
+fn named_instance() : Int =
+  with h <- handler
+    tick() resume k => k(5)
+    return r => r
+  h.tick()

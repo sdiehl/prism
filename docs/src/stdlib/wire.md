@@ -59,7 +59,7 @@ A compact, positional byte body: an unboxed byte buffer and a read cursor, `Byte
 ### `Loss`
 
 ```prism,def,h-10592e2985d5e277d2c9d324e8a45e36f5ad5d67ace0644119f39792a395007e
-newtype Loss = Loss(List(String)) deriving (Show)
+newtype Loss = Loss(List(String)) deriving (Eq, Show)
 ```
 
 What a downgrade could not carry down: the names of the fields dropped when lowering a value to an older frozen version. A downgrade never silently discards, it reports every field it had to drop.
@@ -67,7 +67,7 @@ What a downgrade could not carry down: the names of the fields dropped when lowe
 ### `Policy`
 
 ```prism,def,h-e7a5c13c0613cbde8cde93e74eb744544e5b5c6a85eb61ce51a68a67c264c13d
-type Policy = Reject | LargestSafeSubset
+type Policy = Reject | LargestSafeSubset deriving (Eq, Show)
 ```
 
 How to reconcile a higher-version value that a reader cannot represent at its own version: `Reject` refuses it, `LargestSafeSubset` downgrades it and keeps the `Loss`. A version mismatch always has one of these defined outcomes, never undefined behavior.
@@ -223,6 +223,8 @@ bytes_at(bytes_of_list([10, 20, 30]), 1)
 wire_empty : Wire.Bytes
 ```
 
+The empty byte body: no bytes, cursor at the start. The unit of `wire_cat`.
+
 ### `wire_cat`
 
 ```prism,sig,h-d5cafe27415db70101093c4213ab27905253b98e4d5bc875877cba5b8f9055d4
@@ -292,6 +294,8 @@ bytes_to_list(bytes_of_list([1, 2, 3]))
 ```prism,sig,h-3c737a5ca67f5b494e2705780d25bdc0d8c96109471f9bc6943793402cef1aa3
 bytes_to_list : (Wire.Bytes) -> List(Int)
 ```
+
+Spread a byte body out as a list of byte values, from the cursor to the end. The inverse of `bytes_of_list`.
 
 ### `wire_tag`
 

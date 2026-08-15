@@ -11,7 +11,7 @@ One document per source file: the embedded source identity and every syntax-boun
 ### `DiagPhase`
 
 ```prism,def,h-e414102dfc871ddc5c848aefdf20f81e8d10ee0b98ced69a14434cb8faa88839
-type DiagPhase = DPLex | DPParse
+type DiagPhase = DPLex | DPParse deriving (Eq, Show)
 ```
 
 The phase that raised a diagnostic.
@@ -26,7 +26,7 @@ type Diagnostic = Diagnostic {
   message: String,
   expected: List(String),
   related: List(Span)
-}
+} deriving (Eq, Show)
 ```
 
 One diagnostic: the stable append-only code, the raising phase, the primary half-open byte span (a lex fault is a caret, `lo == hi`), the rendered message, the parser's canonical expectation set when it has one, and related spans.
@@ -42,7 +42,7 @@ type DiagnosticsDoc = DiagnosticsDoc {
 }
 ```
 
-A decoded diagnostics document: the envelope identity, the embedded source every span indexes into, and the diagnostics in source order.
+A decoded diagnostics document: the envelope identity, the embedded source every span indexes into, and the diagnostics in source order. lint: allow(L0203)
 
 ## Functions and Values
 

@@ -27,7 +27,24 @@ use std::path::PathBuf;
 
 use crate::core::{EffectStrategy, OptLevel};
 
-const DEFAULT_QUERY_THREADS: usize = 1;
+/// Sequential fallback when the host's parallelism cannot be queried.
+const SEQUENTIAL_QUERY_THREADS: usize = 1;
+
+/// Ceiling on the auto-detected query worker count. Each worker can hold a
+/// live compiler subprocess (an SCC shard object compile) plus its inputs in
+/// memory, so the default fan-out stays bounded on high-core machines. An
+/// explicit override (env, CLI, or prism.toml) may exceed it.
+const MAX_AUTO_QUERY_THREADS: usize = 8;
+
+/// Default worker count for independent compiler queries: the host's available
+/// parallelism, capped. Worker count is a pure cost decision; artifacts must be
+/// byte-identical at any value, which `tests/native/compiler_cache.rs` enforces
+/// by diffing sequential and parallel builds.
+fn default_query_threads() -> usize {
+    std::thread::available_parallelism().map_or(SEQUENTIAL_QUERY_THREADS, |threads| {
+        threads.get().min(MAX_AUTO_QUERY_THREADS)
+    })
+}
 
 /// The lowest rung of the effect-lowering cascade a compile is allowed to take.
 ///
@@ -159,17 +176,17 @@ impl SignMode {
     }
 }
 
-/// How loudly a duplicate-definition analysis speaks.
+/// How loudly a redundant-definition analysis speaks.
 ///
-/// Two distinct definitions that elaborate to the same behavior hash (the content
-/// address `dump dupes` reports) are almost always an accident: a copy-pasted
-/// helper, or a reimplementation of something the standard library already
-/// provides. `Warn` surfaces each finding as a diagnostic; `Strict` turns it into
-/// a hard compile error with a declaration-family E-code; `Off` does no analysis,
-/// so an ordinary build pays nothing. The two analyses that use this severity have
-/// different defaults (clone-group detection is [`Off`](Self::Off); stdlib
-/// reimplementation is [`Warn`](Self::Warn)); the [`Default`] here is only the
-/// enum's own zero value.
+/// These analyses find a definition that duplicates something the program already
+/// has: two definitions elaborating to the same behavior hash (the content address
+/// `dump dupes` reports), a reimplementation of a standard library function, or a
+/// top-level name the prelude had already opened into scope. `Warn` surfaces each
+/// finding as a diagnostic; `Strict` turns it into a hard compile error with a
+/// declaration-family E-code; `Off` does no analysis, so an ordinary build pays
+/// nothing. Each analysis picks its own default (clone-group detection is
+/// [`Off`](Self::Off); stdlib reimplementation and prelude capture are
+/// [`Warn`](Self::Warn)); the [`Default`] here is only the enum's own zero value.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum WarnDupes {
     /// No analysis.
@@ -269,8 +286,9 @@ pub struct DynFlags {
     /// `PRISM_EXPLAIN_CACHE` (default off): report the final and backend-IR
     /// compiler-query decisions after a build.
     pub explain_cache: bool,
-    /// `PRISM_QUERY_THREADS` (default 1): bounded worker count for independent
-    /// compiler queries. Collection order remains deterministic.
+    /// `PRISM_QUERY_THREADS` (default: the host's available parallelism, capped
+    /// at 8): bounded worker count for independent compiler queries. Collection
+    /// order remains deterministic.
     pub query_threads: usize,
     /// `PRISM_SCC_BACKEND` (default on): emit and link SCC-granular backend
     /// modules. Disabling it forces the whole-program backend oracle; selection
@@ -383,6 +401,14 @@ pub struct DynFlags {
     /// definition that already *is* the named library function is never flagged. A
     /// diagnostics-only knob: it never perturbs a content hash or an artifact.
     pub warn_stdlib_dupes: WarnDupes,
+    /// `PRISM_WARN_PRELUDE_CAPTURE` (default `warn`): whether to flag a top-level
+    /// definition whose name the prelude had already opened into unqualified scope,
+    /// naming the library symbol it displaces. On by default (the capture is silent
+    /// otherwise, and it redirects every unqualified use in the file); `strict`
+    /// escalates it to a hard error, `off` silences it. A diagnostics-only knob: it
+    /// never perturbs a content hash or an artifact, and the name still resolves to
+    /// the user's definition either way.
+    pub warn_prelude_capture: WarnDupes,
 }
 
 impl Default for DynFlags {
@@ -397,7 +423,7 @@ impl Default for DynFlags {
             opt_stats: false,
             compiler_stats: false,
             explain_cache: false,
-            query_threads: DEFAULT_QUERY_THREADS,
+            query_threads: default_query_threads(),
             scc_backend: true,
             time_compile: false,
             quiet: false,
@@ -420,6 +446,7 @@ impl Default for DynFlags {
             sign_allowed_signers: None,
             warn_dupes: WarnDupes::Off,
             warn_stdlib_dupes: WarnDupes::Warn,
+            warn_prelude_capture: WarnDupes::Warn,
         }
     }
 }
@@ -496,6 +523,10 @@ impl DynFlags {
                 "PRISM_WARN_STDLIB_DUPES",
                 base.warn_stdlib_dupes,
             ),
+            warn_prelude_capture: warn_dupes_from_env(
+                "PRISM_WARN_PRELUDE_CAPTURE",
+                base.warn_prelude_capture,
+            ),
         }
     }
 
@@ -545,6 +576,9 @@ impl DynFlags {
             "warn-dupes" => self.warn_dupes = toml_parsed(key, val, WarnDupes::parse)?,
             "warn-stdlib-dupes" => {
                 self.warn_stdlib_dupes = toml_parsed(key, val, WarnDupes::parse)?;
+            }
+            "warn-prelude-capture" => {
+                self.warn_prelude_capture = toml_parsed(key, val, WarnDupes::parse)?;
             }
             "dump-core" => self.dump_core = dump_sink(toml_string(key, val)?.into()),
             "store-path" => self.store_path = Some(PathBuf::from(toml_string(key, val)?)),

@@ -38,6 +38,12 @@ import Code (code_block, prism_code)
 import Data.String (contains, lines_of, split, starts_with, trim)
 import Data.List (map, reverse)
 
+-- The vertical gap between an example's source and its output, and the wider
+-- gap between one example and the next.
+let example_gap_pt : Int = 10
+
+let doctest_gap_pt : Int = 18
+
 -- | One fenced example: the source a slide shows, and the output the doctest
 -- runner proves it prints (empty when the docstring pins none).
 pub type Example = Example { code: String, output: String } deriving (Eq, Show)
@@ -116,6 +122,9 @@ fn hidden(line : String) : Bool =
 -- The comment block a declaration leads with, and the declaration itself. The
 -- block ends at the first line that is not a comment, so a comment inside the
 -- body stays part of the body.
+-- The block is accumulated in reverse and turned once at the end, so the
+-- lines come back in source order.
+-- lint: allow(L0105)
 fn split_comment(
   lines : List(String),
   doc : List(String)
@@ -150,6 +159,9 @@ fn after_code(
         walk(rest, InProse, Nil, prose, acc)
     Nil => (reverse(prose), reverse(acc))
 
+-- Prose and examples are both accumulated in reverse and turned once at the
+-- end, so each comes back in the order the docstring wrote it.
+-- lint: allow(L0105)
 fn walk(
   lines : List(String),
   region : Region,
@@ -217,11 +229,14 @@ pub fn example_pict(e : Example) : Pict =
   if e.output == "" then
     prism_code(e.code)
   else
-    column(10, [prism_code(e.code), code_block(output_language, e.output)])
+    column(example_gap_pt, [
+        prism_code(e.code),
+        code_block(output_language, e.output),
+      ])
 
 -- | Every example a reflected declaration carries, stacked.
 pub fn doctest(reflected : String) : Pict =
-  column(18, map(example_pict, examples_of(reflected)))
+  column(doctest_gap_pt, map(example_pict, examples_of(reflected)))
 
 -- | A reflected declaration without its comment block, as a source block. This
 -- is the code a docstring documents, with the documentation left behind.

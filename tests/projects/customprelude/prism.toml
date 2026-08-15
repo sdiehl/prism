@@ -1,5 +1,9 @@
 [package]
 name = "customprelude"
+version = "0.0.0"
+authors = ["Test Author <test@example.com>"]
+maintainers = ["test@example.com"]
+license = "MIT"
 prelude = "src/Prelude.pr"
 
 [bin]

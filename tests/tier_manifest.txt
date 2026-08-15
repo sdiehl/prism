@@ -114,6 +114,7 @@ examples/stlc.pr	selective-free-monad
 examples/streams.pr	state-fusion
 examples/superclass.pr	pure
 examples/systemf.pr	whole-program-free-monad
+examples/systemf_dk.pr	whole-program-free-monad
 examples/tagless.pr	pure
 examples/tensor_ops.pr	selective-free-monad
 examples/textutil.pr	pure
@@ -213,7 +214,7 @@ tests/cases/run/generic_fold.pr	pure
 tests/cases/run/grade_ops.pr	selective-free-monad
 tests/cases/run/graph_algorithms.pr	pure
 tests/cases/run/guards.pr	pure
-tests/cases/run/handler_arms_answer_apart.pr	whole-program-free-monad
+tests/cases/run/handler_arms_answer_apart.pr	selective-free-monad
 tests/cases/run/handler_funval.pr	evidence
 tests/cases/run/handler_partial_forward.pr	selective-free-monad
 tests/cases/run/higher.pr	pure
@@ -240,6 +241,7 @@ tests/cases/run/list_diff.pr	pure
 tests/cases/run/list_ops.pr	pure
 tests/cases/run/list_show.pr	pure
 tests/cases/run/list_singleton.pr	pure
+tests/cases/run/local_constrained_let.pr	pure
 tests/cases/run/local_mono_combined.pr	local-partial
 tests/cases/run/local_mono_escape.pr	whole-program-free-monad
 tests/cases/run/loop_break.pr	pure
@@ -299,6 +301,8 @@ tests/cases/run/repeat_block.pr	pure
 tests/cases/run/replayable_ok.pr	evidence
 tests/cases/run/rewrite_strategies.pr	whole-program-free-monad
 tests/cases/run/rollback.pr	selective-free-monad
+tests/cases/run/row_widen_task_list.pr	whole-program-free-monad
+tests/cases/run/row_widen_user_effect.pr	whole-program-free-monad
 tests/cases/run/scc_effect_row.pr	evidence
 tests/cases/run/scientific.pr	pure
 tests/cases/run/sequence_pull.pr	pure

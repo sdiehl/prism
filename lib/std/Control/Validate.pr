@@ -15,7 +15,7 @@
 -- Opt-in: not in Base.
 
 import Data.List (reverse)
-import Data.Validation (..)
+import Data.Validation (Validation, Valid, Invalid)
 
 -- | Errors raised while validating values of type `e`.
 pub effect Validate(e)

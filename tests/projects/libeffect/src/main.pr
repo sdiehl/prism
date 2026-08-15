@@ -1,0 +1,8 @@
+import Beeper
+
+fn main() =
+  let r =
+    handle Beeper.twice(21) with
+      beep(_d) resume k => k(())
+      return r => r
+  println(r)

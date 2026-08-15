@@ -1,0 +1,3 @@
+import Beeper
+
+fn main() = println(1)

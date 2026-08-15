@@ -13,3 +13,5 @@ This module deliberately knows nothing about Type grammar control flow. Generate
 ```prism,sig,h-81097d472e7ff936d09df88cf7522972b950954274f48d689be95fb1690911a1
 validate_usage : (Syntax.Cursor.Cursor, Syntax.Ast.Ty, List(String), Bool, Syntax.Cursor.Cursor) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Ty)
 ```
+
+Check a usage row against the fact vocabulary, refusing an open tail and any unknown or repeated fact.

@@ -25,7 +25,11 @@ The row variable `e` is the whole story on effects. It is open and it is threade
 ### `RwFix`
 
 ```prism,def,h-f269ee7e7f6b4b675947c0358924029dec04bee36096578ca48a8ae1b8d0764d
-type RwFix(a) = RwFix { tree: a, steps: Int, converged: Bool }
+type RwFix(a) = RwFix {
+  tree: a,
+  steps: Int,
+  converged: Bool
+} deriving (Eq, Show)
 ```
 
 The outcome of a fueled fixpoint: the tree it reached, how many steps it took, and whether it converged. `converged` is false exactly when the fuel ran out with the rewrite still applying, which is the only way a caller learns that a rule set does not terminate on this input.

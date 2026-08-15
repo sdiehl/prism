@@ -1,0 +1,68 @@
+-- Effect rows, the shadow checker's second class of evidence. A declaration's
+-- row is what its body performs; a call absorbs the callee's row into the
+-- caller's rather than equating them, so a pure callee stands wherever an
+-- effectful one does.
+
+effect Tick
+  tick() : Int
+
+effect Say
+  say(Int) : Unit
+
+effect Store
+  put(Int) : Unit
+  get() : Int
+
+type Reading = Reading { at: Int, value: Int }
+
+fn double(n : Int) : Int = n + n
+
+fn one_tick() : Int ! {Tick} = tick()
+
+-- The annotation admits more than the body performs.
+fn wider() : Int ! {Say, Tick} = tick()
+
+-- A pure callee inside an effectful caller.
+fn mixed(n : Int) : Int ! {Tick} = double(n) + tick()
+
+-- Two effects meeting in one ambient row, written out of alphabetical order.
+fn both(n : Int) : Unit ! {Tick, Say} = say(double(n) + tick())
+
+-- An unannotated declaration's row is inferred from what it performs.
+fn inferred(n : Int) : Int = tick() + n
+
+-- ... and settles closed when it performs nothing.
+fn still_pure(n : Int) : Int = double(n)
+
+-- Recursion under a row: the self binding carries the same ambient row.
+fn countdown(n : Int) : Int ! {Tick} =
+  if n == 0 then
+    tick()
+  else
+    countdown(n - 1)
+
+-- Records and matching check under an ambient row like anything else.
+fn sample() : Reading ! {Store, Tick} = Reading { at = tick(), value = get() }
+
+fn total(r : Reading) : Int ! {Store} =
+  match r of
+    Reading { at = at, value = value } =>
+      let stored = put(at)
+      value + get()
+
+-- A lambda carries a row of its own rather than the one its enclosing
+-- declaration is accumulating, because its body performs where the thunk is
+-- forced and not where it is written. A lambda that performs nothing settles
+-- closed and passes for a pure parameter.
+fn apply_to(f : (Int) -> Int, n : Int) : Int = f(n)
+
+fn deferred(n : Int) : Int = apply_to(\(x) -> double(x), n)
+
+-- A parameterized effect is deliberately outside the checked subset: its
+-- operations need a binder the shadow has no way to brand, so they stay absent
+-- from the environment and a body performing one counts as uncovered syntax
+-- without turning an otherwise matching run into a disagreement.
+effect Cell(a)
+  read() : a
+
+fn later() : Int ! {Cell(Int)} = read()

@@ -15,7 +15,7 @@ The re-lex is a lexical check and nothing more. It catches an edit that unbalanc
 ### `Edit`
 
 ```prism,def,h-b4eb83007d87481124be61640bb0bd4fb90e1d349ef9bade513114ef28b9e23c
-type Edit = Edit { span: Span, text: String }
+type Edit = Edit { span: Span, text: String } deriving (Eq, Show)
 ```
 
 One edit: the byte span it replaces and the text that replaces it. An insertion is an empty span, a deletion is empty text.

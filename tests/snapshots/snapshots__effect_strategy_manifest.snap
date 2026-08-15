@@ -66,6 +66,7 @@ examples/scheduler_policy.pr: whole-program-free-monad
 examples/stlc.pr: selective-free-monad
 examples/streams.pr: state-fusion
 examples/systemf.pr: whole-program-free-monad
+examples/systemf_dk.pr: whole-program-free-monad
 examples/tensor_ops.pr: selective-free-monad
 examples/time.pr: selective-free-monad
 examples/transact.pr: selective-free-monad
@@ -123,7 +124,7 @@ tests/cases/run/frozen_array.pr: selective-free-monad
 tests/cases/run/fs.pr: evidence
 tests/cases/run/fs_bytes.pr: evidence
 tests/cases/run/grade_ops.pr: selective-free-monad
-tests/cases/run/handler_arms_answer_apart.pr: whole-program-free-monad
+tests/cases/run/handler_arms_answer_apart.pr: selective-free-monad
 tests/cases/run/handler_funval.pr: evidence
 tests/cases/run/handler_partial_forward.pr: selective-free-monad
 tests/cases/run/incr_diff.pr: whole-program-free-monad
@@ -159,6 +160,8 @@ tests/cases/run/reified_under_world.pr: whole-program-free-monad
 tests/cases/run/replayable_ok.pr: evidence
 tests/cases/run/rewrite_strategies.pr: whole-program-free-monad
 tests/cases/run/rollback.pr: selective-free-monad
+tests/cases/run/row_widen_task_list.pr: whole-program-free-monad
+tests/cases/run/row_widen_user_effect.pr: whole-program-free-monad
 tests/cases/run/scc_effect_row.pr: evidence
 tests/cases/run/stable_ladder.pr: whole-program-free-monad
 tests/cases/run/stable_migrations.pr: selective-free-monad

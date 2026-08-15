@@ -18,6 +18,8 @@
 -- codes. A parser built on this cursor therefore reports through the same
 -- document every other syntax fault does, with no error type of its own.
 
+-- lint: allow-file(L0108)
+
 import Data.List (..)
 import Data.Maybe (..)
 import Data.String (..)
@@ -78,6 +80,7 @@ fn cover_go(acc : Span, ss : List(Span)) : Span =
 -- position at which an expectation was recorded, and the names recorded there).
 -- The failure record is part of the cursor rather than of a failure value
 -- because it must outlive every failure a parse recovers from.
+-- lint: allow(L0203)
 pub type Cursor = Cursor {
   toks: Array(Token),
   pos: Int,
@@ -89,6 +92,7 @@ pub type Cursor = Cursor {
 -- | The reply of a cursor step: the value and the advanced cursor, or the
 -- cursor alone. A refusal still carries a cursor, because the failure record it
 -- accumulated is the part worth reporting.
+-- lint: allow(L0203)
 pub type Reply(a) = Took(a, Cursor) | Stuck(Cursor)
 
 -- | A cursor over a token list. `stop` is the byte offset the end-of-input
@@ -349,17 +353,17 @@ pub fn cursor_diagnostic(c : Cursor) : Diagnostic =
 -- | How an infix operator groups a chain of its own level. A non-associative
 -- operator declines a second application at its level, leaving the second
 -- operator unconsumed for the caller to refuse.
-pub type Assoc = ALeft | ARight | ANone deriving (Eq)
+pub type Assoc = ALeft | ARight | ANone deriving (Eq, Show)
 
 -- | One infix operator: the token spelling, its level (higher binds tighter),
 -- and how it associates.
-pub type Infix = Infix { op: String, level: Int, assoc: Assoc }
+pub type Infix = Infix { op: String, level: Int, assoc: Assoc } deriving (Eq, Show)
 
 -- | One prefix operator: the token spelling and the level its operand is
 -- parsed at. An operator that binds tighter than that level is pulled into the
 -- operand; one that binds looser takes the prefix application as its left
 -- operand.
-pub type Prefix = Prefix { op: String, level: Int }
+pub type Prefix = Prefix { op: String, level: Int } deriving (Eq, Show)
 
 -- | The power binding an infix operator's left operand.
 --

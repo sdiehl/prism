@@ -1,9 +1,9 @@
 {
   "schema": "prism-syntax-tokens-v1",
-  "compiler": "0.18.0",
+  "compiler": "0.19.0",
   "source": {
-    "digest": "ab952b49b82a4dd4b2e6444d34d5d54165723e98787a7645979ffd84d00f4e26",
-    "text": "-- Expression forms: operators, records, paths, ranges, comprehensions.\ntype Wheel = Wheel { psi: Float }\n\ntype Car = Car { name: String, wheels: List(Wheel) }\n\nfn arith(x : Int, y : Int) : Int = -x + y * 2 - x % 3 + x ^ 2\n\nfn logic_ops(a : Bool, b : Bool) : Bool = a && b || not(a)\n\nfn compare(x : Int, y : Int) : Bool =\n  x < y && x <= y && x > y || x >= y || x == y || x /= y\n\nfn pipes(xs : List(Int)) : Int = xs |> map(\\(v) -> v + 1) |> length\n\nfn composed(f : (Int) -> Int, g : (Int) -> Int) : (Int) -> Int = f >> g << f\n\nfn records(c : Car) : Car =\n  let bumped =\n    { c\n    | name = \"vx\"\n    , wheels.each.psi ~ \\(p) -> p + 1.0\n    }\n  { bumped | wheels[0].psi = 30.0 }\n\nfn reads(c : Car) : List(Float) = c.[wheels.each.psi]\n\nfn collections() : List(Int) =\n  let squares = [v * v for v in [1..5], if v % 2 == 1, let w = v + 1]\n  let pair = (1, \"two\")\n  let evens = [2, 4..10]\n  append(squares, evens)\n\nfn stringy(name : String) : String = \"hello {name}, {1 + 2} wide\"\n\nfn indexed(xs : List(Int)) : Int = xs[0] ?? 0\n\nfn chained(c : Option(Car)) : String = c?.name ?? \"none\"\n\nfn multikey(t : Tensor(Float)) : Float = t[1, 2]\n\nfn holey(x : Int) : Int = ?fill\n"
+    "digest": "315cd0cf1b228c9cac33697d29700821a508568b5d66084badb33ef0c4e1714c",
+    "text": "-- Expression forms: operators, records, paths, ranges, comprehensions.\ntype Wheel = Wheel { psi: Float }\n\ntype Car = Car { name: String, wheels: List(Wheel) }\n\nfn arith(x : Int, y : Int) : Int = -x + y * 2 - x % 3 + x ^ 2\n\nfn logic_ops(a : Bool, b : Bool) : Bool = a && b || not(a)\n\nfn compare(x : Int, y : Int) : Bool =\n  x < y && x <= y && x > y || x >= y || x == y || x /= y\n\nfn pipes(xs : List(Int)) : Int = xs |> map(\\(v) -> v + 1) |> length\n\nfn composed(f : (Int) -> Int, g : (Int) -> Int) : (Int) -> Int = f >> g << f\n\nfn records(c : Car) : Car =\n  let bumped =\n    { c\n    | name = \"vx\"\n    , wheels.each.psi ~ \\(p) -> p + 1.0\n    }\n  { bumped | wheels[0].psi = 30.0 }\n\nfn reads(c : Car) : List(Float) = c.[wheels.each.psi]\n\nfn collections() : List(Int) =\n  let squares = [v * v for v in [1..5], if v % 2 == 1, let w = v + 1]\n  let pair = (1, \"two\")\n  let evens = [2, 4..10]\n  append(squares, evens)\n\nfn stringy(name : String) : String = \"hello {name}, {1 + 2} wide\"\n\nfn indexed(xs : List(Int)) : Int = xs[0] ?? 0\n\nfn chained(c : Option(Car)) : String = c?.name ?? \"none\"\n\nfn multikey(t : Tensor(Float)) : Float = t[1, 2]\n\nfn holey(x : Int) : Int = ?fill\n\ntype Lot = Parked(Int) | Vacant\n\nfn fallback(l : Lot) : Int =\n  let Parked(n) = l else 0\n  n + 1\n\nfn fallback_line(l : Lot) : Int =\n  let Parked(n) = l else 7\n  n * 2\n"
   },
   "raw": [
     {
@@ -2863,6 +2863,398 @@
         1163
       ],
       "value": "fill"
+    },
+    {
+      "kind": "type",
+      "span": [
+        1165,
+        1169
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1170,
+        1173
+      ],
+      "value": "Lot"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1174,
+        1175
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1176,
+        1182
+      ],
+      "value": "Parked"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1182,
+        1183
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1183,
+        1186
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1186,
+        1187
+      ]
+    },
+    {
+      "kind": "|",
+      "span": [
+        1188,
+        1189
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1190,
+        1196
+      ],
+      "value": "Vacant"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1198,
+        1200
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1201,
+        1209
+      ],
+      "value": "fallback"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1209,
+        1210
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1210,
+        1211
+      ],
+      "value": "l"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1212,
+        1213
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1214,
+        1217
+      ],
+      "value": "Lot"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1217,
+        1218
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1219,
+        1220
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1221,
+        1224
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1225,
+        1226
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        1229,
+        1232
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1233,
+        1239
+      ],
+      "value": "Parked"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1239,
+        1240
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1240,
+        1241
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1241,
+        1242
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1243,
+        1244
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1245,
+        1246
+      ],
+      "value": "l"
+    },
+    {
+      "kind": "else",
+      "span": [
+        1247,
+        1251
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1252,
+        1253
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1256,
+        1257
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "+",
+      "span": [
+        1258,
+        1259
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1260,
+        1261
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1263,
+        1265
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1266,
+        1279
+      ],
+      "value": "fallback_line"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1279,
+        1280
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1280,
+        1281
+      ],
+      "value": "l"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1282,
+        1283
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1284,
+        1287
+      ],
+      "value": "Lot"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1287,
+        1288
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1289,
+        1290
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1291,
+        1294
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1295,
+        1296
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        1299,
+        1302
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1303,
+        1309
+      ],
+      "value": "Parked"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1309,
+        1310
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1310,
+        1311
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1311,
+        1312
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1313,
+        1314
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1315,
+        1316
+      ],
+      "value": "l"
+    },
+    {
+      "kind": "else",
+      "span": [
+        1317,
+        1321
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1322,
+        1323
+      ],
+      "value": "7"
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1326,
+        1327
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "*",
+      "span": [
+        1328,
+        1329
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1330,
+        1331
+      ],
+      "value": "2"
     }
   ],
   "parse": [
@@ -5914,10 +6306,465 @@
       "value": "fill"
     },
     {
-      "kind": "v}",
+      "kind": "v;",
       "span": [
         1163,
         1163
+      ]
+    },
+    {
+      "kind": "type",
+      "span": [
+        1165,
+        1169
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1170,
+        1173
+      ],
+      "value": "Lot"
+    },
+    {
+      "kind": "=",
+      "span": [
+        1174,
+        1175
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1176,
+        1182
+      ],
+      "value": "Parked"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1182,
+        1183
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1183,
+        1186
+      ]
+    },
+    {
+      "kind": ")",
+      "span": [
+        1186,
+        1187
+      ]
+    },
+    {
+      "kind": "|",
+      "span": [
+        1188,
+        1189
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1190,
+        1196
+      ],
+      "value": "Vacant"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1196,
+        1196
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1198,
+        1200
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1201,
+        1209
+      ],
+      "value": "fallback"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1209,
+        1210
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1210,
+        1211
+      ],
+      "value": "l"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1212,
+        1213
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1214,
+        1217
+      ],
+      "value": "Lot"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1217,
+        1218
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1219,
+        1220
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1221,
+        1224
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1225,
+        1226
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1229,
+        1229
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        1229,
+        1232
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1233,
+        1239
+      ],
+      "value": "Parked"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1239,
+        1240
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1240,
+        1241
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1241,
+        1242
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1243,
+        1244
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1245,
+        1246
+      ],
+      "value": "l"
+    },
+    {
+      "kind": "else",
+      "span": [
+        1247,
+        1251
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1252,
+        1253
+      ],
+      "value": "0"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1253,
+        1253
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1256,
+        1257
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "+",
+      "span": [
+        1258,
+        1259
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1260,
+        1261
+      ],
+      "value": "1"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1261,
+        1261
+      ]
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1261,
+        1261
+      ]
+    },
+    {
+      "kind": "fn",
+      "span": [
+        1263,
+        1265
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1266,
+        1279
+      ],
+      "value": "fallback_line"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1279,
+        1280
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1280,
+        1281
+      ],
+      "value": "l"
+    },
+    {
+      "kind": ":",
+      "span": [
+        1282,
+        1283
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1284,
+        1287
+      ],
+      "value": "Lot"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1287,
+        1288
+      ]
+    },
+    {
+      "kind": ":",
+      "span": [
+        1289,
+        1290
+      ]
+    },
+    {
+      "kind": "Int",
+      "span": [
+        1291,
+        1294
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1295,
+        1296
+      ]
+    },
+    {
+      "kind": "v{",
+      "span": [
+        1299,
+        1299
+      ]
+    },
+    {
+      "kind": "let",
+      "span": [
+        1299,
+        1302
+      ]
+    },
+    {
+      "kind": "uid",
+      "span": [
+        1303,
+        1309
+      ],
+      "value": "Parked"
+    },
+    {
+      "kind": "(",
+      "span": [
+        1309,
+        1310
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1310,
+        1311
+      ],
+      "value": "n"
+    },
+    {
+      "kind": ")",
+      "span": [
+        1311,
+        1312
+      ]
+    },
+    {
+      "kind": "=",
+      "span": [
+        1313,
+        1314
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1315,
+        1316
+      ],
+      "value": "l"
+    },
+    {
+      "kind": "else",
+      "span": [
+        1317,
+        1321
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1322,
+        1323
+      ],
+      "value": "7"
+    },
+    {
+      "kind": "v;",
+      "span": [
+        1323,
+        1323
+      ]
+    },
+    {
+      "kind": "ident",
+      "span": [
+        1326,
+        1327
+      ],
+      "value": "n"
+    },
+    {
+      "kind": "*",
+      "span": [
+        1328,
+        1329
+      ]
+    },
+    {
+      "kind": "int",
+      "span": [
+        1330,
+        1331
+      ],
+      "value": "2"
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1331,
+        1331
+      ]
+    },
+    {
+      "kind": "v}",
+      "span": [
+        1331,
+        1331
       ]
     }
   ],
@@ -6025,6 +6872,27 @@
       "span": [
         1130,
         1132
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        1163,
+        1165
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        1196,
+        1198
+      ]
+    },
+    {
+      "kind": "blank",
+      "span": [
+        1261,
+        1263
       ]
     }
   ]

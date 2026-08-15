@@ -35,7 +35,7 @@ A handle to a buffered FIFO channel, opened with `channel`.
 ### `Outcome`
 
 ```prism,def,h-528f262f1b1f406c518cc80508c2d0d3f84d75f075c7088b4246ab06301ec2e0
-type Outcome(a) = Completed(a) | Was_Cancelled
+type Outcome(a) = Completed(a) | Was_Cancelled deriving (Eq, Show)
 ```
 
 The outcome of `try_await`: a fiber that completed with a value, or one that was cancelled before it could.

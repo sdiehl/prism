@@ -27,7 +27,10 @@ span_len(Span { lo = 3, hi = 8 })
 ### `SourceFile`
 
 ```prism,def,h-ebd32a7e8114ee8f96881286bb6c9c3af577341626f7fcf94173297a0dc0233f
-type SourceFile = SourceFile { digest: String, text: String } deriving (Eq)
+type SourceFile = SourceFile {
+  digest: String,
+  text: String
+} deriving (Eq, Show)
 ```
 
 One source file as an artifact embeds it: the exact text and its digest. Every span in an artifact indexes this text, so a persisted document needs no external file.
@@ -68,7 +71,7 @@ Whether a byte offset falls inside the span (half-open, so the end offset is out
 
 ### `line_col`
 
-```prism,sig,h-cf3e9dc2ac25e3260468940f6160060e31c038d2116817d2c4b5fdc3af9d734e
+```prism,sig,h-33f2880bdc82777d01a6831e3edc0adcc2b2fb23576e0e46a44c97bf7e840066
 line_col : (String, Int) -> (Int, Int)
 ```
 

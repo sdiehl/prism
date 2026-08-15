@@ -37,7 +37,13 @@ pub fn span_contains(s : Span, pos : Int) : Bool = s.lo <= pos && pos < s.hi
 -- | One source file as an artifact embeds it: the exact text and its digest.
 -- Every span in an artifact indexes this text, so a persisted document needs
 -- no external file.
-pub type SourceFile = SourceFile { digest: String, text: String } deriving (Eq)
+pub type SourceFile = SourceFile {
+  digest: String,
+  text: String
+} deriving (Eq, Show)
+
+-- The newline codepoint, the only line terminator `line_col` counts.
+fn src_newline() : Int = 10
 
 -- | The one-based line and column of a byte offset, as a projection over the
 -- text. Offsets past the end clamp to the final position.
@@ -54,7 +60,7 @@ pub fn line_col(text : String, off : Int) : (Int, Int) =
 fn line_col_go(s : String, i : Int, stop : Int, l : Int, c : Int) : (Int, Int) =
   if i >= stop then
     (l, c)
-  elif char_at(s, i) == 10 then
+  elif char_at(s, i) == src_newline() then
     line_col_go(s, i + 1, stop, l + 1, 1)
   else
     line_col_go(s, i + 1, stop, l, c + 1)

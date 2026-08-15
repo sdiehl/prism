@@ -606,11 +606,10 @@ pub fn step_ruler_on(
     cfg: &Config,
 ) -> Result<StepRuler, Error> {
     let core = prepared_core(src, roots, cfg)?;
-    let (run, marks, total_steps) =
-        run_ruler(&core, out_sink, input).map_err(Error::RuntimeEvaluation)?;
+    let (run, marks) = run_ruler(&core, out_sink, input).map_err(Error::RuntimeEvaluation)?;
     Ok(StepRuler {
         format: STEP_RULER_FORMAT,
-        total_steps,
+        total_steps: run.steps,
         exit: run.exit,
         rows: marks.into_iter().map(ruler_row).collect(),
     })

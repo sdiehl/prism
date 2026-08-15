@@ -1,0 +1,707 @@
+-- | The lint rules: structural judgments over one surface document.
+--
+-- Every rule reads the decoded surface tree through the `Syntax` seams and the
+-- generic queries of `Syntax.Analysis`; none re-implements a traversal the
+-- stdlib already names. The syntactic tier judges shape (nesting, size,
+-- parameter count, closure chains, magic literals, import hygiene); the
+-- name-set tier judges the flat namespace (prelude capture, missing docs,
+-- underived basics, family-prefix drift) and needs only the caller-supplied
+-- known-name list, never the resolver. Layout is never judged: `prism fmt`
+-- owns it, so every threshold here is expressed in nodes and depths, and
+-- linting a formatted tree equals linting the tree it was formatted from.
+
+import Data.Foldable (elem, length)
+import Data.List (append, concat_map, filter, map)
+import Data.String (index_of, starts_with, str_join)
+import Findings (..)
+import Limits (..)
+import Pragma (pg_allows, pg_file_allows, pg_has_doc)
+import Syntax.Ast (..)
+import Syntax.Codec (SurfaceDoc)
+import Syntax.Source (Span)
+import Syntax.Analysis (an_call_targets, an_nodes, an_size)
+import Syntax.Walk (expr_children)
+
+-- | Lint one decoded document against the caller's known-name set. An empty
+-- known set silences the capture rule and nothing else, so a caller without
+-- the prelude index still gets the structural tier.
+pub fn lint_doc(known : List(String), d : SurfaceDoc) : List(Finding) =
+  lint_report(known, d).findings
+
+-- | Lint one document and keep the suppression count, so a deny gate can
+-- report how many findings allow pragmas absorbed.
+pub fn lint_report(known : List(String), d : SurfaceDoc) : LintReport =
+  let text = d.source.text
+  let file_allows = pg_file_allows(text)
+  let used = rl_used_names(d.items)
+  let prefix = rl_family_prefix(d.items)
+  let tagged = concat_map(
+      \(it) -> rl_item(known, text, file_allows, used, prefix, it),
+      d.items,
+    )
+  LintReport {
+    findings = map(rl_tag_finding, filter(rl_tag_kept, tagged)),
+    suppressed = length(filter(rl_tag_dropped, tagged))
+  }
+
+fn rl_tag_finding(t : (Finding, Bool)) : Finding = fst(t)
+
+fn rl_tag_kept(t : (Finding, Bool)) : Bool = snd(t)
+
+fn rl_tag_dropped(t : (Finding, Bool)) : Bool = not(snd(t))
+
+-- The five document facts are computed once in `lint_report` and fan out to
+-- every item; a bundling record would only rename the width, so the
+-- parameter-count exception is carried openly instead.
+-- lint: allow(L0103)
+fn rl_item(
+  known : List(String),
+  text : String,
+  file_allows : List(String),
+  used : List(String),
+  prefix : Option(String),
+  it : Item
+) : List((Finding, Bool)) =
+  let allows = append(file_allows, pg_allows(text, rl_item_span(it).lo))
+  map(
+      \(f) -> (f, not(elem(f.code, allows))),
+      rl_item_raw(known, text, used, prefix, it),
+    )
+
+-- | The span an item's findings anchor to.
+pub fn rl_item_span(it : Item) : Span =
+  match it of
+    IImport { span = span, .. } => span
+    IData { span = span, .. } => span
+    IEffect { span = span, .. } => span
+    IError { span = span, .. } => span
+    IEffAlias { span = span, .. } => span
+    ISynonym { span = span, .. } => span
+    IClass { span = span, .. } => span
+    IInstance { span = span, .. } => span
+    ICanonical { span = span, .. } => span
+    IPattern { span = span, .. } => span
+    IStable { span = span, .. } => span
+    IDecl { decl = decl, .. } => decl.span
+
+fn rl_item_raw(
+  known : List(String),
+  text : String,
+  used : List(String),
+  prefix : Option(String),
+  it : Item
+) : List(Finding) =
+  match it of
+    IImport {
+      path = path,
+      names = names,
+      glob = glob,
+      reexport = reexport,
+      span = span,
+      ..
+    } =>
+      append(
+          rl_glob_import(path, glob, reexport, span),
+          rl_unused_import(path, names, reexport, used, span),
+        )
+    IData {
+      name = name,
+      ctors = ctors,
+      derivs = derivs,
+      span = span,
+      vis = vis,
+      ..
+    } =>
+      append(
+          rl_missing_doc(text, vis, name, span),
+          rl_underived(name, ctors, derivs, span, vis),
+        )
+    IEffect { name = name, ops = ops, span = span, vis = vis, .. } =>
+      append(
+          rl_missing_doc(text, vis, name, span),
+          rl_op_capture(known, ops, span),
+        )
+    IError { name = name, span = span, vis = vis, .. } =>
+      rl_missing_doc(text, vis, name, span)
+    IEffAlias { name = name, span = span, vis = vis, .. } =>
+      rl_missing_doc(text, vis, name, span)
+    ISynonym { name = name, span = span, vis = vis, .. } =>
+      rl_missing_doc(text, vis, name, span)
+    IClass { name = name, span = span, vis = vis, .. } =>
+      rl_missing_doc(text, vis, name, span)
+    IPattern { name = name, span = span, vis = vis, .. } =>
+      rl_missing_doc(text, vis, name, span)
+    IStable { name = name, span = span, vis = vis, .. } =>
+      rl_missing_doc(text, vis, name, span)
+    IInstance { decls = decls, .. } => concat_map(rl_decl_rules, decls)
+    ICanonical { .. } => []
+    IDecl { decl = decl, vis = vis, .. } =>
+      rl_flat([
+          rl_missing_doc(text, vis, decl.name, decl.span),
+          rl_capture(known, decl),
+          rl_prefix_drift(prefix, vis, decl),
+          rl_decl_rules(decl),
+        ])
+
+fn rl_flat(xss : List(List(a))) : List(a) = concat_map(rl_same, xss)
+
+fn rl_same(xs : List(a)) : List(a) = xs
+
+fn rl_is_pub(vis : Option(String)) : Bool =
+  match vis of
+    Some(word) => word == "pub"
+    None => false
+
+-- The structural rules over one declaration body, shared by top-level
+-- functions and instance methods.
+
+-- | Every structural finding for one declaration: nesting, size, parameters,
+-- closure chains, backwards accumulation, and magic literals.
+pub fn rl_decl_rules(decl : Decl) : List(Finding) =
+  rl_flat([
+      rl_nesting(decl),
+      rl_size(decl),
+      rl_params(decl),
+      rl_lambda_chain(decl),
+      rl_accum_reverse(decl),
+      rl_magic(decl),
+    ])
+
+fn rl_nesting(decl : Decl) : List(Finding) =
+  let depth = rl_ctrl_depth(decl.body)
+  if depth > lm_max_nesting then
+    [
+        Finding {
+          code = fd_l0101,
+          span = decl.span,
+          message = "`{decl.name}` nests control {depth} deep (limit {lm_max_nesting}); split a rule or refuse early"
+        },
+      ]
+  else
+    []
+
+fn rl_ctrl_depth(e : Sp(Expr)) : Int =
+  let here =
+    match node_of(e) of
+      EIf(_, _, _) => 1
+      EMatch(_, _) => 1
+      _ => 0
+  here + rl_max_over(map(rl_ctrl_depth, expr_children(e)))
+
+fn rl_max_over(xs : List(Int)) : Int =
+  match xs of
+    Nil => 0
+    Cons(x, rest) => max(x, rl_max_over(rest))
+
+fn rl_size(decl : Decl) : List(Finding) =
+  let nodes = an_size(decl.body)
+  if nodes > lm_max_body_nodes then
+    [
+        Finding {
+          code = fd_l0102,
+          span = decl.span,
+          message = "`{decl.name}` has {nodes} body nodes (limit {lm_max_body_nodes}); extract, or name the traversal it hand-implements"
+        },
+      ]
+  else
+    []
+
+fn rl_params(decl : Decl) : List(Finding) =
+  let count = length(decl.params)
+  if count > lm_max_params then
+    [
+        Finding {
+          code = fd_l0103,
+          span = decl.span,
+          message = "`{decl.name}` takes {count} parameters (limit {lm_max_params}); bundle a record, or thread context through Reader or State"
+        },
+      ]
+  else
+    []
+
+fn rl_lambda_chain(decl : Decl) : List(Finding) =
+  let depth = rl_lam_depth(decl.body)
+  if depth > lm_max_lambda_chain then
+    [
+        Finding {
+          code = fd_l0104,
+          span = decl.span,
+          message = "`{decl.name}` nests closures {depth} deep (limit {lm_max_lambda_chain}); name the stages of the pipeline"
+        },
+      ]
+  else
+    []
+
+fn rl_lam_depth(e : Sp(Expr)) : Int =
+  let here =
+    match node_of(e) of
+      ELam(_, _) => 1
+      _ => 0
+  here + rl_max_over(map(rl_lam_depth, expr_children(e)))
+
+fn rl_accum_reverse(decl : Decl) : List(Finding) =
+  let targets = an_call_targets(decl.body)
+  if elem(decl.name, targets) && elem("reverse", targets) then
+    [
+        Finding {
+          code = fd_l0105,
+          span = decl.span,
+          message = "`{decl.name}` recurses and reverses its result; a fold or Writer builds it forward"
+        },
+      ]
+  else
+    []
+
+fn rl_magic(decl : Decl) : List(Finding) =
+  if decl.is_test then
+    []
+  else
+    let named = rl_named_literal_spans(decl)
+    concat_map(\(n) -> rl_magic_at(named, n), an_nodes(decl.body))
+
+fn rl_magic_at(named : List(Span), n : Sp(Expr)) : List(Finding) =
+  match node_of(n) of
+    EInt(digits, _suffix) =>
+      if (is_synth(n) || elem(digits, lm_exempt_ints()) || elem(span_of(n), named)) then
+        []
+      else
+        [
+            Finding {
+              code = fd_l0108,
+              span = span_of(n),
+              message = "magic literal {digits}; give it a named binding"
+            },
+          ]
+    _ => []
+
+-- A literal is already named when it is the whole of a binding: the body of
+-- the declaration itself, the right side of a let or var, a where binding, or
+-- a parameter default.
+fn rl_named_literal_spans(decl : Decl) : List(Span) =
+  rl_flat([
+      rl_int_span(decl.body),
+      concat_map(rl_binder_rhs, an_nodes(decl.body)),
+      concat_map(\(w) -> rl_int_span(w.value), decl.wheres),
+      concat_map(rl_param_default_span, decl.params),
+    ])
+
+fn rl_binder_rhs(n : Sp(Expr)) : List(Span) =
+  match node_of(n) of
+    ELet(_, rhs, _) => rl_int_span(rhs)
+    EVarDecl(_, rhs, _) => rl_int_span(rhs)
+    _ => []
+
+fn rl_int_span(e : Sp(Expr)) : List(Span) =
+  match node_of(e) of
+    EInt(_, _) => [span_of(e)]
+    ENeg(inner) => rl_int_span(inner)
+    _ => []
+
+fn rl_param_default_span(p : Param) : List(Span) =
+  match p.dflt of
+    Some(d) => rl_int_span(d)
+    None => []
+
+-- The import rules.
+
+fn rl_glob_import(
+  path : List(String),
+  glob : Bool,
+  reexport : Bool,
+  span : Span
+) : List(Finding) =
+  -- A `pub import` glob is a deliberate re-export of the module's whole
+  -- surface; enumerating the names would silently drop any name the module
+  -- gains later, so the rule never asks for that.
+  if not(glob) || reexport then
+    []
+  else
+    let dotted = str_join(".", path)
+    let local = length(path) <= 1 && not(elem(dotted, lm_stdlib_singles()))
+    if (local || elem(dotted, lm_vocab_globs()) || rl_vocab_prefixed(dotted)) then
+      []
+    else
+      [
+          Finding {
+            code = fd_l0106,
+            span = span,
+            message = "glob import of `{dotted}`, which is not a vocabulary module; name what you take"
+          },
+        ]
+
+fn rl_vocab_prefixed(dotted : String) : Bool =
+  rl_any_prefix(lm_vocab_prefixes(), dotted)
+
+fn rl_any_prefix(prefixes : List(String), dotted : String) : Bool =
+  match prefixes of
+    Nil => false
+    Cons(p, rest) => starts_with(p, dotted) || rl_any_prefix(rest, dotted)
+
+fn rl_unused_import(
+  path : List(String),
+  names : Option(List(String)),
+  reexport : Bool,
+  used : List(String),
+  span : Span
+) : List(Finding) =
+  match names of
+    None => []
+    Some(list) =>
+      if reexport then
+        []
+      else
+        let dotted = str_join(".", path)
+        concat_map(
+            \(name) -> if elem(name, used) then [] else [Finding { code = fd_l0107, span = span, message = "imported `{name}` from `{dotted}` is never used" }],
+            list,
+          )
+
+-- The name-set rules.
+
+fn rl_capture(known : List(String), decl : Decl) : List(Finding) =
+  if elem(decl.name, known) && not(decl.name == "main") then
+    [
+        Finding {
+          code = fd_l0201,
+          span = decl.span,
+          message = "top-level `{decl.name}` captures a prelude or stdlib name; the flat namespace makes this a silent rebind"
+        },
+      ]
+  else
+    []
+
+fn rl_op_capture(
+  known : List(String),
+  ops : List(EffOp),
+  span : Span
+) : List(Finding) =
+  concat_map(
+      \(op) -> if elem(op.name, known) then [Finding { code = fd_l0201, span = span, message = "effect op `{op.name}` captures a prelude or stdlib name; ops share one flat namespace" }] else [],
+      ops,
+    )
+
+fn rl_missing_doc(
+  text : String,
+  vis : Option(String),
+  name : String,
+  span : Span
+) : List(Finding) =
+  if rl_is_pub(vis) && not(pg_has_doc(text, span.lo)) then
+    [
+        Finding {
+          code = fd_l0202,
+          span = span,
+          message = "pub `{name}` has no `-- |` doc comment"
+        },
+      ]
+  else
+    []
+
+fn rl_underived(
+  name : String,
+  ctors : List(Ctor),
+  derivs : List(Deriving),
+  span : Span,
+  vis : Option(String)
+) : List(Finding) =
+  if not(rl_is_pub(vis)) || rl_ctors_have_fun(ctors) then
+    []
+  else
+    let derived = map(rl_deriv_name, derivs)
+    let missing = filter(\(want) -> not(elem(want, derived)), ["Eq", "Show"])
+    match missing of
+      Nil => []
+      wanted =>
+        let listed = str_join(", ", wanted)
+        [
+            Finding {
+              code = fd_l0203,
+              span = span,
+              message = "pub type `{name}` does not derive {listed}"
+            },
+          ]
+
+fn rl_deriv_name(dv : Deriving) : String = dv.name
+
+-- A type holding a function cannot derive Eq or Show, so it is exempt rather
+-- than condemned to an allow.
+fn rl_ctors_have_fun(ctors : List(Ctor)) : Bool =
+  match ctors of
+    Nil => false
+    Cons(c, rest) => rl_shape_has_fun(c.shape) || rl_ctors_have_fun(rest)
+
+fn rl_shape_has_fun(shape : CtorShape) : Bool =
+  match shape of
+    CPositional(tys) => rl_any_fun(tys)
+    CRecord(fields) => rl_any_fun(map(rl_cfield_ty, fields))
+
+fn rl_cfield_ty(f : CField) : Ty = f.ty
+
+fn rl_any_fun(tys : List(Ty)) : Bool =
+  match tys of
+    Nil => false
+    Cons(t, rest) => rl_ty_has_fun(t) || rl_any_fun(rest)
+
+fn rl_ty_has_fun(t : Ty) : Bool =
+  match t of
+    TyFun(_, _, _) => true
+    TyForall(_, inner) => rl_ty_has_fun(inner)
+    TyApp(_, args) | TyCon(_, args) | TyTuple(args) | TyUnboxedTuple(args) =>
+      rl_any_fun(args)
+    TyUnboxedRecord(fields) => rl_any_fun(map(rl_cfield_ty, fields))
+    TyUsage(inner, _) => rl_ty_has_fun(inner)
+    _ => false
+
+-- The family-prefix rule: a module that names most of its public functions
+-- through one `xx_` prefix has established a family, and a stray pub name is
+-- drift.
+
+fn rl_prefix_drift(
+  prefix : Option(String),
+  vis : Option(String),
+  decl : Decl
+) : List(Finding) =
+  match prefix of
+    None => []
+    Some(family) =>
+      -- The bare family root (`intern` beside `intern_get`) is the family's
+      -- own name, not drift.
+      let root = substring(family, 0, byte_len(family) - 1)
+      if (rl_is_pub(vis)
+          && not(decl.is_test)
+          && not(decl.name == "main")
+          && not(decl.name == root)
+          && not(starts_with(family, decl.name))) then
+        [
+            Finding {
+              code = fd_l0204,
+              span = decl.span,
+              message = "pub `{decl.name}` sits outside the module's `{family}` family prefix"
+            },
+          ]
+      else
+        []
+
+-- | The family prefix a document's public functions establish, if the dominant
+-- prefix has at least `lm_family_min` members and covers at least eight tenths
+-- of the public names.
+pub fn rl_family_prefix(items : List(Item)) : Option(String) =
+  let names = concat_map(rl_pub_fn_name, items)
+  let prefixes = concat_map(rl_prefix_of, names)
+  rl_best_prefix(rl_dedup(prefixes, Nil), prefixes, length(names), None, 0)
+
+fn rl_pub_fn_name(it : Item) : List(String) =
+  match it of
+    IDecl { decl = decl, vis = vis, .. } =>
+      if (rl_is_pub(vis) && not(decl.is_test) && not(decl.name == "main")) then
+        [decl.name]
+      else
+        []
+    _ => []
+
+fn rl_prefix_of(name : String) : List(String) =
+  let cut = index_of("_", name)
+  if cut <= 0 then
+    []
+  else
+    [substring(name, 0, cut + 1)]
+
+fn rl_best_prefix(
+  cands : List(String),
+  all : List(String),
+  total : Int,
+  best : Option(String),
+  best_count : Int
+) : Option(String) =
+  match cands of
+    Nil =>
+      if (best_count >= lm_family_min
+          && best_count * lm_family_den >= total * lm_family_num) then
+        best
+      else
+        None
+    Cons(cand, rest) =>
+      let count = length(filter(\(p) -> p == cand, all))
+      if count > best_count then
+        rl_best_prefix(rest, all, total, Some(cand), count)
+      else
+        rl_best_prefix(rest, all, total, best, best_count)
+
+fn rl_dedup(xs : List(String), seen : List(String)) : List(String) =
+  match xs of
+    Nil => Nil
+    Cons(x, rest) =>
+      if elem(x, seen) then
+        rl_dedup(rest, seen)
+      else
+        Cons(x, rl_dedup(rest, Cons(x, seen)))
+
+-- The occurrence table the unused-import rule checks against: every name a
+-- file's items use as an expression head, a pattern head, a type, a class, an
+-- effect label, an operator, or a handler operation. Collection errs wide on
+-- purpose: a name counted here can never be flagged unused, so a missed
+-- collector is a false finding and a spurious collector is only a silence.
+
+-- | Every name the document's items use, with repeats.
+pub fn rl_used_names(items : List(Item)) : List(String) =
+  concat_map(rl_item_uses, items)
+
+fn rl_item_uses(it : Item) : List(String) =
+  match it of
+    IImport { .. } => []
+    IData { ctors = ctors, derivs = derivs, .. } =>
+      append(concat_map(rl_ctor_uses, ctors), map(rl_deriv_name, derivs))
+    IEffect { ops = ops, .. } => concat_map(rl_op_uses, ops)
+    IError { arg_types = tys, .. } => concat_map(rl_ty_names, tys)
+    IEffAlias { labels = labels, .. } => concat_map(rl_label_names, labels)
+    ISynonym { ty = ty, .. } => rl_ty_names(ty)
+    IClass { supers = supers, methods = methods, .. } =>
+      append(supers, concat_map(rl_method_uses, methods))
+    IInstance { cls = cls, head = head, context = context, decls = decls, .. } =>
+      rl_flat([
+          [cls],
+          rl_ty_names(head),
+          concat_map(rl_constraint_names, context),
+          concat_map(rl_decl_uses, decls),
+        ])
+    ICanonical { cls = cls, head = head, .. } => Cons(cls, rl_ty_names(head))
+    IPattern { forty = forty, viewfn = viewfn, makefn = makefn, .. } =>
+      rl_flat([[forty], rl_expr_uses(viewfn), rl_opt_expr_uses(makefn)])
+    IStable { rungs = rungs, converters = converters, .. } =>
+      append(
+          concat_map(rl_rung_uses, rungs),
+          concat_map(rl_converter_uses, converters),
+        )
+    IDecl { decl = decl, .. } => rl_decl_uses(decl)
+
+fn rl_ctor_uses(c : Ctor) : List(String) =
+  match c.shape of
+    CPositional(tys) => concat_map(rl_ty_names, tys)
+    CRecord(fields) => concat_map(\(f) -> rl_ty_names(f.ty), fields)
+
+fn rl_op_uses(op : EffOp) : List(String) =
+  append(concat_map(rl_ty_names, op.params), rl_ty_names(op.ret))
+
+fn rl_method_uses(m : Method) : List(String) = rl_ty_names(m.ty)
+
+fn rl_rung_uses(r : Rung) : List(String) =
+  concat_map(
+      \(f) -> append(rl_ty_names(f.ty), rl_opt_expr_uses(f.dflt)),
+      r.fields,
+    )
+
+fn rl_converter_uses(c : Converter) : List(String) =
+  append(
+      rl_expr_uses(c.base),
+      concat_map(\(o) -> rl_expr_uses(o.value), c.overrides),
+    )
+
+fn rl_decl_uses(decl : Decl) : List(String) =
+  rl_flat([
+      concat_map(rl_param_uses, decl.params),
+      rl_opt_ty_names(decl.ret),
+      rl_opt_row_names(decl.eff),
+      concat_map(rl_constraint_names, decl.constraints),
+      rl_expr_uses(decl.body),
+      concat_map(\(w) -> rl_expr_uses(w.value), decl.wheres),
+      concat_map(rl_expr_uses, decl.reqs),
+      concat_map(\(en) -> rl_expr_uses(en.expr), decl.enss),
+      rl_opt_expr_uses(decl.measure),
+    ])
+
+fn rl_param_uses(p : Param) : List(String) =
+  rl_flat([
+      rl_opt_ty_names(p.ty),
+      rl_opt_pat_uses(p.pat),
+      rl_opt_expr_uses(p.dflt),
+    ])
+
+fn rl_opt_ty_names(o : Option(Ty)) : List(String) =
+  match o of
+    Some(t) => rl_ty_names(t)
+    None => []
+
+fn rl_opt_row_names(o : Option(Row)) : List(String) =
+  match o of
+    Some(row) => rl_row_names(row)
+    None => []
+
+fn rl_opt_expr_uses(o : Option(Sp(Expr))) : List(String) =
+  match o of
+    Some(e) => rl_expr_uses(e)
+    None => []
+
+fn rl_opt_pat_uses(o : Option(Sp(Pat))) : List(String) =
+  match o of
+    Some(p) => rl_pat_uses(p)
+    None => []
+
+fn rl_expr_uses(e : Sp(Expr)) : List(String) =
+  concat_map(rl_node_uses, an_nodes(e))
+
+fn rl_node_uses(n : Sp(Expr)) : List(String) =
+  match node_of(n) of
+    EVar(name) => [name]
+    EBin(op, _, _) => [op]
+    ERecord(name, _) => [name]
+    ERecordUpdate(_, name, _) => [name]
+    EThrow(name, _) => [name]
+    EMask(name, _) => [name]
+    EHandle(_, arms, _) => concat_map(rl_arm_op, arms)
+    ENamedHandle(_, _, arms) => concat_map(rl_arm_op, arms)
+    ETryCatch(_, arms) => map(rl_catch_name, arms)
+    EMatch(_, arms) => concat_map(\(a) -> rl_pat_uses(a.pat), arms)
+    EAnn(_, ty) => rl_ty_names(ty)
+    EInst(_, names) => names
+    ELam(params, _) => concat_map(rl_param_uses_shallow, params)
+    _ => []
+
+-- A lambda's parameter types and patterns; its default expressions are walked
+-- as ordinary children.
+fn rl_param_uses_shallow(p : Param) : List(String) =
+  append(rl_opt_ty_names(p.ty), rl_opt_pat_uses(p.pat))
+
+fn rl_arm_op(h : HandlerArm) : List(String) =
+  match h of
+    HReturn(_, _) => []
+    HOp(op, _, _, _) => [op]
+    HOnce(op, _, _) => [op]
+    HVal(op, _) => [op]
+    HNever(op, _, _) => [op]
+
+fn rl_catch_name(c : CatchArm) : String = c.name
+
+fn rl_pat_uses(p : Sp(Pat)) : List(String) =
+  match node_of(p) of
+    PCtor(name, args) => Cons(name, concat_map(rl_pat_uses, args))
+    PTuple(args) => concat_map(rl_pat_uses, args)
+    PRecord(name, fields, _) =>
+      Cons(name, concat_map(\(f) -> rl_pat_uses(f.pat), fields))
+    POr(alts) => concat_map(rl_pat_uses, alts)
+    _ => []
+
+fn rl_ty_names(t : Ty) : List(String) =
+  match t of
+    TyApp(name, args) | TyCon(name, args) =>
+      Cons(name, concat_map(rl_ty_names, args))
+    TyForall(_, inner) => rl_ty_names(inner)
+    TyFun(params, row, ret) =>
+      rl_flat([
+          concat_map(rl_ty_names, params),
+          rl_row_names(row),
+          rl_ty_names(ret),
+        ])
+    TyTuple(args) | TyUnboxedTuple(args) => concat_map(rl_ty_names, args)
+    TyUnboxedRecord(fields) => concat_map(\(f) -> rl_ty_names(f.ty), fields)
+    TyRowLit(row) => rl_row_names(row)
+    TyUsage(inner, _) => rl_ty_names(inner)
+    _ => []
+
+fn rl_row_names(row : Row) : List(String) =
+  concat_map(rl_label_names, row.labels)
+
+fn rl_label_names(label : EffLabel) : List(String) =
+  Cons(label.name, concat_map(rl_ty_names, label.args))
+
+fn rl_constraint_names(c : Constraint) : List(String) =
+  Cons(c.cls, rl_ty_names(c.ty))

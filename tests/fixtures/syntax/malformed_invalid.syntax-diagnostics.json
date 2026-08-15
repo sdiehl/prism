@@ -1,6 +1,6 @@
 {
   "schema": "prism-syntax-diagnostics-v1",
-  "compiler": "0.18.0",
+  "compiler": "0.19.0",
   "source": {
     "digest": "5864fcf0b577338014f14188f1c2a562fb8021da0b5ef51bcc2ec2510491ce37",
     "text": "-- An unknown backslash escape in a string: the lexer refuses this file. The\n-- fault lifts to the opening quote, the compiler's `LexError::Invalid` (E7000).\nfn main() = println(\"\\y\")\n"

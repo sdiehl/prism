@@ -36,6 +36,47 @@ let shift_b : U64 = 27u64
 
 let shift_c : U64 = 31u64
 
+-- The small signed band is two-sided: draw `2 * m` values and shift down by `m`.
+let signed_band_sides : Int = 2
+
+-- The `int_at` draw buckets. Buckets 0 and 1 are `0` and `1`; the named ones are
+-- the remaining edge cases; everything above falls through to the small band.
+let int_buckets : Int = 8
+
+let int_bucket_neg_one : Int = 2
+
+let int_bucket_wide : Int = 3
+
+-- The `float_at` draw buckets, in the same shape: 0 and 1 are `0.0` and `1.0`,
+-- the named ones are the rest of the nasty values, the tail is the small band.
+let float_buckets : Int = 9
+
+let float_bucket_neg_one : Int = 2
+
+let float_bucket_pos_inf : Int = 3
+
+let float_bucket_neg_inf : Int = 4
+
+let float_bucket_nan : Int = 5
+
+-- A `Bool` is one of two equally likely draws.
+let bool_outcomes : Int = 2
+
+-- One draw in four makes `gen_option` yield `None`.
+let option_none_in : Int = 4
+
+-- The printable ASCII block: 95 code points from the space at 32.
+let ascii_printable_lo : Int = 32
+
+let ascii_printable_count : Int = 95
+
+-- The defaults `default_config` is built from.
+let default_seed : U64 = 2463534242u64
+
+let default_count : Int = 100
+
+let default_max_size : Int = 20
+
 -- The SplitMix64 output for counter state `s`: advance the counter by gamma,
 -- then avalanche it. The state is just the incrementing counter, so `sm_next`
 -- is the raw advance and `sm_out` mixes the advanced value.
@@ -204,19 +245,19 @@ pub fn gen_one_of(x0 : a, rest : List(a)) : Gen(a) =
 -- generators fall back to between edge cases.
 fn small_signed(size : Int) =
   let m = size + 1
-  nat_below(2 * m) - m
+  nat_below(signed_band_sides * m) - m
 
 -- Draw an `Int`, mixing the edge cases (`0`, `1`, `-1`, a full-width value)
 -- with a small readable one so both corner and typical inputs are covered.
 fn int_at(size : Int) =
-  let pick = nat_below(8)
+  let pick = nat_below(int_buckets)
   if pick == 0 then
     0
   elif pick == 1 then
     1
-  elif pick == 2 then
+  elif pick == int_bucket_neg_one then
     -1
-  elif pick == 3 then
+  elif pick == int_bucket_wide then
     rand()
   else
     small_signed(size)
@@ -246,23 +287,23 @@ pub let gen_u64 : Gen(U64) = gen_map(\(x) -> to_u64(x), gen_int)
 -- ```output
 -- false
 -- ```
-pub let gen_bool : Gen(Bool) = Gen(\(_size) -> nat_below(2) == 0)
+pub let gen_bool : Gen(Bool) = Gen(\(_size) -> nat_below(bool_outcomes) == 0)
 
 -- The nasty float draw: zeros, one, and the three non-finite values, so a
 -- roundtrip or ordering property meets `NaN` and the infinities.
 fn float_at(size : Int) =
-  let pick = nat_below(9)
+  let pick = nat_below(float_buckets)
   if pick == 0 then
     0.0
   elif pick == 1 then
     1.0
-  elif pick == 2 then
+  elif pick == float_bucket_neg_one then
     0.0 - 1.0
-  elif pick == 3 then
+  elif pick == float_bucket_pos_inf then
     1.0 / 0.0
-  elif pick == 4 then
+  elif pick == float_bucket_neg_inf then
     (0.0 - 1.0) / 0.0
-  elif pick == 5 then
+  elif pick == float_bucket_nan then
     0.0 / 0.0
   else
     let m = size + 1
@@ -272,13 +313,17 @@ fn float_at(size : Int) =
 pub let gen_float : Gen(Float) = Gen(float_at)
 
 -- | Generator of a printable-ASCII `Char`.
-pub let gen_char : Gen(Char) = Gen(\(_size) -> chr(32 + nat_below(95)))
+pub let gen_char : Gen(Char) =
+  Gen(\(_size) -> chr(ascii_printable_lo + nat_below(ascii_printable_count)))
 
 fn rand_bytes(n : Int, buf : Buf) =
   if n <= 0 then
     buf
   else
-    rand_bytes(n - 1, buf_push(buf, 32 + nat_below(95)))
+    rand_bytes(
+        n - 1,
+        buf_push(buf, ascii_printable_lo + nat_below(ascii_printable_count)),
+      )
 
 -- | Generator of a printable-ASCII `String`, length bounded by size.
 pub let gen_string : Gen(String) =
@@ -311,7 +356,7 @@ pub fn gen_list(g : Gen(a)) : Gen(List(a)) =
 -- ```
 pub fn gen_option(g : Gen(a)) : Gen(Option(a)) =
   Gen() fn(size)
-    if nat_below(4) == 0 then
+    if nat_below(option_none_in) == 0 then
       None
     else
       Some(gen_run(g, size))
@@ -341,7 +386,7 @@ pub fn gen_triple(ga : Gen(a), gb : Gen(b), gc : Gen(c)) : Gen((a, b, c)) =
 -- | How a property run configures the seeded stream: the base `seed`, the number
 -- of cases to try (`count`), and the largest size handed to a generator
 -- (`max_size`).
-pub type Config = Cfg { seed: U64, count: Int, max_size: Int }
+pub type Config = Cfg { seed: U64, count: Int, max_size: Int } deriving (Eq, Show)
 
 -- | The default configuration: a fixed base seed, 100 cases, sizes up to 20.
 --
@@ -352,12 +397,16 @@ pub type Config = Cfg { seed: U64, count: Int, max_size: Int }
 -- 100
 -- ```
 pub let default_config : Config =
-  Cfg { seed = 2463534242u64, count = 100, max_size = 20 }
+  Cfg {
+    seed = default_seed,
+    count = default_count,
+    max_size = default_max_size
+  }
 
 -- | The result of a property run: `Passed(n)` after `n` cases held, or
 -- `Failed(value, index, seed, size)` with the first counterexample and the seed
 -- and size that reproduce it via `gen_at`.
-pub type Outcome(a) = Passed(Int) | Failed(a, Int, U64, Int)
+pub type Outcome(a) = Passed(Int) | Failed(a, Int, U64, Int) deriving (Eq, Show)
 
 -- The per-case seed: a well-mixed function of the base seed and the case index,
 -- so each case is independent and any single one reproduces on its own.

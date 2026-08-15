@@ -5,8 +5,8 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 ## Merkle root
 
 - **Scheme**: `prism-core-hash-v2`
-- **Hash**: `80303809162f28f277bc5587d17f115db91817dec5cc85cb79673defb9214f2e`
-- **Compiler version**: Prism v0.18.0
+- **Hash**: `47ba5c0026d3903e5af056d51900f8d172356c8a5b65bd0b27d8dc9e1046f298`
+- **Compiler version**: Prism v0.19.0
 
 ## Modules
 
@@ -15,6 +15,7 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 - [Control.Layer](./control-layer.md) - The children-and-rebuild interface a generic traversal runs on, and the collecting queries that ride it.
 - [Control.Reader](./control-reader.md) - The canonical `Reader(r)` effect: a read-only ambient environment.
 - [Control.Rewrite](./control-rewrite.md) - Strategy combinators: a pass as a composition of small local rules instead of a hand-written recursive match.
+- [Control.Solve](./control-solve.md) - The `Solve` effect: a metavariable solver as an effect.
 - [Control.State](./control-state.md) - The canonical `State(s)` effect: a threaded piece of mutable-looking state, interpreted through a private cell scoped to the run.
 - [Control.Validate](./control-validate.md) - Validation as an algebraic effect.
 - [Control.Writer](./control-writer.md) - The canonical `Writer(w)` effect: accumulate output on the side.

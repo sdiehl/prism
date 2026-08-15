@@ -62,6 +62,10 @@ PARSER_SOURCE_PATHS = (
 )
 LAYERS = ("raw", "layout", "parse")
 KIB = 1024
+# The committed corpus row reads these trees from the current checkout.
+CORPUS_TREES = ("lib/std", "packages")
+# A walk smaller than this is a broken enumeration, not a small corpus.
+CORPUS_MIN_FILES = 100
 # The doubling ladder, in bytes. A class stops climbing when the Prism side
 # passes the budget, so the pathological layers report at the size they reach.
 SIZES = [8 * KIB << i for i in range(10)]
@@ -144,6 +148,23 @@ def frozen_corpus():
     stdlib = [(p, git_text(PARSER_ORACLE_COMMIT, p)) for p in stdlib_paths]
     examples = [(p, git_text(PARSER_ORACLE_COMMIT, p)) for p in example_paths]
     return stdlib, examples
+
+
+def committed_corpus():
+    """Every committed `.pr` under the current tree's corpus roots, from disk.
+
+    Enumerated with `git ls-files` so the row measures exactly what is
+    committed; the bytes come from the working tree, and any local drift is
+    already visible in the receipt's `worktree_changes`.
+    """
+    result = run(["git", "ls-files", "--", *CORPUS_TREES])
+    if result.returncode:
+        sys.exit(result.stderr.strip() or "cannot enumerate the committed corpus")
+    paths = sorted(p for p in result.stdout.splitlines() if p.endswith(".pr"))
+    if len(paths) < CORPUS_MIN_FILES:
+        sys.exit(f"committed corpus walk found only {len(paths)} files; "
+                 f"the enumeration is broken")
+    return [(p, (ROOT / p).read_text()) for p in paths]
 
 
 def host_identity():
@@ -529,6 +550,49 @@ class Bench:
         row["tokens"] = here["rust"][1]
         return row
 
+    def whole_corpus(self, layer, path, files):
+        """The entire committed tree as one closed input, a single solid point.
+
+        The ladder classes repeat a fragment to size, so a fragment that is
+        unrepresentative of real modules can report a flattering throughput.
+        This row runs every committed corpus module through one process as one
+        concatenated input, so the number beside the sampled rows is the
+        corpus's own.
+        """
+        size = path.stat().st_size
+        row = {"class": "corpus", "layer": layer, "points": {}, "note": "",
+               "caveat": f"{files} committed modules concatenated whole",
+               "files": files, "samples": {},
+               "inputs": {size: bytes_identity(path.read_bytes(), path.name)},
+               "gate": "timing"}
+        if not self.quiet:
+            print(f"  {'corpus':<9} {layer:<6} {size // KIB:>5} KiB",
+                  file=sys.stderr)
+        here = {}
+        solid = True
+        for side in ("rust", "prism"):
+            secs, tokens, ok, samples = self.one(side, [path], layer)
+            if secs is None:
+                row["note"] = f"{side} failed: {tokens}"
+                return row
+            here[side] = (secs, tokens)
+            row["samples"].setdefault(size, {})[side] = samples
+            solid = solid and ok
+            row[f"{side}_rss"] = peak_rss(
+                [str(self.drivers[side]), str(path), layer])
+        if here["rust"][1] != here["prism"][1]:
+            row["note"] = (f"count mismatch: rust={here['rust'][1]} "
+                           f"prism={here['prism'][1]}")
+            return row
+        if not solid:
+            share = self.launch_share("prism", 1, here["prism"][0])
+            row["caveat"] = (f"launch-dominated: {share:.0%} of the Prism wall "
+                             f"clock was process startup; timing is report-only")
+            row["gate"] = "report-only"
+        row["points"][size] = here
+        row["tokens"] = here["rust"][1]
+        return row
+
 
 def report(rows, budget):
     head = (f"{'class':<9} {'layer':<7} {'at KiB':>7} {'rust MB/s':>10} "
@@ -618,12 +682,21 @@ def main():
             print(f"startup: rust {startup['rust'] * 1e3:.1f} ms, "
                   f"prism {startup['prism'] * 1e3:.1f} ms", file=sys.stderr)
 
+        corpus_units = committed_corpus()
+        corpus_file = tmp / "committed-corpus.pr"
+        corpus_file.write_text(
+            "".join(text.rstrip() + "\n" for _, text in corpus_units)
+        )
+
         bench = Bench(rust, prism, startup, args.reps, args.budget, args.quiet)
         rows = []
         for layer in layers:
             for name, _desc, make in classes(layer, corpus):
                 rows.append(bench.ladder(name, layer, make, tmp))
             rows.append(bench.modules(layer, module_paths, module_inputs))
+            rows.append(
+                bench.whole_corpus(layer, corpus_file, len(corpus_units))
+            )
         report(rows, args.budget)
         if args.json:
             status = run([

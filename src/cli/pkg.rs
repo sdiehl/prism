@@ -1,36 +1,38 @@
 //! Package manager and store-publishing command bodies.
 
-use std::io::{self, Write as _};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use crate::cli::check_world::{PACKAGE_USAGE_SUMMARY, USAGE_SUMMARY_PHASE};
-use crate::cli::{out_stem, pkg_report, resolve_input, user_source, CmdResult};
+use crate::cli::{out_stem, pkg_report, resolve_input, user_source, CmdError, CmdResult};
 use crate::error::Error;
 
 pub fn init() -> CmdResult {
     let mut stdout = io::stdout();
-    write!(stdout, "package name: ")
-        .map_err(|e| (Error::Io(e), String::new(), "pkg init".into()))?;
-    stdout
-        .flush()
-        .map_err(|e| (Error::Io(e), String::new(), "pkg init".into()))?;
-    let mut name = String::new();
-    io::stdin()
-        .read_line(&mut name)
-        .map_err(|e| (Error::Io(e), String::new(), "pkg init".into()))?;
-
-    write!(stdout, "directory name: ")
-        .map_err(|e| (Error::Io(e), String::new(), "pkg init".into()))?;
-    stdout
-        .flush()
-        .map_err(|e| (Error::Io(e), String::new(), "pkg init".into()))?;
-    let mut dir = String::new();
-    io::stdin()
-        .read_line(&mut dir)
-        .map_err(|e| (Error::Io(e), String::new(), "pkg init".into()))?;
+    let name = prompt(&mut stdout, "package name")?;
+    let dir = prompt(&mut stdout, "directory name")?;
+    let version = prompt(&mut stdout, "version")?;
+    let author = prompt(&mut stdout, "author")?;
+    let maintainer = prompt(&mut stdout, "maintainer")?;
+    let license = prompt(&mut stdout, "license")?;
 
     let dir = PathBuf::from(dir.trim());
-    pkg_report(crate::pkg::cmd::init(&name, &dir), "pkg init")
+    pkg_report(
+        crate::pkg::cmd::init(&name, &dir, &version, &author, &maintainer, &license),
+        "pkg init",
+    )
+}
+
+fn prompt(stdout: &mut impl Write, field: &str) -> Result<String, CmdError> {
+    write!(stdout, "{field}: ").map_err(|e| (Error::Io(e), String::new(), "pkg init".into()))?;
+    stdout
+        .flush()
+        .map_err(|e| (Error::Io(e), String::new(), "pkg init".into()))?;
+    let mut value = String::new();
+    io::stdin()
+        .read_line(&mut value)
+        .map_err(|e| (Error::Io(e), String::new(), "pkg init".into()))?;
+    Ok(value.trim().to_string())
 }
 
 pub fn add(target: &str, cfg: &crate::Config) -> CmdResult {

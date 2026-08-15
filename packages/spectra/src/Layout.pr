@@ -12,10 +12,15 @@
 -- Layout.Column(8, Layout.Left, [Layout.Text(Layout.TextStyle { size = 0, color = "", align = Layout.Left }, [Layout.Plain("hi")])])
 -- ```
 
+-- | Horizontal alignment of a picture's children.
 pub type Align = Left | Center | Right deriving (Eq, Show)
 
+-- | How a picture fills the box it is fitted into: letterboxed inside it, or
+-- filling it and cropping the overflow.
 pub type FitMode = Contain | Cover deriving (Eq, Show)
 
+-- | A span of inline text: plain characters, an emphasis or strength
+-- wrapper, inline code, a link, or a color role.
 pub type Inline
   = Plain(String)
   | Emphasis(List(Inline))
@@ -25,12 +30,16 @@ pub type Inline
   | Colored(String, List(Inline))
   deriving (Eq, Show)
 
+-- | The type settings of a text picture. A size of zero and an empty color
+-- both mean "whatever the theme says".
 pub type TextStyle = TextStyle {
   size: Int,
   color: String,
   align: Align
 } deriving (Eq, Show)
 
+-- | A picture: the layout intent of one region of a slide, as plain data a
+-- backend interprets later.
 pub type Pict
   = Empty
   | Text(TextStyle, List(Inline))
@@ -66,15 +75,21 @@ pub fn item_text(xs : List(Inline)) : Pict =
 -- | A plain bullet item.
 pub fn item(s : String) : Pict = item_text([Plain(s)])
 
+-- | Children laid out left to right, `gap` points apart.
 pub fn row(gap : Int, children : List(Pict)) : Pict = Row(gap, children)
 
+-- | Children laid out top to bottom, `gap` points apart, left aligned.
 pub fn column(gap : Int, children : List(Pict)) : Pict = Column(gap, Left, children)
 
+-- | Children laid out top to bottom, `gap` points apart, centered.
 pub fn centered(gap : Int, children : List(Pict)) : Pict =
   Column(gap, Center, children)
 
+-- | Children stacked on one another, first at the back.
 pub fn overlay(children : List(Pict)) : Pict = Overlay(children)
 
+-- | A child padded by `all` points on every side.
 pub fn inset(all : Int, child : Pict) : Pict = Inset(all, all, all, all, child)
 
+-- | Typst source admitted verbatim, escaping nothing.
 pub fn raw_typst(source : String) : Pict = RawTypst(source)

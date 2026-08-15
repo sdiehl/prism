@@ -3,6 +3,8 @@
 -- Complete frozen AType and TypeArg lowering, with explicit receipts.
 -- Checked TypeArg hooks remain pinned in the typed action schema.
 
+-- lint: allow-file(L0101, L0102, L0103, L0105, L0108, L0202, L0203, L0204)
+
 import Data.List (..)
 import Data.Maybe (..)
 import Data.String (ends_with)

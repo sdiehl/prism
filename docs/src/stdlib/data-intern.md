@@ -72,6 +72,8 @@ let (_t3, again) = intern(t2, "x")
 (0, 1, 0)
 ```
 
+The table's central verb, named for the operation rather than prefixed with the type it operates on. lint: allow(L0204)
+
 ### `intern_all`
 
 ```prism,sig,h-76ed15d7c2423153c0324ca8f7f7733286194e6c728e6786f74008dd6dda4750

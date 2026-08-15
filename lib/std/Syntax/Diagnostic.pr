@@ -9,7 +9,7 @@
 import Syntax.Source (..)
 
 -- | The phase that raised a diagnostic.
-pub type DiagPhase = DPLex | DPParse
+pub type DiagPhase = DPLex | DPParse deriving (Eq, Show)
 
 -- | One diagnostic: the stable append-only code, the raising phase, the
 -- primary half-open byte span (a lex fault is a caret, `lo == hi`), the
@@ -22,10 +22,11 @@ pub type Diagnostic = Diagnostic {
   message: String,
   expected: List(String),
   related: List(Span)
-}
+} deriving (Eq, Show)
 
 -- | A decoded diagnostics document: the envelope identity, the embedded
 -- source every span indexes into, and the diagnostics in source order.
+-- lint: allow(L0203)
 pub type DiagnosticsDoc = DiagnosticsDoc {
   schema: String,
   compiler: String,

@@ -6,7 +6,6 @@
 -- function declarations. Additional declaration families extend the dispatch
 -- without changing expression precedence or cursor mechanics.
 
-import Data.Foldable (length)
 import Data.List (..)
 import Data.String (..)
 import Syntax.Source (..)
@@ -102,6 +101,7 @@ pub fn parse_program(c : Cursor, depth : Int) : Parsed(List(Item)) =
     Took(_, c5) => PTook(items, c5)
     Stuck(c5) => PStuck(c5)
 
+-- lint: allow(L0105)
 fn parse_items(c : Cursor, depth : Int, rev : List(Item)) : Parsed(List(Item)) =
   if at_kind(c, TVClose) then
     PTook(reverse(rev), c)
@@ -116,6 +116,7 @@ fn parse_items(c : Cursor, depth : Int, rev : List(Item)) : Parsed(List(Item)) =
       parse_items(skip_sep(c1), depth, Cons(item, rev))
 
 -- | Parse one top-level item, including its optional visibility prefix.
+-- lint: allow(L0101)
 pub fn parse_item(c : Cursor, depth : Int) : Parsed(Item) =
   if at_kind(c, TIdent) && peek_word(c) == "deprecated" then
     parse_deprecated(c, depth)
@@ -386,6 +387,7 @@ fn parse_import_names(c : Cursor) : Parsed((Option(List(String)), Bool)) =
       let PTook(ns, c2) = p1 else parsed_refused(p1)
       PTook((Some(ns), false), c2)
 
+-- lint: allow(L0105)
 fn parse_names_until(
   c : Cursor,
   close : String,
@@ -407,6 +409,7 @@ fn parse_names_until(
 -- Algebraic data and aliases
 -- -------------------------------------------------------------------------
 
+-- lint: allow(L0101)
 fn parse_data(
   saved : Cursor,
   c : Cursor,
@@ -472,6 +475,7 @@ fn parse_type_params(c : Cursor) : Parsed((List(String), List(Kind))) =
   else
     parse_type_params_go(cursor_advance(c), Nil, Nil)
 
+-- lint: allow(L0105)
 fn parse_type_params_go(
   c : Cursor,
   names : List(String),
@@ -528,6 +532,7 @@ fn parse_ctors(
   let PTook(ctors, c2) = p2 else parsed_refused(p2)
   PTook((ctors, opened), c2)
 
+-- lint: allow(L0105)
 fn parse_ctors_go(
   c : Cursor,
   depth : Int,
@@ -574,6 +579,7 @@ fn parse_ctor(c : Cursor, depth : Int) : Parsed(Ctor) =
   else
     PTook(Ctor { name = name, shape = CPositional(Nil) }, c1)
 
+-- lint: allow(L0105)
 fn parse_ctor_fields(
   c : Cursor,
   depth : Int,
@@ -597,6 +603,7 @@ fn parse_ctor_fields(
       let c4 = cursor_note(c3, TFixed(","))
       PStuck(cursor_note(c4, TFixed("\}")))
 
+-- lint: allow(L0105)
 fn parse_types_until(
   c : Cursor,
   close : String,
@@ -624,6 +631,7 @@ fn parse_deriving(c : Cursor, rev : List(Deriving)) : Parsed(List(Deriving)) =
     let PTook(_, c1) = p1 else parsed_refused(p1)
     parse_deriving_go(c1, Nil)
 
+-- lint: allow(L0105)
 fn parse_deriving_go(
   c : Cursor,
   rev : List(Deriving)
@@ -682,6 +690,7 @@ fn parse_error_decl(
 fn parse_logic_fn(c : Cursor, vis : PVis, depth : Int) : Parsed(Item) =
   parse_fn(cursor_advance(c), cursor_advance(c), vis, depth, "logic-fn")
 
+-- lint: allow(L0101)
 fn parse_fn(
   saved : Cursor,
   c : Cursor,
@@ -762,6 +771,7 @@ fn parse_fn_spec(c : Cursor, depth : Int) : Parsed(FnSpec) =
       c5,
     )
 
+-- lint: allow(L0101)
 fn parse_ret_spec(c : Cursor, depth : Int) : Parsed(RetSpec) =
   if not(at_fixed(c, ":")) then
     PTook(RetSpec { ret = None, eff = None, no_alloc = false }, c)
@@ -871,6 +881,7 @@ fn parse_given(c : Cursor, depth : Int) : Parsed(List(Constraint)) =
   else
     parse_constraints(cursor_advance(c), depth, Nil)
 
+-- lint: allow(L0105)
 fn parse_constraints(
   c : Cursor,
   depth : Int,
@@ -891,6 +902,7 @@ fn parse_constraints(
   else
     PTook(reverse(Cons(con, rev)), c4)
 
+-- lint: allow(L0105)
 fn parse_requires(
   c : Cursor,
   depth : Int,
@@ -903,6 +915,7 @@ fn parse_requires(
     let PTook(e, c1) = p1 else parsed_refused(p1)
     parse_requires(c1, depth, Cons(e, rev))
 
+-- lint: allow(L0105)
 fn parse_ensures(
   c : Cursor,
   depth : Int,
@@ -937,6 +950,7 @@ fn parse_where_block(c : Cursor, depth : Int) : Parsed(List(NamedExpr)) =
     let PTook(_, c1) = p1 else parsed_refused(p1)
     parse_where_bindings(c1, depth, Nil)
 
+-- lint: allow(L0105)
 fn parse_where_bindings(
   c : Cursor,
   depth : Int,
@@ -959,8 +973,11 @@ fn parse_where_bindings(
         Cons(NamedExpr { name = name, value = value }, rev),
       )
 
+-- The longest declaration-modifier phrase before `fn`: `test assume total`.
+fn fn_mod_max_words() : Int = 3
+
 fn parse_fn_mods(c : Cursor) : Parsed((Bool, Option(String), Option(String), Bool)) =
-  let (words, c1, remaining) = take_fn_mod_words(c, 3, Nil)
+  let (words, c1, remaining) = take_fn_mod_words(c, fn_mod_max_words(), Nil)
   if fn_mod_follow(c1) then
     match classify_fn_mod_words(words) of
       None =>
@@ -982,8 +999,15 @@ fn parse_fn_mods(c : Cursor) : Parsed((Bool, Option(String), Option(String), Boo
     -- DeclMods reduces, and runs its deliberate validation, only when its
     -- lookahead is a reserved modifier or `fn`. A fourth identifier or a
     -- layout boundary is instead a generic miss at that lookahead.
-    PStuck(note_fn_mod_follow(c1, remaining > 0, remaining == 2))
+    PStuck(
+        note_fn_mod_follow(
+            c1,
+            remaining > 0,
+            remaining == fn_mod_max_words() - 1,
+          ),
+      )
 
+-- lint: allow(L0105)
 fn take_fn_mod_words(
   c : Cursor,
   remaining : Int,
@@ -1082,6 +1106,7 @@ fn parse_reserved_fn_mods(
   else
     PTook((is_test, totality, None, false), c)
 
+-- lint: allow(L0101, L0105)
 fn parse_params(
   c : Cursor,
   depth : Int,

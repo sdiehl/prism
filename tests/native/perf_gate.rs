@@ -893,11 +893,7 @@ fn corpus_tiers() -> Vec<(String, String)> {
     let mut rows: Vec<(String, String)> = crate::support::corpus()
         .into_iter()
         .map(|path| {
-            let label = path
-                .strip_prefix(root)
-                .unwrap_or(&path)
-                .to_string_lossy()
-                .into_owned();
+            let label = crate::support::label_of(&path);
             let tier = prism::effect_strategy_full(&crate::support::source(&path), root)
                 .unwrap_or_else(|e| panic!("{label}: tier classification failed: {e}"));
             (label, tier.to_string())

@@ -42,6 +42,8 @@ A pull pipeline is correct and constant-space per stage. At `-O1`, each transfor
 type Step(a) = SDone | SMore(a, (Unit) -> Step(a))
 ```
 
+One pull from a sequence: `SDone` ends the stream, `SMore(x, rest)` yields `x` and the thunk producing everything after it. A sequence is exactly a thunk returning one of these.
+
 ## Functions and Values
 
 ### `empty`
@@ -135,7 +137,7 @@ Seq.to_list(Seq.take(Seq.iterate(1, \(x) -> x * 2), 4))
 repeat : forall a. (a) -> (Unit) -> Sequence.Step(a)
 ```
 
-The infinite sequence of `x` repeated. Bound it with `take`.
+The infinite sequence of `x` repeated. Bound it with `take`. `Sequence` is where the streaming `repeat` is defined; it is the canonical bearer of the name for pull sequences.
 
 ```prism,mod=Sequence
 # import Sequence as Seq
@@ -145,6 +147,8 @@ Seq.to_list(Seq.take(Seq.repeat(7), 3))
 ```output
 [7, 7, 7]
 ```
+
+lint: allow(L0201)
 
 ### `unfold`
 

@@ -14,7 +14,7 @@
 -- comment spans here, yet elaborate to the identical Core; that duality is the
 -- point of the query.
 
-import Data.List (map, flatten, reverse, filter)
+import Data.List (map, flatten, reverse)
 import Syntax.Source (..)
 import Syntax.Token (..)
 import Syntax.Codec (..)
@@ -38,7 +38,7 @@ pub type QueryReport = QueryReport {
   comments: List(Span),
   decls: List(DeclHead),
   kinds: List(KindCount)
-} deriving (Eq)
+} deriving (Eq, Show)
 
 -- The value a token carries, or the empty string for a value-free kind.
 fn q_val(t : Token) : String =
@@ -92,6 +92,7 @@ fn q_flush(cur : List(Token), out : List(List(Token))) : List(List(Token)) =
 -- Split the layout-resolved parse stream into top-level items. Only depth-one
 -- tokens (a declaration's head, before its body block opens) are retained, and
 -- only a depth-one virtual semicolon ends an item; nested layout is skipped.
+-- lint: allow(L0105)
 fn q_items_go(
   ts : List(Token),
   depth : Int,

@@ -60,6 +60,10 @@ pub(crate) enum Phase {
     OptPre,
     LowerEffects,
     OptLate,
+    /// The ownership finishing between the optimizer and codegen: reference-count
+    /// insertion, the reuse pass, their verifications, and the typed-to-untyped
+    /// erasure. One honest row, like `parse`, rather than a faked split.
+    Rc,
     #[cfg(feature = "native")]
     EmitLlvm,
     #[cfg(feature = "native")]
@@ -79,6 +83,7 @@ impl Phase {
             Self::OptPre => "opt.pre",
             Self::LowerEffects => "lower.effects",
             Self::OptLate => "opt.late",
+            Self::Rc => "rc",
             #[cfg(feature = "native")]
             Self::EmitLlvm => "emit.llvm",
             #[cfg(feature = "native")]
@@ -167,6 +172,9 @@ pub(crate) enum CountKey {
     RuntimeObjectHits,
     #[cfg(feature = "native")]
     RuntimeObjectMisses,
+    /// How many per-SCC bitcode shards the sharded backend emitted.
+    #[cfg(feature = "native")]
+    SccShards,
 }
 
 impl CountKey {
@@ -195,6 +203,8 @@ impl CountKey {
             Self::RuntimeObjectHits => "runtime_object_hits",
             #[cfg(feature = "native")]
             Self::RuntimeObjectMisses => "runtime_object_misses",
+            #[cfg(feature = "native")]
+            Self::SccShards => "scc_shards",
         }
     }
 }

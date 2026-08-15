@@ -137,6 +137,13 @@ pub struct Program<P: Phase = Surface> {
     // (like `exports`), so an AST dump of an annotation-free program is unchanged.
     // A use of one of these names warns at compile time (see `resolve::lints`).
     pub deprecated: BTreeMap<String, String>,
+    // Top-level names the user's own file defines that the prelude had already
+    // opened into unqualified scope, keyed by the surface name. Written by name
+    // resolution, the one phase that holds both the prelude's import scope and
+    // the user's own binders; a later phase cannot recover the fact, because the
+    // merged program keeps no record of which module opened which name. A capture
+    // warns at compile time (see `resolve::lints`).
+    pub prelude_captures: BTreeMap<String, PreludeCapture>,
     // Byte offset where the user's own source begins, when a prelude was
     // prepended to it; 0 when the source carries no prelude prefix. A decl whose
     // span starts below it belongs to the prelude, above it to the user's file.
@@ -146,6 +153,19 @@ pub struct Program<P: Phase = Surface> {
     // renderer and the syntax dumps use; no later phase recovers the region from
     // a name.
     pub prelude_end: usize,
+}
+
+// One user top-level definition that took a name the prelude had already opened
+// into unqualified scope. The definition wins the bare name for the whole file,
+// so every reference the author expected to reach the library binding reaches
+// theirs instead.
+#[derive(Clone, Debug)]
+pub struct PreludeCapture {
+    // The canonical symbol the prelude's import opened for the name
+    // (`Data.List.count`), which carries the module that exported it.
+    pub opened: String,
+    // Where the user's own definition of that name is written.
+    pub span: Span,
 }
 
 // The visibility of a top-level item: private (default), `pub` (exported

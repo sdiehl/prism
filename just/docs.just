@@ -139,7 +139,7 @@ lean-fuzz: build
 # Accept a reviewed effect-lowering tier manifest.
 [group('generated artifacts')]
 tier-accept:
-    PRISM_ACCEPT_TIER_MANIFEST=1 cargo test --test native_perf tier_manifest_holds -- --nocapture
+    PRISM_ACCEPT_TIER_MANIFEST=1 cargo test --test native tier_manifest_holds -- --nocapture
 
 # Rewrite stale inline doctest output expectations.
 [group('generated artifacts')]

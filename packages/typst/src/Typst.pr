@@ -32,10 +32,12 @@
 -- Each line of this document came from a typed combinator.
 -- ```
 
-import Data.String (split, str_of_char)
-import Data.Bytes (Bytes, bytes_concat, bytes_index, bytes_length, bytes_slice, bytes_to_string, string_to_bytes)
+-- lint: allow-file(L0108)
+
+import Data.String (split)
+import Data.Bytes (Bytes, bytes_index, bytes_length, bytes_slice, bytes_to_string, string_to_bytes)
 import Data.Pretty as Pretty
-import Typst.Value (..)
+import Typst.Value (Length, Pt, Em, Fr, Percent, Color, Rgb, Alignment, AHorizon, Dir, Ttb, show_length, show_color, show_alignment, show_dir)
 pub import Typst.Value (..)
 
 -- | A markup-mode document fragment.
@@ -260,6 +262,10 @@ fn escape_markup(value : String) : String =
   let b = string_to_bytes(value)
   esc_run(b, bytes_length(b), 0, 0, "", markup_escape_of)
 
+-- A byte-scanning escape loop: it threads the source, its length, the start of
+-- the pending unescaped run, the cursor, the accumulator, and the escape table,
+-- so the parameters are the loop state and bundling them would only hide it.
+-- lint: allow(L0103)
 fn esc_run(
   b : Bytes,
   n : Int,
@@ -296,6 +302,9 @@ fn string_escape_of(c : Int) : Option(String) =
   else
     None
 
+-- A flat decision table over Typst's markup metacharacters; the nesting is one
+-- case per character, not control flow.
+-- lint: allow(L0101)
 fn markup_escape_of(c : Int) : Option(String) =
   if c == 35 then
     Some("\\#")

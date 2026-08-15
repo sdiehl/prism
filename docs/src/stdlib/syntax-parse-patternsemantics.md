@@ -8,18 +8,24 @@ Pure Pattern action lowerings used by the generated structural parser.
 
 ### `pattern_int`
 
-```prism,sig,h-5d319d1b78ad768c16ded4e246c588f7c84441ebe8ab1d1dbd3848f9682f50ee
+```prism,sig,h-65f6ea94d8cb784714d414c653a53494022b037fc1418ca1c7151525a53a13c4
 pattern_int : (String, Bool, Syntax.Source.Span) -> Syntax.Ast.Sp(Syntax.Ast.Pat)
 ```
 
+Lower an integer literal pattern, splitting off its width suffix and folding a leading minus into the digits.
+
 ### `pattern_float`
 
-```prism,sig,h-e4c8f339980ce656ad645c934c284f274f3549b3eb6d111aa8f4cf63e044dc1a
+```prism,sig,h-66c10e12b4c9e327cfb2b7df03bee38553d27c66231bd3f61279ba3cde125283
 pattern_float : (String, Bool, Syntax.Source.Span) -> Syntax.Ast.Sp(Syntax.Ast.Pat)
 ```
+
+Lower a float literal pattern, folding a leading minus into the value.
 
 ### `pattern_list`
 
 ```prism,sig,h-d77ddee22742e4db8843694b142162679663885af2438c14f83565c48691496d
 pattern_list : (List(Syntax.Ast.Sp(Syntax.Ast.Pat)), Syntax.Source.Span) -> Syntax.Ast.Sp(Syntax.Ast.Pat)
 ```
+
+Lower a list literal pattern to the `Cons`/`Nil` spine it abbreviates.

@@ -15,17 +15,7 @@ from typing import Sequence
 
 ROOT = Path(__file__).resolve().parent.parent
 FAILURES = re.compile(r"test result:|FAILED|error\[")
-ORACLE_TARGETS = (
-    "native_parity",
-    "native_tier",
-    "native_fusion",
-    "native_perf",
-    "native_conformance",
-    "native_sort",
-    "native_cache",
-    "snapshots",
-    "compiler",
-)
+ORACLE_TARGETS = ("native", "snapshots", "compiler")
 
 
 def run(command: Sequence[str], *, env: dict[str, str] | None = None) -> int:
@@ -53,14 +43,27 @@ def test_targets(
     *,
     env: dict[str, str],
     cargo_flags: Sequence[str] = (),
+    name_filter: str | None = None,
 ) -> int:
     selectors = [item for target in targets for item in ("--test", target)]
+    filters = [name_filter] if name_filter else []
     if shutil.which("cargo-nextest"):
         return run(
-            ["cargo", "nextest", "run", "--profile", "ci", *cargo_flags, *selectors],
+            [
+                "cargo",
+                "nextest",
+                "run",
+                "--profile",
+                "ci",
+                *cargo_flags,
+                *selectors,
+                *filters,
+            ],
             env=env,
         )
-    return run_filtered(["cargo", "test", *cargo_flags, *selectors], env=env)
+    return run_filtered(
+        ["cargo", "test", *cargo_flags, *selectors, *filters], env=env
+    )
 
 
 def oracles(cargo_flags: Sequence[str]) -> int:
@@ -123,7 +126,7 @@ def native_slice() -> int:
     test_env.update(
         PRISM_COMPILER_CACHE="0", PRISM_SHARD_TOTAL="8", PRISM_SHARD_INDEX="0"
     )
-    return test_targets(("native_parity",), env=test_env)
+    return test_targets(("native",), env=test_env, name_filter="parity::")
 
 
 def usage() -> None:

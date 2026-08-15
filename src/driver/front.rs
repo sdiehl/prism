@@ -16,7 +16,10 @@ use crate::core::{
 };
 use crate::error::Error;
 use crate::flags::WarnDupes;
-use crate::resolve::{resolve_loaded_modules, resolve_modules_in, Module, Root};
+use crate::resolve::{
+    lint_prelude_captures, prelude_capture, resolve_loaded_modules, resolve_modules_in, Module,
+    Root,
+};
 use crate::syntax::ast::{Core as CorePhase, Program};
 use crate::syntax::desugar::{desugar, retarget_cooperative};
 use crate::syntax::reflect::parse_unit;
@@ -472,13 +475,15 @@ fn front_key_for(schema: &[u8], input: &str, cfg: &Config, opts: FrontOpts) -> S
             u8::from(opts.pre_opt),
             u8::from(opts.allow_holes),
             u8::from(opts.typed_tooltips),
-            // Duplicate detection is diagnostics-only and never touches a content
-            // hash, so it is absent from the artifact fingerprint; it must still
-            // split the cache, or a warn/strict run could be served a front
-            // computed (and stored warning-free) under a different mode. Both
-            // knobs (own clones, stdlib reimplementations) split it.
+            // Redundant-definition detection is diagnostics-only and never touches
+            // a content hash, so it is absent from the artifact fingerprint; it must
+            // still split the cache, or a warn/strict run could be served a front
+            // computed (and stored warning-free) under a different mode. All three
+            // knobs (own clones, stdlib reimplementations, prelude captures) split
+            // it.
             cfg.flags.warn_dupes as u8,
             cfg.flags.warn_stdlib_dupes as u8,
+            cfg.flags.warn_prelude_capture as u8,
             // The build mode changes which declarations the front retains
             // (production strips `test fn`; test keeps them) without entering the
             // artifact fingerprint, so it must split the session cache: a shared
@@ -552,11 +557,14 @@ fn prepare_resolved_front(
     // dump, the store commit) flows through; it shares the strip with the project
     // module check via `strip_tests_for_mode`.
     super::modules::strip_tests_for_mode(cfg.mode, &mut program);
-    let lints = if opts.diagnostics {
+    let mut lints = if opts.diagnostics {
         lint_surface(src, &program)
     } else {
         Vec::new()
     };
+    if opts.diagnostics {
+        apply_prelude_captures(cfg, &program, &mut lints)?;
+    }
     // The logical checker validates every `logic fn` and contract clause
     // against the resolved surface program, before desugar erases them. A
     // malformed contract is a source error; a valid one leaves the runtime path
@@ -575,6 +583,33 @@ fn prepare_resolved_front(
         }
     }
     Ok(PreparedFront { program, lints })
+}
+
+// Surface the name captures resolution recorded, per `warn_prelude_capture`.
+// `Strict` fails the compile at the first capture in source order (the table is
+// keyed by name, so the earliest span is chosen explicitly); `Warn` adds one
+// surface lint per capture, carried with the other surface lints so a cache hit
+// re-emits them; `Off` says nothing. Either way the name resolves to the user's
+// definition, so this changes no program's meaning.
+fn apply_prelude_captures(
+    cfg: &Config,
+    program: &Program,
+    lints: &mut Vec<crate::tc::Warning>,
+) -> Result<(), Error> {
+    match cfg.flags.warn_prelude_capture {
+        WarnDupes::Off => {}
+        WarnDupes::Warn => lints.extend(lint_prelude_captures(program)),
+        WarnDupes::Strict => {
+            if let Some((name, capture)) = program
+                .prelude_captures
+                .iter()
+                .min_by_key(|(_, capture)| capture.span.start)
+            {
+                return Err(Error::Type(prelude_capture(name, capture).at(capture.span)));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn finish_front(

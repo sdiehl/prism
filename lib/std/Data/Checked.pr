@@ -41,11 +41,18 @@
 
 -- The lane bounds, as exact `Int` values. Written with `^` rather than as raw
 -- 20-digit literals so they read as the powers they are and cannot be mistyped.
-let bound_i64_max : Int = 2 ^ 63 - 1
+-- A `U64` spends all 64 bits on magnitude; an `I64` spends one of them on sign.
+let lane_base : Int = 2
 
-let bound_i64_min : Int = -2 ^ 63
+let i64_magnitude_bits : Int = 63
 
-let bound_u64_max : Int = 2 ^ 64 - 1
+let u64_width_bits : Int = 64
+
+let bound_i64_max : Int = lane_base ^ i64_magnitude_bits - 1
+
+let bound_i64_min : Int = -lane_base ^ i64_magnitude_bits
+
+let bound_u64_max : Int = lane_base ^ u64_width_bits - 1
 
 -- | Safe arithmetic over a fixed- or arbitrary-width integer lane. Every method
 -- is total: the `checked_*` family reports overflow as `None`, `saturating_*`

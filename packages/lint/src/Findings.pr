@@ -1,0 +1,143 @@
+-- | Lint findings as data, and the one home of the rule-code registry.
+--
+-- A finding is a rule code, the byte span it points at, and a self-contained
+-- message. Severity is a property of the corpus gate (deny here, advise
+-- there), never of the finding, so the same data renders as a human line or a
+-- JSON line without re-judging anything. Every code the linter can fire is a
+-- row of `fd_rules`; a code that is not in the table is a bug in the rule that
+-- fired it, and the tests pin the two against each other.
+
+import Data.Foldable (elem)
+import Data.List (map)
+import Syntax.Source (Span, line_col)
+
+-- | One lint finding: the rule code, the byte span it points at, and the
+-- message.
+pub type Finding = Finding {
+  code: String,
+  span: Span,
+  message: String
+} deriving (Eq, Show)
+
+-- | The result of linting one document: the findings that stand, and how many
+-- were suppressed by allow pragmas so the gate can keep counting exceptions.
+pub type LintReport = LintReport {
+  findings: List(Finding),
+  suppressed: Int
+} deriving (Eq, Show)
+
+-- The code constants rules fire through: one spelling per code, never a
+-- literal re-typed at a fire site.
+
+-- | The deep-nesting rule code.
+pub let fd_l0101 : String = "L0101"
+
+-- | The oversized-function rule code.
+pub let fd_l0102 : String = "L0102"
+
+-- | The parameter-count rule code.
+pub let fd_l0103 : String = "L0103"
+
+-- | The lambda-chain-depth rule code.
+pub let fd_l0104 : String = "L0104"
+
+-- | The accumulate-then-reverse rule code.
+pub let fd_l0105 : String = "L0105"
+
+-- | The glob-import-outside-a-vocabulary-module rule code.
+pub let fd_l0106 : String = "L0106"
+
+-- | The unused-import rule code.
+pub let fd_l0107 : String = "L0107"
+
+-- | The magic-literal rule code.
+pub let fd_l0108 : String = "L0108"
+
+-- | The prelude-or-stdlib-name-capture rule code.
+pub let fd_l0201 : String = "L0201"
+
+-- | The missing-doc-comment rule code.
+pub let fd_l0202 : String = "L0202"
+
+-- | The underived-basics rule code.
+pub let fd_l0203 : String = "L0203"
+
+-- | The family-prefix-drift rule code.
+pub let fd_l0204 : String = "L0204"
+
+-- | The canonical rule registry: every code the linter can fire, with its
+-- one-line title.
+pub fn fd_rules() : List((String, String)) =
+  [
+      (fd_l0101, "deep nesting"),
+      (fd_l0102, "oversized function"),
+      (fd_l0103, "parameter count"),
+      (fd_l0104, "lambda-chain depth"),
+      (fd_l0105, "accumulate-then-reverse"),
+      (fd_l0106, "glob import outside a vocabulary module"),
+      (fd_l0107, "unused import"),
+      (fd_l0108, "magic literal"),
+      (fd_l0201, "prelude or stdlib name capture"),
+      (fd_l0202, "missing doc comment"),
+      (fd_l0203, "underived basics"),
+      (fd_l0204, "family-prefix drift"),
+    ]
+
+-- | Every registered rule code, in catalog order.
+pub fn fd_codes() : List(String) = map(fd_code_of, fd_rules())
+
+fn fd_code_of(row : (String, String)) : String =
+  match row of
+    (code, _title) => code
+
+-- | Whether a code is a registered rule.
+pub fn fd_known(code : String) : Bool = elem(code, fd_codes())
+
+-- | The registered title of a code, or the empty string for a stranger.
+pub fn fd_title(code : String) : String = fd_title_in(code, fd_rules())
+
+fn fd_title_in(code : String, rows : List((String, String))) : String =
+  match rows of
+    Nil => ""
+    Cons((c, title), rest) =>
+      if c == code then
+        title
+      else
+        fd_title_in(code, rest)
+
+-- | The human rendering: `path:line:col: [CODE] message`.
+pub fn fd_render(path : String, text : String, f : Finding) : String =
+  match line_col(text, f.span.lo) of
+    (line, col) => "{path}:{line}:{col}: [{f.code}] {f.message}"
+
+-- | The machine rendering: one JSON object per line, keys in one fixed order,
+-- so the fixture snapshots are byte-deterministic.
+pub fn fd_render_json(path : String, text : String, f : Finding) : String =
+  match line_col(text, f.span.lo) of
+    (line, col) =>
+      concat(
+          "\{\"code\":\"{f.code}\",\"path\":\"{fd_escape(path)}\"",
+          ",\"line\":{line},\"col\":{col},\"span\":[{f.span.lo},{f.span.hi}],\"message\":\"{fd_escape(f.message)}\"\}",
+        )
+
+-- The two bytes JSON strings must escape.
+let fd_quote : Int = 34
+
+let fd_backslash : Int = 92
+
+-- | Escape a string for a JSON string body: backslash and double quote only,
+-- since finding messages and paths carry no control characters.
+pub fn fd_escape(s : String) : String =
+  string_of_buf(fd_escape_go(s, 0, byte_len(s), buf_empty()))
+
+fn fd_escape_go(s : String, i : Int, n : Int, buf : Buf) : Buf =
+  if i >= n then
+    buf
+  else
+    let b = byte_at(s, i)
+    let out =
+      if b == fd_quote || b == fd_backslash then
+        buf_push(buf_push(buf, fd_backslash), b)
+      else
+        buf_push(buf, b)
+    fd_escape_go(s, i + 1, n, out)

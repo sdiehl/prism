@@ -8,12 +8,16 @@ Stable public facade for the generated Pattern-family parser.
 
 ### `parse_pattern`
 
-```prism,sig,h-9731ed2f4a8b321f66b813945b98856cecb39c9c7f04a5e539654dfd71540999
+```prism,sig,h-b68c1a3d6b33bc9e53ce6aa72ebcff84fdf293dddd8c70c856c17ac8c6a5452b
 parse_pattern : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Sp(Syntax.Ast.Pat))
 ```
 
+Parse one pattern at `depth`, noting the receipt the generated parser completed it with.
+
 ### `parse_let_pattern`
 
-```prism,sig,h-46fa50b5e4002d7dbda188ba8e4b2dc4922be666763c0a9ce84b0608c9dc6fb6
+```prism,sig,h-985f502a7d6e4c6cc08419509ed6341a624d07cb1efb8652a5f007919808d782
 parse_let_pattern : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Sp(Syntax.Ast.Pat))
 ```
+
+Parse the pattern on the left of a `let` binding, where a bare constructor name binds rather than matches.

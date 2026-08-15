@@ -1,0 +1,35 @@
+pub type Band
+  = Violet
+  | Blue
+  | Green
+  | Warm
+  deriving (Eq, Show)
+
+pub fn band(wavelength : Int) : Band =
+  if wavelength < 450 then
+    Violet
+  elif wavelength < 495 then
+    Blue
+  elif wavelength < 570 then
+    Green
+  else
+    Warm
+
+pub fn name(value : Band) : String =
+  match value of
+    Violet => "violet"
+    Blue => "blue"
+    Green => "green"
+    Warm => "yellow, orange, or red"
+
+test fn green_is_classified() =
+  if band(530) == Green then
+    ()
+  else
+    fail()
+
+test fn warm_name_is_readable() =
+  if name(Warm) == "yellow, orange, or red" then
+    ()
+  else
+    fail()

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.19.0
+
+- Lint: added `prism lint`, twelve Prism-written house rules with coded suppressions, JSON output, and an advisory mode.
+- Packages: manifests gained release metadata and typed SPDX licenses; `check --licenses` audits dependencies.
+- Diagnostics: top-level names that displace a prelude import now warn by default, with `strict` and `off` controls.
+- Typechecker: constrained local functions now generalize once grounded; ungrounded ones stay monomorphic.
+- Effect rows: pure and effectful closures can now share a collection when its consumer supplies their common row.
+- Effects: duplicate operation names now fail on every checking path, with both owning effects named and labelled.
+- Standard library: added `Control.Solve`, a union-find metavariable effect with a handler-selected join policy.
+- Bootstrap: Prism now checks ground effect operations and principal rows under Rust's versioned scheme contract.
+- Self-hosted parser: learned `let pat = value else fallback` and gained a native self-parse gate.
+- Builds: compiler queries now use up to eight host threads, with sequential and parallel artifacts pinned identical.
+- Reference counting: made ownership insertion linear over deep bind chains without changing the emitted Core.
+- Cost gates: parity now pins interpreter steps and native allocations, catching output-preserving regressions.
+- Accountability: CI now pins compaction size, throughput, memory, failed bets, and coverage.
+- Example: added a second System F checker with ordered existential contexts and bidirectional subtyping.
+- Documentation: rebuilt the Python-first tutorial from data and effects through projects and identity.
+
 ## 0.18.0
 
 - Code index: added `prism index`, a whole-program artifact of definitions and their edges, and the `/viewer/` page that browses by definition.

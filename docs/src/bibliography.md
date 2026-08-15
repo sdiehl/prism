@@ -10,6 +10,8 @@
 
 <a id="biernacki-2018"></a> Biernacki, D., Piróg, M., Polesiuk, P., & Sieczkowski, F. (2018). Handle with care: Relational interpretation of algebraic effects and handlers. _Proceedings of the ACM on Programming Languages, 2_(POPL).
 
+<a id="bragdon-2010"></a> Bragdon, A., Zeleznik, R., Reiss, S. P., Karumuri, S., Cheung, W., Kaplan, J., Coleman, C., Adeputra, F., & LaViola Jr., J. J. (2010). Code bubbles: A working set-based interface for code understanding and maintenance. _Proceedings of the SIGCHI Conference on Human Factors in Computing Systems (CHI)_, 2503-2512.
+
 <a id="bour-clement-scherer-2021"></a> Bour, F., Clément, B., & Scherer, G. (2021). Tail modulo cons. _Journées Francophones des Langages Applicatifs (JFLA)_.
 
 <a id="coutts-2007"></a> Coutts, D., Leshchinskiy, R., & Stewart, D. (2007). Stream fusion: From lists to streams to nothing at all. _International Conference on Functional Programming (ICFP)_.

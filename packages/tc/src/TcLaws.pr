@@ -8,11 +8,10 @@
 
 import Tc (..)
 import Quickcheck (..)
-import Control.State (..)
+import Control.Solve (Solve)
 import Control.Fresh (Fresh, run_fresh)
 import Data.Name (Name, Binder, fresh_binder, bound_name)
-import Data.Result (result_or)
-import Data.List (map, reverse, foldl)
+import Data.List (reverse, foldl, append)
 import Data.Foldable (length)
 
 -- Deterministic rigid names for the substitution laws: identities 0 and 1 in
@@ -27,8 +26,12 @@ fn mint_two_tys() : (Name(TyVarSpace), Name(TyVarSpace)) ! {Fresh} =
 
 fn mint_ty() : Binder(TyVarSpace) ! {Fresh} = fresh_binder("t")
 
+-- The deepest generated type. The laws are structural, so depth buys nothing
+-- past the point where every constructor shape has appeared.
+let gen_depth : Int = 3
+
 -- A shallow generated type over the two rigid names and small metas.
-fn gen_vty() : Gen(VTy) = gen_sized(\(size) -> gen_vty_at(min(size, 3)))
+fn gen_vty() : Gen(VTy) = gen_sized(\(size) -> gen_vty_at(min(size, gen_depth)))
 
 fn gen_vty_at(depth : Int) : Gen(VTy) =
   if depth <= 0 then
@@ -105,7 +108,7 @@ test fn compose_matches_sequential() =
     Failed(_x, _i, _s, _z) => fail()
 
 -- Law: zonking is idempotent, including through solved metas.
-fn zonk_twice_agrees(t : VTy) : Bool ! {State(Solver), TcFail} =
+fn zonk_twice_agrees(t : VTy) : Bool ! {Solve(Sol), TcFail} =
   let m = fresh_ty_meta()
   unify_v(m, t)
   let once = zonk_v(m)
@@ -124,7 +127,7 @@ test fn zonk_is_idempotent() =
 -- Law: unification is order-independent modulo canonical meta naming. The
 -- probe unifies a chain of metas against a generated type in both orders and
 -- compares the canonicalized rendering of the chain's head.
-fn chain_solved(t : VTy, flipped : Bool) : String ! {State(Solver), TcFail} =
+fn chain_solved(t : VTy, flipped : Bool) : String ! {Solve(Sol), TcFail} =
   let m1 = fresh_ty_meta()
   let m2 = fresh_ty_meta()
   if flipped then
@@ -143,8 +146,26 @@ test fn unify_is_order_independent() =
     Passed(_n) => ()
     Failed(_x, _i, _s, _z) => fail()
 
+-- Law: the solver strategy lives in the handler alone. Unification only ever
+-- joins classes with at most one solution in play, so any join policy that
+-- keeps the solved side is observationally the same checker.
+fn merge_flip(kept : Sol, lost : Sol) : Sol =
+  match (kept, lost) of
+    (k, TyUnsolved) => k
+    (k, RowUnsolved) => k
+    (_k, solved) => solved
+
+fn prop_policy_swap(t : VTy) : Bool =
+  run_tc_with(merge_sol, \() -> chain_solved(t, false))
+    == run_tc_with(merge_flip, \() -> chain_solved(t, false))
+
+test fn solver_strategy_is_the_handler() =
+  match quickcheck(gen_vty(), prop_policy_swap) of
+    Passed(_n) => ()
+    Failed(_x, _i, _s, _z) => fail()
+
 -- Law: generalization never captures an ambient metavariable.
-fn gen_capture_witness() : (Int, Int) ! {State(Solver), TcFail, Fresh} =
+fn gen_capture_witness() : (Int, Int) ! {Solve(Sol), TcFail, Fresh} =
   let ambient = fresh_ty_meta()
   let local = fresh_ty_meta()
   let scheme =
@@ -175,7 +196,7 @@ fn prop_row_normal(ls : List(Label)) : Bool =
   let backward = row_closed(reverse(distinct))
   run_tc(\() -> normalized_pair(forward, backward)) == Ok(true)
 
-fn normalized_pair(a : Row, b : Row) : Bool ! {State(Solver), TcFail} =
+fn normalized_pair(a : Row, b : Row) : Bool ! {Solve(Sol), TcFail} =
   row_normalize(a) == row_normalize(b)
 
 test fn row_normalization_deterministic() =
@@ -184,7 +205,7 @@ test fn row_normalization_deterministic() =
     Failed(_x, _i, _s, _z) => fail()
 
 -- Row unification smoke: an open row absorbs the closed remainder.
-fn open_absorbs() : String ! {State(Solver), TcFail} =
+fn open_absorbs() : String ! {Solve(Sol), TcFail} =
   let tail = fresh_row_meta()
   unify_row(row_open([label0("IO")], tail), row_closed([
       label0("Ask"),
@@ -200,3 +221,185 @@ test fn open_row_absorbs_remainder() =
       else
         fail()
     Err(_e) => fail()
+
+-- The row-algebra laws proper: the three operations principal-row inference
+-- leans on (closed equality, open-tail merge, closed absorption) plus
+-- discharge, stated over generated rows rather than single witnesses.
+
+fn gen_labels() : Gen(List(Label)) =
+  gen_map(dedup_labels, gen_list(gen_label_pool()))
+
+fn gen_names() : Gen(List(String)) = gen_list(gen_one_of("A", ["B", "C", "D"]))
+
+fn gen_row_any() : Gen(Row) = gen_map2(row_open, gen_labels(), gen_tail())
+
+fn gen_tail() : Gen(Tail) =
+  gen_one_of(TailClosed, [TailVar(row_name()), TailMeta(0)])
+
+fn row_name() : Name(RowVarSpace) =
+  run_fresh(\() -> bound_name(fresh_binder("r")))
+
+fn subset_of(a : List(Label), b : List(Label)) : Bool =
+  match a of
+    Nil => true
+    Cons(h, rest) => label_in(b, h) && subset_of(rest, b)
+
+fn same_label_set(a : List(Label), b : List(Label)) : Bool =
+  subset_of(a, b) && subset_of(b, a)
+
+fn name_in(names : List(String), n : String) : Bool =
+  match names of
+    Nil => false
+    Cons(h, rest) => h == n || name_in(rest, n)
+
+-- Law: closed rows unify exactly when they carry the same label set, in
+-- either argument order.
+fn unified(a : Row, b : Row) : Bool ! {Solve(Sol), TcFail} =
+  unify_row(a, b)
+  true
+
+fn closed_unifies(a : List(Label), b : List(Label)) : Bool =
+  run_tc(\() -> unified(row_closed(a), row_closed(b))) == Ok(true)
+
+fn prop_closed_equality(pair : (List(Label), List(Label))) : Bool =
+  match pair of
+    (a, b) =>
+      let hit = same_label_set(a, b)
+      closed_unifies(a, b) == hit && closed_unifies(b, a) == hit
+
+test fn closed_rows_unify_iff_equal_sets() =
+  match (quickcheck(gen_pair(gen_labels(), gen_labels()), prop_closed_equality)) of
+    Passed(_n) => ()
+    Failed(_x, _i, _s, _z) => fail()
+
+-- Law: two open rows always merge, and both sides settle on one row whose
+-- labels are exactly the union.
+fn merged(
+  a_ls : List(Label),
+  b_ls : List(Label)
+) : (Row, Row) ! {Solve(Sol), TcFail} =
+  let a = row_open(a_ls, fresh_row_meta())
+  let b = row_open(b_ls, fresh_row_meta())
+  unify_row(a, b)
+  (row_normalize(zonk_row(a)), row_normalize(zonk_row(b)))
+
+fn prop_open_merge(pair : (List(Label), List(Label))) : Bool =
+  match pair of
+    (a_ls, b_ls) =>
+      match run_tc(\() -> merged(a_ls, b_ls)) of
+        Ok((ra, rb)) =>
+          ra == rb
+            && same_label_set(ra.labels, dedup_labels(append(a_ls, b_ls)))
+        Err(_e) => false
+
+test fn open_rows_merge_to_the_union() =
+  match (quickcheck(gen_pair(gen_labels(), gen_labels()), prop_open_merge)) of
+    Passed(_n) => ()
+    Failed(_x, _i, _s, _z) => fail()
+
+-- Law: an open row absorbs a closed row exactly when its labels are a
+-- subset, settling to the closed row itself.
+fn absorbed(
+  open_ls : List(Label),
+  closed_ls : List(Label)
+) : Row ! {Solve(Sol), TcFail} =
+  let o = row_open(open_ls, fresh_row_meta())
+  unify_row(o, row_closed(closed_ls))
+  row_normalize(zonk_row(o))
+
+fn prop_closed_absorption(pair : (List(Label), List(Label))) : Bool =
+  match pair of
+    (open_ls, closed_ls) =>
+      match run_tc(\() -> absorbed(open_ls, closed_ls)) of
+        Ok(r) =>
+          subset_of(open_ls, closed_ls)
+            && r.tail == TailClosed
+            && same_label_set(r.labels, closed_ls)
+        Err(_e) => not(subset_of(open_ls, closed_ls))
+
+test fn open_row_absorbs_iff_subset() =
+  match (quickcheck(gen_pair(gen_labels(), gen_labels()), prop_closed_absorption)) of
+    Passed(_n) => ()
+    Failed(_x, _i, _s, _z) => fail()
+
+-- Law: discharge drops exactly the handled labels in order, preserves the
+-- tail, and is idempotent.
+fn prop_discharge(pair : (Row, List(String))) : Bool =
+  match pair of
+    (r, handled) =>
+      let d = row_discharge(r, handled)
+      d.tail == r.tail
+        && row_discharge(d, handled) == d
+        && kept_exactly(r.labels, d.labels, handled)
+
+fn kept_exactly(
+  before : List(Label),
+  after : List(Label),
+  handled : List(String)
+) : Bool =
+  match before of
+    Nil => after == Nil
+    Cons(l, rest) =>
+      if name_in(handled, l.name) then
+        kept_exactly(rest, after, handled)
+      else
+        match after of
+          Cons(k, krest) => k == l && kept_exactly(rest, krest, handled)
+          Nil => false
+
+test fn discharge_removes_exactly_the_handled() =
+  match (quickcheck(gen_pair(gen_row_any(), gen_names()), prop_discharge)) of
+    Passed(_n) => ()
+    Failed(_x, _i, _s, _z) => fail()
+
+-- Law: absorption is containment, not equality. A written-down row admits a
+-- use exactly when it already carries every label used, and admitting one
+-- leaves it exactly as it was, so a call can never widen a row a declaration
+-- committed to.
+fn absorbed_into_closed(
+  have_ls : List(Label),
+  used_ls : List(Label)
+) : Row ! {Solve(Sol), TcFail} =
+  let have = row_closed(have_ls)
+  row_absorb(have, row_closed(used_ls))
+  row_normalize(zonk_row(have))
+
+fn prop_absorb_into_closed(pair : (List(Label), List(Label))) : Bool =
+  match pair of
+    (have_ls, used_ls) =>
+      match run_tc(\() -> absorbed_into_closed(have_ls, used_ls)) of
+        Ok(r) =>
+          subset_of(used_ls, have_ls)
+            && r.tail == TailClosed
+            && same_label_set(r.labels, have_ls)
+        Err(_e) => not(subset_of(used_ls, have_ls))
+
+test fn closed_row_absorbs_iff_it_contains() =
+  match (quickcheck(gen_pair(gen_labels(), gen_labels()), prop_absorb_into_closed)) of
+    Passed(_n) => ()
+    Failed(_x, _i, _s, _z) => fail()
+
+-- Law: an inferred row absorbs any use, growing to the union and staying open.
+-- This is the call-site half of inference: performing something a caller had
+-- not yet been told about widens the caller rather than failing it.
+fn absorbed_into_open(
+  have_ls : List(Label),
+  used_ls : List(Label)
+) : Row ! {Solve(Sol), TcFail} =
+  let have = row_open(have_ls, fresh_row_meta())
+  row_absorb(have, row_closed(used_ls))
+  row_normalize(zonk_row(have))
+
+fn prop_absorb_into_open(pair : (List(Label), List(Label))) : Bool =
+  match pair of
+    (have_ls, used_ls) =>
+      match run_tc(\() -> absorbed_into_open(have_ls, used_ls)) of
+        Ok(r) =>
+          not(r.tail == TailClosed)
+            && same_label_set(r.labels, dedup_labels(append(have_ls, used_ls)))
+        Err(_e) => false
+
+test fn open_row_absorbs_any_use() =
+  match (quickcheck(gen_pair(gen_labels(), gen_labels()), prop_absorb_into_open)) of
+    Passed(_n) => ()
+    Failed(_x, _i, _s, _z) => fail()

@@ -62,6 +62,7 @@ pub fn parse_pattern_decl(
   let PTook(d, c1) = p1 else parsed_refused(p1)
   parse_pattern_decl_body(c1, d, vis)
 
+-- lint: allow(L0101)
 fn parse_pattern_decl_body(
   saved : Cursor,
   depth : Int,
@@ -87,6 +88,7 @@ fn parse_pattern_decl_body(
 
 -- A conventional comma list with an optional trailing comma. The closing
 -- delimiter is consumed here.
+-- lint: allow(L0105)
 fn parse_ident_list(
   c : Cursor,
   close : String,
@@ -115,6 +117,7 @@ fn parse_pattern_clauses(
     let PTook(clause, c1) = p1 else parsed_refused(p1)
     PTook([clause], c1)
 
+-- lint: allow(L0105)
 fn parse_pattern_clause_block(
   c : Cursor,
   depth : Int,
@@ -158,6 +161,7 @@ fn parse_pattern_clause(c : Cursor, depth : Int) : Parsed(PatternClause) =
         c2,
       )
 
+-- lint: allow(L0103)
 fn assemble_pattern(
   saved : Cursor,
   c : Cursor,
@@ -432,6 +436,7 @@ fn add_stable_entry(
 -- Stable rungs
 -- -------------------------------------------------------------------------
 
+-- lint: allow(L0101)
 fn parse_rung(c : Cursor, depth : Int) : Parsed(Rung) =
   let saved = c
   let p1 = take_word(c, TUid)
@@ -541,6 +546,7 @@ fn parse_frozen_badge(c : Cursor) : Parsed(Option(String)) =
 -- Hand-written converters
 -- -------------------------------------------------------------------------
 
+-- lint: allow(L0101)
 fn parse_converter(c : Cursor, depth : Int) : Parsed(Converter) =
   let saved = c
   let p1 = take_word(c, TIdent)
@@ -713,6 +719,7 @@ fn parse_migration_route(c : Cursor, depth : Int) : Parsed(MigrationRoute) =
           ),
       )
 
+-- lint: allow(L0101)
 fn parse_version_route(
   saved : Cursor,
   word : String,

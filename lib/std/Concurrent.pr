@@ -81,7 +81,7 @@ type Wake(a) = Arrived(a) | Gone | Halt
 
 -- | The outcome of `try_await`: a fiber that completed with a value, or one that
 -- was cancelled before it could.
-pub type Outcome(a) = Completed(a) | Was_Cancelled
+pub type Outcome(a) = Completed(a) | Was_Cancelled deriving (Eq, Show)
 
 -- | Reschedule the current fiber. A cooperative yield point; also a cancellation
 -- point (a cancelled fiber unwinds here instead of resuming).
@@ -551,6 +551,9 @@ fn remove(x : Int, xs : List(Int)) : List(Int) =
 
 -- Interpret the command produced by fiber `me`, threading the scheduler `s`. The
 -- main fiber has id 0; when it finishes, the whole run returns its result.
+-- One arm per scheduler command, and each arm has to see the whole scheduler
+-- state; splitting it would thread that state through helpers by hand.
+-- lint: allow(L0102)
 fn drive(me : Int, cmd : Cmd(a, e), s : Sched(a, e)) : a =
   match cmd of
     Forked(parent, child) =>

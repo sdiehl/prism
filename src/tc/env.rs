@@ -1203,9 +1203,22 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
             }
         }
     }
-    let mut eff_ops = BTreeMap::new();
+    let mut eff_ops: BTreeMap<String, EffOpInfo> = BTreeMap::new();
     for eff_decl in &prog.effects {
         for op in &eff_decl.ops {
+            // Two effects reaching one operation name are rejected by the surface
+            // pass that runs before any of this, on every entry path. Repeating
+            // the verdict here means the table can never be built by silently
+            // dropping one of the two signatures: an inserted duplicate would
+            // decide which effect a perform means by declaration order.
+            if let Some(prev) = eff_ops.get(&op.name) {
+                return Err(ErrKind::DuplicateEffectOp {
+                    op: names::bare_name(&op.name).to_string(),
+                    first: prev.effect_name.to_string(),
+                    second: eff_decl.name.clone(),
+                }
+                .at(eff_decl.span));
+            }
             let params: Vec<Type> = op.params.iter().map(convert_data).collect();
             let ret = convert_data(&op.ret);
             eff_ops.insert(

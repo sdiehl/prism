@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Compile every Prism example referenced by the docs. Exits 0 only if all of
-# docs/examples/*.pr compile with the real prism binary. This is the hard gate
-# behind the Accuracy axis: docs may only embed code that the compiler accepts.
+# docs/examples/*.pr and tutorial projects compile with the real prism binary.
+# This is the hard gate behind the Accuracy axis: docs may only embed code that
+# the compiler accepts.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -10,7 +11,8 @@ cd "$root"
 examples_dir="docs/examples"
 shopt -s nullglob
 files=("$examples_dir"/*.pr)
-if [ ${#files[@]} -eq 0 ]; then
+projects=("$examples_dir"/*/prism.toml)
+if [ ${#files[@]} -eq 0 ] && [ ${#projects[@]} -eq 0 ]; then
   echo "no examples in $examples_dir"; exit 1
 fi
 
@@ -47,6 +49,19 @@ for f in "${files[@]}"; do
     else
       echo "FAIL  $f"; "$prism" check "$f" || true; fail=1
     fi
+  fi
+done
+
+for manifest in "${projects[@]}"; do
+  project="$(dirname "$manifest")"
+  if "$prism" check "$project" >/dev/null 2>&1 &&
+     "$prism" test "$project" --no-run >/dev/null 2>&1; then
+    echo "ok    $project"
+  else
+    echo "FAIL  $project"
+    "$prism" check "$project" || true
+    "$prism" test "$project" --no-run || true
+    fail=1
   fi
 done
 

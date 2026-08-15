@@ -20,6 +20,7 @@ import Data.String (contains, index_of)
 -- | One parse step: the value and the cursor after it, an unmet expectation
 -- held in the cursor's failure record, or a finished diagnostic that no
 -- expectation set can express.
+-- lint: allow(L0203)
 pub type Parsed(a) = PTook(a, Cursor) | PStuck(Cursor) | PFault(Diagnostic)
 
 -- | Lift a cursor reply into a parse outcome.
@@ -125,6 +126,10 @@ pub fn peek_word(c : Cursor) : String =
     None => ""
     Some(t) => token_text(t)
 
+-- The byte length of the `e+` or `E+` exponent marker Rust writes and the
+-- artifact spelling drops the sign from.
+fn exp_marker_len() : Int = 2
+
 -- | Match Rust's stable `f64` debug spelling used by syntax artifacts. The
 -- Prism lexer has already round-tripped the value through `show_float`, which
 -- omits the `.0` on integral finite values.
@@ -132,11 +137,22 @@ pub fn surface_float(s : String) : String =
   let ep = index_of("e+", s)
   let cap_ep = index_of("E+", s)
   if ep >= 0 then
-    concat(substring(s, 0, ep + 1), substring(s, ep + 2, byte_len(s) - ep - 2))
+    concat(
+        substring(s, 0, ep + 1),
+        substring(
+            s,
+            ep + exp_marker_len(),
+            byte_len(s) - ep - exp_marker_len(),
+          ),
+      )
   elif cap_ep >= 0 then
     concat(
         substring(s, 0, cap_ep + 1),
-        substring(s, cap_ep + 2, byte_len(s) - cap_ep - 2),
+        substring(
+            s,
+            cap_ep + exp_marker_len(),
+            byte_len(s) - cap_ep - exp_marker_len(),
+          ),
       )
   elif contains(".", s) || contains("e", s) || contains("E", s) then
     s

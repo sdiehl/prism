@@ -49,6 +49,8 @@ with_ordering(\(a, b) -> cmp(a, b), \(w) ->
 Some(a)
 ```
 
+Named as the scoping form it is, since it reads at the call site as the block that opens the brand rather than as another operation on an ordered map. lint: allow(L0204)
+
 ### `ord_empty`
 
 ```prism,sig,h-8159146d7f73826c9861e1f5e7e73fd7c5febb65525c53ecd879a3fc8f58c585

@@ -637,7 +637,7 @@ fn prepared_core_with_opts(
         cfg,
     )?;
     emit_lower_warning(src, lowered.warning.as_deref(), cfg.flags.verbose);
-    finish_lowered(lowered, &sigs)?;
+    finish_lowered(lowered, &sigs, cfg)?;
     Ok(core)
 }
 
@@ -715,8 +715,14 @@ fn lower_opt_on_grown_stack(
     })
 }
 
-fn finish_lowered(lowered: LoweredSpine, sigs: &Sigs) -> Result<LoweredCore, Error> {
-    on_typed_lower_stack(|| finish_lowered_on_grown_stack(lowered, sigs))
+fn finish_lowered(lowered: LoweredSpine, sigs: &Sigs, cfg: &Config) -> Result<LoweredCore, Error> {
+    timing::timed_res(
+        cfg.timing.as_ref(),
+        timing::Phase::Rc,
+        "",
+        || on_typed_lower_stack(|| finish_lowered_on_grown_stack(lowered, sigs)),
+        |_| timing::RowExtras::default(),
+    )
 }
 
 fn finish_lowered_on_grown_stack(lowered: LoweredSpine, sigs: &Sigs) -> Result<LoweredCore, Error> {
@@ -749,7 +755,7 @@ fn reuse_lowered_core(
 ) -> Result<(Checked, LoweredCore, BTreeMap<String, CtorInfo>, Sigs), Error> {
     let (checked, sigs, lowered) = lowered_front(src, roots, cfg)?;
     let ctors = lowered.ctors.clone();
-    let core = finish_lowered(lowered, &sigs)?;
+    let core = finish_lowered(lowered, &sigs, cfg)?;
     Ok((checked, core, ctors, sigs))
 }
 
@@ -786,6 +792,23 @@ fn lowered_core_with_identity(
     ),
     Error,
 > {
+    let (checked, lowered, sigs, hashes) = lowered_spine_with_identity(src, roots, cfg)?;
+    let ctors = lowered.ctors.clone();
+    let core = finish_lowered(lowered, &sigs, cfg)?;
+    Ok((checked, core, ctors, hashes))
+}
+
+// The front end, optimization, and effect lowering, stopping BEFORE
+// reference-count insertion. The returned spine still carries its typed
+// tree; `finish_lowered` completes it. The native build path uses the split
+// to consult the semantic artifact cache against the pre-insertion term, so
+// a hit never pays for the ownership passes it is about to discard.
+#[cfg(feature = "native")]
+fn lowered_spine_with_identity(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+) -> Result<(Checked, LoweredSpine, Sigs, crate::core::Hashes), Error> {
     let (program, checked, identity_core, _, typed, verify_env) =
         run_front(src, roots, cfg, FrontRequest::Full)?.into_compilation();
     let sigs = borrow_sigs(&program);
@@ -814,9 +837,7 @@ fn lowered_core_with_identity(
         cfg,
     )?;
     emit_lower_warning(src, lowered.warning.as_deref(), cfg.flags.verbose);
-    let ctors = lowered.ctors.clone();
-    let core = finish_lowered(lowered, &sigs)?;
-    Ok((checked, core, ctors, hashes))
+    Ok((checked, lowered, sigs, hashes))
 }
 
 // Surface the effect-lowering fallback warning through the standard renderer,
@@ -897,7 +918,7 @@ mod typed_post_route_tests {
             &cfg,
         )
         .expect("typed lowering");
-        let final_core = finish_lowered(lowered, &sigs).expect("typed final route");
+        let final_core = finish_lowered(lowered, &sigs, &cfg).expect("typed final route");
         balanced(&final_core, &sigs).expect("balanced typed final");
         crate::core::residual_effects(&final_core).expect("no residual effect nodes");
     }
@@ -922,7 +943,7 @@ mod typed_post_route_tests {
             &cfg,
         )
         .expect("typed lowering");
-        finish_lowered(lowered, &sigs).expect("typed final route");
+        finish_lowered(lowered, &sigs, &cfg).expect("typed final route");
     }
 
     #[test]

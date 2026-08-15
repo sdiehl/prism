@@ -1,0 +1,90 @@
+-- | The lint driver: judge decoded surface documents and speak a line
+-- protocol.
+--
+-- The Rust front end parses each target, hands the surface artifacts and the
+-- known-name list in as arguments, and renders whatever this module prints;
+-- the package never touches a file and never parses Prism itself. One line
+-- per record, tab-separated: a `LINT` header once, then per document a
+-- `SUPPRESSED` count so the gate can keep score of allow pragmas and one
+-- `FINDING` per finding in source order.
+
+import Data.List (filter)
+import Data.String (split)
+import Findings (Finding)
+import Rules (lint_report)
+import Syntax.Codec (codec_error_message, decode_surface)
+import Syntax.Source (line_col)
+
+-- The protocol version this driver speaks.
+let lint_protocol : Int = 1
+
+-- The newline byte the known-name list is split on.
+let lint_lf : Int = 10
+
+-- The byte value of the zero digit; the document count parses relative to it.
+let lint_zero : Int = 48
+
+-- The decimal base of the document count argument.
+let lint_base : Int = 10
+
+-- How many fixed arguments precede the document/path pairs.
+let lint_head : Int = 2
+
+-- The stride of one document/path pair in the argument list.
+let lint_pair : Int = 2
+
+fn known_list(text : String) : List(String) =
+  filter(\(name) -> not(name == ""), split(lint_lf, text))
+
+fn nat_go(s : String, i : Int, acc : Int) : Int =
+  if i >= byte_len(s) then
+    acc
+  else
+    nat_go(s, i + 1, acc * lint_base + (byte_at(s, i) - lint_zero))
+
+-- Parse the driver-written decimal document count.
+fn nat_of(s : String) : Int = nat_go(s, 0, 0)
+
+fn print_findings(
+  path : String,
+  text : String,
+  fs : List(Finding)
+) : Unit ! {IO} =
+  match fs of
+    Nil => ()
+    Cons(f, rest) =>
+      match line_col(text, f.span.lo) of
+        (line, col) =>
+          println(
+              "FINDING\t{f.code}\t{path}\t{line}\t{col}\t{f.span.lo}\t{f.span.hi}\t{f.message}",
+            )
+      print_findings(path, text, rest)
+
+fn lint_one(
+  known : List(String),
+  doc_text : String,
+  path : String
+) : Unit ! {IO} =
+  match decode_surface(doc_text) of
+    Err(e) => println("ERROR\t{path}\t{codec_error_message(e)}")
+    Ok(doc) =>
+      let report = lint_report(known, doc)
+      println("SUPPRESSED\t{path}\t{report.suppressed}")
+      print_findings(path, doc.source.text, report.findings)
+
+fn lint_docs(known : List(String), i : Int, n : Int) : Unit ! {IO, Env} =
+  if i >= n then
+    ()
+  else
+    lint_one(
+        known,
+        arg(lint_head + i * lint_pair),
+        arg(lint_head + i * lint_pair + 1),
+      )
+    lint_docs(known, i + 1, n)
+
+fn main() =
+  let known = known_list(arg(0))
+  let n = nat_of(arg(1))
+  println("LINT\t{lint_protocol}")
+  lint_docs(known, 0, n)

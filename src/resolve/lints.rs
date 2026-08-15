@@ -17,9 +17,10 @@ use std::collections::BTreeMap;
 
 use marginalia::Span;
 
+use crate::error::ErrKind;
 use crate::syntax::ast::{
-    CatchArm, Decl, Expr, HandlerArm, Param, Pattern, Program, Qualifier, Sugar, SugarArm, Surface,
-    S,
+    CatchArm, Decl, Expr, HandlerArm, Param, Pattern, PreludeCapture, Program, Qualifier, Sugar,
+    SugarArm, Surface, S,
 };
 use crate::tc::{Warning, WarningOrigin};
 
@@ -63,6 +64,38 @@ pub fn lint_bindings(prog: &Program, user_start: usize) -> Vec<Warning> {
         }
     }
     l.warnings
+}
+
+/// The diagnostic for one prelude capture: the definition that took the name,
+/// and the library binding the prelude had opened under it.
+///
+/// Both origins are named. The span is the user's own definition; the canonical
+/// symbol carries the module that exported the captured name, so the reader can
+/// see which library binding stopped being reachable unqualified.
+#[must_use]
+pub fn prelude_capture(name: &str, capture: &PreludeCapture) -> ErrKind {
+    ErrKind::PreludeCapture {
+        name: name.to_string(),
+        opened: capture.opened.clone(),
+    }
+}
+
+/// One finding per top-level definition whose name the prelude had already
+/// opened into scope, in name order.
+///
+/// The resolver records the captures ([`crate::syntax::ast::Program`]); this
+/// renders them. The caller decides severity, so the same finding can be a
+/// warning or a hard error without the two wording themselves differently.
+#[must_use]
+pub fn lint_prelude_captures(prog: &Program) -> Vec<Warning> {
+    prog.prelude_captures
+        .iter()
+        .map(|(name, capture)| Warning {
+            span: capture.span,
+            msg: prelude_capture(name, capture).to_string(),
+            origin: WarningOrigin::Surface,
+        })
+        .collect()
 }
 
 impl Lints {

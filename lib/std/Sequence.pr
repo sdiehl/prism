@@ -66,8 +66,9 @@
 import Data.List (reverse, tail)
 import Data.Bytes (Bytes, bytes_empty, bytes_push, bytes_length, bytes_index)
 
--- The pull step: `SDone` ends the stream, `SMore(x, rest)` yields `x` and the thunk
--- producing everything after it.
+-- | One pull from a sequence: `SDone` ends the stream, `SMore(x, rest)` yields
+-- `x` and the thunk producing everything after it. A sequence is exactly a thunk
+-- returning one of these.
 pub type Step(a) = SDone | SMore(a, (Unit) -> Step(a))
 
 -- ============================================================================
@@ -133,7 +134,9 @@ pub fn from_list(xs : List(a)) : (Unit) -> Step(a) =
 pub fn iterate(x : a, f : (a) -> a) : (Unit) -> Step(a) =
   \(u) -> SMore(x, iterate(f(x), f))
 
--- | The infinite sequence of `x` repeated. Bound it with `take`.
+-- | The infinite sequence of `x` repeated. Bound it with `take`. `Sequence` is
+-- where the streaming `repeat` is defined; it is the canonical bearer of the
+-- name for pull sequences.
 --
 -- ```prism
 -- # import Sequence as Seq
@@ -142,6 +145,7 @@ pub fn iterate(x : a, f : (a) -> a) : (Unit) -> Step(a) =
 -- ```output
 -- [7, 7, 7]
 -- ```
+-- lint: allow(L0201)
 pub fn repeat(x : a) : (Unit) -> Step(a) = \(u) -> SMore(x, repeat(x))
 
 -- | The generator producer: yield `x` for each `Some((x, seed'))` that `step`
@@ -393,6 +397,9 @@ pub fn chunk(s : (Unit) -> Step(a), n : Int) : (Unit) -> Step(List(a)) =
 
 -- | Helper for `chunk`: grab up to `n` more elements into the reversed `acc`,
 -- returning the finished (forward-order) group and the remaining sequence.
+-- Pulling is one-directional, so the group is built newest-first and flipped once
+-- when it is complete; a fold cannot see the end of the group in advance.
+-- lint: allow(L0105)
 fn chunk_grab(s, n, acc) =
   if n <= 0 then
     (reverse(acc), s)
@@ -415,6 +422,9 @@ pub fn window(s : (Unit) -> Step(a), n : Int) : (Unit) -> Step(List(a)) =
   \(u) -> match grab_n(s, n, Nil) of { None => SDone, Some(pair) => match pair of { (buf, rest) => SMore(buf, window_slide(buf, rest)) } }
 
 -- | Helper for `window`: pull exactly `n` elements, or `None` if fewer remain.
+-- The window is accumulated newest-first and flipped once, since a short stream
+-- has to abandon the partial window rather than emit it.
+-- lint: allow(L0105)
 fn grab_n(s, n, acc) =
   if n <= 0 then
     Some((reverse(acc), s))

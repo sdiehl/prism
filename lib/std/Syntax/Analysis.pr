@@ -107,7 +107,7 @@ pub type ExprCensus = ExprCensus {
   calls: Int,
   binds: Int,
   holes: Int
-}
+} deriving (Eq, Show)
 
 -- | Count every shape in one walk. The combining operation is field-wise
 -- addition, which is what `lay_summarize` was shaped for: one pass, one

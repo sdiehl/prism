@@ -1,0 +1,20 @@
+-- A pure closure written directly inside a list literal is widened into the
+-- element row the consumer demands. `scope` takes `List(() -> a ! {Async(a) |
+-- e})`, so each element's latent row is only pinned by the argument position,
+-- which is reached after the closure itself is built. Pure elements, named
+-- functions and genuinely suspending ones all coexist in one literal.
+
+import Concurrent (..)
+
+fn suspends() : Int ! {Async(Int)} =
+  yield()
+  4
+
+fn named_pure() : Int = 2
+
+fn structured() : Int ! {Async(Int)} =
+  let mixed = scope([\() -> 1, named_pure, suspends, \() -> 8])
+  let pure_only = scope([\() -> 16, \() -> 32])
+  sum(mixed) + sum(pure_only)
+
+fn main() = println(run_async(structured))

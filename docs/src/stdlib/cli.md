@@ -23,6 +23,7 @@ type CliError
   | BadValue(String, String)
   | UnknownFlag(String)
   | UnknownCommand(String)
+  deriving (Eq, Show)
 ```
 
 A parse failure, carrying enough to name the offending token and the form expected. Rendered to a message by `describe`.
@@ -36,7 +37,7 @@ type OptSpec = OptSpec {
   meta: String,
   help: String,
   takes_value: Bool
-}
+} deriving (Eq, Show)
 ```
 
 The static description of one option, carried by the parser for help and to tell the lexer whether the flag consumes a following value.
@@ -44,7 +45,11 @@ The static description of one option, carried by the parser for help and to tell
 ### `ArgSpec`
 
 ```prism,def,h-b3c3df89883d744ba9fd2beb1ef25ac49c07bd9042c99771d13ce9a93bfdc552
-type ArgSpec = ArgSpec { meta: String, help: String, required: Bool }
+type ArgSpec = ArgSpec {
+  meta: String,
+  help: String,
+  required: Bool
+} deriving (Eq, Show)
 ```
 
 The static description of one positional argument.
@@ -52,7 +57,10 @@ The static description of one positional argument.
 ### `Tokens`
 
 ```prism,def,h-b9e75f3bdea89502d9ad8028aca6108b7309f059cef001746f504e81f3e36cad
-type Tokens = Tokens { opts: List((String, String)), pos: List(String) }
+type Tokens = Tokens {
+  opts: List((String, String)),
+  pos: List(String)
+} deriving (Eq, Show)
 ```
 
 argv after lexing: options canonicalized to their long name, and the positionals in order. `--help`/`-h` are handled before lexing (`has_help`), so they never appear here.
@@ -75,7 +83,7 @@ A parser for a value of type `a`: the option and positional specs it accepts (th
 type SubCmd(a) = SubCmd { key: String, about: String, sub: Parser(a) }
 ```
 
-One named subcommand: its key on the command line, a one-line description, and the parser that runs when it is chosen.
+One named subcommand: its key on the command line, a one-line description, and the parser that runs when it is chosen. The parser it carries is a reader function, so the subcommand as a whole has no meaningful equality or printed form. lint: allow(L0203)
 
 ### `Body`
 
@@ -83,7 +91,7 @@ One named subcommand: its key on the command line, a one-line description, and t
 type Body(a) = Plain(Parser(a)) | Group(List(SubCmd(a)))
 ```
 
-A top-level command is either a single parser or a group of subcommands, all producing the same result type (so distinct subcommands map to distinct constructors of the user's ADT).
+A top-level command is either a single parser or a group of subcommands, all producing the same result type (so distinct subcommands map to distinct constructors of the user's ADT). Both alternatives bottom out in parser functions, so the body is not comparable or printable. lint: allow(L0203)
 
 ### `Command`
 
@@ -91,12 +99,16 @@ A top-level command is either a single parser or a group of subcommands, all pro
 type Command(a) = Command { name: String, about: String, body: Body(a) }
 ```
 
-A complete command: a program name and one-line description for usage, plus its body.
+A complete command: a program name and one-line description for usage, plus its body. The body holds parser functions; render a command with `help_text` rather than expecting a printed form. lint: allow(L0203)
 
 ### `Outcome`
 
 ```prism,def,h-31bdcb763fcb9a96acfd20365d7e6d0df577a7c8bd75450ec44e1783e02357a2
-type Outcome(a) = Parsed(a) | ShowHelp(String) | BadUsage(String)
+type Outcome(a)
+  = Parsed(a)
+  | ShowHelp(String)
+  | BadUsage(String)
+  deriving (Eq, Show)
 ```
 
 The outcome of parsing argv: a value, a help request (carrying the rendered text), or a usage error (carrying the rendered message).
@@ -109,11 +121,15 @@ The outcome of parsing argv: a value, a help request (carrying the rendered text
 dash : Int
 ```
 
+ASCII byte of `-`, the flag sigil.
+
 ### `help_col`
 
 ```prism,sig,h-7dc56bf94cca8d8c8e45d361742db10b929805f81d7bb9348bc0442c12d66342
 help_col : Int
 ```
+
+Column the help text aligns descriptions to.
 
 ### `pure_p`
 

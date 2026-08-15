@@ -18,16 +18,21 @@
 -- early. Bracket tracking and the offside layout virtuals are later layers; no
 -- layout virtual is synthesized here.
 
+-- lint: allow-file(L0108)
+
 import Data.List (..)
 import Data.Maybe (..)
 import Data.Result (..)
-import Data.Char (..)
+import Data.Char (is_alnum, is_alpha, is_digit, is_lower, is_upper)
 import Syntax.Source (..)
 import Syntax.Token (..)
 
 -- | The raw token layer: the semantic token stream and the trivia interleaved
 -- between them, each keyed by absolute byte span into the lexed text.
-pub type LexRaw = LexRaw { tokens: List(Token), trivia: List(Trivia) }
+pub type LexRaw = LexRaw {
+  tokens: List(Token),
+  trivia: List(Trivia)
+} deriving (Eq, Show)
 
 -- | A lexing failure, mirroring the compiler's five `LexError` variants one for
 -- one: an invalid token, an empty interpolation hole, an unterminated hole, an
@@ -609,6 +614,7 @@ fn lx_margin(
 
 -- The lines of [p, e) with `ml` bytes of shared indentation removed from each,
 -- rejoined by the newlines that separated them.
+-- lint: allow(L0103)
 fn lx_raw_lines(
   text : String,
   p : Int,
@@ -652,6 +658,7 @@ fn lx_raw_cook(text : String, lo : Int, hi : Int) : String =
 -- set: `n t r " \ { }`. Numeric and unicode escapes are deliberately absent, so
 -- the map stays one-to-one and the formatter round-trips. Any other escape is a
 -- lexing error.
+-- lint: allow(L0101)
 fn lx_esc_byte(e : Int) : Option(Int) =
   if e == lx_b("n") then
     Some(10)
@@ -722,6 +729,7 @@ fn lx_unterminated(
       Cons(qo, _) => LxUntermStr(qo)
       Nil => LxUntermHole(lx_head0(braces))
 
+-- lint: allow(L0101, L0103)
 fn lx_scan_str(
   text : String,
   p : Int,
@@ -794,6 +802,7 @@ fn lx_scan_str(
 fn lx_scan_hole(text : String, from : Int, n : Int) : Option(Int) =
   lx_hole_go(text, from, n, Cons(1, Nil), false)
 
+-- lint: allow(L0101)
 fn lx_hole_go(
   text : String,
   p : Int,
@@ -1021,6 +1030,7 @@ fn lx_interp(
 ) : Result(List(Token), LexError) =
   lx_interp_go(text, oq + 1, endq - 1, endq, buf_empty(), oq, true, Nil)
 
+-- lint: allow(L0103, L0105)
 fn lx_interp_go(
   text : String,
   p : Int,
@@ -1123,6 +1133,7 @@ pub fn lex_incomplete(text : String) : Bool =
 -- token or comment's end), and the reversed token and trivia accumulators. A
 -- string is handled here rather than in `lx_classify`: its extent is found with
 -- the brace-aware scanner and, when interpolated, it expands to several tokens.
+-- lint: allow(L0101, L0103, L0105)
 fn lx_loop(
   text : String,
   n : Int,

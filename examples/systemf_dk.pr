@@ -1,0 +1,790 @@
+-- System F with the ordered-context bidirectional algorithm of Dunfield and
+-- Krishnaswami (DK). This deliberately shares the surface and resolved syntax
+-- of `systemf.pr`, so the two examples isolate one design choice:
+--
+--   systemf.pr     equality/subsumption + a payload union-find
+--   systemf_dk.pr  checking/synthesis + ordered existential contexts
+--
+-- The latter is the algorithm implemented by Typechecker Zoo's Rust System F
+-- crate. Existentials are declared, solved, and discarded in one ordered
+-- context. A solution may mention only entries older than itself; markers and
+-- rigid-variable entries therefore make scope escape impossible by
+-- construction. Unlike `systemf.pr`'s convenient implicit application path,
+-- this checker keeps System F type application explicit.
+--
+-- Expected output:
+--   id                 : forall a. a -> a
+--   id[Int] 42         : Int
+--   higher rank        : (forall a. a -> a) -> Bool
+--   impredicative      : forall a. a -> a
+--   bad application    : error: application expects a function, got Int
+--   bad argument       : error: no subtype rule for Int <: Bool
+
+import Control.State (..)
+import Control.Fresh (Fresh, run_fresh)
+import Data.Name (Name, Binder, fresh_binder, bound_name, name_id)
+import Data.Scope (Scope, scope_empty, scope_push, scope_lookup)
+import Data.String (contains)
+
+-- String-spelled source syntax.
+
+type Ty
+  = TyInt
+  | TyBool
+  | TyVar(String)
+  | TyMeta(Int)
+  | TyArrow(Ty, Ty)
+  | TyForall(String, Ty)
+
+type Op
+  = Add
+  | Sub
+  | Mul
+  | Div
+  | And
+  | Or
+  | Eq
+  | Ne
+  | Lt
+  | Le
+  | Gt
+  | Ge
+
+type Expr
+  = EVar(String)
+  | EInt(Int)
+  | EBool(Bool)
+  | ELam(String, Ty, Expr)
+  | EApp(Expr, Expr)
+  | ETLam(String, Expr)
+  | ETApp(Expr, Ty)
+  | EAnn(Expr, Ty)
+  | ELet(String, Expr, Expr)
+  | EIf(Expr, Expr, Expr)
+  | EBin(Op, Expr, Expr)
+
+-- Resolution gives the two namespaces incompatible identity brands. The DK
+-- context below never compares a spelling and substitution never freshens.
+
+type TermSpace = TermTag
+
+type TySpace = TyTag
+
+type RTy
+  = RInt
+  | RBool
+  | RVar(Name(TySpace))
+  | RMeta(Int)
+  | RArrow(RTy, RTy)
+  | RForall(Binder(TySpace), RTy)
+
+type RExpr
+  = RVarE(Name(TermSpace))
+  | RIntE(Int)
+  | RBoolE(Bool)
+  | RLam(Binder(TermSpace), RTy, RExpr)
+  | RApp(RExpr, RExpr)
+  | RTLam(Binder(TySpace), RExpr)
+  | RTApp(RExpr, RTy)
+  | RAnn(RExpr, RTy)
+  | RLet(Binder(TermSpace), RExpr, RExpr)
+  | RIf(RExpr, RExpr, RExpr)
+  | RBin(Op, RExpr, RExpr)
+
+error TypeError(String)
+
+fn type_error(msg : String) : a ! {TypeError} = throw TypeError(msg)
+
+type Scopes = Scopes { terms: Scope(TermSpace), tys: Scope(TySpace) }
+
+fn empty_scopes() : Scopes = Scopes { terms = scope_empty, tys = scope_empty }
+
+fn resolve_ty(sc : Scopes, ty : Ty) : RTy ! {Fresh, TypeError} =
+  match ty of
+    TyInt => RInt
+    TyBool => RBool
+    TyVar(a) =>
+      match scope_lookup(sc.tys, a) of
+        Ok(b) => RVar(bound_name(b))
+        Err(_e) => type_error("unbound type variable {a}")
+    TyMeta(_) => type_error("metavariable escaped into a source annotation")
+    TyArrow(a, b) => RArrow(resolve_ty(sc, a), resolve_ty(sc, b))
+    TyForall(a, body) =>
+      let binder = fresh_binder(a)
+      RForall(
+          binder,
+          resolve_ty({ sc | tys = scope_push(sc.tys, binder) }, body),
+        )
+
+fn resolve_expr(sc : Scopes, e : Expr) : RExpr ! {Fresh, TypeError} =
+  match e of
+    EVar(x) =>
+      match scope_lookup(sc.terms, x) of
+        Ok(b) => RVarE(bound_name(b))
+        Err(_e) => type_error("unbound variable {x}")
+    EInt(n) => RIntE(n)
+    EBool(b) => RBoolE(b)
+    ELam(x, param, body) =>
+      let rp = resolve_ty(sc, param)
+      let binder = fresh_binder(x)
+      RLam(
+          binder,
+          rp,
+          resolve_expr({ sc | terms = scope_push(sc.terms, binder) }, body),
+        )
+    EApp(f, x) => RApp(resolve_expr(sc, f), resolve_expr(sc, x))
+    ETLam(a, body) =>
+      let binder = fresh_binder(a)
+      RTLam(
+          binder,
+          resolve_expr({ sc | tys = scope_push(sc.tys, binder) }, body),
+        )
+    ETApp(f, arg) => RTApp(resolve_expr(sc, f), resolve_ty(sc, arg))
+    EAnn(inner, annotation) =>
+      RAnn(resolve_expr(sc, inner), resolve_ty(sc, annotation))
+    ELet(x, value, body) =>
+      let rv = resolve_expr(sc, value)
+      let binder = fresh_binder(x)
+      RLet(
+          binder,
+          rv,
+          resolve_expr({ sc | terms = scope_push(sc.terms, binder) }, body),
+        )
+    EIf(c, yes, no) =>
+      RIf(resolve_expr(sc, c), resolve_expr(sc, yes), resolve_expr(sc, no))
+    EBin(op, x, y) => RBin(op, resolve_expr(sc, x), resolve_expr(sc, y))
+
+fn subst(name : Name(TySpace), replacement : RTy, ty : RTy) : RTy =
+  match ty of
+    RVar(a) =>
+      if name == a then
+        replacement
+      else
+        ty
+    RArrow(a, b) =>
+      RArrow(subst(name, replacement, a), subst(name, replacement, b))
+    RForall(b, body) => RForall(b, subst(name, replacement, body))
+    _ => ty
+
+-- Ordered contexts. The list is newest-first. A solved existential stays at
+-- the declaration's position, so the entries in `older` are exactly the ones
+-- its solution is allowed to mention.
+
+type Entry
+  = VarBnd(Name(TermSpace), RTy)
+  | TVarBnd(Name(TySpace))
+  | ETVarBnd(Int)
+  | SETVarBnd(Int, RTy)
+  | Mark(Int)
+
+alias Context = List(Entry)
+
+type Split = Missing | Found(List(Entry), Entry, List(Entry))
+
+fn empty_context() : Context = []
+
+fn push(ctx : Context, entry : Entry) : Context = Cons(entry, ctx)
+
+fn split_entry(p : (Entry) -> Bool, xs : List(Entry)) : Split =
+  match xs of
+    Nil => Missing
+    Cons(entry, rest) =>
+      if p(entry) then
+        Found(Nil, entry, rest)
+      else
+        match split_entry(p, rest) of
+          Missing => Missing
+          Found(newer, target, older) =>
+            Found(Cons(entry, newer), target, older)
+
+fn is_meta_entry(a : Int, entry : Entry) : Bool =
+  match entry of
+    ETVarBnd(b) => a == b
+    SETVarBnd(b, _ty) => a == b
+    _ => false
+
+fn is_tvar_entry(a : Name(TySpace), entry : Entry) : Bool =
+  match entry of
+    TVarBnd(b) => a == b
+    _ => false
+
+fn is_term_entry(x : Name(TermSpace), entry : Entry) : Bool =
+  match entry of
+    VarBnd(y, _ty) => x == y
+    _ => false
+
+fn is_mark_entry(a : Int, entry : Entry) : Bool =
+  match entry of
+    Mark(b) => a == b
+    _ => false
+
+fn split_meta(a : Int, ctx : Context) : Split =
+  split_entry(\(entry) -> is_meta_entry(a, entry), ctx)
+
+fn split_tvar(a : Name(TySpace), ctx : Context) : Split =
+  split_entry(\(entry) -> is_tvar_entry(a, entry), ctx)
+
+fn split_term(x : Name(TermSpace), ctx : Context) : Split =
+  split_entry(\(entry) -> is_term_entry(x, entry), ctx)
+
+fn split_mark(a : Int, ctx : Context) : Split =
+  split_entry(\(entry) -> is_mark_entry(a, entry), ctx)
+
+-- Term binders do not scope types, so deleting one preserves entries created
+-- while checking its body. Type binders and markers do scope types, so leaving
+-- either truncates everything newer than the delimiter.
+fn remove_term(ctx : Context, x : Name(TermSpace)) : Context ! {TypeError} =
+  match split_term(x, ctx) of
+    Found(newer, _target, older) => append(newer, older)
+    Missing => type_error("internal: missing term context entry %{name_id(x)}")
+
+fn leave_tvar(ctx : Context, a : Name(TySpace)) : Context ! {TypeError} =
+  match split_tvar(a, ctx) of
+    Found(_newer, _target, older) => older
+    Missing => type_error("internal: missing type context entry %{name_id(a)}")
+
+fn leave_mark(ctx : Context, a : Int) : Context ! {TypeError} =
+  match split_mark(a, ctx) of
+    Found(_newer, _target, older) => older
+    Missing => type_error("internal: missing context marker ?{a}")
+
+fn lookup_term(x : Name(TermSpace), xs : List(Entry)) : RTy ! {TypeError} =
+  match xs of
+    Nil => type_error("unbound resolved variable %{name_id(x)}")
+    Cons(entry, rest) =>
+      match entry of
+        VarBnd(y, ty) =>
+          if x == y then
+            ty
+          else
+            lookup_term(x, rest)
+        _ => lookup_term(x, rest)
+
+fn lookup_solution(a : Int, xs : List(Entry)) : Option(RTy) =
+  match xs of
+    Nil => None
+    Cons(entry, rest) =>
+      match entry of
+        SETVarBnd(b, ty) =>
+          if a == b then
+            Some(ty)
+          else
+            lookup_solution(a, rest)
+        _ => lookup_solution(a, rest)
+
+fn has_tvar(a : Name(TySpace), xs : List(Entry)) : Bool =
+  match xs of
+    Nil => false
+    Cons(entry, rest) =>
+      match entry of
+        TVarBnd(b) => a == b || has_tvar(a, rest)
+        _ => has_tvar(a, rest)
+
+fn has_meta(a : Int, xs : List(Entry)) : Bool =
+  match xs of
+    Nil => false
+    Cons(entry, rest) =>
+      match entry of
+        ETVarBnd(b) => a == b || has_meta(a, rest)
+        SETVarBnd(b, _ty) => a == b || has_meta(a, rest)
+        _ => has_meta(a, rest)
+
+fn apply_context(ctx : Context, ty : RTy) : RTy =
+  match ty of
+    RMeta(a) =>
+      match lookup_solution(a, ctx) of
+        Some(solution) => apply_context(ctx, solution)
+        None => ty
+    RArrow(a, b) => RArrow(apply_context(ctx, a), apply_context(ctx, b))
+    RForall(a, body) => RForall(a, apply_context(ctx, body))
+    _ => ty
+
+fn well_formed(ctx : Context, ty : RTy) : Bool =
+  match ty of
+    RInt | RBool => true
+    RVar(a) => has_tvar(a, ctx)
+    RMeta(a) => has_meta(a, ctx)
+    RArrow(a, b) => well_formed(ctx, a) && well_formed(ctx, b)
+    RForall(a, body) => well_formed(push(ctx, TVarBnd(bound_name(a))), body)
+
+fn mono(ty : RTy) : Bool =
+  match ty of
+    RForall(_, _) => false
+    RArrow(a, b) => mono(a) && mono(b)
+    _ => true
+
+fn occurs(ctx : Context, a : Int, ty : RTy) : Bool =
+  match apply_context(ctx, ty) of
+    RMeta(b) => a == b
+    RArrow(x, y) => occurs(ctx, a, x) || occurs(ctx, a, y)
+    RForall(_, body) => occurs(ctx, a, body)
+    _ => false
+
+-- Pretty printing recovers source hints without returning to string identity.
+
+fn show_ty(ty : RTy) : String = show_ty_at(0, [], ty)
+
+fn hint_for(env : List((Name(TySpace), String)), n : Name(TySpace)) : String =
+  match env of
+    Nil => "%{name_id(n)}"
+    Cons((m, hint), rest) =>
+      if n == m then
+        hint
+      else
+        hint_for(rest, n)
+
+fn hint_taken(env : List((Name(TySpace), String)), hint : String) : Bool =
+  match env of
+    Nil => false
+    Cons((_m, h), rest) => h == hint || hint_taken(rest, hint)
+
+fn free_hint(env : List((Name(TySpace), String)), hint : String) : String =
+  if hint_taken(env, hint) then
+    free_hint(env, concat(hint, "'"))
+  else
+    hint
+
+fn show_ty_at(
+  precedence : Int,
+  env : List((Name(TySpace), String)),
+  ty : RTy
+) : String =
+  match ty of
+    RInt => "Int"
+    RBool => "Bool"
+    RVar(a) => hint_for(env, a)
+    RMeta(a) => "?{a}"
+    RArrow(a, b) =>
+      let text = "{show_ty_at(1 + 1, env, a)} -> {show_ty_at(1, env, b)}"
+      if precedence > 1 then
+        "({text})"
+      else
+        text
+    RForall(b, body) =>
+      let shown = free_hint(env, b.hint)
+      let inner = Cons((bound_name(b), shown), env)
+      let text = "forall {shown}. {show_ty_at(0, inner, body)}"
+      if precedence > 0 then
+        "({text})"
+      else
+        text
+
+-- Fresh existential allocation is the DK checker's only mutable state.
+
+alias Dk = {State(Int), TypeError}
+
+fn fresh_evar(ctx : Context) : (RTy, Context) ! {State(Int)} =
+  let a = get()
+  put(a + 1)
+  (RMeta(a), push(ctx, ETVarBnd(a)))
+
+fn replace_meta(
+  ctx : Context,
+  a : Int,
+  replacement : RTy
+) : Context ! {TypeError} =
+  match split_meta(a, ctx) of
+    Missing => type_error("internal: missing existential ?{a}")
+    Found(newer, _target, older) =>
+      let allowed = older
+      if occurs(ctx, a, replacement) then
+        type_error("occurs check: ?{a} occurs in {show_ty(replacement)}")
+      elif not(well_formed(allowed, replacement)) then
+        type_error("scope escape while solving ?{a} := {show_ty(replacement)}")
+      else
+        append(newer, Cons(SETVarBnd(a, replacement), older))
+
+-- Orient a meta/meta equation from the newer existential to the older one.
+fn reach(ctx : Context, a : Int, b : Int) : Context ! {TypeError} =
+  if a == b then
+    ctx
+  else
+    match split_meta(a, ctx) of
+      Missing => type_error("internal: missing existential ?{a}")
+      Found(_anewer, _atarget, aolder) =>
+        if has_meta(b, aolder) then
+          replace_meta(ctx, a, RMeta(b))
+        else
+          replace_meta(ctx, b, RMeta(a))
+
+-- Decompose one existential into an arrow. The fresh components are inserted
+-- just below it, making both legal dependencies of the solution.
+fn expand_arrow(ctx : Context, a : Int) : (Int, Int, Context) ! {Dk} =
+  let left = get()
+  put(left + 1)
+  let right = get()
+  put(right + 1)
+  match split_meta(a, ctx) of
+    Missing => type_error("internal: missing existential ?{a}")
+    Found(newer, _target, older) =>
+      let replacement = SETVarBnd(a, RArrow(RMeta(left), RMeta(right)))
+      let middle =
+        Cons(replacement, Cons(ETVarBnd(right), Cons(ETVarBnd(left), older)))
+      (left, right, append(newer, middle))
+
+-- DK's two instantiation judgments, mutually recursive with subtyping.
+
+fn instantiate_left(ctx : Context, a : Int, ty : RTy) : Context ! {Dk} =
+  let t = apply_context(ctx, ty)
+  match t of
+    RMeta(b) => reach(ctx, a, b)
+    RArrow(t1, t2) =>
+      let (a1, a2, ctx1) = expand_arrow(ctx, a)
+      let ctx2 = instantiate_right(ctx1, t1, a1)
+      instantiate_left(ctx2, a2, apply_context(ctx2, t2))
+    RForall(b, body) =>
+      let scoped = push(ctx, TVarBnd(bound_name(b)))
+      let checked = instantiate_left(scoped, a, body)
+      leave_tvar(checked, bound_name(b))
+    _ =>
+      if mono(t) then
+        replace_meta(ctx, a, t)
+      else
+        type_error("cannot instantiate ?{a} below {show_ty(t)}")
+
+fn instantiate_right(ctx : Context, ty : RTy, a : Int) : Context ! {Dk} =
+  let t = apply_context(ctx, ty)
+  match t of
+    RMeta(b) => reach(ctx, a, b)
+    RArrow(t1, t2) =>
+      let (a1, a2, ctx1) = expand_arrow(ctx, a)
+      let ctx2 = instantiate_left(ctx1, a1, t1)
+      instantiate_right(ctx2, apply_context(ctx2, t2), a2)
+    RForall(b, body) =>
+      let marker = get()
+      let (m, with_meta) = fresh_evar(push(ctx, Mark(marker)))
+      match m of
+        RMeta(_) =>
+          let checked =
+            instantiate_right(with_meta, subst(bound_name(b), m, body), a)
+          leave_mark(checked, marker)
+        _ => type_error("internal: fresh existential is not a meta")
+    _ =>
+      if mono(t) then
+        replace_meta(ctx, a, t)
+      else
+        type_error("cannot instantiate {show_ty(t)} below ?{a}")
+
+fn subtype(ctx : Context, left : RTy, right : RTy) : Context ! {Dk} =
+  let a = apply_context(ctx, left)
+  let b = apply_context(ctx, right)
+  match (a, b) of
+    (RInt, RInt) => ctx
+    (RBool, RBool) => ctx
+    (RVar(x), RVar(y)) =>
+      if x == y then
+        ctx
+      else
+        type_error("no subtype rule for {show_ty(a)} <: {show_ty(b)}")
+    (RMeta(x), RMeta(y)) => reach(ctx, x, y)
+    (RArrow(a1, a2), RArrow(b1, b2)) =>
+      let ctx1 = subtype(ctx, b1, a1)
+      subtype(ctx1, apply_context(ctx1, a2), apply_context(ctx1, b2))
+    (_have, RForall(x, body)) =>
+      let scoped = push(ctx, TVarBnd(bound_name(x)))
+      let checked = subtype(scoped, a, body)
+      leave_tvar(checked, bound_name(x))
+    (RForall(x, body), _want) =>
+      let marker = get()
+      let (m, scoped) = fresh_evar(push(ctx, Mark(marker)))
+      let checked = subtype(scoped, subst(bound_name(x), m, body), b)
+      leave_mark(checked, marker)
+    (RMeta(x), want) => instantiate_left(ctx, x, want)
+    (have, RMeta(x)) => instantiate_right(ctx, have, x)
+    _ => type_error("no subtype rule for {show_ty(a)} <: {show_ty(b)}")
+
+-- Checking consumes an expected type; synthesis produces one. Context output
+-- carries every existential refinement to the next premise.
+
+fn check(ctx : Context, expr : RExpr, ty : RTy) : Context ! {Dk} =
+  let expected = apply_context(ctx, ty)
+  match (expr, expected) of
+    (RIntE(_), RInt) => ctx
+    (RBoolE(_), RBool) => ctx
+    (RLam(x, annotation, body), RArrow(domain, codomain)) =>
+      let ctx1 = subtype(ctx, annotation, domain)
+      let ctx2 = subtype(ctx1, apply_context(ctx1, domain), annotation)
+      let scoped = push(ctx2, VarBnd(bound_name(x), annotation))
+      remove_term(check(scoped, body, codomain), bound_name(x))
+    (RTLam(actual, e), RForall(expected_binder, body)) =>
+      let actual_name = bound_name(actual)
+      let aligned = subst(bound_name(expected_binder), RVar(actual_name), body)
+      let scoped = push(ctx, TVarBnd(actual_name))
+      leave_tvar(check(scoped, e, aligned), actual_name)
+    (e, RForall(a, body)) =>
+      let scoped = push(ctx, TVarBnd(bound_name(a)))
+      let checked = check(scoped, e, body)
+      leave_tvar(checked, bound_name(a))
+    (e, want) =>
+      let (have, ctx1) = infer(ctx, e)
+      subtype(ctx1, apply_context(ctx1, have), apply_context(ctx1, want))
+
+fn infer(ctx : Context, expr : RExpr) : (RTy, Context) ! {Dk} =
+  match expr of
+    RVarE(x) => (lookup_term(x, ctx), ctx)
+    RIntE(_) => (RInt, ctx)
+    RBoolE(_) => (RBool, ctx)
+    RLam(x, param, body) =>
+      let with_term = push(ctx, VarBnd(bound_name(x), param))
+      let (result, with_result) = fresh_evar(with_term)
+      let checked = check(with_result, body, result)
+      let result_ty = apply_context(checked, result)
+      (RArrow(param, result_ty), remove_term(checked, bound_name(x)))
+    RApp(f, x) =>
+      let (fn_ty, ctx1) = infer(ctx, f)
+      infer_app(ctx1, apply_context(ctx1, fn_ty), x)
+    RTLam(a, body) =>
+      let scoped = push(ctx, TVarBnd(bound_name(a)))
+      let (body_ty, checked) = infer(scoped, body)
+      let resolved = apply_context(checked, body_ty)
+      (RForall(a, resolved), leave_tvar(checked, bound_name(a)))
+    RTApp(f, arg) =>
+      let (fn_ty, ctx1) = infer(ctx, f)
+      match apply_context(ctx1, fn_ty) of
+        RForall(a, body) => (subst(bound_name(a), arg, body), ctx1)
+        other =>
+          type_error("type application expects forall, got {show_ty(other)}")
+    RAnn(e, annotation) => (annotation, check(ctx, e, annotation))
+    RLet(x, value, body) =>
+      let (value_ty, ctx1) = infer(ctx, value)
+      let scoped =
+        push(ctx1, VarBnd(bound_name(x), apply_context(ctx1, value_ty)))
+      let (body_ty, ctx2) = infer(scoped, body)
+      let resolved = apply_context(ctx2, body_ty)
+      (resolved, remove_term(ctx2, bound_name(x)))
+    RIf(cond, yes, no) =>
+      let ctx1 = check(ctx, cond, RBool)
+      let (yes_ty, ctx2) = infer(ctx1, yes)
+      let (no_ty, ctx3) = infer(ctx2, no)
+      let ctx4 =
+        subtype(ctx3, apply_context(ctx3, yes_ty), apply_context(ctx3, no_ty))
+      (apply_context(ctx4, yes_ty), ctx4)
+    RBin(op, x, y) => infer_binop(ctx, op, x, y)
+
+fn infer_app(ctx : Context, fn_ty : RTy, arg : RExpr) : (RTy, Context) ! {Dk} =
+  match apply_context(ctx, fn_ty) of
+    RArrow(domain, codomain) =>
+      let checked = check(ctx, arg, domain)
+      (apply_context(checked, codomain), checked)
+    RMeta(a) =>
+      let (domain, codomain, ctx1) = expand_arrow(ctx, a)
+      let checked = check(ctx1, arg, RMeta(domain))
+      (apply_context(checked, RMeta(codomain)), checked)
+    other => type_error("application expects a function, got {show_ty(other)}")
+
+fn infer_binop(
+  ctx : Context,
+  op : Op,
+  x : RExpr,
+  y : RExpr
+) : (RTy, Context) ! {Dk} =
+  match op of
+    Add | Sub | Mul | Div => check_binop(ctx, x, y, RInt, RInt)
+    Lt | Le | Gt | Ge => check_binop(ctx, x, y, RInt, RBool)
+    And | Or => check_binop(ctx, x, y, RBool, RBool)
+    Eq | Ne =>
+      let (operand, ctx1) = infer(ctx, x)
+      let checked = check(ctx1, y, apply_context(ctx1, operand))
+      (RBool, checked)
+
+fn check_binop(
+  ctx : Context,
+  x : RExpr,
+  y : RExpr,
+  operand : RTy,
+  result : RTy
+) : (RTy, Context) ! {Dk} =
+  let ctx1 = check(ctx, x, operand)
+  let ctx2 = check(ctx1, y, operand)
+  (result, ctx2)
+
+fn type_of(expr : Expr) : Result(RTy, String) =
+  try
+    let resolved = run_fresh(\() -> resolve_expr(empty_scopes(), expr))
+    let ((ty, final_ctx), _next) =
+      run_state(0, \() -> infer(empty_context(), resolved))
+    Ok(apply_context(final_ctx, ty))
+  catch
+    TypeError(msg) => Err(msg)
+
+fn report(label : String, expr : Expr) : Unit ! {IO} =
+  match type_of(expr) of
+    Ok(ty) => println("{label} : {show_ty(ty)}")
+    Err(msg) => println("{label} : error: {msg}")
+
+fn identity() : Expr = ETLam("a", ELam("x", TyVar("a"), EVar("x")))
+
+fn church_pair() : Expr =
+  ETLam(
+      "a",
+      ETLam(
+          "b",
+          ELam(
+              "x",
+              TyVar("a"),
+              ELam(
+                  "y",
+                  TyVar("b"),
+                  ETLam(
+                      "c",
+                      ELam(
+                          "f",
+                          TyArrow(TyVar("a"), TyArrow(TyVar("b"), TyVar("c"))),
+                          EApp(EApp(EVar("f"), EVar("x")), EVar("y")),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+fn church_pair_type() : Ty =
+  TyForall(
+      "a",
+      TyForall(
+          "b",
+          TyArrow(
+              TyVar("a"),
+              TyArrow(
+                  TyVar("b"),
+                  TyForall(
+                      "c",
+                      TyArrow(
+                          TyArrow(TyVar("a"), TyArrow(TyVar("b"), TyVar("c"))),
+                          TyVar("c"),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+fn shown_type(expr : Expr) : String =
+  match type_of(expr) of
+    Ok(ty) => show_ty(ty)
+    Err(msg) => "error: {msg}"
+
+fn resolve_ty_pair(
+  sc : Scopes,
+  a : Ty,
+  b : Ty
+) : (RTy, RTy) ! {Fresh, TypeError} =
+  (resolve_ty(sc, a), resolve_ty(sc, b))
+
+fn equivalent_body(ra : RTy, rb : RTy) : Context ! {Dk} =
+  let ctx1 = subtype(empty_context(), ra, rb)
+  subtype(ctx1, rb, ra)
+
+fn equivalent_types(a : Ty, b : Ty) : Bool =
+  try
+    let (ra, rb) = run_fresh(\() -> resolve_ty_pair(empty_scopes(), a, b))
+    let (_ctx, _next) = run_state(0, \() -> equivalent_body(ra, rb))
+    true
+  catch
+    TypeError(_msg) => false
+
+fn occurs_body() : Unit ! {Dk} =
+  let (m, ctx) = fresh_evar(empty_context())
+  match m of
+    RMeta(a) =>
+      replace_meta(ctx, a, RArrow(m, RInt))
+      ()
+    _ => type_error("internal: fresh existential is not a meta")
+
+fn occurs_rejected() : Bool =
+  try
+    let (_u, _next) = run_state(0, \() -> occurs_body())
+    false
+  catch
+    TypeError(msg) => contains("occurs", msg)
+
+fn dk_escape_body(a : Binder(TySpace)) : Unit ! {Dk} =
+  let (m, ctx) = fresh_evar(empty_context())
+  subtype(push(ctx, TVarBnd(bound_name(a))), m, RVar(bound_name(a)))
+  ()
+
+fn scope_escape_rejected() : Bool =
+  try
+    let a = run_fresh(\() -> fresh_binder("a"))
+    let (_u, _next) = run_state(0, \() -> dk_escape_body(a))
+    false
+  catch
+    TypeError(msg) => contains("scope escape", msg)
+
+-- Silent executable laws keep the example's visible output small while
+-- pinning the failure modes that an ordered-context implementation is meant to
+-- exclude.
+fn baseline(name : String, ok : Bool) : Unit ! {IO} =
+  if ok then
+    ()
+  else
+    println("baseline violated: {name}")
+
+fn baseline_checks() : Unit ! {IO} =
+  let poly_x = TyForall("x", TyArrow(TyVar("x"), TyVar("x")))
+  let poly_y = TyForall("y", TyArrow(TyVar("y"), TyVar("y")))
+  baseline("alpha-equivalent foralls subtype", equivalent_types(poly_x, poly_y))
+  baseline("occurs check rejects", occurs_rejected())
+  baseline("rigid variable cannot escape", scope_escape_rejected())
+  baseline(
+      "lambda annotation is checked",
+      contains(
+          "error:",
+          shown_type(EAnn(ELam("x", TyBool, EVar("x")), TyArrow(TyInt, TyInt))),
+        ),
+    )
+  baseline(
+      "implicit forall application is rejected",
+      contains("error:", shown_type(EApp(identity(), EBool(true)))),
+    )
+  baseline(
+      "Church pair checks at its rank-3 type",
+      not(
+          contains(
+              "error:",
+              shown_type(EAnn(church_pair(), church_pair_type())),
+            ),
+        ),
+    )
+  baseline(
+      "free source type variable is rejected",
+      contains(
+          "unbound type variable",
+          shown_type(ELam("x", TyVar("free"), EVar("x"))),
+        ),
+    )
+  baseline(
+      "source existential is rejected",
+      contains(
+          "metavariable escaped",
+          shown_type(ELam("x", TyMeta(0), EVar("x"))),
+        ),
+    )
+  baseline(
+      "instantiation avoids capture",
+      shown_type(
+          ETLam(
+              "b",
+              ETApp(
+                  ETLam("a", ETLam("b", ELam("x", TyVar("a"), EVar("x")))),
+                  TyVar("b"),
+                ),
+            ),
+        )
+        == "forall b. forall b'. b -> b",
+    )
+
+fn main() : Unit ! {IO} =
+  baseline_checks()
+  let id = identity()
+  let answer = 42
+  report("id                ", id)
+  report("id[Int] 42        ", EApp(ETApp(id, TyInt), EInt(answer)))
+  let poly_id = TyForall("a", TyArrow(TyVar("a"), TyVar("a")))
+  report(
+      "higher rank       ",
+      ELam("f", poly_id, EApp(ETApp(EVar("f"), TyBool), EBool(true))),
+    )
+  report("impredicative     ", EApp(ETApp(id, poly_id), identity()))
+  report("bad application   ", EApp(EInt(1), EBool(true)))
+  report("bad argument      ", EApp(ELam("x", TyBool, EVar("x")), EInt(1)))

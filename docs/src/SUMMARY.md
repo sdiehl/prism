@@ -1,7 +1,15 @@
 # Summary
 
 - [Prism](./intro.md)
-- [Prism Tutorial](./tutorial.md)
+- [Taste the Rainbow](./tutorial.md)
+  - [Functions and Values](./tutorial/functions.md)
+  - [Data and Patterns](./tutorial/data.md)
+  - [Purity and Effect Types](./tutorial/effects.md)
+  - [Handlers and Continuations](./tutorial/continuations.md)
+  - [Coeffects](./tutorial/coeffects.md)
+  - [Lenses and Streams](./tutorial/lenses-streams.md)
+  - [Projects and Content Identity](./tutorial/projects-identity.md)
+  - [The Prism Way](./tutorial/prism-way.md)
 - [Language Specification](./spec.md)
 - [Compiler](./compiler.md)
 - [Standard Library](./stdlib/index.md)

@@ -7,17 +7,17 @@ test:
 # Run the native parity tests.
 [group('tests')]
 parity:
-    PRISM_COMPILER_CACHE=0 cargo test --test native_parity parity::
+    PRISM_COMPILER_CACHE=0 cargo test --test native parity::
 
 # Compare the corpus across all optimizer configurations.
 [group('tests')]
 opt-equiv *FLAGS:
-    PRISM_COMPILER_CACHE=0 PRISM_CORE_LINT=1 PRISM_QUIET=1 cargo test {{ FLAGS }} --test opt_equiv gate::optimizer_configurations_have_identical_observation_traces -- --exact
+    PRISM_COMPILER_CACHE=0 PRISM_CORE_LINT=1 PRISM_QUIET=1 cargo test {{ FLAGS }} --test differential gate::optimizer_configurations_have_identical_observation_traces -- --exact
 
 # Run native performance gates.
 [group('tests')]
 perf:
-    PRISM_COMPILER_CACHE=0 cargo test --test native_perf perf_gate::
+    PRISM_COMPILER_CACHE=0 cargo test --test native perf_gate::
 
 # Run snapshot tests.
 [group('tests')]
@@ -102,9 +102,14 @@ fmt-examples: build-release
 package-world: build-release
     ./target/release/prism pkg check-world packages --strict
 
+# Judge the stdlib and packages against the house style rules.
+[group('quality')]
+lint: build-release
+    ./target/release/prism lint lib/std packages
+
 # Mirror the complete CI check set locally.
 [group('gates')]
-ci: fmt-check clippy stub-check doc-check feature-matrix test fmt-examples package-world artifacts-check
+ci: fmt-check clippy stub-check doc-check feature-matrix test fmt-examples package-world lint artifacts-check
 
 # Reject placeholder markers in production sources.
 [group('quality')]

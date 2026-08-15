@@ -9,11 +9,11 @@ fn fold_tree(leaf : b, node : (b, a, b) -> b, t : Tree(a)) : b =
 
 fn size(t : Tree(a)) : Int = fold_tree(0, \(l, _, r) -> l + r + 1, t)
 
-fn sum(t : Tree(Int)) : Int = fold_tree(0, \(l, x, r) -> l + x + r, t)
+fn total(t : Tree(Int)) : Int = fold_tree(0, \(l, x, r) -> l + x + r, t)
 
 fn depth(t : Tree(a)) : Int = fold_tree(0, \(l, _, r) -> 1 + max(l, r), t)
 
-fn to_list(t : Tree(a)) : List(a) =
+fn elems(t : Tree(a)) : List(a) =
   fold_tree([], \(l, x, r) -> append(append(l, [x]), r), t)
 
 -- Expected output:
@@ -24,6 +24,6 @@ fn to_list(t : Tree(a)) : List(a) =
 fn main() =
   let t = Node(Node(Leaf, 1, Leaf), 2, Node(Node(Leaf, 3, Leaf), 4, Leaf))
   println(show(size(t)))
-  println(show(sum(t)))
+  println(show(total(t)))
   println(show(depth(t)))
-  println(show(to_list(t)))
+  println(show(elems(t)))

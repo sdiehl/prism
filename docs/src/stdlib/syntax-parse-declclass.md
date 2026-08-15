@@ -42,11 +42,11 @@ Parse a class declaration, including marker classes without a body and layout bo
 
 ### `parse_instance_item`
 
-```prism,sig,h-8d174b07cf4d979dc19fc53ba1e24a18f615367715f3fbc2e1c898dbbbae8745
+```prism,sig,h-2fbbd552036874bf7aa7c22ed73fb4a2605301034029fa082dd75aebddaade23
 parse_instance_item : (Syntax.Cursor.Cursor, Int, Option(String)) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Item)
 ```
 
-Parse an instance declaration, including marker instances and layout bodies of complete function declarations. Visibility is accepted for the uniform dispatcher API; the phase-independent instance AST has no visibility field, matching the bootstrap export.
+Parse an instance declaration, including marker instances and layout bodies of complete function declarations. Visibility is accepted for the uniform dispatcher API; the phase-independent instance AST has no visibility field, matching the bootstrap export. lint: allow(L0101)
 
 ### `parse_canonical_item`
 
@@ -54,4 +54,4 @@ Parse an instance declaration, including marker instances and layout bodies of c
 parse_canonical_item : (Syntax.Cursor.Cursor, Int, Option(String)) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Item)
 ```
 
-Parse `canonical Class(Head) = instance_name`.
+Parse `canonical Class(Head) = instance_name`. lint: allow(L0101)

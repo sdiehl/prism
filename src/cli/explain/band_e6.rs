@@ -803,4 +803,18 @@ pub(super) const ENTRIES: &[Explanation] = &[
               `deriving` clause and write that type's accessors by hand under \
               names of your own.",
     },
+    Explanation {
+        code: "E6073",
+        title: "definition takes a name the prelude already opened",
+        prose: "The prelude opens a set of library names into unqualified scope, \
+                and a top-level definition of one of those names wins it for the \
+                whole file. Every unqualified use then reaches the local \
+                definition, including uses written before it and uses that meant \
+                the library one. The message names the library symbol that was \
+                displaced, so the module it came from is visible. Under the strict \
+                setting the capture is an error.",
+        example: "fn count(xs) = 0\n\nfn main() = println(count([1, 2]))",
+        fix: "Rename the local definition, or keep the name and call the library \
+              function by its qualified name where you meant it.",
+    },
 ];

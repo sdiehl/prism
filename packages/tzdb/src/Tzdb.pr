@@ -30,7 +30,9 @@
 -- 2026-07-01T08:00:00-04:00
 -- ```
 
-import Time (..)
+-- lint: allow-file(L0108)
+
+import Time (Wall, Duration, minutes, wall_add, wall_of_nanos, wall_unix_secs)
 
 -- Floor division and remainder for a positive divisor. `/` truncates toward
 -- zero, which disagrees with floor exactly on negative dividends, and local
@@ -490,35 +492,47 @@ pub fn tzdata_version() : String = "2025b"
 -- | Coordinated Universal Time itself, offset zero, no daylight rule.
 pub fn utc() : Zone = fixed("UTC", "UTC", 0)
 
+-- | The United Kingdom, on GMT in winter and BST under the European daylight rule.
 pub fn europe_london() : Zone = ruled("Europe/London", "GMT", "BST", 0, eu_dst())
 
+-- | Portugal, on Western European Time and its summer counterpart.
 pub fn europe_lisbon() : Zone = ruled("Europe/Lisbon", "WET", "WEST", 0, eu_dst())
 
+-- | France, on Central European Time and its summer counterpart.
 pub fn europe_paris() : Zone = ruled("Europe/Paris", "CET", "CEST", 60, eu_dst())
 
+-- | Germany, on Central European Time and its summer counterpart.
 pub fn europe_berlin() : Zone = ruled("Europe/Berlin", "CET", "CEST", 60, eu_dst())
 
+-- | Spain, on Central European Time and its summer counterpart.
 pub fn europe_madrid() : Zone = ruled("Europe/Madrid", "CET", "CEST", 60, eu_dst())
 
+-- | Italy, on Central European Time and its summer counterpart.
 pub fn europe_rome() : Zone = ruled("Europe/Rome", "CET", "CEST", 60, eu_dst())
 
+-- | Greece, on Eastern European Time and its summer counterpart.
 pub fn europe_athens() : Zone = ruled("Europe/Athens", "EET", "EEST", 120, eu_dst())
 
+-- | The United States Eastern zone, on the North American daylight rule.
 pub fn america_new_york() : Zone =
   ruled("America/New_York", "EST", "EDT", -300, us_dst())
 
+-- | The United States Central zone, on the North American daylight rule.
 pub fn america_chicago() : Zone =
   ruled("America/Chicago", "CST", "CDT", -360, us_dst())
 
+-- | The United States Mountain zone, on the North American daylight rule.
 pub fn america_denver() : Zone =
   ruled("America/Denver", "MST", "MDT", -420, us_dst())
 
 -- | Arizona observes no daylight time, unlike the rest of the Mountain zone.
 pub fn america_phoenix() : Zone = fixed("America/Phoenix", "MST", -420)
 
+-- | The United States Pacific zone, on the North American daylight rule.
 pub fn america_los_angeles() : Zone =
   ruled("America/Los_Angeles", "PST", "PDT", -480, us_dst())
 
+-- | The Alaska zone, on the North American daylight rule.
 pub fn america_anchorage() : Zone =
   ruled("America/Anchorage", "AKST", "AKDT", -540, us_dst())
 
@@ -528,23 +542,29 @@ pub fn america_sao_paulo() : Zone = fixed("America/Sao_Paulo", "-03", -180)
 -- | Mexico abolished daylight time in 2022.
 pub fn america_mexico_city() : Zone = fixed("America/Mexico_City", "CST", -360)
 
+-- | Japan, nine hours ahead of UTC year round.
 pub fn asia_tokyo() : Zone = fixed("Asia/Tokyo", "JST", 540)
 
+-- | Mainland China, eight hours ahead of UTC year round.
 pub fn asia_shanghai() : Zone = fixed("Asia/Shanghai", "CST", 480)
 
 -- | India runs on a half-hour offset, five hours thirty minutes ahead of UTC.
 pub fn asia_kolkata() : Zone = fixed("Asia/Kolkata", "IST", 330)
 
+-- | The United Arab Emirates, four hours ahead of UTC year round.
 pub fn asia_dubai() : Zone = fixed("Asia/Dubai", "+04", 240)
 
+-- | Singapore, eight hours ahead of UTC year round.
 pub fn asia_singapore() : Zone = fixed("Asia/Singapore", "+08", 480)
 
+-- | New South Wales, on the southern-hemisphere Australian daylight rule.
 pub fn australia_sydney() : Zone =
   ruled("Australia/Sydney", "AEST", "AEDT", 600, au_dst())
 
 -- | Queensland observes no daylight time, unlike New South Wales.
 pub fn australia_brisbane() : Zone = fixed("Australia/Brisbane", "AEST", 600)
 
+-- | New Zealand, on the southern-hemisphere New Zealand daylight rule.
 pub fn pacific_auckland() : Zone =
   ruled("Pacific/Auckland", "NZST", "NZDT", 720, nz_dst())
 

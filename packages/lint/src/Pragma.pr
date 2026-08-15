@@ -1,0 +1,102 @@
+-- | Allow pragmas and doc-comment detection over the embedded source text.
+--
+-- The surface tree carries no trivia, so the pragma scanner reads the
+-- document's own source: the contiguous `--` comment block directly above a
+-- declaration is its leading trivia. Two pragma spellings are recognized, both
+-- requiring explicit rule codes so an exception never becomes a blanket skip:
+--
+-- `-- lint: allow(L0101)` in leading trivia suppresses those codes for that
+-- one declaration. `-- lint: allow-file(L0108)` anywhere in the file
+-- suppresses those codes for the whole file, the escape hatch for generated
+-- parsers and hand-optimized code. Both survive `prism fmt` (they are ordinary
+-- comments), both are greppable, and the gate counts every suppression in its
+-- summary so exceptions stay visible.
+
+import Data.List (concat_map, filter, map)
+import Data.String (index_of, split, starts_with, trim)
+
+-- The newline and comma bytes the scanner splits on.
+let pg_lf : Int = 10
+
+let pg_comma : Int = 44
+
+-- | The spelling of a per-declaration allow line.
+pub fn pg_allow_head() : String = "-- lint: allow("
+
+-- | The spelling of a whole-file allow line.
+pub fn pg_allow_file_head() : String = "-- lint: allow-file("
+
+-- | The spelling of a doc-comment head.
+pub fn pg_doc_head() : String = "-- |"
+
+-- | The offset of the first byte of the line containing `i`.
+pub fn pg_line_start(text : String, i : Int) : Int =
+  if i <= 0 then
+    0
+  elif char_at(text, i - 1) == pg_lf then
+    i
+  else
+    pg_line_start(text, i - 1)
+
+-- | The contiguous comment lines directly above the byte offset `lo`, trimmed,
+-- in source order. A blank line or code line ends the block.
+pub fn pg_leading(text : String, lo : Int) : List(String) =
+  pg_leading_go(text, pg_line_start(text, lo), Nil)
+
+fn pg_leading_go(
+  text : String,
+  start : Int,
+  acc : List(String)
+) : List(String) =
+  if start <= 0 then
+    acc
+  else
+    let prev = pg_line_start(text, start - 1)
+    let line = trim(substring(text, prev, start - 1 - prev))
+    if starts_with("--", line) then
+      pg_leading_go(text, prev, Cons(line, acc))
+    else
+      acc
+
+-- | Whether the declaration at `lo` carries a `-- |` doc head in its leading
+-- trivia.
+pub fn pg_has_doc(text : String, lo : Int) : Bool = pg_any_doc(pg_leading(text, lo))
+
+fn pg_any_doc(lines : List(String)) : Bool =
+  match lines of
+    Nil => false
+    Cons(line, rest) => starts_with(pg_doc_head(), line) || pg_any_doc(rest)
+
+-- | The rule codes allowed for the declaration at `lo`.
+pub fn pg_allows(text : String, lo : Int) : List(String) =
+  concat_map(
+      \(line) -> pg_line_codes(pg_allow_head(), line),
+      pg_leading(text, lo),
+    )
+
+-- | The rule codes allowed for the whole file, from `allow-file` lines
+-- anywhere in it.
+pub fn pg_file_allows(text : String) : List(String) =
+  concat_map(
+      \(line) -> pg_line_codes(pg_allow_file_head(), line),
+      map(trim, split(pg_lf, text)),
+    )
+
+-- | The codes inside one pragma line, or nothing if the line is not that
+-- pragma.
+pub fn pg_line_codes(head : String, line : String) : List(String) =
+  if starts_with(head, line) then
+    let open = index_of("(", line)
+    let close = index_of(")", line)
+    if open < 0 || close <= open then
+      Nil
+    else
+      filter(
+          \(code) -> not(code == ""),
+          map(
+              trim,
+              split(pg_comma, substring(line, open + 1, close - open - 1)),
+            ),
+        )
+  else
+    Nil

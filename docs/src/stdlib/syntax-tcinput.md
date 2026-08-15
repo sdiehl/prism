@@ -11,8 +11,14 @@ The document is the declaration interface consumed by the Rust checker. Its func
 ### `TcImport`
 
 ```prism,def,h-e6e8d50d33b2a8f61d31f374e97db52c0de4bc66843018e0d81a1e0e93f15194
-type TcImport = TcImport { path: String, names: List(String), glob: Bool }
+type TcImport = TcImport {
+  path: String,
+  names: List(String),
+  glob: Bool
+} deriving (Eq, Show)
 ```
+
+One import the module takes: the module path, the names taken from it, and whether the list was written as a glob.
 
 ### `TcCtor`
 
@@ -22,8 +28,10 @@ type TcCtor = TcCtor {
   tag: Int,
   fields: List(String),
   args: List(String)
-}
+} deriving (Eq, Show)
 ```
+
+One constructor of a data declaration: its name, its discriminant tag, its record field names, and its argument type spellings.
 
 ### `TcData`
 
@@ -35,8 +43,10 @@ type TcData = TcData {
   derivs: List(String),
   ctors: List(TcCtor),
   span: Span
-}
+} deriving (Eq, Show)
 ```
+
+A data declaration: its name, type parameters, newtype flag, derived class names, constructors, and the span of the declaration head.
 
 ### `TcOp`
 
@@ -46,8 +56,10 @@ type TcOp = TcOp {
   grade: String,
   params: List(String),
   ret: String
-}
+} deriving (Eq, Show)
 ```
+
+One operation of an effect declaration: its name, its resumption grade, its parameter type spellings, and its return type.
 
 ### `TcEffect`
 
@@ -57,14 +69,18 @@ type TcEffect = TcEffect {
   params: List(String),
   ops: List(TcOp),
   span: Span
-}
+} deriving (Eq, Show)
 ```
+
+An effect declaration: its name, type parameters, operations, and the span of the declaration head.
 
 ### `TcMethod`
 
 ```prism,def,h-3db0fd3fcbc788dcb0cdba82d5e1b3b66556a8d1a10a1aafa5a60cbc67b16062
-type TcMethod = TcMethod { name: String, ty: String }
+type TcMethod = TcMethod { name: String, ty: String } deriving (Eq, Show)
 ```
+
+One method signature of a class: its name and its type spelling.
 
 ### `TcClass`
 
@@ -75,14 +91,18 @@ type TcClass = TcClass {
   supers: List(String),
   methods: List(TcMethod),
   span: Span
-}
+} deriving (Eq, Show)
 ```
+
+A class declaration: its name, its single type parameter, its superclass names, its method signatures, and the span of the declaration head.
 
 ### `TcConstraint`
 
 ```prism,def,h-094c800470313cbfe7bddddb3db03404effea78d8332abd5e226a040e2906cfb
-type TcConstraint = TcConstraint { cls: String, ty: String }
+type TcConstraint = TcConstraint { cls: String, ty: String } deriving (Eq, Show)
 ```
+
+One class constraint: the class named and the type it constrains.
 
 ### `TcInstance`
 
@@ -92,14 +112,18 @@ type TcInstance = TcInstance {
   head: String,
   module_name: String,
   context: List(TcConstraint)
-}
+} deriving (Eq, Show)
 ```
+
+An instance declaration: the class, the head type it instantiates, the module that defines it, and its instance context.
 
 ### `TcParam`
 
 ```prism,def,h-57863e590b38a005b3211d2800e641e711973f7060250a9b2d4f75347706cc11
-type TcParam = TcParam { name: String, is_borrow: Bool }
+type TcParam = TcParam { name: String, is_borrow: Bool } deriving (Eq, Show)
 ```
+
+One function parameter: its binder name and whether it is taken by borrow.
 
 ### `TcFunction`
 
@@ -110,8 +134,10 @@ type TcFunction = TcFunction {
   constraints: List(String),
   body: Int,
   span: Span
-}
+} deriving (Eq, Show)
 ```
+
+A function declaration: its name, parameters, constraint spellings, the NodeId of its body in the resolved-syntax artifact, and the span of its head.
 
 ### `TcInputDoc`
 
@@ -125,8 +151,10 @@ type TcInputDoc = TcInputDoc {
   classes: List(TcClass),
   instances: List(TcInstance),
   functions: List(TcFunction)
-}
+} deriving (Eq, Show)
 ```
+
+A whole checker-input document: the schema tag, the compiler version that emitted it, and the module's imports and declarations in source order.
 
 ## Functions and Values
 
@@ -135,3 +163,5 @@ type TcInputDoc = TcInputDoc {
 ```prism,sig,h-2503f90e041aac1a51fe7de55328f535bde4a4b0d44a129d7fe1a46a96affa32
 tc_input_schema : () -> String
 ```
+
+The schema tag every checker-input document carries.

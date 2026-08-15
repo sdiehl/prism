@@ -1,25 +1,26 @@
 -- A recursive component where a member reaches its declared effect only through
 -- a sibling call must still record that effect. The witness used to be captured
--- from a pure sibling view (an annotated sibling looked effect-free), so `mid`
--- and `tail` here (which perform `Counter` only by calling `head`) lost the row
--- between checking and typed Core: a false "never performed" warning, then an
--- E9996 witness mismatch. Both must now check, elaborate, and run.
+-- from a pure sibling view (an annotated sibling looked effect-free), so
+-- `chain_mid` and `chain_tail` here (which perform `Counter` only by calling
+-- `chain_head`) lost the row between checking and typed Core: a false "never
+-- performed" warning, then an E9996 witness mismatch. Both must now check,
+-- elaborate, and run.
 effect Counter
   tick() : Int
 
-fn head(n : Int) : Int ! {Counter} =
+fn chain_head(n : Int) : Int ! {Counter} =
   if n <= 0 then
     tick()
   else
-    mid(n)
+    chain_mid(n)
 
-fn mid(n : Int) : Int ! {Counter} = tail(n)
+fn chain_mid(n : Int) : Int ! {Counter} = chain_tail(n)
 
-fn tail(n : Int) : Int ! {Counter} = head(n - 1)
+fn chain_tail(n : Int) : Int ! {Counter} = chain_head(n - 1)
 
 fn main() =
   let r =
-    handle head(3) with
+    handle chain_head(3) with
       tick() resume k => k(42)
       return r => r
   println(r)

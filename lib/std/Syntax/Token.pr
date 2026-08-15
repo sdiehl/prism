@@ -25,7 +25,7 @@ pub type TokenKind
   | TVOpen
   | TVClose
   | TVSemi
-  deriving (Eq)
+  deriving (Eq, Show)
 
 -- | The canonical wire name of a token kind, matching the compiler's artifact
 -- vocabulary (fixed tokens spell themselves; specials use the grammar's
@@ -64,6 +64,7 @@ pub fn kind_name(k : TokenKind) : String =
 -- ```output
 -- (true, true)
 -- ```
+-- lint: allow(L0101)
 pub fn kind_of_name(s : String) : TokenKind =
   if s == "ident" then
     TIdent
@@ -98,11 +99,19 @@ pub fn kind_of_name(s : String) : TokenKind =
 -- value-carrying kinds, the decoded payload (escapes resolved, digit
 -- separators stripped). The original spelling is always recoverable from the
 -- span.
-pub type Token = Token { kind: TokenKind, span: Span, value: Option(String) }
+pub type Token = Token {
+  kind: TokenKind,
+  span: Span,
+  value: Option(String)
+} deriving (Eq, Show)
 
 -- | One trivia event between semantic tokens: a line comment, a delimited
 -- comment, or a blank-line run.
-pub type Trivia = TComment(Span) | TBlockComment(Span) | TBlank(Span)
+pub type Trivia
+  = TComment(Span)
+  | TBlockComment(Span)
+  | TBlank(Span)
+  deriving (Eq, Show)
 
 -- | The wire name of a trivia event.
 pub fn trivia_name(t : Trivia) : String =

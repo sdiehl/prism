@@ -233,7 +233,9 @@ pub fn reverse(xs) = foldl(\(acc, x) -> Cons(x, acc), Nil, xs)
 -- ```
 pub fn flatten(xss) = foldr(append, Nil, xss)
 
--- | Map `f` over the list and concatenate the resulting lists.
+-- | Map `f` over the list and concatenate the resulting lists. `Data.List` is
+-- where this name is defined; anything else answering to `concat_map` is a
+-- specialization of it.
 --
 -- ```prism
 -- concat_map(\(x) -> [x, x], [1, 2])
@@ -241,6 +243,7 @@ pub fn flatten(xss) = foldr(append, Nil, xss)
 -- ```output
 -- [1, 1, 2, 2]
 -- ```
+-- lint: allow(L0201)
 pub fn concat_map(f, xs) =
   match xs of
     Nil => Nil

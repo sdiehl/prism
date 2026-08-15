@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/local_constrained_let.pr
+---
+7
+42
+"hi"
+[1, 2, 3]
+=> ()

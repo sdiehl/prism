@@ -178,6 +178,7 @@ pub const STDLIB: &[(&str, &str)] = &[
         "Data.UnionFind.Payload",
         include_str!("../lib/std/Data/UnionFind/Payload.pr"),
     ),
+    ("Control.Solve", include_str!("../lib/std/Control/Solve.pr")),
     ("Data.Name", include_str!("../lib/std/Data/Name.pr")),
     ("Data.Scope", include_str!("../lib/std/Data/Scope.pr")),
     ("Data.Bind", include_str!("../lib/std/Data/Bind.pr")),

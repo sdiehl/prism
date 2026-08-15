@@ -133,7 +133,7 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
     )
     .and_then(|lowered| {
         let ctors = lowered.ctors.clone();
-        finish_lowered(lowered, &sigs).map(|core| (core, ctors))
+        finish_lowered(lowered, &sigs, cfg).map(|core| (core, ctors))
     }) {
         Ok((lowered, ctors)) => {
             let hashes = hash_program(&core, &hash_meta(&checked, &sigs, &fip_annots(&program)));

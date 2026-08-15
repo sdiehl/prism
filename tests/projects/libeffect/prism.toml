@@ -1,0 +1,9 @@
+[package]
+name = "libeffect"
+version = "0.0.0"
+authors = ["Test Author <test@example.com>"]
+maintainers = ["test@example.com"]
+license = "MIT"
+
+[bin]
+entry = "src/main.pr"

@@ -62,6 +62,9 @@ pub let intern_empty : Intern =
 -- ```output
 -- (0, 1, 0)
 -- ```
+-- The table's central verb, named for the operation rather than prefixed with
+-- the type it operates on.
+-- lint: allow(L0204)
 pub fn intern(t : Intern, name : String) : (Intern, Int) =
   match map_lookup(name, t.ids) of
     Some(id) => (t, id)

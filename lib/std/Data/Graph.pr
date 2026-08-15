@@ -141,6 +141,9 @@ fn dfs_go(
 pub fn graph_bfs(g : Map(k, List(k)), start : k) : List(k) given Ord(k) =
   reverse(bfs_go(g, Cons(start, Nil), set_insert(start, set_empty), Nil))
 
+-- The frontier walk. Visited nodes are pushed newest-first and flipped once by
+-- `graph_bfs`, so appending to the queue stays the only list append per level.
+-- lint: allow(L0105)
 fn bfs_go(
   g : Map(k, List(k)),
   queue : List(k),
@@ -274,6 +277,9 @@ fn scc_start(
 
 -- The iterative DFS: process the top frame's next successor, or finish the node
 -- when its successors are exhausted. Tail-recursive over the work stack.
+-- The nesting is the explicit stack machine that replaces the recursion the
+-- algorithm is usually written with; flattening it would put the frames back.
+-- lint: allow(L0101)
 fn scc_drive(
   g : Map(k, List(k)),
   st : (Map(k, (Int, Int)), Map(k, Unit), List(k), Int, List(List(k)), List((k, List(k))))

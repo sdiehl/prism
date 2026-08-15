@@ -24,10 +24,55 @@ use prism::eval::Run;
 /// determinism gate; shared so every fuzz harness diffs the same fragment.
 pub mod fuzzgen;
 
-/// A clean run under `PRISM_CHECK_LEAKS` writes exactly this to stderr.
-const LEAK_OK: &str = "prism: 0 cells leaked";
 /// The env var that turns on the runtime's live-cell balance report.
 pub const CHECK_LEAKS: &str = "PRISM_CHECK_LEAKS";
+/// The env var that turns on the runtime's cumulative cell-allocation report.
+pub const ALLOC_STATS: &str = "PRISM_ALLOC_STATS";
+
+/// Every counter the C runtime reports writes one `prism: <n> <suffix>` line to
+/// stderr under its own env var. This is the one home for that family: an oracle
+/// that arms a counter strips the reports out of the program's own stderr with
+/// [`program_stderr`] and reads a value back with [`counter_report`], so no
+/// harness re-types the line format.
+const COUNTER_PREFIX: &str = "prism: ";
+const LEAKED_SUFFIX: &str = " cells leaked";
+const ALLOCATED_SUFFIX: &str = " cells allocated";
+const REUSED_SUFFIX: &str = " cells reused";
+const EFF_OPS_SUFFIX: &str = " eff ops allocated";
+const DRIVE_STEPS_SUFFIX: &str = " drive steps";
+const COUNTER_SUFFIXES: &[&str] = &[
+    LEAKED_SUFFIX,
+    ALLOCATED_SUFFIX,
+    REUSED_SUFFIX,
+    EFF_OPS_SUFFIX,
+    DRIVE_STEPS_SUFFIX,
+];
+/// A balanced run leaks nothing.
+const NO_LEAKED_CELLS: i64 = 0;
+/// Position of the count in a `prism: <n> <suffix>` report.
+const COUNTER_VALUE_FIELD: usize = 1;
+
+/// Whether `line` is one of the runtime's counter reports rather than output the
+/// program itself wrote.
+fn is_counter_report(line: &str) -> bool {
+    let line = line.trim_end();
+    line.starts_with(COUNTER_PREFIX) && COUNTER_SUFFIXES.iter().any(|s| line.ends_with(s))
+}
+
+/// The value the runtime reported for the counter named by `suffix`, or `None`
+/// when that counter did not report (its env var was not set) or its line is
+/// malformed. Callers that armed the counter treat `None` as a failure: a missing
+/// report means the measurement never happened, never that it was zero.
+pub fn counter_report(stderr: &str, suffix: &str) -> Option<i64> {
+    stderr
+        .lines()
+        .map(str::trim_end)
+        .find(|l| l.starts_with(COUNTER_PREFIX) && l.ends_with(suffix))?
+        .split_whitespace()
+        .nth(COUNTER_VALUE_FIELD)?
+        .parse()
+        .ok()
+}
 /// Opt-in memoization of verified native cases: set it to skip programs whose
 /// complete toolchain fingerprint is unchanged since a previous green run.
 const GATE_CACHE: &str = "PRISM_GATE_CACHE";
@@ -51,6 +96,11 @@ const COMPILER_SOURCE_ROOTS: &[&str] = &[
     "crates",
     "runtime",
     "lib",
+    // Package sources compiled into the binary via `include_str!` (the lint
+    // rules and the bootstrap checker); outside `src/`, so they must be named
+    // here or a change to them leaves the source fingerprint unmoved.
+    "packages/lint/src",
+    "packages/tc/src",
     "build.rs",
     "Cargo.lock",
     "Cargo.toml",
@@ -384,23 +434,24 @@ pub fn temp_bin(tag: &str, stem: &str) -> PathBuf {
     env::temp_dir().join(format!("prism_parity_{tag}_{}_{stem}", std::process::id()))
 }
 
-/// The single leak predicate for every native oracle. The parity harness sets
-/// only `PRISM_CHECK_LEAKS` (the reuse/effop/drive counters are behind their own
-/// env vars), so a correct run's stderr is exactly the leak line and stdout is
-/// untouched. Whole-stderr equality is therefore the right check: it also fails
-/// on a stray `fatal:`/`prism_rt:` abort line or a nonzero balance, which a
-/// substring search for the leak line would let slip through.
+/// The single leak predicate for every native oracle: the balance report must be
+/// present and zero, and the program itself must have written nothing to stderr.
+/// The second half is what makes this stricter than a search for the leak line:
+/// a stray `fatal:`/`prism_rt:` abort line fails here too. Counter reports the
+/// harness armed are the runtime talking to the harness, not program output, so
+/// they are excluded rather than treated as noise on the channel.
 pub fn leak_free(stderr: &str) -> bool {
-    stderr.trim_end() == LEAK_OK
+    counter_report(stderr, LEAKED_SUFFIX) == Some(NO_LEAKED_CELLS)
+        && program_stderr(stderr).trim().is_empty()
 }
 
-/// The program's own stderr: everything except the leak checker's report line,
-/// which belongs to the harness and not to the observation trace the tiers
-/// must agree on.
+/// The program's own stderr: everything except the runtime's counter reports,
+/// which belong to the harness and not to the observation trace the tiers must
+/// agree on.
 pub fn program_stderr(stderr: &str) -> String {
     stderr
         .lines()
-        .filter(|line| !line.starts_with("prism: ") || !line.ends_with(" cells leaked"))
+        .filter(|line| !is_counter_report(line))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -669,20 +720,33 @@ pub fn with_gate_cache(
     tag: &str,
     check: impl FnOnce() -> Result<(), String>,
 ) -> Result<(), String> {
+    with_gate_cache_value(full, tag, check).map(|_| ())
+}
+
+/// [`with_gate_cache`] for a check that also measures something. `Ok(None)` means
+/// the verdict was served from the cache, so nothing was measured this run: the
+/// marker records only that the case passed, never what it cost. A caller that
+/// needs measurements from the whole corpus therefore has to run with the cache
+/// off (which the cold gate does) rather than infer a missing value.
+pub fn with_gate_cache_value<T>(
+    full: &str,
+    tag: &str,
+    check: impl FnOnce() -> Result<T, String>,
+) -> Result<Option<T>, String> {
     let cache = gate_cache_dir();
     let key = cache.as_ref().map(|_| cache_key(full, tag));
     if let (Some(dir), Some(k)) = (&cache, &key) {
         if dir.join(k).exists() {
-            return Ok(());
+            return Ok(None);
         }
     }
-    check()?;
+    let measured = check()?;
     // Record the pass: an empty marker named by the key. Only reached on a full
     // verification, so a failing case never leaves a marker to skip it later.
     if let (Some(dir), Some(k)) = (&cache, &key) {
         let _ = fs::write(dir.join(k), b"");
     }
-    Ok(())
+    Ok(Some(measured))
 }
 
 /// Build `case` with `build`, run it under leak checking on empty stdin, and
@@ -694,8 +758,33 @@ pub fn check_native_parity(
     tag: &str,
     build: impl Fn(&str, &Path) -> Result<(), Error>,
 ) -> Result<(), String> {
+    check_native_parity_costed(case, tag, build).map(|_| ())
+}
+
+/// What one program cost on each side of the differential run, in each side's own
+/// unit of work: machine transitions for the interpreter, heap cells materialized
+/// for the native binary. Both are pure functions of the program and the
+/// compiler, so they are comparable against a recorded baseline; they are not
+/// comparable to each other, and nothing here tries to.
+#[derive(Clone, Debug)]
+pub struct CaseCost {
+    /// The program's path relative to the crate root.
+    pub label: String,
+    pub interp_steps: i64,
+    pub native_cells: i64,
+}
+
+/// [`check_native_parity`], additionally reporting what the run cost on both
+/// sides. The counters ride the build and run the parity check already performs,
+/// so measuring is free; `Ok(None)` means the gate cache served this case's
+/// verdict and nothing ran to be measured.
+pub fn check_native_parity_costed(
+    case: &Path,
+    tag: &str,
+    build: impl Fn(&str, &Path) -> Result<(), Error>,
+) -> Result<Option<CaseCost>, String> {
     let full = source(case);
-    with_gate_cache(&full, tag, || {
+    with_gate_cache_value(&full, tag, || {
         check_native_parity_uncached(case, &full, tag, build)
     })
 }
@@ -705,14 +794,17 @@ fn check_native_parity_uncached(
     full: &str,
     tag: &str,
     build: impl Fn(&str, &Path) -> Result<(), Error>,
-) -> Result<(), String> {
+) -> Result<CaseCost, String> {
     let stem = case.file_stem().unwrap().to_string_lossy();
     let bin = temp_bin(tag, &stem);
     if let Err(e) = build(full, &bin) {
         cleanup_bin(&bin);
         return Err(format!("{}: {tag} build failed: {e}", case.display()));
     }
-    let run = Command::new(&bin).env(CHECK_LEAKS, "1").output();
+    let run = Command::new(&bin)
+        .env(CHECK_LEAKS, "1")
+        .env(ALLOC_STATS, "1")
+        .output();
     cleanup_bin(&bin);
     let out = match run {
         Ok(o) => o,
@@ -736,11 +828,7 @@ fn check_native_parity_uncached(
         ));
     };
     let leak = String::from_utf8_lossy(&out.stderr);
-    let native_stderr = leak
-        .lines()
-        .filter(|line| !line.starts_with("prism: ") || !line.ends_with(" cells leaked"))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let native_stderr = program_stderr(&leak);
     let native_trace = prism::ObservationTrace::from_process(
         &out.stdout,
         native_stderr.as_bytes(),
@@ -763,7 +851,27 @@ fn check_native_parity_uncached(
             leak.trim()
         ));
     }
-    Ok(())
+    let Some(native_cells) = counter_report(&leak, ALLOCATED_SUFFIX) else {
+        return Err(format!(
+            "{}: {tag} reported no allocation count under {ALLOC_STATS}: {}",
+            case.display(),
+            leak.trim()
+        ));
+    };
+    Ok(CaseCost {
+        label: label_of(case),
+        interp_steps: i64::try_from(reference.steps).unwrap_or(i64::MAX),
+        native_cells,
+    })
+}
+
+/// A case's name in harness output and in committed goldens: its path relative to
+/// the crate root, the same `dir/name.pr` label the corpus manifests use.
+pub fn label_of(case: &Path) -> String {
+    case.strip_prefix(env!("CARGO_MANIFEST_DIR"))
+        .unwrap_or(case)
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Worker stack size for corpus fan-out. The in-process interpreter's recursion
@@ -784,8 +892,19 @@ pub fn parallel_check(
     cases: &[PathBuf],
     check: impl Fn(&Path) -> Result<(), String> + Sync,
 ) -> Vec<String> {
+    parallel_collect(cases, check).0
+}
+
+/// [`parallel_check`] for a check that also returns a measurement, as
+/// `(failures, values)`. Values arrive in whatever order the workers finish, so a
+/// caller that needs a stable order sorts them.
+pub fn parallel_collect<T: Send>(
+    cases: &[PathBuf],
+    check: impl Fn(&Path) -> Result<T, String> + Sync,
+) -> (Vec<String>, Vec<T>) {
     let next = AtomicUsize::new(0);
     let fails: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    let values: Mutex<Vec<T>> = Mutex::new(Vec::new());
     let threads = thread::available_parallelism()
         .map_or(DEFAULT_PARALLELISM, NonZeroUsize::get)
         .min(cases.len().max(MIN_WORKER_COUNT));
@@ -794,8 +913,9 @@ pub fn parallel_check(
             let worker = || loop {
                 let i = next.fetch_add(1, Ordering::Relaxed);
                 let Some(case) = cases.get(i) else { break };
-                if let Err(e) = check(case) {
-                    fails.lock().unwrap().push(e);
+                match check(case) {
+                    Ok(v) => values.lock().unwrap().push(v),
+                    Err(e) => fails.lock().unwrap().push(e),
                 }
             };
             thread::Builder::new()
@@ -804,5 +924,5 @@ pub fn parallel_check(
                 .expect("spawning corpus worker");
         }
     });
-    fails.into_inner().unwrap()
+    (fails.into_inner().unwrap(), values.into_inner().unwrap())
 }

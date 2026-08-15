@@ -11,16 +11,16 @@ fn insert(x, t) : Tree =
       else
         t
 
-fn contains(x, t) : Bool =
+fn contains_tree(x, t) : Bool =
   match t of
     Leaf => false
     Node(v, l, r) =>
       if x == v then
         true
       elif x < v then
-        contains(x, l)
+        contains_tree(x, l)
       else
-        contains(x, r)
+        contains_tree(x, r)
 
 fn size(t) : Int =
   match t of
@@ -42,5 +42,5 @@ fn main() : Unit ! {IO} =
   println(size(t))
   println(height(t))
   println(sum_tree(t))
-  println(if contains(3, t) then 1 else 0)
-  println(if contains(9, t) then 1 else 0)
+  println(if contains_tree(3, t) then 1 else 0)
+  println(if contains_tree(9, t) then 1 else 0)

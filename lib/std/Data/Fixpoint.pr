@@ -37,7 +37,7 @@ import Data.Foldable (length)
 import Data.Graph (graph_add_edge, graph_empty, graph_nodes, graph_successors)
 import Data.Lattice (Semilattice)
 import Data.List (append, foldl, reverse)
-import Data.Map (map_empty, map_insert, map_keys, map_lookup, map_size, map_to_list, map_values)
+import Data.Map (map_empty, map_insert, map_keys, map_lookup, map_size, map_values)
 import Data.Set (set_delete, set_from_list, set_insert, set_member, set_to_list, set_union)
 
 -- | The value assigned to `key`, or bottom when the assignment says nothing

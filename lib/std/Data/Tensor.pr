@@ -343,6 +343,9 @@ pub fn map_tensor(f, t : Tensor) : Tensor ! {Fail} =
     fail()
 
 -- Combine the pth elements of `ba` and `bb` with `f` into `out`, over `[p, n)`.
+-- The loop carries both inputs, the output buffer, and the cursor pair; a record
+-- would allocate once per element on a numeric inner loop.
+-- lint: allow(L0103)
 fn zip_fill(
   f,
   ba : FloatBuf,
@@ -482,6 +485,9 @@ fn drop_at(i : Int, xs : List(a)) : List(a) =
 -- Sum `extent` elements of `b` starting at flat `base`, stepping by `sa` (the
 -- stride of the contracted axis), in index order `0..extent`. The fixed order is
 -- what makes the axis reduction bit-identical across backends.
+-- The fixed order is the contract, so the loop threads the stride, the extent,
+-- the cursor, and the running sum as scalars rather than as a bundle.
+-- lint: allow(L0103)
 fn contract_sum(
   b : FloatBuf,
   base : Int,
@@ -499,6 +505,9 @@ fn contract_sum(
 -- input elements sharing `q`'s index on every remaining axis, over `[q, total)`.
 -- `out_idx` unravels `q` against the output shape; its dot with the kept input
 -- strides `ks` is the flat base of the contracted fibre.
+-- Carries the output geometry (strides, shape, kept strides) alongside the
+-- contracted axis and the cursor; every one of them is read on each element.
+-- lint: allow(L0103)
 fn sum_axis_fill(
   b : FloatBuf,
   out : FloatBuf,
@@ -589,6 +598,9 @@ pub fn mean_axis(t : Tensor, axis_name : String) : Tensor ! {Fail} =
 -- The dot product of row `i` of `a` (flat base `i * k`) and column `j` of `b`
 -- (flat stride `n`), contracted over `0..k` in order. The fixed summation order
 -- makes `matmul` deterministic across backends and optimization levels.
+-- The inner product loop threads both operands, the row and column being
+-- contracted, the two extents, the cursor, and the running sum as scalars.
+-- lint: allow(L0103)
 fn mm_dot(
   ba : FloatBuf,
   bb : FloatBuf,
@@ -615,6 +627,9 @@ fn mm_dot(
 
 -- Fill output flat position `q` (row `q / n`, column `q % n`) with its dot
 -- product, over `[q, total)`.
+-- The output loop threads both operands, the destination, both extents, and the
+-- cursor pair, matching `mm_dot`'s scalar-threading shape.
+-- lint: allow(L0103)
 fn mm_fill(
   ba : FloatBuf,
   bb : FloatBuf,

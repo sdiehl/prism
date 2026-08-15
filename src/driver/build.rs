@@ -14,7 +14,9 @@ use crate::lineage::FactOutcome;
 use crate::resolve::default_roots;
 
 #[cfg(feature = "native")]
-use super::lowered_core_with_identity;
+use super::{
+    finish_lowered, lowered_core_with_identity, lowered_spine_with_identity, on_typed_lower_stack,
+};
 use super::{reuse_lowered_core, Config};
 
 #[cfg(feature = "native")]
@@ -49,7 +51,7 @@ use std::process::Command;
 use prism_native::emit_mlir;
 
 #[cfg(feature = "native")]
-use super::backend::materialize_scc_bitcode;
+use super::backend::{materialize_scc_bitcode, scc_backend_enabled};
 
 #[cfg(feature = "native")]
 const EXPLAIN_QUERY_DIR: &str = "prism-explain-queries";
@@ -191,7 +193,7 @@ pub fn build_on_report(
     out: &Path,
     cfg: &Config,
 ) -> Result<NativeBuildReport, Error> {
-    let artifact_cache = NativeArtifactCache::for_build(src, roots, out, cfg)?;
+    let artifact_cache = NativeArtifactCache::for_build(src, roots, cfg)?;
     if let Some(cache) = &artifact_cache {
         if let Some(output_hash) = cache.materialize(out)? {
             remove_stale_bitcode(out)?;
@@ -218,12 +220,21 @@ pub fn build_on_report(
             session.record_miss();
         }
     }
-    let (checked, core, ctors, hashes) = compiled(src, roots, cfg)?;
+    let (checked, spine, sigs, hashes) = lowered_spine_with_identity(src, roots, cfg)?;
     require_main(&checked)?;
     let native_kont_table =
         native_kont_table_of(&hashes, roots, cfg, NativeKontIdentityRows::Full)?;
-    let semantic_cache =
-        NativeArtifactCache::for_semantic_build(&core, &ctors, &native_kont_table, out, cfg)?;
+    // The semantic key is taken before reference-count insertion, so a hit
+    // returns below without ever running the ownership passes; the erased
+    // clone exists only to give the key a stable content encoding.
+    let ctors = spine.ctors.clone();
+    let semantic_cache = NativeArtifactCache::for_semantic_build(
+        || on_typed_lower_stack(|| LoweredCore::new(spine.core.clone().erase())),
+        &sigs,
+        &ctors,
+        &native_kont_table,
+        cfg,
+    )?;
     if let Some(cache) = &semantic_cache {
         if let Some(output_hash) = cache.materialize(out)? {
             remove_stale_bitcode(out)?;
@@ -262,6 +273,8 @@ pub fn build_on_report(
             session.record_miss();
         }
     }
+    let core = finish_lowered(spine, &sigs, cfg)?;
+    residual_effects(&core).map_err(Error::InternalInvariant)?;
     let bc = out.with_extension("bc");
     let bitcode_cache = NativeArtifactCache::for_bitcode(&core, &ctors, &native_kont_table, cfg)?;
     let bitcode_hit = if let Some(cache) = &bitcode_cache {
@@ -291,17 +304,28 @@ pub fn build_on_report(
         false
     };
     let scc_directory = out.with_extension("prism_scc.d");
-    let scc_bitcode = if bitcode_hit {
+    let emit_status = if artifact_cache.is_some() {
+        timing::CacheStatus::Miss
+    } else {
+        timing::CacheStatus::Cold
+    };
+    let scc_bitcode = if bitcode_hit || !scc_backend_enabled(cfg) {
         None
     } else {
-        materialize_scc_bitcode(&core, &ctors, &native_kont_table, &scc_directory, cfg)?
+        timing::timed_res_status(
+            cfg.timing.as_ref(),
+            timing::Phase::EmitLlvm,
+            "",
+            emit_status,
+            || materialize_scc_bitcode(&core, &ctors, &native_kont_table, &scc_directory, cfg),
+            |scc| {
+                scc.as_ref().map_or_else(timing::RowExtras::default, |scc| {
+                    timing::RowExtras::default().count(timing::CountKey::SccShards, scc.paths.len())
+                })
+            },
+        )?
     };
     if !bitcode_hit && scc_bitcode.is_none() {
-        let emit_status = if artifact_cache.is_some() {
-            timing::CacheStatus::Miss
-        } else {
-            timing::CacheStatus::Cold
-        };
         timing::timed_res_status(
             cfg.timing.as_ref(),
             timing::Phase::EmitLlvm,

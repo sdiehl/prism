@@ -39,6 +39,9 @@ pub type Layer(a) = Layer { kids: (a) -> List(a), rebuild: (a, List(a)) -> a }
 -- `rebuild` raises `Fail` on a replacement list that does not match the node,
 -- and a layer says the same thing by returning the node unchanged. Nothing else
 -- is adapted, because `children` is already the order `kids` promises.
+-- Named for the interface it adapts from rather than the one it builds, so the
+-- direction of the translation is readable at the call site.
+-- lint: allow(L0204)
 pub fn plate_layer() : Layer(a) given Plate(a) =
   Layer { kids = children, rebuild = plate_rebuild }
 

@@ -15,12 +15,16 @@
 --     fill: rgb("#211a2c"))[#(text(fill: rgb("#6d28d9"))[#(text("→ "))] + text("Lowered by the backend."))])
 -- ```
 
+-- lint: allow-file(L0108)
+
 import Data.List (append)
 import Data.String (contains)
 import Typst as T
 import Layout (..)
 import Theme (Theme, prism_theme)
 
+-- | A rendered deck: the output format, the Typst source, the logical slide
+-- and physical page counts, and every asset path the source refers to.
 pub type TypstDocument = TypstDocument {
   format: String,
   source: String,

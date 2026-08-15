@@ -223,6 +223,10 @@ mod tests {
 
     const BASE: &str = r#"[package]
 name = "app" # the app
+version = "0.0.0"
+authors = ["Test Author <test@example.com>"]
+maintainers = ["test@example.com"]
+license = "MIT"
 
 [bin]
 entry = "src/main.pr"
@@ -262,6 +266,10 @@ util = "../util"
     fn creates_the_section_when_absent() {
         let no_deps = r#"[package]
 name = "a"
+version = "0.0.0"
+authors = ["Test Author <test@example.com>"]
+maintainers = ["test@example.com"]
+license = "MIT"
 
 [bin]
 entry = "s.pr"
@@ -269,7 +277,7 @@ entry = "s.pr"
         let out = set_dependency(no_deps, "geo", "{ path = \"../geo\" }");
         assert!(out.contains("[dependencies]\ngeo = { path = \"../geo\" }\n"));
         // The original body is untouched and the section is separated by a blank.
-        assert!(out.starts_with("[package]\nname = \"a\"\n\n[bin]\nentry = \"s.pr\"\n"));
+        assert!(out.starts_with("[package]\nname = \"a\"\nversion = \"0.0.0\"\n"));
     }
 
     #[test]
@@ -302,6 +310,10 @@ entry = "s.pr"
             let doc = set_dependency(
                 r#"[package]
 name = "a"
+version = "0.0.0"
+authors = ["Test Author <test@example.com>"]
+maintainers = ["test@example.com"]
+license = "MIT"
 
 [bin]
 entry = "s.pr"

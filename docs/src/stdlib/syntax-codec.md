@@ -13,7 +13,10 @@ The printer here matches the compiler's export format precisely: two-space inden
 ### `CodecError`
 
 ```prism,def,h-839228f2d050a9a16de7451e8a40f7adafa020a54cd1c0d82abd2b1d6c0ec71a
-type CodecError = CodecError { path: String, reason: String }
+type CodecError = CodecError {
+  path: String,
+  reason: String
+} deriving (Eq, Show)
 ```
 
 A structured decode refusal: the path of the offending value inside the document and the reason it was rejected.
@@ -31,7 +34,7 @@ type TokensDoc = TokensDoc {
 }
 ```
 
-A decoded `prism-syntax-tokens-v1` document: the envelope identity, the embedded source, the raw and post-layout token streams, and the trivia events, all in stream order.
+A decoded `prism-syntax-tokens-v1` document: the envelope identity, the embedded source, the raw and post-layout token streams, and the trivia events, all in stream order. lint: allow(L0203)
 
 ### `SurfaceDoc`
 
@@ -44,7 +47,7 @@ type SurfaceDoc = SurfaceDoc {
 }
 ```
 
-A decoded `prism-surface-syntax-v1` document: the envelope identity, the embedded source, and the ordered item list of the parsed file.
+A decoded `prism-surface-syntax-v1` document: the envelope identity, the embedded source, and the ordered item list of the parsed file. lint: allow(L0203)
 
 ## Effects
 
@@ -54,6 +57,8 @@ A decoded `prism-surface-syntax-v1` document: the envelope identity, the embedde
 effect Decode
   never fail_decode(CodecError) : a
 ```
+
+The decoder's short-circuit: `fail_decode` abandons the decode in progress, carrying the `CodecError` that refused it out to `run_decode`.
 
 ## Functions and Values
 
@@ -147,7 +152,7 @@ Run a decoding computation, turning a `fail_decode` into `Err` and a completed d
 
 ### `decode_resolved`
 
-```prism,sig,h-b5d47674c7f2037a945ee9656d6b219473745892288a63b5efac7cb9498c42cf
+```prism,sig,h-40e1ce348a4406826bce8bcfc1e778b4c61b637c2e4235932bb0e8fb9d6b80c2
 decode_resolved : (String) -> Result(Syntax.Resolved.ResolvedDoc, Syntax.Codec.CodecError)
 ```
 
@@ -158,6 +163,8 @@ Decode a `prism-resolved-syntax-v1` document. Total: every malformed input lands
 ```prism,sig,h-a6055170caddf10b5d0af005b026501c9d8e132985a87656f09e9d5ea506f9d7
 encode_resolved : (Syntax.Resolved.ResolvedDoc) -> String
 ```
+
+Encode a resolved-syntax document back to the exact artifact bytes the compiler emits, the inverse of `decode_resolved`.
 
 ### `decode_tc_input`
 

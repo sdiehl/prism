@@ -67,7 +67,10 @@ fn im_nomatch(w : U64, p : U64, m : U64) : Bool = not(im_prefix(w, m) == p)
 -- The highest set bit of `x`, or zero when `x` is zero. Smearing every set bit
 -- downward leaves a run of ones from the top bit, and subtracting that run
 -- shifted right isolates the top bit. `u64_shr` is the logical shift, so the
--- smear is unaffected by the sign bit.
+-- smear is unaffected by the sign bit. The shift distances are the doubling
+-- ladder `1, 2, 4, ... 32`, which is the algorithm rather than a tunable, so each
+-- one is written in place.
+-- lint: allow(L0108)
 fn im_high_bit(x : U64) : U64 =
   let a = u64_or(x, u64_shr(x, 1u64))
   let b = u64_or(a, u64_shr(a, 2u64))

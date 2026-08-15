@@ -778,6 +778,11 @@ pub enum ErrKind {
         "`{name}` reimplements the standard library function `{stdlib}`; call `{stdlib}` instead"
     )]
     RedundantStdlibDef { name: String, stdlib: String },
+    #[error(
+        "`{name}` takes the name the prelude opens for `{opened}`; every unqualified `{name}` in \
+         this file now means this definition"
+    )]
+    PreludeCapture { name: String, opened: String },
     // SMT contracts. A `logic fn` body or a `requires`/`ensures` clause
     // is a total first-order proposition over `Bool`/`Int`; these report the
     // smallest offending logical subexpression. Solver-free: raised during normal
@@ -964,6 +969,7 @@ impl ErrKind {
             Self::MissingArgument { .. } => "E6058",
             Self::DuplicateBehavior { .. } => "E6063",
             Self::RedundantStdlibDef { .. } => "E6064",
+            Self::PreludeCapture { .. } => "E6073",
             // E8xxx: logical/contract checking.
             Self::LogicUnsupported { .. } => "E8000",
             Self::LogicUnresolved { .. } => "E8001",
@@ -1382,6 +1388,7 @@ mod tests {
             MissingArgument { fn_name, param },
             DuplicateBehavior { names },
             RedundantStdlibDef { name, stdlib },
+            PreludeCapture { name, opened },
             LogicUnsupported { detail },
             LogicUnresolved { name },
             LogicNotLogical { name },

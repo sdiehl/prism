@@ -6,15 +6,25 @@
 
 import Syntax.Source (Span)
 
-pub type TcImport = TcImport { path: String, names: List(String), glob: Bool }
+-- | One import the module takes: the module path, the names taken from it, and
+-- whether the list was written as a glob.
+pub type TcImport = TcImport {
+  path: String,
+  names: List(String),
+  glob: Bool
+} deriving (Eq, Show)
 
+-- | One constructor of a data declaration: its name, its discriminant tag, its
+-- record field names, and its argument type spellings.
 pub type TcCtor = TcCtor {
   name: String,
   tag: Int,
   fields: List(String),
   args: List(String)
-}
+} deriving (Eq, Show)
 
+-- | A data declaration: its name, type parameters, newtype flag, derived class
+-- names, constructors, and the span of the declaration head.
 pub type TcData = TcData {
   name: String,
   params: List(String),
@@ -22,51 +32,66 @@ pub type TcData = TcData {
   derivs: List(String),
   ctors: List(TcCtor),
   span: Span
-}
+} deriving (Eq, Show)
 
+-- | One operation of an effect declaration: its name, its resumption grade, its
+-- parameter type spellings, and its return type.
 pub type TcOp = TcOp {
   name: String,
   grade: String,
   params: List(String),
   ret: String
-}
+} deriving (Eq, Show)
 
+-- | An effect declaration: its name, type parameters, operations, and the span
+-- of the declaration head.
 pub type TcEffect = TcEffect {
   name: String,
   params: List(String),
   ops: List(TcOp),
   span: Span
-}
+} deriving (Eq, Show)
 
-pub type TcMethod = TcMethod { name: String, ty: String }
+-- | One method signature of a class: its name and its type spelling.
+pub type TcMethod = TcMethod { name: String, ty: String } deriving (Eq, Show)
 
+-- | A class declaration: its name, its single type parameter, its superclass
+-- names, its method signatures, and the span of the declaration head.
 pub type TcClass = TcClass {
   name: String,
   param: String,
   supers: List(String),
   methods: List(TcMethod),
   span: Span
-}
+} deriving (Eq, Show)
 
-pub type TcConstraint = TcConstraint { cls: String, ty: String }
+-- | One class constraint: the class named and the type it constrains.
+pub type TcConstraint = TcConstraint { cls: String, ty: String } deriving (Eq, Show)
 
+-- | An instance declaration: the class, the head type it instantiates, the
+-- module that defines it, and its instance context.
 pub type TcInstance = TcInstance {
   cls: String,
   head: String,
   module_name: String,
   context: List(TcConstraint)
-}
+} deriving (Eq, Show)
 
-pub type TcParam = TcParam { name: String, is_borrow: Bool }
+-- | One function parameter: its binder name and whether it is taken by borrow.
+pub type TcParam = TcParam { name: String, is_borrow: Bool } deriving (Eq, Show)
 
+-- | A function declaration: its name, parameters, constraint spellings, the
+-- NodeId of its body in the resolved-syntax artifact, and the span of its head.
 pub type TcFunction = TcFunction {
   name: String,
   params: List(TcParam),
   constraints: List(String),
   body: Int,
   span: Span
-}
+} deriving (Eq, Show)
 
+-- | A whole checker-input document: the schema tag, the compiler version that
+-- emitted it, and the module's imports and declarations in source order.
 pub type TcInputDoc = TcInputDoc {
   schema: String,
   compiler: String,
@@ -76,6 +101,7 @@ pub type TcInputDoc = TcInputDoc {
   classes: List(TcClass),
   instances: List(TcInstance),
   functions: List(TcFunction)
-}
+} deriving (Eq, Show)
 
+-- | The schema tag every checker-input document carries.
 pub fn tc_input_schema() : String = "prism-tc-input-v1"

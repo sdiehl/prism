@@ -88,4 +88,13 @@ Program {
  5 │ ├─▶   ping(Int) : Unit
    │ │                        
    │ ╰──────────────────────── operation `ping` is declared in both `A` and `B`
+   │
+   ├─[ <source>:4:1 ]
+   │
+ 1 │ ╭─▶ effect A
+ 2 │ ├─▶   ping(Int) : Unit
+   │ │                        
+   │ ╰──────────────────────── `ping` is first declared by effect `A`
+   │     
+   │     Help: rename the operation in effect `B`, or handle it through its own effect
 ───╯

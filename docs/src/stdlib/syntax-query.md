@@ -39,7 +39,7 @@ type QueryReport = QueryReport {
   comments: List(Span),
   decls: List(DeclHead),
   kinds: List(KindCount)
-} deriving (Eq)
+} deriving (Eq, Show)
 ```
 
 The full source inventory of an artifact.

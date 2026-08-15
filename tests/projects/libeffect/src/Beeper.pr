@@ -1,0 +1,9 @@
+-- A library module declaring a public effect. Its operation has no qualified
+-- spelling in a handler clause, so a plain `import Beeper` must still let the
+-- entry module name `beep` there.
+pub effect Beeper
+  beep(Int) : Unit
+
+pub fn twice(n : Int) : Int ! {Beeper} =
+  beep(n)
+  n * 2

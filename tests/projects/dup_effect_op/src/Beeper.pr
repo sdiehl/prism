@@ -1,0 +1,8 @@
+-- Two effects in one module claiming one operation name. Operations dispatch by
+-- name within a module, so the second declaration would shadow the first; the
+-- modular checker must refuse it exactly as the whole-program checker does.
+pub effect Ping
+  beep(Int) : Unit
+
+pub effect Pong
+  beep(Int) : Unit

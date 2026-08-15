@@ -14,7 +14,7 @@ Constructor prefixes name the family (`I` items, `E` expressions, `P` patterns, 
 type Sp(a) = Sp { node: a, span: Span, synth: Bool }
 ```
 
-A parsed node with its byte span and the parse-sugar bit. Expressions and patterns are spanned; `synth` is set when the parser rewrote surface sugar into this node rather than reading it verbatim.
+A parsed node with its byte span and the parse-sugar bit. Expressions and patterns are spanned; `synth` is set when the parser rewrote surface sugar into this node rather than reading it verbatim. lint: allow(L0203)
 
 ### `Suffix`
 
@@ -22,7 +22,7 @@ A parsed node with its byte span and the parse-sugar bit. Expressions and patter
 type Suffix = SufNone | SufI64 | SufU64
 ```
 
-An integer literal's optional width suffix: `i64`, `u64`, or none.
+An integer literal's optional width suffix: `i64`, `u64`, or none. lint: allow(L0203)
 
 ### `Kind`
 
@@ -34,7 +34,7 @@ type Kind
   | KFun(Kind, Kind)
 ```
 
-A kind: the classifier of a type parameter. Ground kinds classify types, rows, and type-level naturals; `KFun` is the kind of a type constructor.
+A kind: the classifier of a type parameter. Ground kinds classify types, rows, and type-level naturals; `KFun` is the kind of a type constructor. lint: allow(L0203)
 
 ### `EffLabel`
 
@@ -42,7 +42,7 @@ A kind: the classifier of a type parameter. Ground kinds classify types, rows, a
 type EffLabel = EffLabel { name: String, args: List(Ty) }
 ```
 
-One effect label: an effect name applied to zero or more type arguments, as it appears in an effect row or an effect alias.
+One effect label: an effect name applied to zero or more type arguments, as it appears in an effect row or an effect alias. lint: allow(L0203)
 
 ### `Row`
 
@@ -50,7 +50,7 @@ One effect label: an effect name applied to zero or more type arguments, as it a
 type Row = Row { labels: List(EffLabel), tail: Option(String) }
 ```
 
-An effect row: the labels present plus an optional row-variable tail. The empty row and a tail-less label list share this one shape.
+An effect row: the labels present plus an optional row-variable tail. The empty row and a tail-less label list share this one shape. lint: allow(L0203)
 
 ### `Ty`
 
@@ -78,7 +78,7 @@ type Ty
   | TyUsage(Ty, List(String))
 ```
 
-A surface type. Ground types, type variables, applications, function types with an effect row, saturated constructors, tuples, unboxed aggregates, row literals, type-level naturals, and usage-qualified types.
+A surface type. Ground types, type variables, applications, function types with an effect row, saturated constructors, tuples, unboxed aggregates, row literals, type-level naturals, and usage-qualified types. lint: allow(L0203)
 
 ### `CField`
 
@@ -86,7 +86,7 @@ A surface type. Ground types, type variables, applications, function types with 
 type CField = CField { name: String, ty: Ty }
 ```
 
-A named field carrying a type: a record constructor field or an unboxed record field.
+A named field carrying a type: a record constructor field or an unboxed record field. lint: allow(L0203)
 
 ### `NamedExpr`
 
@@ -94,7 +94,7 @@ A named field carrying a type: a record constructor field or an unboxed record f
 type NamedExpr = NamedExpr { name: String, value: Sp(Expr) }
 ```
 
-A named field carrying an expression: a record literal field, a record update field, a where binding, or a converter override.
+A named field carrying an expression: a record literal field, a record update field, a where binding, or a converter override. lint: allow(L0203)
 
 ### `Expr`
 
@@ -155,7 +155,7 @@ type Expr
   | EReadPath(Sp(Expr), List(PathStep))
 ```
 
-A surface expression. One constructor per node kind the exporter emits, including the desugarable surface forms (loops, comprehensions, throw and try-catch, path reads and updates) that the parser records before lowering.
+A surface expression. One constructor per node kind the exporter emits, including the desugarable surface forms (loops, comprehensions, throw and try-catch, path reads and updates) that the parser records before lowering. lint: allow(L0203)
 
 ### `Arm`
 
@@ -163,7 +163,7 @@ A surface expression. One constructor per node kind the exporter emits, includin
 type Arm = Arm { pat: Sp(Pat), guard: Option(Sp(Expr)), body: Sp(Expr) }
 ```
 
-One match arm: a spanned pattern, an optional boolean guard, and the body taken when the pattern matches and the guard holds.
+One match arm: a spanned pattern, an optional boolean guard, and the body taken when the pattern matches and the guard holds. lint: allow(L0203)
 
 ### `HandlerArm`
 
@@ -176,7 +176,7 @@ type HandlerArm
   | HNever(String, List(String), Sp(Expr))
 ```
 
-One arm of an effect handler: the return clause, a full operation clause binding the resumption, or the `once`, `val`, and `never` sugars.
+One arm of an effect handler: the return clause, a full operation clause binding the resumption, or the `once`, `val`, and `never` sugars. lint: allow(L0203)
 
 ### `CatchArm`
 
@@ -189,7 +189,7 @@ type CatchArm = CatchArm {
 }
 ```
 
-One catch arm of a try-catch: the error name, the binders for its payload, and the handler body.
+One catch arm of a try-catch: the error name, the binders for its payload, and the handler body. lint: allow(L0203)
 
 ### `Qual`
 
@@ -197,7 +197,7 @@ One catch arm of a try-catch: the error name, the binders for its payload, and t
 type Qual = QGuard(Sp(Expr)) | QBind(String, Sp(Expr))
 ```
 
-One qualifier of a for-loop or comprehension: a boolean guard or a binding generator.
+One qualifier of a for-loop or comprehension: a boolean guard or a binding generator. lint: allow(L0203)
 
 ### `PathStep`
 
@@ -210,7 +210,7 @@ type PathStep
   | PSWhere(Sp(Expr))
 ```
 
-One step of an optic path: a field, every element, a case selection, an index, or a where filter.
+One step of an optic path: a field, every element, a case selection, an index, or a where filter. lint: allow(L0203)
 
 ### `PathOp`
 
@@ -218,7 +218,7 @@ One step of an optic path: a field, every element, a case selection, an index, o
 type PathOp = POSet(Sp(Expr)) | POModify(Sp(Expr))
 ```
 
-The write at the end of an optic path: set to a value or modify by a function.
+The write at the end of an optic path: set to a value or modify by a function. lint: allow(L0203)
 
 ### `PathUpdate`
 
@@ -226,7 +226,7 @@ The write at the end of an optic path: set to a value or modify by a function.
 type PathUpdate = PathUpdate { path: List(PathStep), op: PathOp }
 ```
 
-One update in a path-update expression: the path walked and the write performed at its end.
+One update in a path-update expression: the path walked and the write performed at its end. lint: allow(L0203)
 
 ### `Pat`
 
@@ -244,7 +244,7 @@ type Pat
   | POr(List(Sp(Pat)))
 ```
 
-A surface pattern: wildcards, variables, literals, constructor and tuple patterns, record patterns with an optional rest, and alternations. An alternation is expanded into one match arm per alternative before the checker, so it appears only in the surface seam.
+A surface pattern: wildcards, variables, literals, constructor and tuple patterns, record patterns with an optional rest, and alternations. An alternation is expanded into one match arm per alternative before the checker, so it appears only in the surface seam. lint: allow(L0203)
 
 ### `PatField`
 
@@ -252,7 +252,7 @@ A surface pattern: wildcards, variables, literals, constructor and tuple pattern
 type PatField = PatField { name: String, pat: Sp(Pat) }
 ```
 
-One field of a record pattern: the field name and the pattern bound to it.
+One field of a record pattern: the field name and the pattern bound to it. lint: allow(L0203)
 
 ### `Param`
 
@@ -266,7 +266,7 @@ type Param = Param {
 }
 ```
 
-A function parameter: its name, the pattern it was written as if it was written as one rather than named, an optional type annotation, whether it is taken by borrow, and an optional default expression. A pattern parameter's name is synthesized from its position, so the pattern is the half of it the source wrote.
+A function parameter: its name, the pattern it was written as if it was written as one rather than named, an optional type annotation, whether it is taken by borrow, and an optional default expression. A pattern parameter's name is synthesized from its position, so the pattern is the half of it the source wrote. lint: allow(L0203)
 
 ### `Constraint`
 
@@ -274,7 +274,7 @@ A function parameter: its name, the pattern it was written as if it was written 
 type Constraint = Constraint { cls: String, ty: Ty, span: Span }
 ```
 
-A class constraint on a type: the class name, the constrained type, and its span.
+A class constraint on a type: the class name, the constrained type, and its span. lint: allow(L0203)
 
 ### `Decl`
 
@@ -299,7 +299,7 @@ type Decl = Decl {
 }
 ```
 
-A function, constant, or logic-function declaration, with every optional clause the parser can attach: effect row, constraints, where bindings, requires and ensures, a decreases measure, and the totality and resource modifiers.
+A function, constant, or logic-function declaration, with every optional clause the parser can attach: effect row, constraints, where bindings, requires and ensures, a decreases measure, and the totality and resource modifiers. lint: allow(L0203)
 
 ### `Ensure`
 
@@ -307,7 +307,7 @@ A function, constant, or logic-function declaration, with every optional clause 
 type Ensure = Ensure { binder: String, expr: Sp(Expr) }
 ```
 
-One ensures clause: the binder for the result and the postcondition expression over it.
+One ensures clause: the binder for the result and the postcondition expression over it. lint: allow(L0203)
 
 ### `CtorShape`
 
@@ -315,7 +315,7 @@ One ensures clause: the binder for the result and the postcondition expression o
 type CtorShape = CPositional(List(Ty)) | CRecord(List(CField))
 ```
 
-The shape of a data constructor: a positional argument list or a named field list.
+The shape of a data constructor: a positional argument list or a named field list. lint: allow(L0203)
 
 ### `Ctor`
 
@@ -323,7 +323,7 @@ The shape of a data constructor: a positional argument list or a named field lis
 type Ctor = Ctor { name: String, shape: CtorShape }
 ```
 
-One data constructor: its name and its argument shape.
+One data constructor: its name and its argument shape. lint: allow(L0203)
 
 ### `Deriving`
 
@@ -331,7 +331,7 @@ One data constructor: its name and its argument shape.
 type Deriving = Deriving { name: String, span: Span }
 ```
 
-One derived class on a data declaration: the class name and its span.
+One derived class on a data declaration: the class name and its span. lint: allow(L0203)
 
 ### `Method`
 
@@ -339,7 +339,7 @@ One derived class on a data declaration: the class name and its span.
 type Method = Method { name: String, ty: Ty }
 ```
 
-One class method signature: the method name and its declared type.
+One class method signature: the method name and its declared type. lint: allow(L0203)
 
 ### `EffOp`
 
@@ -352,7 +352,7 @@ type EffOp = EffOp {
 }
 ```
 
-One operation of an effect declaration: its name, parameter types, result type, and optional resumption grade.
+One operation of an effect declaration: its name, parameter types, result type, and optional resumption grade. lint: allow(L0203)
 
 ### `Rung`
 
@@ -366,7 +366,7 @@ type Rung = Rung {
 }
 ```
 
-One rung of a stable type: the version name, an optional base to inherit from, its fields, and an optional frozen marker.
+One rung of a stable type: the version name, an optional base to inherit from, its fields, and an optional frozen marker. lint: allow(L0203)
 
 ### `RungField`
 
@@ -374,7 +374,7 @@ One rung of a stable type: the version name, an optional base to inherit from, i
 type RungField = RungField { name: String, ty: Ty, dflt: Option(Sp(Expr)) }
 ```
 
-One field of a stable rung: the field name, its type, and an optional default expression.
+One field of a stable rung: the field name, its type, and an optional default expression. lint: allow(L0203)
 
 ### `Converter`
 
@@ -390,7 +390,7 @@ type Converter = Converter {
 }
 ```
 
-One converter between stable rungs: the direction, the from and to rung names, the base expression, overriding field bindings, and dropped fields.
+One converter between stable rungs: the direction, the from and to rung names, the base expression, overriding field bindings, and dropped fields. lint: allow(L0203)
 
 ### `MigrationRoute`
 
@@ -398,7 +398,7 @@ One converter between stable rungs: the direction, the from and to rung names, t
 type MigrationRoute = MAuto | MVersion(MigrationDir, MigrationDir)
 ```
 
-The route of a stable migration: automatic, or an explicit upgrade and downgrade pair.
+The route of a stable migration: automatic, or an explicit upgrade and downgrade pair. lint: allow(L0203)
 
 ### `MigrationDir`
 
@@ -406,7 +406,7 @@ The route of a stable migration: automatic, or an explicit upgrade and downgrade
 type MigrationDir = DAuto | DExpr(Sp(Expr))
 ```
 
-One direction of an explicit migration: automatic or a given expression.
+One direction of an explicit migration: automatic or a given expression. lint: allow(L0203)
 
 ### `Migration`
 
@@ -419,7 +419,7 @@ type Migration = Migration {
 }
 ```
 
-One migration of a stable type: the from and to rung names and its route.
+One migration of a stable type: the from and to rung names and its route. lint: allow(L0203)
 
 ### `Item`
 
@@ -439,7 +439,7 @@ type Item
   | IDecl { decl: Decl, declkind: String, vis: Option(String), dep: Option(String) }
 ```
 
-A top-level item of a source file, tagged by its declaration family. Named items carry an optional visibility (`pub` or `opaque`) and an optional deprecation message; imports, instances, and canonical bindings do not.
+A top-level item of a source file, tagged by its declaration family. Named items carry an optional visibility (`pub` or `opaque`) and an optional deprecation message; imports, instances, and canonical bindings do not. lint: allow(L0203)
 
 ## Functions and Values
 

@@ -11,6 +11,7 @@ use crate::lineage::FactOutcome;
 use prism_native::rt::{cc, cc_flags, write_libm_archive, write_runtime_for, RuntimeProfile};
 
 use super::cache::NativeArtifactCache;
+use super::scheduler::QueryScheduler;
 use super::{Config, NATIVE_KONT_FRAME_FLAGS};
 
 const THIN_LTO_FLAG: &str = "-flto=thin";
@@ -247,13 +248,24 @@ pub(super) fn cc_link_many(
         stats.probe_time += elapsed;
     }
 
+    // Program shards are independent compiler subprocesses writing distinct
+    // objects, so they run under the bounded scheduler; results fold back in
+    // input order, keeping stats and error selection deterministic.
+    let shard_jobs: Vec<(usize, &PathBuf)> = ir.iter().enumerate().collect();
+    let shard_results = QueryScheduler::new(cfg.flags.query_threads).map_ordered(
+        &shard_jobs,
+        |(index, input)| -> Result<(PathBuf, ObjectCompileStats), Error> {
+            let name = format!("program-{index}");
+            let object = rt_dir.join(format!("{name}.o"));
+            let ir_bytes = fs::read(input)?;
+            let cache = NativeArtifactCache::for_native_object(&name, &ir_bytes, cfg)?;
+            let object_stats = compile_object(&cc, &args, input, &object, cache.as_ref(), cfg)?;
+            Ok((object, object_stats))
+        },
+    );
     let mut program_objects = Vec::with_capacity(ir.len());
-    for (index, input) in ir.iter().enumerate() {
-        let name = format!("program-{index}");
-        let object = rt_dir.join(format!("{name}.o"));
-        let ir_bytes = fs::read(input)?;
-        let cache = NativeArtifactCache::for_native_object(&name, &ir_bytes, cfg)?;
-        let object_stats = compile_object(&cc, &args, input, &object, cache.as_ref(), cfg)?;
+    for result in shard_results {
+        let (object, object_stats) = result?;
         stats.record_object(object_stats, false);
         program_objects.push(object);
     }

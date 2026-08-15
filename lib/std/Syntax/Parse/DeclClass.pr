@@ -60,6 +60,7 @@ fn parse_ty_params(c : Cursor) : Parsed(List(String)) =
   else
     parse_ty_params_go(cursor_advance(c), Nil)
 
+-- lint: allow(L0105)
 fn parse_ty_params_go(c : Cursor, rev : List(String)) : Parsed(List(String)) =
   if at_fixed(c, ")") then
     PTook(reverse(rev), cursor_advance(c))
@@ -154,6 +155,7 @@ pub fn parse_effect_item(
       c6,
     )
 
+-- lint: allow(L0105)
 fn parse_effect_ops(
   c : Cursor,
   depth : Int,
@@ -208,6 +210,7 @@ fn parse_effect_op_named(
   let PTook(ret, c5) = p5 else parsed_refused(p5)
   PTook(EffOp { name = name, params = params, ret = ret, grade = grade }, c5)
 
+-- lint: allow(L0105)
 fn parse_effect_params(
   c : Cursor,
   depth : Int,
@@ -289,6 +292,7 @@ fn parse_effect_alias_rhs(
       c1,
     )
 
+-- lint: allow(L0105)
 fn parse_alias_labels(
   c : Cursor,
   depth : Int,
@@ -332,6 +336,7 @@ pub fn parse_class_item(
   let PTook(supers, c6) = p6 else parsed_refused(p6)
   parse_class_body(saved, name, param, constraint_names(supers), c6, depth, vis)
 
+-- lint: allow(L0103)
 fn parse_class_body(
   saved : Cursor,
   name : String,
@@ -378,6 +383,7 @@ fn parse_class_body(
         c3,
       )
 
+-- lint: allow(L0105)
 fn parse_class_methods(
   c : Cursor,
   depth : Int,
@@ -408,6 +414,7 @@ fn parse_class_methods(
 -- bodies of complete function declarations. Visibility is accepted for the
 -- uniform dispatcher API; the phase-independent instance AST has no visibility
 -- field, matching the bootstrap export.
+-- lint: allow(L0101)
 pub fn parse_instance_item(
   c : Cursor,
   depth : Int,
@@ -432,6 +439,7 @@ pub fn parse_instance_item(
   let PTook(context, c8) = p8 else parsed_refused(p8)
   parse_instance_body(saved, name, cls, head, context, c8, depth, vis)
 
+-- lint: allow(L0103)
 fn parse_instance_body(
   saved : Cursor,
   name : String,
@@ -477,6 +485,7 @@ fn parse_instance_body(
         c3,
       )
 
+-- lint: allow(L0105)
 fn parse_instance_methods(
   c : Cursor,
   depth : Int,
@@ -562,6 +571,7 @@ fn parse_method_decl(c : Cursor, depth : Int) : Parsed(Decl) =
           is_replayable,
         )
 
+-- lint: allow(L0101, L0103)
 fn parse_method_after_params(
   saved : Cursor,
   name : String,
@@ -613,6 +623,7 @@ fn parse_method_after_params(
           c8,
         )
 
+-- lint: allow(L0105)
 fn parse_method_params(
   c : Cursor,
   depth : Int,
@@ -696,6 +707,7 @@ fn parse_optional_default(c : Cursor, depth : Int) : Parsed(Option(Sp(Expr))) =
 -- the type through a capped view of the cursor, then attach the row to a
 -- function result (including beneath `forall`) or retain it as the
 -- declaration's ambient effect for every other result.
+-- lint: allow(L0101)
 fn parse_return_ann(
   c : Cursor,
   depth : Int
@@ -770,6 +782,7 @@ fn cap_cursor(c : Cursor, stop : Int) : Cursor =
 fn full_cursor(base : Cursor, parsed : Cursor) : Cursor =
   Cursor { ..base, pos = parsed.pos }
 
+-- lint: allow(L0101)
 fn find_top_bang(
   c : Cursor,
   i : Int,
@@ -847,6 +860,7 @@ fn find_top_bang(
 -- Function clauses
 -- -------------------------------------------------------------------------
 
+-- lint: allow(L0105)
 fn parse_requires(
   c : Cursor,
   depth : Int,
@@ -859,6 +873,7 @@ fn parse_requires(
   else
     PTook(reverse(rev), c)
 
+-- lint: allow(L0105)
 fn parse_ensures(
   c : Cursor,
   depth : Int,
@@ -893,6 +908,7 @@ fn parse_where_block(c : Cursor, depth : Int) : Parsed(List(NamedExpr)) =
     let PTook(_, c1) = p1 else parsed_refused(p1)
     parse_where_bindings(c1, depth, Nil)
 
+-- lint: allow(L0105)
 fn parse_where_bindings(
   c : Cursor,
   depth : Int,
@@ -920,6 +936,7 @@ fn parse_where_bindings(
 -- -------------------------------------------------------------------------
 
 -- | Parse `canonical Class(Head) = instance_name`.
+-- lint: allow(L0101)
 pub fn parse_canonical_item(
   c : Cursor,
   depth : Int,

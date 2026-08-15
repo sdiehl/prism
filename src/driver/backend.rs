@@ -54,6 +54,11 @@ struct SccJobOutput {
     closure_summary_hit: bool,
 }
 
+/// Whether the sharded per-SCC backend is in play for this configuration.
+pub(super) const fn scc_backend_enabled(cfg: &Config) -> bool {
+    cfg.flags.scc_backend && !cfg.flags.native_kont_frames
+}
+
 pub(super) fn materialize_scc_bitcode(
     core: &LoweredCore,
     ctors: &BTreeMap<String, CtorInfo>,
@@ -61,7 +66,7 @@ pub(super) fn materialize_scc_bitcode(
     directory: &Path,
     cfg: &Config,
 ) -> Result<Option<SccBitcode>, Error> {
-    if !cfg.flags.scc_backend || cfg.flags.native_kont_frames {
+    if !scc_backend_enabled(cfg) {
         return Ok(None);
     }
     fs::create_dir_all(directory)?;

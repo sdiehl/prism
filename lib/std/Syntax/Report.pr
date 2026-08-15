@@ -32,6 +32,8 @@
 -- Counting characters would mean carrying a decoder the rest of the module has
 -- no use for, so the predicate below declines those lines instead.
 
+-- lint: allow-file(L0108)
+
 import Data.String (pad_left, slice_bytes, str_repeat)
 import Syntax.Diagnostic (..)
 import Syntax.Source (..)

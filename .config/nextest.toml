@@ -13,10 +13,10 @@ corpus-compilers = { max-threads = 1 }
 native-oracles = { max-threads = 1 }
 snapshot-goldens = { max-threads = 1 }
 
-[[profile.default.overrides]]
-filter = 'binary(typed_spine)'
-test-group = 'corpus-compilers'
-slow-timeout = { period = "120s", terminate-after = 16 }
+# The suites below live in shared targets, so the narrow rules select them by
+# their module prefix and the binary-wide rule catches the rest. Anchored
+# regexes are required: a bare substring like `parity::` would also match
+# `tier_parity::` and `fuse_parity::`, which carry a different allowance.
 
 # The whole-corpus test lowers every runnable program under eight optimizer
 # configurations and interprets each; the sample test is its fast subset. Same
@@ -26,9 +26,14 @@ slow-timeout = { period = "120s", terminate-after = 16 }
 # crossed the previous 64-minute cap with the corpus still growing, so the cap
 # doubles to keep its only job: distinguishing a hang from a big corpus.
 [[profile.default.overrides]]
-filter = 'binary(opt_equiv)'
+filter = 'binary(differential) & test(/^gate::/)'
 test-group = 'corpus-compilers'
 slow-timeout = { period = "120s", terminate-after = 64 }
+
+[[profile.default.overrides]]
+filter = 'binary(differential) & test(/^typed_spine::/)'
+test-group = 'corpus-compilers'
+slow-timeout = { period = "120s", terminate-after = 16 }
 
 [[profile.default.overrides]]
 filter = 'binary(compiler) & test(core_lint_clean_on_corpus)'
@@ -53,55 +58,26 @@ slow-timeout = { period = "120s", terminate-after = 16 }
 # here: the timeout exists to catch a hang, not to bound honest work. It precedes
 # the general rule below so the narrower match wins.
 [[profile.default.overrides]]
-filter = 'binary(native_parity) & test(mlir_matches_interpreter)'
+filter = 'binary(native) & test(mlir_matches_interpreter)'
 test-group = 'native-oracles'
 slow-timeout = { period = "120s", terminate-after = 32 }
 
-[[profile.default.overrides]]
-filter = 'binary(native_parity)'
-test-group = 'native-oracles'
-slow-timeout = { period = "120s", terminate-after = 16 }
-
-# Each forced test here re-plans the whole corpus twice per program to select the
+# Each forced tier test re-plans the whole corpus twice per program to select the
 # ones whose lowering actually moves, then builds and diffs every one it selects,
-# and the group below pins the binary to one thread. Measured at 502s, 508s, and
+# and the group below pins the oracles to one thread. Measured at 502s, 508s, and
 # 569s per forced test on an M-series laptop; a runner is several times slower,
-# which put one of them a few percent over the shared cap. Same rule as every
-# other entry here: the timeout catches a hang, it does not bound honest work.
+# which put one of them a few percent over the shared cap. Fusion parity
+# discovers its cases the same way, compiling the whole corpus twice (fuse off
+# and on) before it builds a single binary, so its honest runtime scales with the
+# corpus identically. Same rule as every other entry here: the timeout catches a
+# hang, it does not bound honest work.
 [[profile.default.overrides]]
-filter = 'binary(native_tier)'
-test-group = 'native-oracles'
-slow-timeout = { period = "120s", terminate-after = 32 }
-
-# Fusion parity discovers its cases by compiling the whole corpus twice (fuse
-# off and on) before it builds a single binary, and the group below pins it to
-# one thread, so its honest runtime scales with the corpus like the tier and
-# MLIR oracles above, which already carry this allowance. A four-core debug CI
-# shard crossed the shared cap with the corpus still growing. Same rule as
-# every other entry here: the timeout catches a hang, it does not bound honest
-# work.
-[[profile.default.overrides]]
-filter = 'binary(native_fusion)'
+filter = 'binary(native) & test(/^(tier_parity|tier_cross|tier_handler_parity|partial_handler_fuzz|typed_fuzz|fuse_parity)::/)'
 test-group = 'native-oracles'
 slow-timeout = { period = "120s", terminate-after = 32 }
 
 [[profile.default.overrides]]
-filter = 'binary(native_perf)'
-test-group = 'native-oracles'
-slow-timeout = { period = "120s", terminate-after = 16 }
-
-[[profile.default.overrides]]
-filter = 'binary(native_conformance)'
-test-group = 'native-oracles'
-slow-timeout = { period = "120s", terminate-after = 16 }
-
-[[profile.default.overrides]]
-filter = 'binary(native_sort)'
-test-group = 'native-oracles'
-slow-timeout = { period = "120s", terminate-after = 16 }
-
-[[profile.default.overrides]]
-filter = 'binary(native_cache)'
+filter = 'binary(native)'
 test-group = 'native-oracles'
 slow-timeout = { period = "120s", terminate-after = 16 }
 
@@ -111,14 +87,14 @@ test-group = 'snapshot-goldens'
 slow-timeout = { period = "120s", terminate-after = 16 }
 
 [[profile.ci.overrides]]
-filter = 'binary(typed_spine)'
-test-group = 'corpus-compilers'
-slow-timeout = { period = "120s", terminate-after = 16 }
-
-[[profile.ci.overrides]]
-filter = 'binary(opt_equiv)'
+filter = 'binary(differential) & test(/^gate::/)'
 test-group = 'corpus-compilers'
 slow-timeout = { period = "120s", terminate-after = 64 }
+
+[[profile.ci.overrides]]
+filter = 'binary(differential) & test(/^typed_spine::/)'
+test-group = 'corpus-compilers'
+slow-timeout = { period = "120s", terminate-after = 16 }
 
 [[profile.ci.overrides]]
 filter = 'binary(compiler) & test(core_lint_clean_on_corpus)'
@@ -130,42 +106,17 @@ filter = 'binary(compiler)'
 slow-timeout = { period = "120s", terminate-after = 16 }
 
 [[profile.ci.overrides]]
-filter = 'binary(native_parity) & test(mlir_matches_interpreter)'
+filter = 'binary(native) & test(mlir_matches_interpreter)'
 test-group = 'native-oracles'
 slow-timeout = { period = "120s", terminate-after = 32 }
 
 [[profile.ci.overrides]]
-filter = 'binary(native_parity)'
-test-group = 'native-oracles'
-slow-timeout = { period = "120s", terminate-after = 16 }
-
-[[profile.ci.overrides]]
-filter = 'binary(native_tier)'
+filter = 'binary(native) & test(/^(tier_parity|tier_cross|tier_handler_parity|partial_handler_fuzz|typed_fuzz|fuse_parity)::/)'
 test-group = 'native-oracles'
 slow-timeout = { period = "120s", terminate-after = 32 }
 
 [[profile.ci.overrides]]
-filter = 'binary(native_fusion)'
-test-group = 'native-oracles'
-slow-timeout = { period = "120s", terminate-after = 32 }
-
-[[profile.ci.overrides]]
-filter = 'binary(native_perf)'
-test-group = 'native-oracles'
-slow-timeout = { period = "120s", terminate-after = 16 }
-
-[[profile.ci.overrides]]
-filter = 'binary(native_conformance)'
-test-group = 'native-oracles'
-slow-timeout = { period = "120s", terminate-after = 16 }
-
-[[profile.ci.overrides]]
-filter = 'binary(native_sort)'
-test-group = 'native-oracles'
-slow-timeout = { period = "120s", terminate-after = 16 }
-
-[[profile.ci.overrides]]
-filter = 'binary(native_cache)'
+filter = 'binary(native)'
 test-group = 'native-oracles'
 slow-timeout = { period = "120s", terminate-after = 16 }
 

@@ -6,11 +6,11 @@ The type-and-row core of a Prism typechecker, written in Prism.
 
 This library is the first load-bearing piece of the self-hosted checker: the type, row, scheme, and error ADTs, the free-variable collectors, rigid substitution with composition, metavariable zonking, row normalization, type and row unification with occurs checks, and generalization and instantiation. The grammar mirrors the statics sketch: value types and computation types are split in the call-by-push-value style, a computation is a returned value with an effect row or a function into a computation, and rows are unordered sets of distinct labels over a closed, rigid, or metavariable tail.
 
-Identities follow the front end's discipline: rigid type and row variables are branded `Data.Name` identities minted by resolution, never spellings, and metavariable classes live in a payload-carrying union-find, so solving a class solves every alias of it. The solver is written in the effects style (a `State` cell for the two forests plus an aborting error), which the compiler confines to the checking region; the structural operations are pure.
+Identities follow the front end's discipline: rigid type and row variables are branded `Data.Name` identities minted by resolution, never spellings, and metavariable classes live in a payload-carrying union-find, so solving a class solves every alias of it. The solver is written in the effects style: `Control.Solve` carries fresh-meta allocation, substitution lookup, and class joining as one effect, discharged once at `run_tc` together with the aborting refusal, so every rule below reads as direct style and the structural operations stay pure.
 
 ```prism,mod=Tc
-# import Control.State (..)
-fn demo() : String ! {State(Solver), TcFail} =
+# import Control.Solve (..)
+fn demo() : String ! {Solve(Sol), TcFail} =
   let m = fresh_ty_meta()
   unify_v(v_fun([VInt], c_ret(m, row_closed([label0("IO")]))), v_fun([VInt], c_ret(VBool, row_closed([label0("IO")]))))
   show_vty(zonk_v(m))
@@ -33,11 +33,15 @@ Bool
 type TyVarSpace = TyVarTag
 ```
 
+The brand for rigid type-variable identities. A marker type carries no instances of its own; the payload's instances do the work. lint: allow(L0203)
+
 ### `RowVarSpace`
 
 ```prism,def
 type RowVarSpace = RowVarTag
 ```
+
+The brand for rigid row-variable identities, distinct from the type- variable brand so the two can never be confused. lint: allow(L0203)
 
 ### `VTy`
 
@@ -56,11 +60,15 @@ type VTy
   deriving (Eq, Show)
 ```
 
+A value type: the primitives, a saturated constructor application, a tuple, a thunked computation, a rigid variable, or a metavariable class.
+
 ### `CTy`
 
 ```prism,def
 type CTy = CRet(VTy, Row) | CFun(List(VTy), CTy) deriving (Eq, Show)
 ```
+
+A computation type: a value returned against an effect row, or a function from value types into a further computation.
 
 ### `Label`
 
@@ -97,7 +105,7 @@ type Scheme = Scheme {
   tyvars: List(Binder(TyVarSpace)),
   rowvars: List(Binder(RowVarSpace)),
   body: VTy
-}
+} deriving (Eq, Show)
 ```
 
 A polymorphic scheme: rigid type and row binders over a value type.
@@ -116,27 +124,18 @@ type TcError
 
 Why checking refused.
 
-### `TySol`
+### `Sol`
 
 ```prism,def
-type TySol = TyUnsolved | TySolved(VTy)
+type Sol
+  = TyUnsolved
+  | TySolved(VTy)
+  | RowUnsolved
+  | RowSolved(Row)
+  deriving (Eq, Show)
 ```
 
-### `RowSol`
-
-```prism,def
-type RowSol = RowUnsolved | RowSolved(Row)
-```
-
-### `Solver`
-
-```prism,def
-type Solver = Solver {
-  tys: UnionFind(Int, TySol),
-  rows: UnionFind(Int, RowSol),
-  next: Int
-}
-```
+What a metavariable class knows: nothing yet, or its solution.
 
 ### `Subst`
 
@@ -146,6 +145,8 @@ type Subst = Subst {
   rows: Map(Name(RowVarSpace), Row)
 }
 ```
+
+A rigid substitution: finite maps from rigid type and row identities to the types and rows they stand for. lint: allow(L0203)
 
 ## Effects
 
@@ -166,11 +167,15 @@ The aborting refusal effect: `tc_fail` abandons the current check with a structu
 tc_fail : forall a. (TcError) -> a ! {TcFail}
 ```
 
+Abandon the current check with a structured error.
+
 ### `v_fun`
 
 ```prism,sig
 v_fun : (List(VTy), CTy) -> VTy
 ```
+
+The thunked function type taking `params` to the computation `body`.
 
 ### `c_ret`
 
@@ -178,11 +183,15 @@ v_fun : (List(VTy), CTy) -> VTy
 c_ret : (VTy, Row) -> CTy
 ```
 
+The computation returning `v` while performing the effects in `r`.
+
 ### `label0`
 
 ```prism,sig
 label0 : (String) -> Label
 ```
+
+An effect label with no type arguments.
 
 ### `row_closed`
 
@@ -190,55 +199,79 @@ label0 : (String) -> Label
 row_closed : (List(Label)) -> Row
 ```
 
+The row of exactly `labels`, admitting no further effects.
+
 ### `row_open`
 
 ```prism,sig
 row_open : (List(Label), Tail) -> Row
 ```
 
-### `empty_solver`
-
-```prism,sig
-empty_solver : () -> Solver
-```
+The row of `labels` over `tail`, open to whatever the tail admits.
 
 ### `run_tc`
 
 ```prism,sig
-run_tc : forall e0 a. (() -> a ! {Control.State.State(Solver), TcFail, Var@cell@0, e0}) -> Result(a, TcError) ! {e0}
+run_tc : forall e0 a. (() -> a ! {Control.Solve.Solve(Sol), TcFail, Var@forest@0, Var@next@1, e0}) -> Result(a, TcError) ! {e0}
 ```
 
 Run a checking computation against a fresh solver, catching refusals.
 
+### `run_tc_with`
+
+```prism,sig
+run_tc_with : forall e0 a. ((Sol, Sol) -> Sol, () -> a ! {Control.Solve.Solve(Sol), TcFail, Var@forest@0, Var@next@1, e0}) -> Result(a, TcError) ! {e0}
+```
+
+`run_tc` with an explicit join policy: the solver strategy is the handler, so a different `combine` swaps the strategy without touching a single rule.
+
+### `merge_sol`
+
+```prism,sig
+merge_sol : (Sol, Sol) -> Sol
+```
+
+The default join policy: keep whichever side knows a solution. Type and row classes never meet, because unions are only ever taken within one kind.
+
 ### `fresh_ty_meta`
 
 ```prism,sig
-fresh_ty_meta : () -> VTy ! {Control.State.State(Solver)}
+fresh_ty_meta : () -> VTy ! {Control.Solve.Solve(Sol)}
 ```
+
+Allocate an unsolved type metavariable.
 
 ### `fresh_row_meta`
 
 ```prism,sig
-fresh_row_meta : () -> Tail ! {Control.State.State(Solver)}
+fresh_row_meta : () -> Tail ! {Control.Solve.Solve(Sol)}
 ```
+
+Allocate an unsolved row metavariable, ready to stand as a row tail.
 
 ### `zonk_v`
 
 ```prism,sig
-zonk_v : (VTy) -> VTy ! {Control.State.State(Solver)}
+zonk_v : (VTy) -> VTy ! {Control.Solve.Solve(Sol)}
 ```
+
+Chase every solved metavariable in a value type to its solution.
 
 ### `zonk_c`
 
 ```prism,sig
-zonk_c : (CTy) -> CTy ! {Control.State.State(Solver)}
+zonk_c : (CTy) -> CTy ! {Control.Solve.Solve(Sol)}
 ```
+
+Chase every solved metavariable in a computation type to its solution.
 
 ### `zonk_row`
 
 ```prism,sig
-zonk_row : (Row) -> Row ! {Control.State.State(Solver)}
+zonk_row : (Row) -> Row ! {Control.Solve.Solve(Sol)}
 ```
+
+Chase every solved metavariable in a row to its solution, splicing the labels a solved tail carries into the row.
 
 ### `subst_empty`
 
@@ -246,11 +279,15 @@ zonk_row : (Row) -> Row ! {Control.State.State(Solver)}
 subst_empty : Subst
 ```
 
+The substitution that maps nothing.
+
 ### `subst_ty`
 
 ```prism,sig
 subst_ty : (Subst, Data.Name.Name(TyVarSpace), VTy) -> Subst
 ```
+
+Extend a substitution so the rigid type variable `v` stands for `t`.
 
 ### `subst_row`
 
@@ -258,11 +295,15 @@ subst_ty : (Subst, Data.Name.Name(TyVarSpace), VTy) -> Subst
 subst_row : (Subst, Data.Name.Name(RowVarSpace), Row) -> Subst
 ```
 
+Extend a substitution so the rigid row variable `v` stands for `r`.
+
 ### `apply_v`
 
 ```prism,sig
 apply_v : (Subst, VTy) -> VTy
 ```
+
+Apply a substitution to a value type.
 
 ### `apply_c`
 
@@ -270,11 +311,15 @@ apply_v : (Subst, VTy) -> VTy
 apply_c : (Subst, CTy) -> CTy
 ```
 
+Apply a substitution to a computation type.
+
 ### `apply_row`
 
 ```prism,sig
 apply_row : (Subst, Row) -> Row
 ```
+
+Apply a substitution to a row, growing it with whatever labels a mapped tail brings.
 
 ### `subst_compose`
 
@@ -290,41 +335,97 @@ The substitution equal to applying `first` and then `second`.
 free_metas_v : (VTy) -> List(Int)
 ```
 
+The metavariable classes occurring in a value type, in first-seen order and without repeats.
+
+### `row_sorted`
+
+```prism,sig
+row_sorted : (Row) -> Row
+```
+
+The label ordering half of normalization, without the duplicate refusal: labels sorted by name over the same tail. Rows that differ only in the order their labels were written have one sorted form, so a renderer that must stay pure can still print the canonical spelling.
+
 ### `row_normalize`
 
 ```prism,sig
 row_normalize : (Row) -> Row ! {TcFail}
 ```
 
+The canonical form of a row: labels sorted by name, refusing a duplicate.
+
 ### `unify_v`
 
 ```prism,sig
-unify_v : (VTy, VTy) -> Unit ! {Control.State.State(Solver), TcFail}
+unify_v : (VTy, VTy) -> Unit ! {Control.Solve.Solve(Sol), TcFail}
 ```
+
+Unify two value types, solving metavariable classes as it goes.
 
 ### `unify_c`
 
 ```prism,sig
-unify_c : (CTy, CTy) -> Unit ! {Control.State.State(Solver), TcFail}
+unify_c : (CTy, CTy) -> Unit ! {Control.Solve.Solve(Sol), TcFail}
 ```
+
+Unify two computation types: results, rows, and parameters pairwise.
 
 ### `unify_row`
 
 ```prism,sig
-unify_row : (Row, Row) -> Unit ! {Control.State.State(Solver), TcFail}
+unify_row : (Row, Row) -> Unit ! {Control.Solve.Solve(Sol), TcFail}
 ```
+
+Unify two rows: shared labels pairwise, then each side's leftovers against the other side's tail.
+
+### `row_absorb`
+
+```prism,sig
+row_absorb : (Row, Row) -> Unit ! {Control.Solve.Solve(Sol), TcFail}
+```
+
+Absorb `used` into the ambient row `have`: everything `used` performs must already be admitted by `have`, while `have` stays free to admit more. This is containment, not equality, which is what lets a pure callee stand in an effectful caller. A closed `used` is reconciled over a fresh residual tail that soaks up whatever `have` admits beyond it; an open `used` has no fixed extent to contain and unifies outright, growing both sides to their union.
+
+### `row_discharge`
+
+```prism,sig
+row_discharge : (Row, List(String)) -> Row
+```
+
+The pure part of handling: drop every label whose effect name is in `handled`, keeping the tail, so an open row stays open to whatever its tail admits. A handler's residual row is this subtraction; folding the residual back into the ambient row is ordinary unification at the use site.
+
+### `close_rows_v`
+
+```prism,sig
+close_rows_v : (VTy) -> VTy ! {Control.Solve.Solve(Sol)}
+```
+
+Zonk `ty` and read every surviving row metavariable tail as closed. Rigid row tails are left alone: those are quantified, not unconstrained.
+
+`generalize` expects this to have run. Type and row classes are minted from one supply, and only a type class may become a rigid type binder, so a row tail must be settled before quantification looks at what is free.
+
+### `close_rows_row`
+
+```prism,sig
+close_rows_row : (Row) -> Row ! {Control.Solve.Solve(Sol)}
+```
+
+Zonk a row and read a surviving metavariable tail as closed, so an inferred row can be read off as the definite set of effects performed.
 
 ### `generalize`
 
 ```prism,sig
-generalize : (List(Int), VTy) -> Scheme ! {Control.Fresh.Fresh, Control.State.State(Solver)}
+generalize : (List(Int), VTy) -> Scheme ! {Control.Fresh.Fresh, Control.Solve.Solve(Sol)}
 ```
+
+Generalize a value type over every metavariable free in it and not in `ambient`, yielding a scheme with fresh rigid binders.
 
 ### `instantiate`
 
 ```prism,sig
-instantiate : (Scheme) -> VTy ! {Control.State.State(Solver)}
+instantiate : (Scheme) -> VTy ! {Control.Solve.Solve(Sol)}
 ```
+
+Instantiate a scheme, replacing each binder with a fresh metavariable.
 
 ### `show_vty`
 
@@ -332,11 +433,15 @@ instantiate : (Scheme) -> VTy ! {Control.State.State(Solver)}
 show_vty : (VTy) -> String
 ```
 
+Render a value type in the surface syntax's spelling.
+
 ### `show_cty`
 
 ```prism,sig
 show_cty : (CTy) -> String
 ```
+
+Render a computation type as its result against its row.
 
 ### `show_row`
 
@@ -344,8 +449,12 @@ show_cty : (CTy) -> String
 show_row : (Row) -> String
 ```
 
+Render a row in brace syntax, naming the tail when the row is open.
+
 ### `show_scheme`
 
 ```prism,sig
 show_scheme : (Scheme) -> String
 ```
+
+Render a scheme, quantifiers first.

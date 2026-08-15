@@ -144,7 +144,10 @@ fn pkg_init_prompts_and_creates_minimal_package() {
         .stdin
         .as_mut()
         .expect("stdin")
-        .write_all(b"demo_pkg\ndemo-dir\n")
+        .write_all(
+            b"demo_pkg\ndemo-dir\n0.1.0\nTest Author <test@example.com>\n\
+              test@example.com\nMIT\n",
+        )
         .expect("writes init answers");
     let out = child.wait_with_output().expect("waits for init");
     assert!(
@@ -155,6 +158,10 @@ fn pkg_init_prompts_and_creates_minimal_package() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("package name: "), "{stdout}");
     assert!(stdout.contains("directory name: "), "{stdout}");
+    assert!(stdout.contains("version: "), "{stdout}");
+    assert!(stdout.contains("author: "), "{stdout}");
+    assert!(stdout.contains("maintainer: "), "{stdout}");
+    assert!(stdout.contains("license: "), "{stdout}");
     assert!(stdout.contains("created package `demo_pkg`"), "{stdout}");
 
     let project = tmp.path.join("demo-dir");
@@ -163,6 +170,10 @@ fn pkg_init_prompts_and_creates_minimal_package() {
     assert!(main.is_file());
     let manifest = fs::read_to_string(project.join("prism.toml")).unwrap();
     assert!(manifest.contains("name = \"demo_pkg\""));
+    assert!(manifest.contains("version = \"0.1.0\""));
+    assert!(manifest.contains("authors = [\"Test Author <test@example.com>\"]"));
+    assert!(manifest.contains("maintainers = [\"test@example.com\"]"));
+    assert!(manifest.contains("license = \"MIT\""));
     assert!(manifest.contains("entry = \"src/main.pr\""));
     assert_eq!(
         fs::read_to_string(&main).unwrap(),
@@ -448,6 +459,10 @@ fn project_check_uses_locked_std_source_bundle() {
         project.join("prism.toml"),
         r#"[package]
 name = "p"
+version = "0.0.0"
+authors = ["Test Author <test@example.com>"]
+maintainers = ["test@example.com"]
+license = "MIT"
 prelude = "src/Prelude.pr"
 
 [bin]
@@ -513,6 +528,10 @@ fn write_named_package_project(project: &Path, name: &str, dep_source: &str) {
         format!(
             r#"[package]
 name = "{name}"
+version = "0.0.0"
+authors = ["Test Author <test@example.com>"]
+maintainers = ["test@example.com"]
+license = "MIT"
 
 [bin]
 entry = "src/main.pr"
@@ -783,6 +802,10 @@ fn why_rejects_foreign_lock_scheme_before_using_hashes() {
         project.join("prism.toml"),
         r#"[package]
 name = "app"
+version = "0.0.0"
+authors = ["Test Author <test@example.com>"]
+maintainers = ["test@example.com"]
+license = "MIT"
 
 [bin]
 entry = "src/main.pr"
@@ -877,6 +900,10 @@ fn publish_add_and_run_git_package_end_to_end() {
         project.join("prism.toml"),
         r#"[package]
 name = "app"
+version = "0.0.0"
+authors = ["Test Author <test@example.com>"]
+maintainers = ["test@example.com"]
+license = "MIT"
 
 [bin]
 entry = "src/main.pr"

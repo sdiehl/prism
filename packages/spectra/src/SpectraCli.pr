@@ -26,6 +26,8 @@
 import Cli as C
 import Cli (Command, Group, SubCmd)
 
+-- | One parsed subcommand: check a project, build it to a named PDF and
+-- optionally open it, or clean its build directory.
 pub type SpectraCommand
   = Check(String)
   | Build(String, String, Bool)
@@ -51,6 +53,7 @@ fn build_parser() =
       C.switch("open", "", "open the resulting PDF"),
     )
 
+-- | The whole command grammar the executable parses its argument list with.
 pub let spectra_command : C.Command(SpectraCommand) =
   Command {
     name = "spectra",
@@ -74,6 +77,8 @@ pub let spectra_command : C.Command(SpectraCommand) =
       ])
   }
 
+-- | Parse an argument list against the grammar, without touching the process
+-- environment.
 pub fn parse_spectra_argv(argv : List(String)) : C.Outcome(SpectraCommand) =
   C.run_argv(spectra_command, argv)
 

@@ -32,7 +32,7 @@ plate_layer : forall a. () -> Control.Layer.Layer(a) given Plate(a)
 
 The layer a `Plate` instance supplies, so a sort that derived `Plate` joins every traversal here and in `Control.Rewrite` without a hand-written pair.
 
-The two interfaces agree on the shape and disagree only on how they report a violation of it, and that disagreement is the whole of the translation: `rebuild` raises `Fail` on a replacement list that does not match the node, and a layer says the same thing by returning the node unchanged. Nothing else is adapted, because `children` is already the order `kids` promises.
+The two interfaces agree on the shape and disagree only on how they report a violation of it, and that disagreement is the whole of the translation: `rebuild` raises `Fail` on a replacement list that does not match the node, and a layer says the same thing by returning the node unchanged. Nothing else is adapted, because `children` is already the order `kids` promises. Named for the interface it adapts from rather than the one it builds, so the direction of the translation is readable at the call site. lint: allow(L0204)
 
 ### `lay_kids`
 

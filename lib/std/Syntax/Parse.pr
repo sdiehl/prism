@@ -18,7 +18,10 @@ import Syntax.Parse.Decl (..)
 
 -- | A source-level parse failure, preserving whether lexing or parsing refused
 -- the input.
-pub type ParseFailure = ParseLex(LexError) | ParseSyntax(Diagnostic)
+pub type ParseFailure
+  = ParseLex(LexError)
+  | ParseSyntax(Diagnostic)
+  deriving (Eq, Show)
 
 -- | Parse an already-laid-out whole-program token stream.
 pub fn parse_program_tokens(

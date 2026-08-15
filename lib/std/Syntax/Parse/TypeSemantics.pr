@@ -10,6 +10,8 @@ import Syntax.Ast (..)
 import Syntax.Cursor (..)
 import Syntax.Parse.Support (..)
 
+-- | Check a usage row against the fact vocabulary, refusing an open tail and
+-- any unknown or repeated fact.
 pub fn validate_usage(
   saved : Cursor,
   base : Ty,

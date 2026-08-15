@@ -1,6 +1,8 @@
 -- Handwritten family-neutral runtime shared by generated parsers.
 -- This module has no grammar-derived policy; generator output targets its stable API.
 
+-- lint: allow-file(L0101, L0102, L0103, L0105, L0108, L0202, L0203, L0204)
+
 import Data.List (..)
 import Syntax.Token (..)
 import Syntax.Cursor (..)

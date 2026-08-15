@@ -98,14 +98,14 @@ fn tile_count(xs : List(String)) : Int =
 -- Join a base directory and a relative path, keeping the path bare when the base
 -- is the current directory so the lineage graph names `summary.json`, not
 -- `./summary.json`.
-fn join(base : String, rel : String) : String =
+fn path_join(base : String, rel : String) : String =
   if base == "." then
     rel
   else
     "{base}/{rel}"
 
 fn tile_path(base : String, name : String) : String =
-  join(base, "tiles/{name}.gray")
+  path_join(base, "tiles/{name}.gray")
 
 fn tile_summary(name : String, n : Int, t : Tally) : Json =
   JObj([
@@ -133,7 +133,7 @@ fn process_tiles(
       (Cons(tile_summary(name, n, t), rest_js), c + n, a + t.above, s + t.sum)
 
 fn read_config(base : String) : Json ! {FileSystem} =
-  match decode(read_file(join(base, "config.json"))) of
+  match decode(read_file(path_join(base, "config.json"))) of
     Ok(j) => j
     Err(_) => JNull
 
@@ -160,7 +160,7 @@ fn main() : Unit ! {IO} =
             ]),
         ),
     ])
-  write_file(join(base, "summary.json"), encode(summary))
+  write_file(path_join(base, "summary.json"), encode(summary))
   println(
       "tiles={tile_count(names)} bytes={total_count} above={total_above} sum={total_sum}",
     )

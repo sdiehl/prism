@@ -14,12 +14,12 @@ One document per source file: the embedded source identity and every user functi
 type RNode = RNode { id: Int, kind: String, span: Span, children: List(RNode) }
 ```
 
-One resolved expression node: its NodeId (the join key), its expression-form kind, its byte span, and its immediate children in source order. A leaf carries the empty child list.
+One resolved expression node: its NodeId (the join key), its expression-form kind, its byte span, and its immediate children in source order. A leaf carries the empty child list. lint: allow(L0203)
 
 ### `RParam`
 
 ```prism,def,h-82bba1a8e89773b798d0c892c056489144c0f83cfd24f4e09520a6dd36f01412
-type RParam = RParam { name: String, is_borrow: Bool }
+type RParam = RParam { name: String, is_borrow: Bool } deriving (Eq, Show)
 ```
 
 One parameter of a resolved function: the binder its body's references resolve to, and whether it is borrowed. A pattern parameter's name is the synthesized binder the resolver assigned, because that is the name the body actually mentions.
@@ -30,7 +30,7 @@ One parameter of a resolved function: the binder its body's references resolve t
 type RFunction = RFunction { name: String, params: List(RParam), body: RNode }
 ```
 
-One user function's resolved body tree, with its name and parameters.
+One user function's resolved body tree, with its name and parameters. lint: allow(L0203)
 
 ### `ResolvedDoc`
 
@@ -43,7 +43,7 @@ type ResolvedDoc = ResolvedDoc {
 }
 ```
 
-A decoded resolved-syntax document: the envelope identity, the embedded source every span indexes into, and the user functions in source order.
+A decoded resolved-syntax document: the envelope identity, the embedded source every span indexes into, and the user functions in source order. lint: allow(L0203)
 
 ## Functions and Values
 
@@ -53,7 +53,7 @@ A decoded resolved-syntax document: the envelope identity, the embedded source e
 resolved_schema : () -> String
 ```
 
-The schema tag this vocabulary decodes.
+The schema tag this vocabulary decodes. lint: allow(L0204)
 
 ### `rkinds`
 
@@ -61,7 +61,7 @@ The schema tag this vocabulary decodes.
 rkinds : () -> List(String)
 ```
 
-The node kinds the artifact spells, one function per form, so a consumer matches on a named kind rather than retyping a bare string at each use site. The list is the artifact's whole vocabulary: a kind outside it is a document this version does not understand, which `rkind_known` is how to ask.
+The node kinds the artifact spells, one function per form, so a consumer matches on a named kind rather than retyping a bare string at each use site. The list is the artifact's whole vocabulary: a kind outside it is a document this version does not understand, which `rkind_known` is how to ask. lint: allow(L0204)
 
 ### `rkind_known`
 
@@ -325,7 +325,7 @@ A type annotation.
 rnode_children : (Syntax.Resolved.RNode) -> List(Syntax.Resolved.RNode)
 ```
 
-The immediate children of one resolved node, in source order. The one constructor-naming site for `RNode` traversal; every generic walk derives from it, so a consumer never re-matches the node shape.
+The immediate children of one resolved node, in source order. The one constructor-naming site for `RNode` traversal; every generic walk derives from it, so a consumer never re-matches the node shape. lint: allow(L0204)
 
 ### `rnode_rebuild`
 
@@ -333,7 +333,7 @@ The immediate children of one resolved node, in source order. The one constructo
 rnode_rebuild : (Syntax.Resolved.RNode, List(Syntax.Resolved.RNode)) -> Syntax.Resolved.RNode
 ```
 
-Put a replacement child list back into a resolved node, keeping its id, kind, and span. Fails closed: a list of the wrong length yields the node unchanged.
+Put a replacement child list back into a resolved node, keeping its id, kind, and span. Fails closed: a list of the wrong length yields the node unchanged. lint: allow(L0204)
 
 ### `rnode_layer`
 
@@ -341,7 +341,7 @@ Put a replacement child list back into a resolved node, keeping its id, kind, an
 rnode_layer : () -> Control.Layer.Layer(Syntax.Resolved.RNode)
 ```
 
-The children-and-rebuild pair for resolved nodes, so every strategy in `Control.Rewrite` and every query in `Control.Layer` works on a resolved body.
+The children-and-rebuild pair for resolved nodes, so every strategy in `Control.Rewrite` and every query in `Control.Layer` works on a resolved body. lint: allow(L0204)
 
 ### `rnode_universe`
 
@@ -349,7 +349,7 @@ The children-and-rebuild pair for resolved nodes, so every strategy in `Control.
 rnode_universe : (Syntax.Resolved.RNode) -> List(Syntax.Resolved.RNode)
 ```
 
-Every node of a resolved body, root first, depth-first. The uniplate `universe` over `RNode`, the traversal a Prism-written checker walks a body with.
+Every node of a resolved body, root first, depth-first. The uniplate `universe` over `RNode`, the traversal a Prism-written checker walks a body with. lint: allow(L0204)
 
 ### `rnode_count`
 
@@ -367,3 +367,5 @@ rnode_count(RNode { id = 0, kind = "unit", span = Span { lo = 0, hi = 0 }, child
 ```output
 1
 ```
+
+lint: allow(L0204)

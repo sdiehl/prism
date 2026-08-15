@@ -541,6 +541,7 @@ struct Solver {
     types: BTreeMap<u32, Type>,
     rows: BTreeMap<u32, EffRow>,
     int_defaults: BTreeSet<u32>,
+    latent_defaults: BTreeSet<u32>,
 }
 
 impl Solver {
@@ -558,6 +559,31 @@ impl Solver {
         let id = self.bump();
         self.int_defaults.insert(id);
         CoreType::Source(Type::Exist(id))
+    }
+
+    // The row of a closure nothing has demanded yet. It is bounded below by
+    // what the body performs and stays open for a consumer whose row the
+    // closure helps determine; a consumer that merely admits more effects than
+    // the body has must not make the closure describe itself as performing
+    // them, so `subsume_row` leaves this variable at its lower bound.
+    fn fresh_latent_row(&mut self) -> EffRow {
+        let id = self.bump();
+        self.latent_defaults.insert(id);
+        EffRow::Exist(id)
+    }
+
+    // Settle an undemanded closure's row at its lower bound. Resolution leaves
+    // the variable bare only while no join from below has given it a label, so
+    // the bound is the empty row; solving it keeps an unsolved variable out of
+    // the structural comparisons a witness has to survive.
+    fn settle_latent(&mut self, row: &EffRow) -> EffRow {
+        if let EffRow::Exist(id) = self.resolve_row(row) {
+            if self.latent_defaults.contains(&id) {
+                self.rows.insert(id, EffRow::Empty);
+                return EffRow::Empty;
+            }
+        }
+        self.resolve_row(row)
     }
 
     const fn fresh_row(&mut self) -> EffRow {
@@ -809,6 +835,24 @@ impl Solver {
         if actual == expected || actual == EffRow::Empty {
             return Ok(());
         }
+        // An undemanded closure's latent row behaves like the empty row it is
+        // about to become: resolution leaves it bare only while no join from
+        // below has given it a label, and the empty row is included in every
+        // upper bound, which is what the short circuit above already says about
+        // a pure computation. Solving it here would instead copy the consumer's
+        // row onto a closure that performs none of it, and a closure that
+        // describes itself as effectful costs the evidence lowering. The one
+        // demand that is not merely an upper bound names labels and still has an
+        // open tail: a container element or a parameter row this closure helps
+        // determine, where the binder that names the closure records exactly
+        // that row, so the two must stay the same variable.
+        if let EffRow::Exist(id) = actual {
+            let demanding =
+                !expected.labels().is_empty() && matches!(expected.tail(), EffRow::Exist(_));
+            if self.latent_defaults.contains(&id) && !demanding {
+                return Ok(());
+            }
+        }
         if matches!(actual, EffRow::Exist(_)) || matches!(expected, EffRow::Exist(_)) {
             return self.unify_row(&actual, &expected);
         }
@@ -959,6 +1003,16 @@ impl Solver {
                         return Ok(());
                     }
                     return Err(format!("recursive row metavariable ?r{id} in {other:?}"));
+                }
+                // An undemanded closure's row keeps its mark across aliasing.
+                // Solving it to a fresh variable would otherwise lose the fact
+                // that nothing has demanded the closure yet, and the next
+                // consumer to state a fixed row would have that row copied onto
+                // a closure that performs none of it.
+                if self.latent_defaults.contains(id) {
+                    if let EffRow::Exist(target) = other {
+                        self.latent_defaults.insert(*target);
+                    }
                 }
                 self.rows.insert(*id, other.clone());
                 Ok(())
@@ -1124,6 +1178,15 @@ impl Solver {
         } else {
             let joined = self.join_core(target, value)?;
             if self.resolve_core(target) == joined {
+                return Ok(());
+            }
+            // The expected type here is fixed, so this comparison is the last
+            // word on the join: an undemanded closure's row that reached it
+            // still open will never be widened, and settling it at its lower
+            // bound is what keeps an unsolved variable out of the witness
+            // rather than merely out of this check.
+            let joined = self.settle_latents(&joined);
+            if self.resolve_core(target) == joined {
                 Ok(())
             } else {
                 Err(format!(
@@ -1132,6 +1195,34 @@ impl Solver {
                 ))
             }
         }
+    }
+
+    // Settle every undemanded closure row inside a value type. See
+    // `settle_latent`; the walk exists because such a row can sit under any
+    // number of thunk and function layers.
+    fn settle_latents(&mut self, ty: &CoreType) -> CoreType {
+        match ty {
+            CoreType::Thunk(sig) => CoreType::Thunk(Box::new(self.settle_latents_sig(sig))),
+            CoreType::Function(sig) => CoreType::Function(Box::new(CoreFnSig::new(
+                sig.quantifiers().to_vec(),
+                sig.params()
+                    .iter()
+                    .map(|ty| self.settle_latents(ty))
+                    .collect(),
+                self.settle_latents_sig(sig.body()),
+            ))),
+            CoreType::Ref(inner) => CoreType::Ref(Box::new(self.settle_latents(inner))),
+            CoreType::ReuseToken(inner) => {
+                CoreType::ReuseToken(Box::new(self.settle_latents(inner)))
+            }
+            CoreType::Source(_) | CoreType::Lowered(_) => ty.clone(),
+        }
+    }
+
+    fn settle_latents_sig(&mut self, sig: &CompSig) -> CompSig {
+        let result = self.settle_latents(sig.result());
+        let effects = self.settle_latent(sig.effects());
+        CompSig::new(result, effects)
     }
 
     fn constrain_row_join(&mut self, target: &EffRow, value: &EffRow) -> Result<(), String> {
@@ -1743,16 +1834,28 @@ impl<'a> Builder<'a> {
                 for raw in params.into_iter().rev() {
                     self.unbind(raw);
                 }
+                let latent = if let Some(expected_fn) = expected_fn {
+                    expected_fn.body().clone()
+                } else {
+                    // Nothing has demanded this closure yet, and the consumer
+                    // that will is reachable only after it is built: an element
+                    // of a list literal is typed before the sibling that fixes
+                    // the element type, and the container fixes it invariantly.
+                    // Recording the body's own row rigidly leaves a pure element
+                    // at the empty row where the binder that names it describes
+                    // the wider one, so keep the row open and bounded below by
+                    // what the body performs.
+                    let row = self.solver.fresh_latent_row();
+                    self.solver.constrain_row_join(&row, body.sig().effects())?;
+                    CompSig::new(body.sig().result().clone(), row)
+                };
                 let signature = CoreFnSig::new(
                     expected_fn
                         .map(CoreFnSig::quantifiers)
                         .unwrap_or_default()
                         .to_vec(),
                     binders.iter().map(|binder| binder.ty().clone()).collect(),
-                    expected_fn
-                        .map(CoreFnSig::body)
-                        .cloned()
-                        .unwrap_or_else(|| body.sig().clone()),
+                    latent,
                 );
                 self.finish_comp(
                     CompSig::new(CoreType::Function(Box::new(signature)), EffRow::Empty),

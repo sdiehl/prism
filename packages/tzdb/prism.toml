@@ -1,6 +1,17 @@
 [package]
 name = "tzdb"
+version = "0.19.0"
+authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
+maintainers = ["stephen.m.diehl@gmail.com"]
+license = "MIT"
 description = "Deterministic timezone arithmetic over a pinned, curated zone table."
+changes-files = ["../../CHANGELOG.md"]
+license-files = ["../../LICENSE"]
+readme-files = ["README.md"]
+homepage = "https://github.com/sdiehl/prism"
+issues = "https://github.com/sdiehl/prism/issues"
+online-doc = "https://sdiehl.github.io/prism/packages/tzdb/index.html"
+repo = "git+https://github.com/sdiehl/prism.git"
 
 [bin]
 entry = "src/Tzdb.pr"

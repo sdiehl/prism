@@ -1,0 +1,6 @@
+import Colour (band, name)
+
+fn main() =
+  let wavelength = 530
+  let result = band(wavelength)
+  println("{wavelength}nm is {name(result)}")

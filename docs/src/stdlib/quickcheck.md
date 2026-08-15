@@ -23,7 +23,7 @@ A seeded, sized generator of `a`. Apply it with `gen_run`; build one with the co
 ### `Config`
 
 ```prism,def,h-995a7b7a3ba5f9c69eb679f9ef3940955626380278e1b2044a0440fa419693df
-type Config = Cfg { seed: U64, count: Int, max_size: Int }
+type Config = Cfg { seed: U64, count: Int, max_size: Int } deriving (Eq, Show)
 ```
 
 How a property run configures the seeded stream: the base `seed`, the number of cases to try (`count`), and the largest size handed to a generator (`max_size`).
@@ -31,7 +31,7 @@ How a property run configures the seeded stream: the base `seed`, the number of 
 ### `Outcome`
 
 ```prism,def,h-76528ba1767ee92028499788eb2921f84a41a9627abcf5497766e0d19735f420
-type Outcome(a) = Passed(Int) | Failed(a, Int, U64, Int)
+type Outcome(a) = Passed(Int) | Failed(a, Int, U64, Int) deriving (Eq, Show)
 ```
 
 The result of a property run: `Passed(n)` after `n` cases held, or `Failed(value, index, seed, size)` with the first counterexample and the seed and size that reproduce it via `gen_at`.

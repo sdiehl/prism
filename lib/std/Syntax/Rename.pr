@@ -40,7 +40,7 @@ import Syntax.Token (..)
 -- | One variable reference: the node id the checker facts join on, the exact
 -- span of the identifier, and the identifier text sliced from the embedded
 -- source.
-pub type RnUse = RnUse { id: Int, span: Span, name: String }
+pub type RnUse = RnUse { id: Int, span: Span, name: String } deriving (Eq, Show)
 
 -- | Why a rename was refused. Every case is a fact about the document, not a
 -- guess about the programmer's intent.

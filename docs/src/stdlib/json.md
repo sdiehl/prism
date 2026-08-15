@@ -39,10 +39,12 @@ encode(JObj([("ok", JBool(true)), ("n", JInt(3))]))
 {"n":3,"ok":true}
 ```
 
+The tree is a structural carrier, and `encode` is its canonical rendering, so a derived printed form would compete with the one the module already defines. lint: allow(L0203)
+
 ### `JsonError`
 
 ```prism,def,h-1e2e5cf374d235d92d59c6123e189654b80e4fd580d366fa9c98b5aff5a7c05e
-type JsonError = JsonError(String, Int, Int)
+type JsonError = JsonError(String, Int, Int) deriving (Eq, Show)
 ```
 
 A decode failure: a human-readable message and the 1-based line and column of the offending byte.

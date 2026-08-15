@@ -39,3 +39,13 @@ fn chained(c : Option(Car)) : String = c?.name ?? "none"
 fn multikey(t : Tensor(Float)) : Float = t[1, 2]
 
 fn holey(x : Int) : Int = ?fill
+
+type Lot = Parked(Int) | Vacant
+
+fn fallback(l : Lot) : Int =
+  let Parked(n) = l else 0
+  n + 1
+
+fn fallback_line(l : Lot) : Int =
+  let Parked(n) = l else 7
+  n * 2

@@ -40,7 +40,7 @@ fn collect_algebra(layer : ListF(a, List(a))) : List(a) =
     NilF => Nil
     ConsF(x, rest) => Cons(x, rest)
 
-fn to_list(value : MuList(a)) : List(a) = cata(collect_algebra, value)
+fn mu_to_list(value : MuList(a)) : List(a) = cata(collect_algebra, value)
 
 fn sum_algebra(layer : ListF(Int, Int)) : Int =
   match layer of
@@ -82,10 +82,10 @@ fn remove_first(target : Int, value : MuList(Int)) : MuList(Int) =
 fn main() : Unit ! {IO} =
   -- ana: [1, 2, 3, 4, 5]
   let values = ana(range_layer, (1, 6))
-  println(to_list(values))
+  println(mu_to_list(values))
   -- cata: consume that fixed point.
   println(cata(sum_algebra, values))
   -- hylo: 6 * 5 * ... * 1, with no intermediate recursive value.
   println(hylo(product_algebra, countdown_layer, 6))
   -- para: remove 3 and return its original tail without rebuilding that tail.
-  println(to_list(remove_first(3, values)))
+  println(mu_to_list(remove_first(3, values)))

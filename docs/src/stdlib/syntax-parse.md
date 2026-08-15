@@ -11,7 +11,10 @@ The compiler remains the bootstrap oracle, but this module is a complete value-p
 ### `ParseFailure`
 
 ```prism,def,h-a21155d65a05e15144cd941ca3d463a4d9c3c37d03af7514ac7e7cc0b256f599
-type ParseFailure = ParseLex(LexError) | ParseSyntax(Diagnostic)
+type ParseFailure
+  = ParseLex(LexError)
+  | ParseSyntax(Diagnostic)
+  deriving (Eq, Show)
 ```
 
 A source-level parse failure, preserving whether lexing or parsing refused the input.
@@ -20,7 +23,7 @@ A source-level parse failure, preserving whether lexing or parsing refused the i
 
 ### `parse_program_tokens`
 
-```prism,sig,h-d420245951c664e909e63156ef177d7e1235ae499d641ad43d0a8985b0d473ee
+```prism,sig,h-29b58e7844e92a36e4a0048981e0a22b9425d5c8487b7116c60829ee1c99f77e
 parse_program_tokens : (List(Syntax.Token.Token), Int) -> Result(List(Syntax.Ast.Item), Syntax.Diagnostic.Diagnostic)
 ```
 
@@ -28,7 +31,7 @@ Parse an already-laid-out whole-program token stream.
 
 ### `parse_source`
 
-```prism,sig,h-669f00b9cee17932b12118a992e65ce0f3f0e1fc2fbdc5da6af01b1826d6d516
+```prism,sig,h-7e89a6e5eca6509dfd1709e56fef36610e5fb632269cbf31c2f463f24bc1292d
 parse_source : (String) -> Result(List(Syntax.Ast.Item), Syntax.Parse.ParseFailure)
 ```
 
@@ -36,7 +39,7 @@ Lex, lay out, and parse one complete Prism source file.
 
 ### `parse_source_budgeted`
 
-```prism,sig,h-44e790db8fa16d8acf1d19e793ab6db5d5234362befc34eb27dadf4ca6ba9e19
+```prism,sig,h-9b5b79102c2215d4ee75f29c9c5853aa3488d2eebeaeae311b3967454b9948cb
 parse_source_budgeted : (Int, String) -> Result(List(Syntax.Ast.Item), Syntax.Parse.ParseFailure)
 ```
 
@@ -44,7 +47,7 @@ parse_source_budgeted : (Int, String) -> Result(List(Syntax.Ast.Item), Syntax.Pa
 
 ### `parse_expr_tokens`
 
-```prism,sig,h-43d218d26849e3df5ea2e0423ada90a9200f27aa63c9824bc2d99ad1141195c0
+```prism,sig,h-8019b66be392fb6b0aebed2936c759fe671cf53e0fd3823b75c69d8cdbc30f92
 parse_expr_tokens : (List(Syntax.Token.Token), Int) -> Result(Syntax.Ast.Sp(Syntax.Ast.Expr), Syntax.Diagnostic.Diagnostic)
 ```
 
@@ -52,7 +55,7 @@ Parse one expression from a token cursor and require complete consumption.
 
 ### `parse_expr_source`
 
-```prism,sig,h-fedddd85115cb8eac9f523280fcef31ae1db236317a69f16833386b940f88309
+```prism,sig,h-98ee5993a588708c4764188a7b74e65d62e2083fe315b1552ee115b957310d13
 parse_expr_source : (String) -> Result(Syntax.Ast.Sp(Syntax.Ast.Expr), Syntax.Parse.ParseFailure)
 ```
 

@@ -361,11 +361,32 @@ fn shadow_fns(prog: &mut Program) {
     prog.fns = kept;
 }
 
-// Ops dispatch globally by name, so a redeclared effect or op would silently
-// shadow an earlier one (including the prelude's Emit). Reject it up front.
+// How a diagnostic names the effect that owns an operation: the effect itself,
+// plus the module its declaration came from. A root-program effect carries no
+// module path and is named alone; a prelude one is named as the prelude, whose
+// module path is a compiler-owned spelling no source can write.
+fn effect_origin(effect: &str) -> String {
+    let module = names::module_of(effect);
+    let bare = names::bare_name(effect);
+    if module.is_empty() {
+        format!("effect `{bare}`")
+    } else if module == names::PRELUDE_MODULE {
+        format!("effect `{bare}` in the prelude")
+    } else {
+        format!("effect `{bare}` in module `{module}`")
+    }
+}
+
+// Ops dispatch by name within a module, so a redeclared effect or op would
+// silently shadow an earlier one (including the prelude's Emit). Reject it up
+// front. This is the earliest phase that sees every declaration a program
+// compiles: the resolver has already merged the imported modules in and given
+// each module's operations their canonical names, so two operations reaching the
+// same name here really do collide, whichever entry path (single file, project
+// build, seeded module check) got us here.
 fn check_effect_dups(prog: &Program) -> Result<(), TypeError> {
     let mut effs = BTreeSet::new();
-    let mut ops: BTreeMap<&str, &str> = BTreeMap::new();
+    let mut ops: BTreeMap<&str, (&str, Span)> = BTreeMap::new();
     for e in &prog.effects {
         if let Some((_, reason)) = crate::names::RESERVED_SEAM_EFFECTS
             .iter()
@@ -385,13 +406,22 @@ fn check_effect_dups(prog: &Program) -> Result<(), TypeError> {
             .at(e.span));
         }
         for op in &e.ops {
-            if let Some(prev) = ops.insert(&op.name, &e.name) {
+            if let Some((prev, prev_span)) = ops.insert(&op.name, (&e.name, e.span)) {
+                let op_name = names::bare_name(&op.name).to_string();
                 return Err(ErrKind::DuplicateEffectOp {
-                    op: op.name.clone(),
+                    op: op_name.clone(),
                     first: prev.to_string(),
                     second: e.name.clone(),
                 }
-                .at(e.span));
+                .at(e.span)
+                .label(
+                    prev_span,
+                    format!("`{op_name}` is first declared by {}", effect_origin(prev)),
+                )
+                .with_help(format!(
+                    "rename the operation in {}, or handle it through its own effect",
+                    effect_origin(&e.name)
+                )));
             }
         }
     }
@@ -1119,6 +1149,7 @@ pub fn desugar_with_scope(
         exports: prog.exports,
         opaques: prog.opaques,
         deprecated: prog.deprecated,
+        prelude_captures: prog.prelude_captures,
         prelude_end: prog.prelude_end,
     };
     assign_ids(&mut out);

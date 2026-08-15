@@ -8,6 +8,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 #[cfg(feature = "native")]
+use crate::core::fbip::Sigs;
+#[cfg(feature = "native")]
 use crate::core::{pass_fingerprint, LoweredCore, PassStage};
 #[cfg(feature = "native")]
 use crate::error::Error;
@@ -46,9 +48,9 @@ const RUNTIME_OBJECT_QUERY: &str = "runtime-object";
 // version is ever read back, so a bumped counter (e.g. native-object at v2) has no
 // backward-compatible read path is required.
 #[cfg(feature = "native")]
-const LINKED_NATIVE_RAW_SCHEMA: &str = "prism-linked-native-raw-query-v1";
+const LINKED_NATIVE_RAW_SCHEMA: &str = "prism-linked-native-raw-query-v2";
 #[cfg(feature = "native")]
-const LINKED_NATIVE_SEMANTIC_SCHEMA: &str = "prism-linked-native-semantic-query-v1";
+const LINKED_NATIVE_SEMANTIC_SCHEMA: &str = "prism-linked-native-semantic-query-v2";
 #[cfg(feature = "native")]
 const LLVM_BITCODE_SCHEMA: &str = "prism-llvm-bitcode-query-v1";
 #[cfg(feature = "native")]
@@ -116,14 +118,13 @@ impl NativeArtifactCache {
     pub(super) fn for_build(
         src: &str,
         roots: &[Root],
-        out: &Path,
         cfg: &Config,
     ) -> Result<Option<Self>, Error> {
         if !cfg.flags.compiler_cache || cfg.flags.store {
             return Ok(None);
         }
         let store = Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?;
-        let key = linked_native_raw_key(src, roots, out, cfg)?;
+        let key = linked_native_raw_key(src, roots, cfg)?;
         Ok(Some(Self {
             store,
             kind: LINKED_NATIVE_RAW_QUERY,
@@ -133,11 +134,18 @@ impl NativeArtifactCache {
         }))
     }
 
+    /// The keyed term is the effect-lowered Core BEFORE reference-count
+    /// insertion and reuse. Those passes (and the erasure that follows them)
+    /// are deterministic functions of the lowered term and the borrow
+    /// signatures, so the pre-insertion identity plus `sigs` pins the finished
+    /// artifact while letting a hit skip the passes entirely. `core` is a
+    /// thunk because producing that identity clones the lowered tree; a
+    /// disabled cache never pays for it.
     pub(super) fn for_semantic_build(
-        core: &LoweredCore,
+        core: impl FnOnce() -> LoweredCore,
+        sigs: &Sigs,
         ctors: &BTreeMap<String, CtorInfo>,
         native_kont_table: &str,
-        out: &Path,
         cfg: &Config,
     ) -> Result<Option<Self>, Error> {
         if !cfg.flags.compiler_cache || cfg.flags.store {
@@ -146,16 +154,29 @@ impl NativeArtifactCache {
         let store = Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?;
         let mut h = semantic_query_hasher(
             LINKED_NATIVE_SEMANTIC_SCHEMA,
-            core,
+            &core(),
             ctors,
             native_kont_table,
             cfg,
         )?;
+        // Borrow signatures direct the ownership decisions the skipped passes
+        // would make, so they join the key. Names are hashed as strings in
+        // name order: symbol ids depend on interner history, and the key must
+        // not move (or collide) across sessions that interned differently.
+        let mut ordered_sigs: Vec<(&str, &Vec<bool>)> = sigs
+            .iter()
+            .map(|(name, borrows)| (name.as_str(), borrows))
+            .collect();
+        ordered_sigs.sort_unstable_by_key(|(name, _)| *name);
+        for (name, borrows) in ordered_sigs {
+            field(&mut h, name.as_bytes());
+            let flags: Vec<u8> = borrows.iter().map(|borrowed| u8::from(*borrowed)).collect();
+            field(&mut h, &flags);
+        }
         field(
             &mut h,
             runtime_profile_digest(RuntimeProfile::NativeBackend).as_bytes(),
         );
-        field(&mut h, output_identity(out)?.as_os_str().as_encoded_bytes());
         Ok(Some(Self {
             store,
             kind: LINKED_NATIVE_SEMANTIC_QUERY,
@@ -487,12 +508,7 @@ impl CheckVerdictCache {
 }
 
 #[cfg(feature = "native")]
-fn linked_native_raw_key(
-    src: &str,
-    roots: &[Root],
-    out: &Path,
-    cfg: &Config,
-) -> Result<String, Error> {
+fn linked_native_raw_key(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
     let mut h = blake3::Hasher::new();
     field(&mut h, LINKED_NATIVE_RAW_SCHEMA.as_bytes());
     field(&mut h, compiler_binary_fingerprint()?.as_bytes());
@@ -513,18 +529,11 @@ fn linked_native_raw_key(
     // artifact identity, so it must split this raw-source key: a test-mode build
     // must never be served a prior production, tests-stripped binary of the same
     // source, or the reverse. Mirrors the session front key's mode split.
+    // The output path is deliberately absent: linked bytes are a function of
+    // the program alone, so one entry serves every destination the same
+    // program is built to.
     field(&mut h, &[u8::from(cfg.mode == super::BuildMode::Test)]);
-    field(&mut h, output_identity(out)?.as_os_str().as_encoded_bytes());
     Ok(h.finalize().to_hex().to_string())
-}
-
-#[cfg(feature = "native")]
-fn output_identity(out: &Path) -> Result<std::path::PathBuf, Error> {
-    if out.is_absolute() {
-        Ok(out.to_path_buf())
-    } else {
-        Ok(std::env::current_dir()?.join(out))
-    }
 }
 
 #[cfg(all(feature = "native", unix))]

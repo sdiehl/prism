@@ -279,8 +279,10 @@ impl Tc<'_> {
             }
             (Expr::Let(x, v, b), _) => {
                 let tv = self.synth(env, v)?;
-                // Unconditional generalization; no value restriction (see `generalize`).
-                let g = self.generalize(env, &tv);
+                // Unconditional generalization; no value restriction, and any
+                // constraint-obligated existential stays monomorphic (see
+                // `generalize` and `generalize_local`).
+                let g = self.generalize_local(env, &tv);
                 let mut env2 = env.clone();
                 env2.insert(Sym::from(x), g);
                 self.check(&env2, b, ty)
@@ -623,8 +625,10 @@ impl Tc<'_> {
             }
             Expr::Let(x, v, b) => {
                 let tv = self.synth(env, v)?;
-                // Unconditional generalization; no value restriction (see `generalize`).
-                let g = self.generalize(env, &tv);
+                // Unconditional generalization; no value restriction, and any
+                // constraint-obligated existential stays monomorphic (see
+                // `generalize` and `generalize_local`).
+                let g = self.generalize_local(env, &tv);
                 let mut env2 = env.clone();
                 env2.insert(Sym::from(x), g);
                 self.synth(&env2, b)

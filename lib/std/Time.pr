@@ -22,11 +22,16 @@
 -- content-addressed package, not a frozen Std). Timestamps at or after the epoch
 -- (non-negative wall readings) are supported.
 
+-- Calendar arithmetic is written against the civil-date algorithms, whose
+-- constants (era lengths, day-of-era offsets, month-length polynomials) are only
+-- meaningful in place.
+-- lint: allow-file(L0108)
+
 import Data.List (..)
 import Data.Maybe (..)
 import Data.String (..)
 import Data.Char (is_digit)
-import Concurrent (..)
+import Concurrent (Clock, now, sleep, wall_now, mono_now)
 
 -- Unit conversions, pinned. A `Duration` is nanoseconds; these name the scale
 -- factors so no bare `1000000000` appears at a use site.
@@ -54,7 +59,7 @@ fn secs_per_hour() : Int = 3600
 fn secs_per_min() : Int = 60
 
 -- | A signed span of time, in nanoseconds.
-pub newtype Duration = Duration(Int)
+pub newtype Duration = Duration(Int) deriving (Eq, Show)
 
 -- | The span in whole nanoseconds.
 --
@@ -205,7 +210,7 @@ pub fn dur_cmp(a : Duration, b : Duration) : Int =
 pub fn dur_eq(a : Duration, b : Duration) : Bool = dur_cmp(a, b) == 0
 
 -- | A monotonic clock reading, in nanoseconds from an unspecified origin.
-pub newtype Instant = Instant(Int)
+pub newtype Instant = Instant(Int) deriving (Eq, Show)
 
 -- | The raw monotonic reading in nanoseconds. The absolute value is meaningless
 -- across processes; subtract two instants to get an elapsed `Duration`.
@@ -244,7 +249,7 @@ pub fn instant_add(i : Instant, d : Duration) : Instant =
   Instant(instant_nanos(i) + dur_nanos(d))
 
 -- | A wall-clock reading: nanoseconds since the Unix epoch, in UTC.
-pub newtype Wall = Wall(Int)
+pub newtype Wall = Wall(Int) deriving (Eq, Show)
 
 -- | The reading in nanoseconds since the Unix epoch (UTC).
 --
@@ -514,6 +519,9 @@ fn in_range(x : Int, lo : Int, hi : Int) : Bool = x >= lo && x <= hi
 -- ```output
 -- 946684800
 -- ```
+-- The chain of separator, range, and offset checks is the RFC 3339 grammar read
+-- left to right, and each rejection has to name the field it refused.
+-- lint: allow(L0101)
 pub fn parse_rfc3339(s : String) : Option(Wall) =
   if str_len(s) < 20 then
     None

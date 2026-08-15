@@ -14,7 +14,7 @@ The support layer of a production parser: the three-way parse outcome, the recur
 type Parsed(a) = PTook(a, Cursor) | PStuck(Cursor) | PFault(Diagnostic)
 ```
 
-One parse step: the value and the cursor after it, an unmet expectation held in the cursor's failure record, or a finished diagnostic that no expectation set can express.
+One parse step: the value and the cursor after it, an unmet expectation held in the cursor's failure record, or a finished diagnostic that no expectation set can express. lint: allow(L0203)
 
 ## Functions and Values
 
@@ -104,7 +104,7 @@ The decoded text at the read position without consuming it, empty at the end or 
 
 ### `surface_float`
 
-```prism,sig,h-07f18c6f254a13068fd0cc259be0e4ab85827752ec3441042478732264b30f46
+```prism,sig,h-d1cacc7b86732926158ee920eef280ad094f8bb4c2c76aa15bbe6d88f090b13b
 surface_float : (String) -> String
 ```
 

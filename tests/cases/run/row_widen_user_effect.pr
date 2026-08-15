@@ -1,0 +1,26 @@
+-- The same widening, on a user-declared effect rather than a stdlib one: the
+-- rule is a property of effect rows, not of any particular effect. Every
+-- element of the literal is called, so a row recorded rigidly at the closure's
+-- own (empty) row would disagree with the binder the consumer reads it back
+-- through.
+
+effect Tick
+  tick() : Unit
+
+fn run_all(ts : List(() -> Int ! {Tick})) : Int ! {Tick} =
+  match ts of
+    Nil => 0
+    Cons(t, rest) => t() + run_all(rest)
+
+fn ticker() : Int ! {Tick} =
+  tick()
+  10
+
+fn named_pure() : Int = 2
+
+fn scene() : Int ! {Tick} = run_all([\() -> 1, named_pure, ticker, \() -> 8])
+
+fn main() =
+  handle scene() with
+    tick() resume k => k(())
+    return v => println(v)

@@ -116,6 +116,10 @@ pub fn rw_all(p : Layer(a), s : Rewrite(a, e)) : Rewrite(a, e) =
 
 -- Rewrite the leftmost accepting element of a list, keeping the rest. Declines
 -- when no element accepts. `seen` accumulates the skipped prefix, reversed.
+-- The reversal restores that prefix at the one position that accepts, so it
+-- happens once per call rather than once per element; a forward fold would have
+-- to rebuild the whole list at every step instead.
+-- lint: allow(L0105)
 fn rw_first(
   s : Rewrite(a, e),
   seen : List(a),
@@ -202,7 +206,11 @@ pub fn rw_once_top_down(p : Layer(a), s : Rewrite(a, e)) : Rewrite(a, e) =
 -- took, and whether it converged. `converged` is false exactly when the fuel ran
 -- out with the rewrite still applying, which is the only way a caller learns
 -- that a rule set does not terminate on this input.
-pub type RwFix(a) = RwFix { tree: a, steps: Int, converged: Bool }
+pub type RwFix(a) = RwFix {
+  tree: a,
+  steps: Int,
+  converged: Bool
+} deriving (Eq, Show)
 
 -- | Apply `s` to its own output until it declines, at most `fuel` times.
 --
@@ -347,6 +355,10 @@ fn rw_steps_at(p : Layer(a), s : Rewrite(a, e), x : a) : List(a) ! { | e} =
       None => []
   append(here, rw_steps_kids(p, s, x, Nil, lay_kids(p, x)))
 
+-- The one-step expansion of a child list: every rewrite of every child, with the
+-- siblings held fixed. `seen` is the prefix already expanded, reversed, and the
+-- reversal restores sibling order for the rebuild at each position.
+-- lint: allow(L0105)
 fn rw_steps_kids(
   p : Layer(a),
   s : Rewrite(a, e),

@@ -10,11 +10,11 @@ fn build(b : Buf, i : Int, n : Int) : Buf =
   else
     build(buf_push(b, i * 17), i + 1, n)
 
-fn sum(b : Buf, i : Int, acc : Int) : Int =
+fn buf_sum(b : Buf, i : Int, acc : Int) : Int =
   if i >= buf_len(b) then
     acc
   else
-    sum(b, i + 1, acc + buf_get(b, i))
+    buf_sum(b, i + 1, acc + buf_get(b, i))
 
 fn show_valid(b : Buf) : String =
   if buf_utf8_valid(b) then
@@ -29,10 +29,10 @@ fn main() =
   let e = buf_cat(d, buf_of_string("!"))
   let f = buf_new(3, 65)
   println(show_int(buf_len(a)))
-  println(show_int(sum(a, 0, 0)))
+  println(show_int(buf_sum(a, 0, 0)))
   println(show_int(buf_get(c, 4)))
   println(show_int(buf_len(d)))
-  println(show_int(sum(d, 0, 0)))
+  println(show_int(buf_sum(d, 0, 0)))
   println(show_int(buf_len(e)))
   println(if buf_eq(a, c) then "eq" else "neq")
   println(show_int(buf_cmp(a, c)))

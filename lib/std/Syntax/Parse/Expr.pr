@@ -5,6 +5,8 @@
 -- from `TokenKind`; it does not allocate an operator table or pass parsing
 -- callbacks through the generic `Syntax.Cursor.Pratt` API.
 
+-- lint: allow-file(L0108)
+
 import Data.Foldable (length)
 import Data.List (append, map, reverse)
 import Data.Maybe (..)
@@ -79,6 +81,7 @@ fn split_int(raw : String) : (String, Suffix) =
 -- operators raise the right floor; `??` and `^` keep it level. Unary minus
 -- parses at 16, between multiplication and power, giving both `-x ^ y` and
 -- `x ^ -y` the mathematical grouping used by the Rust grammar.
+-- lint: allow(L0101)
 fn infix_binding(k : TokenKind) : Option(Binding) =
   match k of
     TFixed(s) =>
@@ -130,6 +133,7 @@ fn infix_binding(k : TokenKind) : Option(Binding) =
         None
     _ => None
 
+-- lint: allow(L0101)
 fn retired_dot(k : TokenKind) : Option(String) =
   match k of
     TFixed(s) =>
@@ -317,6 +321,7 @@ fn parse_call_tail(
           let call = authored(ECall(head, args), callee.span.lo, hi)
           parse_postfix_loop(call, c3, depth)
 
+-- lint: allow(L0105)
 fn parse_call_args(
   c : Cursor,
   depth : Int,
@@ -344,6 +349,7 @@ fn parse_call_args(
     else
       PTook((reverse(Cons(e, rev)), None), c1)
 
+-- lint: allow(L0105)
 fn parse_using(c : Cursor, rev : List(String)) : Parsed(List(String)) =
   let p1 = take_word(c, TIdent)
   let PTook(name, c1) = p1 else parsed_refused(p1)
@@ -504,6 +510,7 @@ fn parse_atom(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
         TFixed(s) => parse_fixed_atom(c, depth, s)
         _ => PStuck(note_expr(c))
 
+-- lint: allow(L0101)
 fn parse_fixed_atom(c : Cursor, depth : Int, s : String) : Parsed(Sp(Expr)) =
   if s == "true" then
     let c1 = cursor_advance(c)
@@ -949,6 +956,7 @@ pub fn parse_expr(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
   let PTook(d, _) = p1 else parsed_refused(p1)
   parse_expr_top(c, d)
 
+-- lint: allow(L0101)
 fn parse_expr_top(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
   if at_fixed(c, "if") then
     parse_if_form(c, depth, false)
@@ -1072,6 +1080,7 @@ fn parse_if_form(
   let PTook(branch, c4) = p4 else parsed_refused(p4)
   PTook(branch.expr, c4)
 
+-- lint: allow(L0103)
 fn parse_if_finish(
   saved : Cursor,
   cond : Sp(Expr),
@@ -1420,6 +1429,7 @@ fn parse_match(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
   let PTook(_, c5) = p5 else parsed_refused(p5)
   PTook(made(saved, c5, EMatch(scrutinee, arms)), c5)
 
+-- lint: allow(L0101)
 fn parse_match_arms(
   c : Cursor,
   depth : Int,
@@ -1477,6 +1487,7 @@ fn parse_try(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
   let PTook(_, c6) = p6 else parsed_refused(p6)
   PTook(made(saved, c6, ETryCatch(body, arms)), c6)
 
+-- lint: allow(L0101)
 fn parse_catch_arms(
   c : Cursor,
   depth : Int,
@@ -1597,6 +1608,7 @@ fn parse_handler_arm(c : Cursor, depth : Int) : Parsed(HandlerArm) =
   else
     parse_operation_arm(c, depth)
 
+-- lint: allow(L0101)
 fn parse_graded_arm(c : Cursor, depth : Int) : Parsed(HandlerArm) =
   let p1 = take_word(c, TIdent)
   let PTook(grade, c1) = p1 else parsed_refused(p1)
@@ -1624,6 +1636,7 @@ fn parse_graded_arm(c : Cursor, depth : Int) : Parsed(HandlerArm) =
     else
       PTook(HNever(name, params, body), c6)
 
+-- lint: allow(L0101)
 fn parse_operation_arm(c : Cursor, depth : Int) : Parsed(HandlerArm) =
   let saved = c
   let p1 = take_word(c, TIdent)
@@ -1763,6 +1776,60 @@ fn build_pattern_let_stmt(
       let arm = Arm { pat = pat, guard = None, body = rest }
       synthesized(EMatch(value, [arm]), lo, lo)
 
+-- A plain `let name = value` statement continuation: a `try` value routes
+-- through the try desugar with the name as its binder, anything else is a
+-- direct let.
+fn finish_ident_let_stmt(
+  saved : Cursor,
+  c : Cursor,
+  name : String,
+  value : Sp(Expr),
+  rest : Sp(Expr)
+) : Sp(Expr) =
+  match try_scrutinee(value) of
+    Some(scrutinee) =>
+      let binder = authored(PVar(name), scrutinee.span.lo, scrutinee.span.hi)
+      build_try_stmt(Some(binder), scrutinee, rest, cursor_span(saved).lo)
+    None => made(saved, c, ELet(name, value, rest))
+
+-- `let pat = value else fallback`: a two-arm match whose first arm binds the
+-- rest of the block and whose wildcard arm is the fallback. The wildcard
+-- carries the fallback's span so a pattern that cannot fail reports its dead
+-- arm there.
+fn build_let_else_stmt(
+  pat : Sp(Pat),
+  value : Sp(Expr),
+  fallback : Sp(Expr),
+  rest : Sp(Expr),
+  lo : Int
+) : Sp(Expr) =
+  let wild = authored(PWild, fallback.span.lo, fallback.span.hi)
+  let arms = [
+      Arm { pat = pat, guard = None, body = rest },
+      Arm { pat = wild, guard = None, body = fallback },
+    ]
+  synthesized(EMatch(value, arms), lo, lo)
+
+-- The fallback and continuation of a `let`-`else` binding, entered with the
+-- cursor just past the `else` keyword.
+fn parse_let_else(
+  saved : Cursor,
+  pat : Sp(Pat),
+  value : Sp(Expr),
+  c : Cursor,
+  depth : Int
+) : Parsed(Sp(Expr)) =
+  let p1 = parse_expr_or_block(c, depth)
+  let PTook(fallback, c1) = p1 else parsed_refused(p1)
+  let p2 = take_kind(c1, TVSemi)
+  let PTook(_, c2) = p2 else parsed_refused(p2)
+  let p3 = parse_stmts(c2, depth)
+  let PTook(rest, c3) = p3 else parsed_refused(p3)
+  PTook(
+      build_let_else_stmt(pat, value, fallback, rest, cursor_span(saved).lo),
+      c3,
+    )
+
 -- The `with` family owns the remainder of its enclosing statement block.  A
 -- present virtual semicolon introduces that remainder; without one, preserve
 -- the authored statement as the `with` marker so desugaring can report the
@@ -1857,6 +1924,7 @@ fn parse_anonymous_with_handler(
   let lo = cursor_span(saved).lo
   PTook(synthesized(EHandle(rest, arms, false), lo, lo), c2)
 
+-- lint: allow(L0101)
 fn parse_let_stmt(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
   let saved = c
   let c1 = cursor_advance(c)
@@ -1876,19 +1944,7 @@ fn parse_let_stmt(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
     let PTook(_, c6) = p6 else parsed_refused(p6)
     let p7 = parse_stmts(c6, depth)
     let PTook(rest, c7) = p7 else parsed_refused(p7)
-    match try_scrutinee(value) of
-      Some(scrutinee) =>
-        let binder = authored(PVar(name), scrutinee.span.lo, scrutinee.span.hi)
-        PTook(
-            build_try_stmt(
-                Some(binder),
-                scrutinee,
-                rest,
-                cursor_span(saved).lo,
-              ),
-            c7,
-          )
-      None => PTook(made(saved, c7, ELet(name, value, rest)), c7)
+    PTook(finish_ident_let_stmt(saved, c7, name, value, rest), c7)
   else
     let p1 = parse_let_pattern(c1, depth)
     let PTook(pat, c2) = p1 else parsed_refused(p1)
@@ -1896,16 +1952,26 @@ fn parse_let_stmt(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
     let PTook(_, c3) = p5 else parsed_refused(p5)
     let p8 = parse_expr_or_block(c3, depth)
     let PTook(value, c4) = p8 else parsed_refused(p8)
-    let c5 =
-      if at_fixed(c4, "in") then
-        cursor_advance(c4)
+    if at_fixed(c4, "else") then
+      parse_let_else(saved, pat, value, cursor_advance(c4), depth)
+    elif at_fixed(c4, "in") then
+      let p9 = take_kind(cursor_advance(c4), TVSemi)
+      let PTook(_, c6) = p9 else parsed_refused(p9)
+      let p10 = parse_stmts(c6, depth)
+      let PTook(rest, c7) = p10 else parsed_refused(p10)
+      PTook(build_pattern_let_stmt(pat, value, rest, cursor_span(saved).lo), c7)
+    else
+      let p9 = take_kind(c4, TVSemi)
+      let PTook(_, c6) = p9 else parsed_refused(p9)
+      if at_fixed(c6, "else") then
+        parse_let_else(saved, pat, value, cursor_advance(c6), depth)
       else
-        c4
-    let p9 = take_kind(c5, TVSemi)
-    let PTook(_, c6) = p9 else parsed_refused(p9)
-    let p10 = parse_stmts(c6, depth)
-    let PTook(rest, c7) = p10 else parsed_refused(p10)
-    PTook(build_pattern_let_stmt(pat, value, rest, cursor_span(saved).lo), c7)
+        let p10 = parse_stmts(c6, depth)
+        let PTook(rest, c7) = p10 else parsed_refused(p10)
+        PTook(
+            build_pattern_let_stmt(pat, value, rest, cursor_span(saved).lo),
+            c7,
+          )
 
 fn parse_var_stmt(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
   let saved = c

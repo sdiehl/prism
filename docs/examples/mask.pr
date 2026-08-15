@@ -8,7 +8,7 @@
 effect Ask
   ask() : Int
 
-fn both() =
+fn nested_ask() =
   handle (handle ask() + mask<Ask>(ask()) with {
       ask() resume k => k(1),
       return r => r
@@ -16,4 +16,4 @@ fn both() =
     ask() resume k => k(10)
     return r => r
 
-fn main() = println(both())
+fn main() = println(nested_ask())

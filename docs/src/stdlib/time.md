@@ -17,7 +17,7 @@ RFC 3339 formatting and parsing are pure, total, UTC-only string code: no locale
 ### `Duration`
 
 ```prism,def,h-3d4be728f465afdc653a6c42295b4d8406959b9b20ddef1cbbf0dd7152b2be39
-newtype Duration = Duration(Int)
+newtype Duration = Duration(Int) deriving (Eq, Show)
 ```
 
 A signed span of time, in nanoseconds.
@@ -25,7 +25,7 @@ A signed span of time, in nanoseconds.
 ### `Instant`
 
 ```prism,def,h-0252c4bc01b7f95eae5337697c014d72ee30a3b4269bcb3136286aa3e9b605a2
-newtype Instant = Instant(Int)
+newtype Instant = Instant(Int) deriving (Eq, Show)
 ```
 
 A monotonic clock reading, in nanoseconds from an unspecified origin.
@@ -33,7 +33,7 @@ A monotonic clock reading, in nanoseconds from an unspecified origin.
 ### `Wall`
 
 ```prism,def,h-d250ce874393ad83556253dc64da5d5da7bac46b103569e69f5606b76d4598a0
-newtype Wall = Wall(Int)
+newtype Wall = Wall(Int) deriving (Eq, Show)
 ```
 
 A wall-clock reading: nanoseconds since the Unix epoch, in UTC.
@@ -499,3 +499,5 @@ wall_unix_secs(unwrap_or(wall_of_nanos(0), parse_rfc3339("2000-01-01T00:00:00Z")
 ```output
 946684800
 ```
+
+The chain of separator, range, and offset checks is the RFC 3339 grammar read left to right, and each rejection has to name the field it refused. lint: allow(L0101)

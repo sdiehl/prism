@@ -2,8 +2,8 @@
 -- label, `throw` performs it (legal in value position because the op's
 -- return type instantiates fresh per site), and `try`/`catch` is one
 -- nested `never` handle per arm, so partial catch just leaves the
--- uncaught label in the enclosing row. `both` pins the inferred union
--- via its annotation: drop a label and it stops typechecking.
+-- uncaught label in the enclosing row. `lookup_and_parse` pins the inferred
+-- union via its annotation: drop a label and it stops typechecking.
 
 error NotFound(String)
 
@@ -23,7 +23,8 @@ fn parse_num(s) =
   else
     throw Malformed(s)
 
-fn both(k, s) : Int ! {NotFound, Malformed} = lookup(k) + parse_num(s)
+fn lookup_and_parse(k, s) : Int ! {NotFound, Malformed} =
+  lookup(k) + parse_num(s)
 
 fn burn(n) =
   if n == 0 then
@@ -34,12 +35,17 @@ fn burn(n) =
 fn main() =
   println(try lookup("x") catch { NotFound(k) => -1 })
   println(try lookup("y") catch { NotFound(k) => -1 })
-  let c = try both("y", "1") catch { NotFound(k) => 100, Malformed(m) => 200 }
+  let c =
+    try
+      lookup_and_parse("y", "1")
+    catch
+      NotFound(k) => 100
+      Malformed(m) => 200
   println(c)
   println(try burn(0) catch { OutOfFuel => 42 })
   let outer =
     try
-      try both("x", "zzz") catch { NotFound(k) => -5 }
+      try lookup_and_parse("x", "zzz") catch { NotFound(k) => -5 }
     catch
       Malformed(m) => 300
   println(outer)

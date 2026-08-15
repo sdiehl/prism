@@ -23,6 +23,9 @@ opaque type Doc
   | DNest(Int, Doc)
   | DGroup(Doc)
 
+-- The conventional page width `pretty` renders at.
+let default_width : Int = 80
+
 -- The layout mode of a pending item: flat (breaks render as their flat string)
 -- or broken (breaks render as newlines). `Brk`, not `Break`, is reserved-safe.
 type Mode = Flat | Brk
@@ -102,7 +105,7 @@ fn layout(sd) =
 pub fn render(w, d) = layout(best(w, 0, Cons(Item(0, Brk, d), Nil)))
 
 -- | Render at the conventional width of 80 columns.
-pub fn pretty(d) = render(80, d)
+pub fn pretty(d) = render(default_width, d)
 
 -- | Literal text. The string must not contain a newline; use `hardline` for a
 -- forced break.

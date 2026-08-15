@@ -127,6 +127,17 @@ struct Cli {
         default_missing_value = "warn"
     )]
     warn_stdlib_dupes: Option<String>,
+    /// Flag a definition taking a name the prelude already opened: `warn`
+    /// (default) reports it, `strict` fails the build, `off` silences it
+    #[arg(
+        long = "warn-prelude-capture",
+        value_name = "LEVEL",
+        global = true,
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "warn"
+    )]
+    warn_prelude_capture: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -182,6 +193,9 @@ enum Cmd {
     Check {
         /// A `.pr` file or project to type-check; omitted checks the enclosing project
         file: Option<PathBuf>,
+        /// List the licenses of every transitive dependency
+        #[arg(long, conflicts_with_all = ["at_hole", "fill", "json"])]
+        licenses: bool,
         /// Report each typed hole: expected type, effect row, in-scope candidates
         #[arg(long)]
         at_hole: bool,
@@ -191,6 +205,9 @@ enum Cmd {
         /// Emit hole reports as JSON (with --at-hole or --fill)
         #[arg(long)]
         json: bool,
+        /// Keep the compiler session alive and re-check when sources change
+        #[arg(long, conflicts_with_all = ["licenses", "at_hole", "fill", "json"])]
+        watch: bool,
     },
     /// Search checked project, package, and standard-library interfaces by type
     Search {
@@ -288,6 +305,17 @@ enum Cmd {
         /// Check only: exit 1 if any file is not canonical, write nothing
         #[arg(long)]
         check: bool,
+    },
+    /// Judge source files against the house style rules
+    Lint {
+        /// Files or directories to lint; default current directory
+        paths: Vec<PathBuf>,
+        /// Emit the findings as JSON
+        #[arg(long)]
+        json: bool,
+        /// Report findings without failing the exit code
+        #[arg(long)]
+        advisory: bool,
     },
     /// Generate Markdown API docs from doc comments
     Docs {
@@ -396,6 +424,9 @@ enum Cmd {
         /// Make an empty selection a command failure
         #[arg(long)]
         fail_if_no_tests: bool,
+        /// Keep the compiler session alive and re-run tests when sources change
+        #[arg(long)]
+        watch: bool,
     },
     /// Content-addressed store verbs
     #[command(subcommand)]
@@ -690,8 +721,9 @@ enum PatchCmd {
     },
 }
 
-// Parse a `--warn-dupes` / `--warn-stdlib-dupes` severity, reporting an invalid
-// spelling under the given flag name. Shared by both knobs' CLI overrides.
+// Parse a `--warn-dupes` / `--warn-stdlib-dupes` / `--warn-prelude-capture`
+// severity, reporting an invalid spelling under the given flag name. Shared by
+// every knob's CLI override.
 fn parse_warn_mode(flag: &str, s: &str) -> Option<prism::WarnDupes> {
     let mode = prism::WarnDupes::parse(s);
     if mode.is_none() {
@@ -811,6 +843,12 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         };
         cfg.flags.warn_stdlib_dupes = mode;
+    }
+    if let Some(s) = &cli.warn_prelude_capture {
+        let Some(mode) = parse_warn_mode("--warn-prelude-capture", s) else {
+            return ExitCode::FAILURE;
+        };
+        cfg.flags.warn_prelude_capture = mode;
     }
     // Install the per-phase timing sink for this top-level compile when the flag
     // or `PRISM_TIME_COMPILE` asked for it. The sink lives only on this config, so
@@ -1014,12 +1052,18 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
         Cmd::Clean { path } => cli::clean_cmd(&path),
         Cmd::Check {
             file,
+            licenses,
             at_hole,
             fill,
             json,
+            watch,
         } => {
-            if at_hole || fill {
+            if licenses {
+                cli::licenses_cmd(file.as_deref())
+            } else if at_hole || fill {
                 cli::holes::at_hole_cmd(file.as_deref(), fill, json, cfg)
+            } else if watch {
+                cli::watch_check_cmd(file.as_deref(), cfg)
             } else {
                 cli::check_cmd(file.as_deref(), cfg)
             }
@@ -1050,9 +1094,9 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
             format,
             show_output,
             fail_if_no_tests,
-        } => cli::test::test_cmd(
-            file.as_deref(),
-            &cli::test::TestOptions {
+            watch,
+        } => {
+            let options = cli::test::TestOptions {
                 filter,
                 exact,
                 list,
@@ -1060,9 +1104,13 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
                 json: format == "json",
                 show_output,
                 fail_if_no_tests,
-            },
-            cfg,
-        ),
+            };
+            if watch {
+                cli::watch_test_cmd(file.as_deref(), &options, cfg)
+            } else {
+                cli::test::test_cmd(file.as_deref(), &options, cfg)
+            }
+        }
         Cmd::Verify {
             file,
             solver,
@@ -1079,6 +1127,11 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
             Ok(())
         }
         Cmd::Fmt { files, check } => cli::fmt::fmt_cmd(&files, check),
+        Cmd::Lint {
+            paths,
+            json,
+            advisory,
+        } => cli::lint::lint_cmd(&paths, json, advisory, cfg),
         Cmd::Docs {
             path,
             out,

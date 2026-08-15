@@ -1,0 +1,113 @@
+-- | The `Solve` effect: a metavariable solver as an effect.
+--
+-- A solver owns three concerns that otherwise thread through every rule as
+-- parameters: allocating fresh metavariable classes, looking a class up in
+-- the current substitution, and joining classes in a union-find. `Solve(d)`
+-- bundles the three as ops over classes carrying a descriptor of type `d`
+-- (a solution, a rank, a binding level), so solver rules read as direct
+-- style and never name the forest. `run_solve` discharges the effect
+-- through a private payload-carrying forest (`Data.UnionFind.Payload`)
+-- scoped to the run; the `combine` policy it installs is the one place a
+-- join's descriptors meet, so swapping the handler swaps the solver
+-- strategy without touching a rule.
+--
+-- Class keys are minted only by `sv_fresh`, which is what keeps the ops
+-- total: `sv_find` answers `None` for a key that was never minted, and
+-- `sv_assign`/`sv_union` on such a key are inert. Every clause resumes
+-- exactly once in tail position, so the compiler is free to lower the
+-- whole run to direct state updates. Opt-in: not in Base.
+
+import Data.UnionFind.Payload (UnionFind, ufp_empty, ufp_find, ufp_insert, ufp_set, ufp_union_with)
+import Data.Result (result_or)
+
+-- | Allocate (`sv_fresh`), look up (`sv_find`), solve (`sv_assign`), and
+-- join (`sv_union`) metavariable classes with descriptors of type `d`.
+pub effect Solve(d)
+  sv_fresh(d) : Int
+  sv_find(Int) : Option((Int, d))
+  sv_assign(Int, d) : Unit
+  sv_union(Int, Int) : Unit
+
+-- | Run `action` against a fresh solver, discharging `Solve(d)`; returns the
+-- result paired with the final forest. `combine` is the join policy: on
+-- `sv_union` it receives the kept root's descriptor first and the absorbed
+-- root's second, exactly once per join that changes the partition.
+--
+-- ```prism
+-- import Data.UnionFind.Payload (ufp_roots)
+--
+-- let (_r, forest) = run_solve(concat, \() -> sv_union(sv_fresh("a"), sv_fresh("b")))
+-- ufp_roots(forest)
+-- ```
+-- ```output
+-- [(0, ab)]
+-- ```
+pub fn run_solve(
+  combine : (d, d) -> d,
+  action : () -> a ! {Solve(d) | e}
+) : (a, UnionFind(Int, d)) =
+  var forest := ufp_empty
+  var next := 0
+  let r =
+    handle action() with
+      sv_fresh(desc) resume k =>
+        let n = next
+        next := n + 1
+        forest := result_or(forest, ufp_insert(forest, n, desc))
+        k(n)
+      sv_find(x) resume k => k(ufp_find(forest, x))
+      sv_assign(x, desc) resume k =>
+        forest := result_or(forest, ufp_set(forest, x, desc))
+        k(())
+      sv_union(x, y) resume k =>
+        forest := join_classes(combine, forest, x, y)
+        k(())
+      return r => r
+  (r, forest)
+
+-- | Join two classes under a pure policy, keeping the forest unchanged when
+-- either key was never minted. `run_solve`'s `combine` is pure, so the
+-- effect-polymorphic `ufp_union_with` is instantiated at the empty row here,
+-- outside the handler clause that applies it.
+fn join_classes(
+  combine : (d, d) -> d,
+  forest : UnionFind(Int, d),
+  x : Int,
+  y : Int
+) : UnionFind(Int, d) =
+  result_or(forest, ufp_union_with(combine, forest, x, y))
+
+-- | Run `action` for its result only, discarding the final forest.
+--
+-- ```prism
+-- eval_solve(concat, \() -> sv_find(sv_fresh("root")))
+-- ```
+-- ```output
+-- Some((0, root))
+-- ```
+pub fn eval_solve(combine : (d, d) -> d, action : () -> a ! {Solve(d) | e}) : a =
+  match run_solve(combine, action) of
+    (a, _forest) => a
+
+-- | The canonical root of `x`'s class; a key that was never minted is its
+-- own root.
+pub fn sv_root(x : Int) : Int ! {Solve(d)} =
+  match sv_find(x) of
+    None => x
+    Some((r, _d)) => r
+
+-- | The descriptor at `x`'s root: the substitution lookup.
+--
+-- ```prism
+-- eval_solve(concat, \() -> sv_solution(sv_fresh("solved")))
+-- ```
+-- ```output
+-- Some(solved)
+-- ```
+pub fn sv_solution(x : Int) : Option(d) ! {Solve(d)} =
+  match sv_find(x) of
+    None => None
+    Some((_r, d)) => Some(d)
+
+-- | True when `x` and `y` belong to the same class.
+pub fn sv_equiv(x : Int, y : Int) : Bool ! {Solve(d)} = sv_root(x) == sv_root(y)

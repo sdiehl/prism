@@ -54,6 +54,9 @@ opaque newtype OrderedMap(k, v, brand) = OrderedMap(Map(k, v, brand))
 -- ```output
 -- Some(a)
 -- ```
+-- Named as the scoping form it is, since it reads at the call site as the block
+-- that opens the brand rather than as another operation on an ordered map.
+-- lint: allow(L0204)
 pub fn with_ordering(
   cmp : (k, k) -> Int,
   body : forall brand. (OrdWitness(k, brand)) -> a

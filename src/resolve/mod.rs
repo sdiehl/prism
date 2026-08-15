@@ -19,7 +19,7 @@ use marginalia::Span;
 use crate::error::{suggest, Error, TypeError};
 use crate::syntax::ast::{
     Constraint, Decl, EffLabel, Expr, HandlerArm, ImportDecl, MigrationDir, MigrationRoute,
-    Pattern, Program, Qualifier, Row, Sugar, SugarArm, Surface, Ty, S,
+    Pattern, PreludeCapture, Program, Qualifier, Row, Sugar, SugarArm, Surface, Ty, S,
 };
 use crate::{kw, names};
 
@@ -28,7 +28,7 @@ mod lints;
 mod load;
 use identity::{CanonicalName, ModuleName};
 
-pub use lints::lint_bindings;
+pub use lints::{lint_bindings, lint_prelude_captures, prelude_capture};
 pub use load::{
     load, serving_root, Module, Root, SourceBundleArtifactKind, SourceBundleIdentity,
     SourceBundleKind, SourceBundleOrigin,
@@ -153,44 +153,44 @@ struct ScopeSet<'a> {
 /// is the original definition's canonical symbol.
 type Exports = BTreeMap<String, CanonicalName>;
 
-/// Visit every top-level binder with the byte offset of the declaration that
-/// introduces it. A constructor takes its data declaration's offset, since it is
-/// introduced by that declaration and shares its region.
-fn each_binder(p: &Program, mut f: impl FnMut(usize, &str)) {
+/// Visit every top-level binder with the span of the declaration that introduces
+/// it. A constructor takes its data declaration's span, since it is introduced by
+/// that declaration and shares its region.
+fn each_binder(p: &Program, mut f: impl FnMut(Span, &str)) {
     for d in &p.types {
-        f(d.span.start, &d.name);
+        f(d.span, &d.name);
         for c in &d.ctors {
-            f(d.span.start, &c.name);
+            f(d.span, &c.name);
         }
     }
-    // An operation takes its effect declaration's offset, for the same reason a
+    // An operation takes its effect declaration's span, for the same reason a
     // constructor takes its data declaration's: the parent declaration is what
     // introduces it and the two share a region. Leaving operations out of this
     // walk is what kept them out of every module namespace, so an operation name
     // was global across the whole standard library no matter what was imported.
     for e in &p.effects {
-        f(e.span.start, &e.name);
+        f(e.span, &e.name);
         for op in &e.ops {
-            f(e.span.start, &op.name);
+            f(e.span, &op.name);
         }
     }
     for e in &p.errors {
-        f(e.span.start, &e.name);
+        f(e.span, &e.name);
     }
     for a in &p.aliases {
-        f(a.span.start, &a.name);
+        f(a.span, &a.name);
     }
     for s in &p.synonyms {
-        f(s.span.start, &s.name);
+        f(s.span, &s.name);
     }
     for c in &p.classes {
-        f(c.span.start, &c.name);
+        f(c.span, &c.name);
     }
     for pat in &p.patterns {
-        f(pat.span.start, &pat.name);
+        f(pat.span, &pat.name);
     }
     for d in &p.fns {
-        f(d.span.start, &d.name);
+        f(d.span, &d.name);
     }
 }
 
@@ -212,8 +212,12 @@ pub fn binders(p: &Program) -> BTreeSet<String> {
 fn binders_by_region(p: &Program) -> (BTreeSet<String>, BTreeSet<String>) {
     let (mut prelude, mut user) = (BTreeSet::new(), BTreeSet::new());
     let end = p.prelude_end;
-    each_binder(p, |start, n| {
-        let side = if start < end { &mut prelude } else { &mut user };
+    each_binder(p, |span, n| {
+        let side = if span.start < end {
+            &mut prelude
+        } else {
+            &mut user
+        };
         side.insert(n.to_string());
     });
     (prelude, user)
@@ -235,12 +239,22 @@ fn exports_of(p: &Program) -> BTreeSet<String> {
             e.extend(d.ctors.iter().map(|c| c.name.clone()));
         }
     }
-    for eff in &p.effects {
-        if p.exports.contains(&eff.name) {
-            e.extend(eff.ops.iter().map(|op| op.name.clone()));
-        }
-    }
+    e.extend(operations_of(p));
     e
+}
+
+/// The operation names a module's `pub` effects make visible to importers.
+///
+/// Kept apart from the rest of [`exports_of`] because an operation is the one
+/// exported name with no qualified spelling: a handler clause names the
+/// operation bare, so `M.op` is not something an importer can write there. The
+/// set is what lets a bare clause name reach an imported operation.
+fn operations_of(p: &Program) -> BTreeSet<String> {
+    p.effects
+        .iter()
+        .filter(|eff| p.exports.contains(&eff.name))
+        .flat_map(|eff| eff.ops.iter().map(|op| op.name.clone()))
+        .collect()
 }
 
 /// Resolve a parsed program to canonical form.
@@ -266,6 +280,9 @@ pub fn resolve(program: Program) -> Result<Program, TypeError> {
 struct ModInfo {
     path: ModuleName,
     exports: Exports,
+    /// The subset of `exports` that names effect operations. See
+    /// [`operations_of`].
+    operations: BTreeSet<String>,
 }
 
 /// Resolve a program that may import other modules, loading them under `base`.
@@ -367,6 +384,7 @@ pub(crate) fn resolve_loaded_module_units_seeing(
         moved_prelude: &moved_prelude,
     };
     let mut root = root;
+    root.prelude_captures = prelude_captures(&root, &root_prelude_scope);
     let mut seen = Rw::new("", &root_scopes, &mods).program(&mut root)?;
 
     // An imported module carries no prelude of its own, so its prelude halves
@@ -543,6 +561,39 @@ fn root_owns(p: &Program) -> (Own, Own) {
     (own_prelude, own_user)
 }
 
+/// The user's own top-level definitions that took a name the prelude had already
+/// opened into unqualified scope, keyed by that name.
+///
+/// The prelude glob-imports a set of standard modules, so a bare `count` in a
+/// file means `Data.List.count` until the file defines its own `count`; from then
+/// on every unqualified use in the file means the local one, including uses the
+/// author wrote before adding the definition. Nothing is ill-formed about that,
+/// and the resolver keeps resolving it the same way, so this is a report of the
+/// silent change of meaning, computed at the only point that can see it.
+///
+/// A name two prelude imports both offer is skipped: a bare reference to it was
+/// already ambiguous and resolved to neither, so the user's definition displaced
+/// nothing.
+fn prelude_captures(root: &Program, prelude_scope: &Scope) -> BTreeMap<String, PreludeCapture> {
+    let mut out = BTreeMap::new();
+    let end = root.prelude_end;
+    each_binder(root, |span, name| {
+        if span.start < end {
+            return;
+        }
+        if let Some([only]) = prelude_scope.opened.get(name).map(Vec::as_slice) {
+            out.insert(
+                name.to_string(),
+                PreludeCapture {
+                    opened: only.as_str().to_string(),
+                    span,
+                },
+            );
+        }
+    });
+    out
+}
+
 /// The prelude definitions a user definition displaced, keyed by their bare
 /// name. Empty when the user's file shadows nothing, which is every program
 /// that does not reuse a prelude name.
@@ -655,6 +706,7 @@ fn module_infos(modules: &[Module]) -> Result<(Vec<ModInfo>, BTreeMap<String, us
             ModInfo {
                 path: ModuleName::new(path),
                 exports,
+                operations: operations_of(&m.prog),
             }
         })
         .collect();
@@ -680,6 +732,8 @@ fn add_reexports(
 ) -> Result<(), Error> {
     loop {
         let snapshot: Vec<Exports> = mods.iter().map(|m| m.exports.clone()).collect();
+        let ops_snapshot: Vec<BTreeSet<String>> =
+            mods.iter().map(|m| m.operations.clone()).collect();
         let mut changed = false;
         for (ti, m) in modules.iter().enumerate() {
             for imp in m.prog.imports.iter().filter(|i| i.reexport) {
@@ -694,6 +748,12 @@ fn add_reexports(
                     .map_or_else(|| src.keys().cloned().collect(), Clone::clone);
                 for n in names {
                     if let Some(canon) = src.get(&n) {
+                        // An operation stays an operation across a re-export, so
+                        // a clause in the re-exporting module's importer still
+                        // reaches it by its bare name.
+                        if ops_snapshot[si].contains(&n) {
+                            changed |= mods[ti].operations.insert(n.clone());
+                        }
                         if let Entry::Vacant(e) = mods[ti].exports.entry(n) {
                             e.insert(canon.clone());
                             changed = true;
@@ -1323,7 +1383,7 @@ impl<'a> Rw<'a> {
                 self.expr(body);
             }
             HandlerArm::Op(name, params, k, body) => {
-                *name = self.value(name, span);
+                *name = self.handler_op(name, span);
                 self.locals.extend(params.iter().cloned());
                 self.locals.push(k.clone());
                 self.expr(body);
@@ -1331,7 +1391,7 @@ impl<'a> Rw<'a> {
             HandlerArm::Sugar(
                 SugarArm::Once(name, params, body) | SugarArm::Never(name, params, body),
             ) => {
-                *name = self.value(name, span);
+                *name = self.handler_op(name, span);
                 self.locals.extend(params.iter().cloned());
                 self.expr(body);
             }
@@ -1482,6 +1542,62 @@ impl<'a> Rw<'a> {
             return name.to_string();
         }
         self.global(name, span)
+    }
+
+    /// The operation a handler clause names.
+    ///
+    /// A clause names its operation bare and the grammar admits nothing else, so
+    /// the qualified route every other imported name has is closed here: under a
+    /// plain `import M`, which opens no unqualified bindings, `M`'s operations
+    /// would be spellable at a call site and unspellable at the clause that
+    /// handles them. So when ordinary resolution finds nothing, the imported
+    /// modules are searched for an operation of that name, which is the only
+    /// reading such a clause can have. Two imports offering it is ambiguous and
+    /// reported, never silently resolved to one of them.
+    fn handler_op(&mut self, name: &str, span: Span) -> String {
+        if self.locals.iter().any(|l| l == name) {
+            return name.to_string();
+        }
+        if let Some(canon) = self.lookup(name, span) {
+            return canon;
+        }
+        self.imported_operation(name, span)
+            .unwrap_or_else(|| name.to_string())
+    }
+
+    /// An operation of that name exported by a module this region imports, taken
+    /// tier by tier so the region's own imports answer before the prelude's.
+    fn imported_operation(&mut self, name: &str, span: Span) -> Option<String> {
+        let mods = self.mods;
+        for scope in self.scopes() {
+            let Some(scope) = scope else { continue };
+            // A module is registered under both its full path and its short
+            // qualifier, so the indices are collected through a set: one module
+            // reached two ways is one candidate, not an ambiguity.
+            let seen: BTreeSet<usize> = scope.quals.values().flatten().copied().collect();
+            let hits: Vec<&ModInfo> = seen
+                .into_iter()
+                .map(|i| &mods[i])
+                .filter(|m| m.operations.contains(name))
+                .collect();
+            match hits.as_slice() {
+                [] => {}
+                [m] => return Some(m.exports[name].as_str().to_string()),
+                many => {
+                    let owners: Vec<&str> = many.iter().map(|m| m.path.as_str()).collect();
+                    let first = many[0].exports[name].as_str().to_string();
+                    self.record(
+                        span,
+                        format!(
+                            "operation `{name}` is ambiguous: declared by {}; import only the module whose operation this clause handles",
+                            owners.join(" and ")
+                        ),
+                    );
+                    return Some(first);
+                }
+            }
+        }
+        None
     }
 
     /// [`Self::value`] where `span` is the written identifier itself, recording

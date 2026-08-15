@@ -28,8 +28,12 @@ import Data.Map (..)
 import Data.List (..)
 import Data.Foldable (..)
 import Data.String (..)
-import Wire (..)
+import Wire (Bytes, Serialize, bytes_of_list, bytes_to_list, wire_empty)
 
+-- | The engine's own effect, over erased nodes: create an input, read a node,
+-- write a node, and register a memo thunk. The typed `Incr(a)` surface below is
+-- the one to program against; this is what `run_incr` handles.
+--
 -- The raw, type-erased effect the engine actually handles: node handles are
 -- string keys and values are `Bytes`. The typed surface below wraps it. The memo
 -- thunk may read other nodes (`IncrRaw`) and perform any replayable effect (`e`),
@@ -950,7 +954,9 @@ let t_snap_name : String = "prism-incr-trace-snapshot"
 let t_snap_version : String = "2"
 
 -- Gather eligible memos with a computed result. Each trace is reversed back to
--- call order before encoding, so the snapshot stores it forward.
+-- call order before encoding, so the snapshot stores it forward. The `reverse`
+-- here flips one entry's trace field, not the recursion's own accumulator.
+-- lint: allow(L0105)
 fn t_snap_collect(s : TSt(e), keys : List(String)) : List(TSnapEntry) =
   match keys of
     Nil => Nil
@@ -974,6 +980,8 @@ fn t_snap_encode(s : TSt(e)) : Bytes =
 
 -- Rebuild the warm cache. A stored trace is decoded to call order then reversed to
 -- the engine's newest-first storage, so a warm memo's trace matches a live one.
+-- The `reverse` flips that decoded trace, not the map being built.
+-- lint: allow(L0105)
 fn t_snap_build(entries : List(TSnapEntry)) : Map(String, TWarm) =
   match entries of
     Nil => map_empty

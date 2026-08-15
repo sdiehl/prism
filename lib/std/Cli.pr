@@ -23,17 +23,26 @@
 -- the `.replay` trace like any other observation: CLI parsing is inside the
 -- determinism contract, argv and all.
 
-import Data.List (map, filter, foldl, foldr, append, reverse, nth)
+import Data.List (map, append, reverse, nth)
 import Data.Maybe (..)
 import Data.Result (..)
 import Data.String (starts_with, str_join, pad_right, index_of, contains)
 import Data.Char (is_digit)
 
--- ASCII byte of `-`, the flag sigil.
+-- | ASCII byte of `-`, the flag sigil.
 pub let dash : Int = 45
 
--- Column the help text aligns descriptions to.
+-- | Column the help text aligns descriptions to.
 pub let help_col : Int = 24
+
+-- Width of the `--` prefix that introduces a long flag.
+let long_prefix_len : Int = 2
+
+-- Shortest possible short flag: the sigil plus one letter.
+let short_flag_min_len : Int = 2
+
+-- Indent of a listed argument or subcommand under its heading.
+let list_indent : Int = 2
 
 -- | A parse failure, carrying enough to name the offending token and the form
 -- expected. Rendered to a message by `describe`.
@@ -45,6 +54,7 @@ pub type CliError
   | BadValue(String, String)
   | UnknownFlag(String)
   | UnknownCommand(String)
+  deriving (Eq, Show)
 
 -- | The static description of one option, carried by the parser for help and to
 -- tell the lexer whether the flag consumes a following value.
@@ -54,15 +64,22 @@ pub type OptSpec = OptSpec {
   meta: String,
   help: String,
   takes_value: Bool
-}
+} deriving (Eq, Show)
 
 -- | The static description of one positional argument.
-pub type ArgSpec = ArgSpec { meta: String, help: String, required: Bool }
+pub type ArgSpec = ArgSpec {
+  meta: String,
+  help: String,
+  required: Bool
+} deriving (Eq, Show)
 
 -- | argv after lexing: options canonicalized to their long name, and the
 -- positionals in order. `--help`/`-h` are handled before lexing (`has_help`), so
 -- they never appear here.
-pub type Tokens = Tokens { opts: List((String, String)), pos: List(String) }
+pub type Tokens = Tokens {
+  opts: List((String, String)),
+  pos: List(String)
+} deriving (Eq, Show)
 
 -- | A parser for a value of type `a`: the option and positional specs it accepts
 -- (the description help is rendered from) and a pure reader over lexed tokens
@@ -76,20 +93,33 @@ opaque type Parser(a) = Parser {
 
 -- | One named subcommand: its key on the command line, a one-line description,
 -- and the parser that runs when it is chosen.
+-- The parser it carries is a reader function, so the subcommand as a whole has no
+-- meaningful equality or printed form.
+-- lint: allow(L0203)
 pub type SubCmd(a) = SubCmd { key: String, about: String, sub: Parser(a) }
 
 -- | A top-level command is either a single parser or a group of subcommands, all
 -- producing the same result type (so distinct subcommands map to distinct
 -- constructors of the user's ADT).
+-- Both alternatives bottom out in parser functions, so the body is not comparable
+-- or printable.
+-- lint: allow(L0203)
 pub type Body(a) = Plain(Parser(a)) | Group(List(SubCmd(a)))
 
 -- | A complete command: a program name and one-line description for usage, plus
 -- its body.
+-- The body holds parser functions; render a command with `help_text` rather than
+-- expecting a printed form.
+-- lint: allow(L0203)
 pub type Command(a) = Command { name: String, about: String, body: Body(a) }
 
 -- | The outcome of parsing argv: a value, a help request (carrying the rendered
 -- text), or a usage error (carrying the rendered message).
-pub type Outcome(a) = Parsed(a) | ShowHelp(String) | BadUsage(String)
+pub type Outcome(a)
+  = Parsed(a)
+  | ShowHelp(String)
+  | BadUsage(String)
+  deriving (Eq, Show)
 
 -- Combinators -----------------------------------------------------------------
 
@@ -254,10 +284,10 @@ fn read_arg_int(meta, t : Tokens, i) =
 
 fn is_help_tok(tok) = str_eq(tok, "--help") || str_eq(tok, "-h")
 
-fn is_long_flag(tok) = starts_with("--", tok) && str_len(tok) > 2
+fn is_long_flag(tok) = starts_with("--", tok) && str_len(tok) > long_prefix_len
 
 fn is_short_flag(tok) =
-  str_len(tok) >= 2
+  str_len(tok) >= short_flag_min_len
     && char_at(tok, 0) == dash
     && char_at(tok, 1) /= dash
     && not(is_digit(char_at(tok, 1)))
@@ -285,6 +315,9 @@ fn find_short(specs : List(OptSpec), name) =
 -- positional. `--help`/`-h` are skipped here (detected earlier by `has_help`).
 pub fn lex(specs, argv) = lex_go(specs, argv, Nil, Nil)
 
+-- The two accumulators are built in reverse and flipped once at Nil; a forward
+-- fold cannot express the token lookahead that a valued flag needs.
+-- lint: allow(L0105)
 fn lex_go(specs, argv, opts_acc, pos_acc) =
   match argv of
     Nil => Ok(Tokens { opts = reverse(opts_acc), pos = reverse(pos_acc) })
@@ -299,7 +332,7 @@ fn lex_go(specs, argv, opts_acc, pos_acc) =
         lex_go(specs, rest, opts_acc, Cons(tok, pos_acc))
 
 fn lex_long(specs, tok, rest, opts_acc, pos_acc) =
-  let name = substring(tok, 2, str_len(tok) - 2)
+  let name = substring(tok, long_prefix_len, str_len(tok) - long_prefix_len)
   if contains("=", name) then
     lex_eq(specs, name, rest, opts_acc, pos_acc)
   else
@@ -323,6 +356,9 @@ fn lex_eq(specs, name, rest, opts_acc, pos_acc) =
       else
         Err(UnknownFlag(concat("--", k)))
 
+-- Carries the raw token alongside the canonical name so a missing value names the
+-- spelling the user actually typed.
+-- lint: allow(L0103)
 fn lex_valued(specs, name, rest, opts_acc, pos_acc, tok) =
   match rest of
     Nil => Err(NeedsValue(tok))
@@ -486,10 +522,10 @@ fn opt_line(s : OptSpec) =
   concat_all([pad_right(lhs, help_col), s.help])
 
 fn arg_line(ar : ArgSpec) =
-  concat_all(["  ", pad_right(ar.meta, help_col - 2), ar.help])
+  concat_all(["  ", pad_right(ar.meta, help_col - list_indent), ar.help])
 
 fn cmd_line(sc : SubCmd(a)) =
-  concat_all(["  ", pad_right(sc.key, help_col - 2), sc.about])
+  concat_all(["  ", pad_right(sc.key, help_col - list_indent), sc.about])
 
 -- The implicit `--help` option, rendered through the same `opt_line` as every
 -- real option so its column lines up.

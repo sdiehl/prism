@@ -15,19 +15,22 @@ import Syntax.Source (..)
 -- | One resolved expression node: its NodeId (the join key), its
 -- expression-form kind, its byte span, and its immediate children in source
 -- order. A leaf carries the empty child list.
+-- lint: allow(L0203)
 pub type RNode = RNode { id: Int, kind: String, span: Span, children: List(RNode) }
 
 -- | One parameter of a resolved function: the binder its body's references
 -- resolve to, and whether it is borrowed. A pattern parameter's name is the
 -- synthesized binder the resolver assigned, because that is the name the body
 -- actually mentions.
-pub type RParam = RParam { name: String, is_borrow: Bool }
+pub type RParam = RParam { name: String, is_borrow: Bool } deriving (Eq, Show)
 
 -- | One user function's resolved body tree, with its name and parameters.
+-- lint: allow(L0203)
 pub type RFunction = RFunction { name: String, params: List(RParam), body: RNode }
 
 -- | A decoded resolved-syntax document: the envelope identity, the embedded
 -- source every span indexes into, and the user functions in source order.
+-- lint: allow(L0203)
 pub type ResolvedDoc = ResolvedDoc {
   schema: String,
   compiler: String,
@@ -36,12 +39,14 @@ pub type ResolvedDoc = ResolvedDoc {
 }
 
 -- | The schema tag this vocabulary decodes.
+-- lint: allow(L0204)
 pub fn resolved_schema() : String = "prism-resolved-syntax-v1"
 
 -- | The node kinds the artifact spells, one function per form, so a consumer
 -- matches on a named kind rather than retyping a bare string at each use site.
 -- The list is the artifact's whole vocabulary: a kind outside it is a document
 -- this version does not understand, which `rkind_known` is how to ask.
+-- lint: allow(L0204)
 pub fn rkinds() : List(String) =
   [
       rkind_int(),
@@ -178,11 +183,13 @@ pub fn rkind_ann() : String = "ann"
 -- | The immediate children of one resolved node, in source order. The one
 -- constructor-naming site for `RNode` traversal; every generic walk derives
 -- from it, so a consumer never re-matches the node shape.
+-- lint: allow(L0204)
 pub fn rnode_children(n : RNode) : List(RNode) = n.children
 
 -- | Put a replacement child list back into a resolved node, keeping its id,
 -- kind, and span. Fails closed: a list of the wrong length yields the node
 -- unchanged.
+-- lint: allow(L0204)
 pub fn rnode_rebuild(n : RNode, cs : List(RNode)) : RNode =
   if length(cs) == length(n.children) then
     RNode { ..n, children = cs }
@@ -192,12 +199,14 @@ pub fn rnode_rebuild(n : RNode, cs : List(RNode)) : RNode =
 -- | The children-and-rebuild pair for resolved nodes, so every strategy in
 -- `Control.Rewrite` and every query in `Control.Layer` works on a resolved
 -- body.
+-- lint: allow(L0204)
 pub fn rnode_layer() : Layer(RNode) =
   Layer { kids = rnode_children, rebuild = rnode_rebuild }
 
 -- | Every node of a resolved body, root first, depth-first. The uniplate
 -- `universe` over `RNode`, the traversal a Prism-written checker walks a body
 -- with.
+-- lint: allow(L0204)
 pub fn rnode_universe(n : RNode) : List(RNode) = lay_universe(rnode_layer(), n)
 
 -- | The number of nodes in a resolved body.
@@ -209,4 +218,5 @@ pub fn rnode_universe(n : RNode) : List(RNode) = lay_universe(rnode_layer(), n)
 -- ```output
 -- 1
 -- ```
+-- lint: allow(L0204)
 pub fn rnode_count(n : RNode) : Int = lay_size(rnode_layer(), n)

@@ -20,6 +20,8 @@ import Data.String (contains, ends_with, starts_with, str_of_char, trim)
 import Data.Result (map_err)
 import Json (Json, JObj, JStr, JInt, decode, encode, json_error_message)
 
+-- | The framed value a deck program prints: the Typst source, the logical
+-- slide and physical page counts, and the deck title.
 pub type DeckEnvelope = DeckEnvelope {
   source: String,
   logical_slides: Int,
@@ -29,10 +31,17 @@ pub type DeckEnvelope = DeckEnvelope {
 
 let envelope_prefix : String = "SPECTRA/1 "
 
+-- The apostrophe, the one byte a POSIX single-quoted string cannot contain.
+let single_quote : Int = 39
+
+-- The status a refused request exits with, distinct from the status a
+-- request that ran and failed exits with.
+let exit_refused : Int = 2
+
 fn quote_body(value : String, i : Int, acc : String) : String =
   if i >= str_len(value) then
     acc
-  elif char_at(value, i) == 39 then
+  elif char_at(value, i) == single_quote then
     quote_body(value, i + 1, "{acc}'\\''")
   else
     quote_body(value, i + 1, "{acc}{str_of_char(chr(char_at(value, i)))}")
@@ -71,6 +80,9 @@ fn int_field(
     Some(JInt(value)) => Ok(value)
     _ => Err("deck envelope field '{name}' must be an integer")
 
+-- A flat validation table over the envelope's fields; each branch refuses one
+-- way the envelope can be wrong, and none of them nest.
+-- lint: allow(L0101)
 fn envelope_fields(fields : List((String, Json))) : Result(DeckEnvelope, String) =
   let format = string_field("format", fields)?
   let document_format = string_field("document_format", fields)?
@@ -94,6 +106,8 @@ fn envelope_fields(fields : List((String, Json))) : Result(DeckEnvelope, String)
         },
       )
 
+-- | Take the framed envelope out of a deck program's standard output,
+-- returning it beside the JSON it was carried in.
 pub fn parse_envelope(stdout : String) : Result((DeckEnvelope, String), String) =
   let framed = trim(stdout)
   if not(starts_with(envelope_prefix, framed)) then
@@ -148,6 +162,8 @@ fn check_steps(project : String) : Result(Unit, String) ! {IO} =
   run("Typst discovery", "typst --version")?
   Ok(())
 
+-- | Verify the external tools and the deck without writing any artifact,
+-- returning the status to exit with.
 pub fn check_project(project : String) : Int ! {IO, Output} =
   match check_steps(project) of
     Ok(_) =>
@@ -157,6 +173,9 @@ pub fn check_project(project : String) : Int ! {IO, Output} =
       eprintln("spectra: {message}")
       1
 
+-- The pipeline in order, each step's failure short-circuiting the rest; the
+-- nesting is the sequence, not a decision tree.
+-- lint: allow(L0101)
 fn build_steps(
   project : String,
   output : String
@@ -184,6 +203,8 @@ fn build_steps(
     )?
   Ok((envelope, pdf_path))
 
+-- | Run the whole pipeline, installing the Typst source and PDF under
+-- `target/spectra`, and return the status to exit with.
 pub fn build_project(
   project : String,
   output : String,
@@ -191,7 +212,7 @@ pub fn build_project(
 ) : Int ! {FileSystem, IO, Output} =
   if not(safe_output(output)) then
     eprintln("spectra: --output must be a plain relative .pdf filename")
-    2
+    exit_refused
   else
     match build_steps(project, output) of
       Err(message) =>
@@ -208,10 +229,12 @@ pub fn build_project(
           ()
         0
 
+-- | Remove a project's `target/spectra` and nothing else, returning the
+-- status to exit with.
 pub fn clean_project(project : String) : Int ! {IO} =
   if project == "" || project == "/" then
     eprintln("spectra: refusing unsafe project path")
-    2
+    exit_refused
   else
     let target = join_path(project, "target/spectra")
     match run("clean", "rm -rf -- {shell_quote(target)}") of

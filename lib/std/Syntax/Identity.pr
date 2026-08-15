@@ -19,7 +19,7 @@
 import Control.Rewrite (..)
 import Data.List (filter)
 import Data.Result (map_result)
-import Json (..)
+import Json (Json, JsonError, JObj, decode, json_layer)
 import Syntax.Codec (..)
 import Syntax.Source (..)
 

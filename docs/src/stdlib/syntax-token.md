@@ -26,7 +26,7 @@ type TokenKind
   | TVOpen
   | TVClose
   | TVSemi
-  deriving (Eq)
+  deriving (Eq, Show)
 ```
 
 A token kind: a fixed token by exact spelling, or one of the special value-carrying and virtual kinds.
@@ -34,7 +34,11 @@ A token kind: a fixed token by exact spelling, or one of the special value-carry
 ### `Token`
 
 ```prism,def,h-4a7d7f923728595b6554ca999086f07d5b86745e5e8f3d803973ecaae285e766
-type Token = Token { kind: TokenKind, span: Span, value: Option(String) }
+type Token = Token {
+  kind: TokenKind,
+  span: Span,
+  value: Option(String)
+} deriving (Eq, Show)
 ```
 
 One token: its kind, its span in the embedded source, and, for value-carrying kinds, the decoded payload (escapes resolved, digit separators stripped). The original spelling is always recoverable from the span.
@@ -42,7 +46,11 @@ One token: its kind, its span in the embedded source, and, for value-carrying ki
 ### `Trivia`
 
 ```prism,def,h-1990b281448458678ac604c1d933a333c000a1acaca72e265d31a34f0148639b
-type Trivia = TComment(Span) | TBlockComment(Span) | TBlank(Span)
+type Trivia
+  = TComment(Span)
+  | TBlockComment(Span)
+  | TBlank(Span)
+  deriving (Eq, Show)
 ```
 
 One trivia event between semantic tokens: a line comment, a delimited comment, or a blank-line run.
@@ -80,6 +88,8 @@ The token kind a wire name denotes. Any name that is not one of the special alia
 ```output
 (true, true)
 ```
+
+lint: allow(L0101)
 
 ### `trivia_name`
 

@@ -6,14 +6,14 @@
       "pattern": 505,
       "type": 668
     },
-    "generator_code_lines": 2867,
-    "maintained_t_delta": 288,
-    "maintained_t_lines": 4020,
+    "generator_code_lines": 2873,
+    "maintained_t_delta": 295,
+    "maintained_t_lines": 4027,
     "maintained_t_verdict": "regressed",
     "pattern": {
       "facade": 15,
       "generated": 0,
-      "semantics": 43
+      "semantics": 44
     },
     "shared_control_code_lines": 202,
     "status": "pattern-scaffold",
@@ -435,7 +435,7 @@
     "artifact": "lib/std/Syntax/Parse/GeneratedControl.pr",
     "classification": "handwritten-family-neutral-runtime",
     "code_lines": 202,
-    "sha256": "0d2c28f7d74b4ec409fba7f7226f35536899f7a56a5fc2be283c15429d8dac9b",
+    "sha256": "d2b0f85601b7ad1f7076a365ec3d600cfb0cdb9db1683573d136507b8f1d3685",
     "test_fixture": {
       "artifact": "experiments/parser_generator_phase1/generated/type_leaf/tests/pattern_contract.pr",
       "classification": "independent-handwritten",
@@ -459,7 +459,7 @@
       "sha256": "eb6e5d36fab08fce7ada02dd5db601afa755d3bf724576589dd0c20f80d380d3"
     },
     "artifact": "experiments/parser_generator_phase1/generated/type_leaf/src/GeneratedTypeLeaf.pr",
-    "artifact_sha256": "21f5ed56a15b255778411de27a33675caeb2567486859d8fa3c67a45fe4107b4",
+    "artifact_sha256": "820828fcf4b71b30fb99d93d23fd389e9f85591143c7756ee50796178d93232b",
     "production_artifact": "lib/std/Syntax/Parse/GeneratedType.pr",
     "test_fixture": {
       "artifact": "experiments/parser_generator_phase1/generated/type_leaf/tests/type_leaf.pr",

@@ -60,6 +60,9 @@ instance blitArray : Blit(Array(a))
   fn blit(src, src_off, len, dst, dst_off) =
     blit_array_go(src, src_off, len, dst, dst_off, 0)
 
+-- The copy loop takes both windows plus the cursor. Bundling them into a record
+-- would allocate one per call on a path whose whole point is not to allocate.
+-- lint: allow(L0103)
 fn blit_array_go(
   src : Array(a),
   src_off : Int,
@@ -88,6 +91,9 @@ instance blitBytes : Blit(Bytes)
   fn blit(src, src_off, len, dst, dst_off) =
     bytes_of_buf(blit_bytes_go(bytes_buf(dst), src, src_off, len, dst_off, 0))
 
+-- Same shape as `blit_array_go`, over a buffer threaded linearly so the
+-- destination is extended in place; a context record would break that ownership.
+-- lint: allow(L0103)
 fn blit_bytes_go(
   dst : Buf,
   src : Bytes,

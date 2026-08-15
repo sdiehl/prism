@@ -2157,6 +2157,8 @@ def render_type_leaf(
         "-- Complete frozen AType and TypeArg lowering, with explicit receipts.",
         "-- Checked TypeArg hooks remain pinned in the typed action schema.",
         "",
+        "-- lint: allow-file(L0101, L0102, L0103, L0105, L0108, L0202, L0203, L0204)",
+        "",
         "import Data.List (..)",
         "",
         "import Data.Maybe (..)",
@@ -3010,6 +3012,10 @@ def build() -> BuildResult:
     type_leaf_manifest_text = (
         '[package]\n'
         'name = "parser_generator_type_leaf"\n'
+        'version = "0.0.0"\n'
+        'authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]\n'
+        'maintainers = ["stephen.m.diehl@gmail.com"]\n'
+        'license = "MIT"\n'
         "\n"
         "[bin]\n"
         'entry = "src/main.pr"\n'

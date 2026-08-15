@@ -662,36 +662,115 @@ impl Rewrite for TermSubstitution<'_> {
 /// Free local/global term references in a typed computation.
 pub(crate) fn free_comp_vars(comp: &TypedComp) -> BTreeSet<Sym> {
     let mut free = BTreeSet::new();
-    collect_comp_vars(comp, &mut Vec::new(), &mut free);
+    collect_comp_vars(comp, &mut BoundStack::new(), &mut free);
     free
 }
 
 /// Free local/global term references in a typed value, including thunk bodies.
 pub(crate) fn free_value_vars(value: &TypedValue) -> BTreeSet<Sym> {
     let mut free = BTreeSet::new();
-    collect_value_vars(value, &mut Vec::new(), &mut free);
+    collect_value_vars(value, &mut BoundStack::new(), &mut free);
     free
 }
 
-fn collect_ref(name: Sym, bound: &[Sym], free: &mut BTreeSet<Sym>) {
-    if !bound.contains(&name) {
+// Count computation nodes visited by free-variable collection in a single
+// unit-test thread. This is structural instrumentation, not a wall-clock
+// benchmark: RC's bind-spine regression can therefore pin linear work without
+// becoming sensitive to CI load. `None` keeps unrelated tests uncounted.
+#[cfg(test)]
+thread_local! {
+    static FREE_COMP_VAR_VISITS: std::cell::Cell<Option<usize>> = const {
+        std::cell::Cell::new(None)
+    };
+}
+
+#[cfg(test)]
+pub(crate) fn count_free_comp_var_visits<T>(f: impl FnOnce() -> T) -> (T, usize) {
+    FREE_COMP_VAR_VISITS.with(|visits| {
+        assert!(
+            visits.replace(Some(0)).is_none(),
+            "free-variable visit counters cannot be nested"
+        );
+    });
+    let result = f();
+    let count = FREE_COMP_VAR_VISITS.with(|visits| {
+        visits
+            .replace(None)
+            .expect("free-variable visit counter is active")
+    });
+    (result, count)
+}
+
+/// A lexical binder stack with sublinear membership.
+///
+/// The stack preserves push order for scoped save/restore while a count map
+/// answers membership without scanning the frames, so free-variable collection
+/// over a deep binder chain stays linear. Counting (rather than a set) keeps a
+/// shadowed name bound until every frame introducing it has been popped.
+pub(crate) struct BoundStack {
+    stack: Vec<Sym>,
+    counts: BTreeMap<Sym, u32>,
+}
+
+impl BoundStack {
+    pub(crate) const fn new() -> Self {
+        Self {
+            stack: Vec::new(),
+            counts: BTreeMap::new(),
+        }
+    }
+
+    pub(crate) const fn mark(&self) -> usize {
+        self.stack.len()
+    }
+
+    pub(crate) fn push(&mut self, name: Sym) {
+        self.stack.push(name);
+        *self.counts.entry(name).or_insert(0) += 1;
+    }
+
+    pub(crate) fn push_all(&mut self, names: impl IntoIterator<Item = Sym>) {
+        for name in names {
+            self.push(name);
+        }
+    }
+
+    pub(crate) fn pop_to(&mut self, mark: usize) {
+        while self.stack.len() > mark {
+            let name = self.stack.pop().expect("stack is longer than the mark");
+            match self.counts.get_mut(&name) {
+                Some(count) if *count > 1 => *count -= 1,
+                _ => {
+                    self.counts.remove(&name);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn contains(&self, name: Sym) -> bool {
+        self.counts.contains_key(&name)
+    }
+}
+
+fn collect_ref(name: Sym, bound: &BoundStack, free: &mut BTreeSet<Sym>) {
+    if !bound.contains(name) {
         free.insert(name);
     }
 }
 
 fn under(
-    bound: &mut Vec<Sym>,
+    bound: &mut BoundStack,
     names: impl IntoIterator<Item = Sym>,
     body: &TypedComp,
     free: &mut BTreeSet<Sym>,
 ) {
-    let old_len = bound.len();
-    bound.extend(names);
+    let mark = bound.mark();
+    bound.push_all(names);
     collect_comp_vars(body, bound, free);
-    bound.truncate(old_len);
+    bound.pop_to(mark);
 }
 
-fn collect_value_vars(value: &TypedValue, bound: &mut Vec<Sym>, free: &mut BTreeSet<Sym>) {
+fn collect_value_vars(value: &TypedValue, bound: &mut BoundStack, free: &mut BTreeSet<Sym>) {
     match &value.kind {
         TypedValueKind::Var { name, .. } => collect_ref(*name, bound, free),
         TypedValueKind::Reinterpret(value)
@@ -723,7 +802,13 @@ fn collect_value_vars(value: &TypedValue, bound: &mut Vec<Sym>, free: &mut BTree
 }
 
 #[allow(clippy::too_many_lines)]
-fn collect_comp_vars(comp: &TypedComp, bound: &mut Vec<Sym>, free: &mut BTreeSet<Sym>) {
+fn collect_comp_vars(comp: &TypedComp, bound: &mut BoundStack, free: &mut BTreeSet<Sym>) {
+    #[cfg(test)]
+    FREE_COMP_VAR_VISITS.with(|visits| {
+        if let Some(count) = visits.get() {
+            visits.set(Some(count + 1));
+        }
+    });
     match &comp.kind {
         TypedCompKind::Return(value)
         | TypedCompKind::Force(value)

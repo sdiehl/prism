@@ -7,13 +7,18 @@ import Syntax.Ast (..)
 import Syntax.Parse.Build (..)
 import Syntax.Parse.Support (surface_float, surface_int)
 
+-- The byte length of an integer literal's width suffix, `i64` or `u64`.
+fn pattern_suffix_len() : Int = 3
+
+-- | Lower an integer literal pattern, splitting off its width suffix and
+-- folding a leading minus into the digits.
 pub fn pattern_int(raw : String, negative : Bool, span : Span) : Sp(Pat) =
   let n = str_len(raw)
   let (digits, suffix) =
     if ends_with("i64", raw) then
-      (substring(raw, 0, n - 3), SufI64)
+      (substring(raw, 0, n - pattern_suffix_len()), SufI64)
     elif ends_with("u64", raw) then
-      (substring(raw, 0, n - 3), SufU64)
+      (substring(raw, 0, n - pattern_suffix_len()), SufU64)
     else
       (raw, SufNone)
   let value = surface_int(digits)
@@ -23,6 +28,7 @@ pub fn pattern_int(raw : String, negative : Bool, span : Span) : Sp(Pat) =
       span.hi,
     )
 
+-- | Lower a float literal pattern, folding a leading minus into the value.
 pub fn pattern_float(raw : String, negative : Bool, span : Span) : Sp(Pat) =
   let value = surface_float(raw)
   authored(
@@ -31,6 +37,7 @@ pub fn pattern_float(raw : String, negative : Bool, span : Span) : Sp(Pat) =
       span.hi,
     )
 
+-- | Lower a list literal pattern to the `Cons`/`Nil` spine it abbreviates.
 pub fn pattern_list(items : List(Sp(Pat)), outer : Span) : Sp(Pat) =
   widened(
       pattern_list_tail(items, zero_width(PCtor("Nil", Nil), outer.hi)),

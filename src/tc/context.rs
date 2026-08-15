@@ -412,26 +412,54 @@ impl Tc<'_> {
     // language, so a value restriction would only reject sound programs. Do not
     // add one (and please leave this note for the next reader who wonders).
     //
-    // What generalization does NOT do: it quantifies only free type and row
-    // existentials (see `generalize_map`), never class constraints. There is no
-    // surface syntax for a constraint on a `let` binding (only top-level `fn`s
-    // carry `given C(a)`), and no constraint inference here, so a local binding
-    // whose body incurs a dictionary obligation over a variable it would
-    // generalize (e.g. `let f = \(x) -> show(x)`) cannot carry that obligation in
-    // its scheme. The obligation is orphaned on the pre-generalization existential
-    // and surfaces at resolution as the standard unresolved-constraint diagnostic
-    // ("cannot infer the type for constraint ...", `head_key` in classes.rs); a
-    // parameter annotation does not rescue it, since the constraint is detached
-    // from the binding's type by generalization. The remedy is to lift the binding
-    // to a top-level `fn ... given C(a)`. Generalizing over constraints locally is
+    // What generalization does NOT do: it never quantifies class constraints
+    // into a scheme. There is no surface syntax for a constraint on a `let`
+    // binding (only top-level `fn`s carry `given C(a)`), and a constrained
+    // local scheme would need a dictionary lambda at the binder plus
+    // dictionary application at every local use, machinery reserved for
+    // top-level declarations. Instead, a local binding whose body incurs a
+    // dictionary obligation keeps the obligated existential monomorphic:
+    // `generalize_local` excludes every existential still mentioned by a
+    // pending obligation from the quantifier set, so the obligation stays
+    // attached to a live existential that later use sites ground
+    // (`let f = \(x) -> show(x)` followed by `f(1)` resolves `Show(Int)` at
+    // the declaration boundary) or the enclosing declaration's `given`
+    // context discharges. A binding that is never grounded still surfaces
+    // as the standard unresolved-constraint diagnostic ("cannot infer the
+    // type for constraint ...", `head_key` in classes.rs), and one used at
+    // two different constrained types is a type mismatch; both lift to a
+    // top-level `fn ... given C(a)`. Quantifying constraints locally is
     // intentionally not implemented.
     pub(super) fn generalize(&self, env: &Env, ty: &Type) -> Type {
         self.generalize_map(env, ty).0
     }
 
+    // Generalization for a local `let` binding: `generalize`, minus every
+    // existential a pending class obligation still mentions (see the policy
+    // note above).
+    pub(super) fn generalize_local(&self, env: &Env, ty: &Type) -> Type {
+        let t = self.zonk(ty);
+        let obligated = self.obligated_exists();
+        self.generalize_zonked(env, &t, true, None, &obligated).0
+    }
+
+    // Every existential still free in a pending class obligation, through
+    // current solutions. These are the variables a local scheme must not
+    // capture: quantifying one detaches the obligation from any future
+    // solution and strands it unresolvable.
+    fn obligated_exists(&self) -> BTreeSet<u32> {
+        let mut exs = BTreeSet::new();
+        for wanted in &self.wanted {
+            for (_, ty, _) in &wanted.items {
+                self.apply(ty).free_exist(&mut exs);
+            }
+        }
+        exs
+    }
+
     pub(super) fn generalize_map(&self, env: &Env, ty: &Type) -> (Type, Renames) {
         let t = self.zonk(ty);
-        self.generalize_zonked(env, &t, true, None)
+        self.generalize_zonked(env, &t, true, None, &BTreeSet::new())
     }
 
     // Generalization for a finished top-level declaration. Identical to
@@ -442,7 +470,7 @@ impl Tc<'_> {
     // variable, or its spelling, from any scheme's quantifiers.
     pub(super) fn generalize_decl_map(&self, env: &Env, ty: &Type) -> (Type, Renames) {
         let t = self.zonk(ty);
-        self.generalize_zonked(env, &t, false, None)
+        self.generalize_zonked(env, &t, false, None, &BTreeSet::new())
     }
 
     // Generalize under a naming already chosen elsewhere: any existential the seed
@@ -451,7 +479,8 @@ impl Tc<'_> {
     // scheme is what makes `xs` read the same in a signature and in the body.
     pub(super) fn generalize_seeded(&self, env: &Env, ty: &Type, seed: &Renames) -> Type {
         let t = self.zonk(ty);
-        self.generalize_zonked(env, &t, true, Some(seed)).0
+        self.generalize_zonked(env, &t, true, Some(seed), &BTreeSet::new())
+            .0
     }
 
     // The scheme builder proper. It only accepts a `Zonked`, so the free-variable
@@ -461,12 +490,16 @@ impl Tc<'_> {
     // true for every local generalization point (the cell must stay one type
     // for as long as its scope is still being checked), false once a top-level
     // declaration is finished (see `generalize_decl_map`).
+    // `exclude` holds existentials that must stay monomorphic regardless of
+    // the environment anchors: the constraint-obligated set a local `let`
+    // hands in via `generalize_local`. Empty everywhere else.
     fn generalize_zonked(
         &self,
         env: &Env,
         zt: &Zonked,
         anchor_var_ops: bool,
         seed: Option<&Renames>,
+        exclude: &BTreeSet<u32>,
     ) -> (Type, Renames) {
         let t: &Type = zt;
         let mut exs = BTreeSet::new();
@@ -534,7 +567,10 @@ impl Tc<'_> {
         // Generalized existentials keep their historical id-order naming, so an
         // all-existential scheme (every inferred function) prints byte-identically
         // to before rigid signature variables existed.
-        let gen: Vec<u32> = exs.into_iter().filter(|e| !env_exs.contains(e)).collect();
+        let gen: Vec<u32> = exs
+            .into_iter()
+            .filter(|e| !env_exs.contains(e) && !exclude.contains(e))
+            .collect();
         let mut names = Vec::new();
         let mut mapping = Vec::new();
         for e in &gen {

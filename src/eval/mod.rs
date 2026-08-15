@@ -397,6 +397,11 @@ pub struct Run {
     // `Some(code)` when the program called `exit(code)`; the host decides what
     // a process exit means in its context.
     pub exit: Option<i32>,
+    // Machine transitions the run took, the interpreter's unit of work. A pure
+    // function of the program and its input, so two runs of the same source take
+    // the same count on every machine, which is what lets a harness compare it
+    // against a recorded baseline.
+    pub steps: usize,
 }
 
 // SplitMix64 default seed, shared with the C runtime (`PRISM_RNG_SEED` in
@@ -1550,6 +1555,7 @@ pub fn run_io_with_args(
         out: m.out,
         term: m.term,
         exit: m.exit,
+        steps: m.steps,
     })
 }
 
@@ -1858,6 +1864,7 @@ fn run_suspending_inner(
                     out: m.out,
                     term: m.term,
                     exit: m.exit,
+                    steps: m.steps,
                 }),
                 marks,
             ))
@@ -1929,6 +1936,7 @@ pub fn run_suspending_at_cut(
                     out: m.out,
                     term: m.term,
                     exit: m.exit,
+                    steps: m.steps,
                 }),
                 marks,
                 outcome,
@@ -1949,8 +1957,8 @@ pub fn run_suspending_at_cut(
 /// Run the whole program with the step ruler armed.
 ///
 /// A full live run whose every observation is marked with the machine step at
-/// which it fired. Returns the run, the marks in step order, and the total
-/// steps taken.
+/// which it fired. Returns the run (whose `steps` is the total taken) and the
+/// marks in step order.
 ///
 /// # Errors
 /// Fails when `main` is missing or evaluation faults.
@@ -1958,23 +1966,22 @@ pub fn run_ruler(
     core: &Core,
     out_sink: &mut dyn io::Write,
     input: &mut dyn io::BufRead,
-) -> Result<(Run, Vec<StepMark>, usize), String> {
+) -> Result<(Run, Vec<StepMark>), String> {
     let g = globals(core);
     let main = g.get(&Sym::new(ENTRY_POINT)).ok_or("no main function")?;
     let mut m = Machine::new(&g, out_sink, input);
     m.arm_ruler();
     let value = m.comp(&Env::default(), &main.body)?;
     let marks = m.take_ruler();
-    let steps = m.steps_taken();
     Ok((
         Run {
             value,
             out: m.out,
             term: m.term,
             exit: m.exit,
+            steps: m.steps,
         },
         marks,
-        steps,
     ))
 }
 
@@ -2014,6 +2021,7 @@ pub fn resume_kont(
             out: m.out,
             term: m.term,
             exit: m.exit,
+            steps: m.steps,
         }),
         // No step budget is set on a resume, so the loop cannot pause again.
         Outcome::Suspended { .. } => Err("resumed continuation paused unexpectedly".into()),

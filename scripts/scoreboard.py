@@ -79,6 +79,11 @@ class Row:
 # description of whatever ends up getting built.
 PARSER_RATIO = 0.5
 
+# The ratio the Prism checker has to beat once its coverage reaches the whole
+# language. Registered while it checks a first-order subset, for the same
+# reason the parser's number was registered before that parser existed.
+CHECKER_RATIO = 0.5
+
 ROWS = [
     Row(
         name="lexer and layout",
@@ -153,6 +158,30 @@ ROWS = [
         ),
         cost="executes, but no paired driver runs the same bytes through both"
         " sides, so the ratio is unmeasured rather than favorable",
+    ),
+    Row(
+        name="checker",
+        rust=["src/tc/*.rs", "src/tc/infer/*.rs"],
+        prism=["packages/tc/src/Tc.pr", "packages/tc/src/Bootstrap.pr"],
+        threshold=f"ratio {CHECKER_RATIO:.2f} or lower at full coverage",
+        verdict=lambda ratio: (
+            f"recorded, not judged, at {ratio:.2f}. The Prism side checks the"
+            " pure first-order subset the bootstrap workbench supports, so the"
+            " number says what a subset costs, not what the full checker will."
+            " Both counting asymmetries push the ratio up rather than down: the"
+            " Prism files carry their own type definitions and the artifact"
+            " decoding, while the Rust side counts the inference engine alone."
+            " The threshold binds when the shadow's coverage reaches the whole"
+            " language, and the subset number stays recorded so the curve from"
+            " subset to full checker is public"
+        ),
+        cost="measured 2026-08-14 on an Apple M5, release profile: the checker"
+        " compiled to a native binary and run to full parity on the committed"
+        " bootstrap fixture's exported artifacts takes 625 ms median of 30"
+        " against 11.6 ms median of 20 for the Rust typecheck phase on the same"
+        " 270-definition universe, about 54x, with artifact decode inside the"
+        " Prism figure and outside the Rust one; the shipped interpreted"
+        " workbench measures 1.9 s end to end on the same fixture",
     ),
 ]
 

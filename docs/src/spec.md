@@ -2026,7 +2026,7 @@ A **constructor pattern** matches a value built by that constructor and destruct
 {{#include ../examples/destructuring.pr}}
 ```
 
-A single constructor pattern over a recursive type retires the recursion into a reusable combinator: `fold_tree` below destructures `Tree` exactly once, and every later traversal, size, sum, depth, or flattening to a list, becomes a three-line call rather than a new `match`.
+A single constructor pattern over a recursive type retires the recursion into a reusable combinator: `fold_tree` below destructures `Tree` exactly once, and every later traversal, size, total, depth, or flattening to a list, becomes a three-line call rather than a new `match`.
 
 ```prism
 {{#include ../examples/tree_fold.pr}}
@@ -2372,32 +2372,46 @@ The diagnostic names every module exporting the contested name and asks for a qu
 
 ### 12.1 Projects {#projects}
 
-A single `.pr` file compiles on its own (`prism file.pr`), resolving imports relative to its own directory. A multi-file program is a **project**: a `prism.toml` manifest at the root plus a `src/` tree, where dotted module paths resolve from the source root rather than from the entry file's location. The smallest manifest names the package and its entry point:
+A single `.pr` file compiles on its own (`prism file.pr`), resolving imports relative to its own directory. A multi-file program is a **project**: a `prism.toml` manifest at the root plus a `src/` tree, where dotted module paths resolve from the source root rather than from the entry file's location. The smallest manifest names the package, release, owners, license, and entry point:
 
 ```toml
 [package]
 name = "myapp"
+version = "0.1.0"
+authors = ["A. Developer <dev@example.com>"]
+maintainers = ["dev@example.com"]
+license = "MIT"
 
 [bin]
 entry = "src/main.pr"
 ```
 
-Inside a project, the everyday verbs default to the nearest enclosing manifest: `prism build` compiles it to a native binary under a `target/` directory at the project root (rustc-style), named after the package; `prism build --watch` keeps that compiler session resident and rebuilds after project or path-dependency source edits; a bare `prism run` builds and executes that native binary, forwarding arguments after `--` and its exit status; interpreter-only flags such as `--record`, `--lineage`, `--durable`, and `--defer-holes` instead interpret the project entry. `prism check` and `prism test` operate on the project, and `prism clean` removes `target/`. `prism run <path>` interprets an explicitly named file or project directly, while a single file is built natively with the bare top-level form `prism file.pr`. The manifest keys are:
+Inside a project, the everyday verbs default to the nearest enclosing manifest: `prism build` compiles it to a native binary under a `target/` directory at the project root (rustc-style), named after the package; `prism build --watch` keeps that compiler session resident and rebuilds after project or path-dependency source edits; a bare `prism run` builds and executes that native binary, forwarding arguments after `--` and its exit status; interpreter-only flags such as `--record`, `--lineage`, `--durable`, and `--defer-holes` instead interpret the project entry. `prism check` and `prism test` operate on the project and take the same `--watch`, and `prism clean` removes `target/`. `prism run <path>` interprets an explicitly named file or project directly, while a single file is built natively with the bare top-level form `prism file.pr`. The manifest keys are:
 
-| Key              | Section     | Required           | Meaning                                                                   |
-| ---------------- | ----------- | ------------------ | ------------------------------------------------------------------------- |
-| `name`           | `[package]` | yes                | package name; also the default binary name                                |
-| `description`    | `[package]` | no                 | package summary shown atop generated API documentation                    |
-| `entry`          | `[bin]`     | yes                | the entry `.pr` file, relative to the project root                        |
-| `src`            | `[package]` | no (default `src`) | the module root that dotted `import` paths resolve from                   |
-| `prelude`        | `[package]` | no                 | a `.pr` file whose contents replace the built-in prelude for this project |
-| `[dependencies]` | table       | no                 | path, hash, or git-package dependencies                                   |
+| Key                                              | Section     | Required           | Meaning                                                                   |
+| ------------------------------------------------ | ----------- | ------------------ | ------------------------------------------------------------------------- |
+| `name`                                           | `[package]` | yes                | package name; also the default binary name                                |
+| `version`                                        | `[package]` | yes                | release label; package identity remains its content hash                  |
+| `authors`                                        | `[package]` | yes                | non-empty list of package authors                                         |
+| `maintainers`                                    | `[package]` | yes                | non-empty list of current maintainer contacts                             |
+| `license`                                        | `[package]` | yes                | one supported SPDX license identifier                                     |
+| `description`                                    | `[package]` | no                 | package summary shown atop generated API documentation                    |
+| `homepage`, `issues`, `online-doc`, `repo`       | `[package]` | no                 | project, support, documentation, and source-repository URLs               |
+| `changes-files`, `license-files`, `readme-files` | `[package]` | no                 | lists of package-relative metadata files                                  |
+| `entry`                                          | `[bin]`     | yes                | the entry `.pr` file, relative to the project root                        |
+| `src`                                            | `[package]` | no (default `src`) | the module root that dotted `import` paths resolve from                   |
+| `prelude`                                        | `[package]` | no                 | a `.pr` file whose contents replace the built-in prelude for this project |
+| `[dependencies]`                                 | table       | no                 | path, hash, or git-package dependencies                                   |
 
 A dependency's modules import under their own dotted paths, so a `geometry = { path = "../geometry" }` entry makes that project's `Geometry` module reachable as `import Geometry`. The table accepts every dependency source form the package manager understands:
 
 ```toml
 [package]
 name = "myapp"
+version = "0.1.0"
+authors = ["A. Developer <dev@example.com>"]
+maintainers = ["dev@example.com"]
+license = "MIT"
 
 [bin]
 entry = "src/main.pr"
@@ -2410,6 +2424,8 @@ http = { git = "github.com/prism-lang/http", version = "stable" }
 ```
 
 The table form `path = "../geometry"` names a local Prism project, and the bare string form is a path shorthand unless it starts with the `prism-core-hash-v2:` scheme prefix. Path dependencies are editable source roots: they extend the module search path and deliberately remain tied to the local filesystem while developing.
+
+`prism check --licenses` prints each transitive dependency and its validated SPDX identifier. It is a short audit view for spotting licenses such as `AGPL-3.0-only`; it does not print license-file contents.
 
 A hash dependency names a source bundle directly and is already the exact accountable identity the build will use. A git dependency names an opaque `version` tag whose signed package index entry maps `(git URL, dependency name, version)` to that exact source-bundle identity: origin, display name, artifact kind, hash scheme, and root. Versions are not ranges and are not solved.
 

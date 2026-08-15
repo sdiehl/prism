@@ -1,6 +1,6 @@
 [package]
 name = "prism"
-version = "0.18.0"
+version = "0.19.0"
 authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
 categories = ["compilers"]
 default-run = "prism"
@@ -190,7 +190,7 @@ exclude = ["tools/prismup"]
 resolver = "2"
 
 [workspace.package]
-version = "0.18.0"
+version = "0.19.0"
 authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
 edition = "2021"
 license = "MIT"

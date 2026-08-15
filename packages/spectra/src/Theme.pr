@@ -14,6 +14,10 @@
 -- mine
 -- ```
 
+-- lint: allow-file(L0108)
+
+-- | A deck's visual settings: its name, the color roles, the text and code
+-- faces, the three type sizes, and the page margin.
 pub type Theme = Theme {
   name: String,
   background: String,

@@ -43,7 +43,7 @@ The text on the caret's label. The end-of-input parse fault asks for more input;
 
 ### `rp_message`
 
-```prism,sig,h-e239450d9609fb45c2a01a4689350dd6a0eb0cd495795b1cee2216a07c29f424
+```prism,sig,h-d7cce8af1bacccce94613b5727b213b72b4260445cad9f4fcc5d53e99807892f
 rp_message : (String, Syntax.Diagnostic.Diagnostic) -> String
 ```
 
@@ -59,7 +59,7 @@ Whether the compiler draws this diagnostic as one caret under one source line, t
 
 ### `rp_report`
 
-```prism,sig,h-8a956de66756a1099de04d53d60989b11489074cf2739768bab9081bf60378f7
+```prism,sig,h-574556191d62169a16e2827c970bddf7a79a79d2fa8c476b36dbe4108c25b337
 rp_report : (String, String, Syntax.Diagnostic.Diagnostic) -> Option(String)
 ```
 
@@ -92,7 +92,7 @@ print(unwrap_or("", rp_report("<source>", "fn main() = )\n", d)))
 
 ### `rp_report_doc`
 
-```prism,sig,h-c80147061739a94527475ab430545db5b61eac90e1b861acd93a18eaa473afb9
+```prism,sig,h-81291cecde3a10f0432fe54a1c67e4ad47036c2c48398438dce356e24dcc773a
 rp_report_doc : (String, Syntax.Diagnostic.DiagnosticsDoc) -> Option(String)
 ```
 

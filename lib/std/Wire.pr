@@ -97,6 +97,10 @@ let char_max : Int = 1114111
 -- a wider word into the buffer.
 let byte_mask : Int = 256
 
+-- Zigzag interleaves the negatives with the non-negatives, so both directions
+-- scale a magnitude by two and use the low bit as the sign.
+let zigzag_scale : Int = 2
+
 -- | A compact, positional byte body: an unboxed byte buffer and a read cursor,
 -- `Bytes(buf, off)` denoting the bytes `buf[off ..]`. The concrete representation
 -- is owned by the codec; a derived instance only ever threads a `Bytes` through
@@ -106,7 +110,7 @@ opaque type Bytes = Bytes(Buf, Int)
 -- | What a downgrade could not carry down: the names of the fields dropped when
 -- lowering a value to an older frozen version. A downgrade never silently
 -- discards, it reports every field it had to drop.
-pub newtype Loss = Loss(List(String)) deriving (Show)
+pub newtype Loss = Loss(List(String)) deriving (Eq, Show)
 
 -- | The codec, derived structurally by `deriving (Serialize)`. `encode` writes a
 -- value's compact positional body; `decode` reads one back, returning the value
@@ -180,7 +184,7 @@ pub fn bytes_at(bs : Bytes, i : Int) : Int =
   match bs of
     Bytes(b, off) => buf_get(b, off + i)
 
--- The empty body.
+-- | The empty byte body: no bytes, cursor at the start. The unit of `wire_cat`.
 pub let wire_empty : Bytes = Bytes(buf_empty(), 0)
 
 -- | Concatenate two byte bodies into a fresh buffer.
@@ -262,6 +266,8 @@ fn list_to_buf(acc : Buf, xs : List(Int)) : Buf =
     Nil => acc
     Cons(h, t) => list_to_buf(buf_push(acc, mod(h, byte_mask)), t)
 
+-- | Spread a byte body out as a list of byte values, from the cursor to the end.
+-- The inverse of `bytes_of_list`.
 pub fn bytes_to_list(bs : Bytes) : List(Int) = bytes_to_list_go(bs, 0, wire_len(bs))
 
 fn bytes_to_list_go(bs : Bytes, i : Int, n : Int) : List(Int) =
@@ -328,15 +334,15 @@ pub fn wire_get_tag(bs : Bytes) : (Int, Bytes) = get_uvarint(bs)
 -- under LEB128: `0, -1, 1, -2, 2 -> 0, 1, 2, 3, 4`.
 fn zigzag(x : Int) : Int =
   if x >= 0 then
-    2 * x
+    zigzag_scale * x
   else
-    -1 - 2 * x
+    -1 - zigzag_scale * x
 
 fn unzigzag(z : Int) : Int =
-  if mod(z, 2) == 0 then
-    z / 2
+  if mod(z, zigzag_scale) == 0 then
+    z / zigzag_scale
   else
-    (-1 - z) / 2
+    (-1 - z) / zigzag_scale
 
 fn put_svarint(x : Int) : Bytes = put_uvarint(zigzag(x))
 
@@ -889,7 +895,7 @@ pub fn compose_downgrade(
 -- own version: `Reject` refuses it, `LargestSafeSubset` downgrades it and keeps
 -- the `Loss`. A version mismatch always has one of these defined outcomes, never
 -- undefined behavior.
-pub type Policy = Reject | LargestSafeSubset
+pub type Policy = Reject | LargestSafeSubset deriving (Eq, Show)
 
 -- | Apply a mismatch policy to a downgrade. `Reject` fails through `Fail`;
 -- `LargestSafeSubset` runs the downgrade and returns the lowered value with the

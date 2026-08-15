@@ -1,6 +1,6 @@
 {
   "schema": "prism-syntax-tokens-v1",
-  "compiler": "0.18.0",
+  "compiler": "0.19.0",
   "source": {
     "digest": "c4c274309273958eba2bb8f5bf75f63b47455c5d720cabc3e66e11bee4d86564",
     "text": "-- Declaration families: imports, datatypes, aliases, constants, visibility.\nimport Data.List (map, filter)\nimport Json as J\nimport Data.Map (..)\n\npub type Color = Red | Green | Blue deriving (Eq, Show)\n\nopaque type Token = MkToken(Int)\n\nnewtype Meters = Meters(Float) deriving (Eq)\n\ntype Point = Point { x: Int, y: Int }\n\nalias Pair(a) = (a, a)\n\nerror NotFound(String)\n\nlet limit = 512\n\ndeprecated \"use limit\"\nlet old_limit = 256\n\npub fn origin() : Point = Point { x = 0, y = 0 }\n"

@@ -35,25 +35,38 @@ import Example as Examples
 import Example (Example, Doc)
 import Backend as TypstBackend
 import Backend (TypstDocument)
-import Layout (Align, Left, Center, Right, Inline, Plain, Emphasis, Strong, InlineCode, Link, Colored, TextStyle, Pict, Empty, Text, CodeBlock, Image, Rectangle, Row, Column, Overlay, Inset, Fit, Fragment, RawTypst)
+import Layout (Left, Center, Inline, Plain, Emphasis, Strong, Link, Colored, TextStyle, Pict, Text, Column, Fragment)
 import Theme (Theme)
 import Data.List (map, reverse, foldl, append)
 import Data.Foldable (length)
 import Data.String (str_join)
-import Json (Json, JObj, JArr, JStr, JInt, encode)
+import Json (JObj, JArr, JStr, JInt, encode)
 
+-- The type sizes and gaps the built-in slide shapes lay out with. A theme
+-- owns body and title sizes; these are the cover slide's own proportions.
+let cover_gap_pt : Int = 18
+
+let cover_title_size_pt : Int = 46
+
+let cover_subtitle_size_pt : Int = 24
+
+let slide_body_gap_pt : Int = 14
+
+-- | A deck's document metadata.
 pub type Metadata = Metadata {
   title: String,
   author: String,
   subject: String
 } deriving (Eq, Show)
 
+-- | One slide: an optional title, a body picture, and presenter notes.
 pub type Slide = Slide {
   title: Option(String),
   body: Pict,
   notes: List(String)
 } deriving (Eq, Show)
 
+-- | A whole presentation: metadata, theme, and slides in order.
 pub type Deck = Deck {
   metadata: Metadata,
   theme: Theme,
@@ -63,43 +76,62 @@ pub type Deck = Deck {
 -- The facade owns forwarding definitions for authoring values. This keeps
 -- package consumers independent of internal module names during native linking;
 -- users who need raw constructors can import Layout explicitly.
+-- | Normal body text in the theme foreground.
 pub fn text(s : String) : Pict = L.text(s)
 
+-- | Rich inline text in the theme foreground.
 pub fn rich_text(xs : List(Inline)) : Pict = L.rich_text(xs)
 
+-- | A paragraph-sized inline sequence.
 pub fn para(xs : List(Inline)) : Pict = L.para(xs)
 
+-- | Literal characters, escaped by the backend.
 pub fn plain(s : String) : Inline = Plain(s)
 
+-- | An emphasized inline span.
 pub fn emphasis(xs : List(Inline)) : Inline = Emphasis(xs)
 
+-- | A strongly emphasized inline span.
 pub fn strong(xs : List(Inline)) : Inline = Strong(xs)
 
+-- | An inline span linking to `url`.
 pub fn link(url : String, xs : List(Inline)) : Inline = Link(url, xs)
 
+-- | An inline span in the theme color role `name`.
 pub fn colored(name : String, xs : List(Inline)) : Inline = Colored(name, xs)
 
+-- | A bullet item rendered as an accent arrow and rich inline text.
 pub fn item_text(xs : List(Inline)) : Pict = L.item_text(xs)
 
+-- | A plain bullet item.
 pub fn item(s : String) : Pict = L.item(s)
 
+-- | Children laid out left to right, `gap` points apart.
 pub fn row(gap : Int, children : List(Pict)) : Pict = L.row(gap, children)
 
+-- | Children laid out top to bottom, `gap` points apart, left aligned.
 pub fn column(gap : Int, children : List(Pict)) : Pict = L.column(gap, children)
 
+-- | Children laid out top to bottom, `gap` points apart, centered.
 pub fn centered(gap : Int, children : List(Pict)) : Pict = L.centered(gap, children)
 
+-- | Children stacked on one another, first at the back.
 pub fn overlay(children : List(Pict)) : Pict = L.overlay(children)
 
+-- | A child padded by `all` points on every side.
 pub fn inset(all : Int, child : Pict) : Pict = L.inset(all, child)
 
+-- | Typst source admitted verbatim, escaping nothing.
 pub fn raw_typst(source : String) : Pict = L.raw_typst(source)
 
+-- | A highlighted code block in `language`.
 pub fn code_block(language : String, source : String) : Pict =
   SourceCode.code_block(language, source)
 
+-- | A highlighted block of Prism source.
 pub fn prism_code(source : String) : Pict = SourceCode.prism_code(source)
 
+-- | An inline code span in the theme code face.
 pub fn inline_code(source : String) : Inline = SourceCode.inline_code(source)
 
 -- | Every example a reflected declaration's docstring fences, each over the
@@ -109,26 +141,37 @@ pub fn doctest(reflected : String) : Pict = Examples.doctest(reflected)
 -- | A reflected declaration with its comment block removed.
 pub fn definition(reflected : String) : Pict = Examples.definition(reflected)
 
+-- | Take a reflected declaration apart into prose, examples, and the
+-- declaration itself.
 pub fn read_doc(reflected : String) : Doc = Examples.read_doc(reflected)
 
+-- | The examples a reflected declaration's docstring fences.
 pub fn examples_of(reflected : String) : List(Example) =
   Examples.examples_of(reflected)
 
+-- | One example as its source over the output it prints.
 pub fn example_pict(e : Example) : Pict = Examples.example_pict(e)
 
+-- | The default theme: a purple accent on warm near-white.
 pub let prism_theme : Theme = Themes.prism_theme
 
+-- | A print theme with a slightly darker accent.
 pub let paper_theme : Theme = Themes.paper_theme
 
+-- | The dark palette, for code-heavy talks.
 pub let prism_dark_theme : Theme = Themes.prism_dark_theme
 
+-- | The highest reveal stage any fragment in a picture is attached to.
 pub fn max_stage(p : Pict) : Int = TypstBackend.max_stage(p)
 
+-- | Every asset path a picture refers to.
 pub fn pict_assets(p : Pict) : List(String) = TypstBackend.pict_assets(p)
 
+-- | The Typst source for a picture at one reveal stage under a theme.
 pub fn render_pict(p : Pict, stage : Int, theme : Theme) : String =
   TypstBackend.render_pict(p, stage, theme)
 
+-- | The Typst source for one slide page at one reveal stage.
 pub fn render_slide_page(
   title : Option(String),
   body : Pict,
@@ -137,39 +180,48 @@ pub fn render_slide_page(
 ) : String =
   TypstBackend.render_slide_page(title, body, stage, theme)
 
+-- | The Typst preamble a theme's page and text settings compile to.
 pub fn typst_prelude(theme : Theme) : String = TypstBackend.typst_prelude(theme)
 
+-- | Deck metadata from a title and an author, leaving the subject empty.
 pub fn metadata(title : String, author : String) : Metadata =
   Metadata { title = title, author = author, subject = "" }
 
+-- | A deck from its metadata, its theme, and its slides.
 pub fn make_deck(meta : Metadata, theme : Theme, slides : List(Slide)) : Deck =
   Deck { metadata = meta, theme = theme, slides = slides }
 
+-- | A cover slide: a large accented title over a muted subtitle, centered.
 pub fn title_slide(title : String, subtitle : String) : Slide =
   Slide {
     title = None,
-    body = centered(18, [
-        Text(TextStyle { size = 46, color = "accent", align = Center }, [
+    body = centered(cover_gap_pt, [
+        Text(TextStyle { size = cover_title_size_pt, color = "accent", align = Center }, [
             Plain(title),
           ]),
-        Text(TextStyle { size = 24, color = "muted", align = Center }, [
+        Text(TextStyle { size = cover_subtitle_size_pt, color = "muted", align = Center }, [
             Plain(subtitle),
           ]),
       ]),
     notes = Nil
   }
 
+-- | A slide with a title and a body picture.
 pub fn titled_slide(title : String, body : Pict) : Slide =
   Slide { title = Some(title), body = body, notes = Nil }
 
 -- Builder operations are ordinary typed effects. A reveal increments the
 -- logical stage attached to subsequent picts.
+-- | The slide authoring surface: place a picture, or advance the reveal
+-- stage that later pictures are attached to.
 pub effect SlideBuilder
   place(Pict) : Unit
   reveal(Unit) : Unit
 
+-- | Place a picture into the slide being built.
 pub fn pict(p : Pict) : Unit ! {SlideBuilder} = place(p)
 
+-- | Advance the reveal stage, so what follows appears on a later page.
 pub fn reveal_next() : Unit ! {SlideBuilder} = reveal(())
 
 fn collect_slide(body : () -> Unit ! {SlideBuilder}) : List(Pict) =
@@ -181,6 +233,7 @@ fn collect_slide(body : () -> Unit ! {SlideBuilder}) : List(Pict) =
       return _ => \(_stage, acc) -> reverse(acc)
   f(0, Nil)
 
+-- | The deck authoring surface: emit a finished slide.
 pub effect DeckBuilder
   add_slide(Slide) : Unit
 
@@ -189,7 +242,9 @@ pub fn slide(
   title : String,
   body : () -> Unit ! {SlideBuilder}
 ) : Unit ! {DeckBuilder} =
-  add_slide(titled_slide(title, Column(14, Left, collect_slide(body))))
+  add_slide(
+      titled_slide(title, Column(slide_body_gap_pt, Left, collect_slide(body))),
+    )
 
 -- | Emit a cover slide into the surrounding deck builder.
 pub fn cover(title : String, subtitle : String) : Unit ! {DeckBuilder} =

@@ -14,7 +14,7 @@ use prism_common::fresh::Fresh;
 use prism_common::sym::Sym;
 use prism_syntax::names;
 
-use super::specialize_support::free_comp_vars;
+use super::specialize_support::{free_comp_vars, BoundStack};
 use super::{
     CompSig, CoreType, EffectLowered, Owned, TypedBinder, TypedComp, TypedCompKind, TypedCore,
     TypedCoreFn, TypedPattern, TypedValue, TypedValueKind,
@@ -26,7 +26,7 @@ type Scope = BTreeMap<Sym, TypedValue>;
 /// Insert precise reference-count operations without erasing type witnesses.
 #[must_use]
 pub fn insert_rc(core: TypedCore<EffectLowered>, sigs: &Sigs) -> TypedCore<Owned> {
-    let globals = reference_scope(&core);
+    let mut scope = reference_scope(&core);
     let mut fresh = Fresh::new();
     let fns = core
         .fns
@@ -47,8 +47,16 @@ pub fn insert_rc(core: TypedCore<EffectLowered>, sigs: &Sigs) -> TypedCore<Owned
                 .filter(|(index, _)| borrowed_at(mask, *index))
                 .map(|(_, binder)| binder.name)
                 .collect();
-            let scope = with_binders(&globals, &function.params);
-            let body = rc(&function.body, &owned, &borrowed, sigs, &scope, &mut fresh);
+            let undo = bind_scope(&mut scope, &function.params);
+            let body = rc(
+                &function.body,
+                &owned,
+                &borrowed,
+                sigs,
+                &mut scope,
+                &mut fresh,
+            );
+            unbind_scope(&mut scope, undo);
             TypedCoreFn::new(
                 function.name,
                 function.params,
@@ -83,12 +91,30 @@ fn binder_value(binder: &TypedBinder) -> TypedValue {
     )
 }
 
-fn with_binders(scope: &Scope, binders: &[TypedBinder]) -> Scope {
-    let mut nested = scope.clone();
-    for binder in binders {
-        nested.insert(binder.name, binder_value(binder));
+// The scope is one shared map mutated in place: cloning it per binder made
+// deep bind chains quadratic in the number of globals plus locals. Each entry
+// records the value it displaced so a reverse replay restores the enclosing
+// scope exactly, including a shadowed global or outer local of the same name.
+type ScopeUndo = Vec<(Sym, Option<TypedValue>)>;
+
+fn bind_scope(scope: &mut Scope, binders: &[TypedBinder]) -> ScopeUndo {
+    binders
+        .iter()
+        .map(|binder| (binder.name, scope.insert(binder.name, binder_value(binder))))
+        .collect()
+}
+
+fn unbind_scope(scope: &mut Scope, undo: ScopeUndo) {
+    for (name, displaced) in undo.into_iter().rev() {
+        match displaced {
+            Some(value) => {
+                scope.insert(name, value);
+            }
+            None => {
+                scope.remove(&name);
+            }
+        }
     }
-    nested
 }
 
 // Unlike the effect-lowering cascade, RC has no downgrade: it runs once on the
@@ -202,42 +228,11 @@ fn rc(
     owned: &Set,
     borrowed: &Set,
     sigs: &Sigs,
-    scope: &Scope,
+    scope: &mut Scope,
     fresh: &mut Fresh,
 ) -> TypedComp {
     match &comp.kind {
-        TypedCompKind::Bind(first, binder, rest) => {
-            let first_free = free_comp_vars(first);
-            let mut rest_free = free_comp_vars(rest);
-            rest_free.remove(&binder.name);
-            let first_owned: Set = owned.intersection(&first_free).copied().collect();
-            let rest_owned: Set = owned.intersection(&rest_free).copied().collect();
-            let shared = by_name(first_owned.intersection(&rest_owned).copied());
-            let dead = by_name(
-                owned
-                    .iter()
-                    .filter(|name| !first_free.contains(*name) && !rest_free.contains(*name))
-                    .copied(),
-            );
-            let first_borrowed: Set = borrowed.intersection(&first_free).copied().collect();
-            let rest_borrowed: Set = borrowed.intersection(&rest_free).copied().collect();
-            let first = rc(first, &first_owned, &first_borrowed, sigs, scope, fresh);
-            let rest_scope = with_binders(scope, std::slice::from_ref(binder));
-            let mut rest_owned = rest_owned;
-            rest_owned.insert(binder.name);
-            let rest = rc(rest, &rest_owned, &rest_borrowed, sigs, &rest_scope, fresh);
-            let mut out = TypedComp::new(
-                comp.sig.clone(),
-                TypedCompKind::Bind(Box::new(first), binder.clone(), Box::new(rest)),
-            );
-            for name in shared {
-                out = dup(name, out, scope);
-            }
-            for name in dead {
-                out = drop_(name, out, scope);
-            }
-            out
-        }
+        TypedCompKind::Bind(..) => rc_bind_spine(comp, owned, borrowed, sigs, scope, fresh),
         TypedCompKind::If(condition, yes, no) => TypedComp::new(
             comp.sig.clone(),
             TypedCompKind::If(
@@ -266,13 +261,12 @@ fn rc(
                 .difference(&params_set)
                 .copied()
                 .collect();
-            let body_scope = with_binders(scope, params);
+            let undo = bind_scope(scope, params);
+            let body = rc(body, &params_set, &captures, sigs, scope, fresh);
+            unbind_scope(scope, undo);
             TypedComp::new(
                 comp.sig.clone(),
-                TypedCompKind::Lam(
-                    params.clone(),
-                    Box::new(rc(body, &params_set, &captures, sigs, &body_scope, fresh)),
-                ),
+                TypedCompKind::Lam(params.clone(), Box::new(body)),
             )
         }
         TypedCompKind::Mask(effects, body) => TypedComp::new(
@@ -329,9 +323,182 @@ fn rc(
     }
 }
 
+/// One right-spine `Bind` level and the free-variable facts its ownership
+/// partition needs.
+struct SpineStep<'a> {
+    sig: &'a CompSig,
+    first: &'a TypedComp,
+    binder: &'a TypedBinder,
+    first_free: Set,
+    /// How many suffix components reference the binder's name while it is in
+    /// scope; the forward pass restores this count once the level is done.
+    prev_count: u32,
+}
+
+/// A rewritten spine level, ready to be reassembled from the tail outward.
+struct SpineLevel<'a> {
+    sig: &'a CompSig,
+    binder: &'a TypedBinder,
+    first: TypedComp,
+    shared_ops: Vec<TypedValue>,
+    dead_ops: Vec<TypedValue>,
+}
+
+/// Rewrite a right-leaning `Bind` chain in one pass over its levels.
+///
+/// A per-level recursion would recompute `free_comp_vars` on both subtrees at
+/// every step, which is quadratic in the chain length. This walk derives the
+/// same facts bottom-up: a backward pass over the spine accumulates a count of
+/// how many suffix components reference each name, and the forward pass peels
+/// one component's contribution back off per level, leaving exactly the
+/// membership the recursive formulation computed from scratch. Counting
+/// components (not occurrences) suffices because every decision below is a
+/// set-membership test. The ownership partition, operand resolution point,
+/// and dup/drop wrap order are unchanged, so the emitted tree is identical.
+#[allow(clippy::too_many_lines)]
+fn rc_bind_spine(
+    comp: &TypedComp,
+    owned: &Set,
+    borrowed: &Set,
+    sigs: &Sigs,
+    scope: &mut Scope,
+    fresh: &mut Fresh,
+) -> TypedComp {
+    let mut steps = Vec::new();
+    let mut cursor = comp;
+    while let TypedCompKind::Bind(first, binder, rest) = &cursor.kind {
+        steps.push(SpineStep {
+            sig: &cursor.sig,
+            first,
+            binder,
+            first_free: free_comp_vars(first),
+            prev_count: 0,
+        });
+        cursor = rest;
+    }
+    let tail = cursor;
+
+    // Backward pass: `live` maps each name to the number of remaining spine
+    // components (suffix firsts plus the tail) in which it occurs free. A
+    // binder's occurrences are bound over its rest, so its count is saved and
+    // withdrawn before the defining component's own free set is added back
+    // (where the same name may legitimately reference an outer binding).
+    let mut live: BTreeMap<Sym, u32> = free_comp_vars(tail)
+        .into_iter()
+        .map(|name| (name, 1))
+        .collect();
+    for step in steps.iter_mut().rev() {
+        step.prev_count = live.remove(&step.binder.name).unwrap_or(0);
+        for name in &step.first_free {
+            *live.entry(*name).or_insert(0) += 1;
+        }
+    }
+
+    // Forward pass: at each level, removing the defining component's
+    // contribution leaves `live` keyed by exactly the free variables of the
+    // chain rest with the binder excluded, the `rest_free` of the recursive
+    // formulation. Ownership then splits as before: names live on both sides
+    // are dupped, names live on neither are dropped, and the binder joins the
+    // owned set for the rest of the chain.
+    let mut owned = owned.clone();
+    let mut borrowed = borrowed.clone();
+    let mut undo: ScopeUndo = Vec::with_capacity(steps.len());
+    let mut levels: Vec<SpineLevel<'_>> = Vec::with_capacity(steps.len());
+    for step in &steps {
+        for name in &step.first_free {
+            if let Some(count) = live.get_mut(name) {
+                if *count > 1 {
+                    *count -= 1;
+                } else {
+                    live.remove(name);
+                }
+            }
+        }
+        let first_owned: Set = owned
+            .iter()
+            .filter(|name| step.first_free.contains(*name))
+            .copied()
+            .collect();
+        let mut rest_owned: Set = owned
+            .iter()
+            .filter(|name| live.contains_key(*name))
+            .copied()
+            .collect();
+        let shared = by_name(
+            first_owned
+                .iter()
+                .filter(|name| rest_owned.contains(*name))
+                .copied(),
+        );
+        let dead = by_name(
+            owned
+                .iter()
+                .filter(|name| !step.first_free.contains(*name) && !live.contains_key(*name))
+                .copied(),
+        );
+        let first_borrowed: Set = borrowed
+            .iter()
+            .filter(|name| step.first_free.contains(*name))
+            .copied()
+            .collect();
+        let rest_borrowed: Set = borrowed
+            .iter()
+            .filter(|name| live.contains_key(*name))
+            .copied()
+            .collect();
+        // Dup/drop operands resolve against the scope enclosing this level,
+        // before the binder is visible, exactly as the wraps are emitted.
+        let shared_ops: Vec<TypedValue> = shared.iter().map(|name| operand(scope, *name)).collect();
+        let dead_ops: Vec<TypedValue> = dead.iter().map(|name| operand(scope, *name)).collect();
+        let first = rc(
+            step.first,
+            &first_owned,
+            &first_borrowed,
+            sigs,
+            scope,
+            fresh,
+        );
+        undo.push((
+            step.binder.name,
+            scope.insert(step.binder.name, binder_value(step.binder)),
+        ));
+        rest_owned.insert(step.binder.name);
+        owned = rest_owned;
+        borrowed = rest_borrowed;
+        if step.prev_count > 0 {
+            live.insert(step.binder.name, step.prev_count);
+        }
+        levels.push(SpineLevel {
+            sig: step.sig,
+            binder: step.binder,
+            first,
+            shared_ops,
+            dead_ops,
+        });
+    }
+    let mut out = rc(tail, &owned, &borrowed, sigs, scope, fresh);
+    unbind_scope(scope, undo);
+
+    // Reassemble from the tail outward; per level the dups wrap the bind and
+    // the drops wrap the dups, each in ascending name order.
+    for level in levels.into_iter().rev() {
+        out = TypedComp::new(
+            level.sig.clone(),
+            TypedCompKind::Bind(Box::new(level.first), level.binder.clone(), Box::new(out)),
+        );
+        for value in level.shared_ops {
+            out = seq(TypedComp::new(pure_unit(), TypedCompKind::Dup(value)), out);
+        }
+        for value in level.dead_ops {
+            out = seq(TypedComp::new(pure_unit(), TypedCompKind::Drop(value)), out);
+        }
+    }
+    out
+}
+
 // A thunk cell owns its captures. The suspended body therefore treats captures
 // as borrowed while lambda parameters remain owned.
-fn rc_value(value: &TypedValue, sigs: &Sigs, scope: &Scope, fresh: &mut Fresh) -> TypedValue {
+fn rc_value(value: &TypedValue, sigs: &Sigs, scope: &mut Scope, fresh: &mut Fresh) -> TypedValue {
     let kind = match &value.kind {
         TypedValueKind::Thunk(body) => TypedValueKind::Thunk(Box::new(rc(
             body,
@@ -394,7 +561,7 @@ fn rc_value(value: &TypedValue, sigs: &Sigs, scope: &Scope, fresh: &mut Fresh) -
     TypedValue::new(value.ty.clone(), kind)
 }
 
-fn rc_thunks(comp: &TypedComp, sigs: &Sigs, scope: &Scope, fresh: &mut Fresh) -> TypedComp {
+fn rc_thunks(comp: &TypedComp, sigs: &Sigs, scope: &mut Scope, fresh: &mut Fresh) -> TypedComp {
     let kind = match &comp.kind {
         TypedCompKind::Return(result) => {
             TypedCompKind::Return(rc_value(result, sigs, scope, fresh))
@@ -499,7 +666,7 @@ fn rc_arm(
     owned: &Set,
     borrowed: &Set,
     sigs: &Sigs,
-    scope: &Scope,
+    scope: &mut Scope,
     fresh: &mut Fresh,
 ) -> TypedComp {
     let body_free = free_comp_vars(body);
@@ -515,14 +682,17 @@ fn rc_arm(
     let mut body_owned: Set = owned.intersection(&body_free).copied().collect();
     body_owned.extend(live.iter().copied());
     let body_borrowed: Set = borrowed.intersection(&body_free).copied().collect();
-    let body_scope = with_binders(scope, &binders);
-    let mut out = rc(body, &body_owned, &body_borrowed, sigs, &body_scope, fresh);
+    // The wraps resolve against the arm scope (fields visible), so the arm's
+    // binders stay installed until after they are emitted.
+    let undo = bind_scope(scope, &binders);
+    let mut out = rc(body, &body_owned, &body_borrowed, sigs, scope, fresh);
     for name in &dead {
-        out = drop_(*name, out, &body_scope);
+        out = drop_(*name, out, scope);
     }
     for name in live.iter().rev() {
-        out = dup(*name, out, &body_scope);
+        out = dup(*name, out, scope);
     }
+    unbind_scope(scope, undo);
     out
 }
 
@@ -624,7 +794,8 @@ fn reference_scope(core: &TypedCore<EffectLowered>) -> Scope {
     let globals: Set = core.fns.iter().map(|function| function.name).collect();
     let mut scope = Scope::new();
     for function in &core.fns {
-        let mut bound: Vec<Sym> = function.params.iter().map(|binder| binder.name).collect();
+        let mut bound = BoundStack::new();
+        bound.push_all(function.params.iter().map(|binder| binder.name));
         collect_global_refs_comp(&function.body, &globals, &mut bound, &mut scope);
     }
     for function in &core.fns {
@@ -644,12 +815,12 @@ fn reference_scope(core: &TypedCore<EffectLowered>) -> Scope {
 fn collect_global_refs_value(
     value: &TypedValue,
     globals: &Set,
-    bound: &mut Vec<Sym>,
+    bound: &mut BoundStack,
     scope: &mut Scope,
 ) {
     match &value.kind {
         TypedValueKind::Var { name, .. } => {
-            if globals.contains(name) && !bound.contains(name) {
+            if globals.contains(name) && !bound.contains(*name) {
                 scope.entry(*name).or_insert_with(|| value.clone());
             }
         }
@@ -688,7 +859,7 @@ fn collect_global_refs_value(
 fn collect_global_refs_comp(
     comp: &TypedComp,
     globals: &Set,
-    bound: &mut Vec<Sym>,
+    bound: &mut BoundStack,
     scope: &mut Scope,
 ) {
     match &comp.kind {
@@ -713,16 +884,16 @@ fn collect_global_refs_comp(
         }
         TypedCompKind::Bind(first, binder, rest) => {
             collect_global_refs_comp(first, globals, bound, scope);
-            let old_len = bound.len();
+            let mark = bound.mark();
             bound.push(binder.name);
             collect_global_refs_comp(rest, globals, bound, scope);
-            bound.truncate(old_len);
+            bound.pop_to(mark);
         }
         TypedCompKind::Lam(params, body) => {
-            let old_len = bound.len();
-            bound.extend(params.iter().map(|binder| binder.name));
+            let mark = bound.mark();
+            bound.push_all(params.iter().map(|binder| binder.name));
             collect_global_refs_comp(body, globals, bound, scope);
-            bound.truncate(old_len);
+            bound.pop_to(mark);
         }
         TypedCompKind::Mask(_, body) => {
             collect_global_refs_comp(body, globals, bound, scope);
@@ -749,10 +920,10 @@ fn collect_global_refs_comp(
         TypedCompKind::Case(scrutinee, arms) => {
             collect_global_refs_value(scrutinee, globals, bound, scope);
             for (pattern, body) in arms {
-                let old_len = bound.len();
-                bound.extend(pattern_binders(pattern).iter().map(|binder| binder.name));
+                let mark = bound.mark();
+                bound.push_all(pattern_binders(pattern).iter().map(|binder| binder.name));
                 collect_global_refs_comp(body, globals, bound, scope);
-                bound.truncate(old_len);
+                bound.pop_to(mark);
             }
         }
         TypedCompKind::Handle {
@@ -763,25 +934,25 @@ fn collect_global_refs_comp(
         } => {
             collect_global_refs_comp(body, globals, bound, scope);
             if let Some(return_body) = return_body {
-                let old_len = bound.len();
-                bound.extend(return_binder.iter().map(|binder| binder.name));
+                let mark = bound.mark();
+                bound.push_all(return_binder.iter().map(|binder| binder.name));
                 collect_global_refs_comp(return_body, globals, bound, scope);
-                bound.truncate(old_len);
+                bound.pop_to(mark);
             }
             for arm in &ops.arms {
-                let old_len = bound.len();
-                bound.extend(arm.params.iter().map(|binder| binder.name));
+                let mark = bound.mark();
+                bound.push_all(arm.params.iter().map(|binder| binder.name));
                 bound.push(arm.resume.name);
                 collect_global_refs_comp(&arm.body, globals, bound, scope);
-                bound.truncate(old_len);
+                bound.pop_to(mark);
             }
         }
         TypedCompKind::WithReuse { token, freed, body } => {
             collect_global_refs_value(freed, globals, bound, scope);
-            let old_len = bound.len();
+            let mark = bound.mark();
             bound.push(token.name);
             collect_global_refs_comp(body, globals, bound, scope);
-            bound.truncate(old_len);
+            bound.pop_to(mark);
         }
     }
 }
@@ -793,6 +964,7 @@ mod tests {
     use crate::types::Type;
     use prism_syntax::names::ALLOC_OP;
 
+    use super::super::specialize_support::count_free_comp_var_visits;
     use super::super::verify::{verify, OperationSig, VerifyEnv};
     use super::super::{
         CoreFnSig, CoreInstantiation, CoreQuantifier, LoweredType, TypedHandler, TypedValueKind,
@@ -1361,6 +1533,50 @@ mod tests {
         assert!(
             zulu_at < alpha_at,
             "name-sorted insertion wraps the later name outermost"
+        );
+    }
+
+    #[test]
+    fn bind_spine_free_variable_work_scales_linearly() {
+        fn fixture(bindings: usize) -> TypedCore<EffectLowered> {
+            let unit = source(Type::Unit);
+            let returned_unit = || ret(TypedValue::new(unit.clone(), TypedValueKind::Unit));
+            let mut body = returned_unit();
+            for index in (0..bindings).rev() {
+                body = TypedComp::new(
+                    pure(unit.clone()),
+                    TypedCompKind::Bind(
+                        Box::new(returned_unit()),
+                        TypedBinder::new(sym(&format!("spine_{index}")), unit.clone()),
+                        Box::new(body),
+                    ),
+                );
+            }
+            TypedCore::new(vec![function("main", Vec::new(), body)])
+        }
+
+        fn visits(bindings: usize) -> usize {
+            let input = fixture(bindings);
+            verify(&input, &VerifyEnv::new()).expect("bind-spine fixture must be valid");
+            let (owned, visits) = count_free_comp_var_visits(|| insert_rc(input, &Sigs::new()));
+            verify(&owned, &VerifyEnv::new()).expect("RC output must remain valid");
+            visits
+        }
+
+        const SMALL: usize = 128;
+        const LARGE: usize = 256;
+        let small = visits(SMALL);
+        let large = visits(LARGE);
+
+        assert!(
+            large <= small * 2 + 2,
+            "doubling a bind spine must approximately double free-variable work: \
+             {SMALL} bindings visited {small} nodes, {LARGE} visited {large}"
+        );
+        assert!(
+            large <= LARGE * 4,
+            "free-variable work must stay linear in bind-spine length: \
+             {LARGE} bindings visited {large} nodes"
         );
     }
 }

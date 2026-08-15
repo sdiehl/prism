@@ -1,0 +1,16 @@
+-- A local binding whose body incurs a class obligation stays monomorphic in
+-- the obligated variable; a later use site grounds it, or the enclosing
+-- declaration's given context discharges it. Both paths must agree between
+-- the interpreter and native code, since the given path captures the
+-- enclosing dictionary parameter inside a local lambda.
+
+fn describe(x : a) : String given Show(a) =
+  let render = \(v) -> show(v)
+  render(x)
+
+fn main() =
+  let f = \(x) -> show(x)
+  println(f(7))
+  println(describe(42))
+  println(describe("hi"))
+  println(describe([1, 2, 3]))

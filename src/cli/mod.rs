@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use crate::driver::stable_lock;
 use crate::error::Error;
 use crate::pkg::lock::Lock;
-use crate::project::MANIFEST as PRISM_MANIFEST;
+use crate::project::{LOCKFILE as PRISM_LOCK, MANIFEST as PRISM_MANIFEST};
 use crate::store::disk::{resolve_store_path, Store};
 use crate::syntax::reflect::parse_unit;
 use crate::verify::run::VerifyOptions;
@@ -33,6 +33,7 @@ pub mod fmt;
 pub mod holes;
 pub mod index;
 pub mod lineage;
+pub mod lint;
 pub mod patch;
 pub mod pkg;
 pub mod render;
@@ -54,6 +55,19 @@ const CURRENT_DIR: &str = ".";
 const WATCH_SNAPSHOT_SCHEMA: &[u8] = b"prism-project-watch-snapshot-v1";
 const WATCH_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const WATCH_HASH_PREFIX: usize = 12;
+// What each watch verb announces it is doing after a change, and what a quiet
+// command acknowledges once it has succeeded.
+const WATCH_REBUILD: &str = "rebuilding";
+const WATCH_RECHECK: &str = "rechecking";
+const WATCH_RETEST: &str = "rerunning tests";
+const WATCH_CHECKED: &str = "checked";
+// The one diagnostic a verb raises when it was given no path and no project
+// encloses the working directory, plus each verb's half of the advice.
+const NO_MANIFEST: &str = "no prism.toml found: ";
+pub(crate) const CHECK_WITHOUT_FILE: &str = "`prism check` without FILE checks the enclosing \
+                                             project; pass a `.pr` file to check a single source";
+pub(crate) const TEST_WITHOUT_PATH: &str = "`prism test` without a path tests the enclosing \
+                                            project; pass a `.pr` file to test a single source";
 
 struct BuildObservation {
     path: PathBuf,
@@ -163,7 +177,7 @@ pub fn resolve_input(arg: &Path, cfg: &crate::Config) -> Result<Resolved, CmdErr
 }
 
 fn read_lock(project_root: &Path) -> Result<Lock, Error> {
-    match fs::read_to_string(project_root.join("prism.lock")) {
+    match fs::read_to_string(project_root.join(PRISM_LOCK)) {
         Ok(text) => {
             let lock = Lock::parse(&text)?;
             lock.validate_current_scheme()?;
@@ -181,27 +195,18 @@ pub fn build_input(arg: &Path, out: Option<PathBuf>, mlir: bool, cfg: &crate::Co
     built_input(arg, out, mlir, cfg).map(|_| ())
 }
 
-/// Compile a project, then retain the command's [`crate::CompilerSession`] and
-/// rebuild whenever its source snapshot changes.
+/// Run `step` once, then retain the command's [`crate::CompilerSession`] and run
+/// it again whenever `arg`'s source snapshot changes.
 ///
 /// The watcher deliberately polls content rather than modification times:
 /// atomic-save renames, timestamp granularity, and clocks cannot hide an edit,
 /// while generated files under `target/` are excluded by [`glob_pr`]. A failed
-/// build is reported and the loop stays alive so the next editor save can repair
-/// it. Process termination remains the ordinary terminal interrupt.
-pub fn watch_build_input(
-    arg: &Path,
-    out: Option<&Path>,
-    mlir: bool,
-    cfg: &crate::Config,
-) -> CmdResult {
+/// step is reported and the loop stays alive so the next editor save can repair
+/// it. Process termination remains the ordinary terminal interrupt, so the loop
+/// never returns.
+fn watch_loop(arg: &Path, cfg: &crate::Config, action: &str, mut step: impl FnMut()) -> CmdResult {
     let mut snapshot = watch_state(arg, cfg);
-    let mut history = WatchHistory::default();
-    report_watch_build(
-        watch_build_once(arg, out, mlir, cfg),
-        cfg.flags.verbose,
-        &mut history,
-    );
+    step();
     eprintln!("watching {} for changes", arg.display());
     loop {
         std::thread::sleep(WATCH_POLL_INTERVAL);
@@ -210,13 +215,64 @@ pub fn watch_build_input(
             continue;
         }
         snapshot = next;
-        eprintln!("change detected; rebuilding");
+        eprintln!("change detected; {action}");
+        step();
+    }
+}
+
+// One watch iteration's outcome. A failure renders like any other CLI error and
+// the loop continues; a quiet command names what it finished so the acknowledgement
+// distinguishes success from a loop that has stalled.
+fn report_watch_step(result: CmdResult, done: Option<&str>) {
+    match result {
+        Ok(()) => {
+            if let Some(done) = done {
+                eprintln!("{done}");
+            }
+        }
+        Err((error, source, name)) => eprint!("{}", render_cli_error(&error, &source, &name)),
+    }
+}
+
+/// Compile a project, then rebuild whenever its source snapshot changes.
+pub fn watch_build_input(
+    arg: &Path,
+    out: Option<&Path>,
+    mlir: bool,
+    cfg: &crate::Config,
+) -> CmdResult {
+    let mut history = WatchHistory::default();
+    watch_loop(arg, cfg, WATCH_REBUILD, || {
         report_watch_build(
             watch_build_once(arg, out, mlir, cfg),
             cfg.flags.verbose,
             &mut history,
         );
-    }
+    })
+}
+
+/// Type-check the input, then re-check whenever its source snapshot changes.
+pub fn watch_check_cmd(file: Option<&Path>, cfg: &crate::Config) -> CmdResult {
+    let input = check_input(file)?;
+    // A passing check is silent, so name what passed: an unchanging line is the
+    // only sign the loop is alive and the edit was accepted.
+    let done = format!("{WATCH_CHECKED} {}", input.display());
+    watch_loop(&input, cfg, WATCH_RECHECK, || {
+        report_watch_step(check_cmd(Some(&input), cfg), Some(&done));
+    })
+}
+
+/// Run the input's tests, then re-run them whenever its source snapshot changes.
+/// The runner prints its own summary, so a passing run needs no acknowledgement.
+pub fn watch_test_cmd(
+    file: Option<&Path>,
+    options: &test::TestOptions,
+    cfg: &crate::Config,
+) -> CmdResult {
+    let input = command_input(file, TEST_WITHOUT_PATH)?;
+    watch_loop(&input, cfg, WATCH_RETEST, || {
+        report_watch_step(test::test_cmd(Some(&input), options, cfg), None);
+    })
 }
 
 fn watch_build_once(
@@ -442,23 +498,16 @@ fn watch_state(arg: &Path, cfg: &crate::Config) -> String {
 }
 
 fn watch_snapshot(arg: &Path, cfg: &crate::Config) -> Result<String, CmdError> {
-    let project = crate::project::load_project(arg)
-        .map_err(|error| (error, String::new(), arg.display().to_string()))?;
-    let mut paths = vec![
-        project.root.join(PRISM_MANIFEST),
-        project.root.join("prism.lock"),
-        project.entry,
-    ];
-    if let Some(prelude) = project.prelude {
-        paths.push(prelude);
-    }
-    paths.extend(glob_pr(&project.src_dir));
-    for dependency_root in &project.dep_src_dirs {
-        paths.extend(glob_pr(dependency_root));
-        if let Some(manifest) = crate::project::find_manifest(dependency_root) {
-            paths.push(manifest);
-        }
-    }
+    let mut paths = if is_project(arg) {
+        project_watch_paths(arg)?
+    } else {
+        // A single file's imports resolve from its own directory, so that
+        // directory is the watched set, together with the stable-lock manifest
+        // the check enforces against.
+        let mut paths = vec![arg.to_path_buf(), stable_lock::manifest_path(arg)];
+        paths.extend(glob_pr(&base_of(arg)));
+        paths
+    };
     paths.sort();
     paths.dedup();
 
@@ -484,6 +533,29 @@ fn watch_snapshot(arg: &Path, cfg: &crate::Config) -> Result<String, CmdError> {
         }
     }
     Ok(hasher.finalize().to_hex().to_string())
+}
+
+// Every file a project build reads: its manifest, lock, entry, prelude, and each
+// `.pr` under its own and its path dependencies' source roots.
+fn project_watch_paths(arg: &Path) -> Result<Vec<PathBuf>, CmdError> {
+    let project = crate::project::load_project(arg)
+        .map_err(|error| (error, String::new(), arg.display().to_string()))?;
+    let mut paths = vec![
+        project.root.join(PRISM_MANIFEST),
+        project.root.join(PRISM_LOCK),
+        project.entry,
+    ];
+    if let Some(prelude) = project.prelude {
+        paths.push(prelude);
+    }
+    paths.extend(glob_pr(&project.src_dir));
+    for dependency_root in &project.dep_src_dirs {
+        paths.extend(glob_pr(dependency_root));
+        if let Some(manifest) = crate::project::find_manifest(dependency_root) {
+            paths.push(manifest);
+        }
+    }
+    Ok(paths)
 }
 
 fn watch_field(hasher: &mut blake3::Hasher, bytes: &[u8]) {
@@ -647,27 +719,33 @@ pub fn clean_cmd(path: &Path) -> CmdResult {
     Ok(())
 }
 
-// The input a `check` names: the explicit path, or the enclosing project's
-// manifest when none is given. Shared by the plain verdict and the typed-hole
-// query so both resolve a bare `prism check` the same way.
-pub fn check_input(file: Option<&Path>) -> Result<PathBuf, CmdError> {
-    if let Some(path) = file {
-        return Ok(path.to_path_buf());
-    }
+// The manifest of the project enclosing the working directory, the input a verb
+// given no path names. `hint` says what that verb does with it, so every command
+// resolving a bare invocation shares one search and one diagnostic shape.
+pub fn enclosing_project(hint: &str) -> Result<PathBuf, CmdError> {
     let start = Path::new(CURRENT_DIR)
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from(CURRENT_DIR));
     crate::project::find_manifest(&start).ok_or_else(|| {
         (
-            Error::ResolveCommand(
-                "no prism.toml found: `prism check` without FILE checks the enclosing \
-                 project; pass a `.pr` file to check a single source"
-                    .into(),
-            ),
+            Error::ResolveCommand(format!("{NO_MANIFEST}{hint}")),
             String::new(),
             start.display().to_string(),
         )
     })
+}
+
+// The input a `check` names: the explicit path, or the enclosing project's
+// manifest when none is given. Shared by the plain verdict and the typed-hole
+// query so both resolve a bare `prism check` the same way.
+pub fn check_input(file: Option<&Path>) -> Result<PathBuf, CmdError> {
+    command_input(file, CHECK_WITHOUT_FILE)
+}
+
+// The input a verb operates on: the explicit path, or the enclosing project's
+// manifest, with `hint` naming the verb in the diagnostic when neither exists.
+fn command_input(file: Option<&Path>, hint: &str) -> Result<PathBuf, CmdError> {
+    file.map_or_else(|| enclosing_project(hint), |path| Ok(path.to_path_buf()))
 }
 
 // `prism check [FILE]`: with an explicit path, type-check exactly that file or
@@ -707,6 +785,44 @@ pub fn check_cmd(file: Option<&Path>, cfg: &crate::Config) -> CmdResult {
         if let Some(cache) = &verdict_cache {
             // Best-effort: a failed record leaves the check's verdict untouched.
             let _ = cache.record();
+        }
+    }
+    Ok(())
+}
+
+// `prism check --licenses`: list the validated SPDX identifier for every
+// transitive dependency. This is metadata-only and never runs the checker.
+pub fn licenses_cmd(file: Option<&Path>) -> CmdResult {
+    let input = check_input(file)?;
+    let manifest = if is_project(&input) {
+        if input.is_dir() {
+            input.join(PRISM_MANIFEST)
+        } else {
+            input
+        }
+    } else {
+        let start = input.canonicalize().unwrap_or(input);
+        crate::project::find_manifest(&start).ok_or_else(|| {
+            (
+                Error::ResolveCommand(
+                    "`prism check --licenses` needs a project with a prism.toml".into(),
+                ),
+                String::new(),
+                start.display().to_string(),
+            )
+        })?
+    };
+    let licenses = crate::project::dependency_licenses(&manifest)
+        .map_err(|e| (e, String::new(), manifest.display().to_string()))?;
+    println!("Dependency licenses:");
+    if licenses.is_empty() {
+        println!("  (none)");
+    } else {
+        for dependency in licenses {
+            println!(
+                "  {} {} - {}",
+                dependency.name, dependency.version, dependency.license
+            );
         }
     }
     Ok(())
@@ -896,7 +1012,16 @@ mod watch_tests {
         fs::create_dir_all(root.join("src")).unwrap();
         fs::write(
             root.join(PRISM_MANIFEST),
-            "[package]\nname = \"watch-test\"\n\n[bin]\nentry = \"src/main.pr\"\n",
+            r#"[package]
+name = "watch-test"
+version = "0.0.0"
+authors = ["Test Author <test@example.com>"]
+maintainers = ["test@example.com"]
+license = "MIT"
+
+[bin]
+entry = "src/main.pr"
+"#,
         )
         .unwrap();
         fs::write(root.join("src/main.pr"), "fn main() : Int = 1\n").unwrap();
@@ -914,6 +1039,33 @@ mod watch_tests {
 
         fs::remove_file(added_path).unwrap();
         assert_eq!(watch_snapshot(&root, &config).unwrap(), edited);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    // A single file's imports resolve from its own directory, so a watch that
+    // saw only the entry would sit still while an imported module changed under
+    // it and report a verdict for source that no longer exists.
+    #[test]
+    fn file_watch_snapshot_tracks_the_entry_and_its_import_directory() {
+        let root = std::env::temp_dir().join(format!("prism-watch-file-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let entry = root.join("main.pr");
+        fs::write(&entry, "fn main() : Int = 1\n").unwrap();
+
+        let config = crate::Config::default();
+        let initial = watch_snapshot(&entry, &config).unwrap();
+        fs::write(&entry, "fn main() : Int = 2\n").unwrap();
+        let edited = watch_snapshot(&entry, &config).unwrap();
+        assert_ne!(edited, initial);
+
+        let imported = root.join("Helper.pr");
+        fs::write(&imported, "pub fn value() : Int = 3\n").unwrap();
+        let with_import = watch_snapshot(&entry, &config).unwrap();
+        assert_ne!(with_import, edited);
+
+        fs::remove_file(imported).unwrap();
+        assert_eq!(watch_snapshot(&entry, &config).unwrap(), edited);
         fs::remove_dir_all(root).unwrap();
     }
 

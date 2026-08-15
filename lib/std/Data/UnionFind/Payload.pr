@@ -23,7 +23,6 @@
 -- pinned. Opt-in: not in Base.
 
 import Data.Map (map_empty, map_lookup, map_insert, map_delete, map_to_list)
-import Data.Result (result_or)
 
 -- | A payload-carrying forest over ordered keys. The constructor is the
 -- module's private representation; go through the `ufp_` functions.

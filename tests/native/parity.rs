@@ -17,7 +17,8 @@
 // already runs test functions (and their LLVM builds) concurrently, so per-case
 // temp paths and a fresh inkwell context per build are the only isolation needed.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -29,8 +30,9 @@ use prism::{build_on, default_roots, Config};
 #[cfg(feature = "mlir")]
 use crate::support::have;
 use crate::support::{
-    check_native_parity, cleanup_bin, corpus_drops, interpreted, leak_free, parallel_check,
-    require_cc, shard_by, sharded_corpus, source, temp_bin, CORPUS_SKIPS,
+    check_native_parity_costed, cleanup_bin, corpus_drops, interpreted, leak_free,
+    parallel_collect, require_cc, shard_by, sharded_corpus, source, temp_bin, CaseCost,
+    CHECK_LEAKS, CORPUS_SKIPS,
 };
 #[cfg(feature = "mlir")]
 use prism::build_mlir_on;
@@ -66,9 +68,10 @@ fn build_mlir_quiet(src: &str, out: &Path) -> Result<(), Error> {
 // diff/leak path and the fan-out live in `support` and are shared with the tier
 // oracle (`tests/tier_parity.rs`). Corpus shrinkage is guarded separately by
 // `corpus_skip_list_is_exact`, not a percentage floor.
-fn run_corpus(tag: &str, build: impl Fn(&str, &Path) -> Result<(), Error> + Sync) {
+fn run_corpus(tag: &str, build: impl Fn(&str, &Path) -> Result<(), Error> + Sync) -> CorpusRun {
     let cases = sharded_corpus();
-    let fails = parallel_check(&cases, |case| check_native_parity(case, tag, &build));
+    let (fails, costs) =
+        parallel_collect(&cases, |case| check_native_parity_costed(case, tag, &build));
     assert!(
         fails.is_empty(),
         "{} of {} cases failed parity/leak:\n{}",
@@ -76,6 +79,19 @@ fn run_corpus(tag: &str, build: impl Fn(&str, &Path) -> Result<(), Error> + Sync
         cases.len(),
         fails.join("\n")
     );
+    // A gate-cache hit passes without running, so it contributes no measurement;
+    // `costs` covers `cases` exactly on a cold run and a subset otherwise.
+    CorpusRun {
+        cases: cases.len(),
+        costs: costs.into_iter().flatten().collect(),
+    }
+}
+
+/// One pass over the corpus: how many programs it covered, and what the ones it
+/// actually ran cost.
+struct CorpusRun {
+    cases: usize,
+    costs: Vec<CaseCost>,
 }
 
 // The runnable corpus is defined by a runtime filter, so a change that stops a
@@ -116,7 +132,8 @@ fn native_matches_interpreter() {
         return;
     }
     require_cc();
-    run_corpus("llvm", build_quiet);
+    let run = run_corpus("llvm", build_quiet);
+    check_cost_manifest(&run);
 }
 
 // A closure can reach a LocalPartial entry through both a static helper return
@@ -318,6 +335,9 @@ fn mlir_matches_interpreter() {
         "`mlir-translate` not found. The --features mlir parity oracle requires \
          it; install LLVM/MLIR so the MLIR backend is exercised."
     );
+    // The cost manifest is pinned by the LLVM run alone: both backends link the
+    // same runtime and materialize the same cells, so checking it twice would
+    // only make the golden's ownership ambiguous.
     run_corpus("mlir", build_mlir_quiet);
 }
 
@@ -814,6 +834,78 @@ fn read_int_eof_and_whitespace_match_interpreter() {
     );
 }
 
+// The self-hosted parser must accept every committed Prism source file. The
+// bootstrap harness is compiled natively (itself a whole-stdlib build, so this
+// doubles as a large-program codegen exercise), then every `.pr` under the
+// stdlib and packages trees is lexed, laid out, and parsed by `Syntax.Parse`;
+// any refusal fails by name. The floor on the walk's size keeps a misrooted or
+// empty enumeration from passing vacuously, and the run is leak-checked like
+// every other native oracle.
+const SELF_PARSE_HARNESS: &str = "tests/fixtures/parser/self_parse.pr";
+const SELF_PARSE_DIRS: [&str; 2] = ["lib/std", "packages"];
+const SELF_PARSE_MIN_FILES: usize = 100;
+
+fn pr_files_under(dir: &Path, out: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(dir).unwrap().flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            pr_files_under(&path, out);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("pr") {
+            out.push(path);
+        }
+    }
+}
+
+#[test]
+fn self_parse_accepts_committed_sources() {
+    require_cc();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    for dir in SELF_PARSE_DIRS {
+        pr_files_under(&root.join(dir), &mut files);
+    }
+    files.sort();
+    assert!(
+        files.len() >= SELF_PARSE_MIN_FILES,
+        "self-parse corpus walk found only {} files; the enumeration is broken",
+        files.len()
+    );
+
+    let full = source(&root.join(SELF_PARSE_HARNESS));
+    let bin = temp_bin("selfparse", "self_parse");
+    build_quiet(&full, &bin).expect("native build of the self-parse harness failed");
+    let out = Command::new(&bin)
+        .current_dir(root)
+        .env(CHECK_LEAKS, "1")
+        .args(&files)
+        .output()
+        .expect("self-parse harness did not run");
+    cleanup_bin(&bin);
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "self-parse harness exited nonzero:\n{stderr}"
+    );
+    let refused: Vec<&str> = stdout
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with("ok "))
+        .collect();
+    assert!(
+        refused.is_empty(),
+        "the self-hosted parser refused committed sources:\n{}",
+        refused.join("\n")
+    );
+    let accepted = stdout.lines().filter(|l| l.starts_with("ok ")).count();
+    assert_eq!(
+        accepted,
+        files.len(),
+        "self-parse verdict count diverges from the corpus walk"
+    );
+    assert!(leak_free(&stderr), "self-parse harness leaked:\n{stderr}");
+}
+
 // The System F example exercises the typechecker core end to end: its seven
 // witness lines are a pinned interpreter fixture, and its silent assertions
 // (substitution capture, alpha equivalence, occurs rejection, meta union then
@@ -830,5 +922,204 @@ fn systemf_witnesses_pinned() {
          union-find         : (forall a. a) -> Int\n\
          bad application    : error: application expects a function, got Int\n\
          bad branches       : error: cannot unify Int with Bool\n"
+    );
+}
+
+// The DK companion uses the same surface and resolved trees as systemf.pr but
+// replaces union-find unification with ordered existential contexts and the
+// bidirectional checking/subtyping judgments. Its silent baselines pin scope,
+// occurs, annotation, alpha-equivalence, and capture behavior.
+#[test]
+fn systemf_dk_witnesses_pinned() {
+    let full = source(Path::new("examples/systemf_dk.pr"));
+    assert_eq!(
+        interpreted(&full),
+        "id                 : forall a. a -> a\n\
+         id[Int] 42         : Int\n\
+         higher rank        : (forall a. a -> a) -> Bool\n\
+         impredicative      : forall a. a -> a\n\
+         bad application    : error: application expects a function, got Int\n\
+         bad argument       : error: no subtype rule for Int <: Bool\n"
+    );
+}
+
+// Resource counters on the differential run.
+//
+// Byte-identical output says the two sides compute the same thing; it says
+// nothing about what either one spent doing it. An optimization that quietly
+// stops firing (a lost specialization, a fold that starts rebuilding its
+// accumulator each step) keeps every byte of output identical, so the corpus
+// stays green while the cost of running it multiplies. Nothing above notices,
+// and the gap is widest for programs that are run interpreted rather than
+// compiled, where there is no native binary whose timings anyone is watching.
+//
+// So the corpus run also records what each program cost on both sides, each in
+// its own unit: machine transitions for the interpreter, heap cells materialized
+// for the native binary. Both counters are already there (the machine's step
+// count and the runtime's `PRISM_ALLOC_STATS` report), both are pure functions
+// of the program and the compiler, and both ride the build and run the parity
+// check already performs, so measuring them costs nothing. The two units are not
+// comparable to each other and nothing here compares them; each is compared
+// against its own recorded baseline.
+//
+// The bound is deliberately loose: a count may move by a factor of
+// `COST_DRIFT_FACTOR` plus a flat `COST_DRIFT_SLACK` before it is reported.
+// Anything inside passes and leaves the golden alone, which keeps this from
+// becoming an exact-count oracle that has to be reblessed for every small
+// movement of ordinary compiler work. The flat term is what lets the bound stay
+// armed on the small counts: most of the corpus materializes only a handful of
+// cells, and a pure ratio there would fail on a jump of three that means nothing,
+// so the choice would be between churn and exempting three quarters of the
+// programs from the check. Adding slack instead bounds every program, with the
+// smallest ones given proportionally the most room.
+//
+// A move in either direction fails, an increase as a regression and a decrease
+// as a stale baseline. A win that goes unrecorded leaves the baseline inflated,
+// and the next regression hides inside the slack it left behind.
+
+const COST_MANIFEST: &str = "tests/cost_manifest.txt";
+const COST_MANIFEST_ACCEPT: &str = "PRISM_ACCEPT_COST_MANIFEST";
+/// How far a count may move from its baseline, either way, before it is reported:
+/// this factor plus [`COST_DRIFT_SLACK`].
+const COST_DRIFT_FACTOR: i64 = 2;
+/// The flat term of the band, in the counter's own units. It keeps the bound
+/// meaningful on programs whose counts are small enough that a ratio alone is
+/// noise.
+const COST_DRIFT_SLACK: i64 = 64;
+const COST_MANIFEST_HEADER: &str = r"# Resource-cost baselines for the differential parity corpus. One
+# `<program>\t<interpreter steps>\t<native cells allocated>` line per corpus
+# program, sorted. The golden checked by tests/parity.rs::native_matches_interpreter
+# against a loose band: a count that moves further than that fails, an increase as
+# a cost regression and a decrease as a stale baseline. Regenerate a reviewed
+# change with PRISM_ACCEPT_COST_MANIFEST=1 from a full cold run. Do not hand-edit.
+";
+
+const COST_MANIFEST_FIELDS: usize = 3;
+const COST_LABEL_FIELD: usize = 0;
+const COST_STEPS_FIELD: usize = 1;
+const COST_CELLS_FIELD: usize = 2;
+
+fn render_cost_manifest(costs: &[CaseCost]) -> String {
+    let mut s = String::from(COST_MANIFEST_HEADER);
+    for c in costs {
+        let _ = writeln!(s, "{}\t{}\t{}", c.label, c.interp_steps, c.native_cells);
+    }
+    s
+}
+
+fn parse_cost_manifest(text: &str) -> BTreeMap<String, (i64, i64)> {
+    text.lines()
+        .filter(|l| !l.trim_start().starts_with('#') && !l.trim().is_empty())
+        .map(|l| {
+            let f: Vec<&str> = l.split('\t').collect();
+            assert_eq!(
+                f.len(),
+                COST_MANIFEST_FIELDS,
+                "cost manifest line is `label<TAB>steps<TAB>cells`: {l:?}"
+            );
+            let n = |i: usize| {
+                f[i].parse()
+                    .unwrap_or_else(|e| panic!("cost manifest count {:?}: {e}", f[i]))
+            };
+            (
+                f[COST_LABEL_FIELD].to_string(),
+                (n(COST_STEPS_FIELD), n(COST_CELLS_FIELD)),
+            )
+        })
+        .collect()
+}
+
+/// The upper edge of the band around a baseline count.
+const fn cost_ceiling(baseline: i64) -> i64 {
+    baseline
+        .saturating_mul(COST_DRIFT_FACTOR)
+        .saturating_add(COST_DRIFT_SLACK)
+}
+
+/// How a measured count left its band, or `None` when it is inside. The band is
+/// symmetric: a measurement is out of band exactly when one of the two counts
+/// exceeds the other's ceiling.
+fn cost_drift(unit: &str, want: i64, got: i64) -> Option<String> {
+    let band = format!("outside {COST_DRIFT_FACTOR}x + {COST_DRIFT_SLACK}");
+    if got > cost_ceiling(want) {
+        return Some(format!("{unit} {want} -> {got}, more ({band})"));
+    }
+    if want > cost_ceiling(got) {
+        return Some(format!("{unit} {want} -> {got}, less ({band})"));
+    }
+    None
+}
+
+const INTERP_STEPS_UNIT: &str = "interpreter steps";
+const NATIVE_CELLS_UNIT: &str = "native cells";
+
+fn check_cost_manifest(run: &CorpusRun) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(COST_MANIFEST);
+    let mut measured = run.costs.clone();
+    measured.sort_by(|a, b| a.label.cmp(&b.label));
+
+    if env::var_os(COST_MANIFEST_ACCEPT).is_some() {
+        // Only a run that measured every program may rewrite the golden. A
+        // sharded or cache-warm run measures a subset, and writing that out would
+        // silently drop the rest of the corpus and disarm the gate for it.
+        assert_eq!(
+            measured.len(),
+            run.cases,
+            "refusing to regenerate {COST_MANIFEST} from a partial run ({} of {} programs \
+             measured). Rerun cold and unsharded, with the gate cache off.",
+            measured.len(),
+            run.cases
+        );
+        assert!(
+            !measured.is_empty(),
+            "refusing to regenerate {COST_MANIFEST} from an empty corpus: fix the tree, then rerun."
+        );
+        fs::write(&path, render_cost_manifest(&measured)).expect("write cost manifest");
+        eprintln!(
+            "cost manifest regenerated: {} programs -> {COST_MANIFEST}",
+            measured.len()
+        );
+        return;
+    }
+
+    let golden = parse_cost_manifest(&fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "cannot read cost manifest {COST_MANIFEST} ({e}); regenerate with \
+             PRISM_ACCEPT_COST_MANIFEST=1"
+        )
+    }));
+    let mut drifted: Vec<String> = Vec::new();
+    let mut missing: Vec<String> = Vec::new();
+    for c in &measured {
+        let Some(&(steps, cells)) = golden.get(&c.label) else {
+            missing.push(format!(
+                "  {}: no baseline ({INTERP_STEPS_UNIT} {}, {NATIVE_CELLS_UNIT} {})",
+                c.label, c.interp_steps, c.native_cells
+            ));
+            continue;
+        };
+        for d in [
+            cost_drift(INTERP_STEPS_UNIT, steps, c.interp_steps),
+            cost_drift(NATIVE_CELLS_UNIT, cells, c.native_cells),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            drifted.push(format!("  {}: {d}", c.label));
+        }
+    }
+    assert!(
+        drifted.is_empty(),
+        r"resource cost left its band for {} program(s). An increase is a cost regression parity cannot see (find the optimization that stopped firing); a decrease is a win the baseline has not recorded yet. Either way, investigate first, then regenerate with PRISM_ACCEPT_COST_MANIFEST=1:
+{}",
+        drifted.len(),
+        drifted.join("\n")
+    );
+    assert!(
+        missing.is_empty(),
+        r"{} corpus program(s) have no cost baseline; regenerate with PRISM_ACCEPT_COST_MANIFEST=1:
+{}",
+        missing.len(),
+        missing.join("\n")
     );
 }

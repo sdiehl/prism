@@ -17,7 +17,7 @@ type ExprCensus = ExprCensus {
   calls: Int,
   binds: Int,
   holes: Int
-}
+} deriving (Eq, Show)
 ```
 
 A shape census of one expression: the counts a size heuristic, a lint threshold, or a complexity report is built from. `nodes` is every node, `vars` every variable occurrence, `calls` every application, `holes` every typed hole, and `binds` every form that introduces a name (a let, a mutable declaration, a lambda, a match, a for loop, a comprehension), counted once per form rather than once per name it binds.

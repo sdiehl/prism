@@ -36,6 +36,11 @@
 -- ever runs. Streaming (gigabyte, SAX-style) JSON is a package; this codec is
 -- value-oriented and total.
 
+-- The scanner works on raw bytes and compares against ASCII codes and JSON depth
+-- and escape widths directly; naming each of those bounds would obscure the table
+-- it is transcribing.
+-- lint: allow-file(L0108)
+
 import Control.Layer (..)
 import Data.Foldable (length)
 import Data.List (..)
@@ -56,6 +61,9 @@ import Data.Bytes (Bytes, bytes_concat, bytes_index, bytes_length, bytes_slice, 
 -- ```output
 -- {"n":3,"ok":true}
 -- ```
+-- The tree is a structural carrier, and `encode` is its canonical rendering, so
+-- a derived printed form would compete with the one the module already defines.
+-- lint: allow(L0203)
 pub type Json
   = JNull
   | JBool(Bool)
@@ -67,7 +75,7 @@ pub type Json
 
 -- | A decode failure: a human-readable message and the 1-based line and column of
 -- the offending byte.
-pub type JsonError = JsonError(String, Int, Int)
+pub type JsonError = JsonError(String, Int, Int) deriving (Eq, Show)
 
 -- | Render a `JsonError` as `line L col C: message`.
 --
@@ -220,6 +228,10 @@ fn esc_emit(
 ) : Result((String, Int), JsonError) =
   str_run(b, n, k, k, bytes_concat(acc, string_to_bytes(char_str(cp))))
 
+-- The escape grammar is a flat decision table over the byte after the backslash,
+-- with the surrogate-pair case nested inside the `\u` arm; splitting it would
+-- scatter one table across several names.
+-- lint: allow(L0101)
 fn parse_escape(
   b : Bytes,
   n : Int,
@@ -394,6 +406,9 @@ fn parse_number(
 
 -- The recursive-descent core, threading the `lossy` flag and the nesting depth.
 
+-- One dispatch over the leading byte of a value, with each literal checked
+-- inline; the nesting is the grammar's own shape.
+-- lint: allow(L0101)
 fn parse_value(
   lossy : Bool,
   b : Bytes,
@@ -441,6 +456,9 @@ fn parse_array(
     else
       array_elems(lossy, b, n, i + 1, d + 1, Nil)
 
+-- Threads the scanner's whole state (mode, buffer, length, cursor, depth) plus
+-- the elements collected so far, which are reversed once at the closing bracket.
+-- lint: allow(L0103, L0105)
 fn array_elems(
   lossy : Bool,
   b : Bytes,
@@ -481,6 +499,9 @@ fn parse_object(
     else
       object_members(lossy, b, n, i + 1, d + 1, Nil)
 
+-- The member loop carries the same scanner state as `array_elems` and nests the
+-- key, colon, and value steps that one member needs.
+-- lint: allow(L0101, L0103, L0105)
 fn object_members(
   lossy : Bool,
   b : Bytes,
@@ -583,6 +604,8 @@ fn raw_run(b : Bytes, start : Int, end : Int) : String =
     Some(text) => text
     None => ""
 
+-- The string-escape table, one arm per byte JSON requires escaping.
+-- lint: allow(L0101)
 fn esc_char(c : Int) : String =
   if c == 34 then
     "\\\""

@@ -32,6 +32,10 @@ effect IncrRaw
   incr_memo(() -> Bytes ! {IncrRaw | e}) : String
 ```
 
+The engine's own effect, over erased nodes: create an input, read a node, write a node, and register a memo thunk. The typed `Incr(a)` surface below is the one to program against; this is what `run_incr` handles.
+
+The raw, type-erased effect the engine actually handles: node handles are string keys and values are `Bytes`. The typed surface below wraps it. The memo thunk may read other nodes (`IncrRaw`) and perform any replayable effect (`e`), and that row flows out through `run_incr` because `incr_memo`'s thunk argument carries the open row `{IncrRaw | e}`: the free row variable in the operation's signature ties the thunk's ambient effects to the caller directly, with no placeholder parameter on the effect. The memo thunk reaches the operation already erased to `() -> Bytes`, built by the `after` combinator (a named function, not a fresh lambda at the perform site: a literal lambda there severs that tie).
+
 ## Functions and Values
 
 ### `run_incr`

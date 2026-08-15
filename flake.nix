@@ -111,6 +111,11 @@
               ./crates/prism-syntax/src/grammar.lalrpop
               ./packages/tc/src/Bootstrap.pr
               ./packages/tc/src/Tc.pr
+              ./packages/lint/src/Lint.pr
+              ./packages/lint/src/Rules.pr
+              ./packages/lint/src/Findings.pr
+              ./packages/lint/src/Pragma.pr
+              ./packages/lint/src/Limits.pr
             ];
           };
 

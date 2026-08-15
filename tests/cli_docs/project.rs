@@ -27,6 +27,13 @@ fn modlib() -> &'static Path {
     ))
 }
 
+fn libeffect() -> &'static Path {
+    Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/projects/libeffect"
+    ))
+}
+
 fn withdep() -> &'static Path {
     Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -187,6 +194,10 @@ fn clean_removes_target_at_package_root() {
         dir.join("prism.toml"),
         r#"[package]
 name = "c"
+version = "0.0.0"
+authors = ["Test Author <test@example.com>"]
+maintainers = ["test@example.com"]
+license = "MIT"
 
 [bin]
 entry = "src/main.pr"
@@ -230,6 +241,10 @@ fn check_without_file_checks_enclosing_project() {
         dir.join("prism.toml"),
         r#"[package]
 name = "checkproj"
+version = "0.0.0"
+authors = ["Test Author <test@example.com>"]
+maintainers = ["test@example.com"]
+license = "MIT"
 
 [bin]
 entry = "src/main.pr"
@@ -252,6 +267,81 @@ entry = "src/main.pr"
     assert!(out.stderr.is_empty(), "stderr should be quiet: {out:?}");
 
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn check_licenses_lists_transitive_spdx_ids_without_license_text() {
+    let workspace = env::temp_dir().join(format!("prism_check_licenses_{}", process::id()));
+    let _ = fs::remove_dir_all(&workspace);
+    for package in ["app", "middle", "copyleft"] {
+        fs::create_dir_all(workspace.join(package).join("src")).unwrap();
+    }
+    fs::write(
+        workspace.join("app/prism.toml"),
+        r#"[package]
+name = "app"
+version = "0.0.0"
+authors = ["Test Author <test@example.com>"]
+maintainers = ["test@example.com"]
+license = "MIT"
+
+[bin]
+entry = "src/main.pr"
+
+[dependencies]
+middle = { path = "../middle" }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        workspace.join("middle/prism.toml"),
+        r#"[package]
+name = "middle"
+version = "1.2.3"
+authors = ["Test Author <test@example.com>"]
+maintainers = ["test@example.com"]
+license = "Apache-2.0"
+
+[bin]
+entry = "src/main.pr"
+
+[dependencies]
+copyleft = { path = "../copyleft" }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        workspace.join("copyleft/prism.toml"),
+        r#"[package]
+name = "copyleft"
+version = "3.0.0"
+authors = ["Test Author <test@example.com>"]
+maintainers = ["test@example.com"]
+license = "AGPL-3.0-only"
+
+[bin]
+entry = "src/main.pr"
+"#,
+    )
+    .unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .args(["check", "--licenses"])
+        .current_dir(workspace.join("app"))
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "license audit failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "Dependency licenses:\n  copyleft 3.0.0 - AGPL-3.0-only\n  middle 1.2.3 - Apache-2.0\n"
+    );
+    assert!(out.stderr.is_empty(), "stderr should be quiet: {out:?}");
+
+    let _ = fs::remove_dir_all(&workspace);
 }
 
 #[test]
@@ -292,6 +382,10 @@ fn diff_without_paths_semantically_compares_project_head_to_worktree() {
         dir.join("prism.toml"),
         r#"[package]
 name = "git-diff"
+version = "0.0.0"
+authors = ["Test Author <test@example.com>"]
+maintainers = ["test@example.com"]
+license = "MIT"
 
 [bin]
 entry = "src/main.pr"
@@ -385,6 +479,10 @@ fn project_effect_op_sharing_a_stdlib_op_name_builds_and_agrees() {
         dir.join("prism.toml"),
         r#"[package]
 name = "opclash"
+version = "0.0.0"
+authors = ["Test Author <test@example.com>"]
+maintainers = ["test@example.com"]
+license = "MIT"
 
 [bin]
 entry = "src/main.pr"
@@ -424,6 +522,26 @@ fn main() =
     assert_native_matches_interp(&dir);
 
     let _ = fs::remove_dir_all(&dir);
+}
+
+// A handler clause names its operation bare and the grammar admits nothing
+// else, so an operation a plain `import M` leaves reachable only as `M.op` is an
+// operation no clause can spell. The entry module imports the library without a
+// name list and handles its `beep`, and the built program must agree with the
+// interpreter, so the clause binds the library's operation on both tiers.
+#[test]
+fn project_handler_clause_names_an_imported_library_operation() {
+    let project = load_project(libeffect()).expect("manifest loads");
+    let roots = prism::project_roots(&project.src_dir, &project.dep_src_dirs);
+    let mut cfg = prism::Config::default();
+    cfg.flags.compiler_cache = false;
+    let full = with_prelude(&fs::read_to_string(&project.entry).expect("entry reads"));
+    prism::check_modules_on(&full, &roots, &cfg)
+        .expect("a clause handling an imported library operation checks");
+    let run = interpret_at(&full, &project.src_dir).expect("interprets");
+    let out: Vec<String> = run.out.iter().map(Rv::show).collect();
+    assert_eq!(out, ["42"], "the imported `Beeper.beep` clause must run");
+    assert_native_matches_interp(libeffect());
 }
 
 fn have_git() -> bool {

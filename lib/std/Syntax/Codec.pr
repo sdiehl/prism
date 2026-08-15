@@ -13,6 +13,8 @@
 -- declaration order, node objects are alphabetical, and optional fields are
 -- omitted rather than null.
 
+-- lint: allow-file(L0108)
+
 import Data.List (..)
 import Data.Maybe (..)
 import Data.Result (..)
@@ -30,7 +32,10 @@ pub fn tokens_schema() : String = "prism-syntax-tokens-v1"
 
 -- | A structured decode refusal: the path of the offending value inside the
 -- document and the reason it was rejected.
-pub type CodecError = CodecError { path: String, reason: String }
+pub type CodecError = CodecError {
+  path: String,
+  reason: String
+} deriving (Eq, Show)
 
 -- | Render a codec error as one line.
 pub fn codec_error_message(e : CodecError) : String = "{e.path}: {e.reason}"
@@ -38,6 +43,7 @@ pub fn codec_error_message(e : CodecError) : String = "{e.path}: {e.reason}"
 -- | A decoded `prism-syntax-tokens-v1` document: the envelope identity, the
 -- embedded source, the raw and post-layout token streams, and the trivia
 -- events, all in stream order.
+-- lint: allow(L0203)
 pub type TokensDoc = TokensDoc {
   schema: String,
   compiler: String,
@@ -146,6 +152,7 @@ fn validate_tokens(d : TokensDoc) : TokensDoc ! {Decode} =
 -- The artifact escape discipline, shared with the compiler's JSON emitter:
 -- named escapes, then lowercase `\u00xx` for the remaining control characters,
 -- raw UTF-8 for everything else.
+-- lint: allow(L0101)
 fn esc_char(c : Int) : String =
   if c == 34 then
     "\\\""
@@ -177,6 +184,7 @@ fn needs_escape(c : Int) : Bool = c == 34 || c == 92 || c < 32
 
 fn jesc(s : String) : String = str_join("", jesc_go(s, 0, 0, []))
 
+-- lint: allow(L0105)
 fn jesc_go(s : String, run : Int, i : Int, acc : List(String)) : List(String) =
   if i >= str_len(s) then
     reverse(if run < i then Cons(substring(s, run, i - run), acc) else acc)
@@ -272,6 +280,7 @@ pub fn surface_schema() : String = "prism-surface-syntax-v1"
 
 -- | A decoded `prism-surface-syntax-v1` document: the envelope identity, the
 -- embedded source, and the ordered item list of the parsed file.
+-- lint: allow(L0203)
 pub type SurfaceDoc = SurfaceDoc {
   schema: String,
   compiler: String,
@@ -724,6 +733,7 @@ fn suffix_frag(s : Suffix) : List((String, Json)) =
 fn enc_expr(e : Sp(Expr)) : Json =
   sp_obj(enc_expr_node(e.node), e.span, e.synth)
 
+-- lint: allow(L0102)
 fn enc_expr_node(e : Expr) : List((String, Json)) =
   match e of
     EInt(v, suf) =>
@@ -1120,6 +1130,7 @@ fn enc_decl(d : Decl, kind : String) : List((String, Json)) =
 
 fn enc_method_decl(d : Decl) : Json = node_obj(enc_decl(d, tag_item_fn()))
 
+-- lint: allow(L0102)
 fn enc_item(it : Item) : Json =
   match it of
     IImport {
@@ -1390,6 +1401,7 @@ fn dec_ty(j : Json, path : String) : Ty ! {Decode} =
   let fields = obj_at(j, path)
   dec_ty_kind(str_at(fields, "kind", path), fields, path)
 
+-- lint: allow(L0101)
 fn dec_ty_kind(
   kind : String,
   fields : List((String, Json)),
@@ -1419,6 +1431,7 @@ fn dec_ty_kind(
   else
     dec_ty_kind2(kind, fields, path)
 
+-- lint: allow(L0101)
 fn dec_ty_kind2(
   kind : String,
   fields : List((String, Json)),
@@ -1531,6 +1544,7 @@ fn e2(
   mk(a, req_at(fields, k2, path, dec_expr))
 
 -- Three expression fields.
+-- lint: allow(L0103)
 fn e3(
   fields : List((String, Json)),
   path : String,
@@ -1566,6 +1580,7 @@ fn es(
   mk(x, str_at(fields, ks, path))
 
 -- A string field then two expression fields.
+-- lint: allow(L0103)
 fn s2e(
   fields : List((String, Json)),
   path : String,
@@ -1578,6 +1593,7 @@ fn s2e(
   let a = req_at(fields, k1, path, dec_expr)
   mk(s, a, req_at(fields, k2, path, dec_expr))
 
+-- lint: allow(L0101)
 fn dec_expr_node(
   kind : String,
   fields : List((String, Json)),
@@ -1608,6 +1624,7 @@ fn dec_expr_node(
   else
     dec_expr_node2(kind, fields, path)
 
+-- lint: allow(L0101)
 fn dec_expr_node2(
   kind : String,
   fields : List((String, Json)),
@@ -1639,6 +1656,7 @@ fn dec_expr_node2(
   else
     dec_expr_node3(kind, fields, path)
 
+-- lint: allow(L0101)
 fn dec_expr_node3(
   kind : String,
   fields : List((String, Json)),
@@ -1677,6 +1695,7 @@ fn dec_expr_node3(
   else
     dec_expr_node4(kind, fields, path)
 
+-- lint: allow(L0101)
 fn dec_expr_node4(
   kind : String,
   fields : List((String, Json)),
@@ -1713,6 +1732,7 @@ fn dec_expr_node4(
   else
     dec_expr_node5(kind, fields, path)
 
+-- lint: allow(L0101)
 fn dec_expr_node5(
   kind : String,
   fields : List((String, Json)),
@@ -2398,6 +2418,8 @@ pub fn encode_diagnostics(d : DiagnosticsDoc) : String =
 -- Err(e)` arms. This is the effect-native way to thread short-circuiting
 -- errors in Prism; new decoders should use it.
 
+-- | The decoder's short-circuit: `fail_decode` abandons the decode in
+-- progress, carrying the `CodecError` that refused it out to `run_decode`.
 pub effect Decode
   never fail_decode(CodecError) : a
 
@@ -2525,6 +2547,22 @@ fn each_of_go(
       let v = f(x, "{path}[{i}]")
       Cons(v, each_of_go(rest, path, i + 1, f))
 
+-- The same traversal for an array whose path is already precise: every element
+-- carries the path unchanged rather than an indexed one.
+--
+-- Both traversals are spelled out rather than routed through `map`. A shared
+-- combinator's function slot carries a single calling convention for the whole
+-- program, so a performing decoder handed to `map` settles that slot for every
+-- pure caller of `map` as well.
+fn each_at(
+  items : List(Json),
+  path : String,
+  f : (Json, String) -> a ! {Decode}
+) : List(a) ! {Decode} =
+  match items of
+    Nil => []
+    Cons(x, rest) => Cons(f(x, path), each_at(rest, path, f))
+
 -- Required field, then decode with the effectful `f`. Mirrors `req`.
 fn req_at(
   fields : List((String, Json)),
@@ -2588,9 +2626,10 @@ fn decode_resolved_doc(text : String) : ResolvedDoc ! {Decode} =
     schema = schema_at(fields, resolved_schema()),
     compiler = str_at(fields, "compiler", "$"),
     source = source_at(fields),
-    functions = map(
-        \(jf) -> rfunction_of(jf, "$.functions"),
+    functions = each_at(
         arr_at(need_at(fields, "functions", "$"), "$.functions"),
+        "$.functions",
+        rfunction_of,
       )
   }
   validate_resolved(doc)
@@ -2659,9 +2698,10 @@ fn rfunction_of(j : Json, path : String) : RFunction ! {Decode} =
   let fields = obj_at(j, path)
   RFunction {
     name = str_at(fields, "name", path),
-    params = map(
-        \(jp) -> rparam_of(jp, "{path}.params"),
+    params = each_at(
         arr_at(need_at(fields, "params", path), "{path}.params"),
+        "{path}.params",
+        rparam_of,
       ),
     body = rnode_of(need_at(fields, "body", path), "{path}.body")
   }
@@ -2691,10 +2731,7 @@ fn rnode_children_of(
   match jget(fields, "children") of
     None => []
     Some(jc) =>
-      map(
-          \(jn) -> rnode_of(jn, "{path}.children"),
-          arr_at(jc, "{path}.children"),
-        )
+      each_at(arr_at(jc, "{path}.children"), "{path}.children", rnode_of)
 
 fn rnode_json(n : RNode) : Json =
   let base =
@@ -2716,6 +2753,8 @@ fn rfunction_json(f : RFunction) : Json =
 fn rparam_json(p : RParam) : Json =
   JObj([("name", JStr(p.name)), ("borrow", JBool(p.is_borrow))])
 
+-- | Encode a resolved-syntax document back to the exact artifact bytes the
+-- compiler emits, the inverse of `decode_resolved`.
 pub fn encode_resolved(d : ResolvedDoc) : String =
   render(
       JObj([

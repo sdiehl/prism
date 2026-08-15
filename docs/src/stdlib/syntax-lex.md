@@ -13,7 +13,10 @@ Scope of this layer: the fixed-token vocabulary, identifiers, uppercase names, q
 ### `LexRaw`
 
 ```prism,def,h-10eb3a9712cb93ac887b3ab68fa8b6f6d973d5da5665c17f21ac9443f819f1d8
-type LexRaw = LexRaw { tokens: List(Token), trivia: List(Trivia) }
+type LexRaw = LexRaw {
+  tokens: List(Token),
+  trivia: List(Trivia)
+} deriving (Eq, Show)
 ```
 
 The raw token layer: the semantic token stream and the trivia interleaved between them, each keyed by absolute byte span into the lexed text.
