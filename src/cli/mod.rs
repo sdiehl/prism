@@ -52,6 +52,10 @@ pub type CmdResult = Result<(), CmdError>;
 /// The leading relative-root component `glob` normalizes out of the paths it
 /// yields, so a root spelled `./src` comes back as `src/...`.
 const CURRENT_DIR: &str = ".";
+/// Where a tool package keeps its modules, under its own directory in the
+/// `packages/` root, and the knob that names that root in a diagnostic.
+const TOOL_PACKAGE_SRC_DIR: &str = "src";
+const TOOL_PACKAGES_ROOT_VAR: &str = "PRISM_TOOL_PACKAGES_ROOT";
 const WATCH_SNAPSHOT_SCHEMA: &[u8] = b"prism-project-watch-snapshot-v1";
 const WATCH_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const WATCH_HASH_PREFIX: usize = 12;
@@ -93,6 +97,41 @@ pub(crate) fn is_project(arg: &Path) -> bool {
 
 pub fn read(file: &Path) -> Result<String, Error> {
     std::fs::read_to_string(file).map_err(Error::Io)
+}
+
+/// The source of one module of a compiler-owned Prism tool package.
+///
+/// A shipped binary answers from `embedded`, the copy `include_str!` compiled
+/// into it. While developing the packages themselves, `PRISM_TOOL_PACKAGES_ROOT`
+/// names a `packages/` directory and the module is read from disk instead, so
+/// editing a rule or a checker clause does not relink the compiler. The knob is
+/// an explicit developer input and is never taken from the checked project, so
+/// a project still cannot choose the tooling that judges it.
+///
+/// Naming a root that lacks the module is an error rather than a silent
+/// fallback: a developer who pointed the compiler at a tree meant to be told it
+/// was not used.
+pub(crate) fn tool_package_source(
+    package: &str,
+    module: &str,
+    embedded: &'static str,
+    cfg: &crate::Config,
+) -> Result<String, Error> {
+    let Some(root) = cfg.flags.tool_packages_root.as_ref() else {
+        return Ok(embedded.to_owned());
+    };
+    let mut path = root.join(package).join(TOOL_PACKAGE_SRC_DIR);
+    path.push(module.replace('.', std::path::MAIN_SEPARATOR_STR));
+    path.set_extension(crate::driver::SOURCE_EXT);
+    read(&path).map_err(|e| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "{TOOL_PACKAGES_ROOT_VAR} is set but {} is unreadable: {e}",
+                path.display()
+            ),
+        ))
+    })
 }
 
 // Imports resolve relative to the entry file's directory.
@@ -475,8 +514,7 @@ fn display_duration(duration: Duration) -> String {
 
 // A probe error is itself a stable state. This matters while a manifest is
 // temporarily malformed during an editor save: report one failed rebuild, wait
-// quietly while the same bytes remain, and resume as soon as the project loads
-// again.
+// while the bytes remain unchanged, and resume after the project loads again.
 fn watch_state(arg: &Path, cfg: &crate::Config) -> String {
     match watch_snapshot(arg, cfg) {
         Ok(snapshot) => format!("ok:{snapshot}"),

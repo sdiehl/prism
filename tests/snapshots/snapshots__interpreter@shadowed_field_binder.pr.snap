@@ -1,0 +1,8 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/shadowed_field_binder.pr
+---
+10
+10
+=> ()

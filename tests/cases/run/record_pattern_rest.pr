@@ -1,0 +1,28 @@
+-- A spread-only record pattern matches the constructor and ignores every field.
+-- The same field name may have a different type in each variant because a match
+-- refines the constructor before binding it.
+type Shape = Circle { radius: Int } | Square { radius: Float }
+
+fn kind(shape : Shape) : Int =
+  match shape of
+    Circle { .. } => 1
+    Square { .. } => 2
+
+fn radius_text(shape : Shape) : String =
+  match shape of
+    Circle { radius = radius } => show(radius)
+    Square { radius = radius } => show(radius)
+
+-- An or-pattern checks each refined constructor arm independently. The shared
+-- binder may therefore have the constructor-local field type in each arm.
+fn radius_text_or(shape : Shape) : String =
+  match shape of
+    Circle { radius = radius } | Square { radius = radius } => show(radius)
+
+fn main() =
+  println(kind(Circle { radius = 7 }))
+  println(kind(Square { radius = 2.5 }))
+  println(radius_text(Circle { radius = 7 }))
+  println(radius_text(Square { radius = 2.5 }))
+  println(radius_text_or(Circle { radius = 9 }))
+  println(radius_text_or(Square { radius = 3.5 }))

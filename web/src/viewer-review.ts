@@ -1,24 +1,11 @@
-// Review state: what you have read, what you thought about it, and what has
-// moved since.
-//
-// The point of anchoring to a content address rather than to a file and a line
-// is this: a mark survives a reformat, a file move, and a rename of a local, and
-// when something *does* change it can say precisely what kind of change it was.
-// "You reviewed this at `a4f280f`, and since then only a dependency moved" is a
-// claim a line-anchored tool cannot make, because it cannot tell that case apart
-// from an edit.
-//
-// State is local to the browser: review notes are working memory, kept where the
-// reading happens rather than in anything that needs an account or a server.
+// Browser-local review state anchored to definition identity and content address.
 
 import type { Def, Index } from "./viewer-model.js";
 
 /// How a definition stands relative to the revision a mark was made against.
 ///
-/// The same four-way split `prism index --diff` draws, for the same reason and by
-/// the same rule — a stored mark is one side of a revision pair. A cross-check
-/// test pins these verdicts against the compiler's own on the same inputs, so the
-/// two cannot drift.
+/// Uses the same four-way split as `prism index --diff`. A cross-check test pins
+/// these verdicts against the compiler's classifications.
 export type Freshness = "current" | "cosmetic" | "cone" | "changed" | "gone";
 
 export interface Mark {
@@ -26,8 +13,7 @@ export interface Mark {
   id: string;
   /// Whether the definition has been read and accepted.
   reviewed: boolean;
-  /// Free text. A thread with an assistant would attach here too; a conversation
-  /// anchored at a definition is a note that happens to have turns.
+  /// Free-form review notes.
   note?: string;
   /// The address when the mark was last touched, and the text at that address.
   /// The text is what lets a later comparison separate a reformat and a
@@ -41,12 +27,8 @@ export interface Mark {
   at: number;
 }
 
-/// The review-facing facts outside a definition's hash and text: claims are
-/// erased before the layer that is hashed (`total` to `assume total` swaps a
-/// proof for a trust root without moving a hashed byte), and the doc comment
-/// sits outside `source` entirely. Stamped into a mark so a later visit can
-/// call an edit to any of them what it is — the same carve-out the compiler's
-/// own diff classification makes.
+/// Review-facing facts outside a definition's hash and source text. Claims erase
+/// before hashing, and doc comments sit outside `source`.
 export function metaOf(def: Def): string {
   return JSON.stringify([
     def.claims ?? [],
@@ -58,9 +40,8 @@ export function metaOf(def: Def): string {
 
 /// Classify a definition against the revision a mark recorded.
 ///
-/// Deliberately the same rule as the compiler's diff: equal addresses mean equal
-/// behavior, so any text difference is presentation; a moved address with
-/// unmoved text means something underneath it changed and this did not.
+/// Matches the compiler's diff rule: equal addresses mean equal behavior, while a
+/// moved address with unchanged text indicates a dependency change.
 export function freshness(mark: Mark, def: Def | undefined): Freshness {
   if (!def) return "gone";
   // Claims, visibility, doc, deprecation: authored edits the hash never sees
@@ -76,7 +57,7 @@ export function freshness(mark: Mark, def: Def | undefined): Freshness {
 }
 
 /// Whether a definition needs the reviewer's attention again: they accepted it,
-/// and its behavior has since moved. A cosmetic change does not qualify — that is
+/// and its behavior has since moved. A cosmetic change does not qualify; that is
 /// the noise this is meant to suppress.
 export function needsAttention(mark: Mark, def: Def | undefined): boolean {
   if (!mark.reviewed) return false;
@@ -91,8 +72,8 @@ interface Stored {
   /// The indexed unit these marks belong to: the artifact's URL joined with its
   /// title (see `boot`). Not the revision's contract digest, which moves on
   /// every change and would drop the marks exactly when they become
-  /// interesting — and not the title alone, which two unrelated projects can
-  /// share, letting one project's `main` display another's review notes.
+  /// interesting. The title alone is also insufficient because two unrelated
+  /// projects can share one, letting one project's `main` display another's notes.
   unit: string;
   marks: Mark[];
 }
@@ -184,13 +165,13 @@ export class Review {
 
   /// Follow marks across renames and file moves, which change the canonical
   /// name a mark is keyed by while preserving the content the mark is *about*.
-  /// Without this, moving a module silently orphans every mark in it — the one
-  /// survival the content-address anchoring promises.
+  /// Without this, moving a module silently orphans every mark in it despite the
+  /// content-address anchor.
   ///
   /// Two sources, tried in order. A loaded diff knows moves as facts
   /// (`old_id` → `id`), so those re-key directly. Failing that, a mark whose id
-  /// left the index follows its stamped hash — but only to an *unambiguous*
-  /// destination, because two definitions can legitimately share a behavior
+  /// left the index follows its stamped hash, but only when it has an *unambiguous*
+  /// destination. Two definitions can legitimately share a behavior
   /// hash and guessing which one the mark meant would attach a review to code
   /// nobody reviewed.
   rekey(moves: Map<string, string>, index: Index): void {

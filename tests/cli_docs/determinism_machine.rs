@@ -155,8 +155,8 @@ fn gallery_and_vite_wire_every_resident() {
         if resident.gallery {
             assert_contains(&gallery, &gallery_link, resident.slug);
         } else {
-            // Unlisted is a decision, not an accident: the card must be absent,
-            // not merely unnoticed, so relisting is a deliberate flip here.
+            // Unlisted is explicit: the card must be absent, so relisting changes
+            // this assertion deliberately.
             assert!(
                 !gallery.contains(&gallery_link),
                 "{} is marked unlisted but the gallery links it",

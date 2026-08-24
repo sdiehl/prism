@@ -1,0 +1,25 @@
+-- A confined region whose handler does real work after the continuation
+-- returns: `k(n) + n` makes the clause non-tail, so the region's free monad
+-- must sequence the resumption before the addition, while the unrelated
+-- stream pipeline beside it stays fused. Any tier that reordered or flattened
+-- the post-resume work would print a different sum, which is exactly the
+-- divergence the confinement split has to keep unobservable.
+effect Peek
+  peek(Int) : Int
+
+fn run_thunks(fs, acc) =
+  match fs of
+    Nil => acc
+    Cons(f, rest) => run_thunks(rest, acc + f())
+
+fn peeked() =
+  let fs = [\() -> peek(4), \() -> peek(7), \() -> peek(9)]
+  handle run_thunks(fs, 0) with
+    peek(n) resume k => k(n) + n
+    return r => r
+
+fn double(n) = n * 2
+
+fn main() =
+  println(srange(1, 50).smap(double).ssum())
+  println(peeked())

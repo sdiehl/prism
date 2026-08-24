@@ -83,7 +83,7 @@ A parser for a value of type `a`: the option and positional specs it accepts (th
 type SubCmd(a) = SubCmd { key: String, about: String, sub: Parser(a) }
 ```
 
-One named subcommand: its key on the command line, a one-line description, and the parser that runs when it is chosen. The parser it carries is a reader function, so the subcommand as a whole has no meaningful equality or printed form. lint: allow(L0203)
+One named subcommand: its key on the command line, a one-line description, and the parser that runs when it is chosen. The parser it carries is a reader function, so the subcommand as a whole has no meaningful equality or printed form.
 
 ### `Body`
 
@@ -91,7 +91,7 @@ One named subcommand: its key on the command line, a one-line description, and t
 type Body(a) = Plain(Parser(a)) | Group(List(SubCmd(a)))
 ```
 
-A top-level command is either a single parser or a group of subcommands, all producing the same result type (so distinct subcommands map to distinct constructors of the user's ADT). Both alternatives bottom out in parser functions, so the body is not comparable or printable. lint: allow(L0203)
+A top-level command is either a single parser or a group of subcommands, all producing the same result type (so distinct subcommands map to distinct constructors of the user's ADT). Both alternatives bottom out in parser functions, so the body is not comparable or printable.
 
 ### `Command`
 
@@ -99,7 +99,7 @@ A top-level command is either a single parser or a group of subcommands, all pro
 type Command(a) = Command { name: String, about: String, body: Body(a) }
 ```
 
-A complete command: a program name and one-line description for usage, plus its body. The body holds parser functions; render a command with `help_text` rather than expecting a printed form. lint: allow(L0203)
+A complete command: a program name and one-line description for usage, plus its body. The body holds parser functions; render a command with `help_text` rather than expecting a printed form.
 
 ### `Outcome`
 

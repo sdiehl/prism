@@ -8,14 +8,19 @@ use prism_syntax::{
 
 use super::cbpv::Value;
 use super::fv::comp as freev;
+use crate::types::scalar_plan;
 
 mod balance;
+mod borrow;
 mod check;
+mod imbalance;
 mod rc;
 mod reuse;
 
 pub use balance::balanced;
+pub use borrow::infer_borrow_sigs;
 pub use check::{check_fip, check_fip_linear, fip_annots, replayable_annots, Fips};
+pub use imbalance::{Imbalance, TokenFault};
 pub use rc::insert_rc;
 pub use reuse::reuse;
 
@@ -86,19 +91,18 @@ pub fn borrow_sigs(prog: &Program<CorePhase>) -> Sigs {
 // A borrow-position call arg is normally a `Value::Var`: the caller retains one
 // ownership token through the call and drops it afterward when the loan is its
 // last use. Mandatory newtype erasure and scalar folding may expose a literal
-// immediate directly at the call. Such a value owns no heap cell and needs no
-// retained token; every other non-variable remains an invariant error rather
-// than silently leaking a temporary heap value.
-const fn immediate_borrow_arg(value: &Value) -> bool {
-    matches!(
-        value,
-        Value::Int(_)
-            | Value::I64(_)
-            | Value::U64(_)
-            | Value::Float(_)
-            | Value::Bool(_)
-            | Value::Unit
-    )
+// directly at the call, and that is fine only when the literal's encoding plan
+// owns no fresh heap cell: a zero or tagged word, or the static cell a `Str`
+// literal names. A literal whose plan mints a fresh cell per use needs an
+// owner at a borrowed position: the typed RC pass anchors it to a binder, and
+// here, like every other cell-owning value, an unanchored one is an invariant
+// error rather than a silently leaking temporary. Mirrors the typed pass's
+// `scalar_without_cell`, reading the same representation authority.
+fn scalar_without_cell(value: &Value) -> bool {
+    value
+        .literal_scalar_type()
+        .and_then(|ty| scalar_plan(&ty).ok())
+        .is_some_and(|plan| !plan.owns_fresh_cell())
 }
 
 fn borrow_mask(name: Sym, sigs: &Sigs) -> Option<&[bool]> {
@@ -111,17 +115,18 @@ fn borrowed_at(mask: Option<&[bool]>, i: usize) -> bool {
     mask.is_some_and(|m| m.get(i).copied().unwrap_or(false))
 }
 
-fn borrowed_call_vars(name: Sym, args: &[Value], sigs: &Sigs) -> Result<Set, String> {
+fn borrowed_call_vars(name: Sym, args: &[Value], sigs: &Sigs) -> Result<Set, TokenFault> {
     let mask = borrow_mask(name, sigs);
     args.iter()
         .enumerate()
         .filter(|(index, _)| borrowed_at(mask, *index))
         .filter_map(|(_, arg)| match arg {
             Value::Var(var) => Some(Ok(*var)),
-            value if immediate_borrow_arg(value) => None,
-            _ => Some(Err(format!(
-                "borrowed argument to {name} is not a let-bound variable: {arg:?}"
-            ))),
+            value if scalar_without_cell(value) => None,
+            _ => Some(Err(TokenFault::BorrowedArgNotBound {
+                callee: name,
+                arg: Box::new(arg.clone()),
+            })),
         })
         .collect()
 }

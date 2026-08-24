@@ -1,6 +1,6 @@
 {
   "schema": "prism-elab-input-v1",
-  "compiler": "0.19.0",
+  "compiler": "0.20.0",
   "input": {
     "imports": [],
     "types": [
@@ -206,7 +206,7 @@
         "evidence": [
           "Global(sameInt, [])"
         ],
-        "ty": "(Int, Int) -> Bool ! {?r26}"
+        "ty": "(Int, Int) -> Bool ! {?r32}"
       },
       "14": {
         "ty": "Int"

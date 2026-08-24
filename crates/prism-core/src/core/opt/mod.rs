@@ -138,7 +138,9 @@ impl CorePass {
     }
 
     /// Whether this pass transforms each definition independently and therefore
-    /// admits an SCC-local durable query boundary.
+    /// admits an SCC-local durable query boundary. Such passes must preserve the
+    /// input global-name set: regrouping keeps the original program order and
+    /// rejects any added or dropped definition.
     #[must_use]
     pub const fn is_scc_local(self) -> bool {
         matches!(self, Self::EraseNewtypes | Self::Simplify | Self::Cse)

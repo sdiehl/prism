@@ -8,7 +8,7 @@ Stable public facade for the generated Pattern-family parser.
 
 ### `parse_pattern`
 
-```prism,sig,h-b68c1a3d6b33bc9e53ce6aa72ebcff84fdf293dddd8c70c856c17ac8c6a5452b
+```prism,sig,h-c981a230ad20c4ffb3c6959880d2b906f1eb434ff50e56015328e5049be9dc4a
 parse_pattern : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Sp(Syntax.Ast.Pat))
 ```
 
@@ -16,7 +16,7 @@ Parse one pattern at `depth`, noting the receipt the generated parser completed 
 
 ### `parse_let_pattern`
 
-```prism,sig,h-985f502a7d6e4c6cc08419509ed6341a624d07cb1efb8652a5f007919808d782
+```prism,sig,h-8b11378af4589f61d65413f59f060431b50f9fbebd05510f6e9a25ddd03cf600
 parse_let_pattern : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Sp(Syntax.Ast.Pat))
 ```
 

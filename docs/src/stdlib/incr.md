@@ -40,7 +40,7 @@ The raw, type-erased effect the engine actually handles: node handles are string
 
 ### `run_incr`
 
-```prism,sig,h-662a1da43c85d67c45d984bd6856930e4451c43fdf2dae41910c32b01882d604
+```prism,sig,h-e2cf247087d9441fa01be1a5b95edc9f454c2155ac9ad0ad78c6bb9988da3a71
 run_incr : forall e0 a. (() -> a ! {Incr.IncrRaw, e0}) -> a ! {e0}
 ```
 
@@ -142,7 +142,7 @@ run_incr() fn
 
 ### `run_incr_durable`
 
-```prism,sig,h-61197e9693b22eab6a0928bd7bb742fc6352e6df2d6bf591e4231e3ea7212dc9
+```prism,sig,h-b145e5c4e7dc6824d4b769b4d3bba50fee8981474087dc49edc824927bfcc826
 run_incr_durable : forall a. (String, String, () -> a ! {Fail, Incr.IncrRaw}) -> a ! {Fail, IO}
 ```
 
@@ -158,7 +158,7 @@ run_incr_durable("totals.snap", "report") fn
 
 ### `run_incr_store`
 
-```prism,sig,h-f2b7bb3b2a235c68d5070e997f6a37569eb21de703260e0e0e3aba96be68d1ca
+```prism,sig,h-f7df3d4dd17d045b1a6d624b44d70b8a6cd07738b35456c849d0d5e45ea9e77b
 run_incr_store : forall a. (String, String, () -> a ! {Fail, Incr.IncrRaw}) -> a ! {Fail, IO}
 ```
 
@@ -174,7 +174,7 @@ run_incr_store(".prism-store", "report") fn
 
 ### `run_incr_durable_replay`
 
-```prism,sig,h-478cad66a2cb5ffa5ac0526d5eb53ef02a36db73894ff75292049c54da8479fe
+```prism,sig,h-0ab4ae1ec029c7271995d1bafc5bf3fe26afbcabd5f798a160f196f15b0e955a
 run_incr_durable_replay : forall e0 a. (String, String, () -> a ! {Fail, IO, Incr.IncrRaw, Output, e0}) -> a ! {Fail, IO, e0}
 ```
 
@@ -188,7 +188,7 @@ run_incr_durable_replay("run.snap", "job") fn
 
 ### `run_incr_store_replay`
 
-```prism,sig,h-65b6be690aaa118239be9db28fadcf230bf9a924b51e4ad39c986e3e6a792fbd
+```prism,sig,h-fbbc01b9822581c86737141c913667f6c1ba69a9e087b369057fffea9c78719d
 run_incr_store_replay : forall e0 a. (String, String, () -> a ! {Fail, IO, Incr.IncrRaw, Output, e0}) -> a ! {Fail, IO, e0}
 ```
 

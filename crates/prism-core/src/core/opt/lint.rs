@@ -28,11 +28,40 @@
 
 use std::collections::BTreeSet;
 
-use super::super::cbpv::{Comp, Core, LoweredCore, Value};
+use super::super::cbpv::{Comp, Core, CoreFn, ElaboratedCore, LoweredCore, Value};
 use super::super::fv;
 use super::super::traverse::Visit;
 use super::PassStage;
 use prism_common::sym::Sym;
+
+impl ElaboratedCore {
+    /// Validate a pre-effect-lowering program and mint its stage claim.
+    ///
+    /// This is the only public construction path. It rejects runtime nodes,
+    /// unbound variables, and invalid reuse scopes before returning the wrapper.
+    ///
+    /// # Errors
+    /// One message per structural violation, as the stage lint reports them.
+    pub fn validate(core: Core) -> Result<Self, Vec<String>> {
+        lint(&core, PassStage::PreLowering)?;
+        Ok(Self::new(core))
+    }
+
+    /// Append synthesized top-level functions and revalidate the whole program.
+    /// Consuming `self` prevents a caller from retaining a validated wrapper while
+    /// mutating its contents behind the stage claim.
+    ///
+    /// # Errors
+    /// One message per structural violation after the functions are appended.
+    pub fn with_functions(
+        self,
+        functions: impl IntoIterator<Item = CoreFn>,
+    ) -> Result<Self, Vec<String>> {
+        let mut core = self.into_core();
+        core.fns.extend(functions);
+        Self::validate(core)
+    }
+}
 
 impl LoweredCore {
     /// Structural stage validation, lint-grade: the checked public constructor
@@ -47,9 +76,17 @@ impl LoweredCore {
     ///
     /// # Errors
     /// One message per structural violation, as the stage lint reports them.
-    pub fn validate_structural(core: Core) -> Result<Self, Vec<String>> {
+    pub fn validate(core: Core) -> Result<Self, Vec<String>> {
         lint(&core, PassStage::Late)?;
         Ok(Self::new(core))
+    }
+
+    /// Backward-compatible spelling for the checked lowered-stage transition.
+    ///
+    /// # Errors
+    /// One message per structural violation, as the stage lint reports them.
+    pub fn validate_structural(core: Core) -> Result<Self, Vec<String>> {
+        Self::validate(core)
     }
 }
 
@@ -260,5 +297,41 @@ fn spends_val(token: Sym, v: &Value) -> usize {
         }
         Value::UnboxedRecord(fs) => fs.iter().map(|(_, f)| spends_val(token, f)).sum(),
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn program(body: Comp) -> Core {
+        Core {
+            fns: vec![CoreFn {
+                name: Sym::new("main"),
+                params: Vec::new(),
+                body,
+                dict_arity: 0,
+            }],
+        }
+    }
+
+    #[test]
+    fn checked_stage_doors_reject_the_other_nodes() {
+        assert!(ElaboratedCore::validate(program(Comp::Return(Value::Int(1)))).is_ok());
+        assert!(ElaboratedCore::validate(program(Comp::Dup(Value::Int(1)))).is_err());
+        assert!(LoweredCore::validate(program(Comp::Do(Sym::new("read"), Vec::new()))).is_err());
+    }
+
+    #[test]
+    fn appending_functions_revalidates_the_stage_claim() {
+        let core = ElaboratedCore::validate(program(Comp::Return(Value::Int(1))))
+            .expect("plain elaborated core");
+        let invalid = CoreFn {
+            name: Sym::new("late"),
+            params: Vec::new(),
+            body: Comp::Drop(Value::Int(1)),
+            dict_arity: 0,
+        };
+        assert!(core.with_functions([invalid]).is_err());
     }
 }

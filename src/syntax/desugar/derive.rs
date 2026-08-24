@@ -112,7 +112,7 @@ pub(super) fn derive_instances(
             function.name.clone(),
         )
     }));
-    // Library constructors too, not just functions: a derived JSON encoder names
+    // Include library constructors: a derived JSON encoder names
     // `JObj`/`JStr`, which are constructors of an opt-in module. In module mode
     // `external_values` already carries them; in whole-program mode every library
     // declaration is merged into `prog.types`, so they must be picked up here or
@@ -139,7 +139,7 @@ pub(super) fn derive_instances(
     // `deriving (Lens)` synthesizes the accessor pair alone.
     let mk_lens = value_canon.get(names::OPTIC_MK_LENS).cloned();
     // Every data declaration in the merged program, by canonical name. A derived
-    // `Plate` reads the whole set, not just the derived type: seeing through the
+    // `Plate` reads the whole set because seeing through the
     // carrier records an AST holds its nodes in (a match arm, a spanned wrapper)
     // is the difference between one derived traversal and one hand-written match
     // per carrier.
@@ -882,8 +882,8 @@ fn derive_serialize(d: &DataDecl, class: &str, lib: &impl Fn(&str) -> String) ->
 // declared field names; a positional one's are its argument positions (`_0`,
 // `_1`), which is the only name the declaration offers. A sum additionally
 // carries its constructor's bare name under `$`, a key no field name can spell,
-// so a document names the variant it holds rather than an index that quietly
-// changes meaning when a constructor is inserted. A single-constructor type has
+// so a document names the variant it holds rather than an unstable numeric index.
+// A single-constructor type has
 // nothing to discriminate and carries no tag.
 //
 // Order is the declaration's throughout, so one value has one tree; the canonical
@@ -1295,42 +1295,18 @@ fn derive_arbitrary(d: &DataDecl, class: &str, lib: &impl Fn(&str) -> String) ->
     )
 }
 
-// `deriving (Plate)` writes, once, the match that every hand-written "children of
-// this node" traversal writes by hand: `children(x)` is the list of `x`'s
-// immediate subvalues *of the derived type itself*, in constructor-declaration
-// order and then field order. That order is a function of the declaration alone,
-// so the derived Core is the same every run, and every whole-tree traversal
-// (universe, fold, count, rewrite) is written once against `children` rather than
-// once per constructor.
+// `deriving (Plate)` emits `children` and `rebuild` over immediate subvalues of
+// the derived type. Child order follows constructor and field declaration order.
 //
-// Whether a field contributes is decided structurally, and it cannot be decided
-// from the field type alone: `List(Arm)` never names the derived type, yet an
-// `Arm` may hold one. So the derivation takes every field apart as far as it can
-// (the derived type itself is a child; a list, optional, or tuple yields its
-// components; a data type declared in this program yields its own fields), then
-// takes the least fixpoint of "holds a child" over the resulting graph. That is
-// what lets the traversal see through the carrier records an AST holds its nodes
-// in (a match arm, a spanned wrapper, a qualifier) without anyone writing a
-// second match for them. Each distinct shape becomes one accumulator-threading
-// helper, shared by every field that walks it, so the emitted code is linear in
-// the shapes rather than in the fields.
+// A least fixpoint over declared field shapes finds nested children through
+// lists, options, tuples, and user data types. Each distinct shape shares one
+// accumulator-threading helper.
 //
-// Anything the derivation cannot look inside is rejected rather than silently
-// skipped: a traversal that quietly drops a subterm is a wrong answer, not a
-// smaller one. That covers function types, containers with no declaration in this
-// program, and a recursive occurrence at different type arguments (whose children
-// would not have the type the instance head promises). "Could it have held a
-// child" is asked of the whole reachable set, not of the printed type, so an
-// opaque container is rejected when it is applied to anything that leads back to
-// the derived type, not only when it spells that type out.
+// Reject opaque shapes that could contain a child, function types, and
+// non-regular recursive occurrences.
 //
-// `rebuild` is the same walk read backwards, and the two are derived from one
-// shape graph so they cannot drift: every position `children` yields is a
-// position `rebuild` fills, in the same order. Each shape gets a second helper
-// taking the replacements it needs off the front of the list and handing back
-// what is left, exactly as the wire codec's decoder threads its remaining bytes,
-// so a replacement list of the wrong length is a `Fail` at the end rather than a
-// silently padded or truncated value.
+// `rebuild` consumes replacements in the same shape order. A length mismatch
+// performs `Fail`.
 
 // The number of distinct field shapes one derivation may walk into. Only a
 // non-regular recursion (a `T(a)` reached through `C(T(List(a)))`) can expand
@@ -1394,9 +1370,8 @@ struct Plate<'a> {
 
 // The declared types from which the target is reachable: the target itself, and
 // any type one of whose fields names a type already known to reach it. Purely
-// syntactic and therefore conservative, which is the direction that fails
-// closed: it is the guard on shapes the traversal cannot take apart, where the
-// question is not "does this hold a child" but "could it".
+// syntactic and conservative. It guards shapes the traversal cannot inspect by
+// asking whether each shape could hold a child.
 fn reaching_set(target: &str, decls: &BTreeMap<&str, &DataDecl>) -> BTreeSet<String> {
     let mut set = BTreeSet::from([target.to_string()]);
     let mut grew = true;

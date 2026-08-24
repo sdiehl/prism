@@ -1,25 +1,17 @@
 //! Deriving the relationship set.
 //!
-//! Every edge here is read off something the compiler already computed, so none
-//! of it can go stale against the code:
+//! Every edge comes from facts the compiler already computed:
 //!
-//! - `calls` is the Core dependency adjacency (`core::DepGraph`) — the same
-//!   relation the content hasher walks for its Merkle substitution and
-//!   `prism store query callers` answers one name at a time.
+//! - `calls` is the Core dependency adjacency (`core::DepGraph`).
 //! - `performs` is the checked effect row, read as a set rather than matched as
 //!   text, so it is exact.
 //! - `uses-type` is a structural walk over the checked type and over the types
 //!   written into a declaration's own signature, keyed on the resolved symbol.
-//!   Deliberately not the token rule `prism store query uses-type` applies: that
-//!   query matches a name a human typed, where looseness is convenient, while an
-//!   edge between canonical identities has to be exact.
+//!   This is stricter than the token rule used by `prism store query uses-type`.
 //! - `instance-of` is the resolved instance's class.
 //! - `tests` is a test's transitive dependency closure in the test-mode graph.
 //!
-//! Behavioral equivalence is deliberately *not* an edge kind: two definitions are
-//! interchangeable exactly when their [`super::Def::hash`] fields are equal, so a
-//! consumer groups by hash and the artifact carries no redundant (and potentially
-//! quadratic) edge set.
+//! Consumers group equal [`super::Def::hash`] values for behavioral equivalence.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -384,19 +376,12 @@ fn declared_type_refs(sources: &Sources<'_>) -> BTreeMap<String, BTreeSet<String
 
 // `instance-of`: the class each resolved instance implements.
 //
-// Read from the merged program rather than from the surface, so the class name is
-// the canonical one the class layer is keyed by — the same string the class's own
-// `Def::id` resolved to, so the two ends of the edge agree by construction.
+// Read from the merged program so the class name is canonical.
 // `handles`: from a definition with a handler clause to the effect that clause
 // interprets.
 //
-// The other half of `performs`, and it cannot be read off a row, because handling
-// an effect is exactly what *removes* it from one: the definition that gives an
-// effect its meaning is the one whose inferred row no longer mentions it. The
-// standard library's `Output` shows what that costs. Nothing there performs it —
-// programs do — and four definitions handle it, so before this its card related to
-// nothing whatsoever in either direction, and the four interpreters of a
-// user-facing capability were unreachable from the capability.
+// This cannot be read from effect rows because handling removes the effect from
+// the row. Collect it from parsed handler clauses instead.
 //
 // Read off the handler clauses the parser already produced, mapped through the
 // same owner table a written operation name resolves through. A clause head has no
@@ -470,11 +455,8 @@ fn instances(sources: &Sources<'_>, out: &mut BTreeSet<Edge>) {
 // `tests`: from each test to every indexed definition in its transitive
 // dependency closure.
 //
-// Transitive rather than direct on purpose. "The tests that exercise this
-// function" must include a test that reaches it through a helper, which is the
-// common case; a direct-only edge set would quietly answer "none" for most
-// definitions. Restricting the targets to indexed definitions is what keeps the
-// closure from dragging in the whole prelude on every test.
+// Use the transitive closure so tests reached through helpers are included. Limit
+// targets to indexed definitions to avoid pulling in the whole prelude.
 fn tests(sources: &Sources<'_>, out: &mut BTreeSet<Edge>) {
     let Some(graph) = &sources.test_graph else {
         return;

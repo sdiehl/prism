@@ -99,9 +99,8 @@ pub fn verify(graph: &LineageGraph, base_dir: &Path) -> Result<VerifyReport, Err
 
 /// What a structural world-timeline check confirmed: a well-formed graph.
 ///
-/// A world timeline is not re-derived (that would re-run the wasm); its ids are
-/// self-certifying content hashes, so verification is the graph invariants plus the
-/// stated node counts, not a recompute.
+/// Verification checks graph invariants and node counts. Re-deriving the timeline
+/// would re-run wasm, while its ids are already self-certifying content hashes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorldVerifyReport {
     pub laws: usize,

@@ -21,7 +21,7 @@ use super::verify::{substitute_core_type, substitute_sig};
 use super::{
     instantiate_fn, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, TypedBinder, TypedComp,
     TypedCompKind, TypedCore, TypedCoreFn, TypedHandleOp, TypedHandler, TypedPattern, TypedValue,
-    TypedValueKind,
+    TypedValueKind, UncheckedTypedCore,
 };
 
 /// Rewrite counts for typed dictionary specialization.
@@ -47,14 +47,14 @@ impl SpecializeStats {
 /// whose erasure would change the compatibility tree.
 pub fn specialize<P>(
     core: TypedCore<P>,
-) -> Result<(TypedCore<P>, SpecializeStats), TypedCoreSpecializationFailure> {
+) -> Result<(UncheckedTypedCore<P>, SpecializeStats), TypedCoreSpecializationFailure> {
     let builders = builders(&core);
     let constrained = constrained(&core);
     if builders.is_empty() || constrained.is_empty() {
-        return Ok((core, SpecializeStats::default()));
+        return Ok((core.into_unchecked(), SpecializeStats::default()));
     }
-    let bodies = core
-        .fns
+    let source_functions = core.into_unchecked().into_functions();
+    let bodies = source_functions
         .iter()
         .map(|function| (function.name, function.clone()))
         .collect();
@@ -70,8 +70,7 @@ pub fn specialize<P>(
         failure: None,
     };
     let empty = BTreeMap::new();
-    let mut functions: Vec<_> = core
-        .fns
+    let mut functions: Vec<_> = source_functions
         .iter()
         .map(|function| pass.function(function, &empty))
         .collect();
@@ -87,7 +86,10 @@ pub fn specialize<P>(
         .iter()
         .map(|function| dce.function(function, &()))
         .collect();
-    Ok((TypedCore::new(functions), SpecializeStats { ticks }))
+    Ok((
+        UncheckedTypedCore::new(functions),
+        SpecializeStats { ticks },
+    ))
 }
 
 #[derive(Clone)]
@@ -96,7 +98,7 @@ struct Builder {
 }
 
 fn builders<P>(core: &TypedCore<P>) -> BTreeMap<Sym, Builder> {
-    core.fns
+    core.functions()
         .iter()
         .filter(|function| function.params.is_empty())
         .filter_map(|function| match &function.body.kind {
@@ -115,7 +117,7 @@ fn builders<P>(core: &TypedCore<P>) -> BTreeMap<Sym, Builder> {
 }
 
 fn constrained<P>(core: &TypedCore<P>) -> BTreeMap<Sym, usize> {
-    core.fns
+    core.functions()
         .iter()
         .filter(|function| function.dict_arity > 0)
         .map(|function| (function.name, function.dict_arity))
@@ -1761,14 +1763,12 @@ mod tests {
         functions: Vec<TypedCoreFn>,
         env: &VerifyEnv,
     ) -> (TypedCore<Elaborated>, u64) {
-        let input = TypedCore::new(functions);
-        if let Err(violations) = verify(&input, env) {
-            panic!("input fixture is invalid: {violations:#?}");
-        }
+        let input = verify(UncheckedTypedCore::<Elaborated>::new(functions), env)
+            .unwrap_or_else(|violations| panic!("input fixture is invalid: {violations:#?}"));
         let (actual, stats) = specialize(input).expect("typed specialization");
-        if let Err(violations) = verify(&actual, env) {
-            panic!("specialized typed Core is invalid: {violations:#?}");
-        }
+        let actual = verify(actual, env).unwrap_or_else(|violations| {
+            panic!("specialized typed Core is invalid: {violations:#?}")
+        });
         (actual, stats.ticks())
     }
 

@@ -167,18 +167,6 @@ pub fn lint_hir(hir: &CheckedHir<'_>) -> Vec<HirViolation> {
             }
         }
     }
-    // The REPL override table carries a re-inferred expression's own evidence
-    // against fresh NodeIds; judge it by the same dictionary rules. Match the
-    // private field directly (the lint is a child module of `hir`).
-    if let Some(table) = &hir.evidence_override {
-        for (i, fact) in table.iter().enumerate() {
-            if let Some(dicts) = fact {
-                for d in dicts {
-                    check_dict(hir.checked, i, d, &mut out);
-                }
-            }
-        }
-    }
     // Handler residual family: the marker and fact tables must agree exactly,
     // and both operation lists are canonical, duplicate-free names from the
     // checked effect environment. The forwarded body uses are necessarily a

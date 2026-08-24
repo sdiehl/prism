@@ -1,8 +1,8 @@
 /* Memory core: allocation, tagged immediates, Perceus reference counting, FBIP
  * reuse, local mutable refs, the `with_arena` region policy, and the runtime
  * instrumentation counters. */
-#include "prism_arena.h"
 #include "prism_mem.h"
+#include "prism_arena.h"
 
 /* Live-cell balance, the box-1 acceptance oracle: every prism_alloc bumps it,
  * every freed cell drops it. With PRISM_CHECK_LEAKS set, a destructor prints the
@@ -28,9 +28,18 @@ __attribute__((destructor)) static void prism_leak_report(void) {
  * parity-checked channel) untouched, so counted runs stay byte-identical. */
 static long prism_alloc_total = 0;
 
+/* Companion byte total. Cells are not one size: a string holds its bytes inline,
+ * so one cell can be three words or three megabytes, and the count above reads
+ * the same either way. A pass that stops copying a payload and starts sharing it
+ * is therefore invisible in cells and plain in bytes. Counts what the cell
+ * allocator hands out, header included; a region's cells are carved from the
+ * region's own allocation and are not counted here. */
+static long prism_alloc_bytes = 0;
+
 __attribute__((destructor)) static void prism_alloc_report(void) {
     if (getenv("PRISM_ALLOC_STATS")) {
         fprintf(stderr, "prism: %ld cells allocated\n", prism_alloc_total);
+        fprintf(stderr, "prism: %ld cell bytes allocated\n", prism_alloc_bytes);
     }
 }
 
@@ -39,7 +48,7 @@ __attribute__((destructor)) static void prism_alloc_report(void) {
  * subsequent field stores would write out of bounds. Reject a negative count (a
  * corrupt length) and any add/mul overflow, aborting rather than handing back an
  * undersized cell. */
-size_t prism_cell_bytes(long n_words) {
+static size_t prism_cell_bytes(long n_words) {
     size_t words, bytes;
     if (n_words < 0) abort();
     if (__builtin_add_overflow((size_t)PRISM_HDR_WORDS, (size_t)n_words, &words)) abort();
@@ -47,9 +56,21 @@ size_t prism_cell_bytes(long n_words) {
     return bytes;
 }
 
-void *prism_alloc(long n_words) {
-    long *p = malloc(prism_cell_bytes(n_words));
+/* The one malloc for a cell: checked sizing, a hard failure on exhaustion, and
+ * the byte total. Every allocator that builds a cell of its own (strings, string
+ * windows, bignums) goes through it rather than sizing a malloc itself, so the
+ * overflow guard and the counter each have one home, the way the live-cell
+ * balance does. The caller writes the header, which differs per family. */
+void *prism_cell_malloc(long n_words) {
+    size_t bytes = prism_cell_bytes(n_words);
+    void *p = malloc(bytes);
     if (!p) abort();
+    prism_alloc_bytes += (long)bytes;
+    return p;
+}
+
+void *prism_alloc(long n_words) {
+    long *p = prism_cell_malloc(n_words);
     p[PRISM_RC_W] = 1;
     p[PRISM_TAG_W] = 0;
     p[PRISM_ARITY_W] = n_words;
@@ -109,8 +130,7 @@ long prism_bump(long n_words) {
     PrismRegion *r = prism_region_top;
     if (!r) return (long)prism_alloc(n_words);
     /* link word + { rc, tag, arity, fields } */
-    size_t bytes = prism_ckd_words_bytes(
-        prism_ckd_ladd(1 + PRISM_HDR_WORDS, n_words));
+    size_t bytes = prism_ckd_words_bytes(prism_ckd_ladd(1 + PRISM_HDR_WORDS, n_words));
     long *w = prism_arena_alloc(r->arena, bytes);
     if (!w) abort();
     w[0] = (long)r->cells;
@@ -143,12 +163,38 @@ static int prism_cell_has_children(const long *p) {
     return !prism_tag_has_payload(p[PRISM_TAG_W]);
 }
 
+/* Promotion counters, the escape-cost oracle for `with_arena`. What escaping a
+ * region costs is invisible to every other gate: output parity, the leak
+ * balance, and the region ratchets above all stay green whether the walk copies
+ * a shared sub-DAG once or once per path that reaches it, because both produce
+ * the identical value and neither leaks. These four separate them. `copied` is
+ * region cells turned into refcounted ones, `shared` is edges that reused a copy
+ * instead of making a second one (so a positive count is direct evidence that
+ * region sharing survived promotion), and `nodes`/`edges` are the walk's own
+ * size, which is what goes exponential when sharing is not preserved. stderr
+ * keeps stdout (the parity-checked channel) untouched, so counted runs stay
+ * byte-identical. */
+static long prism_promote_copied = 0;
+static long prism_promote_shared = 0;
+static long prism_promote_nodes = 0;
+static long prism_promote_edges = 0;
+
+__attribute__((destructor)) static void prism_promote_report(void) {
+    if (getenv("PRISM_PROMOTE_STATS")) {
+        fprintf(stderr, "prism: %ld cells promoted\n", prism_promote_copied);
+        fprintf(stderr, "prism: %ld promotion copies shared\n", prism_promote_shared);
+        fprintf(stderr, "prism: %ld promotion nodes visited\n", prism_promote_nodes);
+        fprintf(stderr, "prism: %ld promotion edges visited\n", prism_promote_edges);
+    }
+}
+
 /* A fresh refcounted copy of an arena cell's header (fields filled by the
  * promotion walk). Only constructor/tuple cells are ever arena-allocated, so
  * arity is always a genuine field count here. */
 static long *prism_promote_shell(const long *p) {
     long *q = prism_alloc(p[PRISM_ARITY_W]);
     q[PRISM_TAG_W] = p[PRISM_TAG_W];
+    prism_promote_copied++;
     return q;
 }
 
@@ -167,8 +213,15 @@ typedef struct {
  * original when nothing was arena-owned at the root). Iterative with an
  * explicit worklist, like prism_rc_dec, so escaping structures of any depth
  * promote in bounded C stack. Values are acyclic (data is immutable and refs
- * cannot capture themselves), so the walk terminates; shared arena cells are
- * duplicated per path, which preserves the value and is unobservable. */
+ * cannot capture themselves), so the walk terminates. A shared arena cell is
+ * copied once and the copy shared, via the PRISM_ARENA_FORWARDED mark; sharing
+ * in the region is therefore preserved in the promoted result rather than
+ * expanded into a tree.
+ *
+ * An ordinary cell reached by more than one path is still descended into once
+ * per path. That is wasted time on a shared spine but never wasted memory: the
+ * descent only rewrites arena-valued fields in place, and after the first visit
+ * there are none left to rewrite. */
 static long prism_promote(long v) {
     if ((v & 1) || !v) return v;
     long *root = (long *)v;
@@ -177,6 +230,8 @@ static long prism_promote(long v) {
     long out;
     if (root[PRISM_RC_W] & PRISM_ARENA_OWNED) {
         long *q = prism_promote_shell(root);
+        root[PRISM_RC_W] |= PRISM_ARENA_FORWARDED;
+        root[PRISM_TAG_W] = (long)q;
         out = (long)q;
         stack = malloc(sizeof *stack);
         if (!stack) abort();
@@ -196,20 +251,34 @@ static long prism_promote(long v) {
         PrismPromoteFrame *f = &stack[sp - 1];
         if (f->i >= f->src[PRISM_ARITY_W]) {
             sp--;
+            prism_promote_nodes++; /* every pushed frame is popped exactly once */
             continue;
         }
         long idx = f->i;
         f->i++;
+        prism_promote_edges++;
         long c = f->src[PRISM_HDR_WORDS + idx];
         if ((c & 1) || !c) {
             if (f->dst) f->dst[PRISM_HDR_WORDS + idx] = c;
             continue;
         }
         long *cp = (long *)c;
+        long *slot = (f->dst ? f->dst : f->src) + PRISM_HDR_WORDS + idx;
         PrismPromoteFrame next;
         if (cp[PRISM_RC_W] & PRISM_ARENA_OWNED) {
+            if (cp[PRISM_RC_W] & PRISM_ARENA_FORWARDED) {
+                /* Already copied on another path: share the one copy and take a
+                 * reference for this edge, rather than copying it again. */
+                long q = cp[PRISM_TAG_W];
+                prism_rc_inc(q);
+                *slot = q;
+                prism_promote_shared++;
+                continue;
+            }
             long *q = prism_promote_shell(cp);
-            (f->dst ? f->dst : f->src)[PRISM_HDR_WORDS + idx] = (long)q;
+            cp[PRISM_RC_W] |= PRISM_ARENA_FORWARDED;
+            cp[PRISM_TAG_W] = (long)q;
+            *slot = (long)q;
             next = (PrismPromoteFrame){cp, q, 0};
         } else {
             if (f->dst) {
@@ -315,16 +384,45 @@ long prism_unbox(long p) {
     return ((long *)p)[PRISM_HDR_WORDS];
 }
 
+/* Reference-count traffic counters: every prism_rc_inc/prism_rc_dec entry
+ * bumps a total, including calls that return without touching a count
+ * (immediates, inert cells). Borrow discipline removes the threaded call
+ * itself, so entry counting measures threading, not just count mutation; the
+ * freeing walk's inline child decrements are program-independent bookkeeping
+ * and stay uncounted. A second pair counts only entries that reach a live
+ * cell's count word: those are the operations with a memory cost, and the pair
+ * a borrowed read is supposed to make vanish. With PRISM_RC_STATS set a
+ * destructor reports all four to stderr (stdout, the parity-checked channel,
+ * stays byte-identical). */
+static long prism_rc_incs = 0;
+static long prism_rc_decs = 0;
+static long prism_rc_cell_incs = 0;
+static long prism_rc_cell_decs = 0;
+
+/* One counter per line, `prism: N <suffix>` shaped, so the perf-gate stderr
+ * parser can pick each out by its distinct suffix. */
+__attribute__((destructor)) static void prism_rc_report(void) {
+    if (getenv("PRISM_RC_STATS")) {
+        fprintf(stderr, "prism: %ld rc increments\n", prism_rc_incs);
+        fprintf(stderr, "prism: %ld rc increments on cells\n", prism_rc_cell_incs);
+        fprintf(stderr, "prism: %ld rc decrements\n", prism_rc_decs);
+        fprintf(stderr, "prism: %ld rc decrements on cells\n", prism_rc_cell_decs);
+    }
+}
+
 /* inc/dec take the raw i64 value, not a pointer: immediates (low bit set) and
  * unit (zero) are skipped without a dereference, so dup/drop stay no-ops on
  * non-cell values under polymorphism. dec frees a cell's children before the
  * cell; a string cell holds inline bytes rather than child cells, so its tag
  * short-circuits the traversal. */
 void prism_rc_inc(long v) {
+    prism_rc_incs++;
     if ((v & 1) || !v) return;
     long *p = (long *)v;
-    /* An arena-owned cell's sole owner is its region: inert. */
-    if (p[PRISM_RC_W] & PRISM_ARENA_OWNED) return;
+    /* An arena cell's sole owner is its region and a static cell is the
+     * image's: both inert, and a static rc word may not even be writable. */
+    if (p[PRISM_RC_W] & PRISM_RC_INERT) return;
+    prism_rc_cell_incs++;
     p[PRISM_RC_W]++;
 }
 
@@ -333,10 +431,13 @@ void prism_rc_inc(long v) {
  * list, so arbitrarily deep structures drop in O(1) extra space with no
  * allocation instead of recursing once per child on the C stack. */
 void prism_rc_dec(long v) {
+    prism_rc_decs++;
     if ((v & 1) || !v) return;
     long *p = (long *)v;
-    /* Arena-owned: the region reclaims it wholesale, never this collector. */
-    if (p[PRISM_RC_W] & PRISM_ARENA_OWNED) return;
+    /* Arena-owned cells the region reclaims wholesale; static cells nothing
+     * ever reclaims. Neither has a count to decrement. */
+    if (p[PRISM_RC_W] & PRISM_RC_INERT) return;
+    prism_rc_cell_decs++;
     if (--p[PRISM_RC_W] != 0) return;
     while (p) {
         long *next = (long *)p[PRISM_RC_W];
@@ -346,11 +447,12 @@ void prism_rc_dec(long v) {
                 long c = p[PRISM_HDR_WORDS + i];
                 if ((c & 1) || !c) continue;
                 long *cp = (long *)c;
-                /* An arena-owned child is the region's, not this cell's, so the
-                 * cascade must neither decrement nor free it. Only live children
-                 * are inspected here, so the rc word read is always a genuine
-                 * count (never a worklist link). */
-                if (cp[PRISM_RC_W] & PRISM_ARENA_OWNED) continue;
+                /* An arena-owned child is the region's and a static child is
+                 * the image's, not this cell's, so the cascade must neither
+                 * decrement nor free either. Only live children are inspected
+                 * here, so the rc word read is always a genuine count (never a
+                 * worklist link). */
+                if (cp[PRISM_RC_W] & PRISM_RC_INERT) continue;
                 if (--cp[PRISM_RC_W] == 0) {
                     cp[PRISM_RC_W] = (long)next;
                     next = cp;
@@ -459,10 +561,11 @@ void prism_drive_step(void) {
 long prism_reuse_token(long v) {
     if ((v & 1) || !v) return 0;
     long *p = (long *)v;
-    /* An arena-owned cell is never uniquely owned by the dropping frame (the
-     * region owns it), so it can never become a reuse shell; its rc word must
-     * also stay untouched. Constructing over it falls back to fresh allocation. */
-    if (p[PRISM_RC_W] & PRISM_ARENA_OWNED) return 0;
+    /* An arena-owned or static cell is never uniquely owned by the dropping
+     * frame (the region or the image owns it), so it can never become a reuse
+     * shell; its rc word must also stay untouched. Constructing over it falls
+     * back to fresh allocation. */
+    if (p[PRISM_RC_W] & PRISM_RC_INERT) return 0;
     /* An inline-payload cell has no fields to release and its arity is a payload
      * measure, not a capacity the reuse path may build over. */
     if (!prism_cell_has_children(p)) return 0;

@@ -53,6 +53,9 @@ pub let fd_l0107 : String = "L0107"
 -- | The magic-literal rule code.
 pub let fd_l0108 : String = "L0108"
 
+-- | The codepoint-scan rule code.
+pub let fd_l0109 : String = "L0109"
+
 -- | The prelude-or-stdlib-name-capture rule code.
 pub let fd_l0201 : String = "L0201"
 
@@ -77,6 +80,7 @@ pub fn fd_rules() : List((String, String)) =
       (fd_l0106, "glob import outside a vocabulary module"),
       (fd_l0107, "unused import"),
       (fd_l0108, "magic literal"),
+      (fd_l0109, "codepoint scan"),
       (fd_l0201, "prelude or stdlib name capture"),
       (fd_l0202, "missing doc comment"),
       (fd_l0203, "underived basics"),

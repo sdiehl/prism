@@ -21,6 +21,7 @@ pub mod abi;
 pub mod analysis;
 pub mod arena;
 mod checks;
+mod convention;
 pub mod decline;
 pub mod diagnostics;
 mod erase_control;
@@ -52,10 +53,11 @@ use prism_syntax::names::ENTRY_POINT;
 
 use super::inline::calls_in;
 use super::specialize_support::{free_comp_vars, Rewrite};
-use super::verify::{instantiate_fn, union_rows, verify, VerifyEnv};
+use super::verify::{instantiate_fn, union_rows, VerifyEnv};
 use super::{
-    CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, EffectLowered, Elaborated, TypedBinder,
-    TypedComp, TypedCompKind, TypedCore, TypedCoreFn, TypedPattern, TypedValue, TypedValueKind,
+    verify, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, EffectLowered, Elaborated,
+    TypedBinder, TypedComp, TypedCompKind, TypedCore, TypedCoreFn, TypedPattern, TypedValue,
+    TypedValueKind, UncheckedTypedCore,
 };
 use decline::Decline;
 use diagnostics::DriftLog;
@@ -86,8 +88,8 @@ type Attempt = Result<Decision, Decline>;
 
 /// What the cascade decided.
 ///
-/// The cascade is the single source of truth for both classification and the
-/// lowering it selects, so a second classifier cannot drift from production.
+/// The cascade performs classification and selects the lowering, avoiding a
+/// second classifier that could drift from production.
 #[derive(Debug)]
 pub enum Decision {
     Lowered(Box<TypedLowering>),
@@ -161,14 +163,14 @@ pub fn prepare(
 ) -> Result<Prepared, TypedCoreEffectLoweringFailure> {
     // Dead prelude code must not flip the program into monadic mode, so only
     // functions reachable from main are lowered (and kept) at all.
-    let fns: Vec<TypedCoreFn> = if core.fns.iter().any(|f| f.name().as_str() == ENTRY_POINT) {
-        let live = reachable(&core.fns);
-        core.fns
-            .into_iter()
+    let fns = core.into_unchecked().into_functions();
+    let fns: Vec<TypedCoreFn> = if fns.iter().any(|f| f.name().as_str() == ENTRY_POINT) {
+        let live = reachable(&fns);
+        fns.into_iter()
             .filter(|f| live.contains(&f.name()))
             .collect()
     } else {
-        core.fns
+        fns
     };
 
     // Scope-directed arena lowering, before the tier branch so every tier reifies
@@ -181,7 +183,10 @@ pub fn prepare(
     // `with_arena` is present, so the non-arena corpus stays byte-identical.
     let mut env = env.clone();
     arena::insert_builtin_sigs(&mut env);
-    let fns = arena::prepare(fns, &env)?.fns;
+    let arena = arena::prepare(fns, &env)?;
+    let fns = convention::split(arena, &env)?
+        .into_unchecked()
+        .into_functions();
 
     // Erase escape-checked local `var` state to mutable cells before strategy
     // selection, so a var-only program has no residual effects and classifies
@@ -270,14 +275,23 @@ pub fn threaded_state_typed(
         return Ok(None);
     }
     let mut fresh = prism_common::fresh::Fresh::new();
-    Ok(state::thread_program(
+    let Some(fns) = state::thread_program(
         &prepared.fns,
         &plan,
         &analysis,
         &DriftLog::new(flags.quiet),
         &mut fresh,
-    )
-    .map(|fns| (TypedCore::<EffectLowered>::new(fns), env)))
+    ) else {
+        return Ok(None);
+    };
+    verify(UncheckedTypedCore::<EffectLowered>::new(fns), &env)
+        .map(|core| Some((core, env)))
+        .map_err(|violations| TypedCoreEffectLoweringFailure::Verification {
+            first: violations
+                .first()
+                .map_or_else(String::new, ToString::to_string),
+            count: violations.len(),
+        })
 }
 
 fn cascade(
@@ -612,7 +626,9 @@ pub fn assemble_local_partial(
         .map_err(|msg| TypedCoreEffectLoweringFailure::Internal { msg })?;
     let region_functions =
         monadic::lower_region(fns, split.region, split.entries, analysis.ops, fresh, &rows)
-            .map_err(|msg| TypedCoreEffectLoweringFailure::Internal { msg })?;
+            .map_err(|decline| TypedCoreEffectLoweringFailure::Internal {
+                msg: decline.to_string(),
+            })?;
     let entry_signatures: BTreeMap<Sym, CoreFnSig> = region_functions
         .iter()
         .filter(|function| split.entries.contains(&function.name()))
@@ -735,7 +751,6 @@ fn attempt_monadic(
         ),
         analysis::MonadicScope::WholeProgram => {
             monadic::lower_whole(fns, analysis.ops, fresh, &residual)
-                .ok_or_else(|| Decline::program(decline::Refusal::UnsupportedForm))
         }
     };
     let mut output = match output {
@@ -903,15 +918,14 @@ fn lowered(
     strategy: EffectStrategy,
     confined_decline: Option<Decline>,
 ) -> Result<Decision, TypedCoreEffectLoweringFailure> {
-    let out = TypedCore::<EffectLowered>::new(fns);
-    if let Err(violations) = verify(&out, env) {
-        return Err(TypedCoreEffectLoweringFailure::Verification {
+    let out = verify(UncheckedTypedCore::<EffectLowered>::new(fns), env).map_err(|violations| {
+        TypedCoreEffectLoweringFailure::Verification {
             first: violations
                 .first()
                 .map_or_else(String::new, ToString::to_string),
             count: violations.len(),
-        });
-    }
+        }
+    })?;
     Ok(Decision::Lowered(Box::new(TypedLowering {
         core: out,
         env: env.clone(),

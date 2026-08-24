@@ -44,7 +44,7 @@
 -- the numbers are the specification.
 -- lint: allow-file(L0108)
 
-import Wire (bytes_at, bytes_buf, bytes_of_buf, wire_cat, wire_empty, wire_len)
+import Wire (bytes_at, bytes_buf, bytes_of_buf, bytes_window, wire_cat, wire_empty, wire_len)
 -- Re-export the `Bytes` type (and its empty/concat/length vocabulary) so a caller
 -- who imports `Data.Bytes` can name the type and thread values without also
 -- reaching into `Wire`; the concrete representation stays owned by `Wire`.
@@ -84,9 +84,10 @@ let b64_alphabet : String =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 -- The representation seam lives in `Wire` (the `Bytes` home): `bytes_of_buf` wraps
--- a buffer, `bytes_buf` recovers one, `bytes_at` reads a byte from the cursor.
--- This module threads `Bytes` only through those functions, never the constructor
--- directly, so it composes with `Wire` the way every other consumer does.
+-- a buffer, `bytes_buf` recovers one, `bytes_at` reads a byte from the cursor, and
+-- `bytes_window` narrows the window without copying. This module threads `Bytes`
+-- only through those functions, never the constructor directly, so it composes
+-- with `Wire` the way every other consumer does.
 
 -- | The number of bytes in a `Bytes`.
 --
@@ -124,9 +125,10 @@ pub let bytes_empty : Bytes = wire_empty
 pub fn bytes_push(bs : Bytes, byte : Int) : Bytes =
   bytes_of_buf(buf_push(bytes_buf(bs), byte))
 
--- | The `len` bytes starting at `start` (0-based), as a fresh `Bytes`. `start`
--- and `len` are clamped to the bounds, so an over-long or out-of-range window
--- yields the in-range remainder rather than trapping.
+-- | The `len` bytes starting at `start` (0-based), as a window into the same
+-- bytes: cursor arithmetic over the shared buffer, no copy. `start` and `len`
+-- are clamped to the bounds, so an over-long or out-of-range window yields the
+-- in-range remainder rather than trapping.
 --
 -- ```prism
 -- bytes_to_string(bytes_slice(string_to_bytes("hello"), 1, 3))
@@ -135,7 +137,7 @@ pub fn bytes_push(bs : Bytes, byte : Int) : Bytes =
 -- Some(ell)
 -- ```
 pub fn bytes_slice(bs : Bytes, start : Int, len : Int) : Bytes =
-  bytes_of_buf(buf_slice(bytes_buf(bs), start, len))
+  bytes_window(bs, start, len)
 
 -- | Concatenate two byte strings.
 --

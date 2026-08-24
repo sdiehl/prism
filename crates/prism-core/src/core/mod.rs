@@ -18,6 +18,7 @@ pub mod simd;
 pub mod tailrec;
 pub mod traverse;
 pub mod typed;
+pub mod work;
 
 pub use cbpv::{
     reachable_fns, CheckedHandler, Comp, Core, CoreFn, CoreOp, CorePat, ElaboratedCore, HandleOp,
@@ -44,10 +45,10 @@ pub use opt::{
 pub use pretty::{pp_comp, pp_core, pp_core_pretty, pp_value};
 pub use shape::{class_digests, contract_digest, instance_digest, shape_digests};
 pub use typed::{
-    verify as verify_typed_core, CompSig, ConstructorSig, CoreFnSig, CoreInstantiation,
-    CoreQuantifier, CoreType, CoreViolation, EffectLowered as TypedEffectLowered,
-    Elaborated as TypedElaborated, OperationSig, Owned as TypedOwned,
-    ReuseLowered as TypedReuseLowered, TypedBinder, TypedComp, TypedCompKind, TypedCore,
-    TypedCoreFn, TypedCorePhase, TypedForward, TypedHandleOp, TypedHandler, TypedPattern,
-    TypedValue, TypedValueKind, VerifyEnv,
+    audit as audit_typed_core, verify as verify_typed_core, CompSig, ConstructorSig, CoreFnSig,
+    CoreInstantiation, CoreQuantifier, CoreType, CoreViolation,
+    EffectLowered as TypedEffectLowered, Elaborated as TypedElaborated, OperationSig,
+    Owned as TypedOwned, ReuseLowered as TypedReuseLowered, TypedBinder, TypedComp, TypedCompKind,
+    TypedCore, TypedCoreFn, TypedCorePhase, TypedForward, TypedHandleOp, TypedHandler,
+    TypedPattern, TypedValue, TypedValueKind, UncheckedTypedCore, VerifyEnv,
 };

@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.20.0
+
+- Representations: one layout query decides storage, ABI, zero words, and ownership for every consumer.
+- Compiler contracts: phase doors, inference solves, and prompt facts now fail closed.
+- Typed Core: construction, verification, and reference-count insertion gained stages and named failures.
+- Reference counting: borrowed parameters lower as true loans, so read-only traversals retain nothing.
+- Memory: fixed two leaks, a shadowed match arm binder and a range expression in the syntax encoder.
+- Strings and bytes: slicing is now a constant-time window rather than a copy.
+- Strings: literals are static cells, allocated once and shared by every mention.
+- Performance: layout and parse throughput improved, the adversarially nested case tenfold.
+- Lint: a new rule catches the recursive codepoint scan that turns traversals quadratic.
+- Effect tiers: shapes that used to fall to the free monad now hold the evidence tier.
+- Effect rows: callbacks stored in data keep exact witnesses, and pure ones stay direct.
+- Effect rows: an element row with no local witness compiles by subsumption with a warning.
+- Effect lowering: a refused rewrite names the declaration and the form it stopped at.
+- Handlers: one without a return arm now answers with its body's type, not an over-general scheme.
+- Arenas: promotion preserves shared structure instead of copying it exponentially.
+- Records: sum variants may reuse field names at different types.
+- Records: partial sum reads and constructor spreads now fail during checking.
+- Patterns: record arms can use `C { .. }` to ignore every field.
+- Checker bootstrap: the Prism shadow now covers effect rows, parameterized effects, and generalization.
+- Self-hosted parser: the whole corpus now parses to identical trees, with no known divergences.
+- Parser handover: froze the oracle terms and recorded a receipt for the shadow's corpus run.
+- Tier accountability: a gate diffs every lowering rung against the interpreter, corpus and fuzzed.
+- Code index: hover facts no longer perturb definition identity.
+- Store: every layer is sharded and bounds itself by entry count and bytes.
+- Store: collection reports what it reclaimed, and a runaway layer is retired wholesale.
+
 ## 0.19.0
 
 - Lint: added `prism lint`, twelve Prism-written house rules with coded suppressions, JSON output, and an advisory mode.
@@ -320,7 +348,7 @@
 - Instance coherence: each `(class, type-head)` has one canonical instance that implicit resolution always selects, so ambiguity-at-use is gone. A lone instance is canonical by default; when several share a head one is named with a top-level `canonical Class(Head) = name`, and two undesignated instances are a coherence error at definition (caret plus designation hint). `f(args, using name)` stays the visible override, and a `newtype` is the way to a different default. No Core, runtime, or backend change, so the parity oracle is byte-identical. `canonical` is reserved.
 - A right-associative power operator `^` (tighter than `*`), the method of a new `Pow` class: `2 ^ 10` is bignum-correct `Int`, `2.0 ^ 10.0` is `Float`, mixed `Int ^ Float` a type error. The prior integer `pow` is now `int_pow`.
 - Imperative loops (`while`/`loop`) lower to a tail-recursive prelude driver (constant stack, no per-iteration allocation), an unconditional `loop` to the bottom-typed `forever`. `break`/`continue`/`return` compile to non-resumable performs of internal, fully-handled effects, so none surfaces in a function's row, and a loop installs a handler only for the keyword it uses. The prelude's old `while` is now `repeat_while`.
-- Principal effect-row inference: a lambda delimits its effects onto its own arrow row, the arrow is covariant in that row (a pure function fits any effectful context via row subsumption), and the call-graph set pass is dropped as a row seed so the inferred row is the single source of truth. Builtins carry their effect row on the type, so inference attributes `IO`/`Exn`/`Fail` directly; rows display in canonical name-sorted order; and definitions are inferred in dependency-SCC order so a forward reference sees a generalized type.
+- Principal effect-row inference: a lambda delimits its effects onto its own arrow row, the arrow is covariant in that row (a pure function fits any effectful context via row subsumption), and the call-graph set pass is dropped as a row seed so the inferred row alone determines the effect set. Builtins carry their effect row on the type, so inference attributes `IO`/`Exn`/`Fail` directly; rows display in canonical name-sorted order; and definitions are inferred in dependency-SCC order so a forward reference sees a generalized type.
 - `mask` over the sole handler of an effect now leaves the operation genuinely unhandled (the label stays in the row) instead of inferring it pure and hitting an effect-reconciliation ICE at lowering.
 - Two source warnings (the prelude is exempt): an unused local binding and a name shadowing one in scope (a leading `_` and a consuming rebind `let s = f(s)` are exempt). Annotations are name-checked uniformly across parameters, returns, constraints, and rows: an undeclared effect or constructor is a hard error, and an annotation broader than the inferred row warns.
 - Standard library split into on-demand modules under `lib/std` (`Data.Char`/`List`/`Map`/`Maybe`/`Result`/`Set`/`String`), shrinking the always-loaded prelude; `Set` gains `set_union`/`set_intersection`/`set_difference`, and a project may replace the built-in prelude via `[package] prelude` in `prism.toml`.

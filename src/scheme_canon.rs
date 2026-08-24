@@ -1,38 +1,22 @@
-//! The canonical-scheme contract: one versioned spelling for "these two
-//! checkers agree on this declaration's type".
+//! Versioned canonical spelling used to compare checker output.
 //!
-//! The bootstrap workbench compares the authoritative Rust checker against the
-//! self-hosted shadow checker declaration by declaration. Each side prints a
-//! scheme; agreement is string equality. That only means anything if both sides
-//! print the *same function* of the type, so the function is pinned here as a
-//! named, versioned contract rather than an ad-hoc convention:
+//! Rust and the self-hosted checker compare schemes as strings under this
+//! contract:
 //!
-//! - The input is the Rust checker's stable type spelling (the `tc-facts`
-//!   `scheme` field).
-//! - The only transformation is alpha-normalization of the binders introduced
-//!   by a single leading `forall`: the i-th binder becomes `$i`, in both the
-//!   binder list and the body. Occurrences are matched at identifier-token
-//!   boundaries (maximal runs of ASCII alphanumerics and `_`), so `a` never
-//!   rewrites part of `Maybe` or `a1`. Every other byte of the spelling is
-//!   preserved.
+//! - Input is the stable `tc-facts` scheme spelling.
+//! - A single leading `forall` is alpha-normalized by renaming its binders to
+//!   `$0`, `$1`, and so on at identifier boundaries.
 //! - A spelling with no leading `forall` is already canonical.
 //!
-//! The shadow checker renders the same form structurally (`canon_scheme` in
-//! `packages/tc/src/Bootstrap.pr`), and the two implementations are held
-//! together by the version handshake in the bootstrap wire protocol and by the
-//! end-to-end parity fixture. Any change to either side's output is a new
-//! contract: bump [`SCHEME_CANON_CONTRACT`] and move both implementations in
-//! the same commit. Downstream artifacts that state expected schemes
-//! (structured refusals, pinned goal schemes) must speak this contract and
-//! carry its identifier, never a raw checker spelling.
+//! The bootstrap protocol and parity fixture pin both implementations. Changes
+//! require a [`SCHEME_CANON_CONTRACT`] bump in both checkers.
 
 use std::collections::HashMap;
 
 /// Version identifier for the canonical scheme spelling.
 ///
 /// Stamped into the bootstrap report and demanded of the shadow checker's
-/// protocol header, so a drifted normalization fails loudly instead of
-/// quietly changing what "agrees" means.
+/// protocol header, so a drifted normalization is rejected.
 pub const SCHEME_CANON_CONTRACT: &str = "prism-scheme-canon-v1";
 
 const FORALL_PREFIX: &str = "forall ";
@@ -104,6 +88,10 @@ mod tests {
                 "forall $0 $1. ($0) -> Unit ! {IO | $1}",
             ),
             (
+                "forall e a. ((a) -> a ! {Tick, e}, a) -> a ! {Tick, e}",
+                "forall $0 $1. (($1) -> $1 ! {Tick, $0}, $1) -> $1 ! {Tick, $0}",
+            ),
+            (
                 "forall a. (List(a), (a) -> Bool) -> List(a)",
                 "forall $0. (List($0), ($0) -> Bool) -> List($0)",
             ),
@@ -123,6 +111,7 @@ mod tests {
             "(Int) -> Bool",
             "forall a b. (a, Maybe(b)) -> a",
             "forall a e. (a) -> Unit ! {IO | e}",
+            "forall e a. ((a) -> a ! {Tick, e}, a) -> a ! {Tick, e}",
             "forall $0. ($0) -> $0",
         ];
         for spelling in spellings {

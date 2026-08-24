@@ -1,0 +1,90 @@
+# The gauntlet's cost ledger: one row per continuous-integration job, declaring
+# when it runs, how many cells it fans out to, the wall clock of its slowest
+# cell, and whether that fits the per-change budget.
+#
+# Columns, tab separated:
+#   workflow  job  arm  cells  slowest_cell_seconds  verdict
+#
+# `arm` is derived from the workflow's triggers, never asserted independently:
+# `per-change` runs on every pull request, `path-gated` runs on a pull request
+# only when named paths move, `post-merge` runs after a change lands,
+# `nightly` runs on a schedule, and `release` runs from a tag.
+#
+# `verdict` is `within` or `over-budget` for a per-change row and `unbudgeted`
+# for every other arm, since the budget bounds the latency a change pays.
+# `planned` names a lane that is declared before it is built: its workflow is
+# `-`, and no job by that name may exist yet.
+#
+# The budget is 2700 seconds of wall clock per cell. A change's latency is its
+# slowest cell, not the sum, so the cap is per cell. A row over the cap is
+# recorded over the cap rather than the cap being raised to cover it, and the
+# repair is named beside the row below.
+#
+# Timings are observed, not modeled, and each names the run it came from, so a
+# figure can be audited rather than believed. They are the last green run of
+# each workflow, read from the forge:
+#
+#   ci.yml        run 31940291956  2026-08-16  68a299af
+#   identity.yml  run 31940291812  2026-08-16  68a299af
+#   pages.yml     run 31940291864  2026-08-16  68a299af
+#   release.yml   run 31934782654  2026-08-16  9971e978
+#   install.yml   run 32004949257  2026-08-17  68a299af
+#
+# They are refreshed when the suite is reshaped, and a stale figure is a wrong
+# figure: the offline gate checks the ledger against the live workflows and
+# against its own budget, but it cannot see that a number aged. Refreshing them
+# is a reviewed edit, deliberately, since a number nobody looked at is the one
+# way this file can lie while passing.
+#
+# Declared before they are built, so that the arm is chosen while the choice is
+# still cheap rather than after the lane already runs somewhere:
+#
+#   shadow-parser-receipt - the source-written parser run against the corpus,
+#   its own sources, generated programs, fuzzed inputs, and hostile inputs, with
+#   one content-addressed comparison receipt. Nightly: it is a whole-corpus
+#   double compile, which is the shape that does not fit a per-change cap.
+#   Its receipt takes the built parser artifact's identity as a key input, not
+#   only the identity of the sources that built it: the same question asked of a
+#   different parser is a different question, and a key that cannot tell them
+#   apart answers the second with the first one's verdict.
+#
+#   stage-reproduction - the two further runs that reproduce syntax and Core
+#   identity from each stage. Nightly, for the same reason and against the same
+#   key.
+#
+# Recorded over the cap:
+#
+#   ci.yml test - 3040s. The four shards are partitioned by test-name hash and
+#   run 1380s, 1755s, 1485s, and 3040s, so one cell carries twice its share and
+#   alone sets the latency of every change. The repair is a balanced partition,
+#   not a move to the nightly arm: the whole-workspace suite is what a change is
+#   gated on, and a gauntlet that runs tomorrow does not gate today.
+
+ci.yml	checks	per-change	1	1010	within
+ci.yml	corpus-oracles	per-change	16	2451	within
+ci.yml	doc-links	per-change	1	6	within
+ci.yml	feature-matrix	per-change	4	111	within
+ci.yml	lean	per-change	1	2557	within
+ci.yml	lint	per-change	1	62	within
+ci.yml	mimalloc	per-change	1	275	within
+ci.yml	mlir	per-change	1	1242	within
+ci.yml	nix	per-change	1	45	within
+ci.yml	parity	per-change	4	294	within
+ci.yml	prismup	per-change	1	64	within
+ci.yml	readme-version	per-change	1	5	within
+ci.yml	sanitizers	per-change	1	2387	within
+ci.yml	scoreboard	per-change	1	6	within
+ci.yml	test	per-change	4	3040	over-budget
+ci.yml	test-complete	per-change	1	4	within
+ci.yml	web	per-change	1	171	within
+identity.yml	compare	post-merge	1	3	unbudgeted
+identity.yml	manifest	post-merge	3	339	unbudgeted
+install.yml	install	path-gated	3	43	unbudgeted
+pages.yml	build	post-merge	1	336	unbudgeted
+pages.yml	deploy	post-merge	1	13	unbudgeted
+release.yml	build	release	3	299	unbudgeted
+release.yml	docker	release	1	254	unbudgeted
+release.yml	gate	release	1	8	unbudgeted
+release.yml	publish	release	1	30	unbudgeted
+-	shadow-parser-receipt	nightly	0	0	planned
+-	stage-reproduction	nightly	0	0	planned

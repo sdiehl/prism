@@ -21,6 +21,7 @@
 //! only consumer, so it stays bespoke until a second one appears.
 
 use super::cbpv::{Comp, HandleOp, Value};
+use super::work;
 
 /// Whole-term rewrite threading an immutable context extended at binders.
 ///
@@ -41,6 +42,8 @@ pub trait Rewrite {
     }
 
     fn descend_comp(&mut self, c: &Comp, cx: &Self::Ctx) -> Comp {
+        let _frame = work::frame();
+        work::rebuild();
         match c {
             Comp::Return(v) => Comp::Return(self.value(v, cx)),
             Comp::Bind(a, x, b) => {
@@ -107,6 +110,8 @@ pub trait Rewrite {
     }
 
     fn descend_value(&mut self, v: &Value, cx: &Self::Ctx) -> Value {
+        let _frame = work::frame();
+        work::rebuild();
         match v {
             Value::Thunk(c) => Value::Thunk(Box::new(self.comp(c, cx))),
             Value::Ctor(n, t, fs) => {
@@ -157,6 +162,8 @@ pub trait Visit {
     }
 
     fn descend_comp(&mut self, c: &Comp) {
+        let _frame = work::frame();
+        work::visit();
         match c {
             Comp::Return(v)
             | Comp::Force(v)
@@ -225,6 +232,8 @@ pub trait Visit {
     }
 
     fn descend_value(&mut self, v: &Value) {
+        let _frame = work::frame();
+        work::visit();
         match v {
             Value::Thunk(c) => self.visit_comp(c),
             Value::UnboxedRecord(fs) => {

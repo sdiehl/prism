@@ -1,0 +1,7 @@
+-- A constructor spread extracts unchanged fields from that constructor. An
+-- unrefined sum base may hold another layout, so it must be rejected before Core.
+type Shape = Circle { radius: Int } | Square { side: Int }
+
+fn resize(shape : Shape) : Shape = Circle { ..shape, radius = 2 }
+
+fn main() = println(0)

@@ -4,7 +4,7 @@
 
 ASCII character classification.
 
-Operates on the byte/codepoint returned by `byte_at`/`char_at`. Base includes this module.
+Operates on the byte/codepoint returned by `byte_at`/`char_at`. Base includes this module. In a scanner, feed these from `byte_at`: `char_at` is counted in codepoints and walks the encoding on every call (see `Data.String`).
 
 ## Functions and Values
 

@@ -3,17 +3,6 @@
   "variant": "docs",
   "nodes": [
     {
-      "id": "blake3:0cf49598d25d1a11c45cd05a0f946db51c192fa49925512d3b95ed968bb92470",
-      "kind": "artifact",
-      "payload": {
-        "kind": "docs-page",
-        "path": "tc.md",
-        "digest_scheme": "blake3",
-        "digest": "0cf49598d25d1a11c45cd05a0f946db51c192fa49925512d3b95ed968bb92470",
-        "bytes": 11430
-      }
-    },
-    {
       "id": "blake3:41eb88713d9fb00f88b9ee56e789d8d1e92eefed249b799d180e092978605185",
       "kind": "artifact",
       "payload": {
@@ -36,6 +25,17 @@
       }
     },
     {
+      "id": "blake3:91ba19cbb51a8c0b48e5af633ea46940b6e8963938ad207b7e0e959e518e0c5a",
+      "kind": "artifact",
+      "payload": {
+        "kind": "docs-page",
+        "path": "tc.md",
+        "digest_scheme": "blake3",
+        "digest": "91ba19cbb51a8c0b48e5af633ea46940b6e8963938ad207b7e0e959e518e0c5a",
+        "bytes": 12623
+      }
+    },
+    {
       "id": "blake3:fdadbe4d13553e1e9c729304ac95212c716bfc22ea092465fc4b470fc672cd2b",
       "kind": "artifact",
       "payload": {
@@ -47,7 +47,7 @@
       }
     },
     {
-      "id": "prism-core-hash-v2:47ba5c0026d3903e5af056d51900f8d172356c8a5b65bd0b27d8dc9e1046f298",
+      "id": "prism-core-hash-v2:0bd60b233d72c0a1cebde41413699269c81e7e4a9764cb8d113627a1f74c3947",
       "kind": "stdlib-root",
       "payload": {
         "role": "stdlib",
@@ -55,11 +55,11 @@
         "origin": null,
         "artifact_kind": "embedded-stdlib",
         "scheme": "prism-core-hash-v2",
-        "root": "47ba5c0026d3903e5af056d51900f8d172356c8a5b65bd0b27d8dc9e1046f298"
+        "root": "0bd60b233d72c0a1cebde41413699269c81e7e4a9764cb8d113627a1f74c3947"
       }
     },
     {
-      "id": "prism-core-hash-v2:de554ebc64e1f1c86b73ec77fff41586a2096c9c152061054308403f528892e1",
+      "id": "prism-core-hash-v2:5a37f49fd7561cf4131519326c3d357aa7c84a08743dca2c7dc035e730829d47",
       "kind": "source-root",
       "payload": {
         "role": "source",
@@ -67,7 +67,7 @@
         "origin": null,
         "artifact_kind": "namespace",
         "scheme": "prism-core-hash-v2",
-        "root": "de554ebc64e1f1c86b73ec77fff41586a2096c9c152061054308403f528892e1"
+        "root": "5a37f49fd7561cf4131519326c3d357aa7c84a08743dca2c7dc035e730829d47"
       }
     },
     {
@@ -87,10 +87,10 @@
       }
     },
     {
-      "id": "sha256:d8d7f6fcec596e6568037663787d6d6f3701175b94e473d43e7b11c2e5ce8488",
+      "id": "sha256:b5640d08aa97f1e48327249c12f5eaec47c230d66fb87f02766417332e99844c",
       "kind": "compiler-identity",
       "payload": {
-        "fingerprint": "compiler=0.19.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=docs;source-root=prism-core-hash-v2:de554ebc64e1f1c86b73ec77fff41586a2096c9c152061054308403f528892e1;stdlib-root=prism-core-hash-v2:47ba5c0026d3903e5af056d51900f8d172356c8a5b65bd0b27d8dc9e1046f298;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;erasures=true;native-effects=true;trampoline=true;fuse=false;rt-checks=false;native-kont-frames=false;",
+        "fingerprint": "compiler=0.19.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=docs;source-root=prism-core-hash-v2:5a37f49fd7561cf4131519326c3d357aa7c84a08743dca2c7dc035e730829d47;stdlib-root=prism-core-hash-v2:0bd60b233d72c0a1cebde41413699269c81e7e4a9764cb8d113627a1f74c3947;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;erasures=true;native-effects=true;trampoline=true;fuse=false;rt-checks=false;native-kont-frames=false;",
         "rows": [
           {
             "key": "compiler",
@@ -110,11 +110,11 @@
           },
           {
             "key": "source-root",
-            "value": "prism-core-hash-v2:de554ebc64e1f1c86b73ec77fff41586a2096c9c152061054308403f528892e1"
+            "value": "prism-core-hash-v2:5a37f49fd7561cf4131519326c3d357aa7c84a08743dca2c7dc035e730829d47"
           },
           {
             "key": "stdlib-root",
-            "value": "prism-core-hash-v2:47ba5c0026d3903e5af056d51900f8d172356c8a5b65bd0b27d8dc9e1046f298"
+            "value": "prism-core-hash-v2:0bd60b233d72c0a1cebde41413699269c81e7e4a9764cb8d113627a1f74c3947"
           },
           {
             "key": "opt",
@@ -180,11 +180,6 @@
   "edges": [
     {
       "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
-      "to": "blake3:0cf49598d25d1a11c45cd05a0f946db51c192fa49925512d3b95ed968bb92470",
-      "kind": "produced"
-    },
-    {
-      "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
       "to": "blake3:41eb88713d9fb00f88b9ee56e789d8d1e92eefed249b799d180e092978605185",
       "kind": "produced"
     },
@@ -195,17 +190,22 @@
     },
     {
       "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
+      "to": "blake3:91ba19cbb51a8c0b48e5af633ea46940b6e8963938ad207b7e0e959e518e0c5a",
+      "kind": "produced"
+    },
+    {
+      "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
       "to": "blake3:fdadbe4d13553e1e9c729304ac95212c716bfc22ea092465fc4b470fc672cd2b",
       "kind": "produced"
     },
     {
       "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
-      "to": "prism-core-hash-v2:47ba5c0026d3903e5af056d51900f8d172356c8a5b65bd0b27d8dc9e1046f298",
+      "to": "prism-core-hash-v2:0bd60b233d72c0a1cebde41413699269c81e7e4a9764cb8d113627a1f74c3947",
       "kind": "input"
     },
     {
       "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
-      "to": "prism-core-hash-v2:de554ebc64e1f1c86b73ec77fff41586a2096c9c152061054308403f528892e1",
+      "to": "prism-core-hash-v2:5a37f49fd7561cf4131519326c3d357aa7c84a08743dca2c7dc035e730829d47",
       "kind": "input"
     },
     {
@@ -215,7 +215,7 @@
     },
     {
       "from": "sha256:0c6b92d155f1edf4c80245a7be0c9a36ed296f2a71210c68b325b6988c1f1ad9",
-      "to": "sha256:d8d7f6fcec596e6568037663787d6d6f3701175b94e473d43e7b11c2e5ce8488",
+      "to": "sha256:b5640d08aa97f1e48327249c12f5eaec47c230d66fb87f02766417332e99844c",
       "kind": "identified-by"
     },
     {

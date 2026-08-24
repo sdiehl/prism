@@ -525,7 +525,11 @@ long prism_parse_float(long s) {
      * embedded NUL cannot hide a suffix. `strtod` additionally admits hex and
      * `nan(payload)` spellings that Rust's float parser refuses; reject those
      * extensions before accepting its result. */
-    const char *data = prism_str_data(s);
+    /* strtod is the one parser here that scans to a terminator, so a view (whose
+     * window is followed by its parent's next byte) is copied out first; a
+     * materialized string is already terminated and is read in place. */
+    char *owned = prism_str_is_view(s) ? prism_str_cstr(s) : 0;
+    const char *data = owned ? owned : prism_str_data(s);
     const char *limit = data + prism_str_len_bytes(s);
     while (data < limit && prism_ws(*data)) data++;
     while (limit > data && prism_ws(limit[-1])) limit--;
@@ -543,6 +547,7 @@ long prism_parse_float(long s) {
     char *parsed_end;
     double d = strtod(data, &parsed_end);
     if (leading_space_extension || hex || nan_payload || parsed_end != limit) d = 0.0;
+    free(owned);
     long bits;
     memcpy(&bits, &d, 8);
     return prism_box(bits);

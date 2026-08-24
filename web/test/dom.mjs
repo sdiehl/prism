@@ -1,9 +1,9 @@
 // The smallest DOM the viewer touches, and the harness that drives it.
 //
 // The viewer has no test runner because it has no framework: it is one module over
-// one JSON file. But its render path is the half most worth checking — an offset
+// one JSON file. Its render path is the half most worth checking: an offset
 // off by one silently corrupts a body, and a guard that forgets `<textarea>`
-// silently breaks typing — so the checks run the *real* module against a shim
+// silently breaks typing. The checks run the real module against a shim
 // covering exactly the DOM surface it uses.
 //
 // These lived in a scratch directory for a while and went stale three times, each

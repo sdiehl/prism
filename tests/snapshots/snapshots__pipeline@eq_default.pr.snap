@@ -368,10 +368,14 @@ fn main() =
 fn eqp(x, y) =
   return x to t@0
   return y to t@1
+  dup t@1
+  dup t@0
   t@0 == t@1
 fn ltp(x, y) =
   return x to t@2
   return y to t@3
+  dup t@3
+  dup t@2
   t@2 < t@3
 fn main() =
   return 1 to t@4
@@ -400,7 +404,10 @@ fn main() =
   drop _
   return 2 to t@19
   return 2 to t@20
-  eqp(t@19, t@20) to t@21
+  eqp(t@19, t@20) to %rc0
+  drop t@20
+  drop t@19
+  return %rc0 to t@21
   show_bool(t@21) to t@22
   prints t@22 to t@23
   drop t@23
@@ -408,7 +415,10 @@ fn main() =
   drop _
   return 1 to t@24
   return 2 to t@25
-  ltp(t@24, t@25) to t@26
+  ltp(t@24, t@25) to %rc1
+  drop t@25
+  drop t@24
+  return %rc1 to t@26
   show_bool(t@26) to t@27
   prints t@27 to t@28
   drop t@28
@@ -419,8 +429,8 @@ fn main() =
 source_filename = "prism"
 
 @.fmts = private constant [3 x i8] c"%s\00"
-@prism_native_kont_table = constant [923 x i8] c"scheme  prism-core-hash-v2\0Abundle  a2e29a57b96431bbdc75dbd75ccc45f34d45e5b8ac5754da0b2bb83a60b2fe0a\0Acompiler  0.19.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:a2e29a57b96431bbdc75dbd75ccc45f34d45e5b8ac5754da0b2bb83a60b2fe0a\0Aflag  stdlib-root  prism-core-hash-v2:47ba5c0026d3903e5af056d51900f8d172356c8a5b65bd0b27d8dc9e1046f298\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_eqp  055362bef1c82a335fb4bfbdf8c9bb3dd7d851ee62efb128ef9c247b19e8dd5f  eqp\0Afn      prismfn_ltp  6e58d3d4a8d58100fd612000a344a785f83ebcee8141e19bc3ee92db2ef75e58  ltp\0Afn      prismfn_main  257e5934c92f2afbc435ff1ad94432554913f7e89f510e0ea0091ec2f4a7f359  main\0A\00", section ",.prism_kont", align 1
-@prism_native_kont_state_map = constant [1089 x i8] c"state-map 1\0Ascheme  prism-core-hash-v2\0Abundle  a2e29a57b96431bbdc75dbd75ccc45f34d45e5b8ac5754da0b2bb83a60b2fe0a\0Acompiler  0.19.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:a2e29a57b96431bbdc75dbd75ccc45f34d45e5b8ac5754da0b2bb83a60b2fe0a\0Aflag  stdlib-root  prism-core-hash-v2:47ba5c0026d3903e5af056d51900f8d172356c8a5b65bd0b27d8dc9e1046f298\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_eqp 055362bef1c82a335fb4bfbdf8c9bb3dd7d851ee62efb128ef9c247b19e8dd5f eqp arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prismfn_ltp 6e58d3d4a8d58100fd612000a344a785f83ebcee8141e19bc3ee92db2ef75e58 ltp arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prismfn_main 257e5934c92f2afbc435ff1ad94432554913f7e89f510e0ea0091ec2f4a7f359 main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_table = constant [948 x i8] c"scheme  prism-core-hash-v2\0Abundle  a2e29a57b96431bbdc75dbd75ccc45f34d45e5b8ac5754da0b2bb83a60b2fe0a\0Acompiler  0.20.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:a2e29a57b96431bbdc75dbd75ccc45f34d45e5b8ac5754da0b2bb83a60b2fe0a\0Aflag  stdlib-root  prism-core-hash-v2:c2fabaf2406a2ef30bbf1b94effcea78e6a8be638bf47330d87f21e090cd6115\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Afn      prismfn_eqp  055362bef1c82a335fb4bfbdf8c9bb3dd7d851ee62efb128ef9c247b19e8dd5f  eqp\0Afn      prismfn_ltp  6e58d3d4a8d58100fd612000a344a785f83ebcee8141e19bc3ee92db2ef75e58  ltp\0Afn      prismfn_main  257e5934c92f2afbc435ff1ad94432554913f7e89f510e0ea0091ec2f4a7f359  main\0A\00", section ",.prism_kont", align 1
+@prism_native_kont_state_map = constant [1114 x i8] c"state-map 1\0Ascheme  prism-core-hash-v2\0Abundle  a2e29a57b96431bbdc75dbd75ccc45f34d45e5b8ac5754da0b2bb83a60b2fe0a\0Acompiler  0.20.0\0Atarget  aarch64-apple-darwin\0Abackend  llvm\0Aflag  source-root  prism-core-hash-v2:a2e29a57b96431bbdc75dbd75ccc45f34d45e5b8ac5754da0b2bb83a60b2fe0a\0Aflag  stdlib-root  prism-core-hash-v2:c2fabaf2406a2ef30bbf1b94effcea78e6a8be638bf47330d87f21e090cd6115\0Aflag  opt  O1\0Aflag  passes  level-default\0Aflag  disabled  none\0Aflag  backend-opt  2\0Aflag  scheduler  cooperative\0Aflag  effect-tier  auto\0Aflag  erasures  true\0Aflag  native-effects  true\0Aflag  trampoline  true\0Aflag  fuse  false\0Aflag  borrow-infer  true\0Aflag  rt-checks  false\0Aflag  native-kont-frames  false\0Aslot-format prism-native-abi-word-v1\0Astate prismfn_eqp 055362bef1c82a335fb4bfbdf8c9bb3dd7d851ee62efb128ef9c247b19e8dd5f eqp arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prismfn_ltp 6e58d3d4a8d58100fd612000a344a785f83ebcee8141e19bc3ee92db2ef75e58 ltp arity 2 slots abi-word[arg0=%a0:word,arg1=%a1:word]\0Astate prismfn_main 257e5934c92f2afbc435ff1ad94432554913f7e89f510e0ea0091ec2f4a7f359 main arity 0 slots abi-word[]\0A\00", section ",.prism_kont", align 1
 @.kont_symbol2 = private constant [13 x i8] c"prismfn_main\00"
 @.kont_hash2 = private constant [65 x i8] c"257e5934c92f2afbc435ff1ad94432554913f7e89f510e0ea0091ec2f4a7f359\00"
 @.kont_name2 = private constant [5 x i8] c"main\00"

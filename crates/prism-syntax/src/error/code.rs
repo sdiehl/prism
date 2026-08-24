@@ -19,6 +19,28 @@ pub enum ErrorPhase {
     Internal,
 }
 
+impl ErrorPhase {
+    /// The subsystem's name, as a machine-readable artifact spells it.
+    ///
+    /// One home for the spelling: the diagnostic seams a Prism-written front
+    /// end is diffed against name the phase in their rows, and a second table
+    /// of the same names elsewhere would drift from this one.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Type => "type",
+            Self::Lex => "lex",
+            Self::Parse => "parse",
+            Self::Resolve => "resolve",
+            Self::Lower => "lower",
+            Self::Codegen => "codegen",
+            Self::Runtime => "runtime",
+            Self::Io => "io",
+            Self::Internal => "internal",
+        }
+    }
+}
+
 /// Stable external identity of a compiler diagnostic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ErrorCode {

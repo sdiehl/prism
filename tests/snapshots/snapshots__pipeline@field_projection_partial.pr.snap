@@ -1,0 +1,214 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/field_projection_partial.pr
+---
+== tokens ==
+VOpen Type UIdent("Shape") Eq UIdent("Circle") LBrace Ident("radius") Colon KwInt RBrace Bar UIdent("Square") LBrace Ident("side") Colon KwInt RBrace VSemi Fn Ident("radius_by_match") LParen Ident("shape") Colon UIdent("Shape") RParen Colon KwInt Eq VOpen Match Ident("shape") Of VOpen UIdent("Circle") LBrace Ident("radius") Eq Ident("radius") RBrace FatArrow Ident("radius") VSemi UIdent("Square") LBrace DotDot RBrace FatArrow Int(IntLit { value: 0, suffix: None }) VClose VClose VSemi Fn Ident("radius") LParen Ident("shape") Colon UIdent("Shape") RParen Colon KwInt Eq Ident("shape") Dot Ident("radius") VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Int(IntLit { value: 0, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Shape",
+            params: [],
+            param_kinds: [],
+            ctors: [
+                Ctor {
+                    name: "Circle",
+                    args: [
+                        Int,
+                    ],
+                    fields: Some(
+                        [
+                            (
+                                "radius",
+                                Int,
+                            ),
+                        ],
+                    ),
+                },
+                Ctor {
+                    name: "Square",
+                    args: [
+                        Int,
+                    ],
+                    fields: Some(
+                        [
+                            (
+                                "side",
+                                Int,
+                            ),
+                        ],
+                    ),
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 72..130,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "radius_by_match",
+            params: [
+                Param {
+                    name: "shape",
+                    ty: Some(
+                        Con(
+                            "Shape",
+                            [],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "shape",
+                        ),
+                        span: 182..187,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Record(
+                                    "Circle",
+                                    [
+                                        (
+                                            "radius",
+                                            Spanned {
+                                                node: Var(
+                                                    "radius",
+                                                ),
+                                                span: 213..219,
+                                            },
+                                        ),
+                                    ],
+                                    false,
+                                ),
+                                span: 195..221,
+                            },
+                            body: Spanned {
+                                node: Var(
+                                    "radius",
+                                ),
+                                span: 225..231,
+                            },
+                        },
+                        Arm {
+                            pat: Spanned {
+                                node: Record(
+                                    "Square",
+                                    [],
+                                    true,
+                                ),
+                                span: 236..249,
+                            },
+                            body: Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 0,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 253..254,
+                            },
+                        },
+                    ],
+                ),
+                span: 176..254,
+            },
+            wheres: [],
+            span: 132..254,
+        },
+        Decl {
+            name: "radius",
+            params: [
+                Param {
+                    name: "shape",
+                    ty: Some(
+                        Con(
+                            "Shape",
+                            [],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: FieldAccess(
+                    Spanned {
+                        node: Var(
+                            "shape",
+                        ),
+                        span: 289..294,
+                    },
+                    "radius",
+                ),
+                span: 289..301,
+            },
+            wheres: [],
+            span: 256..301,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 315..322,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 0,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 323..324,
+                        },
+                    ],
+                ),
+                span: 315..325,
+            },
+            wheres: [],
+            span: 303..325,
+        },
+    ],
+}
+
+== types ==
+[E1023] Type Error: in `radius`: field `radius` cannot be projected from unrefined sum type `Shape` with 2 constructors; match a constructor first
+   ╭─[ <source>:9:34 ]
+   │
+ 9 │ fn radius(shape : Shape) : Int = shape.radius
+   │                                  ──────┬─────  
+   │                                        ╰─────── in `radius`: field `radius` cannot be projected from unrefined sum type `Shape` with 2 constructors; match a constructor first
+───╯

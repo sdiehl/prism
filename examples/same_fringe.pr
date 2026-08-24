@@ -3,7 +3,7 @@ effect Gen
 
 -- Same-fringe, the classic coroutine problem: do two differently shaped trees
 -- have the same left-to-right sequence of leaves? Flattening both throws away
--- the point; the elegant answer pulls one leaf at a time and stops at the first
+-- the point; a streaming comparison pulls one leaf at a time and stops at the first
 -- mismatch. `to_stream` reifies a `yield`-producer into a lazy step: resuming
 -- the captured continuation advances to the next leaf, so the two trees walk in
 -- lockstep with no intermediate lists.

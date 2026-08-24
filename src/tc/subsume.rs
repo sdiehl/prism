@@ -165,7 +165,7 @@ impl Tc<'_> {
                 let ex = self.push_ex();
                 let a1 = a0.subst_var(*n, &Type::Exist(ex));
                 self.subtype(&a1, b)?;
-                self.drop_marker(m);
+                self.drop_marker(m)?;
                 Ok(())
             }
             (_, Type::Forall(n, b0)) => {
@@ -233,9 +233,22 @@ impl Tc<'_> {
     // side. The rules mirror except under a binder (left keeps foralls rigid,
     // right opens them) and function arguments flip side.
     fn inst(&mut self, ex: u32, t: &Type, left: bool) -> Result<(), TcErr> {
+        // Callers may still hold an existential that an earlier sibling
+        // constraint solved. Re-check that constraint against the installed
+        // solution; never send the stale id back through `solve`, where it
+        // would either overwrite evidence or (now) correctly fail closed.
+        if let Some(solved) = self.solved(ex) {
+            let solved = self.apply(&solved);
+            let t = self.apply(t);
+            return if left {
+                self.subtype(&solved, &t)
+            } else {
+                self.subtype(&t, &solved)
+            };
+        }
         let t = self.apply(t);
         if t.is_mono() && self.well_formed_before(ex, &t) {
-            self.solve(ex, t);
+            self.solve(ex, t)?;
             return Ok(());
         }
         match t {
@@ -253,9 +266,9 @@ impl Tc<'_> {
                     .index_ex(ex)
                     .ok_or_else(|| TcErr::Ice(format!("inst: ^{ex} escaped scope")))?;
                 if oi > ei {
-                    self.solve(other, Type::Exist(ex));
+                    self.solve(other, Type::Exist(ex))?;
                 } else {
-                    self.solve(ex, Type::Exist(other));
+                    self.solve(ex, Type::Exist(other))?;
                 }
                 Ok(())
             }
@@ -345,6 +358,19 @@ impl Tc<'_> {
                 let elem = self.apply(&elem);
                 self.inst(elem_ex, &elem, left)
             }
+            Type::Coeffect(inner, row) => {
+                let inner_ex = self.fresh_id();
+                let coeffect = Type::Coeffect(Box::new(Type::Exist(inner_ex)), row);
+                self.splice_solved(ex, &[inner_ex], coeffect)?;
+                let inner = self.apply(&inner);
+                self.inst(inner_ex, &inner, left)
+            }
+            Type::Row(row) => {
+                let row_ex = self.fresh_id();
+                self.articulate_row_type(ex, row_ex)?;
+                let row = self.apply_row(&row);
+                self.unify_row(&EffRow::Exist(row_ex), &row)
+            }
             Type::Forall(n, body) if left => {
                 let sk = Sym::fresh_named(n);
                 let body = body.subst_var(n, &Type::Var(sk));
@@ -360,7 +386,7 @@ impl Tc<'_> {
                 let e = self.push_ex();
                 let body = body.subst_var(n, &Type::Exist(e));
                 self.inst(ex, &body, false)?;
-                self.drop_marker(m);
+                self.drop_marker(m)?;
                 Ok(())
             }
             Type::RowForall(n, body) if left => {
@@ -378,7 +404,7 @@ impl Tc<'_> {
                 let r = self.push_ex_row();
                 let body = body.subst_row_var(n, &EffRow::Exist(r));
                 self.inst(ex, &body, false)?;
-                self.drop_marker(m);
+                self.drop_marker(m)?;
                 Ok(())
             }
             other => Err(TcErr::Fail(format!(
@@ -402,12 +428,9 @@ impl Tc<'_> {
             // to the older, so a solution only references entries to its left and
             // survives later truncation at a marker. Mirrors `inst`'s `Exist` arm.
             (EffRow::Exist(x), EffRow::Exist(y)) => {
-                // Unlike the type context, the row context does not keep every
-                // solution strictly left-referencing, so absence here is not an
-                // internal fault: a later truncation can strand a row variable a
-                // unification still references. Surface it as a row-scope-escape
-                // user diagnostic rather than a compiler ICE. `Keep` so the precise
-                // reason survives a caller's coarse expected/got rewrite.
+                // A caller may still hold a raw row that an enclosing scope has
+                // closed. Surface that as a precise row-scope diagnostic rather
+                // than replacing it with a coarse expected/got mismatch.
                 let xi = self
                     .index_ex_row(*x)
                     .ok_or_else(|| TcErr::Keep(ROW_ESCAPES_SCOPE.into()))?;
@@ -415,9 +438,9 @@ impl Tc<'_> {
                     .index_ex_row(*y)
                     .ok_or_else(|| TcErr::Keep(ROW_ESCAPES_SCOPE.into()))?;
                 if xi > yi {
-                    self.solve_row(*x, EffRow::Exist(*y))
+                    self.solve_row(*x, &EffRow::Exist(*y))
                 } else {
-                    self.solve_row(*y, EffRow::Exist(*x))
+                    self.solve_row(*y, &EffRow::Exist(*x))
                 }
             }
             (EffRow::Exist(x), other) | (other, EffRow::Exist(x)) => {
@@ -426,7 +449,7 @@ impl Tc<'_> {
                 if fv.contains(x) {
                     return Err(TcErr::Fail("recursive effect row".into()));
                 }
-                self.solve_row(*x, other.clone())
+                self.solve_row(*x, other)
             }
             (EffRow::Extend(l, rest1), _) => {
                 let rest2 = self.rewrite_row(&b, l)?;
@@ -485,7 +508,7 @@ impl Tc<'_> {
                 self.splice_solved_row(
                     *alpha,
                     &[beta],
-                    EffRow::Extend(label.clone(), Box::new(EffRow::Exist(beta))),
+                    &EffRow::Extend(label.clone(), Box::new(EffRow::Exist(beta))),
                 )?;
                 Ok(EffRow::Exist(beta))
             }
@@ -746,6 +769,335 @@ mod tests {
             handler_nodes: BTreeSet::new(),
             handler_residuals: BTreeMap::new(),
         }
+    }
+
+    #[test]
+    fn type_solutions_fail_closed_on_missing_or_forward_variables() {
+        let ctors = BTreeMap::new();
+        let data = BTreeMap::new();
+        let eff_ops = BTreeMap::new();
+        let classes = BTreeMap::new();
+        let instances = BTreeMap::new();
+        let inst_keys = BTreeMap::new();
+        let canonical = BTreeMap::new();
+        let mut t = tc(
+            &ctors, &data, &eff_ops, &classes, &instances, &inst_keys, &canonical,
+        );
+
+        assert!(matches!(t.solve(41, Type::Int), Err(TcErr::Ice(_))));
+
+        t.ctx.push(Entry::Ex(1));
+        t.ctx.push(Entry::Ex(2));
+        assert!(matches!(t.solve(1, Type::Exist(2)), Err(TcErr::Ice(_))));
+        assert!(matches!(t.ctx.first(), Some(Entry::Ex(1))));
+
+        assert!(t.solve(1, Type::Int).is_ok(), "first solution is installed");
+        assert!(matches!(t.solve(1, Type::Bool), Err(TcErr::Ice(_))));
+        assert!(matches!(t.ctx.first(), Some(Entry::Solved(1, Type::Int))));
+        assert!(
+            t.inst_l(1, &Type::Int).is_ok(),
+            "a stale constraint is checked against the installed solution"
+        );
+        assert!(matches!(t.inst_l(1, &Type::Bool), Err(TcErr::Fail(_))));
+
+        t.ctx.push(Entry::ExRow(3));
+        assert!(
+            t.solve_row(3, &EffRow::Empty).is_ok(),
+            "first row solution is installed"
+        );
+        assert!(matches!(
+            t.solve_row(3, &EffRow::Var(Sym::from("e"))),
+            Err(TcErr::Ice(_))
+        ));
+        assert!(matches!(
+            t.ctx.last(),
+            Some(Entry::SolvedRow(3, EffRow::Empty))
+        ));
+    }
+
+    #[test]
+    fn row_solutions_rebase_younger_variables_before_markers() {
+        let ctors = BTreeMap::new();
+        let data = BTreeMap::new();
+        let eff_ops = BTreeMap::new();
+        let classes = BTreeMap::new();
+        let instances = BTreeMap::new();
+        let inst_keys = BTreeMap::new();
+        let canonical = BTreeMap::new();
+        let mut t = tc(
+            &ctors, &data, &eff_ops, &classes, &instances, &inst_keys, &canonical,
+        );
+
+        let owner = t.push_ex_row();
+        let marker = t.fresh_id();
+        t.ctx.push(Entry::Marker(marker));
+        let young = t.push_ex();
+        let cell = |arg| {
+            EffRow::Extend(
+                Label {
+                    name: "Cell".into(),
+                    args: vec![arg],
+                },
+                Box::new(EffRow::Empty),
+            )
+        };
+
+        assert!(
+            t.solve_row(owner, &cell(Type::Exist(young))).is_ok(),
+            "row solution rebases its young type argument"
+        );
+        let solved = t.apply_row(&EffRow::Exist(owner));
+        let mut live = BTreeSet::new();
+        Type::Row(solved).free_exist(&mut live);
+        assert_eq!(live.len(), 1, "one shared representative is retained");
+        let representative = *live.first().unwrap();
+        assert_ne!(representative, young);
+        assert!(
+            t.index_ex(representative).unwrap() < t.index_ex_row(owner).unwrap(),
+            "the representative lives to the row owner's left"
+        );
+        assert!(
+            t.drop_marker(marker).is_ok(),
+            "dropping the instantiation scope leaves no dangling id"
+        );
+
+        let concrete = cell(Type::Con("List".into(), vec![Type::Int]));
+        assert!(
+            t.unify_row(&EffRow::Exist(owner), &concrete).is_ok(),
+            "the representative remains available to the outer context"
+        );
+        assert_eq!(t.apply_row(&EffRow::Exist(owner)), concrete);
+
+        // Repeated occurrences preserve sharing: one young id becomes one older
+        // representative even when two labels mention it.
+        t.ctx.clear();
+        t.next = 0;
+        let owner = t.push_ex_row();
+        let marker = t.fresh_id();
+        t.ctx.push(Entry::Marker(marker));
+        let young = t.push_ex();
+        let repeated = EffRow::Extend(
+            Label {
+                name: "First".into(),
+                args: vec![Type::Exist(young)],
+            },
+            Box::new(EffRow::Extend(
+                Label {
+                    name: "Second".into(),
+                    args: vec![Type::Exist(young), Type::Exist(young)],
+                },
+                Box::new(EffRow::Empty),
+            )),
+        );
+        assert!(t.solve_row(owner, &repeated).is_ok());
+        let mut live = BTreeSet::new();
+        Type::Row(t.apply_row(&EffRow::Exist(owner))).free_exist(&mut live);
+        assert_eq!(live.len(), 1);
+        assert!(t.drop_marker(marker).is_ok());
+    }
+
+    #[test]
+    fn type_solutions_cannot_recontaminate_rebased_rows() {
+        let ctors = BTreeMap::new();
+        let data = BTreeMap::new();
+        let eff_ops = BTreeMap::new();
+        let classes = BTreeMap::new();
+        let instances = BTreeMap::new();
+        let inst_keys = BTreeMap::new();
+        let canonical = BTreeMap::new();
+        let mut t = tc(
+            &ctors, &data, &eff_ops, &classes, &instances, &inst_keys, &canonical,
+        );
+
+        // A row may retain an older type variable which is solved only later.
+        // That later type solution must not smuggle a marker-local row back into
+        // the surviving row through the older representative.
+        let proxy = t.push_ex();
+        let owner = t.push_ex_row();
+        let cell = EffRow::Extend(
+            Label {
+                name: "Cell".into(),
+                args: vec![Type::Exist(proxy)],
+            },
+            Box::new(EffRow::Empty),
+        );
+        assert!(t.solve_row(owner, &cell).is_ok());
+        let marker = t.fresh_id();
+        t.ctx.push(Entry::Marker(marker));
+        let young_row = t.push_ex_row();
+        let callback = Type::Fun(Vec::new(), EffRow::Exist(young_row), Box::new(Type::Unit));
+        assert!(t.equate(&Type::Exist(proxy), &callback).is_ok());
+        assert!(t.drop_marker(marker).is_ok());
+        assert!(t.index_ex_row(young_row).is_none());
+        let applied = Type::Row(t.apply_row(&EffRow::Exist(owner)));
+        let mut rows = BTreeSet::new();
+        applied.free_exist_row(&mut rows);
+        assert!(!rows.contains(&young_row));
+        assert!(rows.iter().all(|row| t.index_ex_row(*row).is_some()));
+
+        // Direct row types and rows nested under coeffects need their own
+        // structural articulation paths once the mono fast path rejects a
+        // forward row reference.
+        t.ctx.clear();
+        t.next = 0;
+        let value = t.push_ex();
+        let marker = t.fresh_id();
+        t.ctx.push(Entry::Marker(marker));
+        let young_row = t.push_ex_row();
+        assert!(t
+            .equate(&Type::Exist(value), &Type::Row(EffRow::Exist(young_row)),)
+            .is_ok());
+        assert!(t.drop_marker(marker).is_ok());
+        let applied = t.apply(&Type::Exist(value));
+        let mut rows = BTreeSet::new();
+        applied.free_exist_row(&mut rows);
+        assert!(!rows.contains(&young_row));
+        assert!(rows.iter().all(|row| t.index_ex_row(*row).is_some()));
+
+        t.ctx.clear();
+        t.next = 0;
+        let value = t.push_ex();
+        let marker = t.fresh_id();
+        t.ctx.push(Entry::Marker(marker));
+        let young_row = t.push_ex_row();
+        let once = CoeffectRow::new(&["once"]).unwrap();
+        let coeffect = Type::Coeffect(
+            Box::new(Type::Fun(
+                Vec::new(),
+                EffRow::Exist(young_row),
+                Box::new(Type::Unit),
+            )),
+            once,
+        );
+        assert!(t.equate(&Type::Exist(value), &coeffect).is_ok());
+        assert!(t.drop_marker(marker).is_ok());
+        let applied = t.apply(&Type::Exist(value));
+        let mut rows = BTreeSet::new();
+        applied.free_exist_row(&mut rows);
+        assert!(!rows.contains(&young_row));
+        assert!(rows.iter().all(|row| t.index_ex_row(*row).is_some()));
+    }
+
+    #[test]
+    fn row_solution_rebasing_is_nested_and_fail_closed() {
+        let ctors = BTreeMap::new();
+        let data = BTreeMap::new();
+        let eff_ops = BTreeMap::new();
+        let classes = BTreeMap::new();
+        let instances = BTreeMap::new();
+        let inst_keys = BTreeMap::new();
+        let canonical = BTreeMap::new();
+        let mut t = tc(
+            &ctors, &data, &eff_ops, &classes, &instances, &inst_keys, &canonical,
+        );
+
+        let owner = t.push_ex_row();
+        let marker = t.fresh_id();
+        t.ctx.push(Entry::Marker(marker));
+        let young_ty = t.push_ex();
+        let young_row = t.push_ex_row();
+        let once = CoeffectRow::new(&["once"]).unwrap();
+        let nested = EffRow::Extend(
+            Label {
+                name: "Nested".into(),
+                args: vec![
+                    Type::Coeffect(Box::new(Type::Exist(young_ty)), once),
+                    Type::Fun(
+                        Vec::new(),
+                        EffRow::Exist(young_row),
+                        Box::new(Type::Row(EffRow::Exist(young_row))),
+                    ),
+                ],
+            },
+            Box::new(EffRow::Empty),
+        );
+        assert!(
+            t.solve_row(owner, &nested).is_ok(),
+            "rebasing traverses coeffects, functions, and nested rows"
+        );
+        let solved = Type::Row(t.apply_row(&EffRow::Exist(owner)));
+        let mut types = BTreeSet::new();
+        solved.free_exist(&mut types);
+        let mut rows = BTreeSet::new();
+        solved.free_exist_row(&mut rows);
+        assert_eq!(types.len(), 1);
+        assert_eq!(rows.len(), 1);
+        assert!(!types.contains(&young_ty));
+        assert!(!rows.contains(&young_row));
+        assert!(t.drop_marker(marker).is_ok());
+
+        // Rigid variables and recursive owner occurrences cannot be lowered to
+        // flexible proxies, and every refusal happens before the owner mutates.
+        t.ctx.clear();
+        t.next = 0;
+        let owner = t.push_ex_row();
+        let sk = Sym::fresh_named("a".into());
+        t.ctx.push(Entry::Uni(sk));
+        let captures_type = EffRow::Extend(
+            Label {
+                name: "Capture".into(),
+                args: vec![Type::Var(sk)],
+            },
+            Box::new(EffRow::Empty),
+        );
+        assert!(matches!(
+            t.solve_row(owner, &captures_type),
+            Err(TcErr::Keep(_))
+        ));
+        assert!(matches!(t.ctx.first(), Some(Entry::ExRow(v)) if *v == owner));
+
+        t.ctx.clear();
+        t.next = 0;
+        let owner = t.push_ex_row();
+        let sk = Sym::fresh_named("e".into());
+        t.ctx.push(Entry::RowUni(sk));
+        let captures_row = EffRow::Extend(
+            Label {
+                name: "Capture".into(),
+                args: vec![Type::Row(EffRow::Var(sk))],
+            },
+            Box::new(EffRow::Empty),
+        );
+        assert!(matches!(
+            t.solve_row(owner, &captures_row),
+            Err(TcErr::Keep(_))
+        ));
+        assert!(matches!(t.ctx.first(), Some(Entry::ExRow(v)) if *v == owner));
+
+        t.ctx.clear();
+        t.next = 0;
+        let owner = t.push_ex_row();
+        let recursive = EffRow::Extend(
+            Label {
+                name: "Recursive".into(),
+                args: vec![Type::Row(EffRow::Exist(owner))],
+            },
+            Box::new(EffRow::Empty),
+        );
+        assert!(matches!(
+            t.solve_row(owner, &recursive),
+            Err(TcErr::Fail(_))
+        ));
+
+        // The release-active marker audit catches a corrupt work-doer at the
+        // boundary, rather than allowing a later lookup to report E9998.
+        t.ctx.clear();
+        t.next = 0;
+        let owner = t.push_ex_row();
+        let marker = t.fresh_id();
+        t.ctx.push(Entry::Marker(marker));
+        let young = t.push_ex();
+        t.ctx[0] = Entry::SolvedRow(
+            owner,
+            EffRow::Extend(
+                Label {
+                    name: "Broken".into(),
+                    args: vec![Type::Exist(young)],
+                },
+                Box::new(EffRow::Empty),
+            ),
+        );
+        assert!(matches!(t.drop_marker(marker), Err(TcErr::Ice(_))));
     }
 
     // occurs_ex must look through every type former so subsume refuses to solve

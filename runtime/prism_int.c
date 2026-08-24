@@ -9,8 +9,7 @@ static long *prism_big_alloc(long nlimbs) {
     /* Same overflow-checked sizing as ordinary cells: a hostile or computed
      * limb count must never under-allocate and let the limb stores below write
      * out of bounds. */
-    long *p = malloc(prism_cell_bytes(nlimbs));
-    if (!p) abort();
+    long *p = prism_cell_malloc(nlimbs);
     p[PRISM_RC_W] = 1;
     p[PRISM_TAG_W] = PRISM_BIG_TAG;
     p[PRISM_ARITY_W] = 0;

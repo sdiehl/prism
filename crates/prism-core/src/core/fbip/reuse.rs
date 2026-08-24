@@ -141,7 +141,7 @@ fn try_reuse(c: &Comp, s: Sym, tok: Sym, cap: usize) -> Option<Comp> {
 }
 
 // Reuse credit (FP^2): a freed token feeds the first constructor allocation that
-// follows the drop on every control path, not just the literal tail. Walk the
+// follows the drop on every control path. Walk the
 // bind chain forward and rewrite the first `return Ctor` (whose arity fits the
 // freed cell, so prism_reuse_alloc never writes past the old shell) into an
 // in-place `Reuse`; the token is then spent and the continuation left alone. At a

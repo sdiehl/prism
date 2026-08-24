@@ -1,7 +1,8 @@
 //! Top-level declaration formatting.
 //!
 //! Imports, effects, classes, instances, data and pattern declarations,
-//! type/row/param rendering, and the function definition printer. The expression and statement printers live in the
+//! type/row/param rendering, and the function definition printer. Expression and
+//! statement printers live in the
 //! parent module; the body-bearing printers here are methods on `Fmt` so they
 //! can call back into them, while the purely structural printers stay free.
 

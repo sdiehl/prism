@@ -1,0 +1,24 @@
+-- A function that both installs a handler and applies an effect-polymorphic
+-- callee (`! {| e}`) inside an operation clause, instantiated at the empty
+-- row while the function's own row stays open. The fused lowering must carry
+-- its ambient row through the call's instantiation as well as the signature,
+-- so the program stays on the fused path and prints the same pair everywhere.
+effect Tick
+  bump(Int) : Unit
+
+fn apply_poly(f : (Int, Int) -> Int ! {| e}, a : Int, b : Int) : Int ! { | e} =
+  f(a, b)
+
+fn add(a : Int, b : Int) : Int = a + b
+
+fn run(action : () -> a ! {Tick | e}) : (a, Int) =
+  var total := 0
+  let r =
+    handle action() with
+      bump(n) resume k =>
+        total := apply_poly(add, total, n)
+        k(())
+      return r => r
+  (r, total)
+
+fn main() = println(show(run(\() -> bump(3))))

@@ -1580,8 +1580,8 @@ Helper for `stake`.
 
 ### `stake`
 
-```prism,sig,h-cb44139f55d344cdd05a17cc7a0d24f9604cced6f83b7900dbb5ee23bec4e6b7
-stake : forall e1 a b c. ((Unit) -> b ! {Emit(a), e1}, Int) -> (c) -> Unit ! {Emit(a), e1}
+```prism,sig,h-2c2e16d78c4611534bfe566cebdc5d0b0e4ea6bb3fd7d3201eec15339fb50e78
+stake : forall e1 a b c. ((Unit) -> a ! {Emit(b), e1}, Int) -> (c) -> Unit ! {Emit(b), e1}
 ```
 
 The first `n` elements of a stream, stopping the producer early.
@@ -1628,8 +1628,8 @@ ssum(srange(1, 5))
 
 ### `scollect`
 
-```prism,sig,h-22cc634bdee91f85eac653e7af21304af80c5c352050a79cb194b525e4ee17dd
-scollect : forall e0 a b. ((Unit) -> b ! {Emit(a), e0}) -> List(a) ! {e0}
+```prism,sig,h-31e2762ca8d6245459d35457fa81313b05a5db37b36a443605d0474c7144dc23
+scollect : forall e0 a b. ((Unit) -> a ! {Emit(b), e0}) -> List(b) ! {e0}
 ```
 
 Collect a stream into a list, in emission order.

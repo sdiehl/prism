@@ -427,7 +427,15 @@ fn load_closure_summary(store: &Store, key: &str) -> Result<Option<ClosureSummar
     let Some(object_hash) = store.get_query(CLOSURE_SUMMARY_QUERY, key)? else {
         return Ok(None);
     };
-    let bytes = store.get(&object_hash)?;
+    // A query binding surviving a swept object is a normal cache miss, not
+    // corruption: gc (crate::store::disk::gc) prunes objects/meta by age
+    // without touching queries/index, so a stale binding must fall back to
+    // recompute exactly like an absent binding does above.
+    let bytes = match store.get(&object_hash) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(Error::Io(e)),
+    };
     if bytes.len() > MAX_CLOSURE_SUMMARY_BYTES {
         return Err(corrupt(
             "backend SCC closure summary exceeds the size limit",
@@ -473,7 +481,13 @@ fn load(store: &Store, key: &str, path: &Path) -> Result<bool, Error> {
     let Some(object_hash) = store.get_query(LLVM_SCC_QUERY, key)? else {
         return Ok(false);
     };
-    let bytes = store.get(&object_hash)?;
+    // See the matching comment in `load_closure_summary` above: a swept object
+    // behind a surviving query binding is a normal miss, not corruption.
+    let bytes = match store.get(&object_hash) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(Error::Io(e)),
+    };
     if bytes.len() > MAX_LLVM_SCC_BYTES {
         return Err(corrupt("backend SCC bitcode exceeds the size limit"));
     }

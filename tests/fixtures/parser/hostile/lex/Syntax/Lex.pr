@@ -1,0 +1,8 @@
+-- A tree's own `Syntax.Lex`, sitting where module resolution finds it before
+-- the embedded standard library. The differential witness reaches the lexer
+-- through this module name, so a search path that included this directory would
+-- let the tree under comparison choose the lexer that judges it. It exports none
+-- of the names the real lexer exports, so that mistake is loud rather than
+-- quiet.
+
+fn shadowed_lex() : Int = 0

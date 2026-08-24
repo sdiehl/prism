@@ -459,7 +459,7 @@
       "sha256": "eb6e5d36fab08fce7ada02dd5db601afa755d3bf724576589dd0c20f80d380d3"
     },
     "artifact": "experiments/parser_generator_phase1/generated/type_leaf/src/GeneratedTypeLeaf.pr",
-    "artifact_sha256": "820828fcf4b71b30fb99d93d23fd389e9f85591143c7756ee50796178d93232b",
+    "artifact_sha256": "9db29f3c99b8d3f3843d2d7bb1f0995cb58f2aa94d01807a6d82b8c627248d35",
     "production_artifact": "lib/std/Syntax/Parse/GeneratedType.pr",
     "test_fixture": {
       "artifact": "experiments/parser_generator_phase1/generated/type_leaf/tests/type_leaf.pr",

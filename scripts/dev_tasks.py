@@ -79,13 +79,19 @@ def filtered_test(filter_text: str) -> int:
 def update_snapshots(filter_text: str) -> int:
     env = cache_disabled()
     env["INSTA_UPDATE"] = "always"
-    run_filtered(
-        ["cargo", "test", *shlex.split(filter_text)], SNAPSHOT_RESULTS, env=env
+    # `always` rewrites a drifted snapshot and lets the assertion pass, so a
+    # non-zero status here is a genuine failure rather than the drift this task
+    # exists to absorb, and reporting it is what keeps a red suite visible.
+    # Without `--no-fail-fast` the first such failure also stops cargo before the
+    # later targets run, leaving their snapshots stale while the task looks done.
+    status = run_filtered(
+        ["cargo", "test", "--no-fail-fast", *shlex.split(filter_text)],
+        SNAPSHOT_RESULTS,
+        env=env,
     )
-    # Snapshot review is the point of this task, so show drift even when the test
-    # command reports the expected snapshot mismatch.
+    # Snapshot review is the point of this task, so show the drift either way.
     run(["git", "status", "--short", "tests/snapshots"])
-    return 0
+    return status
 
 
 def smoke(source: str) -> int:

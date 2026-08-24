@@ -39,6 +39,8 @@ type Theme = Theme {
 } deriving (Eq, Show)
 ```
 
+A deck's visual settings: its name, the color roles, the text and code faces, the three type sizes, and the page margin.
+
 ## Functions and Values
 
 ### `prism_theme`

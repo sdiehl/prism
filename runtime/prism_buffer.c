@@ -38,7 +38,7 @@ static unsigned char *buf_data(long *p) {
 
 /* Allocate a buffer with room for `cap_bytes` bytes and length 0. The word count
    is the length word plus the byte capacity rounded up; computed in size_t so a
-   near-LONG_MAX capacity cannot overflow before prism_cell_bytes re-checks it. */
+   near-LONG_MAX capacity cannot overflow before prism_alloc re-checks it. */
 static long *buf_alloc(long cap_bytes) {
     if (cap_bytes < 0) prism_buf_oob();
     size_t span, capw;
@@ -108,6 +108,34 @@ long prism_buf_push(long b, long x) {
     memcpy(buf_data(q), buf_data(p), (size_t)len);
     buf_data(q)[len] = v;
     buf_setlen(q, len + 1);
+    return (long)q;
+}
+
+/* Append a whole string's bytes in one copy, the builder's bulk step. Same
+   ownership rule as prism_buf_push (extend a uniquely owned buffer in place,
+   copy a shared one), so a builder threaded linearly through an encoder pays one
+   memcpy per run instead of a fresh buffer per byte. Growth doubles until the run
+   fits, which keeps a sequence of appends amortized constant per byte the way a
+   sequence of pushes is. The string is only read, so a window onto another
+   string's bytes appends exactly like a materialized one. */
+long prism_buf_append_str(long b, long s) {
+    long *p = (long *)b;
+    long len = buf_len(p), cap = buf_cap(p);
+    long n = prism_str_len_bytes(s);
+    const char *src = prism_str_data(s);
+    long total = prism_ckd_ladd(len, n);
+    if (p[PRISM_RC_W] == 1 && total <= cap) {
+        memcpy(buf_data(p) + len, src, (size_t)n);
+        buf_setlen(p, total);
+        prism_rc_inc(b);
+        return b;
+    }
+    long ncap = total <= cap ? cap : prism_ckd_grow(cap, 8);
+    while (ncap < total) ncap = prism_ckd_grow(ncap, 8);
+    long *q = buf_alloc(ncap);
+    memcpy(buf_data(q), buf_data(p), (size_t)len);
+    memcpy(buf_data(q) + len, src, (size_t)n);
+    buf_setlen(q, total);
     return (long)q;
 }
 

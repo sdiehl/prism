@@ -35,7 +35,8 @@ use super::input::{
 use super::timing::{self, ArtifactKind, CountKey, Phase, RowExtras};
 use super::verify::{fip_check, reconcile_effects, replayable_check};
 use super::{
-    core_root_digest, dupes, emit_warning, emit_warnings, lint_surface, stdlib_hash, Config,
+    core_root_digest, dupes, emit_warning, emit_warnings, lint_surface, stdlib_hash,
+    validated_elaborated_core, Config,
 };
 
 const RAW_FRONT_QUERY_SCHEMA: &[u8] = b"prism-session-front-v1";
@@ -78,8 +79,8 @@ pub(super) enum FrontRequest {
     IdentityValidated,
     /// The identity surface plus the per-node type strings, for the code index:
     /// it needs the same pre-optimizer Core every address is taken over *and* the
-    /// types a reader hovers. Collection only fills side tables, so the Core — and
-    /// therefore every hash — is byte-identical to `Identity`.
+    /// types a reader hovers. Collection only fills side tables, leaving Core and
+    /// its hashes byte-identical to `Identity`.
     IdentityTooltips,
     /// Typecheck-only analysis with per-node type/effect strings, for
     /// `dump typespans` and static documentation tooltips.
@@ -495,6 +496,34 @@ fn front_key_for(schema: &[u8], input: &str, cfg: &Config, opts: FrontOpts) -> S
     h.finalize().to_hex().to_string()
 }
 
+/// The resolved program and the checker's verdict on it.
+///
+/// Every other entry point returns nothing at all when the checker refuses, so
+/// no front-end artifact exists for a rejected program and a negative oracle
+/// has nothing to compare against. Desugar runs before typechecking, so the
+/// resolved tree of a rejected program was already built; this hands it back
+/// alongside the refusal instead of discarding both. The policy is the one the
+/// accepting artifacts use, so an accepted program's tree is identical here.
+///
+/// Not cached: the session cache stores fronts, and a refusal is not one.
+///
+/// # Errors
+/// Fails on lex, parse, module, or contract errors. Those refuse before a
+/// resolved tree exists, so there is nothing to report a verdict against.
+pub(super) fn run_front_verdict(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+) -> Result<(Program<CorePhase>, Option<Error>), Error> {
+    let opts = FrontRequest::TypedTooltips.policy();
+    let prepared = prepare_front(src, roots, cfg, opts)?;
+    let program = prepared.program.clone();
+    match finish_front(src, cfg, opts, prepared) {
+        Ok(_) => Ok((program, None)),
+        Err(error) => Ok((program, Some(error))),
+    }
+}
+
 fn run_front_uncached(
     src: &str,
     roots: &[Root],
@@ -651,6 +680,19 @@ fn finish_front(
             identity_core: None,
         });
     }
+    // The instrumented tooltip checker delimits a fresh effect row around every
+    // node, so its zonked schemes can be alpha-variants of the plain judgment's
+    // (same types, differently ordered quantifiers), and every content hash
+    // folds the rendered scheme. Nothing presentation-driven may reach
+    // elaboration or a hash, so past the checked stop the judgment is re-taken
+    // plainly and only the per-node tooltip strings are kept.
+    let mut checked = if opts.typed_tooltips {
+        let mut canonical = typecheck(&program)?;
+        canonical.facts.adopt_tooltips(checked.facts);
+        canonical
+    } else {
+        checked
+    };
     let elaboration = timing::timed_res(
         timer,
         Phase::Elaborate,
@@ -712,9 +754,9 @@ fn finish_front(
             core: typed,
             verify_env,
         }),
-        core: Some(ElaboratedCore::new(core)),
+        core: Some(validated_elaborated_core(core)?),
         #[cfg(feature = "native")]
-        identity_core: Some(ElaboratedCore::new(identity_core)),
+        identity_core: Some(validated_elaborated_core(identity_core)?),
     })
 }
 
@@ -817,9 +859,9 @@ mod typed_pass_route_tests {
         let (_, _, warm_compatibility, warm_typed, warm_env) = warm;
 
         assert_eq!(session.stats().hits, 1);
-        crate::core::verify_typed_core(&cold_typed, &cold_env)
+        crate::core::audit_typed_core(&cold_typed, &cold_env)
             .expect("cold retained pre result verifies");
-        crate::core::verify_typed_core(&warm_typed, &warm_env)
+        crate::core::audit_typed_core(&warm_typed, &warm_env)
             .expect("cached retained pre result verifies");
         assert_eq!(cold_typed, warm_typed, "the cache clones typed witnesses");
         assert_eq!(&cold_typed.erase(), &*cold_compatibility);

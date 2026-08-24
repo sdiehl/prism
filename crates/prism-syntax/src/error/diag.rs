@@ -310,6 +310,24 @@ pub enum ErrKind {
     MissingFields { fields: String, ctor: String },
     #[error("field access on non-record type {ty}")]
     FieldAccessNonRecord { ty: String },
+    #[error(
+        "field `{field}` cannot be projected from unrefined sum type `{ty}` with \
+         {constructors} constructors; match a constructor first"
+    )]
+    PartialFieldProjection {
+        field: String,
+        ty: String,
+        constructors: usize,
+    },
+    #[error(
+        "cannot spread an unrefined sum type `{ty}` into record constructor `{ctor}`; \
+         the type has {constructors} constructors"
+    )]
+    RecordSpreadMultiCtor {
+        ctor: String,
+        ty: String,
+        constructors: usize,
+    },
     /// The unboxed-values surface (`#(...)`, `#{...}`, `.#field`) parses, but
     /// representation-aware checking and lowering are unsupported. The `what`
     /// names the form ("tuples", "records", "projection").
@@ -464,6 +482,8 @@ pub enum ErrKind {
     },
     #[error("no field `{field}` on type `{ctor_name}`")]
     NoFieldOnType { field: String, ctor_name: String },
+    /// Retired in v0.20 when unrefined sum projection moved to E1023. Kept in
+    /// the catalogue so the published E4008 identity is never reassigned.
     #[error(
         "field `{field}` of type `{type_name}` has conflicting types across its constructors: \
          `{first}` in one and `{second}` in another; a field read `x.{field}` cannot be given \
@@ -829,6 +849,8 @@ impl ErrKind {
             Self::NotRecordCtor { .. } => "E1007",
             Self::MissingFields { .. } => "E1008",
             Self::FieldAccessNonRecord { .. } => "E1009",
+            Self::PartialFieldProjection { .. } => "E1023",
+            Self::RecordSpreadMultiCtor { .. } => "E1024",
             Self::UnboxedUnsupported { .. } => "E1018",
             Self::ConflictingUpdatePaths { .. } => "E1010",
             Self::OpticPathSurvived { .. } => "E1011",
@@ -1167,6 +1189,16 @@ mod tests {
             NotRecordCtor { ctor },
             MissingFields { fields, ctor },
             FieldAccessNonRecord { ty },
+            PartialFieldProjection {
+                field,
+                ty,
+                constructors
+            },
+            RecordSpreadMultiCtor {
+                ctor,
+                ty,
+                constructors
+            },
             UnboxedUnsupported { what },
             ConflictingUpdatePaths { a, b },
             OpticPathSurvived,

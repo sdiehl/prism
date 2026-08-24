@@ -164,6 +164,7 @@ pub fn rl_decl_rules(decl : Decl) : List(Finding) =
       rl_params(decl),
       rl_lambda_chain(decl),
       rl_accum_reverse(decl),
+      rl_codepoint_scan(decl),
       rl_magic(decl),
     ])
 
@@ -251,6 +252,45 @@ fn rl_accum_reverse(decl : Decl) : List(Finding) =
       ]
   else
     []
+
+fn rl_codepoint_scan(decl : Decl) : List(Finding) =
+  let targets = an_call_targets(decl.body)
+  if elem(decl.name, targets) && rl_walks_codepoints(decl.body) then
+    [
+        Finding {
+          code = fd_l0109,
+          span = decl.span,
+          message = "`{decl.name}` recurses while indexing by codepoint; each call re-walks the encoding, so the scan is quadratic in its input (`byte_at` and `byte_len` are constant time)"
+        },
+      ]
+  else
+    []
+
+fn rl_walks_codepoints(body : Sp(Expr)) : Bool =
+  length(filter(rl_codepoint_walk, an_nodes(body))) > 0
+
+-- A call to a codepoint-indexed accessor at a computed position. Every member
+-- of the family takes that position second, and a fixed one (`char_at(s, 0)`)
+-- reads one place rather than stepping through the string, so only a computed
+-- position turns the surrounding recursion into a re-walk.
+fn rl_codepoint_walk(n : Sp(Expr)) : Bool =
+  match node_of(n) of
+    ECall(f, args) =>
+      match node_of(f) of
+        EVar(name) =>
+          elem(name, lm_codepoint_index_fns()) && rl_computed_index(args)
+        _ => false
+    _ => false
+
+fn rl_computed_index(args : List(Sp(Expr))) : Bool =
+  match args of
+    Cons(_, Cons(idx, _)) => not(rl_is_int_lit(idx))
+    _ => false
+
+fn rl_is_int_lit(e : Sp(Expr)) : Bool =
+  match node_of(e) of
+    EInt(_, _) => true
+    _ => false
 
 fn rl_magic(decl : Decl) : List(Finding) =
   if decl.is_test then

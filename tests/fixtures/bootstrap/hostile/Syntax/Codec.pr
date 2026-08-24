@@ -1,0 +1,10 @@
+-- The same hazard one level down: `Syntax.Codec` lives in the standard
+-- library, and a source directory root is searched before the embedded
+-- standard library, so a file at this path shadows it for anything resolving
+-- against the target's search path. The shadow decodes its input artifacts
+-- through this module, so a target that supplied it could decide what the
+-- checker believes it was given.
+
+fn decode_surface(text : String) : String = ""
+
+fn codec_error_message(text : String) : String = text

@@ -1,8 +1,9 @@
 -- Hand-crafted hostile frames and bodies: every one must fail through `Fail` and
 -- be caught, never trap or hang. Covers the frame header checks (a foreign scheme
 -- tag, a wrong kind, a wrong contract digest), a body truncated mid-value, a
--- length prefix larger than the bytes that follow it, and a map body whose keys
--- arrive out of canonical order. Each hostile case is paired with a well-formed
+-- length prefix larger than the bytes that follow it, a map body whose keys
+-- arrive out of canonical order, and an element varint whose continuation run
+-- overruns the byte cap. Each hostile case is paired with a well-formed
 -- control that must be accepted, so the rejection is never vacuous. Runs under the
 -- parity + leak oracles: native and interpreter must agree byte-for-byte.
 --
@@ -27,6 +28,8 @@ fn caught(d : Bool, action : () -> Bool ! {Fail | e}) : Bool =
 fn dec_str(bs : Bytes) : (String, Bytes) = decode(bs)
 
 fn dec_map_ii(bs : Bytes) : (Map(Int, Int), Bytes) = decode(bs)
+
+fn dec_by(bs : Bytes) : (Bytes, Bytes) = decode(bs)
 
 fn dec_val(bs : Bytes) : Int = wire_decode_value_with_digest(bs, dig)
 
@@ -103,6 +106,37 @@ fn map_ordering() : Bool =
     match dec_map_ii(body) of
       _ => false
 
+-- A byte body is a count followed by that many varints. Well-formed elements are
+-- one or two bytes, so only a hand-crafted body reaches the varint byte cap at
+-- all: `varint_body(n)` writes a single element as `n` continuation bytes (high
+-- bit set, no payload) followed by a terminator.
+fn varint_run(n : Int) : List(Int) =
+  if n <= 0 then
+    [0]
+  else
+    Cons(128, varint_run(n - 1))
+
+fn varint_body(n : Int) : Bytes = bytes_of_list(Cons(1, varint_run(n)))
+
+-- Nine continuations plus a terminator is ten bytes, exactly the cap, so this is
+-- the widest element a body may legally carry.
+fn varint_cap_control() : Bool =
+  caught(false) fn
+    match dec_by(varint_body(9)) of
+      (out, _r) => wire_len(out) == 1
+
+-- One byte past the cap, and a long run well past it: both must be refused where
+-- the cap falls rather than scanned to the end of the input.
+fn varint_overlong() : Bool =
+  caught(true) fn
+    match dec_by(varint_body(10)) of
+      _ => false
+
+fn varint_long_run() : Bool =
+  caught(true) fn
+    match dec_by(varint_body(64)) of
+      _ => false
+
 fn report(name : String, ok : Bool) =
   println(concat(name, if ok then ": OK" else ": FAIL"))
 
@@ -115,3 +149,6 @@ fn main() =
   report("truncated body rejected", truncated_body())
   report("hostile length rejected", hostile_length())
   report("descending map rejected", map_ordering())
+  report("varint at cap accepted", varint_cap_control())
+  report("overlong varint rejected", varint_overlong())
+  report("long continuation run rejected", varint_long_run())

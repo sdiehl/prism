@@ -10,15 +10,13 @@ entry:
   ]
 
 b2:                                               ; preds = %entry
-  call void @prism_rc_dec(i64 %a0)
   ret i64 1
 
 b3:                                               ; preds = %entry
-  %t5 = getelementptr inbounds i8, ptr %t0, i64 24
-  %t6 = load i64, ptr %t5, align 8
-  call void @prism_rc_inc(i64 %t6)
-  call void @prism_rc_dec(i64 %a0)
-  ret i64 %t6
+  %t4 = getelementptr inbounds i8, ptr %t0, i64 24
+  %t5 = load i64, ptr %t4, align 8
+  call void @prism_rc_inc(i64 %t5)
+  ret i64 %t5
 
 b1:                                               ; preds = %entry
   call void @prism_match_error()

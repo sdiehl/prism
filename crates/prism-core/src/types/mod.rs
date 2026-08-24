@@ -11,7 +11,10 @@ pub mod repr;
 pub mod sig;
 pub mod ty;
 
-pub use repr::{is_or_null_element, repr_of_type, Repr};
+pub use repr::{
+    is_or_null_element, is_or_null_element_in, layout_of_type, layout_of_type_in, repr_of_type,
+    scalar_plan, AbiLayout, LiteralCell, RcBehavior, Repr, ScalarPlan, TypeLayout, ZeroPossibility,
+};
 pub use ty::{
     show_effects, show_type_with_effects, Effects, Type, ARBITRARY_CLASS, BUF, CANONICAL, CONS,
     DIV_CLASS, EQ_CLASS, F32X4, F64X2, FLOAT_BUF, FROM_JSON_CLASS, HASH_CLASS, I32X4, I64X2,
@@ -45,6 +48,13 @@ pub struct DeclInfo {
     pub params: Vec<String>,
     pub ty: Type,
     pub effects: Effects,
+    /// Provably pure: the body's principal effect row solved empty and closed,
+    /// recorded from the pre-generalization witness (generalization re-opens a
+    /// pure row for context fit, so this fact cannot be read off `ty`). This is
+    /// the precondition the `borrow` calling convention requires; borrow
+    /// inference consumes it, and a rehydrated interface conservatively reports
+    /// `false` because the witness is not serialized.
+    pub pure: bool,
 }
 
 /// One effect operation's checked signature facts.

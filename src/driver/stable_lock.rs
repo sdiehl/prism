@@ -55,9 +55,8 @@ pub fn derive(full: &str, roots: &[Root]) -> Result<LockManifest, Error> {
     Ok(derive_with_spans(full, roots)?.0)
 }
 
-// Derive the manifest and, alongside it, each locked family's declaration span,
-// so a drift diagnostic can point at the block. The span map is not serialized; it
-// exists only to place the error.
+// Derive the manifest and each locked family's declaration span. The span map is
+// used only to place drift diagnostics.
 fn derive_with_spans(
     full: &str,
     roots: &[Root],

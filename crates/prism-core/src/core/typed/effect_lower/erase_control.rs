@@ -1357,7 +1357,7 @@ impl Eraser<'_> {
 
     // `case s of SMore(ctl) => if ctl == 0 then cont else SMore(ctl) | SDone(v)
     // => SDone(v)`: a `continue`/`break` short-circuits the body carrying its
-    // disposition; a `return` propagates. `s` and `cont` share `at`; only
+    // disposition. A `return` propagates. `s` and `cont` share `at`. Only
     // `cont`'s side of the disjunction actually needs it (the propagating arm
     // rebuilds from `s`'s own `done` witness, which is the same `at.done`).
     fn step_guard_combined(&mut self, at: &StepAt, s: &TypedBinder, cont: TypedComp) -> TypedComp {
@@ -1988,7 +1988,7 @@ fn nullary_thunk(m: &TypedComp) -> Option<&TypedComp> {
 
 #[cfg(test)]
 mod tests {
-    use crate::core::typed::{verify::verify, CoreFnSig, Elaborated, TypedCore, TypedCoreFn};
+    use crate::core::typed::{verify, CoreFnSig, Elaborated, TypedCoreFn, UncheckedTypedCore};
     use crate::types::ty::Label;
 
     use super::*;
@@ -2062,7 +2062,7 @@ mod tests {
             ),
             0,
         );
-        if let Err(violations) = verify(&TypedCore::<Elaborated>::new(vec![f]), &env) {
+        if let Err(violations) = verify(UncheckedTypedCore::<Elaborated>::new(vec![f]), &env) {
             panic!("mixed-payload Step must verify: {violations:#?}");
         }
     }
@@ -2182,13 +2182,13 @@ mod tests {
             0,
         );
         let env = VerifyEnv::new();
-        let input = TypedCore::<Elaborated>::new(vec![function]);
-        assert_eq!(verify(&input, &env), Ok(()));
+        let input = verify(UncheckedTypedCore::<Elaborated>::new(vec![function]), &env)
+            .expect("row-polymorphic control input verifies");
 
         let plan = EffectPlan::analyze(input.functions());
         let erased = erase_control(input.functions(), &plan);
-        let output = TypedCore::<Elaborated>::new(erased.fns);
-        assert_eq!(verify(&output, &env), Ok(()));
+        let output = verify(UncheckedTypedCore::<Elaborated>::new(erased.fns), &env)
+            .expect("control-erased output verifies");
         assert_eq!(output.erase(), input.erase());
     }
 

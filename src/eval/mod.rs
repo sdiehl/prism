@@ -763,7 +763,7 @@ impl<'a> Machine<'a> {
     }
 
     // Perform one capability read of the given kind. Under `Live` the real read
-    // runs; under `Record` it runs and its result is logged; under `Replay` the
+    // runs. Under `Record` it runs and its result is logged. Under `Replay` the
     // recorded value is served and the real read is skipped. Reaching a replay
     // budget sets `halted` and returns a placeholder the unwinding discards.
     fn observe(
@@ -1235,6 +1235,31 @@ impl<'a> Machine<'a> {
             // Region brackets: no regions in the verifier, so enter yields a
             // placeholder token and exit is the identity on the activation's
             // result, both unobservable (the native contract).
+            //
+            // Modeling regions by value identity is correct and deliberate: the
+            // region policy is a resource decision and the interpreter is the
+            // value oracle. The consequence is that differential parity against
+            // this interpreter is not coverage of any of the following, each of
+            // which is a resource property with no value counterpart here, and
+            // each of which is therefore checked natively instead, by the region
+            // and promotion counters the runtime reports:
+            //
+            //   - Region allocation. `Bump` yields unit, so no cell exists and
+            //     nothing distinguishes a region cell from a heap cell; a silent
+            //     fallback to per-cell malloc is invisible on this side.
+            //   - Escape promotion. `ArenaExit` is the identity, so nothing is
+            //     copied; a result that natively costs one deep copy per
+            //     reachable cell costs zero here.
+            //   - Sharing across promotion. Identity preserves sharing for free,
+            //     so a native walk that expands a shared sub-DAG into a tree,
+            //     which is exponential in the sharing depth and still yields the
+            //     identical value, produces no divergence to observe.
+            //   - Reclamation. Nothing was allocated, so the wholesale teardown
+            //     at the activation's return has no counterpart, and neither does
+            //     failing to perform it.
+            //   - Region identity and nesting. Enter yields one constant token
+            //     rather than a distinct region, so nested activations and the
+            //     depth at which a cell was allocated are indistinguishable.
             Node::ArenaEnter => State::Ret(Rv::Int(0)),
             Node::ArenaExit(args) => match atoms(&env, args)?.as_slice() {
                 [Rv::Int(_), v] => State::Ret(v.clone()),

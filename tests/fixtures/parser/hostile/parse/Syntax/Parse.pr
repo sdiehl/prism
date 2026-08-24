@@ -1,0 +1,7 @@
+-- The hazard at its sharpest: the module the differential witness imports to
+-- re-parse the source it is comparing. A search path that reached this file
+-- would hand the gate a parser supplied by the very tree it is judging, and the
+-- comparison would certify a parser against itself. It exports none of the names
+-- the real parser exports, so that mistake is loud rather than quiet.
+
+fn shadowed_parse() : Int = 0

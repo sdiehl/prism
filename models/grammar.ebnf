@@ -1,4 +1,4 @@
-(* Prism surface grammar -- the single source of truth.
+(* Canonical Prism surface grammar.
 
    This is hand-written documentation that mirrors the real parser in
    crates/prism-syntax/src/grammar.lalrpop (terminal spellings from

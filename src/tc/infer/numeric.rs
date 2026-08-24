@@ -42,7 +42,7 @@ impl Tc<'_> {
 
     // The defer-or-fix ladder shared by every numeric/comparison operator, over
     // the already-applied left-operand type `t`. `Int` is the default lane and is
-    // accepted as-is; a fixed-width lane pins `id` so later width inference agrees;
+    // accepted as-is. A fixed-width lane pins `id` so later width inference agrees.
     // an unsolved existential defers to the `resolve_all` pass, where a still-later
     // use can pin its width before the `Int` default fires. Only the leftover case
     // differs per operator family (`NumClass`), and `blame` is the span the
@@ -155,7 +155,7 @@ impl Tc<'_> {
 
     // Classify a unary-minus whose operand type is already applied. The lane is
     // recorded on the node for the elaborator (I64 wrap, Float sign flip); `Int`
-    // is the default and needs no record; `U64` is rejected; an unsolved operand
+    // is the default and needs no record. `U64` is rejected. An unsolved operand
     // defers to `resolve_all`.
     fn neg_lane(&mut self, t: &Type, id: NodeId, span: Span) -> Result<Type, TypeError> {
         match t {

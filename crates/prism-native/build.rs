@@ -82,6 +82,7 @@ const ABI_TAG_WORD: &str = "PRISM_TAG_W";
 const ABI_ARITY_WORD: &str = "PRISM_ARITY_W";
 const ABI_HEADER_WORDS: &str = "PRISM_HDR_WORDS";
 const ABI_WORD_BYTES: &str = "PRISM_WORD_BYTES";
+const ABI_STATIC_CELL: &str = "PRISM_STATIC_CELL";
 
 // The reserved-tag family must at least contain the four cell kinds the runtime
 // has always claimed; fewer means the parser regressed, not that C shrank.
@@ -93,12 +94,22 @@ const C_LONG_SUFFIX: char = 'L';
 const HEX_RADIX: u32 = 16;
 const HEX_GROUP_DIGITS: usize = 4;
 
-// A `#define NAME value` numeric define: decimal or 0x hex, optional L suffix.
-// Expressions and shifts are deliberately not parsed; nothing in the mirrored
-// ABI uses them.
+// A `#define NAME value` numeric define: decimal or 0x hex with an optional L
+// suffix, or the parenthesized single-shift form `(1L << n)` the rc-word
+// marker bits use. General expressions are still not parsed; nothing else in
+// the mirrored ABI needs them.
 fn c_define(header: &str, name: &str) -> Option<i64> {
     let prefix = format!("#define {name} ");
     let raw = header.lines().find_map(|l| l.strip_prefix(&prefix))?.trim();
+    if let Some(inner) = raw.strip_prefix('(').and_then(|r| r.strip_suffix(')')) {
+        let (base, shift) = inner.split_once("<<")?;
+        let base = base.trim();
+        let base = base.strip_suffix(C_LONG_SUFFIX).unwrap_or(base);
+        return base
+            .parse::<i64>()
+            .ok()?
+            .checked_shl(shift.trim().parse().ok()?);
+    }
     let raw = raw.strip_suffix(C_LONG_SUFFIX).unwrap_or(raw);
     raw.strip_prefix(C_HEX_PREFIX).map_or_else(
         || raw.parse().ok(),
@@ -159,6 +170,7 @@ fn runtime_abi(manifest_dir: &str) -> String {
     let arity_word = required_c_define(&header, ABI_ARITY_WORD);
     let header_words = required_c_define(&header, ABI_HEADER_WORDS);
     let word_bytes = required_c_define(&header, ABI_WORD_BYTES);
+    let static_cell = required_c_define(&header, ABI_STATIC_CELL);
     let tag_offset = tag_word * word_bytes;
     let header_bytes = header_words * word_bytes;
     assert_eq!(
@@ -202,6 +214,15 @@ fn runtime_abi(manifest_dir: &str) -> String {
     writeln!(out, "pub(crate) const WORD_BYTES: i64 = {word_bytes};").unwrap();
     writeln!(out, "pub(crate) const TAG_OFF: i64 = {tag_offset};").unwrap();
     writeln!(out, "pub(crate) const HDR_BYTES: i64 = {header_bytes};").unwrap();
+    writeln!(
+        out,
+        "/// The rc-word marker for a cell baked into the executable image:\n\
+         /// codegen writes it into a static cell's refcount word so the runtime\n\
+         /// treats the cell as count-inert and never writes the (read-only) word.\n\
+         pub(crate) const STATIC_CELL: i64 = {};",
+        rust_hex(static_cell)
+    )
+    .unwrap();
     out
 }
 

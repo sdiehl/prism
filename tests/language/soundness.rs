@@ -8,6 +8,10 @@
 // rejection and the exact structured diagnostic code, and one positive control
 // proves the coverage rule does not over-reject a fully covered handler.
 
+use std::io::Write;
+use std::process::{Command, Stdio};
+
+use prism::error::{ErrKind, Frame, TypeError};
 use prism::Error;
 
 // Two arms for the same operation `pick`. The second silently shadows the first
@@ -54,6 +58,31 @@ fn handler_arity_mismatch_is_rejected() {
         panic!("expected a type error, got: {err}");
     };
     assert_eq!(ty.code(), Some("E5010"), "got: {err}");
+}
+
+// One named `Cell(a)` instance fixes `a` at its first directed call. A later
+// directed call through the same instance cannot silently instantiate another
+// `a`, or the handler's operation and label evidence would disagree.
+const NAMED_INSTANCE_ARGUMENT_MISMATCH: &str =
+    include_str!("../fixtures/language/soundness/named_instance_argument_mismatch.pr");
+
+#[test]
+fn named_instance_reuses_one_effect_argument_vector() {
+    let src = prism::with_prelude(NAMED_INSTANCE_ARGUMENT_MISMATCH);
+    let err = prism::check(&src)
+        .expect_err("one named effect instance cannot be both Cell(Int) and Cell(String)");
+    let Error::Type(TypeError::Kind(diag)) = err else {
+        panic!("expected a structured type mismatch, got: {err}");
+    };
+    assert_eq!(diag.kind.code(), "E1022", "got: {diag}");
+    let ErrKind::TypeMismatch { expected, found } = &diag.kind else {
+        panic!("expected the structured type-mismatch payload, got: {diag}");
+    };
+    assert_eq!((expected.as_str(), found.as_str()), ("Int", "String"));
+    assert!(
+        matches!(diag.context.as_slice(), [Frame::InFn(name)] if name == "main"),
+        "the mismatch must retain its declaration context: {diag}"
+    );
 }
 
 // The mirror direction: `pair` declares two operation parameters, the clause
@@ -260,6 +289,21 @@ const OR_NULL_NESTED: &str = r"fn m() : OrNull(OrNull(Int)) = Null
 fn main() = println(0)
 ";
 
+// A transparent newtype can erase to the zero word even though its source type
+// is nominal, so it needs declaration-aware representation proof.
+const OR_NULL_ZERO_NEWTYPE: &str = r"newtype Zero = Zero(Unit)
+fn m() : OrNull(Zero) = This(Zero(()))
+fn main() = println(0)
+";
+
+// Constructor shape is not newtype evidence: an ordinary unary datatype keeps
+// its allocated, non-zero wrapper and is a sound nullable element.
+const OR_NULL_ORDINARY_UNARY: &str = r"type Box(a) = Box(a)
+fn annotated(x : Box(Int)) : OrNull(Box(Int)) = This(x)
+fn inferred(x : Box(Int)) = This(x)
+fn main() = println(0)
+";
+
 // A well-formed nullable over a heap element must still check.
 const OR_NULL_OK: &str = r#"fn m(b : Bool) : OrNull(String) =
   match b of
@@ -283,6 +327,7 @@ fn or_null_zero_word_element_is_rejected() {
     or_null_rejected(OR_NULL_UNIT_INFERRED, "inferred OrNull(Unit)");
     or_null_rejected(OR_NULL_UNINFERRED, "un-inferred OrNull element");
     or_null_rejected(OR_NULL_NESTED, "nested OrNull");
+    or_null_rejected(OR_NULL_ZERO_NEWTYPE, "zero-represented newtype element");
 }
 
 #[test]
@@ -290,6 +335,10 @@ fn or_null_over_heap_element_checks() {
     assert!(
         prism::check(&prism::with_prelude(OR_NULL_OK)).is_ok(),
         "OrNull(String) with Null/This arms must check"
+    );
+    assert!(
+        prism::check(&prism::with_prelude(OR_NULL_ORDINARY_UNARY)).is_ok(),
+        "an ordinary unary datatype keeps its boxed wrapper"
     );
 }
 
@@ -369,8 +418,8 @@ fn once_direct_reuse_is_rejected() {
 
 #[test]
 fn once_delegation_to_many_context_is_rejected() {
-    // Contravariant subsumption: a `@ once` value cannot fill a `@ many` slot.
-    // This is a subsumption mismatch (a legacy `TypeFailure`, not a structured
+    // A `@ once` value in a `@ many` slot produces a contravariant subsumption
+    // mismatch (a legacy `TypeFailure`, not a structured
     // catalogue error), so the pinned surface is its message, not a code.
     let err = prism::check(&prism::with_prelude(ONCE_DELEGATION))
         .expect_err("handing a `@ once` closure to a `@ many` context must be rejected");
@@ -541,34 +590,107 @@ fn noescape_uncheckable_argument_is_rejected() {
     assert_eq!(once_code(&src, "uncheckable noescape argument"), "E6062");
 }
 
-// A field name shared across a datatype's constructors with DIFFERING types is
-// unsound: a record read `x.field` resolves the field type from whichever
-// constructor `find_field` visits first, so `Square { size: String }` read as
-// the `Circle { size: Int }` field would reinterpret a string pointer as an
-// integer. This must be rejected at the declaration, not fault at runtime.
+// Field types belong to constructors, so a match may refine the same label to
+// a different type in each arm without making an unrefined projection safe.
 #[test]
-fn conflicting_shared_field_type_is_rejected() {
+fn variant_local_shared_field_types_are_accepted() {
     let src = prism::with_prelude(
-        "type Shape = Circle { size: Int } | Square { size: String }\n\
-         fn main() = println(\"x\")\n",
+        r"type Shape = Circle { radius: Int } | Square { radius: Float }
+fn radius_text(shape : Shape) : String =
+  match shape of
+    Circle { radius = radius } => show(radius)
+    Square { radius = radius } => show(radius)
+fn main() = println(radius_text(Circle { radius = 7 }))
+",
     );
-    let err = prism::check(&src).expect_err("a conflicting shared field type must be rejected");
+    prism::check(&src).expect("pattern refinement must permit constructor-local field types");
+}
+
+fn projection_error(src: &str, what: &str) {
+    let err =
+        prism::check(&prism::with_prelude(src)).expect_err(&format!("{what} must be rejected"));
+    let Error::Type(ty) = &err else {
+        panic!("expected a type error for {what}, got: {err}");
+    };
+    assert_eq!(ty.code(), Some("E1023"), "{what}: got {err}");
+    assert!(
+        err.to_string().contains("match a constructor first"),
+        "{what}: diagnostic must name the repair: {err}"
+    );
+}
+
+// A field present on only one constructor is partial on the unrefined nominal.
+#[test]
+fn constructor_specific_field_projection_is_rejected() {
+    projection_error(
+        "type Shape = Circle { radius: Int } | Square { side: Int }\n\
+         fn radius(s : Shape) : Int = s.radius\n\
+         fn main() = println(0)\n",
+        "constructor-specific field projection",
+    );
+}
+
+// Even a same-typed common field needs one lowering arm per constructor. Until
+// projection facts carry that multi-arm evidence, accepting it would typecheck
+// a program whose Core projection handles only one constructor.
+#[test]
+fn common_field_projection_without_multi_arm_evidence_is_rejected() {
+    projection_error(
+        "type Tagged = A { id: Int, kind: String } | B { id: Int }\n\
+         fn tag_id(t : Tagged) : Int = t.id\n\
+         fn main() = println(0)\n",
+        "common field projection",
+    );
+}
+
+// The same guard applies below a valid outer projection: `outer.inner` records
+// one constructor, but `.id` still receives an unrefined sum.
+#[test]
+fn nested_sum_field_projection_is_rejected() {
+    projection_error(
+        "type Tagged = A { id: Int } | B { id: Int }\n\
+         type Outer = Outer { inner: Tagged }\n\
+         fn tag_id(outer : Outer) : Int = outer.inner.id\n\
+         fn main() = println(0)\n",
+        "nested sum field projection",
+    );
+}
+
+// Bare `.name` is syntactically a field projection, never UFCS fallback. A
+// same-named top-level function must not turn E1023 into a silent call.
+#[test]
+fn partial_projection_does_not_fall_back_to_ufcs() {
+    projection_error(
+        "type Shape = Circle { radius: Int } | Square { side: Int }\n\
+         fn radius(_shape : Shape) : Int = 99\n\
+         fn read(shape : Shape) : Int = shape.radius\n\
+         fn main() = println(0)\n",
+        "partial projection with a same-named function",
+    );
+}
+
+#[test]
+fn single_constructor_field_projection_checks() {
+    let src = prism::with_prelude(
+        "type Box = Box { value: Int }\n\
+         fn value(box : Box) : Int = box.value\n\
+         fn main() = println(value(Box { value = 22 }))\n",
+    );
+    prism::check(&src).expect("a single-constructor field projection must check");
+}
+
+#[test]
+fn record_spread_from_unrefined_sum_is_rejected() {
+    let src = prism::with_prelude(
+        "type Shape = Circle { radius: Int } | Square { side: Int }\n\
+         fn resize(shape : Shape) : Shape = Circle { ..shape, radius = 2 }\n\
+         fn main() = println(0)\n",
+    );
+    let err = prism::check(&src).expect_err("constructor spread must prove the base layout");
     let Error::Type(ty) = &err else {
         panic!("expected a type error, got: {err}");
     };
-    assert_eq!(ty.code(), Some("E4008"), "got: {err}");
-}
-
-// A field name shared across constructors with the SAME type is the sound
-// common-field case and must keep compiling: `id` is `Int` in both arms.
-#[test]
-fn compatible_shared_field_type_is_accepted() {
-    let src = prism::with_prelude(
-        "type Tagged = A { id: Int, kind: String } | B { id: Int }\n\
-         fn tag_id(t : Tagged) : Int = t.id\n\
-         fn main() = println(show(tag_id(B { id = 7 })))\n",
-    );
-    prism::check(&src).expect("a shared field of identical type must be accepted");
+    assert_eq!(ty.code(), Some("E1024"), "got: {err}");
 }
 
 // A record pattern without `..` must bind every field of its constructor: the
@@ -597,4 +719,107 @@ fn record_pattern_with_spread_is_accepted() {
          fn main() = println(show(f(P { x = 1, y = 2 })))\n",
     );
     prism::check(&src).expect("a record pattern with `..` must be accepted");
+}
+
+/// One session of the interactive entry point: the lines are fed to the real
+/// binary over its own input and the whole transcript comes back, since a
+/// refusal is reported on the error stream and an accepted line prints its
+/// value on the output stream.
+fn repl_transcript(lines: &str) -> String {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg("repl")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn the interactive entry point");
+    child
+        .stdin
+        .take()
+        .expect("session input")
+        .write_all(format!("{lines}:quit\n").as_bytes())
+        .expect("drive the session");
+    let out = child.wait_with_output().expect("session transcript");
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    )
+}
+
+/// A sum whose two constructors carry the same field, which is the shape that
+/// makes both a projection and an update path ambiguous: nothing in the
+/// unrefined type says which constructor a field access is aimed at.
+const AMBIGUOUS_SUM: &str = "type Tagged = A { id: Int } | B { id: Int }\n";
+
+// The interactive entry point reaches the checker without a file or a pipeline
+// around it, so the constructor-ambiguity refusals are certified through it as
+// well as through a compiled program. A field on an unrefined sum is refused in
+// declaration position and in expression position alike; selecting the first
+// constructor that happens to carry the label would make acceptance depend on
+// how the program was entered.
+#[test]
+fn repl_refuses_unrefined_field_projection() {
+    let out = repl_transcript(&format!(
+        "{AMBIGUOUS_SUM}\
+         fn tag_id(t : Tagged) : Int = t.id\n\
+         let a = A {{ id = 1 }}\n\
+         a.id\n"
+    ));
+    assert_eq!(
+        out.matches("[E1023]").count(),
+        2,
+        "both the declared and the entered projection must be refused: {out}"
+    );
+    assert!(
+        out.contains("match a constructor first"),
+        "the refusal must name the repair: {out}"
+    );
+}
+
+// The update path fails closed on the same shape, and it is the wider of the
+// two: it refuses on the constructor count before it ever looks the field up,
+// so a record update can never be aimed at a constructor the value may not be.
+#[test]
+fn repl_refuses_multi_constructor_update_path() {
+    let out = repl_transcript(&format!(
+        "{AMBIGUOUS_SUM}\
+         fn bump(t : Tagged) : Tagged = {{ t | id = 1 }}\n\
+         let a = A {{ id = 1 }}\n\
+         {{ a | id = 2 }}\n"
+    ));
+    assert_eq!(
+        out.matches("[E1013]").count(),
+        2,
+        "both the declared and the entered update path must be refused: {out}"
+    );
+    assert!(
+        out.contains("single-constructor record"),
+        "the refusal must name what the path needs: {out}"
+    );
+}
+
+// The control that keeps the two refusals honest: on a single-constructor
+// record the very same projection and update are unambiguous, and the session
+// evaluates them rather than refusing everything it is handed.
+#[test]
+fn repl_accepts_single_constructor_field_paths() {
+    let out = repl_transcript(
+        "type Box = Box { value: Int }\n\
+         let b = Box { value = 7 }\n\
+         b.value\n\
+         { b | value = 8 }\n",
+    );
+    assert!(
+        out.contains("7 : Int"),
+        "the projection must evaluate: {out}"
+    );
+    assert!(
+        out.contains("Box(8) : Box"),
+        "the update must evaluate: {out}"
+    );
+    assert!(
+        !out.contains("Type Error"),
+        "an unambiguous field path must not be refused: {out}"
+    );
 }

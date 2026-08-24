@@ -26,7 +26,7 @@ use super::verify::{
 };
 use super::{
     CompSig, CoreInstantiation, TypedBinder, TypedComp, TypedCompKind, TypedCore, TypedCoreFn,
-    TypedValue, TypedValueKind,
+    TypedValue, TypedValueKind, UncheckedTypedCore,
 };
 
 /// Rewrite counts for typed inlining.
@@ -44,14 +44,18 @@ impl InlineStats {
 
 /// Inline single-call-site non-recursive functions, preserving every witness.
 #[must_use]
-pub fn inline<P>(core: TypedCore<P>) -> (TypedCore<P>, InlineStats) {
-    let names: BTreeSet<Sym> = core.fns.iter().map(|function| function.name).collect();
+pub fn inline<P>(core: TypedCore<P>) -> (UncheckedTypedCore<P>, InlineStats) {
+    let names: BTreeSet<Sym> = core
+        .functions()
+        .iter()
+        .map(|function| function.name)
+        .collect();
 
     // Per-function call-site count (Call heads) and whether it is ever used
     // first-class (as a value), across all bodies.
     let mut call_count: BTreeMap<Sym, usize> = BTreeMap::new();
     let mut first_class: BTreeSet<Sym> = BTreeSet::new();
-    for function in &core.fns {
+    for function in core.functions() {
         for head in calls_in(&function.body) {
             *call_count.entry(head).or_default() += 1;
         }
@@ -75,12 +79,12 @@ pub fn inline<P>(core: TypedCore<P>) -> (TypedCore<P>, InlineStats) {
         })
         .collect();
     if inlinable.is_empty() {
-        return (core, InlineStats::default());
+        return (core.into_unchecked(), InlineStats::default());
     }
 
+    let source_functions = core.into_unchecked().into_functions();
     let mut inliner = Inliner {
-        fns: core
-            .fns
+        fns: source_functions
             .iter()
             .map(|function| (function.name, function.clone()))
             .collect(),
@@ -88,8 +92,7 @@ pub fn inline<P>(core: TypedCore<P>) -> (TypedCore<P>, InlineStats) {
         ticks: 0,
         counter: 0,
     };
-    let fns = core
-        .fns
+    let fns = source_functions
         .iter()
         .map(|function| {
             TypedCoreFn::new(
@@ -102,7 +105,7 @@ pub fn inline<P>(core: TypedCore<P>) -> (TypedCore<P>, InlineStats) {
         })
         .collect();
     (
-        TypedCore::new(fns),
+        UncheckedTypedCore::new(fns),
         InlineStats {
             ticks: inliner.ticks,
         },
@@ -113,7 +116,7 @@ pub fn inline<P>(core: TypedCore<P>) -> (TypedCore<P>, InlineStats) {
 // not terminate and would reshape the spines native codegen expects.
 fn recursive_set<P>(core: &TypedCore<P>, names: &BTreeSet<Sym>) -> BTreeSet<Sym> {
     let mut edges: BTreeMap<Sym, BTreeSet<Sym>> = BTreeMap::new();
-    for function in &core.fns {
+    for function in core.functions() {
         let heads = calls_in(&function.body);
         edges.insert(
             function.name,
@@ -432,9 +435,9 @@ mod tests {
     use crate::types::Type;
 
     use super::super::effect_lower::lower_effects;
-    use super::super::verify::{verify, OperationSig, VerifyEnv};
+    use super::super::verify::{OperationSig, VerifyEnv};
     use super::super::{
-        CoreFnSig, CoreQuantifier, CoreType, EffectLowered, Elaborated, TypedLowering,
+        verify, CoreFnSig, CoreQuantifier, CoreType, EffectLowered, Elaborated, TypedLowering,
     };
     use super::*;
 
@@ -476,14 +479,11 @@ mod tests {
     }
 
     fn run_inline(functions: Vec<TypedCoreFn>, env: &VerifyEnv) -> (TypedCore<Elaborated>, u64) {
-        let input = TypedCore::new(functions);
-        if let Err(violations) = verify(&input, env) {
-            panic!("input fixture is invalid: {violations:#?}");
-        }
+        let input = verify(UncheckedTypedCore::<Elaborated>::new(functions), env)
+            .unwrap_or_else(|violations| panic!("input fixture is invalid: {violations:#?}"));
         let (actual, stats) = inline(input);
-        if let Err(violations) = verify(&actual, env) {
-            panic!("inlined typed Core is invalid: {violations:#?}");
-        }
+        let actual = verify(actual, env)
+            .unwrap_or_else(|violations| panic!("inlined typed Core is invalid: {violations:#?}"));
         (actual, stats.ticks())
     }
 
@@ -565,10 +565,13 @@ mod tests {
             ),
             0,
         );
-        let input = TypedCore::<Elaborated>::new(vec![increment, main]);
-        if let Err(violations) = verify(&input, &env) {
-            panic!("elaborated late-pass fixture is invalid: {violations:#?}");
-        }
+        let input = verify(
+            UncheckedTypedCore::<Elaborated>::new(vec![increment, main]),
+            &env,
+        )
+        .unwrap_or_else(|violations| {
+            panic!("elaborated late-pass fixture is invalid: {violations:#?}")
+        });
         let flags = DynFlags {
             effect_tier: EffectTier::FreeMonad,
             quiet: true,
@@ -586,9 +589,6 @@ mod tests {
         assert_eq!(strategy, EffectStrategy::SelectiveFreeMonad);
         assert!(ctors.contains_key("EPure"));
         assert!(ctors.contains_key("EOp"));
-        if let Err(violations) = verify(&lowered, &env) {
-            panic!("effect-lowered late-pass fixture is invalid: {violations:#?}");
-        }
         let lowered_main = lowered
             .functions()
             .iter()
@@ -633,13 +633,10 @@ mod tests {
         input: TypedCore<EffectLowered>,
         env: &VerifyEnv,
     ) -> (TypedCore<EffectLowered>, u64) {
-        if let Err(violations) = verify(&input, env) {
-            panic!("effect-lowered Inline input is invalid: {violations:#?}");
-        }
         let (actual, stats) = inline(input);
-        if let Err(violations) = verify(&actual, env) {
-            panic!("effect-lowered Inline output is invalid: {violations:#?}");
-        }
+        let actual = verify(actual, env).unwrap_or_else(|violations| {
+            panic!("effect-lowered Inline output is invalid: {violations:#?}")
+        });
         (actual, stats.ticks())
     }
 

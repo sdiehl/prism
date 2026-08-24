@@ -1,39 +1,16 @@
-//! The from-scratch versus incremental oracle pair.
+//! Compares cold and incremental builds of a multi-definition program.
 //!
-//! This is the content-addressed analogue of the interpreter/native parity gate,
-//! and the half of the `hash_parity` invariant the store completes.
+//! The tests assert that:
 //!
-//! `hash_parity` proves *equal hash implies a byte-identical artifact* over
-//! curated pairs. This file proves the other half over a real multi-definition
-//! program driven two ways: built from scratch into a cold store, and built
-//! incrementally by editing one definition against a warm store. The acceptance
-//! is threefold:
+//!  (a) a semantic edit moves only its Merkle closure;
+//!  (b) cold and incremental paths emit identical stored Core and LLVM IR;
+//!  (c) reformatting or renaming a local writes no new objects.
 //!
-//!  (a) editing a definition moves exactly that definition and its Merkle
-//!      closure (its transitive dependents); every other hash is unchanged, so
-//!      an incremental build recompiles the closure and nothing more;
-//!  (b) the emitted artifact is byte-identical between a full cold rebuild and
-//!      the incremental path (the stored anonymous-Core object per definition,
-//!      and the whole-program LLVM IR, which the store never perturbs);
-//!  (c) an edit that only reformats or renames a local yields zero hash movement
-//!      and writes zero new objects.
+//! Verification receipts are reused when the content hash is unchanged and
+//! recomputed after semantic edits.
 //!
-//! Verification caching rides on the same identity: a parity pass recorded
-//! against a content hash ([`prism::store::verify`]) is reused when a reformat
-//! keeps the hash and re-run when a semantic edit moves it, so check cost tracks
-//! the Merkle closure rather than the size of the suite.
-//!
-//! Every assertion is taken in the store's one hashing regime, pre-optimizer
-//! elaborated Core: the closure is read from the pre-optimizer dependency graph
-//! (`store_def_inputs`) and the per-definition hashes the commit writes (`dump
-//! core-hash`), and byte-identity is read from the store's name index and
-//! objects. That is deliberate: the store commits the pre-optimizer Core hash
-//! (`commit_to_store`, aligned with `dump core-hash` and `store_def_inputs`), so
-//! the oracle diffs the same hashes the store keys on, not a second surface that
-//! could disagree. Identity is optimizer-independent by design; the optimizer
-//! level rides in the verification fingerprint. The store-only assertions compile
-//! everywhere; the native build/run demonstration of cached parity is gated on
-//! `feature = "native"`.
+//! Hashes and closures come from pre-optimizer Core, matching the store's keys.
+//! The native cached-parity check is gated on `feature = "native"`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -546,8 +523,8 @@ fn store_commit_and_rehash_agree_for_optimizer_touched_programs() {
     }
 }
 
-// The namespace root names the exact program interface, not just its definition
-// bodies: two programs that differ only in a public type's shape must have
+// The namespace root includes the complete program interface. Programs that
+// differ only in a public type's shape must have
 // distinct namespace contracts. Folding definitions alone let `Token(Int)` and
 // `Token(String)` share one contract, so a published root did not name the value
 // schema under it.

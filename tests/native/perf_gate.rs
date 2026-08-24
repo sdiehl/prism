@@ -20,6 +20,8 @@ use std::path::Path;
 use std::process::Command;
 use std::{env, fs};
 
+use crate::support::{ALLOCATED_BYTES_SUFFIX, ALLOC_STATS};
+
 // Corpus discovery and prelude-prepending source loader, shared with the parity
 // oracles. The tier manifest below records the same program set those gates diff, so
 // it reuses the one definition of "the runnable corpus" rather than rediscovering
@@ -45,6 +47,9 @@ const PERF_WIRE_ENCODE: &str = include_str!("../cases/perf/wire_encode.pr");
 const PERF_WIRE_DECODE: &str = include_str!("../cases/perf/wire_decode.pr");
 const PERF_BUF_CHUNKS: &str = include_str!("../cases/perf/buf_chunks.pr");
 const PERF_BYTES_CODEC: &str = include_str!("../cases/perf/bytes_codec_slope.pr");
+const PERF_STR_SLICE_WINDOW: &str = include_str!("../cases/perf/str_slice_window.pr");
+const PERF_JSON_ESCAPE_RUNS: &str = include_str!("../cases/perf/json_escape_runs.pr");
+const PERF_BYTES_BODY_DECODE: &str = include_str!("../cases/perf/bytes_body_decode.pr");
 
 const N_PLACEHOLDER: &str = "__N__";
 const PIPELINE_PLACEHOLDER: &str = "__PIPELINE__";
@@ -121,6 +126,18 @@ fn stat_build(
     suffix: &str,
     build: impl Fn(&str, &Path) -> Result<(), prism::error::Error>,
 ) -> Result<i64, String> {
+    stat_build_many(full, tag, stat_env, &[suffix], build).map(|v| v[0])
+}
+
+// Every counter a stats run reports is on the same stderr, so a family of them
+// costs one build and one run, not one per counter.
+fn stat_build_many(
+    full: &str,
+    tag: &str,
+    stat_env: &str,
+    suffixes: &[&str],
+    build: impl Fn(&str, &Path) -> Result<(), prism::error::Error>,
+) -> Result<Vec<i64>, String> {
     let bin = env::temp_dir().join(format!(
         "prism_perf_{}_{}",
         std::process::id(),
@@ -140,14 +157,19 @@ fn stat_build(
     cleanup();
     let out = out.map_err(|e| format!("{tag}: spawn failed: {e}"))?;
     let stderr = String::from_utf8_lossy(&out.stderr);
-    let line = stderr
-        .lines()
-        .find(|l| l.trim_end().ends_with(suffix))
-        .ok_or_else(|| format!("{tag}: no `{suffix}` line in stderr: {stderr:?}"))?;
-    line.split_whitespace()
-        .nth(1)
-        .and_then(|n| n.parse().ok())
-        .ok_or_else(|| format!("{tag}: cannot parse count from {line:?}"))
+    suffixes
+        .iter()
+        .map(|suffix| {
+            let line = stderr
+                .lines()
+                .find(|l| l.trim_end().ends_with(suffix))
+                .ok_or_else(|| format!("{tag}: no `{suffix}` line in stderr: {stderr:?}"))?;
+            line.split_whitespace()
+                .nth(1)
+                .and_then(|n| n.parse().ok())
+                .ok_or_else(|| format!("{tag}: cannot parse count from {line:?}"))
+        })
+        .collect()
 }
 
 // The fusion corpus: each program drives a different path to the zero-allocation
@@ -397,6 +419,9 @@ fn or_null_values_allocate_no_cells() {
 
 const PERF_ARENA_REGION_FILL: &str = include_str!("../cases/perf/arena_region_fill.pr");
 const PERF_ARENA_REGION_LOOP: &str = include_str!("../cases/perf/arena_region_loop.pr");
+const PERF_ARENA_PROMOTE_NONE: &str = include_str!("../cases/perf/arena_promote_none.pr");
+const PERF_ARENA_PROMOTE_LINEAR: &str = include_str!("../cases/perf/arena_promote_linear.pr");
+const PERF_ARENA_PROMOTE_SHARED: &str = include_str!("../cases/perf/arena_promote_shared.pr");
 
 // Growing the list built under one `with_arena` activation must not grow the
 // runtime allocation count at all. Every `Cons` comes from the region; only the
@@ -457,6 +482,167 @@ fn arena_region_loop_allocates_only_activation_constants() {
         "arena activation loop allocates {per} cells/iteration through prism_alloc ({lo} at \
          n={small}, {hi} at n={big}; baseline 2, the activation's evidence closures); the \
          region path regressed"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The promotion oracle. Escaping a `with_arena` scope deep-copies every
+// arena-owned cell the result reaches, and what that costs is invisible to every
+// other gate in the tree: output parity, the leak balance, and the region
+// ratchets above all stay green whether the walk copies a shared sub-DAG once or
+// once per path that reaches it, because both produce the identical value and
+// neither leaks. `PRISM_PROMOTE_STATS` reports the walk's own size and shape, and
+// the three fixtures below pin it at nothing escaping, at an unshared spine, and
+// at a shared DAG where the two behaviors differ exponentially.
+//
+// The counters are exact counts, not timings, which is what lets these read as
+// equalities against a stated baseline rather than as thresholds. A timing gate
+// would owe a distribution over repeated samples to be worth anything, because a
+// single favorable run proves nothing; a count of cells copied is the same
+// integer on every run of a deterministic program, so one sample is the whole
+// distribution and a regression cannot hide in variance.
+//
+// These are anti-vacuous by construction: with the promotion walk's forwarding
+// disabled, `arena_promotion_copies_a_shared_cell_once` reads roughly 2^N rather
+// than N (measured 4.3 GB and 4.18 s at depth 26 against 1.4 MB and 0.00 s),
+// `arena_promotion_of_an_unshared_list_is_one_copy_per_cell` is unaffected
+// because that fixture has no sharing to lose, and
+// `arena_promotion_does_nothing_when_nothing_escapes` is unaffected because the
+// walk never runs. So the shared fixture is the one carrying the claim and it
+// has been shown to fail without the behavior it asserts.
+
+const PROMOTE_STATS: &str = "PRISM_PROMOTE_STATS";
+
+// The four counters from one promotion-instrumented run.
+struct PromoteStats {
+    copied: i64,
+    shared: i64,
+    nodes: i64,
+    edges: i64,
+}
+
+impl PromoteStats {
+    // Ordered as the fields above; the runtime prints one `prism: <n> <suffix>`
+    // line per counter.
+    const SUFFIXES: [&'static str; 4] = [
+        "cells promoted",
+        "promotion copies shared",
+        "promotion nodes visited",
+        "promotion edges visited",
+    ];
+
+    fn measure(template: &str, tag: &str, n: i64) -> Self {
+        let v = stat_build_many(
+            &perf_src_n(template, n),
+            tag,
+            PROMOTE_STATS,
+            &Self::SUFFIXES,
+            |src, bin| {
+                let mut cfg = prism::Config::from_env();
+                cfg.flags.opt_level = prism::OptLevel::O2;
+                prism::build_on(src, &prism::default_roots(Path::new(".")), bin, &cfg)
+            },
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        Self {
+            copied: v[0],
+            shared: v[1],
+            nodes: v[2],
+            edges: v[3],
+        }
+    }
+}
+
+// Nothing reachable from the result is arena-owned, so the walk never runs. A
+// promotion that fires here is deep-copying a region the scope was entitled to
+// drop wholesale.
+#[test]
+fn arena_promotion_does_nothing_when_nothing_escapes() {
+    require_cc();
+    let n = 500;
+    let s = PromoteStats::measure(PERF_ARENA_PROMOTE_NONE, "arena_promote_none", n);
+    assert_eq!(
+        (s.copied, s.shared, s.nodes, s.edges),
+        (0, 0, 0, 0),
+        "a scope returning a scalar promoted {} cells over {} nodes and {} edges ({} shared) \
+         with a {n}-element region; nothing reachable from the result is arena-owned, so the \
+         promotion walk should not have run at all",
+        s.copied,
+        s.nodes,
+        s.edges,
+        s.shared
+    );
+}
+
+// An unshared spine: every cell is reached by exactly one path, so each of the
+// three walk measures is one per element and no edge ever finds an existing copy
+// to reuse. This is what promotion costs with no sharing to preserve, and it is
+// what the shared case is compared against.
+#[test]
+fn arena_promotion_of_an_unshared_list_is_one_copy_per_cell() {
+    let (small, big) = (500_i64, 5_000_i64);
+    require_cc();
+    let lo = PromoteStats::measure(PERF_ARENA_PROMOTE_LINEAR, "arena_promote_linear_lo", small);
+    let hi = PromoteStats::measure(PERF_ARENA_PROMOTE_LINEAR, "arena_promote_linear_hi", big);
+    let span = big - small;
+    let (copied, nodes, edges) = (
+        (hi.copied - lo.copied) / span,
+        (hi.nodes - lo.nodes) / span,
+        (hi.edges - lo.edges) / span,
+    );
+    assert_eq!(
+        (copied, nodes, hi.shared),
+        (1, 1, 0),
+        "promoting an unshared {big}-element list copied {copied} cells and entered {nodes} \
+         nodes per element with {} shared reuses (baseline 1, 1, and 0: one copy and one visit \
+         per cell, and nothing to share); {edges} edges/element",
+        hi.shared
+    );
+    assert!(
+        edges <= 2,
+        "promoting an unshared list examined {edges} edges/element ({} at n={small}, {} at \
+         n={big}); a `Cons` has two fields, so the walk is revisiting cells",
+        lo.edges,
+        hi.edges
+    );
+}
+
+// A shared DAG: each level's two fields point at the same child, so N region
+// cells span 2^N root-to-leaf paths. Copying once per cell costs N and copying
+// once per path costs 2^N, and the two produce the identical value, so the
+// counters are the only thing that can tell them apart. `shared` rising with
+// depth is the positive evidence: it counts edges that reused an existing copy,
+// which is region sharing surviving into the promoted result.
+#[test]
+fn arena_promotion_copies_a_shared_cell_once() {
+    require_cc();
+    let (small, big) = (12_i64, 22_i64);
+    let lo = PromoteStats::measure(PERF_ARENA_PROMOTE_SHARED, "arena_promote_shared_lo", small);
+    let hi = PromoteStats::measure(PERF_ARENA_PROMOTE_SHARED, "arena_promote_shared_hi", big);
+    let span = big - small;
+    let (copied, nodes, shared) = (
+        (hi.copied - lo.copied) / span,
+        (hi.nodes - lo.nodes) / span,
+        (hi.shared - lo.shared) / span,
+    );
+    assert!(
+        copied <= 2 && nodes <= 2,
+        "promoting a shared DAG out of `with_arena` copied {copied} cells and entered {nodes} \
+         nodes per sharing level ({} and {} at depth {small}, {} and {} at depth {big}; \
+         baseline 1 each, the single new cell each level adds); the promotion walk is \
+         descending into a shared sub-DAG once per path reaching it rather than once per cell",
+        lo.copied,
+        lo.nodes,
+        hi.copied,
+        hi.nodes
+    );
+    assert_eq!(
+        shared, 1,
+        "promoting a shared DAG reused an existing copy on {shared} edges per sharing level \
+         ({} at depth {small}, {} at depth {big}; baseline 1, the second field of each level \
+         pointing at the child the first field already promoted); region sharing is not \
+         surviving promotion",
+        lo.shared, hi.shared
     );
 }
 
@@ -567,14 +753,123 @@ fn bytes_codec_allocation_is_flat() {
     );
 }
 
+// Bytes the program allocates at -O2 for input size `n`. Cells and bytes are not
+// the same measurement: a string holds its payload inline, so a copy and a window
+// onto someone else's bytes are both exactly one cell, and only the byte total
+// separates them.
+fn alloc_bytes_o2(template: &str, tag: &str, n: i64) -> i64 {
+    stat_src_o2(
+        &perf_src_n(template, n),
+        tag,
+        ALLOC_STATS,
+        ALLOCATED_BYTES_SUFFIX,
+    )
+    .unwrap_or_else(|e| panic!("{e}"))
+}
+
+// Slicing a string is a window onto it, not a copy: the result holds a reference
+// to the parent and reads through it, so a slice costs the same on three bytes as
+// on three megabytes. The probe takes 200 long windows onto one N-byte string, so
+// a copying slice would materialize the sum of their lengths (the number the probe
+// prints, ~1.8 MB at n=10000 against ~180 KB at n=1000) while a window pays one
+// small cell each. What remains proportional to N either way is the parent's own
+// construction, one buffer plus one string, so the byte total may grow by a small
+// multiple of the size increase and no more.
+#[test]
+fn string_slice_is_a_window_not_a_copy() {
+    require_cc();
+    let (small, big) = (1000_i64, 10_000_i64);
+    let (lo, hi) = (
+        alloc_bytes_o2(PERF_STR_SLICE_WINDOW, "str slice window", small),
+        alloc_bytes_o2(PERF_STR_SLICE_WINDOW, "str slice window", big),
+    );
+    let grew = hi - lo;
+    let scale = big - small;
+    // Anti-vacuous: the parent is materialized once, so the input really did scale
+    // with N and a probe that stopped building a large string would fail here
+    // rather than pass the ceiling for free.
+    assert!(
+        grew >= scale,
+        r"the window probe stopped scaling with its input ({lo} bytes at n={small}, {hi} at n={big}); its parent string is no longer proportional to N and the ceiling below would pass vacuously"
+    );
+    // The parent costs a buffer and a string, so three times the size increase is
+    // room to spare for the aliasing path and far under the ~200x a copy pays.
+    assert!(
+        grew <= 3 * scale + 4096,
+        r"string slicing allocates with the parent's size ({lo} bytes at n={small}, {hi} at n={big}, growth {grew} for a {scale}-byte larger parent); the slice copies its window instead of aliasing it"
+    );
+}
+
+// Escaping a string is one pass over it, not one rebuild per escape. The probe
+// encodes a string whose every other byte is a quote, so both the escape count
+// and the output length scale with N; appending each clean run and each escape
+// into one growable buffer keeps the byte total proportional to N, while an
+// accumulator that rebuilds the escaped output at every escape pays the escape
+// count times the length escaped so far and grows with N squared. The ceiling
+// sits an order of magnitude under that square and well above the linear cost,
+// so it separates the two shapes rather than pinning a constant.
+#[test]
+fn json_escaping_appends_runs_instead_of_rebuilding() {
+    require_cc();
+    let (small, big) = (200_i64, 2000_i64);
+    let (lo, hi) = (
+        alloc_bytes_o2(PERF_JSON_ESCAPE_RUNS, "json escape runs", small),
+        alloc_bytes_o2(PERF_JSON_ESCAPE_RUNS, "json escape runs", big),
+    );
+    let grew = hi - lo;
+    let scale = big - small;
+    // Anti-vacuous: the encoded output really is proportional to N, so a probe
+    // that stopped scaling would fail here instead of passing the ceiling for
+    // free.
+    assert!(
+        grew >= scale,
+        r"the escape probe stopped scaling with its input ({lo} bytes at n={small}, {hi} at n={big}); its output is no longer proportional to N and the ceiling below would pass vacuously"
+    );
+    assert!(
+        grew <= 150 * scale,
+        r"escape-heavy encoding allocates with the square of its input ({lo} bytes at n={small}, {hi} at n={big}, growth {grew} for {scale} more escapes); the escaper rebuilds the output per escape instead of appending runs to one buffer"
+    );
+}
+
+// Decoding a byte payload accumulates into one buffer that is extended in place,
+// not rebuilt per byte. A builder is extended in place only while it is uniquely
+// owned, and an accumulator threaded through a failure row is shared at every
+// step, so the same loop written inside the row copies the whole accumulation on
+// each push and costs the square of N. Nothing about the program's output reveals
+// which shape ran, so only the allocation slope catches the regression: the
+// ceiling sits several times over the linear cost and an order of magnitude under
+// the square.
+#[test]
+fn byte_payload_decoding_extends_one_buffer_in_place() {
+    require_cc();
+    let (small, big) = (1000_i64, 8000_i64);
+    let (lo, hi) = (
+        alloc_bytes_o2(PERF_BYTES_BODY_DECODE, "bytes body decode", small),
+        alloc_bytes_o2(PERF_BYTES_BODY_DECODE, "bytes body decode", big),
+    );
+    let grew = hi - lo;
+    let scale = big - small;
+    // Anti-vacuous: the decoded payload really is proportional to N, so a probe
+    // that stopped scaling would fail here instead of passing the ceiling for
+    // free.
+    assert!(
+        grew >= scale,
+        r"the byte-payload probe stopped scaling with its input ({lo} bytes at n={small}, {hi} at n={big}); its payload is no longer proportional to N and the ceiling below would pass vacuously"
+    );
+    assert!(
+        grew <= 1200 * scale,
+        r"decoding a byte payload allocates with the square of its length ({lo} bytes at n={small}, {hi} at n={big}, growth {grew} for {scale} more bytes); the reader threads its accumulator through the failure row, so every push copies what it has decoded so far"
+    );
+}
+
 // The container codec's builder fold, checked statically in the elaborated Core.
 // A program that encodes a list must reach `buf_append`, the linear accumulation
 // primitive the element fold threads through; its presence proves the container
 // encoder builds into one growable buffer rather than nesting immutable `wire_cat`
-// concatenations. The runtime slope guards above measure the consequence; this checks
-// the mechanism, and needs no native build. (A right-nested revert is linear in
+// concatenations. The runtime slope guards above measure the consequence. This checks
+// the mechanism and needs no native build. (A right-nested revert is linear in
 // cell count too, since each buffer is a single cell, so the slope guards alone
-// cannot see it; this static check is what does.)
+// only this static check catches it.)
 #[test]
 fn container_encoder_threads_the_builder_fold() {
     let src = perf_src_n(PERF_WIRE_ENCODE, 8);
@@ -602,6 +897,62 @@ fn each_update_reuses_uniquely_owned() {
     assert!(
         hits > 0,
         "a uniquely-owned `each` update reused no cells (hits=0); the path lowering broke FBIP reuse"
+    );
+}
+
+const PERF_BORROWED_WALK: &str = include_str!("../cases/perf/borrowed_walk.pr");
+// The probe walks a 1000-cell list 20 times; without borrowing that is one
+// retain per level per pass, so half of it is a generous floor.
+const BORROWED_WALK_PAIR_FLOOR: i64 = 10_000;
+// Cell traffic the borrowed build may still carry: the list teardown plus
+// whatever the prelude print path touches.
+const BORROWED_WALK_CELL_SLACK: i64 = 8;
+
+// Borrow inference must remove reference-count pairs, not relocate them: a
+// read-only walk over a shared list threads no retains and no releases on
+// cells beyond the structure's own teardown. The inference-off build keeps the
+// ceiling honest: the identical program pays a pair per level per pass without
+// borrowing, so a probe that stops exercising RC pressure fails the floor
+// instead of passing the ceiling vacuously. Both builds pin the flag
+// explicitly, so the assertion is independent of the configured default.
+#[test]
+fn borrowed_walk_threads_no_rc_pairs() {
+    require_cc();
+    let full = prism::with_prelude(PERF_BORROWED_WALK);
+    let suffixes = &["rc increments on cells", "rc decrements on cells"];
+    let build = |infer: bool| {
+        move |src: &str, bin: &Path| {
+            let mut cfg = prism::Config::from_env();
+            cfg.flags.borrow_infer = infer;
+            prism::build_on(src, &prism::default_roots(Path::new(".")), bin, &cfg)
+        }
+    };
+    let on = stat_build_many(
+        &full,
+        "borrowed_walk_on",
+        "PRISM_RC_STATS",
+        suffixes,
+        build(true),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let off = stat_build_many(
+        &full,
+        "borrowed_walk_off",
+        "PRISM_RC_STATS",
+        suffixes,
+        build(false),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    assert!(
+        off[0] >= BORROWED_WALK_PAIR_FLOOR,
+        "the walk probe lost its RC pressure ({} cell retains without borrow inference, floor {BORROWED_WALK_PAIR_FLOOR}); the borrowed ceiling would pass vacuously",
+        off[0]
+    );
+    assert!(
+        on[0] <= BORROWED_WALK_CELL_SLACK && on[1] <= BORROWED_WALK_CELL_SLACK,
+        "a borrowed read-only walk still threads cell RC traffic ({} retains, {} releases, bound {BORROWED_WALK_CELL_SLACK}); borrowing is relocating pairs instead of removing them",
+        on[0],
+        on[1]
     );
 }
 
@@ -1014,8 +1365,8 @@ fn tier_manifest_holds_on_compiler_stack() {
         match golden.get(label) {
             Some(want) if want == tier => {}
             Some(want) if matches!((rank(want), rank(tier)), (Some(a), Some(b)) if b > a) => {
-                // Name the functions that lost fusion so the failure points at the
-                // handler to investigate, not just the program.
+                // Name the functions that lost fusion so the failure identifies
+                // the handler to investigate.
                 let culprits =
                     prism::effect_warnings_full(&crate::support::source(&root.join(label)), root)
                         .unwrap_or_default();

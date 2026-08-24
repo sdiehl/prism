@@ -6,8 +6,8 @@ use crate::sym::Sym;
 use crate::syntax::ast::{Grade, Program};
 use crate::types::ty::Kind;
 use crate::types::{
-    Canon, Checked, ClassInfo, CtorInfo, DataInfo, EffOpInfo, Env, InstInfo, InstKeys, Type,
-    TypecheckSeed,
+    Canon, Checked, ClassInfo, CtorInfo, DataInfo, EffOpInfo, Env, InstInfo, InstKeys, NominalRepr,
+    Type, TypecheckSeed,
 };
 
 use super::identity::{interface_entry, ModuleInterface, ModuleInterfaceEntry};
@@ -72,6 +72,35 @@ struct DataPayload {
     params: Vec<String>,
     param_kinds: Vec<KindWire>,
     ctors: Vec<String>,
+    repr: NominalReprWire,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum NominalReprWire {
+    BoxedCell,
+    Transparent,
+    Vec128,
+}
+
+impl From<NominalRepr> for NominalReprWire {
+    fn from(repr: NominalRepr) -> Self {
+        match repr {
+            NominalRepr::BoxedCell => Self::BoxedCell,
+            NominalRepr::Transparent => Self::Transparent,
+            NominalRepr::Vec128 => Self::Vec128,
+        }
+    }
+}
+
+impl From<NominalReprWire> for NominalRepr {
+    fn from(repr: NominalReprWire) -> Self {
+        match repr {
+            NominalReprWire::BoxedCell => Self::BoxedCell,
+            NominalReprWire::Transparent => Self::Transparent,
+            NominalReprWire::Vec128 => Self::Vec128,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -203,6 +232,7 @@ pub(super) fn metadata_entries(
                     } else {
                         info.ctors.clone()
                     },
+                    repr: info.repr.into(),
                 },
             )?);
             if !opaques.contains(name) {
@@ -337,6 +367,7 @@ pub(super) fn rehydrate(interface: &ModuleInterface) -> Result<RehydratedModuleI
                             .map(kind_from_wire)
                             .collect(),
                         ctors: payload.ctors,
+                        repr: payload.repr.into(),
                     },
                 );
             }

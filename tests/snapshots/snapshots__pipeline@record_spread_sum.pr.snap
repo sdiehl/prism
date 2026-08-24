@@ -1,0 +1,150 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/record_spread_sum.pr
+---
+== tokens ==
+VOpen Type UIdent("Shape") Eq UIdent("Circle") LBrace Ident("radius") Colon KwInt RBrace Bar UIdent("Square") LBrace Ident("side") Colon KwInt RBrace VSemi Fn Ident("resize") LParen Ident("shape") Colon UIdent("Shape") RParen Colon UIdent("Shape") Eq UIdent("Circle") LBrace DotDot Ident("shape") Comma Ident("radius") Eq Int(IntLit { value: 2, suffix: None }) RBrace VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Int(IntLit { value: 0, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Shape",
+            params: [],
+            param_kinds: [],
+            ctors: [
+                Ctor {
+                    name: "Circle",
+                    args: [
+                        Int,
+                    ],
+                    fields: Some(
+                        [
+                            (
+                                "radius",
+                                Int,
+                            ),
+                        ],
+                    ),
+                },
+                Ctor {
+                    name: "Square",
+                    args: [
+                        Int,
+                    ],
+                    fields: Some(
+                        [
+                            (
+                                "side",
+                                Int,
+                            ),
+                        ],
+                    ),
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 159..217,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "resize",
+            params: [
+                Param {
+                    name: "shape",
+                    ty: Some(
+                        Con(
+                            "Shape",
+                            [],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Con(
+                    "Shape",
+                    [],
+                ),
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: RecordUpdate(
+                    Spanned {
+                        node: Var(
+                            "shape",
+                        ),
+                        span: 265..270,
+                    },
+                    "Circle",
+                    [
+                        (
+                            "radius",
+                            Spanned {
+                                node: Int(
+                                    IntLit {
+                                        value: 2,
+                                        suffix: None,
+                                    },
+                                ),
+                                span: 281..282,
+                            },
+                        ),
+                    ],
+                ),
+                span: 254..284,
+            },
+            wheres: [],
+            span: 219..284,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 298..305,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 0,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 306..307,
+                        },
+                    ],
+                ),
+                span: 298..308,
+            },
+            wheres: [],
+            span: 286..308,
+        },
+    ],
+}
+
+== types ==
+[E1024] Type Error: in `resize`: cannot spread an unrefined sum type `Shape` into record constructor `Circle`; the type has 2 constructors
+   ╭─[ <source>:5:36 ]
+   │
+ 5 │ fn resize(shape : Shape) : Shape = Circle { ..shape, radius = 2 }
+   │                                    ───────────────┬──────────────  
+   │                                                   ╰──────────────── in `resize`: cannot spread an unrefined sum type `Shape` into record constructor `Circle`; the type has 2 constructors
+───╯

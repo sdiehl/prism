@@ -192,6 +192,7 @@ value Data.String.starts_with
 value Data.String.str_join
 value Data.String.str_of_char
 value Data.String.str_repeat
+value Data.String.str_slice
 value Data.String.to_lower
 value Data.String.to_upper
 value Data.String.trim

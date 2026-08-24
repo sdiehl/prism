@@ -1,33 +1,10 @@
-// Assembling a context packet for a set of definitions.
-//
-// The selection is a set of *definitions*, not a range of lines, and that is what
-// makes the packet worth assembling. Handing an assistant "the file" gives it
-// whatever else happens to live in that file and none of what the definition
-// actually depends on. Handing it a definition's canonical name, inferred type,
-// effect row, exact source, transitive dependencies, callers, and the tests that
-// reach it gives it the same picture a reviewer builds by clicking around for ten
-// minutes — and every part of it is a fact the compiler computed, not a guess
-// from proximity.
-//
-// This builds the packet and stops there. Sending it somewhere is a request the
-// reader makes with their own key, in their own tool; the part that needed to
-// know how the codebase fits together is done here.
-//
-// Nothing in the viewer calls this yet. It had a UI — a `+` on every card that
-// gathered definitions and a tray that copied the packet to the clipboard — and
-// that UI was removed because copying a prompt is not asking a question: the
-// reader wanted to ask in the browser and get an answer back. The assembly is the
-// half that needed the compiler's facts, so it stays, checked, waiting for the
-// half that needs a key and a network call.
+// Build a Markdown context packet from compiler-index facts. Transport and UI are
+// separate concerns, and no current viewer path calls this module.
 
 import type { Def, Index, Relations } from "./viewer-model.js";
 import type { Review } from "./viewer-review.js";
 
-/// How much dependency source to include before saying so and stopping.
-///
-/// A budget is not politeness, it is honesty: the alternative to truncating is
-/// either an unbounded packet or a silently clipped one, and a reader who cannot
-/// see that the closure was cut cannot tell whether the answer was informed.
+/// Maximum dependency source included in one packet, in bytes.
 const DEPENDENCY_BUDGET = 24_000;
 
 export interface PacketInput {
@@ -54,8 +31,7 @@ export function packet({ index, rel, review, selected }: PacketInput): string {
   out.push(`\n## Selected (${defs.length})`);
   for (const d of defs) out.push(describe(d, rel, index, review));
 
-  // What the selection depends on, so the reader is not asked about a call it
-  // cannot see the body of.
+  // Include the selected definitions' dependency closure.
   const closure = dependencies(defs, rel, index);
   if (closure.included.length > 0) {
     out.push(`\n## Reached by the above (${closure.included.length})`);
@@ -69,8 +45,7 @@ export function packet({ index, rel, review, selected }: PacketInput): string {
     );
   }
 
-  // More than one definition selected means the question is probably about how
-  // they relate, so say how they relate.
+  // Relate multiple selected definitions.
   if (defs.length > 1) {
     const between = relationsAmong(defs, rel);
     out.push(`\n## Between the selected definitions`);
@@ -112,8 +87,7 @@ function describe(d: Def, rel: Relations, index: Index, review: Review | null): 
       : "No test in this index reaches this definition.",
   );
 
-  // Behavioral duplicates come free from the addressing, and are worth stating:
-  // they mean an answer about one applies verbatim to the others.
+  // Equal content addresses identify behavioral duplicates.
   const twins = index.defs.filter((o) => o.hash && o.hash === d.hash && o.id !== d.id);
   if (twins.length > 0) {
     lines.push(`Identical behavior to ${named(twins.map((t) => t.id))} (same content address).`);
@@ -152,13 +126,7 @@ function dependencies(
   return { included, omitted };
 }
 
-// How the selected definitions relate to each other, which is usually the actual
-// question when more than one is selected.
-//
-// Reported as *paths*, not just direct edges. Two definitions a reader picks
-// together are often several hops apart — that is frequently why they were picked
-// together — and "no direct relation" would be a true statement that hides the
-// answer. The route through the intermediate definitions is the relationship.
+// Report complete call paths between selected definitions.
 function relationsAmong(defs: Def[], rel: Relations): string[] {
   const lines: string[] = [];
   for (const from of defs) {
@@ -183,8 +151,7 @@ function path(from: string, to: string, rel: Relations): string[] | null {
   const back = new Map<string, string>();
   const seen = new Set([from]);
   let frontier = [from];
-  // Bounded: a route long enough to need this many hops is not an explanation
-  // anyone reading a packet would use.
+  // Bound route length to keep the packet useful.
   for (let depth = 0; depth < 8 && frontier.length > 0; depth++) {
     const next: string[] = [];
     for (const at of frontier) {

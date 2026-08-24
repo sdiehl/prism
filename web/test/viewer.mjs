@@ -137,7 +137,7 @@ v.renderList("");
 
 section("search reaches past canonical names");
 // `Cons`, `Nil` and `pure` are members, so no definition in the rail carries those
-// names — the declarations that introduce them do. Each is now a result in its own
+// names; the declarations that introduce them do. Each is now a result in its own
 // right, and an exact match leads.
 for (const [q, owner, what] of [
   ["cons", "List", "constructor"],
@@ -182,7 +182,7 @@ deck.search.value = "";
 v.renderList("");
 
 section("a kind is named, not initialled");
-check("a card badge spells the kind out", one.includes('data-tip="fn — a function or value">fn<'));
+check("a card badge spells the kind out", one.includes('data-tip="fn: a function or value">fn<'));
 v.toggleModule("Prelude");
 check(
   "and the rail agrees, after the name so names stay in a column",
@@ -394,7 +394,7 @@ check(
 );
 
 section("an effect relates to what interprets it");
-// Nothing in the standard library performs `Output` — programs do — so before
+// Programs, not the standard library, perform `Output`, so before
 // `handles` this card related to nothing at all in either direction.
 check(
   "nothing performs it, which is why the card looked empty",
@@ -429,7 +429,7 @@ check(
   between(sig, "card-eff").includes('data-goto="Concurrent.Async"'),
 );
 // A signature drops the module from a name it links, so what a card shows is the
-// compiler's rendering with the qualifiers taken off — computed here from the refs,
+// compiler's rendering with the qualifiers taken off. Compute it here from the refs,
 // independently of the renderer under test.
 const unqualify = (text, refs) => {
   let out = "";
@@ -581,7 +581,7 @@ check(
 );
 v.setNote("Data.Bytes.bytes_length", "", 2);
 check("emptying it closes the field", !noteCard().includes("card-note"));
-// A card leads with the canonical name, qualified — the prelude is addressed in
+// A card leads with the qualified canonical name. The prelude is addressed in
 // global scope, so its ids are bare and the module has to be put back.
 check(
   "a card names itself fully",
@@ -844,7 +844,7 @@ check(
 
 // Offsets arrive as UTF-8 byte counts and a JavaScript string is indexed in code
 // units. The old revision's records are painted like any other, so they need the
-// same translation — and nothing else here would notice, since the artifact the
+// same translation. Nothing else here would notice because the artifact the
 // other checks read is the current revision's.
 const utf8 = (t) => new TextEncoder().encode(t).length;
 const arrowed = 'fn f() = concat("\u2192", g)';
@@ -925,7 +925,7 @@ check(
 check("an edit does", needsAttention(review.get(target.id), { ...target, hash: "x", source: "d" }));
 // Equal hashes prove equal executable behavior and nothing more: a claims,
 // visibility, doc, or deprecation edit is invisible to the hash (and a doc edit
-// to the text too), and each is authored — the same carve-out the compiler's
+// to the text too), and each is authored. This is the same carve-out the compiler's
 // diff classification makes.
 check(
   "a trust-root edit is not cosmetic",
@@ -950,7 +950,7 @@ check("keeping the read mark it was attached to", review.get(target.id)?.reviewe
 section("marks follow a definition across renames and file moves");
 // A move changes the canonical name a mark is keyed by while preserving what the
 // mark is about. A loaded diff knows the rename as a fact; without one, the
-// stamped hash finds the definition again — but only unambiguously.
+// stamped hash finds the definition again only when the result is unambiguous.
 const moveStore = new Storage();
 const movable = new Review("t", moveStore);
 movable.set(target, { reviewed: true, note: "looked at" }, 1);

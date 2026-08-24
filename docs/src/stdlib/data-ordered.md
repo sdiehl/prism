@@ -49,7 +49,7 @@ with_ordering(\(a, b) -> cmp(a, b), \(w) ->
 Some(a)
 ```
 
-Named as the scoping form it is, since it reads at the call site as the block that opens the brand rather than as another operation on an ordered map. lint: allow(L0204)
+Named as the scoping form it is, since it reads at the call site as the block that opens the brand rather than as another operation on an ordered map.
 
 ### `ord_empty`
 

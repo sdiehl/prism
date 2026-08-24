@@ -463,8 +463,8 @@ fn polymorphic_test_is_rejected() {
     );
 }
 
-// A test-only edit leaves the emitted (effect-lowered) artifact byte-identical,
-// not merely the semantic hash. This is the emitted-artifact half of production
+// A test-only edit leaves the emitted, effect-lowered artifact byte-identical.
+// This is the emitted-artifact half of production
 // neutrality, complementing the core-hash and interface checks above.
 #[test]
 fn test_only_edit_leaves_emitted_artifact_identical() {

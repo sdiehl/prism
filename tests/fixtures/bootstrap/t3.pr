@@ -100,20 +100,140 @@ fn nested() : Int =
     get() resume k => k(2)
     return r => r
 
--- A partial handler is deliberately outside the checked subset: it leaves the
--- operations it does not name in the residual row, which the shadow has no way
--- to spell without the effect's full operation table.
+-- A partial handler discharges an effect only when its clauses cover every
+-- operation the body is known to perform. Here the body performs get and only
+-- put is covered, so Store survives in the declaration's row.
 fn partial_cover() : Int ! {Store} =
   handle get() with partial {
     put(_v) resume k => k(()),
     return r => r
   }
 
--- A named handler instance is outside the subset for the same kind of reason:
--- its operations are dispatched through a binding rather than by name, so the
--- effect a clause discharges is not readable from the clause alone.
+-- The positive side of the same rule: get is used and get is covered, so
+-- Store is discharged even though put is never named.
+fn partial_covered() : Int =
+  handle get() with partial {
+    get() resume k => k(1),
+    return r => r
+  }
+
+fn stored_probe() : Int ! {Store} = get()
+
+-- A call through a declared row hides which operations run behind it, so
+-- covering get is not evidence that the helper reaches nothing else of Store:
+-- the effect survives.
+fn partial_opaque() : Int ! {Store} =
+  handle stored_probe() with partial {
+    get() resume k => k(1),
+    return r => r
+  }
+
+-- A named handler introduces a fresh private effect and dispatches through its
+-- binding, so the directed call is discharged without capturing an ordinary
+-- Tick call in the surrounding scope.
 fn named_instance() : Int =
   with h <- handler
     tick() resume k => k(5)
     return r => r
   h.tick()
+
+-- One parameter vector is shared by every operation in the handled body and by
+-- every clause. The argument, written value, read result, and clause answers
+-- therefore remain one class rather than four independently generalized ones.
+effect Cell(a)
+  read() : a
+  write(a) : Unit
+
+fn applied_handler(x) =
+  handle let _u = write(x) in read() with
+    once read() => x
+    once write(_v) => ()
+    return r => r
+
+-- Linking happens when a function value is called, not only when an operation
+-- name is the call head. Its latent applied row must join the handler's class
+-- before that row is discharged.
+fn function_valued_handler(action : () -> Int ! {Cell(Int)}) : Int =
+  handle action() with
+    once read() => 5
+    once write(_v) => ()
+    return r => r
+
+-- An inner anonymous handler shadows the outer argument vector only for its
+-- handled body. Its clause runs after that scope is restored, so the inner read
+-- answers with a String while the read in its clause reaches the outer Int
+-- instance and may be added to one.
+fn nested_applied_scope() : String =
+  handle (handle read() with {
+      once read() => let _n = read() + 1 in "inner",
+      once write(_v) => (),
+      return r => r
+    }) with
+    once read() => 7
+    once write(_v) => ()
+    return r => r
+
+-- A named handler is one fresh private instance. Repeated directed calls share
+-- its parameter vector, even though the source effect remains parameterized.
+fn named_consistent() : Int =
+  with h <- handler
+    once read() => 7
+    once write(_v) => ()
+    return r => r
+  let _a = h.write(1)
+  let _b = h.write(2)
+  h.read()
+
+-- Only directed calls use the private instance. A bare operation beside one
+-- remains an ordinary ambient Cell call, and the two may carry different type
+-- arguments without being conflated or discharged together.
+fn named_ambient() : (Int, String) ! {Cell(String)} =
+  with h <- handler
+    once read() => 1
+    once write(_v) => ()
+    return r => r
+  let private = h.read()
+  let ambient = read()
+  (private, ambient)
+
+-- A local value may reuse the source operation name without changing what the
+-- instance's synthetic method denotes. Directed lookup uses the operation
+-- captured when the instance was introduced, not the later value binding.
+fn named_operation_shadow() : Int =
+  with h <- handler
+    once read() => 3
+    once write(_v) => ()
+    return r => r
+  let read = \() -> "local"
+  let _local = read
+  h.read()
+
+-- Handler clause heads resolve in the operation namespace even when an outer
+-- value has the same spelling. Anonymous and named introductions both capture
+-- the declared Cell operation rather than the unrelated local function.
+fn anonymous_outer_operation_shadow() : Unit =
+  let read = \() -> "local"
+  let _local = read
+  handle write(1) with
+    once read() => 3
+    once write(_v) => ()
+    return r => r
+
+fn named_outer_operation_shadow() : Int =
+  let read = \() -> "local"
+  let _local = read
+  with h <- handler
+    once read() => 4
+    once write(_v) => ()
+    return r => r
+  h.read()
+
+-- The resolver accepts both dot syntax and its explicit UFCS spelling. Once
+-- the first argument resolves to an instance, `read(h)` is the same private
+-- dispatch as `h.read()` and must reuse the instance vector.
+fn named_explicit_instance() : Int =
+  with h <- handler
+    once read() => 5
+    once write(_v) => ()
+    return r => r
+  read(h)

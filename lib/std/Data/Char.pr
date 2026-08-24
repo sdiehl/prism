@@ -1,7 +1,8 @@
 -- | ASCII character classification.
 --
 -- Operates on the byte/codepoint returned by `byte_at`/`char_at`. Base includes
--- this module.
+-- this module. In a scanner, feed these from `byte_at`: `char_at` is counted in
+-- codepoints and walks the encoding on every call (see `Data.String`).
 
 -- Each predicate is a range check against the ASCII table, so the code points are
 -- the definition.

@@ -1,0 +1,8 @@
+-- Plain field projection is total on a single-constructor record. Keep this in
+-- the runnable corpus so interpreter/native parity exercises the recorded
+-- constructor, field index, and arity together.
+type Box = Box { value: Int }
+
+fn value(box : Box) : Int = box.value
+
+fn main() = println(value(Box { value = 22 }))

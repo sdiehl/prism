@@ -39,6 +39,8 @@ type Metadata = Metadata {
 } deriving (Eq, Show)
 ```
 
+A deck's document metadata.
+
 ### `Slide`
 
 ```prism,def
@@ -49,6 +51,8 @@ type Slide = Slide {
 } deriving (Eq, Show)
 ```
 
+One slide: an optional title, a body picture, and presenter notes.
+
 ### `Deck`
 
 ```prism,def
@@ -58,6 +62,8 @@ type Deck = Deck {
   slides: List(Slide)
 } deriving (Eq, Show)
 ```
+
+A whole presentation: metadata, theme, and slides in order.
 
 ## Effects
 
@@ -76,6 +82,8 @@ effect DeckBuilder
   add_slide(Slide) : Unit
 ```
 
+The deck authoring surface: emit a finished slide.
+
 ## Functions and Values
 
 ### `text`
@@ -90,11 +98,15 @@ text : (String) -> Layout.Pict
 rich_text : (List(Layout.Inline)) -> Layout.Pict
 ```
 
+Rich inline text in the theme foreground.
+
 ### `para`
 
 ```prism,sig
 para : (List(Layout.Inline)) -> Layout.Pict
 ```
+
+A paragraph-sized inline sequence.
 
 ### `plain`
 
@@ -102,11 +114,15 @@ para : (List(Layout.Inline)) -> Layout.Pict
 plain : (String) -> Layout.Inline
 ```
 
+Literal characters, escaped by the backend.
+
 ### `emphasis`
 
 ```prism,sig
 emphasis : (List(Layout.Inline)) -> Layout.Inline
 ```
+
+An emphasized inline span.
 
 ### `strong`
 
@@ -114,11 +130,15 @@ emphasis : (List(Layout.Inline)) -> Layout.Inline
 strong : (List(Layout.Inline)) -> Layout.Inline
 ```
 
+A strongly emphasized inline span.
+
 ### `link`
 
 ```prism,sig
 link : (String, List(Layout.Inline)) -> Layout.Inline
 ```
+
+An inline span linking to `url`.
 
 ### `colored`
 
@@ -126,11 +146,15 @@ link : (String, List(Layout.Inline)) -> Layout.Inline
 colored : (String, List(Layout.Inline)) -> Layout.Inline
 ```
 
+An inline span in the theme color role `name`.
+
 ### `item_text`
 
 ```prism,sig
 item_text : (List(Layout.Inline)) -> Layout.Pict
 ```
+
+A bullet item rendered as an accent arrow and rich inline text.
 
 ### `item`
 
@@ -138,11 +162,15 @@ item_text : (List(Layout.Inline)) -> Layout.Pict
 item : (String) -> Layout.Pict
 ```
 
+A plain bullet item.
+
 ### `row`
 
 ```prism,sig
 row : (Int, List(Layout.Pict)) -> Layout.Pict
 ```
+
+Children laid out left to right, `gap` points apart.
 
 ### `column`
 
@@ -150,11 +178,15 @@ row : (Int, List(Layout.Pict)) -> Layout.Pict
 column : (Int, List(Layout.Pict)) -> Layout.Pict
 ```
 
+Children laid out top to bottom, `gap` points apart, left aligned.
+
 ### `centered`
 
 ```prism,sig
 centered : (Int, List(Layout.Pict)) -> Layout.Pict
 ```
+
+Children laid out top to bottom, `gap` points apart, centered.
 
 ### `overlay`
 
@@ -162,11 +194,15 @@ centered : (Int, List(Layout.Pict)) -> Layout.Pict
 overlay : (List(Layout.Pict)) -> Layout.Pict
 ```
 
+Children stacked on one another, first at the back.
+
 ### `inset`
 
 ```prism,sig
 inset : (Int, Layout.Pict) -> Layout.Pict
 ```
+
+A child padded by `all` points on every side.
 
 ### `raw_typst`
 
@@ -174,11 +210,15 @@ inset : (Int, Layout.Pict) -> Layout.Pict
 raw_typst : (String) -> Layout.Pict
 ```
 
+Typst source admitted verbatim, escaping nothing.
+
 ### `code_block`
 
 ```prism,sig
 code_block : (String, String) -> Layout.Pict
 ```
+
+A highlighted code block in `language`.
 
 ### `prism_code`
 
@@ -186,11 +226,15 @@ code_block : (String, String) -> Layout.Pict
 prism_code : (String) -> Layout.Pict
 ```
 
+A highlighted block of Prism source.
+
 ### `inline_code`
 
 ```prism,sig
 inline_code : (String) -> Layout.Inline
 ```
+
+An inline code span in the theme code face.
 
 ### `doctest`
 
@@ -214,11 +258,15 @@ A reflected declaration with its comment block removed.
 read_doc : (String) -> Example.Doc
 ```
 
+Take a reflected declaration apart into prose, examples, and the declaration itself.
+
 ### `examples_of`
 
 ```prism,sig
 examples_of : (String) -> List(Example.Example)
 ```
+
+The examples a reflected declaration's docstring fences.
 
 ### `example_pict`
 
@@ -226,11 +274,15 @@ examples_of : (String) -> List(Example.Example)
 example_pict : (Example.Example) -> Layout.Pict
 ```
 
+One example as its source over the output it prints.
+
 ### `prism_theme`
 
 ```prism,sig
 prism_theme : Theme.Theme
 ```
+
+The default theme: a purple accent on warm near-white.
 
 ### `paper_theme`
 
@@ -238,11 +290,15 @@ prism_theme : Theme.Theme
 paper_theme : Theme.Theme
 ```
 
+A print theme with a slightly darker accent.
+
 ### `prism_dark_theme`
 
 ```prism,sig
 prism_dark_theme : Theme.Theme
 ```
+
+The dark palette, for code-heavy talks.
 
 ### `max_stage`
 
@@ -250,11 +306,15 @@ prism_dark_theme : Theme.Theme
 max_stage : (Layout.Pict) -> Int
 ```
 
+The highest reveal stage any fragment in a picture is attached to.
+
 ### `pict_assets`
 
 ```prism,sig
 pict_assets : (Layout.Pict) -> List(String)
 ```
+
+Every asset path a picture refers to.
 
 ### `render_pict`
 
@@ -262,11 +322,15 @@ pict_assets : (Layout.Pict) -> List(String)
 render_pict : (Layout.Pict, Int, Theme.Theme) -> String
 ```
 
+The Typst source for a picture at one reveal stage under a theme.
+
 ### `render_slide_page`
 
 ```prism,sig
 render_slide_page : (Option(String), Layout.Pict, Int, Theme.Theme) -> String
 ```
+
+The Typst source for one slide page at one reveal stage.
 
 ### `typst_prelude`
 
@@ -274,11 +338,15 @@ render_slide_page : (Option(String), Layout.Pict, Int, Theme.Theme) -> String
 typst_prelude : (Theme.Theme) -> String
 ```
 
+The Typst preamble a theme's page and text settings compile to.
+
 ### `metadata`
 
 ```prism,sig
 metadata : (String, String) -> Metadata
 ```
+
+Deck metadata from a title and an author, leaving the subject empty.
 
 ### `make_deck`
 
@@ -286,11 +354,15 @@ metadata : (String, String) -> Metadata
 make_deck : (Metadata, Theme.Theme, List(Slide)) -> Deck
 ```
 
+A deck from its metadata, its theme, and its slides.
+
 ### `title_slide`
 
 ```prism,sig
 title_slide : (String, String) -> Slide
 ```
+
+A cover slide: a large accented title over a muted subtitle, centered.
 
 ### `titled_slide`
 
@@ -298,17 +370,23 @@ title_slide : (String, String) -> Slide
 titled_slide : (String, Layout.Pict) -> Slide
 ```
 
+A slide with a title and a body picture.
+
 ### `pict`
 
 ```prism,sig
 pict : (Layout.Pict) -> Unit ! {SlideBuilder}
 ```
 
+Place a picture into the slide being built.
+
 ### `reveal_next`
 
 ```prism,sig
 reveal_next : () -> Unit ! {SlideBuilder}
 ```
+
+Advance the reveal stage, so what follows appears on a later page.
 
 ### `slide`
 

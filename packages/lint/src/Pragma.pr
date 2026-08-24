@@ -13,7 +13,7 @@
 -- summary so exceptions stay visible.
 
 import Data.List (concat_map, filter, map)
-import Data.String (index_of, split, starts_with, trim)
+import Data.String (index_of, split, starts_with, str_slice, trim)
 
 -- The newline and comma bytes the scanner splits on.
 let pg_lf : Int = 10
@@ -30,10 +30,15 @@ pub fn pg_allow_file_head() : String = "-- lint: allow-file("
 pub fn pg_doc_head() : String = "-- |"
 
 -- | The offset of the first byte of the line containing `i`.
+--
+-- `i` is a byte offset (declaration spans are byte spans), so the walk back to
+-- the line start counts bytes too. A newline cannot occur inside a multi-byte
+-- character, so the byte scan finds exactly the line breaks a character scan
+-- would, in constant time per step.
 pub fn pg_line_start(text : String, i : Int) : Int =
   if i <= 0 then
     0
-  elif char_at(text, i - 1) == pg_lf then
+  elif byte_at(text, i - 1) == pg_lf then
     i
   else
     pg_line_start(text, i - 1)
@@ -52,7 +57,7 @@ fn pg_leading_go(
     acc
   else
     let prev = pg_line_start(text, start - 1)
-    let line = trim(substring(text, prev, start - 1 - prev))
+    let line = trim(str_slice(text, prev, start - 1))
     if starts_with("--", line) then
       pg_leading_go(text, prev, Cons(line, acc))
     else

@@ -23,7 +23,10 @@ const CLOSURE_TAG_MASK: u64 = i64::MAX.cast_unsigned();
 // forking the two tiers; such a literal must reach codegen boxed as I64/bignum.
 const TAGGED_INT_VALUE_BITS: u32 = i64::BITS - 2;
 
-use super::abi::{ctor_tag, idx64, HDR_BYTES, NULL_WORD, RESERVED_HEAP_TAGS, TAG_OFF, WORD_BYTES};
+use super::abi::{
+    ctor_tag, field_slot_off, idx64, require_scalar_plan, ScalarPlan, HDR_BYTES, NULL_WORD,
+    RESERVED_HEAP_TAGS, TAG_OFF,
+};
 use super::dispatch::partial_app_body;
 use super::isa::{Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa};
 use super::rt;
@@ -34,11 +37,13 @@ use prism_common::{ASCII_PRINTABLE_HI, ASCII_PRINTABLE_LO};
 use prism_core::core::builtins::BUILTINS;
 use prism_core::core::builtins::{builtin, AbiArg, AbiResult, Builtin, BuiltinKind, FloatOp};
 use prism_core::core::effect_abi::{is_free_monad_driver, EOP};
-use prism_core::core::tailrec::{reassoc, trmc_mode, trmc_shape, TrmcMode, TrmcShape};
+use prism_core::core::tailrec::{
+    loops_as_tail_call, reassoc, trmc_mode, trmc_shape, TrmcMode, TrmcShape,
+};
 use prism_core::core::{
     fv, reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, IoOp, LoweredCore, NegLane, Value,
 };
-use prism_core::types::CtorInfo;
+use prism_core::types::{CtorInfo, Type};
 use prism_syntax::kw;
 use prism_syntax::names::{closure_cap, generated_param};
 
@@ -119,6 +124,10 @@ pub(crate) struct Cg<'a, I> {
     // planning and emission agree on adapter tags.
     pub adapters: BTreeMap<(usize, usize), usize>,
     strs: Vec<String>,
+    // Distinct literal spellings only: every mention of the same bytes resolves
+    // to the same static cell, so sharing is part of the emitted layout, not a
+    // size optimization the backend may skip.
+    str_index: BTreeMap<String, usize>,
     used_rt: BTreeMap<String, usize>,
     // Owned-libm transcendentals actually called (the `prism_m_*` symbols). These
     // take and return `f64` rather than the `i64` of `used_rt`, so they carry a
@@ -149,6 +158,7 @@ impl<'a, I: Isa> Cg<'a, I> {
             lams: Vec::new(),
             adapters: BTreeMap::new(),
             strs: Vec::new(),
+            str_index: BTreeMap::new(),
             used_rt: BTreeMap::new(),
             used_fcall: BTreeSet::new(),
             used_apply: BTreeSet::new(),
@@ -206,7 +216,7 @@ impl<'a, I: Isa> Cg<'a, I> {
         let tv = self.isa.const_int(&mut self.b, tag);
         self.isa.store(&mut self.b, &tv, &tag_ptr);
         for (i, fv) in fields.iter().enumerate() {
-            let off = HDR_BYTES + idx64(i) * WORD_BYTES;
+            let off = field_slot_off(i);
             let fp = self.dst(|i, b, d| i.gep(b, d, ptr, off));
             self.isa.store(&mut self.b, fv, &fp);
         }
@@ -239,7 +249,10 @@ impl<'a, I: Isa> Cg<'a, I> {
         body: &Comp,
     ) -> Result<String, String> {
         // `Sym` orders by intern id, so sort captures by name to keep the closure
-        // cell layout (and `_fv` numbering) byte-stable across runs.
+        // cell layout (and `_fv` numbering) byte-stable across runs. Each capture
+        // fills one word of the cell, an invariant the typed verifier checks on
+        // every binding referenced across a suspension, so the capture count
+        // sizes the cell exactly.
         let mut free_vars: Vec<Sym> = fv::comp_without(body, params).into_iter().collect();
         free_vars.sort_by_cached_key(|s| s.as_str());
 
@@ -322,7 +335,7 @@ impl<'a, I: Isa> Cg<'a, I> {
                 .get(x)
                 .cloned()
                 .ok_or_else(|| format!("codegen: unbound {x}")),
-            // Checked in every profile, not just under `debug_assertions`: the
+            // Checked in every profile. The
             // shift is what makes a literal an immediate, and out of range it
             // wraps into a different value in silence. Two comparisons per
             // literal buy a hard failure instead of a wrong program, in the
@@ -335,26 +348,40 @@ impl<'a, I: Isa> Cg<'a, I> {
                          elaborator must box a wider literal as I64/bignum before codegen"
                     ));
                 }
+                require_scalar_plan(&Type::Int, ScalarPlan::TaggedImmediate, "Int")?;
                 Ok(self.isa.const_int(&mut self.b, n.wrapping_shl(1) | 1))
             }
             Value::I64(n) => {
+                require_scalar_plan(&Type::I64, ScalarPlan::FreshCell, "I64")?;
                 let c = self.isa.const_int(&mut self.b, *n);
                 Ok(self.box_i64(&c))
             }
             Value::U64(n) => {
+                require_scalar_plan(&Type::U64, ScalarPlan::FreshCell, "U64")?;
                 let c = self.isa.const_int(&mut self.b, n.cast_signed());
                 Ok(self.box_i64(&c))
             }
-            Value::Bool(b) => Ok(self.isa.const_int(&mut self.b, (i64::from(*b) << 1) | 1)),
-            Value::Unit => Ok(self.isa.const_int(&mut self.b, 0)),
+            Value::Bool(b) => {
+                require_scalar_plan(&Type::Bool, ScalarPlan::TaggedImmediate, "Bool")?;
+                Ok(self.isa.const_int(&mut self.b, (i64::from(*b) << 1) | 1))
+            }
+            Value::Unit => {
+                require_scalar_plan(&Type::Unit, ScalarPlan::ZeroWord, "Unit")?;
+                Ok(self.isa.const_int(&mut self.b, 0))
+            }
             Value::Float(f) => {
+                require_scalar_plan(&Type::Float, ScalarPlan::FreshCell, "Float")?;
                 let ft = self.isa.const_float(&mut self.b, *f);
                 Ok(self.f_out(&ft))
             }
             Value::Str(s) => {
-                let idx = self.strs.len();
+                require_scalar_plan(&Type::Str, ScalarPlan::StaticCell, "Str")?;
+                let next = self.strs.len();
+                let idx = *self.str_index.entry(s.clone()).or_insert(next);
+                if idx == next {
+                    self.strs.push(s.clone());
+                }
                 let nbytes = s.len();
-                self.strs.push(s.clone());
                 Ok(self.dst(|i, b, d| i.str_lit(b, d, idx, nbytes)))
             }
             Value::Thunk(inner) => match inner.as_ref() {
@@ -784,7 +811,7 @@ impl<'a, I: Isa> Cg<'a, I> {
                     return Ok(());
                 }
                 let arity = self.fn_arity(name.as_str())?;
-                if args.len() == arity && arity == self.cur_arity {
+                if loops_as_tail_call(args.len(), arity, self.cur_arity) {
                     let avs: Vec<String> = args
                         .iter()
                         .map(|a| self.value(regs, a))
@@ -868,7 +895,7 @@ impl<'a, I: Isa> Cg<'a, I> {
                     None => self.dst(|i, b, d| i.call_ptr(b, d, rt::ALLOC, slice::from_ref(&n))),
                 };
                 let cell = self.fill_obj(&ptr, *tag, &fvs);
-                let off = HDR_BYTES + idx64(*hole) * WORD_BYTES;
+                let off = field_slot_off(*hole);
                 let hp = self.dst(|i, b, d| i.gep(b, d, &ptr, off));
                 let hole_int = self.dst(|i, b, d| i.ptrtoint(b, d, &hp));
                 let parent = self.dst(|i, b, d| i.inttoptr(b, d, &t.extra));
@@ -999,7 +1026,7 @@ impl<'a, I: Isa> Cg<'a, I> {
                 CorePat::Ctor(_, fields) | CorePat::Tuple(fields) => {
                     for (fi, sub) in fields.iter().enumerate() {
                         if let Some(vname) = sub {
-                            let off = HDR_BYTES + idx64(fi) * WORD_BYTES;
+                            let off = field_slot_off(fi);
                             let fp = self.dst(|i, b, d| i.gep(b, d, &ptr, off));
                             let fv = self.dst(|i, b, d| i.load(b, d, &fp));
                             arm_regs.insert(*vname, fv);
@@ -1760,7 +1787,16 @@ mod tests {
             .flat_map(|(_, body, _)| body.lines())
             .find(|l| l.starts_with(&prefix))
             .unwrap_or_else(|| panic!("{name} not defined in any runtime/ module"));
-        let val = line[prefix.len()..].trim_end().trim_end_matches('L');
+        let val = line[prefix.len()..].trim_end();
+        if let Some(inner) = val.strip_prefix('(').and_then(|v| v.strip_suffix(')')) {
+            // The parenthesized shift form `(1L << n)` the rc-word markers use.
+            let (base, shift) = inner
+                .split_once("<<")
+                .unwrap_or_else(|| panic!("{name}: unsupported parenthesized define"));
+            let base: i64 = base.trim().trim_end_matches('L').parse().unwrap();
+            return base << shift.trim().parse::<u32>().unwrap();
+        }
+        let val = val.trim_end_matches('L');
         val.strip_prefix("0x").map_or_else(
             || val.parse().unwrap(),
             |hex| i64::from_str_radix(hex, 16).unwrap(),
@@ -1789,16 +1825,47 @@ mod tests {
                 .count(),
             "the runtime defines a PRISM_*_TAG the generated mirror missed"
         );
-        assert_eq!(c_def("PRISM_TAG_W") * super::WORD_BYTES, super::TAG_OFF);
-        assert_eq!(
-            c_def("PRISM_HDR_WORDS") * super::WORD_BYTES,
-            super::HDR_BYTES
-        );
+        assert_eq!(c_def("PRISM_TAG_W") * abi::WORD_BYTES, abi::TAG_OFF);
+        assert_eq!(c_def("PRISM_HDR_WORDS") * abi::WORD_BYTES, abi::HDR_BYTES);
         assert_eq!(c_def("PRISM_RC_W"), 0);
-        assert_eq!(c_def("PRISM_WORD_BYTES"), super::WORD_BYTES);
+        assert_eq!(c_def("PRISM_WORD_BYTES"), abi::WORD_BYTES);
         assert_eq!(
-            c_def("PRISM_ARITY_W") * super::WORD_BYTES + super::WORD_BYTES,
-            super::HDR_BYTES
+            c_def("PRISM_ARITY_W") * abi::WORD_BYTES + abi::WORD_BYTES,
+            abi::HDR_BYTES
+        );
+        // Every stored slot (constructor field, closure capture, TRMC hole) is
+        // one runtime word wide, starting right after the header: the fixed
+        // stride `field_slot_off` bakes in and the C runtime walks with.
+        assert_eq!(abi::field_slot_off(0), abi::HDR_BYTES);
+        for index in 1..4 {
+            assert_eq!(
+                abi::field_slot_off(index) - abi::field_slot_off(index - 1),
+                abi::WORD_BYTES
+            );
+        }
+    }
+
+    #[test]
+    fn static_cell_matches_runtime() {
+        // The rc word codegen writes into every static string cell, checked
+        // against the embedded header by the independent parser above: the
+        // marker is the header's bit, is a single bit, and shares no bit with
+        // the other rc-word markers, so no rc-word test can conflate the
+        // image-owned, region-owned, and forwarded cases.
+        assert_eq!(c_def("PRISM_STATIC_CELL"), abi::STATIC_CELL);
+        assert_eq!(abi::STATIC_CELL.count_ones(), 1);
+        assert_eq!(abi::STATIC_CELL & c_def("PRISM_ARENA_OWNED"), 0);
+        assert_eq!(abi::STATIC_CELL & c_def("PRISM_ARENA_FORWARDED"), 0);
+        // The inert mask stays exactly the two ownership markers: a future
+        // inert class must extend that one definition, where every rc-writing
+        // site already looks, rather than patching sites by hand.
+        let inert = "#define PRISM_RC_INERT (PRISM_ARENA_OWNED | PRISM_STATIC_CELL)";
+        assert!(
+            super::rt::RUNTIME_FILES
+                .iter()
+                .flat_map(|(_, body, _)| body.lines())
+                .any(|l| l.trim_end() == inert),
+            "PRISM_RC_INERT changed shape in the runtime header"
         );
     }
 

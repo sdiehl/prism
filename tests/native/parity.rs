@@ -943,39 +943,13 @@ fn systemf_dk_witnesses_pinned() {
     );
 }
 
-// Resource counters on the differential run.
+// Record interpreter transitions and native heap allocations alongside output
+// parity. Each counter is compared only with its own recorded baseline.
 //
-// Byte-identical output says the two sides compute the same thing; it says
-// nothing about what either one spent doing it. An optimization that quietly
-// stops firing (a lost specialization, a fold that starts rebuilding its
-// accumulator each step) keeps every byte of output identical, so the corpus
-// stays green while the cost of running it multiplies. Nothing above notices,
-// and the gap is widest for programs that are run interpreted rather than
-// compiled, where there is no native binary whose timings anyone is watching.
+// The allowed band combines `COST_DRIFT_FACTOR` with `COST_DRIFT_SLACK`, avoiding
+// churn on small counts while retaining a bound for every program.
 //
-// So the corpus run also records what each program cost on both sides, each in
-// its own unit: machine transitions for the interpreter, heap cells materialized
-// for the native binary. Both counters are already there (the machine's step
-// count and the runtime's `PRISM_ALLOC_STATS` report), both are pure functions
-// of the program and the compiler, and both ride the build and run the parity
-// check already performs, so measuring them costs nothing. The two units are not
-// comparable to each other and nothing here compares them; each is compared
-// against its own recorded baseline.
-//
-// The bound is deliberately loose: a count may move by a factor of
-// `COST_DRIFT_FACTOR` plus a flat `COST_DRIFT_SLACK` before it is reported.
-// Anything inside passes and leaves the golden alone, which keeps this from
-// becoming an exact-count oracle that has to be reblessed for every small
-// movement of ordinary compiler work. The flat term is what lets the bound stay
-// armed on the small counts: most of the corpus materializes only a handful of
-// cells, and a pure ratio there would fail on a jump of three that means nothing,
-// so the choice would be between churn and exempting three quarters of the
-// programs from the check. Adding slack instead bounds every program, with the
-// smallest ones given proportionally the most room.
-//
-// A move in either direction fails, an increase as a regression and a decrease
-// as a stale baseline. A win that goes unrecorded leaves the baseline inflated,
-// and the next regression hides inside the slack it left behind.
+// Increases are regressions; decreases indicate a stale baseline.
 
 const COST_MANIFEST: &str = "tests/cost_manifest.txt";
 const COST_MANIFEST_ACCEPT: &str = "PRISM_ACCEPT_COST_MANIFEST";

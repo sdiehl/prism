@@ -1,0 +1,221 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/field_projection_common.pr
+---
+== tokens ==
+VOpen Type UIdent("Tagged") Eq UIdent("A") LBrace Ident("id") Colon KwInt RBrace Bar UIdent("B") LBrace Ident("id") Colon KwInt RBrace VSemi Fn Ident("tag_id_by_match") LParen Ident("tagged") Colon UIdent("Tagged") RParen Colon KwInt Eq VOpen Match Ident("tagged") Of VOpen UIdent("A") LBrace Ident("id") Eq Ident("id") RBrace FatArrow Ident("id") VSemi UIdent("B") LBrace Ident("id") Eq Ident("id") RBrace FatArrow Ident("id") VClose VClose VSemi Fn Ident("tag_id") LParen Ident("tagged") Colon UIdent("Tagged") RParen Colon KwInt Eq Ident("tagged") Dot Ident("id") VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Int(IntLit { value: 0, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Tagged",
+            params: [],
+            param_kinds: [],
+            ctors: [
+                Ctor {
+                    name: "A",
+                    args: [
+                        Int,
+                    ],
+                    fields: Some(
+                        [
+                            (
+                                "id",
+                                Int,
+                            ),
+                        ],
+                    ),
+                },
+                Ctor {
+                    name: "B",
+                    args: [
+                        Int,
+                    ],
+                    fields: Some(
+                        [
+                            (
+                                "id",
+                                Int,
+                            ),
+                        ],
+                    ),
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 179..222,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "tag_id_by_match",
+            params: [
+                Param {
+                    name: "tagged",
+                    ty: Some(
+                        Con(
+                            "Tagged",
+                            [],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Match(
+                    Spanned {
+                        node: Var(
+                            "tagged",
+                        ),
+                        span: 276..282,
+                    },
+                    [
+                        Arm {
+                            pat: Spanned {
+                                node: Record(
+                                    "A",
+                                    [
+                                        (
+                                            "id",
+                                            Spanned {
+                                                node: Var(
+                                                    "id",
+                                                ),
+                                                span: 299..301,
+                                            },
+                                        ),
+                                    ],
+                                    false,
+                                ),
+                                span: 290..303,
+                            },
+                            body: Spanned {
+                                node: Var(
+                                    "id",
+                                ),
+                                span: 307..309,
+                            },
+                        },
+                        Arm {
+                            pat: Spanned {
+                                node: Record(
+                                    "B",
+                                    [
+                                        (
+                                            "id",
+                                            Spanned {
+                                                node: Var(
+                                                    "id",
+                                                ),
+                                                span: 323..325,
+                                            },
+                                        ),
+                                    ],
+                                    false,
+                                ),
+                                span: 314..327,
+                            },
+                            body: Spanned {
+                                node: Var(
+                                    "id",
+                                ),
+                                span: 331..333,
+                            },
+                        },
+                    ],
+                ),
+                span: 270..333,
+            },
+            wheres: [],
+            span: 224..333,
+        },
+        Decl {
+            name: "tag_id",
+            params: [
+                Param {
+                    name: "tagged",
+                    ty: Some(
+                        Con(
+                            "Tagged",
+                            [],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: FieldAccess(
+                    Spanned {
+                        node: Var(
+                            "tagged",
+                        ),
+                        span: 370..376,
+                    },
+                    "id",
+                ),
+                span: 370..379,
+            },
+            wheres: [],
+            span: 335..379,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 393..400,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 0,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 401..402,
+                        },
+                    ],
+                ),
+                span: 393..403,
+            },
+            wheres: [],
+            span: 381..403,
+        },
+    ],
+}
+
+== types ==
+[E1023] Type Error: in `tag_id`: field `id` cannot be projected from unrefined sum type `Tagged` with 2 constructors; match a constructor first
+    ╭─[ <source>:11:36 ]
+    │
+ 11 │ fn tag_id(tagged : Tagged) : Int = tagged.id
+    │                                    ────┬────  
+    │                                        ╰────── in `tag_id`: field `id` cannot be projected from unrefined sum type `Tagged` with 2 constructors; match a constructor first
+────╯

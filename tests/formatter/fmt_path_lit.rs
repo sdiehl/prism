@@ -32,8 +32,8 @@ fn a_literal_survives_an_argument_position() {
     assert_format(src, src);
 }
 
-// Extra spacing around the sigil and the steps is the author's, not the
-// language's, and normalizing it is the whole reason the form has one spelling.
+// The form has one spelling, so formatting removes extra space around the sigil
+// and steps.
 #[test]
 fn spacing_is_normalized() {
     assert_format("fn f() =\n  let a = #path   pos . x\n  a\n", MANY_STEPS);

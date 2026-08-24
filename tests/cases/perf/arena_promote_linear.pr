@@ -1,0 +1,22 @@
+-- The bounded case for the promotion oracle: an unshared list of N cells built
+-- under `with_arena` and returned out of it. Every cell is reachable by exactly
+-- one path, so copies, nodes, and edges are each one per element and no edge
+-- ever finds an existing copy to reuse. This is the row that pins what promotion
+-- costs when there is no sharing to preserve, so the shared case has something
+-- to be compared against.
+import Arena (..)
+
+fn build(n : Int, acc : List(Int)) : List(Int) =
+  if n == 0 then
+    acc
+  else
+    build(n - 1, Cons(n, acc))
+
+fn escape() : List(Int) = build(__N__, Nil)
+
+fn total(xs : List(Int)) : Int =
+  match xs of
+    Nil => 0
+    Cons(h, t) => h + total(t)
+
+fn main() = println(total(with_arena(escape)))

@@ -30,10 +30,26 @@ filter = 'binary(differential) & test(/^gate::/)'
 test-group = 'corpus-compilers'
 slow-timeout = { period = "120s", terminate-after = 64 }
 
+# The tier-equivalence suite is the same shape at five effect-tier positions:
+# the sharded relation lowers and interprets a quarter of the corpus five
+# times, and the generated sweep adds a fuzz corpus on top. Same allowance as
+# the optimizer relation above.
+[[profile.default.overrides]]
+filter = 'binary(differential) & test(/^tier_gate::/)'
+test-group = 'corpus-compilers'
+slow-timeout = { period = "120s", terminate-after = 64 }
+
+# The typed-spine gates compile every corpus program twice, once with Core lint on
+# and once without, then diff the two Core dumps, and the group below pins them to
+# one thread. Measured at 1142s standalone in the debug profile on an M-series
+# laptop against the previous 1920s cap: headroom on a quiet machine, none left
+# once the rest of the suite competes for the cores, which is where it timed out.
+# Same rule as every other entry here: the timeout catches a hang, it does not
+# bound honest work.
 [[profile.default.overrides]]
 filter = 'binary(differential) & test(/^typed_spine::/)'
 test-group = 'corpus-compilers'
-slow-timeout = { period = "120s", terminate-after = 16 }
+slow-timeout = { period = "120s", terminate-after = 32 }
 
 [[profile.default.overrides]]
 filter = 'binary(compiler) & test(core_lint_clean_on_corpus)'
@@ -86,15 +102,31 @@ filter = 'binary(snapshots)'
 test-group = 'snapshot-goldens'
 slow-timeout = { period = "120s", terminate-after = 16 }
 
+# Several of this binary's modules drive the whole compiler over a corpus: the
+# receipt lane encodes every corpus file with the authority parser and re-encodes
+# it with the Prism-implemented one, and the bootstrap lanes compile the
+# compiler's own sources. That is minutes of honest work in the debug profile, and
+# the receipt lane crossed the shared default the first time the rest of the suite
+# competed for the machine while it ran. Same rule as every other entry here: the
+# timeout catches a hang, it does not bound honest work.
+[[profile.default.overrides]]
+filter = 'binary(tooling)'
+slow-timeout = { period = "120s", terminate-after = 16 }
+
 [[profile.ci.overrides]]
 filter = 'binary(differential) & test(/^gate::/)'
 test-group = 'corpus-compilers'
 slow-timeout = { period = "120s", terminate-after = 64 }
 
 [[profile.ci.overrides]]
+filter = 'binary(differential) & test(/^tier_gate::/)'
+test-group = 'corpus-compilers'
+slow-timeout = { period = "120s", terminate-after = 64 }
+
+[[profile.ci.overrides]]
 filter = 'binary(differential) & test(/^typed_spine::/)'
 test-group = 'corpus-compilers'
-slow-timeout = { period = "120s", terminate-after = 16 }
+slow-timeout = { period = "120s", terminate-after = 32 }
 
 [[profile.ci.overrides]]
 filter = 'binary(compiler) & test(core_lint_clean_on_corpus)'
@@ -123,4 +155,8 @@ slow-timeout = { period = "120s", terminate-after = 16 }
 [[profile.ci.overrides]]
 filter = 'binary(snapshots)'
 test-group = 'snapshot-goldens'
+slow-timeout = { period = "120s", terminate-after = 16 }
+
+[[profile.ci.overrides]]
+filter = 'binary(tooling)'
 slow-timeout = { period = "120s", terminate-after = 16 }

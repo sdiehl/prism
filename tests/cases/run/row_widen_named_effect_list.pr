@@ -1,0 +1,29 @@
+-- A named function may promise a wider latent row than its body performs. Two
+-- occurrences in one invariant container used to leave the first producer at
+-- its pure body witness while the shared list element was widened to `Log`, so
+-- typed-Core verification rejected the bind assembled for the list literal.
+
+effect Log
+  emit(Int) : Unit
+
+fn quiet(x : Int) : Int ! {Log} = x * 2
+
+fn apply_all(fs : List((Int) -> Int ! {Log}), x : Int) : Int ! {Log} =
+  match fs of
+    Nil => x
+    Cons(f, rest) => apply_all(rest, f(x))
+
+fn one_item() : List((Int) -> Int ! {Log}) = [quiet]
+
+fn table() : List((Int) -> Int ! {Log}) = [quiet, quiet]
+
+fn main() =
+  let once =
+    handle apply_all(one_item(), 1) with
+      emit(_n) resume k => k(())
+      return value => value
+  let twice =
+    handle apply_all(table(), 1) with
+      emit(_n) resume k => k(())
+      return value => value
+  println(show((once, twice)))

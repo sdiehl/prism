@@ -399,7 +399,8 @@ fn why_output_top_level_defaults_to_the_primary_output() {
     );
 }
 
-// The `.plineage` arm of `prism diff` acceptance: changing one input file names exactly that input as
+// The `.plineage` arm of `prism diff` acceptance: changing one input file names
+// exactly that input as
 // moved along with every downstream digest (trace, stdout), everything else
 // preserved, and it exits nonzero so it can gate CI.
 #[test]

@@ -36,11 +36,13 @@ Every serialized thing is one envelope, read left to right, each header part che
 
 ## The `Bytes` representation
 
-`Bytes` is an unboxed byte buffer (`Buf`, `runtime/prism_buffer.c`) plus a read cursor: `Bytes(buf, off)` is the bytes `buf[off ..]`. The buffer holds raw u8 with no UTF-8 interpretation, so it threads byte-for-byte identically on both backends (the parity contract a `String`-of-bytes would break, since reconstructing a `String` from raw bytes repairs invalid UTF-8 lossily). The cursor makes `decode` cheap: peeling a byte off the front advances the offset in O(1) with no copy, so a whole decode is linear. Encode accumulates into a growable buffer builder (`buf_push`, amortized O(1)), so building a container or a string body stays linear rather than paying the quadratic cost a right-nested immutable `wire_cat` would incur. The concrete representation is owned by the codec; a derived instance only ever threads a `Bytes` through the builders below, never inspects it. `bytes_of_list`/`bytes_to_list` bridge to the older `List(Int)` view for callers that still want it.
+`Bytes` is an unboxed byte buffer (`Buf`, `runtime/prism_buffer.c`) plus a window: `Bytes(buf, off, end)` is the bytes `buf[off .. end)`. The buffer holds raw u8 with no UTF-8 interpretation, so it threads byte-for-byte identically on both backends (the parity contract a `String`-of-bytes would break, since reconstructing a `String` from raw bytes repairs invalid UTF-8 lossily). The window makes `decode` cheap: peeling a byte off the front advances the offset in O(1) with no copy, so a whole decode is linear, and `bytes_window` narrows either bound the same way, so a middle slice is cursor arithmetic over the shared buffer (kept alive under every window by ordinary reference counting) rather than a copy. Encode accumulates into a growable buffer builder (`buf_push` a byte at a time, `buf_append_str` a whole string in one copy, both amortized O(1) per byte), so building a container or a string body stays linear rather than paying the quadratic cost a right-nested immutable `wire_cat` would incur. The concrete representation is owned by the codec; a derived instance only ever threads a `Bytes` through the builders below, never inspects it. `bytes_of_list`/`bytes_to_list` bridge to the older `List(Int)` view for callers that still want it.
 
 ## Totality
 
-`decode` is total. Every read consumes at least one byte from a finite, strictly shrinking list, so decode always terminates; a truncated or hostile input runs out of bytes and fails through `Fail` rather than looping or panicking. Varints are length-capped and container and string lengths are bounded on both encode and decode, so a hostile length prefix cannot force unbounded work. The frame's total decoder checks the scheme, kind, and digest before touching the body and rejects trailing bytes after the value.
+`decode` is total. Every read advances the cursor over a finite window, so the bytes left strictly shrink and decode always terminates; a truncated or hostile input runs out of bytes and fails through `Fail` rather than looping or panicking. Varints are length-capped and container and string lengths are bounded on both encode and decode, so a hostile length prefix cannot force unbounded work. The frame's total decoder checks the scheme, kind, and digest before touching the body and rejects trailing bytes after the value.
+
+A bulk reader hoists its failure to the boundary rather than raising inside its loop: a buffer being accumulated is extended in place only while it is uniquely owned, and threading it through the failure row shares it at every step, so each push would copy the whole accumulation and the read would cost the square of its length. The inner scan is therefore total, reporting a short or malformed run through its cursor, and the caller raises the same `Fail` once.
 
 ## Deriving
 
@@ -50,11 +52,11 @@ Every serialized thing is one envelope, read left to right, each header part che
 
 ### `Bytes`
 
-```prism,def,h-eb83ea7dac4fb051f9e3420ad9e91e0eb24fe0d9fd604afa2bb10d2bc1c35d28
-type Bytes = Bytes(Buf, Int)
+```prism,def,h-c183b9e6fb5b8dff10287d027a2464149f8b72233b8f36f5ae268e68d26aac38
+type Bytes = Bytes(Buf, Int, Int)
 ```
 
-A compact, positional byte body: an unboxed byte buffer and a read cursor, `Bytes(buf, off)` denoting the bytes `buf[off ..]`. The concrete representation is owned by the codec; a derived instance only ever threads a `Bytes` through the builders below, never inspects it.
+A compact, positional byte body: an unboxed byte buffer and a window, `Bytes(buf, off, end)` denoting the bytes `buf[off .. end)`. The concrete representation is owned by the codec; a derived instance only ever threads a `Bytes` through the builders below, never inspects it.
 
 ### `Loss`
 
@@ -109,79 +111,79 @@ The one method, `shape_digest_of`, is the type's contract digest: the shape dige
 
 ### `serializeInt`
 
-```prism,def,h-97e0af036de0795a537a0bbd23e78a780a1f41c8f0631d16ae15b54f6417bfb3
+```prism,def,h-5c3d9d8b2375924e72884c62c5bde254923291a98205a793c7c5b314008d9f73
 instance serializeInt : Serialize(Int)
 ```
 
 ### `serializeI64`
 
-```prism,def,h-3225f6c191564fec632a80cf4fcb50f787b91e3206b0f00feab6ee2c425ea075
+```prism,def,h-95a34f8c50fc788e8206d6e0eddb0463b0b09f3713f570f0a7dd090c913f3523
 instance serializeI64 : Serialize(I64)
 ```
 
 ### `serializeU64`
 
-```prism,def,h-d7892b27a00d0811f5cc82555b967490dea91425b48e25c3f8422e88714ed52f
+```prism,def,h-d5a2895353a02d6a403213b0b68aad7060882db56c21b1d5d65fa6392a29ed12
 instance serializeU64 : Serialize(U64)
 ```
 
 ### `serializeBool`
 
-```prism,def,h-630d81a13b74a95eb7567e4b18a6e7b2be6662750a5686f8a0c7b2c7d5570277
+```prism,def,h-80eaea65911f4d8a6320b9747746a065561170564b80d3b98840a0b52350036b
 instance serializeBool : Serialize(Bool)
 ```
 
 ### `serializeUnit`
 
-```prism,def,h-18c3fe8466a599db95031fbee4f4415e387cc1556fd570c5994cf4083617793b
+```prism,def,h-530fe4b2ec98acd40b1c4a7037c08e3aa4309ff0aa7e7b1e66e3925827464815
 instance serializeUnit : Serialize(Unit)
 ```
 
 ### `serializeChar`
 
-```prism,def,h-b45ffa5726cf77639fc6478fddb919c2dd84fde9a017789bc13732c3069968ff
+```prism,def,h-e81c9e8c2d5a7ef39482820b20ef8a6b73bd61cbc4a118c2953c419526b46f1d
 instance serializeChar : Serialize(Char)
 ```
 
 ### `serializeString`
 
-```prism,def,h-4393be89af3be81582f486b4f247c528dbee598778c5a443bda46a1e4d14d22a
+```prism,def,h-8b63d3bbf2904a4c38c5a03a3e996cd4df1915715f406c23749fd9274512d22c
 instance serializeString : Serialize(String)
 ```
 
 ### `serializeList`
 
-```prism,def,h-7b83846a4f033cb8bb9a93b02509fe5017a0bec7c6451161f213a804425f31c3
+```prism,def,h-b469194cac8b518aee6a6a3217dd32b57c442e3280d70da9511330e814442230
 instance serializeList : Serialize(List(a))
 ```
 
 ### `serializeBytes`
 
-```prism,def,h-f64f2e798da09214dedc68da2d6d9bb95db2534a3d3d0e435455295c5edac301
+```prism,def,h-658ca0080398f99a4365f087a487faa384e4eae021252b944de511c31f79abf5
 instance serializeBytes : Serialize(Bytes)
 ```
 
 ### `serializeOption`
 
-```prism,def,h-2d72adc9332dabc24ab1f54e3d2819db958205211380c6ee272c7889ab70cb86
+```prism,def,h-da2b4c93adce47199b54bd6721bbbbabc82171228aacf9637d3bc510a336091d
 instance serializeOption : Serialize(Option(a))
 ```
 
 ### `serializePair`
 
-```prism,def,h-770970b35026068912a4dec43ab83dd80eafaeab961ff63c3cbe1b97a053c957
+```prism,def,h-bf673cf47af5a65e2fbf366b0ca0fcf4bd06673a87c805eb23fc088bf2faeea9
 instance serializePair : Serialize((a, b))
 ```
 
 ### `serializeTriple`
 
-```prism,def,h-172b9ac493da7a1c5d8bc695cc94342cbb048f98e9dc75f0a207bebccb02eff7
+```prism,def,h-1b9d3137fc40309dd371470ce414be28da30d54f5842520ccd320251d2290a7e
 instance serializeTriple : Serialize((a, b, c))
 ```
 
 ### `serializeMap`
 
-```prism,def,h-1fd4115f38a9dafa7e4def1fcd64d974b91809f8d886c4e6ff8e2c2e53da5ccd
+```prism,def,h-5817f3ea276df450d2ef2758512401654475435c66da487cd924cd4ef3abccf7
 instance serializeMap : Serialize(Map(k, v, ord))
 ```
 
@@ -189,21 +191,21 @@ instance serializeMap : Serialize(Map(k, v, ord))
 
 ### `bytes_of_buf`
 
-```prism,sig,h-b8fe7965a9c10fdd3229fc5c68e855e1d30963ad2bd561092251be0297a7f39a
+```prism,sig,h-1a467c0bcb1717f18c6813949467520f0a84a35d84b800c5b270d1a278601deb
 bytes_of_buf : (Buf) -> Wire.Bytes
 ```
 
 ### `bytes_buf`
 
-```prism,sig,h-61f1df36fddcf96d6b482f739cc3dabad0cdc8f95028758d87afe0a48fa14e3f
+```prism,sig,h-20e0ca5feea2a9216510190029cb6061f4ff1334e8a2ab256d1415450d2d73f9
 bytes_buf : (Wire.Bytes) -> Buf
 ```
 
-Recover the buffer of a body's remaining bytes, compacting away a non-zero cursor with a single slice.
+Recover the buffer of a body's remaining bytes, compacting away a narrowed window with a single slice.
 
 ### `bytes_at`
 
-```prism,sig,h-19ba5106f6e22efc49a535471b674f0d6a2ac3d29ec1c7d8d4717850b9eb31ec
+```prism,sig,h-b233b14ff37a517e4aafbd0c75467661bfc2e0052c573fd3ba6a72af237c2572
 bytes_at : (Wire.Bytes, Int) -> Int
 ```
 
@@ -217,9 +219,25 @@ bytes_at(bytes_of_list([10, 20, 30]), 1)
 20
 ```
 
+### `bytes_window`
+
+```prism,sig,h-ce361b79fed025f3e7386f09c869db85d2eecd778e0eedb0a27a7f89c2ed00f4
+bytes_window : (Wire.Bytes, Int, Int) -> Wire.Bytes
+```
+
+The `len` bytes of a body starting at `start` (0-based from the cursor), as a window into the same buffer: cursor arithmetic, no copy, the shared buffer kept alive by the window. `start` and `len` are clamped to the window's bounds, so an out-of-range request yields the in-range remainder rather than trapping, exactly as `buf_slice` clamps.
+
+```prism,mod=Wire
+bytes_to_list(bytes_window(bytes_of_list([1, 2, 3, 4]), 1, 2))
+```
+
+```output
+[2, 3]
+```
+
 ### `wire_empty`
 
-```prism,sig,h-ac2748597956fda3b9528cc398e6471e64489bee05462dbf4a3775d785db133c
+```prism,sig,h-1a502f359bffae11fe5651728f48979e7b9f921a72963c35a4039f7700581ca5
 wire_empty : Wire.Bytes
 ```
 
@@ -227,7 +245,7 @@ The empty byte body: no bytes, cursor at the start. The unit of `wire_cat`.
 
 ### `wire_cat`
 
-```prism,sig,h-d5cafe27415db70101093c4213ab27905253b98e4d5bc875877cba5b8f9055d4
+```prism,sig,h-6faf6a8504371b3dfc7d360d5ff8014292c982b98cb9b764b3e300df115c8917
 wire_cat : (Wire.Bytes, Wire.Bytes) -> Wire.Bytes
 ```
 
@@ -243,7 +261,7 @@ bytes_to_list(wire_cat(bytes_of_list([1, 2]), bytes_of_list([3])))
 
 ### `wire_is_empty`
 
-```prism,sig,h-55822030d6d802a9371d65c2d8d3aedd18643924d8eb67739fa79de7046730ad
+```prism,sig,h-e0d1bb13db39729046427133e8caf412ddc3843204e46339bd129b4a282abb93
 wire_is_empty : (Wire.Bytes) -> Bool
 ```
 
@@ -259,7 +277,7 @@ true
 
 ### `wire_len`
 
-```prism,sig,h-a2ac26aab3054d03c1846bba5a30183d4815f7a0c7d13d4a4eadffe600f39c37
+```prism,sig,h-ed8c61757f236de2ca1dc611f5acc24d2626a4e2a61bce546e56c163c5e88073
 wire_len : (Wire.Bytes) -> Int
 ```
 
@@ -275,7 +293,7 @@ wire_len(bytes_of_list([1, 2, 3]))
 
 ### `bytes_of_list`
 
-```prism,sig,h-73b33a7af2cebb0ed86c030109bcb5d70c81c8cf673e74c6c36311cca7f944ce
+```prism,sig,h-a50942a5d6e6e21ebb67884f6a32795e6e9dec531ff182e0de0c52e800ddd5b5
 bytes_of_list : (List(Int)) -> Wire.Bytes
 ```
 
@@ -291,7 +309,7 @@ bytes_to_list(bytes_of_list([1, 2, 3]))
 
 ### `bytes_to_list`
 
-```prism,sig,h-3c737a5ca67f5b494e2705780d25bdc0d8c96109471f9bc6943793402cef1aa3
+```prism,sig,h-2b77a3092fa5e83d0e0ea934479a293eb23ddfdc9a6df1aa93e538cd48ce0b6a
 bytes_to_list : (Wire.Bytes) -> List(Int)
 ```
 
@@ -299,7 +317,7 @@ Spread a byte body out as a list of byte values, from the cursor to the end. The
 
 ### `wire_tag`
 
-```prism,sig,h-01beb0215c68b9bc5b43e4fe235fb2b6d8a98af576ffa7085fe537e12f5534fc
+```prism,sig,h-23ff68c15416ae6cb4d0aa799b235aa3b45b69e5ddb6ab128493a397b078d05c
 wire_tag : (Int) -> Wire.Bytes
 ```
 
@@ -315,7 +333,7 @@ bytes_to_list(wire_tag(300))
 
 ### `wire_get_tag`
 
-```prism,sig,h-18718f0126d3e475a9eca65dd75ae68e00ea98a6602d3694bf2c691299319fdf
+```prism,sig,h-b0c5a6da74ef5e4d491f2991095528743e24490c873fdbb61fde88f4c1145f49
 wire_get_tag : (Wire.Bytes) -> (Int, Wire.Bytes) ! {Fail}
 ```
 
@@ -395,7 +413,7 @@ The reserved frame kind naming a certificate by its digest.
 
 ### `wire_frame`
 
-```prism,sig,h-e52f5bca75a00c9a3aaf444531665762d30d70bafbce480110d28386c0870157
+```prism,sig,h-468f5e7a4de146038a3a169f71a4a94e80fa1129c6bdc93f63fee8e581427584
 wire_frame : (Int, String, Wire.Bytes) -> Wire.Bytes
 ```
 
@@ -411,7 +429,7 @@ bytes_to_list(wire_open(wire_frame(wire_kind_value, "dig", bytes_of_list([7, 8])
 
 ### `wire_ref`
 
-```prism,sig,h-e27c95aa85fd666c3b9b7db85d7956fe5673beed564700af63b0801d79447969
+```prism,sig,h-aabcfa2ffa6aab76cdd81fc3680e85dd3d8c5730d5502f4a85111a2e7c7b1882
 wire_ref : (Int, String) -> Wire.Bytes
 ```
 
@@ -427,7 +445,7 @@ true
 
 ### `wire_open`
 
-```prism,sig,h-63260cb3ee7184a3b2de95fcf36e7f71588710e255dac17f484ef84e6c03f19a
+```prism,sig,h-161a4e2e949b61b6b785ca9cff31d74b1f12a061523d4c9203bf38ba5cb76956
 wire_open : (Wire.Bytes, Int, String) -> Wire.Bytes ! {Fail}
 ```
 
@@ -435,7 +453,7 @@ Open a frame, checking the scheme, kind, and digest before the body and returnin
 
 ### `wire_is_reference`
 
-```prism,sig,h-0102a530a37de10d1cf1f4e1af17d25296704d567a37a53540e06f0d184e2e1c
+```prism,sig,h-e885d666e2d89a2ca32b9eb180146cd794e05f477dd9fecf1797fd59a6e95138
 wire_is_reference : (Wire.Bytes, Int, String) -> Bool ! {Fail}
 ```
 
@@ -443,7 +461,7 @@ True when a well-formed frame for `kind`/`digest` carries no body (a pure refere
 
 ### `wire_open_value_any`
 
-```prism,sig,h-2fdcd0a7e8627b5c8c43337890c08435277e2b22c48e2e695af1e1cfe472b6ec
+```prism,sig,h-d9c0e6c4098e0e3958aa84a028df42486b0e587d6d1779be339e49e72d9e01f1
 wire_open_value_any : (Wire.Bytes) -> (String, Wire.Bytes) ! {Fail}
 ```
 
@@ -459,7 +477,7 @@ dig
 
 ### `wire_encode_value_with_digest`
 
-```prism,sig,h-644d9ca061aa79a698e6601f6961374b67b07a261d14aa2f91bcdce439b77255
+```prism,sig,h-f374e1ee88172094ff67ac3bfaa2d7447a0e4bc488dc06d9c60ce2a79f4c4e41
 wire_encode_value_with_digest : forall a. (String, a) -> Wire.Bytes given Wire.Serialize(a)
 ```
 
@@ -475,7 +493,7 @@ Encode a value as a `value`-kind frame carrying an explicitly supplied contract 
 
 ### `wire_decode_value_with_digest`
 
-```prism,sig,h-52019f23bbf4a24b99c8ef334b3230eb1abffe4c12c2aeb541db38630bb584de
+```prism,sig,h-ed5d81b299271c915696a2e58bf7d03569781d1fd38022a931812de13f76fffe
 wire_decode_value_with_digest : forall a. (Wire.Bytes, String) -> a ! {Fail} given Wire.Serialize(a)
 ```
 
@@ -483,7 +501,7 @@ Decode a `value`-kind frame against an explicitly supplied contract digest: chec
 
 ### `wire_encode_stable`
 
-```prism,sig,h-88321ffc55eec8ac4b5d530df9e7a6d105e7da82949f2ac64ea930ae21dce1e0
+```prism,sig,h-9eb46e5c684cd99418deccdac0c4307c47ea5720c9894c1d684763bb067689bc
 wire_encode_stable : forall a. (a) -> Wire.Bytes given Wire.Stable(a), Wire.Serialize(a)
 ```
 
@@ -491,7 +509,7 @@ Encode a `Stable` value as a `value` frame under its own contract digest. The di
 
 ### `wire_decode_stable`
 
-```prism,sig,h-f832ada4ee65e0ede47d0563fe03e1c62e2278a00db1077db516c4e098ade1e8
+```prism,sig,h-c234b9c1baac6bffefec51b8f5e4f4a36a0948279a06851494ba719fd85d7a37
 wire_decode_stable : forall a. (Wire.Bytes) -> a ! {Fail} given Wire.Stable(a), Wire.Serialize(a)
 ```
 

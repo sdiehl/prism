@@ -2,8 +2,8 @@
 // every layout path. The flat/break printer and the inline printer decode a
 // call head through one shared classifier; when they drifted, a call wide enough
 // to break re-emitted `f(a, using I)` as `f(using I)(a)` -- a fixpoint, so it
-// slipped past plain idempotence. These cases check AST-level round-trip (meaning
-// preserved), not just `format(format(x)) == format(x)`.
+// slipped past plain idempotence. These cases check the AST-level round trip as
+// well as `format(format(x)) == format(x)`.
 
 // The parse AST with span offsets stripped, so it is invariant under the
 // whitespace reflow a reformat performs. Reflow shifts only spans; a structural

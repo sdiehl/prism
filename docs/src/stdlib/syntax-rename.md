@@ -118,7 +118,7 @@ The checks run in a fixed order, so the refusal a caller sees is always the firs
 
 ### `rn_rename`
 
-```prism,sig,h-5bc34c59f90e9bb77f8cae85b130f74f1089817f7c04352296a1aa6dafeb5d55
+```prism,sig,h-a576a09a87eadaed4c2c4c98dfabace44bb2962eb71c555016b62f38a9af2b71
 rn_rename : (Syntax.Resolved.ResolvedDoc, String, String) -> Result(String, Syntax.Rename.RenameError)
 ```
 

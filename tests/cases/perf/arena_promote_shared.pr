@@ -1,0 +1,26 @@
+-- A shared DAG built under `with_arena` and returned out of it. Each level's
+-- two fields point at the same child, so N region cells span 2^N root-to-leaf
+-- paths. Promotion must copy each reachable cell once and share the copy, which
+-- costs N allocations; a walk that recurses per path copies the whole expansion
+-- instead and costs 2^N. Both produce the identical value, so only the
+-- allocation counter can tell them apart.
+import Arena (..)
+
+type Shared = Leaf(Int) | Fork(Shared, Shared)
+
+fn share(n : Int, x : Shared) : Shared =
+  if n == 0 then
+    x
+  else
+    share(n - 1, Fork(x, x))
+
+fn build() : Shared = share(__N__, Leaf(1))
+
+-- Walks one spine, so reading the result stays linear in N whatever the
+-- promotion did to its sharing.
+fn depth(t : Shared) : Int =
+  match t of
+    Leaf(_) => 0
+    Fork(a, _) => 1 + depth(a)
+
+fn main() = println(depth(with_arena(build)))

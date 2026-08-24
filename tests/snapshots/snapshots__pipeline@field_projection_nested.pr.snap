@@ -1,0 +1,169 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/field_projection_nested.pr
+---
+== tokens ==
+VOpen Type UIdent("Tagged") Eq UIdent("A") LBrace Ident("id") Colon KwInt RBrace Bar UIdent("B") LBrace Ident("id") Colon KwInt RBrace VSemi Type UIdent("Outer") Eq UIdent("Outer") LBrace Ident("inner") Colon UIdent("Tagged") RBrace VSemi Fn Ident("tag_id") LParen Ident("outer") Colon UIdent("Outer") RParen Colon KwInt Eq Ident("outer") Dot Ident("inner") Dot Ident("id") VSemi Fn Ident("main") LParen RParen Eq Ident("println") LParen Int(IntLit { value: 0, suffix: None }) RParen VClose
+
+== ast ==
+Program {
+    types: [
+        DataDecl {
+            name: "Tagged",
+            params: [],
+            param_kinds: [],
+            ctors: [
+                Ctor {
+                    name: "A",
+                    args: [
+                        Int,
+                    ],
+                    fields: Some(
+                        [
+                            (
+                                "id",
+                                Int,
+                            ),
+                        ],
+                    ),
+                },
+                Ctor {
+                    name: "B",
+                    args: [
+                        Int,
+                    ],
+                    fields: Some(
+                        [
+                            (
+                                "id",
+                                Int,
+                            ),
+                        ],
+                    ),
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 70..113,
+        },
+        DataDecl {
+            name: "Outer",
+            params: [],
+            param_kinds: [],
+            ctors: [
+                Ctor {
+                    name: "Outer",
+                    args: [
+                        Con(
+                            "Tagged",
+                            [],
+                        ),
+                    ],
+                    fields: Some(
+                        [
+                            (
+                                "inner",
+                                Con(
+                                    "Tagged",
+                                    [],
+                                ),
+                            ),
+                        ],
+                    ),
+                },
+            ],
+            deriving: [],
+            newtype: false,
+            span: 115..151,
+        },
+    ],
+    effects: [],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "tag_id",
+            params: [
+                Param {
+                    name: "outer",
+                    ty: Some(
+                        Con(
+                            "Outer",
+                            [],
+                        ),
+                    ),
+                    borrow: false,
+                    default: None,
+                },
+            ],
+            ret: Some(
+                Int,
+            ),
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: FieldAccess(
+                    Spanned {
+                        node: FieldAccess(
+                            Spanned {
+                                node: Var(
+                                    "outer",
+                                ),
+                                span: 186..191,
+                            },
+                            "inner",
+                        ),
+                        span: 186..197,
+                    },
+                    "id",
+                ),
+                span: 186..200,
+            },
+            wheres: [],
+            span: 153..200,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Call(
+                    Spanned {
+                        node: Var(
+                            "println",
+                        ),
+                        span: 214..221,
+                    },
+                    [
+                        Spanned {
+                            node: Int(
+                                IntLit {
+                                    value: 0,
+                                    suffix: None,
+                                },
+                            ),
+                            span: 222..223,
+                        },
+                    ],
+                ),
+                span: 214..224,
+            },
+            wheres: [],
+            span: 202..224,
+        },
+    ],
+}
+
+== types ==
+[E1023] Type Error: in `tag_id`: field `id` cannot be projected from unrefined sum type `Tagged` with 2 constructors; match a constructor first
+   ╭─[ <source>:6:34 ]
+   │
+ 6 │ fn tag_id(outer : Outer) : Int = outer.inner.id
+   │                                  ───────┬──────  
+   │                                         ╰──────── in `tag_id`: field `id` cannot be projected from unrefined sum type `Tagged` with 2 constructors; match a constructor first
+───╯

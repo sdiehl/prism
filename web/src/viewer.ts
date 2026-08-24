@@ -8,9 +8,9 @@
 // either direction along any relation, and the URL of a view is the definition's
 // canonical name.
 //
-// It deliberately does not load the wasm compiler. Every fact it renders is baked
-// into the artifact — the same discipline the book's typed tooltips follow, where
-// hovering a subterm runs no compiler. That keeps the viewer a pure function of
+// The viewer does not load the wasm compiler. Every fact it renders is baked into
+// the artifact. The book's typed tooltips follow the same rule: hovering a subterm
+// runs no compiler. That keeps the viewer a pure function of
 // one JSON file, which is what lets it open any project's index, including one
 // generated somewhere else and handed over.
 
@@ -46,7 +46,7 @@ const RELATIONS: { kind: EdgeKind; dir: "in" | "out"; label: string; hint: strin
     kind: "handles",
     dir: "in",
     label: "handled by",
-    hint: "definitions that interpret this effect — what gives it its meaning",
+    hint: "definitions that interpret this effect and give it meaning",
   },
   { kind: "instance-of", dir: "out", label: "instance of", hint: "the class this implements" },
   { kind: "instance-of", dir: "in", label: "instances", hint: "instances of this class" },
@@ -157,7 +157,7 @@ class Viewer {
     this.showRail(this.review.railShown());
     const counts = this.revs?.envelope.counts;
     const title = counts
-      ? `${this.index.envelope.title} — ${counts.changed} changed, ${counts.cone} in the cone`
+      ? `${this.index.envelope.title}: ${counts.changed} changed, ${counts.cone} in the cone`
       : this.index.envelope.title;
     this.nodes.title.innerHTML =
       esc(title) + testLayer(this.index.envelope.tests) + brokenModules(this.index.modules);
@@ -181,8 +181,8 @@ class Viewer {
     }
   }
 
-  // The definition to render for `id`: the current revision's, or — for an id
-  // the diff reports as removed — the old revision's record. A removed
+  // Render the current revision's definition for `id`. If the diff reports it as
+  // removed, render the old revision's record. A removed
   // definition exists only on the old side, and its review row would otherwise
   // be a dead button pointing at something `show` refuses to open.
   private lookup(id: string): Def | undefined {
@@ -230,9 +230,8 @@ class Viewer {
   // Open `id`, or focus it if it is already in the deck.
   //
   // There is no back stack. The deck *is* the trail: what you followed is still
-  // open, in the order you opened it, and clicking it again is how you return —
-  // which is the working-set model doing the job a history stack was bolted on to
-  // do, less well.
+  // open in order, and clicking one again returns to it. The working set therefore
+  // provides the needed history.
   show(id: string): void {
     if (!this.lookup(id) && !this.index.builtins.has(id)) return;
     if (!this.open.includes(id)) this.open.push(id);
@@ -392,8 +391,8 @@ class Viewer {
   // What a query finds.
   //
   // A declaration's *members* are results in their own right. `Cons`, `Nil` and
-  // `pure` are not definitions and so were unfindable — only the `List` and the
-  // `Applicative` that introduce them were in the rail at all — and listing them
+  // `pure` are not definitions and so were unfindable. Only the `List` and the
+  // `Applicative` declarations that introduce them were in the rail. Listing them
   // as their owner ("List, matched Cons") answered a question nobody asked. A
   // constructor is a name a reader looks up by name, so it appears under its
   // module as itself, badged with what it is, and opening it goes to the
@@ -404,8 +403,8 @@ class Viewer {
   // `const`, `Console`, `cons_validation` and six others above `Cons` itself.
   // Modules lead with their best hit for the same reason.
   //
-  // Text matches stay a separate tier at the end. They are a different question —
-  // "where does this string appear" rather than "what is this called" — and there
+  // Text matches stay in a separate tier at the end. They answer "where does this
+  // string appear" rather than "what is this called." There
   // are two hundred of them for a name like `Cons`, which would bury everything
   // above.
   private search(q: string): { groups: { module: string; hits: Hit[] }[]; text: Def[] } {
@@ -496,7 +495,7 @@ class Viewer {
 
   // What to say about one member of a declaration.
   //
-  // The count is the honest one, including zero — and zero is the common case for
+  // The count includes zero, which is the common case for
   // an effect operation, because a library declares `Output` and *programs*
   // perform it. Saying so, and naming the handlers that give it meaning instead,
   // is the difference between "this index is missing something" and "this is
@@ -540,8 +539,8 @@ class Viewer {
     );
     const authored = all.filter((e) => e.status !== "cone" && e.status !== "cosmetic");
     // The consequences are offered, collapsed, rather than withheld. Leading with
-    // them would be wrong — on a real change the cone dwarfs the edits a reviewer
-    // came to read — but leaving them out of the rail entirely made the header
+    // them would be wrong because the cone often dwarfs the edits a reviewer came
+    // to read. Leaving them out of the rail entirely made the header
     // count three cone entries the rail gave no way to reach.
     return (
       this.changeGroup("changed in this revision", authored, true) +
@@ -647,8 +646,8 @@ class Viewer {
     // and a second click to see what they asked for is a click that buys nothing.
     // Folding stays for a card being kept open for reference.
     const shut = this.folded.has(id);
-    // Nothing relates to `compose` in either direction — it calls only its own
-    // parameters — and an empty strip is a bordered band of nothing, so it goes.
+    // Nothing relates to `compose` in either direction because it calls only its
+    // own parameters. Omit the empty relation strip.
     const rel = this.relations(id);
     return `<article class="card${focused}${shut ? " is-folded" : ""}" data-card="${esc(id)}">
       <header class="card-head">
@@ -736,8 +735,8 @@ class Viewer {
 
   // What has happened to this definition since it was marked read.
   //
-  // The whole reason a mark is anchored to a content address: it can say which
-  // *kind* of change happened. A reformat is dismissed outright, a dependency
+  // A content-addressed mark can identify which *kind* of change happened. A
+  // reformat is dismissed outright, a dependency
   // shift is named as one, and only a real edit asks for the definition to be
   // read again. A line-anchored mark can say none of this, because it cannot tell
   // the three apart.
@@ -755,7 +754,7 @@ class Viewer {
       case "gone":
         return `<div class="card-seen is-warn">reviewed ${at}; no longer in this revision</div>`;
       default:
-        return `<div class="card-seen is-warn">reviewed ${at}; <b>edited since</b> — read again</div>`;
+        return `<div class="card-seen is-warn">reviewed ${at}; <b>edited since</b>; read again</div>`;
     }
   }
 
@@ -763,9 +762,8 @@ class Viewer {
   //
   // A `cone` entry gets a sentence rather than a second copy of identical text:
   // its bytes did not move, only its address did, because something it depends on
-  // changed. Saying that plainly is the whole reason the classification exists —
-  // it is the difference between a reviewer reading three edits and scrolling
-  // past forty-seven.
+  // changed. The classification lets a reviewer read the three edits without
+  // scrolling past all forty-seven consequences.
   private before(id: string): string {
     const e = this.revs?.get(id);
     if (!e) return "";
@@ -791,7 +789,7 @@ class Viewer {
   // Side by side rather than stacked: the two versions of a definition are being
   // compared, and comparing means reading across, not scrolling. The left pane is
   // painted and linked exactly like the right one, from the old revision's own
-  // occurrence rows — a name in the version you are moving away from is as worth
+  // occurrence rows. A name in the version you are moving away from is as worth
   // following as one in the version you are moving to, and the artifact carries
   // what it needs to do that. A target the old revision had and this one does not
   // keeps its text without becoming a link, the same rule every other reference
@@ -829,8 +827,8 @@ class Viewer {
 
   // The rendered type, painted and linked exactly like a body.
   //
-  // A signature is not source — no file holds it, the typechecker rendered it —
-  // but the artifact carries spans over it anyway, from the compiler's own lexer
+  // A signature is rendered by the typechecker rather than read from a source file.
+  // The artifact still carries spans over it from the compiler's own lexer
   // run across the rendered string. So `List` and `Concurrent.Async` in a
   // signature are the same colour and the same link they are in a body, which is
   // the point: the signature is the part a reader reads first. It leads with the
@@ -847,8 +845,8 @@ class Viewer {
 
   // Paint one text with its highlight spans and wrap its references in links.
   //
-  // `brief` drops the module from a qualified name — `Data.Vec.Vec(a, 0)` reads as
-  // `Vec(a, 0)` — which is for the rendered signature, not for source. The
+  // `brief` drops the module from a qualified name, so `Data.Vec.Vec(a, 0)` reads as
+  // `Vec(a, 0)`. This applies to rendered signatures, not source. The
   // typechecker qualifies every name it prints because it has no scope to print
   // against, while a reader has this card: the module is on the header, the full
   // name is on the link's tooltip, and the body below writes `Vec` too.
@@ -909,7 +907,7 @@ class Viewer {
       }
       at = r.end;
       // Where this declaration introduces one of its own members. It resolves to
-      // nothing to navigate to — it is already here — so it points at its own
+      // nothing to navigate to because it is already here, so it points at its own
       // list of users further down the card.
       if (r.ty !== undefined) {
         // Hoverable, not navigable: a local binds here and leads nowhere.
@@ -954,7 +952,7 @@ class Viewer {
   // plus this declaration's own members where it introduces them.
   //
   // The occurrence rows cannot supply the second. A member's declaration site is a
-  // *binder*, not a use, so the renamer has nothing to record there — and a
+  // *binder*, not a use, so the renamer has nothing to record there. A
   // reference to it would resolve to the declaration we are already reading. The
   // artifact carries those positions separately, from the compiler's own list of
   // what each declaration declares.
@@ -967,7 +965,7 @@ class Viewer {
     }
     // A name the checker gave a type. Only where nothing else already claims the
     // span: a reference's tooltip carries the *definition's* type, which is the
-    // better answer where there is one, so these fill in what is left — the
+    // better answer where there is one, so these fill in what is left: the
     // parameters and locals, which have no definition to point at.
     for (const s of decodeSpans(d.types, this.index.typeTable)) {
       if (marks.some((m) => s.start < m.end && m.start < s.end)) continue;
@@ -983,7 +981,7 @@ class Viewer {
   // of looking broken.
   private relations(id: string): string {
     // Edges first, members after. On a type the member rows are the heaviest thing
-    // on the card — `Option` has 127 uses of `None` and 135 of `Some` — and leading
+    // on the card. `Option` has 127 uses of `None` and 135 of `Some`, and leading
     // with them buries the summary of what the definition relates to under the
     // detail of who writes each of its parts.
     return this.edgeRows(id) + this.memberRows(id);
@@ -995,7 +993,7 @@ class Viewer {
   // These are not edges, and could not be. A class method is dispatched through a
   // dictionary, so the dependency graph records no call: `Data.Monad.map2` calls
   // `ap` and `fmap` and has no outgoing edges at all. What does know is the
-  // occurrence set, read from the far end — a reference to a member resolves to
+  // occurrence set, read from the far end. A reference to a member resolves to
   // the declaration that owns it, and the span it covers says which member was
   // meant. Without this a class card can list its instances and nothing else.
   private memberRows(id: string): string {
@@ -1022,9 +1020,9 @@ class Viewer {
       // The call rows lead with what the source names, in the order it names them,
       // and then with what the dependency graph adds. The two are not the same set:
       // elaboration inlines a top-level `let`, so a body that writes `gen_float`
-      // depends on what the constant expanded to instead. Both are worth having —
-      // one is what you can point at on the page, the other is what actually runs —
-      // and a chip is marked when it is only the second, since a name appearing in
+      // depends on what the constant expanded to instead. Both are useful: one is
+      // what you can point at on the page, while the other is what actually runs.
+      // A chip is marked when it is only the second, since a name appearing in
       // a row and nowhere in the body it belongs to reads as a bug.
       const written = this.mentions.get(dir, id);
       const derived = edges.filter((t) => !written.includes(t));
@@ -1046,8 +1044,8 @@ class Viewer {
 
   // One relation row: a label, a count, and the targets as chips.
   //
-  // Capped, because these lists are not small — `List` is used by 374 definitions
-  // and its `Cons` is written by 183 — and a card that opens with six hundred
+  // Cap these large lists. `List` is used by 374 definitions and its `Cons` is
+  // written by 183; a card that opens with six hundred
   // chips is a card nobody reads. The count is always the true one and the
   // remainder is one click away, so nothing is silently dropped; what is hidden is
   // hidden visibly.
@@ -1106,10 +1104,9 @@ const FENCE_NOTE: Record<string, string> = {
 
 /// Render a docstring.
 ///
-/// Deliberately not a markdown library, and not markdown either: it is the small
-/// dialect the docstrings actually use. Across the 723 documented definitions in
-/// the standard library there is not one list, heading, emphasis or link — there
-/// are 602 inline code spans and 386 examples, each usually paired with the
+/// Render the small docstring dialect used by the standard library. Its 723
+/// documented definitions contain no lists, headings, emphasis, or links. They
+/// contain 602 inline code spans and 386 examples, each usually paired with the
 /// `output` block asserting what it prints. Paragraphs, inline code and fences
 /// cover all of it, and a construct that never appears is not worth a dependency.
 ///
@@ -1153,7 +1150,7 @@ const inline = (s: string): string => esc(s).replace(/`([^`]+)`/g, "<code>$1</co
 /// The name a card leads with: the canonical one, qualified.
 ///
 /// A definition's id already carries its module wherever the compiler puts it
-/// there — `Data.List.map`, and `Data.Pretty@Mode` with the `@` that marks a
+/// there, such as `Data.List.map` and `Data.Pretty@Mode`, with the `@` marking a
 /// module-private name. The prelude is addressed in global scope, so its ids are
 /// bare, and prefixing the module is what makes every card read the same way:
 /// `Prelude.Result`, not `Result` beside a separate module label.
@@ -1165,8 +1162,8 @@ const qualified = (d: Def): string =>
 // A `tested by` row is empty for two entirely different reasons, and an empty row
 // looks the same either way: the unit declares no tests, or it declares tests
 // whose elaboration failed and the layer could not be built. The second is the
-// dangerous one — every definition then reads as untested — and the artifact knows
-// which it is, so the page should not make a reader ask.
+// dangerous one because every definition then reads as untested. The artifact
+// distinguishes the cases, so the page should too.
 const testLayer = (tests: Envelope["tests"]): string => {
   if (tests === "included") return "";
   if (tests === "empty") {
@@ -1198,7 +1195,7 @@ const shortName = short;
 const hashChip = (d: Def): string =>
   d.hash
     ? `<button class="hash" data-tip="${esc(d.hash)}\nclick to copy" data-copy="${esc(d.hash)}">${d.hash.slice(0, HASH_CHIP)}</button>`
-    : `<span class="hash hash--none" data-tip="no content address: this kind has none, or the indexed program never reached it">—</span>`;
+    : `<span class="hash hash--none" data-tip="no content address: this kind has none, or the indexed program never reached it">none</span>`;
 
 // What each surface kind is called, and what that means. The label is the
 // keyword that declares it wherever Prism has one, so the badge reads the way the
@@ -1227,7 +1224,7 @@ export const KINDS: Record<string, { label: string; gloss: string }> = {
 // legend; the tooltip carries the sentence the word still leaves out.
 const kindBadge = (kind: string): string => {
   const k = KINDS[kind];
-  const tip = k ? `${k.label} — ${k.gloss}` : kind;
+  const tip = k ? `${k.label}: ${k.gloss}` : kind;
   return `<span class="kind kind--${kind}" data-tip="${esc(tip)}">${esc(k?.label ?? kind)}</span>`;
 };
 
@@ -1236,7 +1233,7 @@ const kindBadge = (kind: string): string => {
 // and "builtin" is the fact that distinguishes the row from every definition
 // around it.
 const builtinBadge = (): string =>
-  `<span class="kind kind--builtin" data-tip="builtin — implemented in the compiler, with no Prism definition">builtin</span>`;
+  `<span class="kind kind--builtin" data-tip="builtin: implemented in the compiler, with no Prism definition">builtin</span>`;
 
 // `CSS.escape` is not in every target here, and card ids are canonical names that
 // can carry `.` and `@`; quoting them for an attribute selector is enough.
@@ -1248,9 +1245,9 @@ const cssEscape = (s: string): string => s.replace(/["\\]/g, "\\$&");
 /// whose entire purpose is answering "what is this" that delay is most of the
 /// answer's value gone. So the tooltip is ours.
 ///
-/// Deliberately not a positioning library. The viewer is a self-contained artifact
-/// reader — no wasm, no dependencies, under 20 kB — and a dependency to place a box
-/// near a word would cost more than it explains. The book's typed tooltips
+/// Position a tooltip without adding a library. The viewer is a self-contained
+/// artifact reader with no wasm and no dependencies, under 20 kB. A positioning
+/// dependency would cost more than it explains. The book's typed tooltips
 /// (`docs/theme/prism-tooltips.js`) solve the same problem the same way, so this
 /// follows that precedent rather than introducing a second approach.
 function wireTooltip(): void {
@@ -1308,7 +1305,7 @@ function wireTooltip(): void {
 ///
 /// Tested on the tag rather than with `instanceof`, so it holds for an element
 /// from another realm (an iframe, a different document) where the constructor
-/// identity differs but the element is just as editable — and so the rule can be
+/// identity differs but the element is just as editable, so the rule can be
 /// checked without a DOM.
 export function isEditable(target: EventTarget | null): boolean {
   const el = target as (Partial<HTMLElement> & { tagName?: string }) | null;
@@ -1326,7 +1323,7 @@ function wireNavigation(viewer: Viewer): void {
       const id = goto.dataset.goto ?? "";
       viewer.show(id);
       // A rail row for a member opens the declaration it lives in, then points at
-      // the member inside it — otherwise a search for `Cons` lands you on `List`
+      // the member inside it. Otherwise a search for `Cons` lands you on `List`
       // with no indication of why.
       if (goto.dataset.member) viewer.revealMember(id, goto.dataset.member);
       return;

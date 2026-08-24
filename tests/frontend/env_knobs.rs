@@ -48,7 +48,9 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("PRISM_CHECK_LEAKS", &["runtime/prism_mem.c"]),
     ("PRISM_ALLOC_STATS", &["runtime/prism_mem.c"]),
     ("PRISM_REUSE_STATS", &["runtime/prism_mem.c"]),
+    ("PRISM_RC_STATS", &["runtime/prism_mem.c"]),
     ("PRISM_EFFOP_STATS", &["runtime/prism_mem.c"]),
+    ("PRISM_PROMOTE_STATS", &["runtime/prism_mem.c"]),
     ("PRISM_DRIVE_STATS", &["runtime/prism_mem.c"]),
     // Family 3a: the C-toolchain seam, centralized in one module.
     (
@@ -68,13 +70,25 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ),
     ("PRISM_Z3", &["src/verify/tests.rs"]),
     ("PRISM_CVC5", &["src/verify/tests.rs"]),
+    ("PRISM_REQUIRE_SOLVERS", &["src/verify/tests.rs"]),
 ];
 
-// An environment *read* is one of these call forms with a string-literal argument.
+// An environment *read* is one of these forms with a string-literal argument.
+// The first three are the call forms. The fourth is a knob named once by a
+// constant instead of at each call site, so a module reading one knob from
+// several places still spells it once: a `*_ENV` constant holding a `PRISM_*`
+// literal counts as reading that knob in the file that declares it, which is
+// exactly the claim this audit makes (one documented home per knob).
+//
 // A bare `"PRISM_..."` in a diagnostic message or a doc comment is not a read and
 // is ignored; a read via a dynamic (non-literal) name is out of scope by design
 // (the `getenv` builtin reads an arbitrary program-supplied name).
-const READ_MARKERS: &[&str] = &["env::var(\"", "env::var_os(\"", "getenv(\""];
+const READ_MARKERS: &[&str] = &[
+    "env::var(\"",
+    "env::var_os(\"",
+    "getenv(\"",
+    "_ENV: &str = \"",
+];
 
 /// Every `(var, relative-file)` env read of a `PRISM_*` knob found by scanning the
 /// literal call sites under `src/` (`.rs`) and `runtime/` (`.c`/`.h`).

@@ -14,7 +14,7 @@ The support layer of a production parser: the three-way parse outcome, the recur
 type Parsed(a) = PTook(a, Cursor) | PStuck(Cursor) | PFault(Diagnostic)
 ```
 
-One parse step: the value and the cursor after it, an unmet expectation held in the cursor's failure record, or a finished diagnostic that no expectation set can express. lint: allow(L0203)
+One parse step: the value and the cursor after it, an unmet expectation held in the cursor's failure record, or a finished diagnostic that no expectation set can express.
 
 ## Functions and Values
 
@@ -104,11 +104,11 @@ The decoded text at the read position without consuming it, empty at the end or 
 
 ### `surface_float`
 
-```prism,sig,h-d1cacc7b86732926158ee920eef280ad094f8bb4c2c76aa15bbe6d88f090b13b
+```prism,sig,h-97d5f75462827293c3802bbd0f2f1237e26f7da68bc599313c6253659f8a7d6e
 surface_float : (String) -> String
 ```
 
-Match Rust's stable `f64` debug spelling used by syntax artifacts. The Prism lexer has already round-tripped the value through `show_float`, which omits the `.0` on integral finite values.
+Match Rust's stable `f64` debug spelling used by syntax artifacts. The Prism lexer has already round-tripped the value through `show_float`, whose digits are the same shortest round-trip set but whose spelling differs in two places: it omits the `.0` on an integral value, and it writes the exponent signed and zero-padded.
 
 ### `surface_int`
 

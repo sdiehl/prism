@@ -1,5 +1,5 @@
 //! Multi-module resolution: qualified, selective, and aliased imports;
-//! private-name namespacing; canonical disjoint namespaces; and the scoping
+//! private-name namespacing, canonical disjoint namespaces, and the scoping
 //! rules that let modules share a short name.
 
 use std::path::Path;

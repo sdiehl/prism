@@ -10,7 +10,8 @@
 import Data.Foldable (length)
 import Data.List (append, map, reverse)
 import Data.Maybe (..)
-import Data.String (ends_with, split)
+import Data.Char (is_upper)
+import Data.String (contains, ends_with, split)
 import Syntax.Source (..)
 import Syntax.Token (..)
 import Syntax.Cursor (..)
@@ -56,17 +57,42 @@ fn fail_at(c : Cursor, message : String) : Parsed(a) =
 fn fail_run(saved : Cursor, c : Cursor, message : String) : Parsed(a) =
   PFault(refuse(cursor_since(saved, c), message))
 
-fn note_expr(c : Cursor) : Cursor =
-  let c1 = cursor_note(c, TIdent)
-  let c2 = cursor_note(c1, TUid)
-  let c3 = cursor_note(c2, TQual)
-  let c4 = cursor_note(c3, TInt)
-  let c5 = cursor_note(c4, TFloat)
-  let c6 = cursor_note(c5, TChar)
-  let c7 = cursor_note(c6, TStr)
-  let c8 = cursor_note(c7, TFixed("("))
-  let c9 = cursor_note(c8, TFixed("["))
-  cursor_note(c9, TFixed("if"))
+-- The tokens that can begin an operand, written as one set rather than a chain
+-- of rebindings, because this is the half of an expectation set that a refusal
+-- reports and that the differential witness compares against the grammar's own
+-- first set. Every member is a spelling the parser really does accept here;
+-- noting a token it would refuse is how a refusal comes to name the very token
+-- it just rejected.
+let atom_starts : List(TokenKind) =
+  [
+      TIdent,
+      TUid,
+      TQual,
+      TInt,
+      TFloat,
+      TChar,
+      TStr,
+      TIStart,
+      TFixed("("),
+      TFixed("["),
+      TFixed("\{"),
+      TFixed("#"),
+      TFixed("-"),
+      TFixed("?"),
+      TFixed("break"),
+      TFixed("continue"),
+      TFixed("error"),
+      TFixed("false"),
+      TFixed("mask"),
+      TFixed("true"),
+    ]
+
+fn note_kinds(c : Cursor, ks : List(TokenKind)) : Cursor =
+  match ks of
+    Nil => c
+    Cons(k, rest) => note_kinds(cursor_note(c, k), rest)
+
+fn note_expr(c : Cursor) : Cursor = note_kinds(c, atom_starts)
 
 fn split_int(raw : String) : (String, Suffix) =
   let n = byte_len(raw)
@@ -675,9 +701,169 @@ fn parse_unboxed_atom(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
     let p1 = take_fixed(c2, "\}")
     let PTook(_, c3) = p1 else parsed_refused(p1)
     PTook(made(c, c3, EUnboxedRecord(fields)), c3)
+  elif at_kind(c1, TIdent) then
+    parse_path_literal(c, c1, depth)
   else
-    let noted = cursor_note(cursor_note(c1, TFixed("(")), TFixed("\{"))
+    let noted = cursor_note(
+        cursor_note(cursor_note(c1, TFixed("(")), TFixed("\{")),
+        TIdent,
+      )
     PStuck(noted)
+
+-- The optic literal's reserved binders and the constructor it expands to. A lens
+-- names a whole structure and the one part it focuses; neither binder is
+-- spellable in source, so no name an author writes can collide with them.
+fn path_word() : String = "path"
+
+fn path_whole() : String = "whole@"
+
+fn path_part() : String = "part@"
+
+fn path_lens() : String = "lens"
+
+-- The binder a compound path write reads its focus through.
+fn path_focus() : String = "focus@"
+
+-- Refused when the sigil is followed by some other word. The `#` has already
+-- committed the expression to this form, so a different word is a misspelling
+-- rather than a new construct.
+fn path_expected_msg() : String = "expected `path` after `#` here"
+
+-- Refused when a step focuses more than one place. The literal denotes a lens,
+-- which names exactly one focus, so admitting a fan-out step would change what
+-- the literal is rather than extend it.
+fn path_fields_only_msg() : String =
+  "a path literal takes field steps only (`#path a.b.c`): `each`, `[i]`, `?Ctor` and `where` focus more than one place, so build those with `traversal` instead of a path literal"
+
+-- Refused when an anchored literal names a type and then stops: the anchor only
+-- says what the whole is, so without a field there is nothing to focus.
+fn path_anchor_msg() : String =
+  "an anchored path literal needs at least one field after the type: `#path Type.field`"
+
+-- `#path a.b.c` denotes a lens over one field chain. The sigil leads because no
+-- other expression begins with `#` followed by a name, so one token past the `#`
+-- decides this form and `path` stays an ordinary identifier everywhere else. The
+-- chain is an ordinary field-access expression, parsed by the same rules as any
+-- other, so the literal shares one spelling of a field path with the grammar
+-- instead of introducing a second.
+fn parse_path_literal(
+  saved : Cursor,
+  c : Cursor,
+  depth : Int
+) : Parsed(Sp(Expr)) =
+  let p1 = take_word(c, TIdent)
+  let PTook(word, c1) = p1 else parsed_refused(p1)
+  let p2 = parse_postfix(c1, depth)
+  let PTook(operand, c2) = p2 else parsed_refused(p2)
+  if word /= path_word() then
+    fail_run(saved, c2, path_expected_msg())
+  else
+    match path_fields(operand, Nil) of
+      None => fail_run(saved, c2, path_fields_only_msg())
+      Some(all) => finish_path_literal(all, cursor_since(saved, c2), c2)
+
+-- The field names the operand denotes, outermost first. The operand is whatever
+-- the ordinary expression rules made of the chain, so its root is the first
+-- field rather than a value. Anything focusing something other than one field
+-- chain is refused.
+fn path_fields(e : Sp(Expr), acc : List(String)) : Option(List(String)) =
+  match e.node of
+    -- A qualified head lexes as one dotted token, so the root may carry several
+    -- segments; the caller decides whether the first of them is a type anchor.
+    EVar(root) => Some(append(acc, split(char_at(".", 0), root)))
+    EField(base, field) =>
+      match path_fields(base, acc) of
+        None => None
+        Some(fields) => Some(append(fields, [field]))
+    -- The bracketed read spelling is the same path written another way and
+    -- flattens to the same steps.
+    EReadPath(base, steps) =>
+      match path_fields(base, acc) of
+        None => None
+        Some(fields) => path_step_fields(steps, fields)
+    _ => None
+
+fn path_step_fields(
+  steps : List(PathStep),
+  acc : List(String)
+) : Option(List(String)) =
+  match steps of
+    Nil => Some(acc)
+    Cons(step, rest) =>
+      match step of
+        PSField(field) => path_step_fields(rest, append(acc, [field]))
+        _ => None
+
+fn finish_path_literal(
+  all : List(String),
+  span : Span,
+  c : Cursor
+) : Parsed(Sp(Expr)) =
+  match all of
+    Nil => PFault(refuse(span, path_anchor_msg()))
+    Cons(head, rest) =>
+      -- An uppercase head is a root-type anchor rather than a field, since
+      -- fields are lowercase. It rides both binders as an ordinary annotation,
+      -- which is what lets the literal sit inline where nothing else names the
+      -- whole type.
+      if str_len(head) > 0 && is_upper(char_at(head, 0)) then
+        match rest of
+          Nil => PFault(refuse(span, path_anchor_msg()))
+          _ => PTook(path_lens_expr(rest, Some(TyCon(head, Nil)), span), c)
+      else
+        PTook(path_lens_expr(all, None, span), c)
+
+fn path_param(name : String, ty : Option(Ty)) : Param =
+  Param {
+    name = name,
+    pat = None,
+    ty = ty,
+    is_borrow = false,
+    dflt = None
+  }
+
+-- Read the chain out of the whole, one field at a time.
+fn path_read(fields : List(String), acc : Sp(Expr), span : Span) : Sp(Expr) =
+  match fields of
+    Nil => acc
+    Cons(field, rest) =>
+      path_read(rest, authored(EField(acc, field), span.lo, span.hi), span)
+
+-- The lens the literal expands to: a getter that reads the chain and a setter
+-- that writes it back. Every piece stands for the one form the author wrote, so
+-- all of them carry the literal's own extent; only the call itself is
+-- synthesized, since that is the node the formatter restores the surface from.
+fn path_lens_expr(
+  fields : List(String),
+  whole_ty : Option(Ty),
+  span : Span
+) : Sp(Expr) =
+  let read =
+    path_read(fields, authored(EVar(path_whole()), span.lo, span.hi), span)
+  let getter =
+    authored(ELam([path_param(path_whole(), whole_ty)], read), span.lo, span.hi)
+  let update = PathUpdate {
+    path = map(\(field) -> PSField(field), fields),
+    op = POSet(authored(EVar(path_part()), span.lo, span.hi))
+  }
+  let write = authored(
+      EPathUpdate(authored(EVar(path_whole()), span.lo, span.hi), [update]),
+      span.lo,
+      span.hi,
+    )
+  let setter = authored(
+      ELam(
+          [path_param(path_whole(), whole_ty), path_param(path_part(), None)],
+          write,
+        ),
+      span.lo,
+      span.hi,
+    )
+  synthesized(
+      ECall(authored(EVar(path_lens()), span.lo, span.hi), [getter, setter]),
+      span.lo,
+      span.hi,
+    )
 
 fn parse_named_fields(
   c : Cursor,
@@ -841,27 +1027,57 @@ fn parse_path_updates(
 ) : Parsed(List(PathUpdate)) =
   let p1 = parse_path_steps(c, depth)
   let PTook(path, c1) = p1 else parsed_refused(p1)
-  if at_fixed(c1, "=") || at_fixed(c1, "~") then
-    let modify = at_fixed(c1, "~")
-    let p2 = parse_expr(cursor_advance(c1), depth)
-    let PTook(value, c2) = p2 else parsed_refused(p2)
-    let op =
-      if modify then
-        POModify(value)
-      else
-        POSet(value)
-    let next = append(acc, [PathUpdate { path = path, op = op }])
-    if at_fixed(c2, ",") then
-      let c3 = cursor_advance(c2)
-      if at_fixed(c3, "\}") then
-        PTook(next, c3)
-      else
-        parse_path_updates(c3, depth, next)
+  let p2 = parse_path_write(c, c1, depth)
+  let PTook(op, c2) = p2 else parsed_refused(p2)
+  let next = append(acc, [PathUpdate { path = path, op = op }])
+  if at_fixed(c2, ",") then
+    let c3 = cursor_advance(c2)
+    if at_fixed(c3, "\}") then
+      PTook(next, c3)
     else
-      PTook(next, c2)
+      parse_path_updates(c3, depth, next)
   else
-    let noted = cursor_note(cursor_note(c1, TFixed("=")), TFixed("~"))
-    PStuck(noted)
+    PTook(next, c2)
+
+-- The write at the end of one path: set it, modify it by a function, or apply
+-- one of the statement layer's compound terminals at the focus. `saved` is where
+-- the update's own steps began, since a compound write stands for the whole
+-- update rather than for its right-hand side.
+fn parse_path_write(saved : Cursor, c : Cursor, depth : Int) : Parsed(PathOp) =
+  if at_fixed(c, "=") || at_fixed(c, "~") then
+    let modify = at_fixed(c, "~")
+    let p1 = parse_expr(cursor_advance(c), depth)
+    let PTook(value, c1) = p1 else parsed_refused(p1)
+    if modify then
+      PTook(POModify(value), c1)
+    else
+      PTook(POSet(value), c1)
+  else
+    match compound_op(c) of
+      None =>
+        PStuck(
+            note_compound(
+                cursor_note(cursor_note(c, TFixed("=")), TFixed("~")),
+              ),
+          )
+      Some(op) =>
+        let p1 = parse_expr(cursor_advance(c), depth)
+        let PTook(value, c1) = p1 else parsed_refused(p1)
+        PTook(compound_path_op(op, value, cursor_since(saved, c1)), c1)
+
+-- `p <op>= e` at a path focus: a modifier that reads the focus, applies the
+-- operator, and writes the result back. The lambda is a node the parser invents
+-- and it stands for the whole update, so it carries the update's extent.
+fn compound_path_op(op : String, value : Sp(Expr), span : Span) : PathOp =
+  let focus = authored(EVar(path_focus()), span.lo, span.hi)
+  let body = synthesized(EBin(op, focus, value), span.lo, span.hi)
+  POModify(
+      synthesized(
+          ELam([path_param(path_focus(), None)], body),
+          span.lo,
+          span.hi,
+        ),
+    )
 
 fn parse_path_steps(c : Cursor, depth : Int) : Parsed(List(PathStep)) =
   let p1 = parse_path_segment(c, depth)
@@ -1001,35 +1217,59 @@ fn parse_assignment_tail(
   if at_fixed(c, ":=") then
     let p1 = parse_expr(cursor_advance(c), depth)
     let PTook(value, c1) = p1 else parsed_refused(p1)
-    match lhs.node of
-      EVar(name) => PTook(made(saved, c1, EAssign(name, value)), c1)
-      EIndex(recv, key) =>
-        PTook(made(saved, c1, EIndexAssign(recv, key, value)), c1)
-      _ =>
-        PFault(
-            refuse(
-                lhs.span,
-                "the left side of `:=` must be a variable or an index `a[i]`",
-              ),
-          )
-  elif (at_fixed(c, "+=")
-      || at_fixed(c, "-=")
-      || at_fixed(c, "*=")
-      || at_fixed(c, "%=")) then
-    let op =
-      if at_fixed(c, "+=") then
-        "+"
-      elif at_fixed(c, "-=") then
-        "-"
-      elif at_fixed(c, "*=") then
-        "*"
-      else
-        "%"
-    let p2 = parse_expr(cursor_advance(c), depth)
-    let PTook(value, c1) = p2 else parsed_refused(p2)
-    build_compound(saved, lhs, op, value, c1)
+    build_assign(saved, lhs, value, c1)
   else
-    PTook(lhs, c)
+    match compound_op(c) of
+      None => PTook(lhs, c)
+      Some(op) =>
+        let p2 = parse_expr(cursor_advance(c), depth)
+        let PTook(value, c1) = p2 else parsed_refused(p2)
+        build_compound(saved, lhs, op, value, c1)
+
+-- The compound assignment terminals and the binary operator each one stands
+-- for. One home for the family: the statement layer and the path-update layer
+-- read the same table instead of each spelling out the four cases.
+fn compound_op(c : Cursor) : Option(String) =
+  if at_fixed(c, "+=") then
+    Some("+")
+  elif at_fixed(c, "-=") then
+    Some("-")
+  elif at_fixed(c, "*=") then
+    Some("*")
+  elif at_fixed(c, "%=") then
+    Some("%")
+  else
+    None
+
+-- Note every compound terminal as an expectation, so a refusal names the
+-- spellings the parser really does accept in the position it just refused.
+fn note_compound(c : Cursor) : Cursor =
+  cursor_note(
+      cursor_note(
+          cursor_note(cursor_note(c, TFixed("+=")), TFixed("-=")),
+          TFixed("*="),
+        ),
+      TFixed("%="),
+    )
+
+-- `lvalue := value`: assign to a mutable binder, to an index target `a[i]`, or
+-- to a field path, which is the brace update it abbreviates. Any other left side
+-- is refused.
+fn build_assign(
+  saved : Cursor,
+  lhs : Sp(Expr),
+  value : Sp(Expr),
+  c : Cursor
+) : Parsed(Sp(Expr)) =
+  let span = cursor_since(saved, c)
+  match assign_route(lhs, POSet(value), span) of
+    Some(routed) => PTook(routed, c)
+    None =>
+      match lhs.node of
+        EVar(name) => PTook(authored(EAssign(name, value), span.lo, span.hi), c)
+        EIndex(recv, key) =>
+          PTook(authored(EIndexAssign(recv, key, value), span.lo, span.hi), c)
+        _ => PFault(refuse(lhs.span, assign_lhs_msg()))
 
 fn build_compound(
   saved : Cursor,
@@ -1039,22 +1279,166 @@ fn build_compound(
   c : Cursor
 ) : Parsed(Sp(Expr)) =
   let span = cursor_since(saved, c)
-  match lhs.node of
-    EVar(name) =>
-      let read = authored(EVar(name), span.lo, span.hi)
-      let rhs = synthesized(EBin(op, read, value), span.lo, span.hi)
-      PTook(authored(EAssign(name, rhs), span.lo, span.hi), c)
-    EIndex(recv, key) =>
-      let read = synthesized(EIndex(recv, key), span.lo, span.hi)
-      let rhs = synthesized(EBin(op, read, value), span.lo, span.hi)
-      PTook(authored(EIndexAssign(recv, key, rhs), span.lo, span.hi), c)
-    _ =>
-      PFault(
-          refuse(
-              lhs.span,
-              "the left side of a compound assignment must be a variable or an index `a[i]`",
-            ),
-        )
+  let written = POSet(compound_read_back(lhs, op, value, span))
+  match assign_route(lhs, written, span) of
+    Some(routed) => PTook(routed, c)
+    None =>
+      match lhs.node of
+        EVar(name) =>
+          let read = authored(EVar(name), span.lo, span.hi)
+          let rhs = synthesized(EBin(op, read, value), span.lo, span.hi)
+          PTook(authored(EAssign(name, rhs), span.lo, span.hi), c)
+        EIndex(recv, key) =>
+          let read = synthesized(EIndex(recv, key), span.lo, span.hi)
+          let rhs = synthesized(EBin(op, read, value), span.lo, span.hi)
+          PTook(authored(EIndexAssign(recv, key, rhs), span.lo, span.hi), c)
+        _ => PFault(refuse(lhs.span, compound_lhs_msg()))
+
+fn assign_lhs_msg() : String =
+  "the left side of `:=` must be a variable, an index `a[i]`, or a field path rooted at a variable (`x.a[i].b`)"
+
+fn compound_lhs_msg() : String =
+  "the left side of a compound assignment must be a variable, an index `a[i]`, or a field path rooted at a variable (`x.a[i].b`)"
+
+-- A statement compound reads its focus first and sets it, the shape `a[i] += e`
+-- already has, rather than closing over the right operand in a modifier lambda:
+-- the roots here are mutable cells or ambient state, so the re-read is a pure
+-- perform, and with no lambda there is nothing for the escape analysis to
+-- mistake for a captured cell.
+fn compound_read_back(
+  lhs : Sp(Expr),
+  op : String,
+  value : Sp(Expr),
+  span : Span
+) : Sp(Expr) =
+  let read = synthesized(lhs.node, span.lo, span.hi)
+  synthesized(EBin(op, read, value), span.lo, span.hi)
+
+-- The two path routes a statement lvalue may take before the plain forms are
+-- tried: a field path rooted at a binder, or one rooted at ambient state.
+fn assign_route(lhs : Sp(Expr), op : PathOp, span : Span) : Option(Sp(Expr)) =
+  match lvalue_path(lhs.node) of
+    Some(LPath(root, steps)) =>
+      if has_field_step(steps) then
+        Some(path_assign(root, steps, op, span))
+      else
+        state_route(lhs, op, span)
+    None => state_route(lhs, op, span)
+
+fn state_route(lhs : Sp(Expr), op : PathOp, span : Span) : Option(Sp(Expr)) =
+  match state_lvalue(lhs.node) of
+    None => None
+    Some(steps) =>
+      match steps of
+        Nil => None
+        _ => Some(state_assign(steps, op, span))
+
+-- A statement lvalue flattened to a root binder and the steps taken from it.
+type LPath = LPath(String, List(PathStep))
+
+-- The lvalue shapes a statement assignment accepts beyond a bare name: a chain
+-- of field accesses and index steps over a root binder, flattened to the steps
+-- the brace form takes. A dotted (qualified) or uppercase root names a
+-- constructor rather than a binder and is never assignable, so it declines.
+fn lvalue_path(e : Expr) : Option(LPath) =
+  match e of
+    EVar(x) =>
+      if (contains(".", x) || str_len(x) > 0 && is_upper(char_at(x, 0))) then
+        None
+      else
+        Some(LPath(x, Nil))
+    EField(base, field) =>
+      match lvalue_path(base.node) of
+        None => None
+        Some(LPath(root, steps)) =>
+          Some(LPath(root, append(steps, [PSField(field)])))
+    EIndex(base, key) =>
+      match lvalue_path(base.node) of
+        None => None
+        Some(LPath(root, steps)) =>
+          Some(LPath(root, append(steps, [PSIndex(key)])))
+    _ => None
+
+-- Whether a flattened lvalue needs the path route: any field step does. A chain
+-- of index steps alone keeps the older assign forms, so programs written before
+-- the path route existed desugar exactly as they did.
+fn has_field_step(steps : List(PathStep)) : Bool =
+  match steps of
+    Nil => false
+    Cons(step, rest) =>
+      match step of
+        PSField(_) => true
+        _ => has_field_step(rest)
+
+-- The ambient-state lvalue: a path rooted at a literal `get()` call, as in
+-- `get().metas.next += 1`. The root spells the operation actually performed, so
+-- nothing implicit is invented.
+fn state_lvalue(e : Expr) : Option(List(PathStep)) =
+  match e of
+    ECall(callee, args) =>
+      match args of
+        Cons(_, _) => None
+        Nil =>
+          match callee.node of
+            EVar(name) =>
+              if name == state_get() then
+                Some(Nil)
+              else
+                None
+            _ => None
+    EField(base, field) =>
+      match state_lvalue(base.node) of
+        None => None
+        Some(steps) => Some(append(steps, [PSField(field)]))
+    EIndex(base, key) =>
+      match state_lvalue(base.node) of
+        None => None
+        Some(steps) => Some(append(steps, [PSIndex(key)]))
+    _ => None
+
+-- The ambient-state operations a `get()`-rooted statement stands for.
+fn state_get() : String = "get"
+
+fn state_put() : String = "put"
+
+-- `x.a[i].b OP rhs` is the brace update it abbreviates, `x := { x | a[i].b OP
+-- rhs }`. The brace node is synthesized, which is what the formatter matches on
+-- to restore the statement surface; a hand-written `x := { x | ... }` is
+-- authored and keeps its explicit form.
+fn path_assign(
+  root : String,
+  steps : List(PathStep),
+  op : PathOp,
+  span : Span
+) : Sp(Expr) =
+  let update = synthesized(
+      EPathUpdate(authored(EVar(root), span.lo, span.hi), [
+          PathUpdate { path = steps, op = op },
+        ]),
+      span.lo,
+      span.hi,
+    )
+  authored(EAssign(root, update), span.lo, span.hi)
+
+-- `get().a.b OP rhs` is the longhand it abbreviates, `put({ get() | a.b OP rhs
+-- })`, with both names resolving in the program's own scope. The brace node is
+-- synthesized for the same reason as the binder-rooted form.
+fn state_assign(steps : List(PathStep), op : PathOp, span : Span) : Sp(Expr) =
+  let read = authored(
+      ECall(authored(EVar(state_get()), span.lo, span.hi), []),
+      span.lo,
+      span.hi,
+    )
+  let update = synthesized(
+      EPathUpdate(read, [PathUpdate { path = steps, op = op }]),
+      span.lo,
+      span.hi,
+    )
+  authored(
+      ECall(authored(EVar(state_put()), span.lo, span.hi), [update]),
+      span.lo,
+      span.hi,
+    )
 
 -- | Parse an expression or a layout-delimited statement block. Declaration
 -- bodies use the same production as control-flow branches, so this seam is
@@ -1973,16 +2357,48 @@ fn parse_let_stmt(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
             c7,
           )
 
+-- An optional `: Type` between a mutable binder and its `:=`. The annotation
+-- describes the initializer rather than the binding, so it is returned here and
+-- applied to the value.
+fn parse_var_ann(c : Cursor, depth : Int) : Parsed(Option(Ty)) =
+  if at_fixed(c, ":") then
+    let p1 = parse_type(cursor_advance(c), depth)
+    let PTook(ty, c1) = p1 else parsed_refused(p1)
+    PTook(Some(ty), c1)
+  else
+    PTook(None, c)
+
 fn parse_var_stmt(c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
   let saved = c
   let p1 = take_word(cursor_advance(c), TIdent)
   let PTook(name, c1) = p1 else parsed_refused(p1)
-  let p2 = take_fixed(c1, ":=")
-  let PTook(_, c2) = p2 else parsed_refused(p2)
-  let p3 = parse_expr(c2, depth)
-  let PTook(value, c3) = p3 else parsed_refused(p3)
-  let p4 = take_kind(c3, TVSemi)
-  let PTook(_, c4) = p4 else parsed_refused(p4)
-  let p5 = parse_stmts(c4, depth)
-  let PTook(rest, c5) = p5 else parsed_refused(p5)
-  PTook(made(saved, c5, EVarDecl(name, value, rest)), c5)
+  let p2 = parse_var_ann(c1, depth)
+  let PTook(ann, c2) = p2 else parsed_refused(p2)
+  let p3 = take_fixed(c2, ":=")
+  let PTook(_, c3) = p3 else parsed_refused(p3)
+  let p4 = parse_expr(c3, depth)
+  let PTook(value, c4) = p4 else parsed_refused(p4)
+  finish_var_stmt(VarHead(saved, name, ann, value), c4, depth)
+
+-- Everything a mutable declaration's head settled, carried to its tail as one
+-- value: the cursor the statement opened at, the binder, the optional annotation
+-- on the initializer, and the initializer itself.
+type VarHead = VarHead(Cursor, String, Option(Ty), Sp(Expr))
+
+-- The tail of a mutable declaration: the statement separator, the statements the
+-- binder scopes over, and the declaration node itself. Split from the head so
+-- that neither half carries the whole chain's nesting.
+fn finish_var_stmt(head : VarHead, c : Cursor, depth : Int) : Parsed(Sp(Expr)) =
+  match head of
+    VarHead(saved, name, ann, value) =>
+      let p1 = take_kind(c, TVSemi)
+      let PTook(_, c1) = p1 else parsed_refused(p1)
+      let p2 = parse_stmts(c1, depth)
+      let PTook(rest, c2) = p2 else parsed_refused(p2)
+      -- The annotation is a node the parser invents, and it stands for the whole
+      -- statement, so it carries the declaration's own extent.
+      let init =
+        match ann of
+          None => value
+          Some(ty) => remade(saved, c2, EAnn(value, ty))
+      PTook(made(saved, c2, EVarDecl(name, init, rest)), c2)

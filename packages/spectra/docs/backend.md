@@ -32,6 +32,8 @@ type TypstDocument = TypstDocument {
 } deriving (Eq, Show)
 ```
 
+A rendered deck: the output format, the Typst source, the logical slide and physical page counts, and every asset path the source refers to.
+
 ## Functions and Values
 
 ### `max_stage`

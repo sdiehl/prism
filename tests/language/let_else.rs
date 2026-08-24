@@ -11,7 +11,7 @@
 // the unreachable arm the expansion actually contains rather than silently
 // accepted. `?` and `else` are two different answers to a failed step, and
 // combining them in one binding is refused by the existing whole-statement rule
-// for `?` instead of quietly picking one.
+// for `?`, avoiding an arbitrary choice.
 
 use prism::eval::Rv;
 use prism::{check, dump, interpret, with_prelude, Error};

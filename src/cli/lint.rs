@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::{glob_pr, resolve_input, CmdError, CmdResult};
+use super::{glob_pr, resolve_input, tool_package_source, CmdError, CmdResult};
 use crate::error::Error;
 use crate::{dump_on, interpret_io_on_with_args, with_prelude, Config, OptLevel, Root};
 
@@ -28,11 +28,21 @@ const NAMESPACE_PHASE: &str = "namespace";
 const NAMESPACE_PROBE: &str = "let main = 0\n";
 const ENTRY_NAME: &str = "main";
 const BUNDLE_LABEL: &str = "lint rules";
+const TOOL_PACKAGE: &str = "lint";
+const ENTRY_MODULE: &str = "Lint";
 const LINT_SRC: &str = include_str!("../../packages/lint/src/Lint.pr");
 const RULES_SRC: &str = include_str!("../../packages/lint/src/Rules.pr");
 const FINDINGS_SRC: &str = include_str!("../../packages/lint/src/Findings.pr");
 const PRAGMA_SRC: &str = include_str!("../../packages/lint/src/Pragma.pr");
 const LIMITS_SRC: &str = include_str!("../../packages/lint/src/Limits.pr");
+/// The modules the entry point imports, each with the copy compiled into this
+/// binary. One home for the family: adding a rule module is one line here.
+const RULE_MODULES: &[(&str, &str)] = &[
+    ("Rules", RULES_SRC),
+    ("Findings", FINDINGS_SRC),
+    ("Pragma", PRAGMA_SRC),
+    ("Limits", LIMITS_SRC),
+];
 
 #[derive(Deserialize)]
 struct Namespace {
@@ -110,11 +120,14 @@ pub fn lint_cmd(paths: &[PathBuf], json: bool, advisory: bool, cfg: &Config) -> 
     }
     let files = (args.len() - 2) / 2;
 
+    let rules = tool_package_source(TOOL_PACKAGE, ENTRY_MODULE, LINT_SRC, cfg)
+        .map_err(|e| lint_error(e.to_string(), ""))?;
     let mut modules = BTreeMap::new();
-    modules.insert("Rules".to_owned(), RULES_SRC.to_owned());
-    modules.insert("Findings".to_owned(), FINDINGS_SRC.to_owned());
-    modules.insert("Pragma".to_owned(), PRAGMA_SRC.to_owned());
-    modules.insert("Limits".to_owned(), LIMITS_SRC.to_owned());
+    for (module, embedded) in RULE_MODULES {
+        let source = tool_package_source(TOOL_PACKAGE, module, embedded, cfg)
+            .map_err(|e| lint_error(e.to_string(), ""))?;
+        modules.insert((*module).to_owned(), source);
+    }
     let roots = vec![
         Root::source_bundle(BUNDLE_LABEL.into(), modules),
         Root::Embedded(crate::stdlib::STDLIB),
@@ -129,7 +142,7 @@ pub fn lint_cmd(paths: &[PathBuf], json: bool, advisory: bool, cfg: &Config) -> 
     shadow_cfg.timing = None;
     let mut output = Vec::new();
     interpret_io_on_with_args(
-        &with_prelude(LINT_SRC),
+        &with_prelude(&rules),
         &roots,
         &mut output,
         &mut &b""[..],
@@ -267,7 +280,24 @@ fn render_text(report: &LintReport) {
 
 #[cfg(test)]
 mod tests {
-    use super::{known_names, parse_protocol};
+    use super::{known_names, parse_protocol, PRAGMA_SRC};
+    use crate::docs::extract::PRAGMA_MARKER;
+
+    /// Both pragma spellings the rule package declares carry the marker the doc
+    /// generator strips, so a suppression can never reach a published page.
+    #[test]
+    fn pragma_marker_matches_the_rule_package() {
+        for form in ["-- lint: allow(", "-- lint: allow-file("] {
+            assert!(
+                PRAGMA_SRC.contains(&format!("\"{form}\"")),
+                "`Pragma.pr` no longer declares `{form}`"
+            );
+            assert!(
+                form.contains(PRAGMA_MARKER),
+                "`{form}` does not carry the marker the doc generator strips"
+            );
+        }
+    }
 
     #[test]
     fn protocol_decodes_findings_and_sums_suppressions() {

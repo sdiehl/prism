@@ -11,8 +11,8 @@ use crate::types::ty::EffRow;
 use prism_common::sym::Sym;
 
 use super::{
-    instantiate_constructor, CompSig, TypedBinder, TypedComp, TypedCompKind, TypedCore,
-    TypedCoreFn, TypedHandler, TypedPattern, TypedValue, TypedValueKind, VerifyEnv,
+    instantiate_constructor, CompSig, TypedBinder, TypedComp, TypedCompKind, TypedCoreFn,
+    TypedHandler, TypedPattern, TypedValue, TypedValueKind, UncheckedTypedCore, VerifyEnv,
 };
 
 /// Rewrite counts for typed newtype erasure.
@@ -35,10 +35,10 @@ impl NewtypeEraseStats {
 /// independent verifier remains responsible for rejecting an invalid input.
 #[must_use]
 pub fn erase_newtypes<P>(
-    core: TypedCore<P>,
+    core: UncheckedTypedCore<P>,
     constructors: &BTreeSet<Sym>,
     env: &VerifyEnv,
-) -> (TypedCore<P>, NewtypeEraseStats) {
+) -> (UncheckedTypedCore<P>, NewtypeEraseStats) {
     if constructors.is_empty() {
         return (core, NewtypeEraseStats::default());
     }
@@ -48,12 +48,12 @@ pub fn erase_newtypes<P>(
         ticks: 0,
     };
     let functions = core
-        .fns
+        .into_functions()
         .into_iter()
         .map(|function| pass.function(function))
         .collect();
     (
-        TypedCore::new(functions),
+        UncheckedTypedCore::new(functions),
         NewtypeEraseStats { ticks: pass.ticks },
     )
 }
@@ -347,11 +347,12 @@ mod tests {
     use crate::types::Type;
 
     use super::*;
+    use crate::core::typed::violation::Violation;
     use crate::core::typed::{
-        verify, ConstructorSig, CoreFnSig, CoreType, Elaborated, TypedCoreFn,
+        verify, ConstructorSig, CoreFnSig, CoreType, Elaborated, TypedCoreFn, UncheckedTypedCore,
     };
 
-    fn fixture(mark_newtype: bool) -> (TypedCore<Elaborated>, VerifyEnv, BTreeSet<Sym>) {
+    fn fixture(mark_newtype: bool) -> (UncheckedTypedCore<Elaborated>, VerifyEnv, BTreeSet<Sym>) {
         let constructor = Sym::new("UserId");
         let newtype = CoreType::Source(Type::Con(Sym::new("Id"), Vec::new()));
         let field = CoreType::Source(Type::Int);
@@ -390,7 +391,7 @@ mod tests {
                 )],
             ),
         );
-        let typed = TypedCore::new(vec![TypedCoreFn::new(
+        let typed = UncheckedTypedCore::new(vec![TypedCoreFn::new(
             Sym::new("main"),
             Vec::new(),
             body,
@@ -411,14 +412,15 @@ mod tests {
     #[test]
     fn typed_erasure_removes_the_constructor_box_and_the_irrefutable_match() {
         let (typed, env, constructors) = fixture(true);
-        verify(&typed, &env).expect("fixture is valid before newtype erasure");
+        let checked = verify(typed.clone(), &env).expect("fixture is valid before newtype erasure");
         assert!(
-            pp_core(&typed.clone().erase()).contains("UserId"),
+            pp_core(&checked.erase()).contains("UserId"),
             "the fixture must start with the newtype constructor present"
         );
 
         let (rewritten, stats) = erase_newtypes(typed, &constructors, &env);
-        verify(&rewritten, &env).expect("newtype witnesses verify after the typed pass");
+        let rewritten =
+            verify(rewritten, &env).expect("newtype witnesses verify after the typed pass");
         let erased = rewritten.erase();
 
         // Both the constructor box and the irrefutable constructor match are
@@ -434,15 +436,14 @@ mod tests {
     #[test]
     fn verifier_rejects_one_field_data_forged_as_newtype_evidence() {
         let (typed, env, constructors) = fixture(false);
-        verify(&typed, &env).expect("ordinary one-field constructor is valid before coercion");
+        verify(typed.clone(), &env)
+            .expect("ordinary one-field constructor is valid before coercion");
 
         let (forged, _) = erase_newtypes(typed, &constructors, &env);
-        let violations = verify(&forged, &env)
+        let violations = verify(forged, &env)
             .expect_err("ordinary one-field data must not prove a newtype coercion");
-        assert!(violations.iter().any(|violation| {
-            violation
-                .message()
-                .contains("representation coercion names non-newtype constructor")
-        }));
+        assert!(violations
+            .iter()
+            .any(|violation| matches!(violation.kind(), Violation::NotANewtype { .. })));
     }
 }

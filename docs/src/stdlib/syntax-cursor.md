@@ -22,7 +22,7 @@ type Cursor = Cursor {
 }
 ```
 
-A token cursor: the tokens being read, the read position, the byte offset the end-of-input caret points at, and the failure record (the furthest position at which an expectation was recorded, and the names recorded there). The failure record is part of the cursor rather than of a failure value because it must outlive every failure a parse recovers from. lint: allow(L0203)
+A token cursor: the tokens being read, the read position, the byte offset the end-of-input caret points at, and the failure record (the furthest position at which an expectation was recorded, and the names recorded there). The failure record is part of the cursor rather than of a failure value because it must outlive every failure a parse recovers from.
 
 ### `Reply`
 
@@ -30,7 +30,7 @@ A token cursor: the tokens being read, the read position, the byte offset the en
 type Reply(a) = Took(a, Cursor) | Stuck(Cursor)
 ```
 
-The reply of a cursor step: the value and the advanced cursor, or the cursor alone. A refusal still carries a cursor, because the failure record it accumulated is the part worth reporting. lint: allow(L0203)
+The reply of a cursor step: the value and the advanced cursor, or the cursor alone. A refusal still carries a cursor, because the failure record it accumulated is the part worth reporting.
 
 ### `Assoc`
 

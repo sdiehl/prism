@@ -1,0 +1,6 @@
+-- The same hazard one module over: layout insertion decides where a block
+-- begins and ends, so a tree that supplied this file would decide what its own
+-- source means before either parser saw a token. It exports none of the names
+-- the real layout pass exports, so that mistake is loud rather than quiet.
+
+fn shadowed_layout() : Int = 0

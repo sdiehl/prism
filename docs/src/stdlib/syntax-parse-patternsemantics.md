@@ -16,7 +16,7 @@ Lower an integer literal pattern, splitting off its width suffix and folding a l
 
 ### `pattern_float`
 
-```prism,sig,h-66c10e12b4c9e327cfb2b7df03bee38553d27c66231bd3f61279ba3cde125283
+```prism,sig,h-e5b4f484b4ebb4d8835e2626e7edc828508e6343bc264e6f86672fd109a76cd2
 pattern_float : (String, Bool, Syntax.Source.Span) -> Syntax.Ast.Sp(Syntax.Ast.Pat)
 ```
 

@@ -1,45 +1,32 @@
 //! Typed scope-directed arena lowering: the `Elaborated -> ArenaPrepared`
 //! transition.
 //!
-//! A constructor built under a `with_arena` scope becomes a performed
-//! allocation plus an in-place initialization:
+//! Constructors built under `with_arena` become allocations followed by in-place
+//! initialization:
 //!
 //! ```text
 //!   let cell = alloc(|fields|) in init_at(cell, Ctor(C, fields))
 //! ```
 //!
-//! Reachability decides which code is "under an arena" as
-//! `arena_only = arena_reachable \ otherwise_reachable` over the direct call
-//! graph.
+//! The direct call graph defines `arena_only` as
+//! `arena_reachable \ otherwise_reachable`.
 //!
-//! ## What the witnesses add
+//! The rewrite introduces `alloc`, invalidating the affected rows from
+//! elaboration. This phase rewrites terms and re-establishes those witnesses.
 //!
-//! The rewrite *introduces* an effect: a function that only built a constructor
-//! now performs `alloc`, so its row is no longer the one elaboration proved.
-//! Re-establishing the invalidated witnesses is the whole reason this is its own
-//! phase rather than a licence to admit `InitAt` in elaborated Core.
-//!
-//! Two propagations, and the distinction between them is the crux:
+//! Terms and rows propagate differently:
 //!
 //!   - **Terms** are rewritten only in `arena_only` functions, and never inside a
 //!     thunk because a closure's layout is not `init_at`-shaped.
-//!   - **Rows** widen wherever the new operation became reachable, which includes
-//!     functions that were never rewritten. `main` never allocates, yet the thunk
-//!     it hands to `with_arena` now suspends a computation that does, so that
-//!     thunk's *witness* gains the label while `main`'s own row does not.
+//!   - **Rows** widen wherever the new operation becomes reachable, including
+//!     unchanged functions. A thunk passed to `with_arena` gains the label even
+//!     when its enclosing function does not.
 //!
-//! The widening is additive and local: `Widen` adds the one label exactly where
-//! a node's checking rule now derives it, and preserves every other row as
-//! elaboration wrote it. `Return` is the invariant keeping this honest: it is
-//! pure by rule, so it never gains the label however effectful the computation it
-//! suspends, and a uniform "add the label everywhere" pass would be rejected for
-//! precisely that reason.
+//! `Widen` adds the label only where a node's checking rule derives it. `Return`
+//! remains pure even when it suspends an effectful computation.
 //!
-//! The frontier is the thunk passed to `with_arena`, whose declared type already
-//! reads `() -> a ! {Alloc}`; widening reaches it and stops, which is why the
-//! label never escapes into `main`. A program where it would escape is one whose
-//! `alloc` the reachability placed outside every handler that discharges it; it
-//! is rejected here rather than lowered.
+//! Widening stops at the `with_arena` thunk, whose type already includes `Alloc`.
+//! Programs whose `alloc` escapes all matching handlers are rejected.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::{iter, ptr};
@@ -53,10 +40,11 @@ use prism_syntax::error::TypedCoreEffectLoweringFailure;
 use prism_syntax::names::{self, ALLOC_OP, ENTRY_POINT};
 
 use super::super::specialize_support::Rewrite;
-use super::super::verify::{verify, VerifyEnv};
+use super::super::verify::VerifyEnv;
 use super::super::{
-    ArenaPrepared, CompSig, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, TypedBinder,
-    TypedComp, TypedCompKind, TypedCore, TypedCoreFn, TypedValue, TypedValueKind,
+    verify, ArenaPrepared, CompSig, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType,
+    TypedBinder, TypedComp, TypedCompKind, TypedCore, TypedCoreFn, TypedValue, TypedValueKind,
+    UncheckedTypedCore,
 };
 use super::peel;
 use super::walk::{each_subcomp, each_value};
@@ -151,6 +139,7 @@ pub fn prepare(
         alloc: &alloc,
         gains: &gains,
         fresh: Fresh::new(),
+        locals: BTreeMap::new(),
     };
     let fns = fns
         .iter()
@@ -180,9 +169,8 @@ fn finish(
     fns: Vec<TypedCoreFn>,
     env: &VerifyEnv,
 ) -> Result<TypedCore<ArenaPrepared>, TypedCoreEffectLoweringFailure> {
-    let out = TypedCore::<ArenaPrepared>::new(fns);
-    match verify(&out, env) {
-        Ok(()) => Ok(out),
+    match verify(UncheckedTypedCore::<ArenaPrepared>::new(fns), env) {
+        Ok(out) => Ok(out),
         Err(violations) => Err(TypedCoreEffectLoweringFailure::Verification {
             first: violations
                 .first()
@@ -604,6 +592,43 @@ impl Alloc {
         }
     }
 
+    /// Carry the introduced label from a rewritten operand into the type a
+    /// representation-preserving coercion converts it to.
+    ///
+    /// Elaboration inserts such a coercion wherever a value's own witness and
+    /// the witness its position expects differ only by a row relabelling. The
+    /// rewrite widens the operand, and the target must follow it in the same
+    /// positions or the coercion claims a purity the operand no longer has,
+    /// which is a laundering the verifier refuses. Only the label this pass
+    /// introduces moves, and only where the operand carries it; every other
+    /// part of the target is left exactly as elaboration wrote it.
+    fn widen_like(&self, target: &CoreType, operand: &CoreType) -> CoreType {
+        match (target, operand) {
+            (CoreType::Thunk(target), CoreType::Thunk(operand)) => {
+                CoreType::Thunk(Box::new(self.widen_sig_like(target, operand)))
+            }
+            (CoreType::Function(target), CoreType::Function(operand))
+                if target.params().len() == operand.params().len() =>
+            {
+                CoreType::Function(Box::new(CoreFnSig::new(
+                    target.quantifiers().to_vec(),
+                    target.params().to_vec(),
+                    self.widen_sig_like(target.body(), operand.body()),
+                )))
+            }
+            _ => target.clone(),
+        }
+    }
+
+    fn widen_sig_like(&self, target: &CompSig, operand: &CompSig) -> CompSig {
+        let effects = if self.present(operand.effects()) {
+            self.widen(target.effects())
+        } else {
+            target.effects().clone()
+        };
+        CompSig::new(self.widen_like(target.result(), operand.result()), effects)
+    }
+
     /// Whether a closure witness now abstracts the operation.
     fn in_function(&self, ty: &CoreType) -> bool {
         match ty {
@@ -625,6 +650,14 @@ struct Widen<'a> {
     alloc: &'a Alloc,
     gains: &'a BTreeSet<Sym>,
     fresh: Fresh,
+    /// The rewritten type of each `let`-bound name currently in scope.
+    ///
+    /// A binder holds what its computation returns, so a bound closure whose
+    /// body now allocates changes type at the binder. Every reference to it
+    /// must change with it, and a reference is visited long after the binder
+    /// that gave it its type, so the new type is carried down here rather than
+    /// discovered at the occurrence.
+    locals: BTreeMap<Sym, CoreType>,
 }
 
 impl Rewrite for Widen<'_> {
@@ -635,12 +668,33 @@ impl Rewrite for Widen<'_> {
     /// out of a rewritten function and into the closure a caller passes around,
     /// which is how it reaches `with_arena`'s parameter without ever entering the
     /// row of the function that builds the thunk.
+    ///
+    /// A coercion's target follows its operand for the same reason: a let-bound
+    /// closure whose body allocates reaches its binder through a
+    /// representation-preserving relabelling, and a target left at the row
+    /// elaboration wrote would coerce the widened closure back to a pure one.
     fn value(&mut self, value: &TypedValue, cx: &Cx) -> TypedValue {
         let out = self.descend_value(value, cx);
         match &out.kind {
             TypedValueKind::Thunk(body) => {
                 TypedValue::new(CoreType::Thunk(Box::new(body.sig().clone())), out.kind)
             }
+            TypedValueKind::Reinterpret(operand) => {
+                let ty = self.alloc.widen_like(out.ty(), operand.ty());
+                TypedValue::new(ty, out.kind)
+            }
+            // A reference is witnessed by its binder, so one naming a binder
+            // this pass retyped follows it. Only the introduced label moves:
+            // the occurrence keeps whatever instantiation elaboration wrote,
+            // which is why the binder's type is carried into the stored one
+            // rather than replacing it.
+            TypedValueKind::Var { name, .. } => match self.locals.get(name) {
+                Some(bound) => {
+                    let ty = self.alloc.widen_like(out.ty(), bound);
+                    TypedValue::new(ty, out.kind)
+                }
+                None => out,
+            },
             _ => out,
         }
     }
@@ -659,7 +713,10 @@ impl Rewrite for Widen<'_> {
             rewriting: cx.rewriting && !nested_alloc_handler(comp),
             installer: cx.installer,
         };
-        let out = self.descend_comp(comp, &inner);
+        let out = match comp.kind() {
+            TypedCompKind::Bind(..) => self.bind(comp, &inner),
+            _ => self.descend_comp(comp, &inner),
+        };
         let out = self.retype(out);
         // Each alloc-handling `Handle` in an installer is one region activation:
         // bracket it with the runtime enter/exit hooks.
@@ -791,6 +848,33 @@ impl Widen<'_> {
         )
     }
 
+    /// Rewrite a `Bind`, binding the name to what its rewritten computation
+    /// returns before the body that reads it is visited.
+    ///
+    /// A binder holds exactly what its computation returns, so a binder whose
+    /// computation was rewritten follows it, and this is the one place that
+    /// happens. Correcting it after the fact instead would leave every
+    /// reference inside the body witnessed by a type the binder no longer has,
+    /// which the verifier refuses; ordering the two is the whole point of
+    /// handling this form here rather than in the generic descent.
+    fn bind(&mut self, comp: &TypedComp, cx: &Cx) -> TypedComp {
+        let TypedCompKind::Bind(first, binder, rest) = comp.kind() else {
+            unreachable!("bind called on a non-Bind computation")
+        };
+        let first = self.comp(first, cx);
+        let binder = TypedBinder::new(binder.name(), first.sig().result().clone());
+        let shadowed = self.locals.insert(binder.name(), binder.ty().clone());
+        let rest = self.comp(rest, cx);
+        match shadowed {
+            Some(ty) => self.locals.insert(binder.name(), ty),
+            None => self.locals.remove(&binder.name()),
+        };
+        TypedComp::new(
+            comp.sig().clone(),
+            TypedCompKind::Bind(Box::new(first), binder, Box::new(rest)),
+        )
+    }
+
     /// Re-establish one node's signature from its rewritten children.
     ///
     /// Only the introduced label moves. A node gains it exactly when its own
@@ -832,7 +916,6 @@ impl Widen<'_> {
             sig.effects().clone()
         };
         let result = self.result_for(&sig, &kind);
-        let kind = Self::rebind(kind);
         TypedComp::new(CompSig::new(result, effects), kind)
     }
 
@@ -863,18 +946,6 @@ impl Widen<'_> {
                 }
             }
             _ => sig.result().clone(),
-        }
-    }
-
-    /// A bind's binder holds exactly what the bound computation returns, so a
-    /// binder whose computation was rewritten must follow it.
-    fn rebind(kind: TypedCompKind) -> TypedCompKind {
-        match kind {
-            TypedCompKind::Bind(m, x, n) => {
-                let x = TypedBinder::new(x.name(), m.sig().result().clone());
-                TypedCompKind::Bind(m, x, n)
-            }
-            other => other,
         }
     }
 }

@@ -141,6 +141,20 @@ lean-fuzz: build
 tier-accept:
     PRISM_ACCEPT_TIER_MANIFEST=1 cargo test --test native tier_manifest_holds -- --nocapture
 
+# Reseat the seam goldens a version bump or a stdlib change makes stale by design.
+[group('generated artifacts')]
+seam-accept:
+    PRISM_COMPILER_CACHE=0 \
+    PRISM_ACCEPT_FRONTEND_FIXTURES=1 \
+    PRISM_ACCEPT_SYNTAX_FIXTURES=1 \
+    PRISM_ACCEPT_RESOLVED_FIXTURES=1 \
+    PRISM_ACCEPT_CURSOR_FIXTURES=1 \
+    cargo test --test compiler --no-fail-fast
+    PRISM_COMPILER_CACHE=0 \
+    PRISM_ACCEPT_TEST_FIXTURES=1 \
+    cargo test --test tooling --no-fail-fast
+    git status --short tests/fixtures
+
 # Rewrite stale inline doctest output expectations.
 [group('generated artifacts')]
 bless PATH=".":

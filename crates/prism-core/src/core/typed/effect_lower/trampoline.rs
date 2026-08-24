@@ -596,8 +596,8 @@ pub fn trampolinize(functions: &[TypedCoreFn], fresh: &mut Fresh) -> Option<Vec<
 #[cfg(test)]
 mod tests {
     use crate::core::cbpv::{Comp, CorePat, Value};
-    use crate::core::typed::verify::{verify, VerifyEnv};
-    use crate::core::typed::{EffectLowered, TypedCore};
+    use crate::core::typed::verify::VerifyEnv;
+    use crate::core::typed::{verify, EffectLowered, UncheckedTypedCore};
     use crate::types::Type;
 
     use super::*;
@@ -702,8 +702,8 @@ mod tests {
         rewritten.push(prism_drive_fn());
         let mut env = VerifyEnv::new();
         abi::insert(&mut env);
-        let typed = TypedCore::<EffectLowered>::new(rewritten);
-        assert_eq!(verify(&typed, &env), Ok(()));
+        let typed = verify(UncheckedTypedCore::<EffectLowered>::new(rewritten), &env)
+            .expect("trampolined program verifies");
         let erased = typed.erase();
 
         assert!(matches!(
@@ -765,10 +765,8 @@ mod tests {
         rewritten.push(prism_drive_fn());
         let mut env = VerifyEnv::new();
         abi::insert(&mut env);
-        assert_eq!(
-            verify(&TypedCore::<EffectLowered>::new(rewritten), &env),
-            Ok(())
-        );
+        verify(UncheckedTypedCore::<EffectLowered>::new(rewritten), &env)
+            .expect("residual-row trampoline verifies");
     }
 
     #[test]
@@ -804,8 +802,8 @@ mod tests {
         rewritten.push(prism_drive_fn());
         let mut env = VerifyEnv::new();
         abi::insert(&mut env);
-        let typed = TypedCore::<EffectLowered>::new(rewritten);
-        assert_eq!(verify(&typed, &env), Ok(()));
+        let typed = verify(UncheckedTypedCore::<EffectLowered>::new(rewritten), &env)
+            .expect("runtime-loop trampoline verifies");
         let erased = typed.erase();
         let driven = Sym::from(names::lowered("drv", 0));
         assert!(matches!(

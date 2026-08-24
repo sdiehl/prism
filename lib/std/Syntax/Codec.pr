@@ -178,23 +178,27 @@ fn hex_digit(n : Int) : String =
 
 fn hex2(c : Int) : String = "{hex_digit(c / 16)}{hex_digit(c % 16)}"
 
--- Escape by copying maximal clean runs whole, so a mostly-clean string costs
--- one slice per escape rather than one allocation per character.
+-- Escape by appending maximal clean runs whole into one growable buffer, so a
+-- mostly-clean string costs one copy of itself plus a few bytes per escape.
+-- Collecting the pieces and joining them at the end costs the same output twice
+-- over, once as pieces and once as the join.
+--
+-- The scan is by byte. Every byte that needs escaping is ASCII, and no byte of
+-- a multi-byte character is ASCII, so a byte scan finds exactly the positions a
+-- character scan would and copies the rest through untouched. Indexing by
+-- character instead would re-walk the whole document at every position, which
+-- is the quadratic that makes encoding a large value cost more than producing
+-- it.
 fn needs_escape(c : Int) : Bool = c == 34 || c == 92 || c < 32
 
-fn jesc(s : String) : String = str_join("", jesc_go(s, 0, 0, []))
+fn jesc(s : String) : String = string_of_buf(jesc_go(s, 0, 0, buf_empty()))
 
--- lint: allow(L0105)
-fn jesc_go(s : String, run : Int, i : Int, acc : List(String)) : List(String) =
-  if i >= str_len(s) then
-    reverse(if run < i then Cons(substring(s, run, i - run), acc) else acc)
-  elif needs_escape(char_at(s, i)) then
-    let acc2 =
-      if run < i then
-        Cons(substring(s, run, i - run), acc)
-      else
-        acc
-    jesc_go(s, i + 1, i + 1, Cons(esc_char(char_at(s, i)), acc2))
+fn jesc_go(s : String, run : Int, i : Int, acc : Buf) : Buf =
+  if i >= byte_len(s) then
+    buf_append_str(acc, str_slice(s, run, i))
+  elif needs_escape(byte_at(s, i)) then
+    let flushed = buf_append_str(acc, str_slice(s, run, i))
+    jesc_go(s, i + 1, i + 1, buf_append_str(flushed, esc_char(byte_at(s, i))))
   else
     jesc_go(s, run, i + 1, acc)
 

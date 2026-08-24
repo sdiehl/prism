@@ -27,8 +27,8 @@ pub(crate) enum ThunkRule {
 /// direct callers before this rail runs, which is also why a direct declaration
 /// may call one.
 ///
-/// Under [`ThunkRule::PerThunk`] every declaration is walked, not just the
-/// members: a declaration outside the region is exactly where a thunk left at
+/// Under [`ThunkRule::PerThunk`] every declaration is walked. A declaration
+/// outside the region is exactly where a thunk left at
 /// the direct convention can be found, and the mistake worth catching is such a
 /// thunk reaching code that answers with an effect cell. A thunk carries no
 /// type-level mark of its convention, so the convention is read back off the
@@ -76,8 +76,8 @@ fn suspends_effect_cell(thunk: &TypedComp) -> bool {
 }
 
 /// A thunk left at the direct convention is copied verbatim into the output, so
-/// it must not reach the other convention anywhere in its body, not merely in
-/// its tail: a member call buried mid-body answers with an effect cell the
+/// it must not reach the other convention anywhere in its body. A member call
+/// buried mid-body answers with an effect cell the
 /// direct code around it would consume as an ordinary result.
 ///
 /// Nested thunks are not descended into. Each is a site of its own with its own

@@ -85,9 +85,8 @@ impl Tc<'_> {
     //
     // Both halves belong here rather than at the end of the body. The zonk, because
     // a group's solutions are only complete once every member's body has run. The
-    // naming, because `renames` is the very renaming the exported scheme carries, so
-    // a body reads the letters its signature does by construction — rather than by
-    // rebuilding the naming early and hoping the two agree.
+    // naming. `renames` is also carried by the exported scheme, so body and
+    // signature render with the same variable names.
     fn flush_deferred(&mut self, renames: &Renames) {
         let Some((spans, rows)) = self.deferred_spans.pop_front() else {
             return;
@@ -495,18 +494,23 @@ impl Tc<'_> {
     // refinement) before checking a new body. Handler residual facts accumulate
     // program-wide, but no in-progress use or continuation summary may cross a
     // declaration/SCC-member boundary.
-    fn clear_obligations(&mut self) {
+    fn clear_obligations(&mut self) -> Result<(), TypeError> {
+        if !self.handler_stack.is_empty() {
+            return Err(TypeError::InternalInvariant {
+                msg: "handler scope escaped its declaration boundary".into(),
+            });
+        }
         self.wanted.clear();
         self.num_default.clear();
         self.neg_default.clear();
         self.index_ops.clear();
         self.operation_uses = super::super::OperationUses::default();
         self.precise_calls.clear();
-        debug_assert!(self.handler_stack.is_empty());
+        Ok(())
     }
 
     fn infer_body(&mut self, env: &Env, d: &Decl<Core>, seed: &DeclSeed) -> Result<(), TypeError> {
-        self.clear_obligations();
+        self.clear_obligations()?;
         let mut env2 = env.clone();
         for (p, t) in d.params.iter().zip(&seed.doms) {
             env2.insert(Sym::from(&p.name), t.clone());
@@ -537,9 +541,8 @@ impl Tc<'_> {
         self.cur_row = saved_row;
         checked?;
         // Held, not read. This declaration's own constraints are settled here, but a
-        // mutually recursive sibling's are not: `Cli@lex_go` passes `specs` along
-        // without using it, and `lex_long`'s `find_long(specs, …)` is what pins it —
-        // a body inferred after this one. Zonking now would report `specs` as the
+        // mutually recursive sibling's are not. In `Cli@lex_go`, the later
+        // `lex_long` body pins `specs`. Zonking now would report `specs` as the
         // unsolved variable it still is at this instant. `finish_decl` reads them
         // once the whole group is inferred, under the scheme it builds there.
         //
@@ -692,7 +695,7 @@ impl Tc<'_> {
         d: &Decl<Core>,
     ) -> Result<(Type, Effects), TypeError> {
         self.reset_ctx();
-        self.clear_obligations();
+        self.clear_obligations()?;
         let (ty, effs) = self.scoped_effects_expected(EffRow::Empty, |tc| {
             let ty = if let Some(ann) = &d.ret {
                 tc.check_annot_rows(ann, d.span)?;
@@ -730,7 +733,7 @@ impl Tc<'_> {
     ) -> Result<(), TypeError> {
         for m in &inst.methods {
             self.reset_ctx();
-            self.clear_obligations();
+            self.clear_obligations()?;
             let (_, sig) = class
                 .methods
                 .iter()
@@ -738,9 +741,9 @@ impl Tc<'_> {
                 .ok_or_else(|| TypeError::InternalInvariant {
                     msg: format!("instance method `{}` missing from class", m.name),
                 })?;
-            // The instance method is checked against the class method's entire
-            // instantiated scheme, INCLUDING its effect row, not just its result
-            // type. The declared row bounds which concrete effects the body may
+            // Check the instance method's entire instantiated scheme, including
+            // its effect row. The declared row bounds which concrete effects the
+            // body may
             // perform: an effect-polymorphic method (`fmap : ... ! {| e}`) may
             // only forward effects that flow through the row variable, which stay
             // as the variable and never appear as concrete labels, so its
@@ -774,10 +777,9 @@ impl Tc<'_> {
             })?;
             // Deliberately unseeded, unlike a function's spans. Seeding from the
             // class signature instantiated at this head was measured and made things
-            // worse: a method body refers to its class's own methods at several
-            // instantiations at once — `eqPair` uses `eq` at both components — and
-            // pinning those to one naming reports two genuinely different types as
-            // though they were the same one named twice.
+            // worse. A method body can use class methods at several instantiations.
+            // `eqPair`, for example, uses `eq` at both components. Pinning both to
+            // one naming conflates different types.
             self.flush_spans();
             self.flush_holes();
             // Recorded before the check below consumes it: this row is the only

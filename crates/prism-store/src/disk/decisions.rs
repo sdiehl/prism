@@ -2,9 +2,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::atomic_write;
+use super::{atomic_write, DECISIONS_DIR};
 
-const DECISIONS_DIR: &str = "decisions";
 const DECISION_FORMAT: &str = "prism-query-decision-v1";
 
 fn path(root: &Path, kind: &str, locator: &str) -> io::Result<PathBuf> {

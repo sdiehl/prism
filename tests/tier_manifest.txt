@@ -38,7 +38,7 @@ examples/eff_amb.pr	selective-free-monad
 examples/eff_exn.pr	selective-free-monad
 examples/eff_forward.pr	selective-free-monad
 examples/eff_nontail.pr	selective-free-monad
-examples/eff_poly.pr	whole-program-free-monad
+examples/eff_poly.pr	selective-free-monad
 examples/eff_reader.pr	evidence
 examples/eff_rows.pr	selective-free-monad
 examples/eff_state.pr	state-fusion
@@ -102,8 +102,8 @@ examples/recursion_zoo.pr	pure
 examples/regex.pr	pure
 examples/replay_concurrent.pr	whole-program-free-monad
 examples/result_pipeline.pr	selective-free-monad
-examples/same_fringe.pr	selective-free-monad
-examples/scheduler.pr	selective-free-monad
+examples/same_fringe.pr	whole-program-free-monad
+examples/scheduler.pr	whole-program-free-monad
 examples/scheduler_policy.pr	whole-program-free-monad
 examples/show.pr	pure
 examples/simd.pr	pure
@@ -148,6 +148,7 @@ tests/cases/run/borrow.pr	pure
 tests/cases/run/buf_shared.pr	pure
 tests/cases/run/buffer_ops.pr	pure
 tests/cases/run/bytes_codec.pr	pure
+tests/cases/run/bytes_view.pr	pure
 tests/cases/run/cancel_await.pr	whole-program-free-monad
 tests/cases/run/cancel_completed.pr	whole-program-free-monad
 tests/cases/run/cancel_finalizer.pr	whole-program-free-monad
@@ -166,7 +167,7 @@ tests/cases/run/comp_in_annotated_row.pr	selective-free-monad
 tests/cases/run/comp_map_once.pr	state-fusion
 tests/cases/run/constrained_mutual.pr	evidence
 tests/cases/run/control_effects.pr	evidence
-tests/cases/run/control_validate.pr	whole-program-free-monad
+tests/cases/run/control_validate.pr	selective-free-monad
 tests/cases/run/curry.pr	pure
 tests/cases/run/curry_effect.pr	evidence
 tests/cases/run/deep_effect_recursion.pr	state-fusion
@@ -176,7 +177,7 @@ tests/cases/run/deriving.pr	pure
 tests/cases/run/deriving_json.pr	selective-free-monad
 tests/cases/run/deriving_lens.pr	pure
 tests/cases/run/deriving_phantom.pr	pure
-tests/cases/run/deriving_plate.pr	whole-program-free-monad
+tests/cases/run/deriving_plate.pr	selective-free-monad
 tests/cases/run/dot_chains.pr	pure
 tests/cases/run/dot_records.pr	pure
 tests/cases/run/dot_strings.pr	pure
@@ -187,15 +188,20 @@ tests/cases/run/eff_fn_list.pr	whole-program-free-monad
 tests/cases/run/eff_fuse.pr	evidence
 tests/cases/run/eff_pending_arg.pr	evidence
 tests/cases/run/eff_poly_fn_arg.pr	whole-program-free-monad
+tests/cases/run/eff_poly_handler_install.pr	evidence
 tests/cases/run/eff_row_forward.pr	evidence
+tests/cases/run/eff_row_unwitnessed.pr	whole-program-free-monad
 tests/cases/run/eff_two_handlers.pr	evidence
 tests/cases/run/effects_demo.pr	pure
 tests/cases/run/effop_tax.pr	evidence
 tests/cases/run/errors.pr	selective-free-monad
+tests/cases/run/evidence_residual_row_after_handle.pr	evidence
+tests/cases/run/evidence_residual_row_clause.pr	evidence
 tests/cases/run/factorial.pr	pure
 tests/cases/run/fail_guard.pr	selective-free-monad
 tests/cases/run/fib.pr	pure
 tests/cases/run/fib_var.pr	pure
+tests/cases/run/field_projection_single.pr	pure
 tests/cases/run/final_ctl.pr	selective-free-monad
 tests/cases/run/fip.pr	pure
 tests/cases/run/fip_inplace.pr	pure
@@ -216,6 +222,7 @@ tests/cases/run/graph_algorithms.pr	pure
 tests/cases/run/guards.pr	pure
 tests/cases/run/handler_arms_answer_apart.pr	selective-free-monad
 tests/cases/run/handler_funval.pr	evidence
+tests/cases/run/handler_implicit_return.pr	selective-free-monad
 tests/cases/run/handler_partial_forward.pr	selective-free-monad
 tests/cases/run/higher.pr	pure
 tests/cases/run/ho_row_inst.pr	pure
@@ -243,7 +250,11 @@ tests/cases/run/list_show.pr	pure
 tests/cases/run/list_singleton.pr	pure
 tests/cases/run/local_constrained_let.pr	pure
 tests/cases/run/local_mono_combined.pr	local-partial
+tests/cases/run/local_mono_effectful_helper.pr	local-partial
 tests/cases/run/local_mono_escape.pr	whole-program-free-monad
+tests/cases/run/local_mono_nontail_resume.pr	local-partial
+tests/cases/run/local_mono_state_rest.pr	local-partial
+tests/cases/run/local_mono_two_entries.pr	local-partial
 tests/cases/run/loop_break.pr	pure
 tests/cases/run/loop_control.pr	pure
 tests/cases/run/looptest.pr	pure
@@ -295,12 +306,14 @@ tests/cases/run/primes.pr	pure
 tests/cases/run/print_structural.pr	pure
 tests/cases/run/quickcheck_detect.pr	whole-program-free-monad
 tests/cases/run/ranges.pr	pure
+tests/cases/run/record_pattern_rest.pr	pure
 tests/cases/run/reflect.pr	pure
 tests/cases/run/reified_under_world.pr	whole-program-free-monad
 tests/cases/run/repeat_block.pr	pure
 tests/cases/run/replayable_ok.pr	evidence
 tests/cases/run/rewrite_strategies.pr	whole-program-free-monad
 tests/cases/run/rollback.pr	selective-free-monad
+tests/cases/run/row_widen_named_effect_list.pr	whole-program-free-monad
 tests/cases/run/row_widen_task_list.pr	whole-program-free-monad
 tests/cases/run/row_widen_user_effect.pr	whole-program-free-monad
 tests/cases/run/scc_effect_row.pr	evidence
@@ -308,6 +321,7 @@ tests/cases/run/scientific.pr	pure
 tests/cases/run/sequence_pull.pr	pure
 tests/cases/run/set_ops.pr	pure
 tests/cases/run/shadow_prelude.pr	pure
+tests/cases/run/shadowed_field_binder.pr	pure
 tests/cases/run/show.pr	pure
 tests/cases/run/show_mangle_clash.pr	pure
 tests/cases/run/simd4_edge.pr	pure
@@ -315,6 +329,7 @@ tests/cases/run/simd_edge.pr	pure
 tests/cases/run/sort_demo.pr	pure
 tests/cases/run/stable_ladder.pr	whole-program-free-monad
 tests/cases/run/stable_migrations.pr	selective-free-monad
+tests/cases/run/str_view.pr	pure
 tests/cases/run/stream_take.pr	state-fusion
 tests/cases/run/streams_edge.pr	state-fusion
 tests/cases/run/string_edges.pr	pure

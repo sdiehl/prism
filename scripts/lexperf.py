@@ -111,7 +111,7 @@ def file_identity(path):
 
 
 def parser_source_identities():
-    """Every handwritten/Rust parser source pinned by the Phase 0 oracle."""
+    """Every handwritten/Rust parser source pinned by the identity oracle."""
     if len(PARSER_SOURCE_PATHS) != len(set(PARSER_SOURCE_PATHS)):
         sys.exit("duplicate path in exact Ledger-B parser boundary")
     return [file_identity(ROOT / rel) for rel in PARSER_SOURCE_PATHS]
@@ -463,10 +463,18 @@ class Bench:
     def ladder(self, name, layer, make, tmp):
         """Climb the size ladder until the Prism side passes the budget."""
         row = {"class": name, "layer": layer, "points": {}, "note": "",
-               "caveat": "", "samples": {}, "inputs": {}, "gate": "timing"}
+               "caveat": "", "samples": {}, "inputs": {}, "gate": "timing",
+               "quotable": True}
         widest_path = None
         for size in SIZES:
-            path = tmp / f"{name}-{size}.pr"
+            # The layer belongs in the cache key. `classes` hands the parse
+            # layer different generators from the lex layers for exactly the
+            # reason `complete_to` documents, so a name keyed on class and size
+            # alone lets whichever layer runs first serve its input to the rest:
+            # the parse layer then measured a line-boundary cut through the
+            # middle of a declaration and reported the resulting rejection as a
+            # driver failure.
+            path = tmp / f"{name}-{layer}-{size}.pr"
             if not path.exists():
                 path.write_text(make(size))
             actual = path.stat().st_size
@@ -517,7 +525,8 @@ class Bench:
         size = sum(p.stat().st_size for p in paths)
         row = {"class": "modules", "layer": layer, "points": {}, "note": "",
                "caveat": "", "files": len(paths), "samples": {},
-               "inputs": corpus_inputs, "gate": "report-only"}
+               "inputs": corpus_inputs, "gate": "report-only",
+               "quotable": True}
         if not self.quiet:
             print(f"  {'modules':<9} {layer:<6} {len(paths)} files",
                   file=sys.stderr)
@@ -538,6 +547,7 @@ class Bench:
             return row
         if not solid:
             share = self.launch_share("prism", len(paths), here["prism"][0])
+            row["quotable"] = False
             row["caveat"] = (f"launch-dominated: {share:.0%} of the Prism wall clock "
                              f"was process startup, subtracted rather than "
                              f"measured; timing is report-only")
@@ -564,7 +574,7 @@ class Bench:
                "caveat": f"{files} committed modules concatenated whole",
                "files": files, "samples": {},
                "inputs": {size: bytes_identity(path.read_bytes(), path.name)},
-               "gate": "timing"}
+               "gate": "timing", "quotable": True}
         if not self.quiet:
             print(f"  {'corpus':<9} {layer:<6} {size // KIB:>5} KiB",
                   file=sys.stderr)
@@ -586,6 +596,7 @@ class Bench:
             return row
         if not solid:
             share = self.launch_share("prism", 1, here["prism"][0])
+            row["quotable"] = False
             row["caveat"] = (f"launch-dominated: {share:.0%} of the Prism wall "
                              f"clock was process startup; timing is report-only")
             row["gate"] = "report-only"
@@ -618,9 +629,18 @@ def report(rows, budget):
         for side in ("rust", "prism"):
             v = r.get(f"{side}_rss")
             rss[side] = f"{v / 1e6:>8.1f}M" if v else f"{'-':>9}"
-        print(f"{r['class']:<9} {r['layer']:<7} {widest // KIB:>7} "
-              f"{widest / rust_s / 1e6:>10.1f} {widest / prism_s / 1e6:>11.3f} "
-              f"{prism_s / rust_s:>7.0f}x "
+        # A row whose wall clock was mostly process startup has already been
+        # declared an artifact of the subtraction, so it does not also get to
+        # print the artifact as a throughput: a near-zero denominator renders as
+        # a spectacular rate and a 0x ratio, and a number in a receipt gets
+        # quoted whatever the footnote beside it says.
+        if r.get("quotable", True):
+            rates = (f"{widest / rust_s / 1e6:>10.1f} "
+                     f"{widest / prism_s / 1e6:>11.3f} "
+                     f"{prism_s / rust_s:>7.0f}x")
+        else:
+            rates = f"{'-':>10} {'-':>11} {'-':>8}"
+        print(f"{r['class']:<9} {r['layer']:<7} {widest // KIB:>7} {rates} "
               f"{cell['rust']} {cell['prism']:>8} {rss['rust']} {rss['prism']:>10}")
         for kind in ("note", "caveat"):
             if r[kind]:

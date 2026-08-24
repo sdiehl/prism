@@ -25,6 +25,8 @@ mod alloc_certificate;
 mod arena;
 #[path = "compiler/base_surface.rs"]
 mod base_surface;
+#[path = "compiler/convention_split.rs"]
+mod convention_split;
 #[path = "compiler/core_identity.rs"]
 mod core_identity;
 #[path = "compiler/cursor.rs"]
@@ -85,5 +87,7 @@ mod syntax_lex;
 mod syntax_roundtrip;
 #[path = "compiler/tc_input_codec.rs"]
 mod tc_input_codec;
+#[path = "compiler/tc_rejection.rs"]
+mod tc_rejection;
 #[path = "compiler/typespans.rs"]
 mod typespans;

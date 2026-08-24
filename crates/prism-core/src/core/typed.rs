@@ -5,6 +5,7 @@
 //! boundary. [`super::Core`] remains the executable representation consumed by
 //! passes outside the verified typed prefix.
 
+mod authority;
 mod build;
 mod cse;
 pub mod effect_lower;
@@ -17,7 +18,9 @@ mod simplify;
 pub mod specialize;
 mod specialize_support;
 pub mod verify;
+pub mod violation;
 
+pub use authority::{audit, verify, TypedCore, UncheckedTypedCore};
 pub use build::{build_typed, build_verify_env, core_fn_sig, dict_type};
 // The raw typed passes, exposed for the driver's ordered stage runner (which
 // owns verification boundaries and the SCC fixed-point cache).
@@ -40,17 +43,17 @@ pub use verify::{
     instantiate_constructor, instantiate_fn, instantiate_operation, instantiate_value_scheme,
     scheme_to_fn_sig,
 };
-pub use verify::{verify, ConstructorSig, CoreViolation, OperationSig, TypedCorePhase, VerifyEnv};
+pub use verify::{ConstructorSig, CoreViolation, OperationSig, TypedCorePhase, VerifyEnv};
 
 use std::collections::BTreeSet;
-use std::marker::PhantomData;
+use std::fmt;
 
 use crate::types::ty::{EffRow, Label};
 use crate::types::Type;
 use prism_common::sym::Sym;
 
 use super::{builtins::Builtin, builtins::FloatOp};
-use super::{CheckedHandler, Comp, Core, CoreFn, CoreOp, CorePat, HandleOp, IoOp, NegLane, Value};
+use super::{CheckedHandler, Comp, CoreFn, CoreOp, CorePat, HandleOp, IoOp, NegLane, Value};
 
 // Erasure walks a whole function body as one non-tail recursion, so a deeply
 // nested definition can outgrow a small host stack. The same segment-growing
@@ -180,6 +183,84 @@ impl CoreFnSig {
             quantifiers,
             params,
             body,
+        }
+    }
+}
+
+// Source-shaped renderings for the witness types.
+//
+// These exist because a failed judgment is read by a person. `Debug` on these
+// types prints the constructor spelling of an internal representation
+// (`Thunk(CompSig { result: Source(Fun([...], Empty, ...)), .. })`), which names
+// the compiler's data structures rather than the type the program wrote, and it
+// is what a verifier violation used to put in front of a user. Every rendering
+// below bottoms out in `Type::show`/`EffRow::show`, the same printers the
+// checker's own diagnostics use, so one type reads the same way wherever it is
+// reported.
+
+impl fmt::Display for CoreType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Source(ty) => f.write_str(&ty.show()),
+            Self::Thunk(signature) => write!(f, "Thunk({signature})"),
+            Self::Function(signature) => write!(f, "{signature}"),
+            Self::Ref(ty) => write!(f, "Ref({ty})"),
+            Self::ReuseToken(ty) => write!(f, "Reuse({ty})"),
+            Self::Lowered(ty) => write!(f, "{ty}"),
+        }
+    }
+}
+
+impl fmt::Display for LoweredType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Word => f.write_str("Word"),
+            Self::Eff(row) => write!(f, "Eff({})", row.show()),
+            Self::Queue(row) => write!(f, "Queue({})", row.show()),
+            Self::QueueView(row) => write!(f, "QueueView({})", row.show()),
+        }
+    }
+}
+
+impl fmt::Display for CompSig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ! {}", self.result, self.effects.show())
+    }
+}
+
+impl fmt::Display for CoreQuantifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Type(name) | Self::Row(name) => write!(f, "{name}"),
+        }
+    }
+}
+
+impl fmt::Display for CoreFnSig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.quantifiers.is_empty() {
+            write!(f, "forall")?;
+            for quantifier in &self.quantifiers {
+                write!(f, " {quantifier}")?;
+            }
+            write!(f, ". ")?;
+        }
+        f.write_str("(")?;
+        for (index, param) in self.params.iter().enumerate() {
+            if index > 0 {
+                f.write_str(", ")?;
+            }
+            write!(f, "{param}")?;
+        }
+        write!(f, ") -> {}", self.body)
+    }
+}
+
+impl fmt::Display for CoreInstantiation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Type(ty) => f.write_str(&ty.show()),
+            Self::Row(row) => f.write_str(&row.show()),
         }
     }
 }
@@ -316,6 +397,27 @@ impl TypedValue {
         Self { ty, kind }
     }
 
+    /// The binding this value reads, if it reads one.
+    ///
+    /// Representation wrappers change how a reference is typed, never which
+    /// reference it is, so they are transparent here. Anything else builds a
+    /// new value rather than reading an existing binding and has no name to
+    /// give. Reference counting asks this to find the owner an operation acts
+    /// on, and the verifier asks it to refuse an operation that acts on none.
+    #[must_use]
+    pub fn referenced_binding(&self) -> Option<Sym> {
+        match &self.kind {
+            TypedValueKind::Var { name, .. } => Some(*name),
+            TypedValueKind::Reinterpret(inner)
+            | TypedValueKind::LoweredRepr {
+                value: inner,
+                proof: _,
+            }
+            | TypedValueKind::NewtypeRepr { value: inner, .. } => inner.referenced_binding(),
+            _ => None,
+        }
+    }
+
     fn erase(self) -> Value {
         match self.kind {
             TypedValueKind::Var {
@@ -424,6 +526,36 @@ pub enum TypedValueKind {
     UnboxedTuple(Vec<TypedValue>),
     /// An unboxed named product.
     UnboxedRecord(Vec<(Sym, TypedValue)>),
+}
+
+impl TypedValueKind {
+    /// The canonical source type of a scalar literal, or `None` for a value
+    /// with no literal encoding (variables, structures, thunks).
+    ///
+    /// Seen through the representation-preserving wrapper nodes: a wrapped
+    /// literal keeps its scalar encoding by the wrappers' own contract, so
+    /// the answer is the underlying literal's type. Consumers pass it to the
+    /// representation authority (`types::scalar_plan`) rather than deciding
+    /// an encoding here. Mirrors `Value::literal_scalar_type` post-erasure.
+    #[must_use]
+    pub fn literal_scalar_type(&self) -> Option<Type> {
+        match self {
+            Self::Int(_) => Some(Type::Int),
+            Self::I64(_) => Some(Type::I64),
+            Self::U64(_) => Some(Type::U64),
+            Self::Float(_) => Some(Type::Float),
+            Self::Bool(_) => Some(Type::Bool),
+            Self::Unit => Some(Type::Unit),
+            Self::Str(_) => Some(Type::Str),
+            Self::Reinterpret(inner)
+            | Self::LoweredRepr {
+                value: inner,
+                proof: _,
+            }
+            | Self::NewtypeRepr { value: inner, .. } => inner.kind.literal_scalar_type(),
+            _ => None,
+        }
+    }
 }
 
 /// One typed handler operation clause.
@@ -563,7 +695,10 @@ impl TypedHandler {
         )
     }
 
-    fn with_forwarded(mut self, mut forwarded: Vec<TypedForward>) -> Self {
+    pub(in crate::core::typed) fn with_forwarded(
+        mut self,
+        mut forwarded: Vec<TypedForward>,
+    ) -> Self {
         forwarded.sort();
         forwarded.dedup();
         self.forwarded = forwarded;
@@ -885,72 +1020,12 @@ pub enum Owned {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReuseLowered {}
 
-/// Whole-program typed Core at phase `P`.
-///
-/// The phase marker prevents routing errors while the private node builders and
-/// independent verifier prevent local type/effect witness drift.
-#[derive(Debug, PartialEq)]
-pub struct TypedCore<P> {
-    fns: Vec<TypedCoreFn>,
-    phase: PhantomData<fn() -> P>,
-}
-
-// Manual so a phase-generic caller can clone: the derive would demand
-// `P: Clone`, but the marker only ever appears under `PhantomData`.
-impl<P> Clone for TypedCore<P> {
-    fn clone(&self) -> Self {
-        Self {
-            fns: self.fns.clone(),
-            phase: PhantomData,
-        }
-    }
-}
-
-impl<P> TypedCore<P> {
-    /// Functions in deterministic program order.
-    #[must_use]
-    pub fn functions(&self) -> &[TypedCoreFn] {
-        &self.fns
-    }
-
-    #[must_use]
-    pub const fn new(fns: Vec<TypedCoreFn>) -> Self {
-        Self {
-            fns,
-            phase: PhantomData,
-        }
-    }
-
-    /// Decompose into owned functions, for the driver's SCC-local pass cache.
-    #[must_use]
-    pub fn into_functions(self) -> Vec<TypedCoreFn> {
-        self.fns
-    }
-
-    /// Regroup verified functions at the same phase. [`TypedCoreFn`]s can only
-    /// be built inside `core`, so this can subset or reorder verified programs
-    /// but never forge a witness.
-    #[must_use]
-    pub const fn from_functions(fns: Vec<TypedCoreFn>) -> Self {
-        Self::new(fns)
-    }
-
-    /// Consume all type/effect witnesses, yielding the existing executable
-    /// Core shape byte-for-byte. This is the sole semantic erasure operation at
-    /// the typed-prefix boundary.
-    #[must_use]
-    pub fn erase(self) -> Core {
-        Core {
-            fns: self.fns.into_iter().map(TypedCoreFn::erase).collect(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
     use crate::core::hash::hash_program;
+    use crate::core::Core;
 
     use super::*;
 
@@ -966,16 +1041,19 @@ mod tests {
         TypedValue::new(source(ty), TypedValueKind::Int(42))
     }
 
-    fn program(witness: Type) -> TypedCore<Elaborated> {
+    fn erased_program(witness: Type) -> Core {
         let value = literal(witness.clone());
         let body = TypedComp::new(pure(source(witness.clone())), TypedCompKind::Return(value));
-        TypedCore::new(vec![TypedCoreFn::new(
-            Sym::new("main"),
-            Vec::new(),
-            body,
-            CoreFnSig::new(Vec::new(), Vec::new(), pure(source(witness))),
-            0,
-        )])
+        Core {
+            fns: vec![TypedCoreFn::new(
+                Sym::new("main"),
+                Vec::new(),
+                body,
+                CoreFnSig::new(Vec::new(), Vec::new(), pure(source(witness))),
+                0,
+            )
+            .erase()],
+        }
     }
 
     #[test]
@@ -983,8 +1061,8 @@ mod tests {
         // Deliberately bypass verification and vary only witness data. A Bool
         // witness on an integer literal is invalid, while content identity must
         // remain a function of erased semantics alone.
-        let int = program(Type::Int).erase();
-        let bool_witness = program(Type::Bool).erase();
+        let int = erased_program(Type::Int);
+        let bool_witness = erased_program(Type::Bool);
         assert_eq!(int, bool_witness);
         assert_eq!(
             hash_program(&int, &BTreeMap::new()),

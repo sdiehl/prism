@@ -23,7 +23,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 
 use crate::core::hash::hex;
-use crate::error::{Error, LexError, ParseError, SourceMap, SyntaxFault};
+use crate::error::{Error, ErrorPhase, LexError, ParseError, SourceMap, SyntaxFault};
 use crate::lex::{lex, lex_raw, LexSpanned};
 use crate::parse::parse;
 use crate::syntax::ast::{
@@ -1184,9 +1184,6 @@ struct DiagnosticRow {
     related: Vec<[usize; 2]>,
 }
 
-const DIAG_PHASE_LEX: &str = "lex";
-const DIAG_PHASE_PARSE: &str = "parse";
-
 /// Render the `syntax-diagnostics` seam for one source file: lex, then parse,
 /// and report every syntax-boundary refusal against the user-relative source.
 /// A file that lexes and parses cleanly exports the empty diagnostic list.
@@ -1200,7 +1197,7 @@ pub(super) fn dump_syntax_diagnostics(full: &str) -> String {
             let at = e.offset();
             diagnostics.push(DiagnosticRow {
                 code: e.code(),
-                phase: DIAG_PHASE_LEX,
+                phase: ErrorPhase::Lex.as_str(),
                 span: [at, at],
                 message: e.to_string(),
                 expected: Vec::new(),
@@ -1212,7 +1209,7 @@ pub(super) fn dump_syntax_diagnostics(full: &str) -> String {
                 let span = e.span();
                 diagnostics.push(DiagnosticRow {
                     code: e.code(),
-                    phase: DIAG_PHASE_PARSE,
+                    phase: ErrorPhase::Parse.as_str(),
                     span: [span.start, span.end],
                     message: e.to_string(),
                     expected: e.expected().to_vec(),

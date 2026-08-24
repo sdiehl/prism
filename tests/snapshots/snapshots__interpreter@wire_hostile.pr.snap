@@ -11,4 +11,7 @@ wrong digest rejected: OK
 truncated body rejected: OK
 hostile length rejected: OK
 descending map rejected: OK
+varint at cap accepted: OK
+overlong varint rejected: OK
+long continuation run rejected: OK
 => ()

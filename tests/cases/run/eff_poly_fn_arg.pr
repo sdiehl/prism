@@ -3,10 +3,16 @@
 -- effect row) used to ICE in row unification: `rewrite_row` opened an existential
 -- row tail by appending the fresh tail to the right, a forward reference that a
 -- later truncation stranded ("solve_row: ^N not in context"). It must now type
--- check and run.
+-- check and run. The second half pins the type argument inside a parameterized
+-- effect label: the generic callback opens it under an instantiation marker,
+-- while `map`'s callback row was created outside that marker. The row solution
+-- must retain a live representative rather than a dangling inner existential.
 
 effect Tag
   fresh() : Int
+
+effect Cell(a)
+  read() : a
 
 -- Polymorphic in `a`, effectful in `Tag`: this is the shape that triggered it.
 fn tag(x) : (Int, a) ! {Tag} = (fresh(), x)
@@ -23,7 +29,23 @@ fn run_tags(action) =
       return r => \(_n) -> r
   go(0)
 
+-- `read` must actually run. A wider annotation on an otherwise pure callback
+-- does not exercise the row-solution scope boundary.
+fn peek(x : Int) : Int ! {Cell(d)} =
+  match read() of
+    _value => x
+
+fn roots(xs : List(Int)) : List(Int) ! {Cell(List(Int))} = map(peek, xs)
+
+fn run_roots() =
+  handle roots([1, 2, 3]) with
+    read() resume k =>
+      println("cell read")
+      k([99])
+    return r => r
+
 fn main() =
   println(
       show(run_tags(\() -> map_eff(tag, Cons(10, Cons(20, Cons(30, Nil)))))),
     )
+  println(show(run_roots()))

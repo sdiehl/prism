@@ -89,8 +89,6 @@ The token kind a wire name denotes. Any name that is not one of the special alia
 (true, true)
 ```
 
-lint: allow(L0101)
-
 ### `trivia_name`
 
 ```prism,sig,h-661cd7c475c16767623e6e49e174e1052dba4f30b3a3d2e8b2d1119341ca3f2d

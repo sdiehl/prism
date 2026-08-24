@@ -191,8 +191,8 @@ impl NonNumericCase {
 }
 
 // A non-numeric operand is rejected as a missing instance on the operand's own
-// type, a clean lane story rather than an unresolved-dictionary dump. Crucially
-// the message names the lane (`Num(String)`), never a raw `_D`-mangled cell.
+// type, a clean lane story rather than an unresolved-dictionary dump. The message
+// must name the lane (`Num(String)`), never a raw `_D`-mangled cell.
 #[rstest]
 fn non_numeric_operand_reads_as_a_lane_not_a_dict_dump(
     #[values(NonNumericCase::StringAddition, NonNumericCase::UserTypeAddition)]

@@ -1,0 +1,63 @@
+-- The observable contract of a byte-indexed string window, which is the same on
+-- both tiers whether the window shares the parent's bytes or copies them. What is
+-- pinned here: endpoints are clamped to the string and an empty or reversed span
+-- is the empty string; a window onto a window addresses the original; a span that
+-- splits a multi-byte character is repaired rather than rejected, so the result is
+-- always well-formed; and a window is an ordinary String everywhere downstream,
+-- including the operations that read to the end of a value.
+
+import Data.String (str_slice, trim, index_of, to_upper)
+
+fn show_case(label : String, got : String) : Unit ! {IO} =
+  println("{label}: [{got}] len={byte_len(got)}")
+
+-- A window onto a window onto a window: the composition addresses the original
+-- string, so re-slicing a remainder never deepens the chain.
+fn nest(s : String) : String =
+  str_slice(str_slice(str_slice(s, 2, 20), 1, 9), 2, 6)
+
+-- Peel one byte at a time off the front, reassembling what falls off. Every step
+-- takes a window onto the whole remainder, which is where a chain would grow.
+fn eat(s : String, acc : String) : String =
+  if byte_len(s) == 0 then
+    acc
+  else
+    eat(str_slice(s, 1, byte_len(s)), concat(acc, str_slice(s, 0, 1)))
+
+fn main() : Unit ! {IO} =
+  let base = "the quick brown fox jumps over the lazy dog"
+  show_case("whole", str_slice(base, 0, byte_len(base)))
+  show_case("mid", str_slice(base, 4, 9))
+  show_case("empty", str_slice(base, 5, 5))
+  show_case("reversed", str_slice(base, 9, 4))
+  show_case("clamped_hi", str_slice(base, 36, 400))
+  show_case("clamped_lo", str_slice(base, -7, 3))
+  show_case("both_out", str_slice(base, 400, 900))
+  show_case("nested", nest(base))
+  show_case("eaten", eat(str_slice(base, 4, 15), ""))
+  -- A span that cuts into a character is repaired, and the repair is the same
+  -- replacement the lossy decoder writes anywhere else.
+  let uni = "naive cafe: ünïcode"
+  show_case("uni_aligned", str_slice(uni, 0, 5))
+  show_case("uni_split_hi", str_slice(uni, 0, 13))
+  show_case("uni_split_lo", str_slice(uni, 13, 18))
+  -- Windows flowing through the ordinary string operations, including the two
+  -- that parse to the end of their input.
+  show_case("view_trim", trim(str_slice(base, 3, 10)))
+  show_case(
+      "view_concat",
+      concat(concat(str_slice(base, 0, 3), "/"), str_slice(base, 4, 9)),
+    )
+  show_case("view_eq", show(str_slice(base, 4, 9) == "quick"))
+  show_case("view_cmp", show(str_cmp(str_slice(base, 4, 9), "quick")))
+  show_case("view_upper", to_upper(str_slice(base, 4, 9)))
+  show_case("view_index", show(index_of("brown", str_slice(base, 4, 20))))
+  show_case("view_char_at", show(char_at(str_slice(uni, 12, 18), 1)))
+  show_case("view_len", show(str_len(str_slice(uni, 12, 18))))
+  show_case("view_sub", substring(str_slice(uni, 12, 18), 1, 2))
+  show_case(
+      "view_parse_float",
+      show(parse_float(str_slice("3.14159xyz", 0, 4))),
+    )
+  show_case("view_parse_cut", show(parse_float(str_slice("3.14159", 0, 3))))
+  show_case("view_parse_int", show(parse_int(str_slice("12345abc", 0, 3))))

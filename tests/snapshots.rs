@@ -323,6 +323,38 @@ fn recursive_fip_examples_lower_to_loops() {
     );
 }
 
+// A loop must stay a loop no matter what the reference-count passes decide. A
+// borrowed parameter is released by the frame that made the call, after the
+// call returns, so borrowing a position that a loop-eligible self-call hands a
+// freshly built value would put work after the jump and cost the frame its tail
+// position: the loop silently becomes one stack frame per iteration and a deep
+// enough input exhausts the stack. `scan` is that shape. Its first parameter is
+// only ever scrutinised, which is what makes it a borrow candidate, and its
+// self-call passes a cell the frame itself built.
+#[cfg(feature = "native")]
+#[test]
+fn a_borrowable_parameter_never_costs_a_loop_its_tail_call() {
+    let src = prism::with_prelude(
+        "fn peek(s) =\n  match s of\n    Nil => 0\n    Cons(a, _b) => a\n\
+         fn scan(cur, xs) =\n  match xs of\n    Nil => peek(cur)\n    Cons(h, t) =>\n      \
+         let step = Cons(h + peek(cur), Nil)\n      scan(step, t)\n\
+         fn main() = println(scan([0], [1, 2, 3]))",
+    );
+    let ir = prism::emit_ir(&src).expect("scan must compile");
+    let scan = prism::codegen::native_symbol("scan");
+    let start = ir
+        .find(&format!("define i64 @{scan}("))
+        .expect("scan must be emitted");
+    let rest = &ir[start..];
+    let block = &rest[..rest.find("\n}").map_or(rest.len(), |e| e + 2)];
+    let total = block.matches(&format!("call i64 @{scan}")).count();
+    let tail = block.matches(&format!("musttail call i64 @{scan}")).count();
+    assert!(
+        tail >= 1 && total == tail,
+        "scan must loop, not grow the stack once per element:\n{block}"
+    );
+}
+
 // Higher-order effect inference: a function's row must account for effects
 // performed by applying its function-typed arguments. `apply` propagates its
 // argument's row into its own, and an effect routed through `apply` (an opaque
@@ -985,8 +1017,8 @@ fn free_monad_fallback_warns() {
 
 // Optimization coverage requirement. Two guarantees the per-program snapshot
 // cannot give on its own: (1) breadth -- every named fast path keeps at least one
-// live witness in the corpus, so silently losing a whole optimization fails here,
-// not just shifts a snapshot line; and (2) the basic-loop invariant -- a canonical
+// live witness in the corpus, so losing a whole optimization fails here instead
+// of shifting a snapshot line. It also checks the basic-loop invariant: a canonical
 // `var` while-loop must NOT classify as a free-monad strategy, because imperative
 // loops have to compile to constant-stack, allocation-free loops. (2) is the
 // requirement whose absence let the var-loop regression ship; it fails until the
@@ -1050,8 +1082,8 @@ fn fmt_idempotent_on_compiler_stack() {
     }
 }
 
-// Formatting must preserve meaning, not just be a fixpoint: the desugared core
-// of the formatted source has to match the original's. This is what catches a
+// Formatting must preserve meaning. The desugared core of the formatted source
+// has to match the original's. This catches a
 // sugar marker that round-trips to the wrong tree, which idempotency cannot see.
 #[test]
 fn fmt_preserves_core() {

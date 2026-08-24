@@ -236,13 +236,13 @@ fn search_universe(
             .map(|module| format!("import {module}"))
             .collect::<Vec<_>>()
             .join("\n");
-        let modules = check_modules_on(&with_prelude(&imports), roots, cfg)?.modules;
-        for module in modules {
-            let source = origins
-                .get(&module.name)
-                .copied()
-                .unwrap_or(SearchSource::Package);
-            add_interface_hits(&mut hits, &module.name, source, &module.interface);
+        // Read `interfaces`, not `modules`: an interface served straight from
+        // the durable cache has no checked body and never lands in `modules`,
+        // but its exports must still be searchable.
+        let interfaces = check_modules_on(&with_prelude(&imports), roots, cfg)?.interfaces;
+        for (name, interface) in &interfaces {
+            let source = origins.get(name).copied().unwrap_or(SearchSource::Package);
+            add_interface_hits(&mut hits, name, source, interface);
         }
     } else {
         let checked = check_validated_on_in(full, roots, cfg)?;

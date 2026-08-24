@@ -69,10 +69,8 @@ pub const PLAIN_CLASS: &str = "id";
 /// Every token in `src` as `(start, end, class)`, in source order.
 ///
 /// The one producer of highlight spans. The browser highlighter, the docs
-/// tooltips, and the code index all paint from this, so what they colour cannot
-/// disagree about what a token is — the risk a second, hand-written tokenizer
-/// would introduce, where highlighting that contradicts the compiler is worse
-/// than none.
+/// tooltips, and the code index all paint from this, keeping their token
+/// classifications consistent with the compiler.
 ///
 /// Comments are included (they are among the most useful things to colour), so
 /// this reads the raw token stream rather than the layout-processed one that

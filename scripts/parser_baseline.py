@@ -654,16 +654,22 @@ def render() -> str:
         "",
         "## Four-family allocation",
         "",
-        "There is no `shared` pseudo-family budget and no proportional residual. "
-        "Every source unit has a frozen nonempty `Reach(u)` set. A unit contributes "
-        "exactly `1 / |Reach(u)|` to every reached family; fractions are preserved "
-        "rather than rounded. The reach rules are: `Comma` and grammar/sugar "
-        "preambles, Rust driver/fault, and Prism Parse/Support/Cursor reach all "
-        "four; `CommaPlus` and Prism Build reach Pattern+Expr; grammar Param/Params "
-        "and sugar param/params reach Expr+Decl; Program reaches Decl; TypeSig "
-        "reaches Type; Expr reaches Expr; GivenClause/ConstraintP reach Decl; "
-        "coeffect reaches Type; `lift_noalloc` reaches Decl. Every other "
-        "production/symbol/file has its single named family.",
+        "There is no `shared` pseudo-family budget or proportional residual. "
+        "Every source unit has a frozen, nonempty `Reach(u)` set and contributes "
+        "exactly `1 / |Reach(u)|` to each reached family. Fractions are preserved "
+        "rather than rounded.",
+        "",
+        "The reach rules are:",
+        "",
+        "- `Comma`, grammar and sugar preambles, Rust driver and fault code, and "
+        "Prism Parse/Support/Cursor reach all four families.",
+        "- `CommaPlus` and Prism Build reach Pattern+Expr.",
+        "- Grammar Param/Params and sugar param/params reach Expr+Decl.",
+        "- Program, GivenClause/ConstraintP, and `lift_noalloc` reach Decl.",
+        "- TypeSig and coeffect reach Type.",
+        "- Expr reaches Expr.",
+        "",
+        "Every other production, symbol, or file has one named family.",
         "",
         table(
             ["source bucket", "Reach(u)", "Rust units", "Prism units"],

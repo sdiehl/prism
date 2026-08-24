@@ -231,25 +231,7 @@ impl Tc<'_> {
         }
     }
 
-    pub(super) fn find_field(
-        &self,
-        span: Span,
-        ctor_name: &str,
-        field: &str,
-        ty: &Type,
-    ) -> Result<(Type, usize), TypeError> {
-        let (info, fi) = self
-            .ctors
-            .values()
-            .filter(|c| c.type_name.as_str() == ctor_name)
-            .find_map(|c| Some((c, c.fields.iter().position(|f| f.as_str() == field)?)))
-            .ok_or_else(|| {
-                ErrKind::NoFieldOnType {
-                    field: field.to_string(),
-                    ctor_name: ctor_name.to_string(),
-                }
-                .at(span)
-            })?;
+    fn field_type(&self, info: &super::CtorInfo, fi: usize, ty: &Type) -> Type {
         let params = match ty {
             Type::Con(_, ps) => ps.clone(),
             _ => vec![],
@@ -263,6 +245,86 @@ impl Tc<'_> {
                 _ => ft = ft.subst_var(*pn, t),
             }
         }
-        Ok((self.apply(&ft), fi))
+        self.apply(&ft)
+    }
+
+    pub(super) fn find_field_projection(
+        &self,
+        span: Span,
+        type_name: &str,
+        field: &str,
+        ty: &Type,
+    ) -> Result<(String, Type, usize, usize), TypeError> {
+        let constructors: Vec<_> = self
+            .ctors
+            .iter()
+            .filter(|(_, info)| info.type_name.as_str() == type_name)
+            .collect();
+        let found = constructors.iter().find_map(|(name, info)| {
+            info.fields
+                .iter()
+                .position(|candidate| candidate.as_str() == field)
+                .map(|fi| (*name, *info, fi))
+        });
+        let Some((ctor_name, info, fi)) = found else {
+            return Err(ErrKind::NoFieldOnType {
+                field: field.to_string(),
+                ctor_name: type_name.to_string(),
+            }
+            .at(span));
+        };
+        if constructors.len() != 1 {
+            return Err(ErrKind::PartialFieldProjection {
+                field: field.to_string(),
+                ty: type_name.to_string(),
+                constructors: constructors.len(),
+            }
+            .at(span));
+        }
+        Ok((
+            ctor_name.clone(),
+            self.field_type(info, fi, ty),
+            fi,
+            info.args.len(),
+        ))
+    }
+
+    pub(super) fn find_update_field(
+        &self,
+        span: Span,
+        type_name: &str,
+        field: &str,
+        ty: &Type,
+    ) -> Result<(String, Type, usize, usize), TypeError> {
+        let mut constructors: Vec<_> = self
+            .ctors
+            .iter()
+            .filter(|(_, info)| info.type_name.as_str() == type_name)
+            .collect();
+        let constructor_count = constructors.len();
+        let Some((ctor_name, info)) = constructors.pop().filter(|_| constructors.is_empty()) else {
+            return Err(ErrKind::UpdatePathMultiCtor {
+                ty: type_name.to_string(),
+                n: constructor_count,
+            }
+            .at(span));
+        };
+        let fi = info
+            .fields
+            .iter()
+            .position(|candidate| candidate.as_str() == field)
+            .ok_or_else(|| {
+                ErrKind::NoFieldOnType {
+                    field: field.to_string(),
+                    ctor_name: type_name.to_string(),
+                }
+                .at(span)
+            })?;
+        Ok((
+            ctor_name.clone(),
+            self.field_type(info, fi, ty),
+            fi,
+            info.args.len(),
+        ))
     }
 }

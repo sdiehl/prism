@@ -448,8 +448,9 @@ enum Cmd {
 enum BootstrapCmd {
     /// Compare the T1 Prism checker with authoritative Rust facts
     Check {
-        /// A `.pr` file or project to shadow-check
-        file: PathBuf,
+        /// One or more `.pr` files or projects to shadow-check
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
         /// Emit the parity and coverage report as JSON
         #[arg(long)]
         json: bool,
@@ -659,6 +660,16 @@ enum StoreCmd {
         /// The `.pr` file whose locked `stable` families to derive or verify
         file: PathBuf,
     },
+    /// Garbage-collect cache entries the store's own query and index layers no
+    /// longer reference
+    Gc {
+        /// Only remove entries older than this many days
+        #[arg(long, default_value_t = 30)]
+        days: u64,
+        /// Report what would be removed without deleting anything
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 /// Semantic patches: inspect, judge, stage, and atomically commit.
@@ -856,6 +867,11 @@ fn main() -> ExitCode {
     // config) stay silent.
     if cfg.flags.time_compile {
         cfg.timing = Some(prism::TimingSink::new());
+        // The work counters ride the same flag rather than a second knob: they
+        // answer "how much" where the row's wall time answers "how long", and a
+        // reader who asked for one wants both. Counting is process-wide, so it is
+        // switched on here, once, beside the sink that reports it.
+        prism::core::work::enable();
     }
     let result = match (cli.cmd, cli.file) {
         (Some(cmd), _) => dispatch(cmd, &cfg),
@@ -1081,8 +1097,8 @@ fn dispatch(cmd: Cmd, cfg: &prism::Config) -> CmdResult {
             limit,
             json,
         } => cli::type_query::synth_cmd(file.as_deref(), &at_hole, depth, limit, json, cfg),
-        Cmd::Bootstrap(BootstrapCmd::Check { file, json }) => {
-            cli::bootstrap::check_cmd(&file, json, cfg)
+        Cmd::Bootstrap(BootstrapCmd::Check { files, json }) => {
+            cli::bootstrap::check_cmd(&files, json, cfg)
         }
         Cmd::Explain { code } => cli::explain::explain_cmd(&code),
         Cmd::Test {
@@ -1275,6 +1291,7 @@ fn dispatch_store(store: StoreCmd, cfg: &prism::Config) -> CmdResult {
         StoreCmd::Query { kind, name, file } => cli::store::query(&kind, &name, &file, cfg),
         StoreCmd::Wire { accept, file } => cli::store::wire(accept, &file),
         StoreCmd::Lock { accept, file } => cli::store::lock(accept, &file, cfg),
+        StoreCmd::Gc { days, dry_run } => cli::store::gc(days, dry_run, cfg),
     }
 }
 

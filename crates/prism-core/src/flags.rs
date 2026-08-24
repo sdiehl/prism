@@ -257,7 +257,7 @@ pub struct DynFlags {
     /// lint between. Setting this therefore forces the uncached route, which is
     /// why it belongs on runs that already disable the cache (the whole-corpus
     /// optimizer-equivalence sweep, the example compile) and not on a whole test
-    /// suite, where it would quietly stand down the cache under test.
+    /// suite, where it would disable the cache under test.
     pub core_lint: bool,
     /// `PRISM_RT_CHECKS` (default off): compile the native C runtime with
     /// `-DPRISM_RT_DEBUG`, inserting a cheap validity check at every cell
@@ -268,9 +268,8 @@ pub struct DynFlags {
     pub rt_checks: bool,
     /// `PRISM_NATIVE_KONT_FRAMES` (default off): ask the native link step to
     /// preserve frame pointers, unwind tables, and non-mandatory call frames for
-    /// experimental native kont frame capture. This is not native resume; it is
-    /// the build-mode backstop that makes return-PC capture less dependent on the
-    /// platform optimizer's defaults.
+    /// experimental native kont frame capture. This build-mode backstop makes
+    /// return-PC capture less dependent on the platform optimizer's defaults.
     pub native_kont_frames: bool,
     /// `PRISM_DUMP_CORE` (default none): sink for the per-pass Core dump.
     /// `stdout`/`stderr` stream a banner plus the block; an off spelling (`0`,
@@ -337,6 +336,18 @@ pub struct DynFlags {
     /// interpreter, and the optimizer-equivalence sweep runs `-O2` against
     /// `--no-fuse` over the whole corpus.
     pub fuse: bool,
+    /// `PRISM_BORROW_INFER` (default on): infer per-parameter borrow masks for
+    /// provably pure functions, so a read-only argument is loaned across the
+    /// call instead of threading a retain and release pair. Augments the
+    /// declared `borrow` annotations at the reference-count insertion boundary
+    /// only; the inferred masks are a pure function of the checked source, so
+    /// they are a cost decision like a lowering tier, never part of a
+    /// definition's identity, and the output must not reveal the setting. The
+    /// inserted reference-count operations do move the linked bytes, so like
+    /// the effect tier the flag joins the artifact identity that keys
+    /// byte-level artifact caches. `PRISM_BORROW_INFER=0` disables inference,
+    /// leaving only the declared annotations.
+    pub borrow_infer: bool,
     /// `PRISM_SCHEDULER` (default cooperative/FIFO): which shipped cooperative
     /// scheduler `run_cooperative` binds to when the CLI does not pass
     /// `--scheduler`.
@@ -368,6 +379,12 @@ pub struct DynFlags {
     /// back to a user-wide cache directory, then `target/prism-store`; see the
     /// store's `disk::resolve_store_path`.
     pub store_path: Option<PathBuf>,
+    /// `PRISM_TOOL_PACKAGES_ROOT` (default none): load compiler-owned Prism tool
+    /// packages from this `packages/` directory while developing them. The
+    /// installed default remains the sources embedded in the binary. This is an
+    /// explicit developer input, never inferred from the checked project's
+    /// manifest, so a project cannot select the checker or linter that judges it.
+    pub tool_packages_root: Option<PathBuf>,
     /// `PRISM_SOLVER_TIMEOUT_MS` (default none): the per-obligation wall-clock
     /// budget `prism verify` gives an external solver before it kills the process
     /// and records an infrastructure timeout. Physical policy, never part of the
@@ -433,12 +450,14 @@ impl Default for DynFlags {
             backend_opt: BackendOpt::default(),
             no_specialize: false,
             fuse: false,
+            borrow_infer: true,
             scheduler: Scheduler::default(),
             effect_tier: EffectTier::default(),
             erasures: true,
             compiler_cache: true,
             store: false,
             store_path: None,
+            tool_packages_root: None,
             solver_timeout_ms: None,
             sign_mode: SignMode::default(),
             sign_key: None,
@@ -493,6 +512,7 @@ impl DynFlags {
             backend_opt: backend_opt_from_env(base.backend_opt),
             no_specialize: base.no_specialize || env_present("PRISM_NO_SPECIALIZE"),
             fuse: env_bool("PRISM_FUSE", base.fuse),
+            borrow_infer: env_bool("PRISM_BORROW_INFER", base.borrow_infer),
             scheduler: std::env::var("PRISM_SCHEDULER")
                 .ok()
                 .and_then(|s| Scheduler::parse(&s))
@@ -504,6 +524,9 @@ impl DynFlags {
             store_path: std::env::var_os("PRISM_STORE_PATH")
                 .map(PathBuf::from)
                 .or_else(|| base.store_path.clone()),
+            tool_packages_root: std::env::var_os("PRISM_TOOL_PACKAGES_ROOT")
+                .map(PathBuf::from)
+                .or_else(|| base.tool_packages_root.clone()),
             solver_timeout_ms: std::env::var("PRISM_SOLVER_TIMEOUT_MS")
                 .ok()
                 .and_then(|s| s.trim().parse().ok())
@@ -564,6 +587,7 @@ impl DynFlags {
             "verbose" => self.verbose = toml_bool(key, val)?,
             "no-specialize" => self.no_specialize = toml_bool(key, val)?,
             "fuse" => self.fuse = toml_bool(key, val)?,
+            "borrow-infer" => self.borrow_infer = toml_bool(key, val)?,
             "compiler-cache" => self.compiler_cache = toml_bool(key, val)?,
             "store" => self.store = toml_bool(key, val)?,
             "query-threads" => self.query_threads = toml_pos_int(key, val)?,
@@ -884,7 +908,7 @@ impl Scheduler {
 
 /// A backend optimization level clang accepts via `-O`.
 ///
-/// The single source of truth shared by the `--backend-opt` flag and the
+/// Parsed representation shared by the `--backend-opt` flag and the
 /// `PRISM_BACKEND_OPT` env knob. An invalid level is unrepresentable; every
 /// spelling flows through [`BackendOpt::as_str`], so the `-O` argument handed to
 /// `cc` and the artifact-identity label can never drift apart or off the set.

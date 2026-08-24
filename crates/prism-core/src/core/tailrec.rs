@@ -180,6 +180,23 @@ pub enum TailClass {
     NonTail,
 }
 
+/// Whether the backend lowers a tail-position call as a loop rather than a
+/// frame.
+///
+/// A `musttail` call reuses the current frame, which the ABI permits only when
+/// the two signatures agree: the call must be saturated and the callee must
+/// take exactly as many parameters as the frame making the call. That covers a
+/// saturated self-call and a same-arity mutual tail call alike, and it is the
+/// test the emitter applies at its tail-call site.
+///
+/// Every pass that can perturb a tail call asks here rather than restating the
+/// arithmetic, so a lowering the emitter would loop is never quietly turned
+/// into a stack-growing one somewhere upstream.
+#[must_use]
+pub const fn loops_as_tail_call(args: usize, callee_arity: usize, frame_arity: usize) -> bool {
+    args == callee_arity && callee_arity == frame_arity
+}
+
 // Classify every call to a member of `group` reachable within `body`'s own
 // evaluation, in source order. Calls hidden inside a thunk, lambda, or handler
 // run in a later, separate frame and do not grow THIS body's stack, so the walk

@@ -34,6 +34,14 @@ pub let lm_family_den : Int = 10
 -- their negations through the sign node.
 pub fn lm_exempt_ints() : List(String) = ["0", "1"]
 
+-- | The string accessors that take a position counted in codepoints. Each one
+-- walks the UTF-8 encoding from the start to reach that position, so a
+-- recursion stepping an index through them re-walks the string on every step.
+-- `str_len` is left out on purpose: it is a length query, not a walk to a
+-- position, and a recursion that only measures is not the quadratic shape.
+-- `byte_at` and `byte_len` are the constant-time alternative.
+pub fn lm_codepoint_index_fns() : List(String) = ["char_at", "substring"]
+
 -- | Modules whose exported vocabulary is designed for glob import. Everywhere
 -- else, imports name what they take. A module inside the importing package
 -- (a dotless path) is its own vocabulary and is always allowed.

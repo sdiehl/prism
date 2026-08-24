@@ -615,7 +615,7 @@ A `deriving (C, ...)` clause generates the named instances structurally from the
 
 ### 6.10 Records {#record-types}
 
-A constructor may instead take _named_ fields, `C { f : T, ... }`, making the type a record. A field is read with `e.f`; records are built and updated by the [record expressions](#record-expressions). `deriving (Lens)` synthesizes a getter `f_of` and a setter `with_f` per field.
+A constructor may instead take _named_ fields, `C { f : T, ... }`, making the type a record. A field is read with `e.f`; records are built and updated by the [record expressions](#record-expressions). Plain projection is total-only: `e.f` requires `e` to have a single-constructor record type. Sum constructors may reuse a field name at different types because a pattern refines the constructor before its fields are checked; read such fields inside the corresponding match arms. `deriving (Lens)` synthesizes a getter `f_of` and a setter `with_f` per field.
 
 ```prism
 {{#include ../examples/record.pr}}
@@ -1143,7 +1143,7 @@ For an operation `op : (p) -> q`, each matching clause is checked with its decla
 k : (q) -> answer ! residual(handle c with partial h)
 ```
 
-The answer type is shared by the return clause and every operation clause. The residual row is the least row satisfying the body-subtraction rule and all clause-effect constraints; this is the same open-row unification used by higher-order handlers, not a default to the empty row.
+The answer type is shared by the return clause and every operation clause. When the return clause is omitted, the answer type is the handled body's own result type rather than a fresh variable, so a handler that names no return can never be generalized into a scheme its clauses do not support. The residual row is the least row satisfying the body-subtraction rule and all clause-effect constraints; this is the same open-row unification used by higher-order handlers, not a default to the empty row.
 
 Forwarding is semantic, not a lowering choice. The interpreter, evidence-passing lowering, and free-monad lowering must emit the same canonical observation trace. In particular, operation emission, outward handling, resumption, and the return clause occur in that order in every tier.
 
@@ -1681,7 +1681,7 @@ A guard-free comprehension `[ e for x in s ]` is exactly a mapped and collected 
 
 ### 9.3 Records {#record-expressions}
 
-Record construction `C { f = e, ... }`, functional update `C { ..base, f = e }`, and nested path update `{ base | a.b = e, ... }` build and modify the [record types](#record-types); each is an in-place write on a uniquely owned value. The `deriving (Lens)` getters and setters compose with them for deeper access. A path generalizes past nested fields to traversals, indices, prisms, filters, and a read form ([optic paths](#optic-paths)).
+Record construction `C { f = e, ... }`, functional update `C { ..base, f = e }`, and nested path update `{ base | a.b = e, ... }` build and modify the [record types](#record-types); each is an in-place write on a uniquely owned value. A spread copies the fields it does not overwrite out of `base`, so `base` must already be known to be a `C`: spreading a sum type a pattern has not yet refined is rejected, since another constructor of that type carries different fields. The `deriving (Lens)` getters and setters compose with them for deeper access. A path generalizes past nested fields to traversals, indices, prisms, filters, and a read form ([optic paths](#optic-paths)).
 
 ```prism
 {{#include ../examples/lens_derive.pr}}
@@ -2020,7 +2020,7 @@ Patterns appear in `match` arms, `let` bindings, lambda and function parameters,
 
 ### 10.1 Destructuring {#pattern-destructuring}
 
-A **constructor pattern** matches a value built by that constructor and destructures its fields against nested patterns of their own: patterns nest to any depth, so one arm can reach through a tuple, into a constructor, into a record field, binding every name it needs in a single match. The remaining forms cover the value's other shapes: a **literal pattern** (`Int`, `Float`, `Char`, `Bool`, and a leading `-` folded into a numeric literal, since patterns have no general negation) matches an exact constant; a **variable pattern** binds the whole matched value under a name; the **wildcard** `_` matches anything and binds nothing; a **tuple pattern** `(p, q, ...)` destructures the matching tuple arity; and a **list pattern** `[p, q, ...]` is sugar for the nested `Cons`/`Nil` constructor patterns it expands to. A **record pattern** `C { f = p, ... }` names the fields it cares about; a bare field name **puns**, binding a variable of the same name (`C { f, .. }` is shorthand for `C { f = f, .. }`), and a trailing `..` ignores every field the pattern does not mention.
+A **constructor pattern** matches a value built by that constructor and destructures its fields against nested patterns of their own: patterns nest to any depth, so one arm can reach through a tuple, into a constructor, into a record field, binding every name it needs in a single match. The remaining forms cover the value's other shapes: a **literal pattern** (`Int`, `Float`, `Char`, `Bool`, and a leading `-` folded into a numeric literal, since patterns have no general negation) matches an exact constant; a **variable pattern** binds the whole matched value under a name; the **wildcard** `_` matches anything and binds nothing; a **tuple pattern** `(p, q, ...)` destructures the matching tuple arity; and a **list pattern** `[p, q, ...]` is sugar for the nested `Cons`/`Nil` constructor patterns it expands to. A **record pattern** `C { f = p, ... }` names the fields it cares about; a bare field name **puns**, binding a variable of the same name (`C { f, .. }` is shorthand for `C { f = f, .. }`), and a trailing `..` ignores every field the pattern does not mention. The spread may stand alone: `C { .. }` matches the constructor without binding any of its fields.
 
 ```prism
 {{#include ../examples/destructuring.pr}}

@@ -1,0 +1,24 @@
+-- The residual-row rewrite belongs to the whole planned function, not only a
+-- handler arm: the same effect-polymorphic call after the handle must carry the
+-- ambient witness too.
+
+effect Tick
+  bump(Int) : Unit
+
+fn apply_poly(f : (Int, Int) -> Int ! {| e}, a : Int, b : Int) : Int ! { | e} =
+  f(a, b)
+
+fn add(a : Int, b : Int) : Int = a + b
+
+fn run(action : () -> a ! {Tick | e}) : (a, Int) =
+  var total := 0
+  let r =
+    handle action() with
+      bump(n) resume k =>
+        total := total + n
+        k(())
+      return r => r
+  let final_total = apply_poly(add, total, 0)
+  (r, final_total)
+
+fn main() = print(show(run(\() -> bump(3))))

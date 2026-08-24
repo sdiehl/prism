@@ -22,7 +22,10 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use super::{atomic_write, shard_path, HashHex, FIELD_SEP, META_DIR};
+use super::{
+    atomic_write, evict_shard_overflow, shard_path, HashHex, FIELD_SEP, META_DIR,
+    OBJECT_SHARD_BUDGET,
+};
 
 const META_HEADER: &str = "prism-store-meta\tv1";
 const KEY_NAME: &str = "name";
@@ -46,7 +49,15 @@ pub(super) fn put(root: &Path, hash: &HashHex<'_>, m: &DefMeta) -> io::Result<()
         "{META_HEADER}\n{KEY_NAME}{FIELD_SEP}{}\n{KEY_TYPE}{FIELD_SEP}{}\n{KEY_DOC}{FIELD_SEP}{}\n",
         m.name, m.ty, m.doc
     );
-    atomic_write(&shard_path(&root.join(META_DIR), hash), body.as_bytes())
+    let path = shard_path(&root.join(META_DIR), hash);
+    atomic_write(&path, body.as_bytes())?;
+    // Metadata rides the object layer's budget: one blob per object hash, so
+    // the layers grow in lockstep and share one bound. An evicted blob's
+    // object survives; only its human-facing facts are re-derived.
+    if let Some(shard_dir) = path.parent() {
+        evict_shard_overflow(shard_dir, &path, OBJECT_SHARD_BUDGET);
+    }
+    Ok(())
 }
 
 pub(super) fn get(root: &Path, hash: &HashHex<'_>) -> io::Result<Option<DefMeta>> {

@@ -46,8 +46,8 @@
 /* The rail: the modules, collapsed, over a search that reaches into all of them.
    A query expands what it matched, so nothing a search finds stays hidden. */
 /* `hidden` is `display: none` from the user-agent stylesheet, which any author
-   `display` beats — including the one below. Said explicitly, or putting the rail
-   away leaves it in place and the deck lands on top of it. */
+   `display` overrides, including the one below. Keep the rule explicit so hiding
+   the rail does not leave it beneath the deck. */
 .rail[hidden] {
   display: none;
 }
@@ -377,7 +377,7 @@ kbd {
 
 /* A resolved name inside a body. Styled as text, not as a control: the body
    should read as code, and only reveal itself as navigable under the pointer.
-   The colour is inherited on purpose — a body is syntax-highlighted, so a link
+   The colour is inherited because a body is syntax-highlighted, so a link
    that repainted every reference one accent colour would overwrite the
    highlighting it sits inside and win an argument it should not be having. What
    marks a name navigable is the underline. */
@@ -420,7 +420,7 @@ button.ref--prim:hover {
 
 /* Where a declaration introduces one of its own members. Marked like a reference
    because it is navigable, but it leads down the card to that member's users
-   rather than away — there is nowhere else to go, since this is where it lives. */
+   rather than away. There is nowhere else to go because this is where it lives. */
 .ref--member {
   border-bottom-style: dashed;
 }
@@ -484,7 +484,7 @@ button.ref--prim:hover {
 /* The old pane is styled exactly like the new one. It was tinted and dimmed back
    when the two were stacked and nothing else told them apart; side by side, the
    captions and the divider do that, and a wash over one side now suggests a
-   meaning it does not have — in a conventional diff a tinted region marks what
+   meaning it does not have. In a conventional diff a tinted region marks what
    changed, and this tints a whole pane regardless. It also made the version being
    reviewed the harder of the two to read. */
 .card-src--was {

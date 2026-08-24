@@ -265,10 +265,9 @@ fn token_free_in(e: &S<Expr<Core>>, token: &str) -> bool {
 // perform them; here the token is a first-class value, so a bare `Var(token)` in
 // value position is itself the escape, and a lambda whose body uses the token
 // free is a carrier (the closure could outlive the call). Shares `escapes`'s
-// documented hole: a non-constructor call result is opaque, so a callee that
-// smuggles its argument back out is not caught; this is a focused early
-// diagnostic for the directly expressible escapes (returned, embedded in data,
-// aliased, captured), not a full soundness boundary.
+// documented hole: a non-constructor call result is opaque, so a callee can
+// smuggle its argument back out. This early diagnostic covers directly
+// expressible escapes (returned, embedded in data, aliased, or captured).
 pub(in crate::syntax::desugar) fn token_escapes(
     e: &S<Expr<Core>>,
     token: &str,

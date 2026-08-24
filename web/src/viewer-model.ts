@@ -91,8 +91,8 @@ export interface TokenSpan {
 
 /// Decode a definition's packed highlight spans.
 ///
-/// The artifact stores `gap length class` triples — gap from the previous span's
-/// end, class as an index into the shared table — because a pretty-printed JSON
+/// The artifact stores `gap length class` triples: the gap from the previous span's
+/// end and the class index into the shared table. A pretty-printed JSON
 /// array would spend more bytes on indentation than on the data. Unstyled spans
 /// are absent, so a gap is not always zero.
 export function decodeSpans(packed: string | undefined, classes: string[]): TokenSpan[] {
@@ -158,7 +158,7 @@ export class Index {
   readonly byId: Map<string, Def>;
   readonly edges: { kind: EdgeKind; from: string; to: string }[];
   /// The compiler's own primitives, by name. One of these has no definition
-  /// anywhere, so it is not a link — but it is also not missing, and saying which
+  /// anywhere, so it is not a link. It is also not missing, and saying which
   /// of the two it is is the difference between "primitive" and "this index is
   /// incomplete". Its signature is what makes it readable rather than merely named.
   readonly builtins: Map<string, Primitive>;
@@ -216,7 +216,7 @@ export class Index {
     }
     const prim = this.primitive(target);
     if (prim) {
-      return [prim.name, prim.signature, prim.doc, "compiler builtin — no Prism definition"]
+      return [prim.name, prim.signature, prim.doc, "compiler builtin: no Prism definition"]
         .filter((l): l is string => Boolean(l))
         .join("\n");
     }
@@ -250,7 +250,7 @@ export class Relations {
 /// The dependency graph and the text answer different questions, and a reviewer
 /// asks the text's. Elaboration inlines a top-level `let`, so a body that writes
 /// `gen_float` depends on whatever the constant expanded to and not on the
-/// constant — across the standard library's 73 consts exactly one is ever a
+/// constant. Across the standard library's 73 consts, exactly one is ever a
 /// dependency. Reading the occurrence set instead gives back what is on the page.
 ///
 /// Terms only. A written type, constructor or class method resolves to the
@@ -285,8 +285,8 @@ export class Mentions {
   }
 }
 
-/// A member of a declaration — a class method, an effect operation, a data
-/// constructor — as some other definition wrote it.
+/// A class method, effect operation, or data constructor as another definition
+/// wrote it.
 export interface MemberUse {
   /// The name as written: `pure`, `Cons`, `get`.
   name: string;
@@ -298,7 +298,7 @@ export interface MemberUse {
 ///
 /// A reference to a member resolves to the declaration that owns it: `Cons` to
 /// `List`, `pure` to `Applicative`, an operation to its effect. That is the right
-/// destination — the declaration is where the member is introduced and typed —
+/// destination because the declaration is where the member is introduced and typed,
 /// but on its own it throws away *which* member was meant, and 28% of every
 /// reference in the standard library is one of these.
 ///
@@ -307,8 +307,8 @@ export interface MemberUse {
 /// whole reference set from the far end turns that back into "who uses `pure`",
 /// at member granularity, for every kind of member at once.
 ///
-/// This is the only way to answer it. A class method is dispatched through a
-/// dictionary, so the dependency graph has no edge for the call at all —
+/// Member-use data is required because a class method is dispatched through a
+/// dictionary, leaving no dependency-graph edge for the call.
 /// `Data.Monad.map2` calls `ap` and `fmap` and has *zero* outgoing edges. Without
 /// this the relation strip is silent in both directions.
 export class Members {
@@ -386,7 +386,7 @@ export interface DiffEntry {
 /// One side of a diff: which revision it was, and the shared tables its carried
 /// definition records index. The records were copied out of their index, whose
 /// `token_classes`/`type_table` did not travel with them, and the two revisions'
-/// tables can order entries differently — so each side brings its own.
+/// tables can order entries differently, so each side brings its own.
 interface DiffSide {
   title: string;
   contract: string;
@@ -416,15 +416,15 @@ export class Revisions {
   readonly envelope: DiffWire["envelope"];
   private readonly byId = new Map<string, DiffEntry>();
 
-  /// `classes` and `types` are the *viewer's* tables — the loaded index's, which
-  /// every card paints against. Each side's records arrive indexing its own
+  /// `classes` and `types` belong to the index loaded in the viewer. They are the
+  /// tables every card paints against. Each side's records arrive indexing its own
   /// revision's tables (carried in the envelope), so they are re-encoded into the
   /// viewer's table space first, and then their offsets get the same move from
   /// bytes to code units that `Index` does for its own.
   ///
   /// `against` is the loaded index's contract. A diff records the revision its
   /// new side came from, and overlaying it on any other index would present old
-  /// bodies against definitions they were never compared with — a stale `?diff=`
+  /// bodies against definitions they were never compared with. A stale `?diff=`
   /// must be refused, not rendered.
   constructor(wire: DiffWire, classes: string[] = [], types: string[] = [], against?: string) {
     if (wire?.envelope?.format !== DIFF_FORMAT) {
@@ -502,8 +502,8 @@ function retable(
 /// The artifact counts in UTF-8 bytes, because that is what the compiler's spans
 /// are and what a consumer holding the file on disk needs. A JavaScript string is
 /// indexed in UTF-16 code units. The two agree on ASCII and nowhere else, which is
-/// why the box-drawing characters in `Syntax.Report` — the standard library's first
-/// non-ASCII definition bodies — put that definition's last highlight span three
+/// why the box-drawing characters in `Syntax.Report`, the standard library's first
+/// non-ASCII definition bodies, put that definition's last highlight span three
 /// bytes past the end of its own source, and slid every link after them onto the
 /// wrong text. Translating once, here, is what keeps the rest of the viewer from
 /// having to know which unit it is holding.
@@ -532,8 +532,8 @@ function rebase(d: Def, classes: string[], types: string[] = []): void {
 }
 
 /// A byte offset to code-unit offset table, or `null` when the text is ASCII and
-/// the two coincide — which is all but a handful of definitions, so the common case
-/// allocates nothing.
+/// the two coincide. This covers all but a handful of definitions, so the common
+/// case allocates nothing.
 function units(text: string): Int32Array | null {
   let ascii = true;
   for (let i = 0; i < text.length; i++) {

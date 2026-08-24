@@ -1,32 +1,19 @@
 //! `prism index`: the whole-codebase index a program viewer reads.
 //!
-//! One deterministic artifact per revision, holding the two things a reviewer
-//! navigates by: **definitions** (each with the content address the compiler
-//! gives it, its inferred type and effect row, its doc comment, and the exact
-//! source range of its body) and **relationships** between them. It is a
-//! projection of facts the compiler already computes, not a new analysis: the
-//! addresses are the namespace layers (`driver::namespace_layers`), the `calls`
-//! edges are the Core dependency graph (`core::DepGraph`, the same adjacency
-//! `prism store query callers` answers and the content hasher walks), and the
-//! `performs` edges are the checked effect rows.
+//! One deterministic artifact per revision, containing definitions and their
+//! relationships. It projects existing compiler facts: namespace addresses,
+//! Core dependency edges, and checked effect rows.
 //!
-//! Two properties make it a viewer substrate rather than a second doc generator:
+//! Two properties make it suitable for a viewer:
 //!
-//! - **Addressed, not located.** A definition's identity is its canonical name
-//!   plus its content hash, so a bookmark, a note, or a review mark survives
-//!   reformatting and file moves, and two revisions can be aligned by identity.
-//!   Source ranges are carried too, but as rendering data, not identity.
-//! - **Whole-set edges.** `callers`/`dependents` answer one question at a time
-//!   from the CLI; the index carries the full edge set, so a viewer can traverse
-//!   in either direction without re-running the compiler.
+//! - A canonical name and content hash identify each definition. Source ranges
+//!   are rendering data.
+//! - The complete edge set supports traversal in either direction without
+//!   re-running the compiler.
 //!
-//! Addressing every definition means compiling more than a build does: "everything
-//! the entry point reaches" is the wrong set for a reader, because a library
-//! package's modules are not reachable from its `[bin]` entry and are most of what
-//! someone opened a viewer to read. The caller therefore supplies a `source` that
-//! reaches every module it lists (`cli::index` appends one qualified import per
-//! module to the build's own input); a module the program does not reach is still
-//! indexed, but carries no address.
+//! `cli::index` imports every listed module so library code outside the binary's
+//! reachability set also receives an address. Unreachable modules remain in the
+//! index without one.
 //!
 //! The artifact is a pure function of the indexed source (it is taken over the
 //! identity surface, pre-optimizer elaborated Core), so `--check` can gate a
@@ -54,14 +41,10 @@ pub use occurrences::{Occurrences, OCCURRENCES_FORMAT};
 /// Schema tag for the index artifact.
 pub const INDEX_FORMAT: &str = "prism-index-v1";
 
-/// The self-describing header: what this artifact is, what produced it, and the
-/// one digest that names the exact program it describes.
+/// Identifies the artifact, its producer, and the indexed program.
 ///
-/// `contract` is the indexed program's namespace root, so a consumer can tell two
-/// indexes apart (and a stale one from a current one) without reading a single
-/// definition. It names the program *the index describes*, which includes every
-/// listed module, so for a project whose entry point does not reach all of them it
-/// is deliberately not the same root a build or a package tag would publish.
+/// `contract` is the namespace root of all listed modules. It may differ from a
+/// build or package root whose entry point reaches fewer modules.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Envelope {
     pub format: String,
@@ -113,12 +96,8 @@ pub struct IndexModule {
     /// `index --no-source`, for a consumer that reads the working tree itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
-    /// The front end's diagnostic when this module's source does not parse. Its
-    /// declarations are then absent from the definition layer, and this is what
-    /// keeps that absence from reading as "an empty module": the same honesty
-    /// [`TestLayer::Unavailable`] gives a test layer that could not be built.
-    /// One broken file — a scratch buffer, a fixture that exists to be invalid —
-    /// must not take the index of everything else down with it.
+    /// The front-end diagnostic when this module does not parse. Other modules
+    /// remain indexed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -192,9 +171,7 @@ impl Vis {
     }
 }
 
-/// A checked claim a definition carries. Each is erased before executable Core,
-/// so it is a property of the declaration rather than of its behavior hash;
-/// a reviewer wants them on the definition card.
+/// A checked claim carried separately because claims are erased before Core.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Claim {
@@ -223,9 +200,8 @@ pub struct Span {
 
 /// One name written inside a definition's [`Def::source`], and what it means.
 ///
-/// Offsets are into `source` itself, so a consumer renders a navigable body by
-/// slicing between them — no file access, no second coordinate system, no
-/// knowledge of where the definition sat in whatever the compiler compiled.
+/// Offsets are relative to `source`, so consumers need no source file or compiler
+/// coordinates.
 ///
 /// `target` may name a definition the index does not contain, exactly as an edge
 /// endpoint may; a builtin or a prelude function a project calls is still worth
@@ -254,9 +230,7 @@ pub struct Def {
     /// behavior hash for a term, a shape digest for a type or effect, an
     /// interface digest for a class, an identity digest for an instance.
     ///
-    /// Two definitions with equal hashes are interchangeable by construction, so a
-    /// consumer groups by this field to find behavioral duplicates; the artifact
-    /// carries no separate equivalence edge set.
+    /// Equal hashes identify behaviorally equivalent definitions.
     ///
     /// Absent for the kinds that have no independent address: a synonym and a row
     /// alias erase into the types that mention them, a `pattern` lowers to hidden
@@ -271,11 +245,8 @@ pub struct Def {
     pub ty: Option<String>,
     /// Highlight spans over `ty`, packed exactly like [`Def::tokens`].
     ///
-    /// A rendered type is not source — no file holds it, so it has no occurrence
-    /// rows and no lexer has run over it. But it is written in the language's own
-    /// type syntax, so running the compiler's lexer across the rendered string
-    /// classifies it correctly, and the alternative is a second tokenizer in the
-    /// consumer that would disagree with this one about what a name is.
+    /// Rendered types are lexed by the compiler so consumers need no second type
+    /// tokenizer.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub ty_tokens: String,
     /// Every name in `ty` that resolves to a definition. A signature is the part of
@@ -314,31 +285,19 @@ pub struct Def {
     /// the same packed form as `tokens`, where `index` selects from
     /// [`Index::type_table`].
     ///
-    /// Variables only. Every subterm has a type, and carrying all of them would
-    /// multiply the payload and nest spans inside one another — the whole
-    /// `Row(gap, children)` contains `gap` — while a reader hovering a body is
-    /// asking what the names in it are. Names cannot overlap, so a consumer merges
-    /// these with the other span sets as flat intervals.
+    /// Contains variables only. Their spans do not overlap, so consumers can
+    /// merge them with the other span sets as flat intervals.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub types: String,
     /// Highlight spans over `source`: whitespace-separated `gap length class`
     /// triples, where `gap` is the bytes since the previous span's end and `class`
     /// indexes [`Index::token_classes`].
     ///
-    /// A string of numbers rather than an array of them, which looks like the
-    /// wrong shape and is not. The artifact is pretty-printed, so a JSON array
-    /// spends a newline and six spaces of indent on every element: over the
-    /// standard library that is 167,000 elements and about 1.3 MB of whitespace,
-    /// for data no one reads element-wise. One object per token
-    /// (`{start, end, class}`) would cost 2 MB — most of the artifact again, to
-    /// colour text. Unstyled spans (an ordinary lowercase identifier) are omitted,
-    /// which is why the gap is needed rather than assuming spans abut.
+    /// The numeric string keeps pretty-printed JSON compact. Unstyled spans are
+    /// omitted, so each encoded span includes its gap from the previous one.
     ///
-    /// Baked rather than computed in the browser for two reasons. The spans come
-    /// from the compiler's own lexer, so highlighting cannot disagree with the
-    /// compiler about what a token is; and highlighting is wanted at first paint,
-    /// while the wasm compiler sits behind a worker boundary and would arrive
-    /// after it.
+    /// Spans come from the compiler lexer and are ready before the browser's wasm
+    /// worker starts.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub tokens: String,
     /// The names this declaration introduces inside itself, in source order: a
@@ -346,14 +305,9 @@ pub struct Def {
     /// a declaration that introduces none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub members: Vec<Member>,
-    /// Every name written in `source` that resolves to a definition, in source
-    /// order. This is what makes a rendered body navigable rather than merely
-    /// readable: the edges say what a definition depends on, these say *where*.
+    /// Every name in `source` that resolves to a definition, in source order.
     ///
-    /// Only names the AST gives a span of their own appear — an expression
-    /// variable, an effect-row label; see
-    /// [`occurrences`] for why a constructor pattern
-    /// and an instance's class do not.
+    /// Only names with their own AST span appear. See [`occurrences`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub refs: Vec<SourceRef>,
 }
@@ -361,14 +315,8 @@ pub struct Def {
 /// A name a declaration introduces inside itself: a data constructor, a class
 /// method, an effect operation.
 ///
-/// None of these is a definition in its own right — a reference to one resolves
-/// to the declaration that owns it — so without this they exist in the artifact
-/// only as text inside a `source` field. That is enough to read and not enough to
-/// *find*: `Cons`, `Nil` and `pure` are among the most written names in any Prism
-/// program, and a consumer searching by name could not turn one up. Recovering
-/// them from occurrences would find only the ones something happens to use, which
-/// is exactly backwards for `Output`'s operations, performed by programs this
-/// index does not contain.
+/// Members resolve to their owning declaration. Recording every declared member
+/// also makes unused constructors, methods, and operations searchable.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Member {
     pub name: String,
@@ -379,10 +327,8 @@ pub struct Member {
 
 /// A relationship between two definitions.
 ///
-/// Every kind here is *derived*: the compiler already knows it, so it cannot go
-/// stale against the code. Author-asserted relations (`equivalent`, `replaces`)
-/// are a separate, later layer; the two are deliberately not mixed, because a
-/// derived edge is a fact and an asserted one is a claim.
+/// These are derived compiler facts. Author-asserted relations belong to a
+/// separate layer.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum EdgeKind {
@@ -405,12 +351,8 @@ pub enum EdgeKind {
     /// `from` has a handler clause for an operation of the effect `to`; reversed,
     /// "what interprets this effect".
     ///
-    /// The other half of `Performs`, and not derivable from it: handling an effect
-    /// *removes* it from the row, so the definition that gives an effect its
-    /// meaning is exactly the one whose inferred row no longer mentions it. In the
-    /// standard library `Output` is performed by nothing and handled four times —
-    /// programs perform it, the library interprets it — so without this an effect
-    /// declaration relates to nothing at all in either direction.
+    /// Complements `Performs`. Handling removes an effect from the inferred row,
+    /// so this relation is collected from handler clauses.
     Handles,
     /// `from` is an instance of the class `to`.
     InstanceOf,
@@ -447,11 +389,8 @@ pub struct Index {
     /// The compiler's own primitives.
     ///
     /// A reference to one resolves to no definition because there is none: it is
-    /// implemented in the compiler rather than in Prism, so there is nothing to
-    /// navigate to and nothing missing. Carried so a consumer can say *that*
-    /// instead of reporting the name as absent from the artifact, which reads as
-    /// an incomplete index when it is nothing of the kind — `byte_at` and
-    /// `buf_push` are not gaps, they are `ByteAt` and `BufPush`.
+    /// implemented in the compiler rather than in Prism. This table lets a
+    /// consumer distinguish primitives from missing definitions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub builtins: Vec<Primitive>,
     /// The highlight categories [`Def::tokens`] indexes, so the class names are
@@ -468,9 +407,7 @@ pub struct Index {
 /// One compiler primitive: what source calls it, and its type where the compiler
 /// records one.
 ///
-/// The signature is what makes a primitive readable rather than merely named. A
-/// reader hovering `byte_at` wants `(String, Int) -> Int`; that it has no Prism
-/// definition is the less interesting half.
+/// Includes a signature when the compiler records one.
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct Primitive {
     pub name: String,

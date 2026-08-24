@@ -50,12 +50,12 @@ generated_let_note_receipt : (Syntax.Cursor.Cursor, Syntax.Parse.GeneratedPatter
 
 ### `generated_parse_pattern`
 
-```prism,sig,h-aa207a24da3c30cfceea847664b3b03d927a95505b7c13becf42b89e9f18e33e
+```prism,sig,h-0085d3545dd5a5c63f1dbd9f1add7657dd1dfbac038e4871fa85dfff899c178c
 generated_parse_pattern : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Parse.GeneratedPattern.GeneratedPatternDone)
 ```
 
 ### `generated_parse_let_pattern`
 
-```prism,sig,h-805d3b99daa3abfb4d4bdb74ae8e6db37f009114069500b5acc494da2cba7c08
+```prism,sig,h-88301927173c8c70c92242752e090cde69ede3c6fbcdb2ea51b0b1e3a1c7e56b
 generated_parse_let_pattern : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Parse.GeneratedPattern.GeneratedLetDone)
 ```

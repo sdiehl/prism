@@ -202,8 +202,7 @@ fn effect_rows_are_reported_and_pure_definitions_carry_none() {
     assert!(targets(&index, EdgeKind::Performs, "double").is_empty());
 }
 
-// A viewer renders `source` directly, so the slice must be the declaration
-// exactly as written — signature, body, and nothing of its neighbours.
+// `source` contains exactly the declaration a viewer renders.
 #[test]
 fn source_slices_and_doc_comments_are_exact() {
     let index = index_of(SIMPLE);
@@ -239,9 +238,7 @@ fbip fn drop_it(c: Color): Unit = ()
 fn ask_twice(): Int ! {Ask} = ask() + ask()
 ";
 
-// Every surface declaration kind must appear, addressed in the namespace layer
-// that owns it, so a viewer's module page is the module — not the subset of it
-// that happens to be a function.
+// Every surface declaration kind uses its owning namespace layer.
 #[test]
 fn every_declaration_kind_is_indexed_and_addressed_in_its_own_layer() {
     let index = index_of(KINDS);
@@ -354,10 +351,7 @@ fn every_occurrence_span_is_exactly_the_written_identifier() {
     }
 }
 
-// A parameter that shadows a top-level name refers to the binder, not the
-// definition, so it must not be recorded — the failure mode a hand-written walk
-// would produce, and the reason collection lives in the renamer, which already
-// carries the scope stack.
+// A parameter that shadows a top-level name must not be recorded as a reference.
 #[test]
 fn a_local_shadowing_a_global_is_not_an_occurrence() {
     let full = with_prelude(SHADOWED);
@@ -376,10 +370,7 @@ fn a_local_shadowing_a_global_is_not_an_occurrence() {
         "the shadowing parameter was recorded as a reference: {:?}",
         of("apply_twice")
     );
-    // The same spelling one function later, unshadowed, is the real reference —
-    // and it resolves to the canonical name the prelude's glob import gives it,
-    // not the bare spelling, so a consumer can link it without guessing which
-    // module it came from.
+    // The unshadowed use resolves to the prelude's canonical name.
     assert_eq!(of("use_global"), vec!["Data.List.map"]);
 }
 
@@ -429,10 +420,8 @@ fn the_occurrence_document_round_trips_and_is_reproducible() {
     .is_err());
 }
 
-// The edges say what a definition depends on; the refs say where in its text. A
-// consumer renders a navigable body by slicing `source` at these offsets, so they
-// have to index `source` itself — not the compiled program the renamer walked,
-// which for the root module begins with the whole prelude.
+// Reference offsets are relative to `source`, not the compiled program with its
+// prepended prelude.
 #[test]
 fn refs_are_offsets_into_the_definitions_own_source() {
     let index = index_of(SIMPLE);
@@ -444,8 +433,7 @@ fn refs_are_offsets_into_the_definitions_own_source() {
             .collect::<Vec<_>>(),
         vec!["Int", "Int", "double", "double"],
     );
-    // Every definition in the index, not just this one: a ref must slice the name
-    // it resolves to out of the text it claims to be in.
+    // Every reference range must contain a source name.
     for d in &index.defs {
         for r in &d.refs {
             let written = &d.source[r.start..r.end];
@@ -504,11 +492,7 @@ fn ding(): Unit ! {Chime} = ring()
 fn main(): Unit ! {IO} = print(show(str_len(\"x\")))
 ";
 
-// A constructor, an operation, and a method are written *inside* another
-// declaration and are not definitions in their own right, so a reference to one
-// used to resolve to nothing — and `Cons`, `Some`, and `Err` are among the most
-// written names in any program. Each now lands on the declaration its source is
-// in, the same retarget a lowered instance method gets.
+// Constructor and operation references resolve to their owning declarations.
 #[test]
 fn a_constructor_or_operation_reference_lands_on_its_declaration() {
     let index = index_of(MEMBERS);
@@ -524,9 +508,7 @@ fn a_constructor_or_operation_reference_lands_on_its_declaration() {
     assert_eq!(target_of("ding", "ring"), Some("Chime"));
 }
 
-// A primitive is not a link and not a gap. The distinction has to survive into
-// the artifact, or a consumer can only report the name as missing — which reads as
-// an incomplete index when the truth is that the compiler implements it.
+// Compiler primitives must be distinguishable from missing definitions.
 #[test]
 fn primitives_are_named_as_such_rather_than_left_unexplained() {
     let index = index_of(MEMBERS);
@@ -621,9 +603,7 @@ fn two(): Unit ! {Ask, Chirp(Int)} = chirp(ask())
 fn main(): Unit = ()
 ";
 
-// A written effect row is the axis a Prism reviewer navigates by, so a label in
-// one is a reference like any other name — and it must cover the label's name and
-// not its argument list, or the link would swallow `Emit(Int)` entire.
+// An effect-row reference covers the label without its argument list.
 #[test]
 fn effect_row_labels_are_occurrences_over_the_label_name_alone() {
     let full = with_prelude(EFFECT_REFS);
@@ -766,10 +746,7 @@ fn uses_type_distinguishes_same_named_types_from_different_modules() {
     );
 }
 
-// One broken file must not take the index of everything else down with it: a
-// scratch buffer, or a fixture that exists to be invalid, is carried with its
-// diagnostic — the same posture the test layer takes — and every other module
-// is indexed exactly as if the broken one were absent.
+// A broken module carries its diagnostic without blocking other modules.
 #[test]
 fn a_module_that_does_not_parse_is_carried_with_its_diagnostic() {
     let modules = vec![
@@ -855,9 +832,7 @@ fn main(): Unit ! {IO} = ()
         .any(|r| singleton.source[r.start..r.end] == *"Node" && r.target == "Tree"));
 }
 
-// An effect-row alias is a type-like name. Written inside another alias — the
-// composition `alias App = {Boom, Tick}` is what row aliases are for — it must
-// link to its declaration exactly as an effect written there does.
+// Effect-row aliases link to aliases referenced in their definitions.
 #[test]
 fn a_row_alias_links_to_the_aliases_it_mentions() {
     let index = index_of(
@@ -949,9 +924,7 @@ fn a_rename_is_a_move_rather_than_an_add_and_a_delete() {
     assert_eq!(d.envelope.counts.cone, 0);
 }
 
-// Reformatting moves text without moving behavior. Separating that from a real
-// edit is what keeps a formatting pass from reading as a semantic change — and
-// nothing above it re-hashes, which a text diff cannot tell you.
+// Reformatting is cosmetic and does not create a dependent cone.
 #[test]
 fn a_reformat_is_cosmetic_and_causes_no_cone() {
     use super::Status;
@@ -1084,12 +1057,7 @@ fn decoding_refuses_a_foreign_format_and_a_dangling_edge_source() {
         .contains("nowhere"));
 }
 
-// A signature is not source: no file holds it, and the typechecker rendered the
-// string. So the renamer has no occurrence in it and no lexer has run over it,
-// and a consumer that wanted `List` in a type to be the same link it is in a body
-// had to tokenize the rendered string itself — a second tokenizer, drifting from
-// this one about what a name is. The compiler renders the type, so the compiler
-// lexes it too.
+// The compiler lexes rendered signatures because they have no source occurrences.
 #[test]
 fn a_rendered_type_carries_its_own_links_and_highlighting() {
     let index = index_of(MEMBERS);
@@ -1169,11 +1137,8 @@ fn an_imported_type_keeps_its_canonical_reference_outside_this_unit() {
     );
 }
 
-// Handling an effect is what *removes* it from a row, so the definition that
-// gives an effect its meaning is precisely the one whose inferred effects no
-// longer mention it. Read the rows alone and an effect nobody in this unit
-// performs relates to nothing at all — which is the standard library's `Output`,
-// performed by programs and handled four times.
+// Handler edges are collected separately because handling removes an effect from
+// the inferred row.
 #[test]
 fn an_effect_reaches_the_definitions_that_handle_it() {
     let index = index_of(HANDLED);
@@ -1204,11 +1169,7 @@ fn silence(): Unit = handle ding() with
   ring() resume k => k(())
 ";
 
-// A declaration's members have to come from the declaration, not from what
-// happens to reference them. `Output`'s operations are performed by *programs*, so
-// an index of the library that declares it would recover none of them from
-// occurrences — and a reader searching for `out_print` would be told the name does
-// not exist.
+// Members come from their declaration so unused operations remain indexed.
 #[test]
 fn a_declaration_records_the_members_it_introduces() {
     let index = index_of(MEMBERS);
@@ -1242,12 +1203,7 @@ fn a_declaration_records_the_members_it_introduces() {
     );
 }
 
-// Elaboration lifts each instance method to its own top-level function
-// (`i@showInt@show`), so an instance has no Core node of its own. Asking the
-// dependency graph about the instance's own name therefore answered nothing, and
-// not one of the standard library's 100 instances had a single outgoing edge —
-// a card for an instance could show the class it implements and nothing about the
-// functions plainly written in its body.
+// Instance dependencies are collected from their lifted method functions.
 #[test]
 fn an_instance_calls_what_its_methods_call() {
     let index = index_of(INSTANCE_BODY);

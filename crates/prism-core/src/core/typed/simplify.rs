@@ -23,8 +23,8 @@ use prism_syntax::error::TypedCoreSimplifyFailure;
 use super::specialize_support::{free_comp_vars, free_value_vars, Rewrite};
 use super::verify::instantiate_value_scheme;
 use super::{
-    CompSig, TypedBinder, TypedComp, TypedCompKind, TypedCore, TypedHandleOp, TypedHandler,
-    TypedPattern, TypedValue, TypedValueKind,
+    CompSig, TypedBinder, TypedComp, TypedCompKind, TypedHandleOp, TypedHandler, TypedPattern,
+    TypedValue, TypedValueKind, UncheckedTypedCore,
 };
 
 // A runaway guard: a correct fixed point converges far below this, so exceeding
@@ -51,13 +51,19 @@ impl SimplifyStats {
 /// the runaway guard, which means a rule is fighting itself rather than
 /// converging.
 pub fn simplify<P>(
-    core: TypedCore<P>,
-) -> Result<(TypedCore<P>, SimplifyStats), TypedCoreSimplifyFailure> {
+    core: UncheckedTypedCore<P>,
+) -> Result<(UncheckedTypedCore<P>, SimplifyStats), TypedCoreSimplifyFailure> {
     let mut current = core;
     let mut total = 0u64;
     loop {
         let mut pass = Simplifier { ticks: 0 };
-        current = pass.core(&current, &Env::new());
+        current = UncheckedTypedCore::new(
+            current
+                .functions()
+                .iter()
+                .map(|function| pass.function(function, &Env::new()))
+                .collect(),
+        );
         total += pass.ticks;
         if total > MAX_TICKS {
             return Err(TypedCoreSimplifyFailure::RunawayRewrite { ticks: total });
@@ -737,9 +743,10 @@ mod tests {
     use crate::types::Type;
 
     use super::super::effect_lower::lower_effects;
-    use super::super::verify::{verify, OperationSig, VerifyEnv};
+    use super::super::verify::{OperationSig, VerifyEnv};
     use super::super::{
-        CoreFnSig, CoreQuantifier, CoreType, EffectLowered, Elaborated, TypedCoreFn, TypedLowering,
+        verify, CoreFnSig, CoreQuantifier, CoreType, EffectLowered, Elaborated, TypedCore,
+        TypedCoreFn, TypedLowering, UncheckedTypedCore,
     };
     use super::*;
 
@@ -788,18 +795,15 @@ mod tests {
     }
 
     fn run_simplify(functions: Vec<TypedCoreFn>, env: &VerifyEnv) -> (TypedCore<Elaborated>, u64) {
-        let input = TypedCore::new(functions);
-        if let Err(violations) = verify(&input, env) {
-            panic!("input fixture is invalid: {violations:#?}");
-        }
+        let input = UncheckedTypedCore::new(functions);
         let (actual, stats) = simplify(input).expect("typed simplification");
-        if let Err(violations) = verify(&actual, env) {
-            panic!("simplified typed Core is invalid: {violations:#?}");
-        }
+        let actual = verify(actual, env).unwrap_or_else(|violations| {
+            panic!("simplified typed Core is invalid: {violations:#?}")
+        });
         (actual, stats.ticks())
     }
 
-    fn lowered_simplify_fixture() -> (TypedCore<EffectLowered>, VerifyEnv) {
+    fn lowered_simplify_fixture() -> (UncheckedTypedCore<EffectLowered>, VerifyEnv) {
         let operation = sym("ask");
         let effect = sym("Ask");
         let mut env = VerifyEnv::new();
@@ -832,10 +836,9 @@ mod tests {
             ),
             0,
         );
-        let input = TypedCore::<Elaborated>::new(vec![main]);
-        if let Err(violations) = verify(&input, &env) {
-            panic!("elaborated late-pass fixture is invalid: {violations:#?}");
-        }
+        let input = verify(UncheckedTypedCore::<Elaborated>::new(vec![main]), &env).unwrap_or_else(
+            |violations| panic!("elaborated late-pass fixture is invalid: {violations:#?}"),
+        );
         let flags = DynFlags {
             effect_tier: EffectTier::FreeMonad,
             quiet: true,
@@ -875,10 +878,7 @@ mod tests {
         );
         let mut functions = lowered.functions().to_vec();
         functions.push(target);
-        let core = TypedCore::<EffectLowered>::new(functions);
-        if let Err(violations) = verify(&core, &env) {
-            panic!("effect-lowered late-pass fixture is invalid: {violations:#?}");
-        }
+        let core = UncheckedTypedCore::<EffectLowered>::new(functions);
         (core, env)
     }
 
@@ -886,9 +886,9 @@ mod tests {
     fn effect_lowered_simplify_collapses_the_copy_binding() {
         let (input, env) = lowered_simplify_fixture();
         let (actual, stats) = simplify(input).expect("effect-lowered fixture simplifies");
-        if let Err(violations) = verify(&actual, &env) {
-            panic!("effect-lowered Simplify output is invalid: {violations:#?}");
-        }
+        let actual = verify(actual, &env).unwrap_or_else(|violations| {
+            panic!("effect-lowered Simplify output is invalid: {violations:#?}")
+        });
         assert!(stats.ticks() >= 2, "the lowered fixture must simplify");
         let target = actual
             .functions()
@@ -978,12 +978,11 @@ mod tests {
             0,
         );
         let env = VerifyEnv::new();
-        let input = TypedCore::<EffectLowered>::new(vec![caller, consume]);
-        assert_eq!(verify(&input, &env), Ok(()));
+        let input = UncheckedTypedCore::<EffectLowered>::new(vec![caller, consume]);
 
         let (output, stats) = simplify(input).expect("simplification converges");
         assert!(stats.ticks() > 0);
-        assert_eq!(verify(&output, &env), Ok(()));
+        let output = verify(output, &env).expect("simplified alias fixture verifies");
 
         // Copy propagation rewrites the `t` occurrence to `h` reinstantiated at
         // the use site's empty row, so the `let t = h` binding is dead and the

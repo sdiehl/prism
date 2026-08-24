@@ -6,12 +6,16 @@ mod support;
 
 #[path = "tooling/bootstrap.rs"]
 mod bootstrap;
+#[path = "tooling/bootstrap_worker.rs"]
+mod bootstrap_worker;
 #[path = "tooling/durable_driver.rs"]
 mod durable_driver;
 #[path = "tooling/index.rs"]
 mod index;
 #[path = "tooling/isa_fixture.rs"]
 mod isa_fixture;
+#[path = "tooling/lane_ledger.rs"]
+mod lane_ledger;
 #[path = "tooling/prism_test.rs"]
 mod prism_test;
 #[path = "tooling/stable_lock.rs"]
@@ -25,6 +29,8 @@ mod certificates;
 mod pkg;
 #[path = "package/pkg_transport.rs"]
 mod pkg_transport;
+#[path = "package/receipt.rs"]
+mod receipt;
 
 #[path = "store_pkg/store_coherence.rs"]
 mod store_coherence;
@@ -42,6 +48,8 @@ mod run_lineage;
 #[path = "lineage_suite/world_lineage.rs"]
 mod world_lineage;
 
+#[path = "compiler/parser_receipt.rs"]
+mod parser_receipt;
 #[path = "compiler/stdlib_hash.rs"]
 mod stdlib_hash;
 

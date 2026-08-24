@@ -14,6 +14,7 @@ use std::{env, fs};
 use num_bigint::{BigInt, Sign};
 
 use crate::core::builtins::{Builtin, FloatOp};
+use crate::core::effect_abi::{TQCONS, TQNIL};
 use crate::core::{CoreOp, NegLane};
 use crate::store::bridge;
 use crate::types::{CONS, NIL};
@@ -30,6 +31,74 @@ const BYTE_MASK: i64 = 0xFF;
 const DEFAULT_BYTE: u8 = 0;
 const BUFFER_INDEX_ERROR: &str = "buffer index out of bounds";
 const TBUF_NEGATIVE_LENGTH_ERROR: &str = "tbuf_new: negative length";
+
+// The type-aligned continuation queue's interior cells, mirroring the C
+// runtime's persistent tree (`runtime/prism_effect.c`): the empty queue is
+// `Unit`, one arrow is a leaf, and snoc/concat build interior nodes in O(1).
+// These cells are evaluator-internal; lowered Core only ever inspects the
+// `TQNil`/`TQCons` view that `taq_uncons` returns, so the names carry a `$`
+// sigil no surface constructor can spell.
+const TAQ_LEAF: &str = "taq$leaf";
+const TAQ_NODE: &str = "taq$node";
+
+const fn taq_is_empty(q: &Rv) -> bool {
+    matches!(q, Rv::Unit)
+}
+
+fn taq_node(l: Rv, r: Rv) -> Rv {
+    Rv::Data(TAQ_NODE.into(), vec![l, r].into())
+}
+
+fn taq_snoc(q: &Rv, arrow: &Rv) -> Rv {
+    let leaf = Rv::Data(TAQ_LEAF.into(), vec![arrow.clone()].into());
+    if taq_is_empty(q) {
+        leaf
+    } else {
+        taq_node(q.clone(), leaf)
+    }
+}
+
+fn taq_concat(q1: &Rv, q2: &Rv) -> Rv {
+    if taq_is_empty(q1) {
+        return q2.clone();
+    }
+    if taq_is_empty(q2) {
+        return q1.clone();
+    }
+    taq_node(q1.clone(), q2.clone())
+}
+
+/// The leftmost arrow and the remaining queue as `TQCons(head, tail)`, or
+/// `TQNil` for the empty queue. Walks the left spine re-associating
+/// `Node(Node(a, b), c)` toward `Node(a, Node(b, c))`, sharing every leaf, so
+/// a queue built by repeated snoc drains in amortized O(1) per element and a
+/// shared queue survives for another resumption.
+fn taq_uncons(q: &Rv) -> Result<Rv, String> {
+    if taq_is_empty(q) {
+        return Ok(Rv::Data(TQNIL.into(), Vec::new().into()));
+    }
+    let mut cur = q.clone();
+    let mut tail = Rv::Unit;
+    loop {
+        cur = match cur {
+            Rv::Data(name, fields) if name.as_str() == TAQ_NODE && fields.len() == 2 => {
+                let l = fields[0].clone();
+                let r = fields[1].clone();
+                tail = if taq_is_empty(&tail) {
+                    r
+                } else {
+                    taq_node(r, tail)
+                };
+                l
+            }
+            Rv::Data(name, fields) if name.as_str() == TAQ_LEAF && fields.len() == 1 => {
+                let head = fields[0].clone();
+                return Ok(Rv::Data(TQCONS.into(), vec![head, tail].into()));
+            }
+            other => return Err(format!("taq_uncons: not a queue: {}", other.kind())),
+        };
+    }
+}
 
 #[expect(clippy::cast_sign_loss)]
 const fn low_byte(value: i64) -> u8 {
@@ -69,7 +138,7 @@ fn file_result(r: std::io::Result<()>) -> Rv {
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 // Genuine unary negation per lane. Int reuses the exact `0 - x` subtract path
 // (immediate/bignum promotion included) so the result is identical to the old
-// lowering; I64 is the wrapping fixed-width subtract from zero; Float is a real
+// lowering. I64 is the wrapping fixed-width subtract from zero. Float is a real
 // sign-bit flip (`-f`, not `-0.0 - f`) so it preserves signed zero and matches
 // the native `fneg` bit for bit.
 pub(super) fn neg_rv(lane: NegLane, v: &Rv) -> Result<Rv, String> {
@@ -381,6 +450,21 @@ pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv
             let take = usize::try_from(*len).unwrap_or(0);
             Ok(Rv::Str(s.chars().skip(st).take(take).collect()))
         }
+        // A byte-indexed span, clamped to the string's bounds, empty when the
+        // window is. Whether a copy is taken is not observable, so this arm may
+        // materialize where the native runtime aliases; what must agree is the
+        // repair of a window that splits a character, which the lossy decode
+        // performs identically on both.
+        (B::StrSlice, [Rv::Str(s), Rv::Int(lo), Rv::Int(hi)]) => {
+            let b = s.as_bytes();
+            let lo = usize::try_from(*lo).unwrap_or(0).min(b.len());
+            let hi = usize::try_from(*hi).unwrap_or(0).min(b.len());
+            if lo >= hi {
+                Ok(Rv::Str(String::new()))
+            } else {
+                Ok(Rv::Str(String::from_utf8_lossy(&b[lo..hi]).into_owned()))
+            }
+        }
         (B::CharAt, [Rv::Str(s), Rv::Int(i)]) => {
             Ok(Rv::Int(usize::try_from(*i).map_or(-1, |idx| {
                 s.chars().nth(idx).map_or(-1, |c| i64::from(c as u32))
@@ -601,6 +685,15 @@ pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv
             next.push(low_byte(*x));
             Ok(Rv::Buf(Rc::new(next)))
         }
+        // The builder's bulk step: a whole string's bytes in one append. Whether
+        // the buffer is extended in place or copied is an ownership question the
+        // native runtime answers and this tier does not have to; the value is the
+        // same either way.
+        (B::BufAppendStr, [Rv::Buf(v), Rv::Str(s)]) => {
+            let mut next = v.to_vec();
+            next.extend_from_slice(s.as_bytes());
+            Ok(Rv::Buf(Rc::new(next)))
+        }
         // Typed buffers (f64 and i64 elements): one raw-word storage, routed to
         // its own dispatcher below.
         (
@@ -721,6 +814,14 @@ pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv
         (B::ArenaEnter | B::ArenaExit, _) => {
             Err("arena region hooks are native-only and have no interpreter form".into())
         }
+        // The type-aligned continuation queue the free-monad lowerings thread
+        // through `ebind`/`qApply`. The interpreter never emits these (it runs
+        // pre-lowering Core), but the lowered-Core observation harness replays
+        // every forced tier's output, so the queue must evaluate here with the
+        // exact semantics of the native cells.
+        (B::TaqSnoc, [q, arrow]) => Ok(taq_snoc(q, arrow)),
+        (B::TaqConcat, [q1, q2]) => Ok(taq_concat(q1, q2)),
+        (B::TaqUncons, [q]) => taq_uncons(q),
         (op, _) => Err(format!("str builtin {}: wrong args", op.name())),
     }
 }

@@ -1,33 +1,16 @@
 //! Hover types for the names inside a definition.
 //!
-//! A reader looking at `fn row(gap : Int, children : List(Pict))` wants to know
-//! what `gap` is where it is *used*, not only where it is declared, and the
-//! signature two lines up answers that only for the simplest bodies. The
-//! typechecker already knows: it stamps every expression node with an identity and
-//! records the zonked type against it, which is what `prism dump typespans` and
-//! the book's typed tooltips read.
+//! The typechecker records a zonked type for each expression identity. This
+//! module maps those types to the names in each definition's source.
 //!
-//! This joins the same two tables — a node's span from the AST, its type from the
-//! checked facts — for every module rather than only the entry one, and rebases
-//! the spans onto each definition's own source. It costs no extra pass: the index's
-//! own elaboration asks for the type strings (`FrontRequest::IdentityTooltips`),
-//! which only fills side tables, so the Core every address is taken over is
-//! byte-identical to the one without them.
+//! Spans come from the AST and types from checked facts. The index requests these
+//! side tables with `FrontRequest::IdentityTooltips`; Core remains unchanged.
 //!
-//! Names only, deliberately: the variables a body mentions and the binders a
-//! pattern introduces. Every subterm has a type, and emitting all of them would
-//! multiply the payload and nest spans inside each other — the whole
-//! `Row(gap, children)` contains `gap` — while a reader hovering a body is asking
-//! about the names in it. Names also cannot overlap, which keeps the consumer's
-//! painting a flat merge of intervals rather than a tree.
+//! Only variable uses and pattern binders are emitted. Their spans do not
+//! overlap, so consumers can merge them as flat intervals.
 //!
-//! A pattern binder costs one thing extra. `y` in `Cons(y, rest)` is a `Pattern`,
-//! not an expression, and identity is what the type tables are keyed by — so
-//! `desugar::ids` stamps arm patterns alongside the expressions around them, and
-//! `check_pat` records each binder's type where it already computes it. Over the
-//! standard library that is 1,786 further names for 14 kB, the payload growing far
-//! more slowly than the span count because a binder's type is nearly always one
-//! the table already holds.
+//! Pattern binders receive identities in `desugar::ids`; `check_pat` records
+//! their types.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -50,9 +33,7 @@ type Header<'a> = (Vec<&'a str>, Vec<&'a Type>);
 
 /// Attach every definition's hover types, returning the table they index.
 ///
-/// Interned because the same type is written over and over — a handful of distinct
-/// types account for most occurrences — and a rendered `forall` repeated a thousand
-/// times would be most of what the payload weighs.
+/// Types are interned because many occurrences share the same rendering.
 pub(super) fn attach_types(defs: &mut [Def], production: &AddressableSurface) -> Vec<String> {
     let hir = crate::hir::build(&production.checked);
     let checked: BTreeMap<&str, &Type> = production
@@ -123,21 +104,8 @@ fn bare(ty: &Type) -> &Type {
 /// Every variable in an expression tree, with the type the checker synthesized.
 fn variables(e: &S<Expr<Core>>, hir: &crate::hir::CheckedHir<'_>, out: &mut Vec<Typed>) {
     if matches!(e.node, Expr::Var(_)) {
-        // The presentable string, not the raw node type. The latter still carries
-        // the checker's own inference variables, which are unreadable and, since
-        // every definition numbers them afresh, defeat interning entirely: dropping
-        // the filter below takes the standard library's table from 2036 entries to
-        // 2758. The fallback is the node's own term, and only when that resolved to
-        // something readable, since an unsolved existential prints as `?846`, which
-        // is worse than silence.
-        //
-        // An argument was long assumed to be missing here, on the reasoning that it
-        // is checked against its parameter rather than synthesized. It is not: a
-        // call reconciles head and arguments by unification, so both carry a type,
-        // and pushing the checked type from `check` was measured against the whole
-        // standard library and produced zero additional spans. What made the gap
-        // look real was a coordinate bug in `rebase_onto`, which dropped every body
-        // span whenever a prelude had been prepended.
+        // Prefer the presentable tooltip over the raw node type, which may contain
+        // unstable inference variables. The fallback omits unsolved existentials.
         out.extend(typed_at(e.id, e.span, hir));
     }
     // Patterns are not expressions, so the structural walk does not reach them.
@@ -180,17 +148,8 @@ fn typed_at(
     })
 }
 
-// Move a declaration's spans onto the declaration itself, subtracting where the
-// compiler placed it rather than where the index did.
-//
-// The two are not the same coordinate, and this is the whole difficulty. A body
-// node is reported at its position in the compiled source, which begins with the
-// prelude; the index holds the declaration at its position in its own file. The
-// difference between a node and its owner is the same in either, so subtracting
-// the owner here yields an offset both agree on — the same bargain `attach_refs`
-// makes, and it has to be made in the same coordinate system the spans came from.
-// Subtracting the index's own `Def::span` instead silently drops every body type
-// whenever a prelude was prepended, which is every single-file index.
+// Rebase compiler-source spans onto the declaration. Compiler coordinates include
+// the prepended prelude, while index coordinates refer to the module file.
 fn rebase_onto(spans: &mut Vec<Typed>, owner: usize) {
     spans.retain_mut(|t| {
         let (Some(start), Some(end)) = (t.start.checked_sub(owner), t.end.checked_sub(owner))
@@ -216,18 +175,8 @@ fn rebase(t: &Typed, def: &Def) -> Option<Typed> {
 
 /// The parameters at their binding site, which have no node of their own.
 ///
-/// These are rendered from the declaration's generalized scheme, so they use the
-/// same variable names as the signature above them. A body node agrees with them
-/// because the checker now renders every span of a declaration under that same
-/// scheme (`generalize_seeded`) rather than canonicalizing each node on its own:
-/// `map`'s `xs` read `List(b)` here and `List(a)` two lines down until it did.
-///
-/// A parameter is not an expression, so it carries neither an identity nor a span,
-/// and the header is exactly where a reader looks first. The names come from the
-/// declaration and their types from the domains of its checked type, so only the
-/// position is recovered from the text — the same bargain the member list makes,
-/// and safe for the same reason: only a token equal to a name this declaration
-/// actually binds is considered.
+/// Types come from the generalized scheme, and positions are recovered from the
+/// declaration text because parameters have no expression identity or span.
 fn header_names(def: &Def, header: Option<&Header<'_>>) -> Vec<Typed> {
     let Some((names, doms)) = header else {
         return Vec::new();

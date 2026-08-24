@@ -141,11 +141,13 @@ static void promotion_dag(void) {
     assert(is_cell(out) && !is_arena(out));
     assert(arena_free_deep(out));
     assert(op[PRISM_TAG_W] == 4 && op[PRISM_ARITY_W] == 4);
-    /* The shared arena child was reached by two paths; each got its own
-     * refcounted copy, structurally equal. */
+    /* The shared arena child was reached by two paths; promotion copies it
+     * once, both paths share the one copy, and the copy's count carries both
+     * owners. */
     long via_mid = ((long *)op[PRISM_HDR_WORDS])[PRISM_HDR_WORDS];
     long direct = op[PRISM_HDR_WORDS + 1];
-    assert(via_mid != direct && value_eq(via_mid, direct));
+    assert(via_mid == direct && value_eq(via_mid, direct));
+    assert(((long *)direct)[PRISM_RC_W] == 2);
     /* The ordinary middle cell was kept (not copied), fields rewritten. */
     assert(op[PRISM_HDR_WORDS] == rc_mid);
     assert(op[PRISM_HDR_WORDS + 3] == rc_leaf);

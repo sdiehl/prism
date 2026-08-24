@@ -1,0 +1,9 @@
+effect Cell(a)
+  write(a) : Unit
+
+fn main() =
+  with h <- handler
+    write(_value) resume k => k(())
+    return r => r
+  let _first = h.write(1)
+  h.write("wrong")

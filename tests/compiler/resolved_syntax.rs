@@ -12,17 +12,35 @@
 // The round-trip and traversal oracles run the committed harness
 // `tests/fixtures/syntax/roundtrip.pr` through the interpreter, reading only the
 // artifact bytes: no source file or compiler state is consulted, so those gates
-// are a pure function of the golden and stay independent of the live exporter
-// and the compiler version. The join gate is the one exception: it dumps the
-// live `prism-tc-facts-v1` fact table for each stem and checks that every leaf
-// of the resolved body carries a fact under the same NodeId. That table is
-// sparse (only a node the checker resolved, typed, or gave evidence to appears,
-// so an interior let or match may be absent), but a leaf is always a settled
-// reference or literal, so the leaf join is total, and diffing it against the
-// live checker also proves the committed ids are the identities the current
-// compiler assigns.
+// are a pure function of the golden and stay independent of the live exporter.
+// They are decoder oracles, and a golden serves them for as long as its schema
+// holds.
+//
+// The join gate is live on both sides. It dumps this compiler's resolved tree
+// and its `prism-tc-facts-v1` fact table for the same stem, and checks that
+// every leaf of the resolved body carries a fact under the same NodeId. That
+// table is sparse (only a node the checker resolved, typed, or gave evidence to
+// appears, so an interior let or match may be absent), but a leaf is always a
+// settled reference or literal, so the leaf join is total.
+//
+// Both sides are live on purpose. Joining a committed tree against a live table
+// tests something weaker than it appears to: the exported ids of a fixture's
+// own functions are assigned after the prelude's, so any change to the standard
+// library shifts them all, and because the fact table is dense a shifted leaf
+// usually still lands on some unrelated node's fact. The gate then passes by
+// coincidence and reports agreement between two seams that have drifted apart.
+// The stale goldens this replaced had drifted by thirteen ids and still passed,
+// until a shift happened to land twelve leaves on the table's sparse gaps.
+// Live-versus-live cannot pass that way, and it stays true across a stdlib edit
+// without a reseat, since the question is whether the two exporters agree now.
+//
+// What the goldens still owe is their declared compiler version, checked below.
+// A golden that outlives a release is a decoder oracle for bytes this compiler
+// no longer emits, which is exactly when a silently added field would go
+// unnoticed. Reseat them with `PRISM_ACCEPT_RESOLVED_FIXTURES=1`.
 
 use std::collections::HashSet;
+use std::env;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -37,6 +55,9 @@ const HARNESS: &str = "roundtrip.pr";
 const ARTIFACT: &str = "resolved-syntax";
 // The checker's fact-table seam the resolved leaves are joined against.
 const FACTS_PHASE: &str = "tc-facts";
+// Rewrites the committed goldens from the live exporter, for a reviewed
+// boundary change or a release version bump.
+const ACCEPT: &str = "PRISM_ACCEPT_RESOLVED_FIXTURES";
 
 // Every resolved-syntax corpus stem, kept sorted. Each is a well-typed,
 // self-contained fixture whose whole-program export is exactly its own
@@ -137,18 +158,25 @@ fn leaf_ids(node: &Value, out: &mut Vec<i64>) {
     }
 }
 
-// The set of NodeId keys the live checker records a fact under for one stem.
-// Generated exactly as the resolved golden was (the bare stem source under the
-// prelude, resolved against the same roots), so the two seams' NodeId
-// identities coincide and the join is meaningful.
-fn tc_facts_ids(stem: &str) -> HashSet<i64> {
+// One phase dumped for a stem by this compiler: the bare stem source under the
+// prelude, resolved against the fixture roots. Both sides of the join are
+// produced this way, from the same source through the same roots, so the two
+// seams' NodeId identities are comparable by construction.
+fn dump_stem(stem: &str, phase: &str) -> String {
     let src = fs::read_to_string(fixture_dir().join(format!("{stem}.pr")))
         .unwrap_or_else(|e| panic!("{stem}: source: {e}"));
-    let dump = dump_at(FACTS_PHASE, &with_prelude(&src), &fixture_dir())
-        .unwrap_or_else(|e| panic!("{stem}.{FACTS_PHASE}: dump: {e}"));
-    let doc: Value =
-        serde_json::from_str(&dump).unwrap_or_else(|e| panic!("{stem}.{FACTS_PHASE}: JSON: {e}"));
-    doc["nodes"]
+    dump_at(phase, &with_prelude(&src), &fixture_dir())
+        .unwrap_or_else(|e| panic!("{stem}.{phase}: dump: {e}"))
+}
+
+fn dump_stem_json(stem: &str, phase: &str) -> Value {
+    serde_json::from_str(&dump_stem(stem, phase))
+        .unwrap_or_else(|e| panic!("{stem}.{phase}: JSON: {e}"))
+}
+
+// The set of NodeId keys the live checker records a fact under for one stem.
+fn tc_facts_ids(stem: &str) -> HashSet<i64> {
+    dump_stem_json(stem, FACTS_PHASE)["nodes"]
         .as_object()
         .unwrap_or_else(|| panic!("{stem}.{FACTS_PHASE}: nodes object"))
         .keys()
@@ -156,11 +184,13 @@ fn tc_facts_ids(stem: &str) -> HashSet<i64> {
         .collect()
 }
 
-// The cross-seam join: every leaf of the resolved body carries a fact in the
-// live checker's table under the same NodeId, so a Prism consumer can hang the
-// type and resolution of each reference off the traversed tree by id.
+// The cross-seam join: every leaf of this compiler's resolved body carries a
+// fact in its own checker's table under the same NodeId, so a Prism consumer
+// can hang the type and resolution of each reference off the traversed tree by
+// id. Both dumps are live; see the header for why a committed tree here would
+// make the gate pass on coincidence.
 fn assert_stem_join(stem: &str) {
-    let doc: Value = serde_json::from_str(&read_golden(stem)).expect("golden JSON");
+    let doc = dump_stem_json(stem, ARTIFACT);
     let mut leaves = Vec::new();
     for f in doc["functions"].as_array().expect("functions") {
         leaf_ids(&f["body"], &mut leaves);
@@ -194,6 +224,36 @@ stem_tests! {
     resolved_roundtrip_decls, resolved_traversal_decls, resolved_join_decls => "decls",
     resolved_roundtrip_patterns, resolved_traversal_patterns, resolved_join_patterns => "patterns",
     resolved_roundtrip_stable, resolved_traversal_stable, resolved_join_stable => "stable",
+}
+
+// Every positive golden was emitted by this compiler. The round trip and the
+// traversal read the golden and never the compiler, so without this a golden
+// outlives the exporter that wrote it and keeps proving the decoder handles
+// bytes nothing emits any more. Checking the declared version is the cheap
+// half of that: it catches the release bump, which is when the drift starts.
+// Regenerate with the accept env, reviewing the diff like a snapshot.
+#[test]
+fn resolved_goldens_come_from_this_compiler() {
+    let accept = env::var(ACCEPT).is_ok();
+    let mut stale = Vec::new();
+    for stem in STEMS {
+        if accept {
+            let dump = dump_stem(stem, ARTIFACT);
+            fs::write(golden_path(stem), format!("{dump}\n")).expect("rewrite golden");
+            continue;
+        }
+        let doc: Value = serde_json::from_str(&read_golden(stem)).expect("golden JSON");
+        let found = doc["compiler"].as_str().unwrap_or_default().to_owned();
+        if found != env!("CARGO_PKG_VERSION") {
+            stale.push(format!("{stem}: {found}"));
+        }
+    }
+    assert!(
+        stale.is_empty(),
+        "resolved-syntax goldens predate this compiler ({}); regenerate with {ACCEPT}=1: {}",
+        env!("CARGO_PKG_VERSION"),
+        stale.join(", ")
+    );
 }
 
 // The static stem list matches the fixture directory exactly, so adding a

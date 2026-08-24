@@ -13,11 +13,11 @@ use super::typed::{
     TypedCore, VerifyEnv,
 };
 use super::{verify_typed_core, CoreFnSig};
-use crate::hir::{self, CheckedHir, NodeRes};
+use crate::hir::{self, CheckedHir, NodeFacts, NodeRes};
 use crate::types::ty::EffRow;
 use crate::types::{
-    infer_expr_env, Checked, CtorInfo, Dict, Env, Type, CONS, DIV_CLASS, EQ_CLASS, LIST, NIL,
-    NUM_CLASS, ORD_CLASS, SHOW_CLASS,
+    infer_expr_env, Checked, CtorInfo, Dict, Env, NominalRepr, Type, CONS, DIV_CLASS, EQ_CLASS,
+    LIST, NIL, NUM_CLASS, ORD_CLASS, SHOW_CLASS,
 };
 use crate::wired::Indexable;
 use prism_common::fresh::Fresh;
@@ -48,9 +48,9 @@ struct Elab<'a> {
     // than calling, so a constant pushes no frame.
     consts: BTreeMap<String, &'a S<Expr<CorePhase>>>,
     checked: &'a Checked,
-    // The checked HIR over `checked`: the only view of its per-node resolution
-    // facts. Direct side-table lookups for that family are excluded; the
-    // fallbacks below serve only the REPL's re-inferred (non-strict) ids.
+    // The checked HIR: the only view of per-node semantic facts. Whole programs
+    // use `checked`'s facts; re-inferred REPL expressions supply a complete,
+    // independent fact artifact so colliding numeric ids cannot fall through.
     hir: CheckedHir<'a>,
     effect_ops: BTreeSet<String>,
     // True when the `Output` capability is in scope (the prelude declares it), so
@@ -60,8 +60,7 @@ struct Elab<'a> {
     show_fns: Vec<CoreFn>,
     show_sigs: BTreeMap<Sym, CoreFnSig>,
     show_seen: BTreeSet<String>,
-    // True when `dicts` and the node tables come from the same check() pass.
-    // REPL re-inference assigns fresh ids, so id-keyed integrity checks are off.
+    // True when the expression and every HIR fact came from the same check pass.
     strict: bool,
 }
 
@@ -216,31 +215,30 @@ impl Elab<'_> {
         self.ctors.get(name)
     }
 
-    // Name-based field resolution for REPL re-elaboration, used only when the
-    // HIR records no resolution fact (the REPL's re-inferred ids miss). Returns the unique (ctor, index, arity)
-    // that declares `field`. A field that no record declares, or that several
-    // distinct records declare, cannot be resolved by name alone: pick neither
-    // and surface a diagnostic rather than silently extracting the wrong field.
-    fn field_res_fallback(&self, field: &str) -> Result<(&str, usize, usize), Error> {
-        let mut hit: Option<(&str, usize, usize)> = None;
-        for (ctor_name, info) in self.ctors {
-            if let Some(fi) = info.fields.iter().position(|f| f.as_str() == field) {
-                if hit.is_some() {
-                    return Err(Error::ResolveCommand(format!(
-                        "field `{field}` is declared by more than one record; \
-                         it cannot be resolved by name alone"
-                    )));
-                }
-                hit = Some((ctor_name, fi, info.args.len()));
-            }
-        }
-        hit.ok_or_else(|| Error::ResolveCommand(format!("no record has field `{field}`")))
-    }
-
     fn extract_field_of(scrut: Value, ctor: &str, fi: usize, n: usize, out: String) -> Comp {
         let binders = (0..n).map(|j| (j == fi).then(|| Sym::from(&out))).collect();
         let pat = CorePat::Ctor(Sym::from(ctor), binders);
         Comp::Case(scrut, vec![(pat, Comp::Return(Value::Var(out.into())))])
+    }
+
+    fn field_access(
+        &mut self,
+        id: NodeId,
+        recv: &S<Expr<CorePhase>>,
+        field: &str,
+        locals: &Locals,
+    ) -> Result<Comp, Error> {
+        let ce = self.elab(recv, locals)?;
+        let ve = self.fresh();
+        let vf = self.fresh();
+        let Some(NodeRes::Field(ctor, fi, n)) = self.hir.res(id) else {
+            return Err(Error::InternalInvariant(format!(
+                "missing checked resolution for field `{field}` at node {}",
+                id.0
+            )));
+        };
+        let extract = Self::extract_field_of(Value::Var(ve.clone().into()), ctor, *fi, *n, vf);
+        Ok(Comp::Bind(Box::new(ce), ve.into(), Box::new(extract)))
     }
 
     // Project the `fi`-th component out of a positional product (an unboxed record
@@ -294,29 +292,6 @@ impl Elab<'_> {
         Ok(Comp::Bind(Box::new(ce), ve.into(), Box::new(extract)))
     }
 
-    // Name-based chain resolution for REPL re-elaboration, mirroring
-    // `field_index_for`. Checked programs carry exact chains in the HIR.
-    fn path_chain_fallback(&self, path: &[PathStep<CorePhase>]) -> Result<Chain, Error> {
-        path.iter()
-            .map(|seg| {
-                let PathStep::Field(seg) = seg else {
-                    return Err(Error::InternalInvariant(
-                        "optic path step survived desugaring".into(),
-                    ));
-                };
-                self.ctors
-                    .iter()
-                    .find_map(|(cn, info)| {
-                        let fi = info.fields.iter().position(|f| f.as_str() == seg)?;
-                        Some((cn.clone(), fi, info.args.len()))
-                    })
-                    .ok_or_else(|| {
-                        Error::InternalInvariant(format!("no constructor has field `{seg}`"))
-                    })
-            })
-            .collect()
-    }
-
     // Nested rebuild along each path: one single-arm Case per level, each arm
     // ending in Return(Ctor), the exact shape the reuse analysis rewrites to
     // in-place mutation when the spine is uniquely owned.
@@ -327,13 +302,13 @@ impl Elab<'_> {
         ups: &[(Vec<PathStep<CorePhase>>, PathOp<CorePhase>)],
         locals: &Locals,
     ) -> Result<Comp, Error> {
-        let chains: Vec<Chain> = match self.hir.res(id) {
-            Some(NodeRes::Paths(c)) => c.clone(),
-            _ => ups
-                .iter()
-                .map(|(p, _)| self.path_chain_fallback(p))
-                .collect::<Result<_, _>>()?,
+        let Some(NodeRes::Paths(chains)) = self.hir.res(id) else {
+            return Err(Error::InternalInvariant(format!(
+                "missing checked update-path resolution for node {}",
+                id.0
+            )));
         };
+        let chains = chains.clone();
         let base_comp = self.elab(base_expr, locals)?;
         let bv = self.fresh();
         let mut binds = Vec::new();
@@ -1029,18 +1004,7 @@ impl Elab<'_> {
                 }
                 acc
             }
-            Expr::FieldAccess(recv, field) => {
-                let ce = self.elab(recv, locals)?;
-                let ve = self.fresh();
-                let vf = self.fresh();
-                let extract = if let Some(NodeRes::Field(ctor, fi, n)) = self.hir.res(e.id) {
-                    Self::extract_field_of(Value::Var(ve.clone().into()), ctor, *fi, *n, vf)
-                } else {
-                    let (ctor, fi, n) = self.field_res_fallback(field)?;
-                    Self::extract_field_of(Value::Var(ve.clone().into()), ctor, fi, n, vf)
-                };
-                Comp::Bind(Box::new(ce), ve.into(), Box::new(extract))
-            }
+            Expr::FieldAccess(recv, field) => self.field_access(e.id, recv, field, locals)?,
             Expr::RecordCreate(ctor_name, field_exprs) => {
                 if let Some(info) = self.ctors.get(ctor_name).cloned() {
                     let n_fields = info.args.len();
@@ -1804,8 +1768,13 @@ pub fn elaborate_typed(
     for constructor in super::opt::newtype_ctors(prog) {
         verify_env.mark_newtype_constructor(constructor);
     }
-    let typed = build_typed(raw, &signatures, &verify_env)?;
-    verify_typed_core(&typed, &verify_env).map_err(typed_verification_error)?;
+    for (name, info) in &checked.data {
+        if info.repr == NominalRepr::BoxedCell {
+            verify_env.mark_boxed_nominal(Sym::from(name.as_str()));
+        }
+    }
+    let typed = verify_typed_core(build_typed(raw, &signatures, &verify_env)?, &verify_env)
+        .map_err(typed_verification_error)?;
     let erased = typed.clone().erase();
     if erased != compatibility {
         return Err(TypedCoreErasureFailure.into());
@@ -1825,7 +1794,7 @@ pub fn typed_verification_error(violations: Vec<super::typed::CoreViolation>) ->
             .map(|violation| TypedCoreViolation {
                 function: violation.function().to_string(),
                 path: violation.path().into(),
-                detail: violation.message().into(),
+                detail: violation.message(),
             })
             .collect(),
     }
@@ -1878,14 +1847,14 @@ pub fn konst_fns(prog: &Program<CorePhase>, checked: &Checked) -> Result<Vec<Cor
 /// # Errors
 /// Fails if the expression references a name or dictionary the elaborator cannot
 /// resolve against `checked`.
-pub fn elaborate_expr(
+pub(crate) fn elaborate_expr(
     checked: &Checked,
     e: &S<Expr<CorePhase>>,
     arity: &BTreeMap<String, usize>,
-    dicts: Option<&crate::types::DictTable>,
+    facts: Option<&NodeFacts>,
     consts: &BTreeMap<String, S<Expr<CorePhase>>>,
 ) -> Result<Comp, Error> {
-    elaborate_expr_defs(checked, e, arity, dicts, consts).map(|(comp, _)| comp)
+    elaborate_expr_defs(checked, e, arity, facts, consts).map(|(comp, _)| comp)
 }
 
 /// Like [`elaborate_expr`], but also returns the definitions the elaborator
@@ -1899,11 +1868,11 @@ pub fn elaborate_expr(
 /// # Errors
 /// Fails if the expression references a name or dictionary the elaborator cannot
 /// resolve against `checked`.
-pub fn elaborate_expr_defs(
+pub(crate) fn elaborate_expr_defs(
     checked: &Checked,
     e: &S<Expr<CorePhase>>,
     arity: &BTreeMap<String, usize>,
-    dicts: Option<&crate::types::DictTable>,
+    facts: Option<&NodeFacts>,
     consts: &BTreeMap<String, S<Expr<CorePhase>>>,
 ) -> Result<(Comp, Vec<CoreFn>), Error> {
     let effect_ops: BTreeSet<String> = checked.eff_ops.keys().cloned().collect();
@@ -1913,15 +1882,15 @@ pub fn elaborate_expr_defs(
         arity: arity.clone(),
         consts: consts.iter().map(|(k, v)| (k.clone(), v)).collect(),
         checked,
-        // A re-inferred expression (the REPL) carries its own evidence under
-        // fresh ids; a konst body shares the program's facts.
-        hir: dicts.map_or_else(|| hir::build(checked), |d| hir::build_for_expr(checked, d)),
+        // A re-inferred expression carries its own complete fact artifact under
+        // fresh ids; a konst body shares the checked program's facts.
+        hir: facts.map_or_else(|| hir::build(checked), |f| hir::build_for_expr(checked, f)),
         route_output: effect_ops.contains(names::OUTPUT_PRINT_OP) && checked_routes_output(checked),
         effect_ops,
         show_fns: Vec::new(),
         show_sigs: BTreeMap::new(),
         show_seen: BTreeSet::new(),
-        strict: false,
+        strict: true,
     };
     let comp = elab.elab(e, &Locals::new())?;
     Ok((comp, elab.show_fns))

@@ -700,7 +700,7 @@ fn main() : Int = first(MkPair(1, 2))",
     Explanation {
         code: "E4007",
         title: "no such field on the type",
-        prose: "A field read `x.f` needs the type of `x` to declare a field `f`. Note that a \
+        prose: "A field read `x.f` needs the type of `x` to declare a field `f`. A \
                 bare `.name` is always a field read and never a zero-argument call: `p.norm()` \
                 calls `norm`, while `p.norm` looks for a field named `norm`.",
         example: "type Point = Point { x: Int, y: Int }
@@ -712,16 +712,15 @@ fn main() : Int =
     },
     Explanation {
         code: "E4008",
-        title: "field has conflicting types across constructors",
-        prose: "Constructors of one data type may share a field name, and a read `x.f` then \
-                works whichever constructor built the value. That requires the shared field to \
-                have one type. Here two constructors give the same name different types, so \
-                the read has no single type to be given.",
+        title: "legacy conflicting field types",
+        prose: "Before v0.20, constructors of one datatype could not reuse a field name at\n\
+                different types. Constructor-refined patterns now type each field from its own\n\
+                arm, while an unrefined `x.f` projection is rejected separately as E1023.\n\
+                E4008 remains reserved so its published identity is never reused.",
         example: "type Shape = Circle { size: Int } | Square { size: String }
 
 fn main() : Int = 0",
-        fix: "Give the shared field the same type in every constructor, or rename one of \
-              them and read it after matching on the constructor.",
+        fix: "Upgrade to v0.20 or later and read the field after matching on its constructor.",
     },
     Explanation {
         code: "E4009",

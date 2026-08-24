@@ -6,6 +6,7 @@ use super::super::cbpv::{Comp, Core, Value};
 use super::super::fv::{comp as freev, pat_vars};
 #[cfg(debug_assertions)]
 use super::super::traverse::Visit;
+use super::imbalance::{Imbalance, TokenFault};
 use super::{borrow_mask, borrowed_at, borrowed_call_vars, count_val, Set, Sigs};
 
 // Independent verifier: simulate the inserted ops as a linear token machine. Each
@@ -14,8 +15,9 @@ use super::{borrow_mask, borrowed_at, borrowed_call_vars, count_val, Set, Sigs};
 // reach zero before leaving scope, and the two sides of a branch must agree. A
 // pass that under-dups, over-drops, or unbalances a branch fails here.
 /// # Errors
-/// Fails when refcount tokens are unbalanced.
-pub fn balanced(core: &Core, sigs: &Sigs) -> Result<(), String> {
+/// The token fault that broke the simulation, attributed to the declaration it
+/// was found in.
+pub fn balanced(core: &Core, sigs: &Sigs) -> Result<(), Imbalance> {
     // This runs only on effect-lowered Core (the compiled pipeline). `sim` treats
     // a stray `Handle`/`Do`/`Mask` as a no-op, which would silently mask an RC
     // imbalance in its clauses, so assert lowering really ran first rather than
@@ -43,10 +45,17 @@ pub fn balanced(core: &Core, sigs: &Sigs) -> Result<(), String> {
             .filter(|(index, _)| borrowed_at(mask, *index))
             .map(|(_, param)| *param)
             .collect();
-        sim(&f.body, &mut env, sigs, &external).map_err(|e| format!("{}: {e}", f.name))?;
+        sim(&f.body, &mut env, sigs, &external)
+            .map_err(|fault| Imbalance::in_function(fault, f.name))?;
         for (v, n) in &env {
             if v.as_str() != "_" && *n != 0 {
-                return Err(format!("{}: {v} ends with {n} tokens", f.name));
+                return Err(Imbalance::in_function(
+                    TokenFault::ScopeExit {
+                        var: *v,
+                        tokens: *n,
+                    },
+                    f.name,
+                ));
             }
         }
     }
@@ -71,7 +80,7 @@ fn effect_free(c: &Comp) -> bool {
     s.0
 }
 
-fn use_val(v: &Value, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), String> {
+fn use_val(v: &Value, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), TokenFault> {
     let mut counts = BTreeMap::new();
     count_val(v, &mut counts);
     for (x, k) in counts {
@@ -84,7 +93,7 @@ fn use_val(v: &Value, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), S
 // never reaches them. Re-run the simulation on each thunk body: lambda params
 // start owned (one token), captures start borrowed (zero, so a use without a
 // preceding dup drives below zero and fails). Catches an under-dup'd capture.
-fn verify_thunks(v: &Value, sigs: &Sigs) -> Result<(), String> {
+fn verify_thunks(v: &Value, sigs: &Sigs) -> Result<(), TokenFault> {
     match v {
         Value::Thunk(c) => {
             let (params, body): (Set, &Comp) = match &**c {
@@ -100,7 +109,10 @@ fn verify_thunks(v: &Value, sigs: &Sigs) -> Result<(), String> {
             sim(body, &mut env, sigs, &external)?;
             for (x, n) in &env {
                 if x.as_str() != "_" && *n != 0 {
-                    return Err(format!("thunk capture {x} ends with {n} tokens"));
+                    return Err(TokenFault::ThunkCapture {
+                        var: *x,
+                        tokens: *n,
+                    });
                 }
             }
             Ok(())
@@ -113,19 +125,24 @@ fn verify_thunks(v: &Value, sigs: &Sigs) -> Result<(), String> {
     }
 }
 
-fn consume(x: Sym, k: i64, env: &mut BTreeMap<Sym, i64>) -> Result<(), String> {
+fn consume(x: Sym, k: i64, env: &mut BTreeMap<Sym, i64>) -> Result<(), TokenFault> {
     if x.as_str() == "_" {
         return Ok(());
     }
     let e = env.entry(x).or_insert(0);
     *e -= k;
     if *e < 0 {
-        return Err(format!("{x} consumed below zero"));
+        return Err(TokenFault::BelowZero { var: x });
     }
     Ok(())
 }
 
-fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs, external: &Set) -> Result<(), String> {
+fn sim(
+    c: &Comp,
+    env: &mut BTreeMap<Sym, i64>,
+    sigs: &Sigs,
+    external: &Set,
+) -> Result<(), TokenFault> {
     match c {
         Comp::Dup(Value::Var(x)) => {
             *env.entry(*x).or_insert(0) += 1;
@@ -133,6 +150,20 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs, external: &Set) -> R
         }
         Comp::Drop(Value::Var(x)) => consume(*x, 1, env),
         Comp::Bind(m, x, n) => {
+            // A bind whose right side merely renames a loaned reference extends
+            // the loan instead of spending a token: the binder reads the same
+            // cell the loan keeps live, so it starts with no token of its own
+            // and joins the loaned set for the rest of the chain. The inserter
+            // applies the identical syntactic rule, so a loaned rename never
+            // carries a retain for this simulation to spend.
+            if let Comp::Return(Value::Var(v)) = &**m {
+                if external.contains(v) && x.as_str() != "_" {
+                    env.insert(*x, 0);
+                    let mut nested_external = external.clone();
+                    nested_external.insert(*x);
+                    return sim(n, env, sigs, &nested_external);
+                }
+            }
             sim(m, env, sigs, external)?;
             if x.as_str() != "_" {
                 env.insert(*x, 1);
@@ -148,7 +179,12 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs, external: &Set) -> R
             sim(e, &mut ee, sigs, external)?;
             merge(&et, &ee, env)
         }
-        Comp::Case(_, arms) => {
+        Comp::Case(scrut, arms) => {
+            // Matching on a loaned cell reads it without spending a token: the
+            // cell drops nothing in the arms, and the pattern binders are loans
+            // on its fields (kept live by the same owner that keeps the parent
+            // live), so they join the loaned set instead of shadowing it.
+            let loaned_scrutinee = matches!(scrut, Value::Var(v) if external.contains(v));
             let mut merged: Option<BTreeMap<Sym, i64>> = None;
             for (p, body) in arms {
                 let mut ea = env.clone();
@@ -159,12 +195,16 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs, external: &Set) -> R
                 }
                 let mut arm_external = external.clone();
                 for var in &pv {
-                    arm_external.remove(var);
+                    if loaned_scrutinee {
+                        arm_external.insert(*var);
+                    } else {
+                        arm_external.remove(var);
+                    }
                 }
                 sim(body, &mut ea, sigs, &arm_external)?;
                 for v in &pv {
                     if ea.get(v).copied().unwrap_or(0) != 0 {
-                        return Err(format!("field {v} leaks in arm"));
+                        return Err(TokenFault::ArmLeak { field: *v });
                     }
                     ea.remove(v);
                 }
@@ -232,9 +272,7 @@ fn sim(c: &Comp, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs, external: &Set) -> R
                 let spent =
                     i64::try_from(consumed.get(&var).copied().unwrap_or(0)).unwrap_or(i64::MAX);
                 if !external.contains(&var) && live - spent < 1 {
-                    return Err(format!(
-                        "borrowed call argument {var} is not live through call to {g}"
-                    ));
+                    return Err(TokenFault::BorrowNotLive { var, callee: *g });
                 }
             }
             for (i, a) in args.iter().enumerate() {
@@ -269,7 +307,7 @@ fn merge(
     a: &BTreeMap<Sym, i64>,
     b: &BTreeMap<Sym, i64>,
     out: &mut BTreeMap<Sym, i64>,
-) -> Result<(), String> {
+) -> Result<(), TokenFault> {
     let keys: Set = a.keys().chain(b.keys()).copied().collect();
     for k in keys {
         let (va, vb) = (
@@ -277,7 +315,11 @@ fn merge(
             b.get(&k).copied().unwrap_or(0),
         );
         if va != vb {
-            return Err(format!("branch disagreement on {k}: {va} vs {vb}"));
+            return Err(TokenFault::BranchDisagreement {
+                var: k,
+                left: va,
+                right: vb,
+            });
         }
         out.insert(k, va);
     }
@@ -308,6 +350,45 @@ mod tests {
     }
 
     #[test]
+    fn borrowed_static_str_needs_no_retained_token() {
+        let observe = Sym::new("observe_str");
+        let core = Core {
+            fns: vec![CoreFn {
+                name: Sym::new("caller_str"),
+                params: Vec::new(),
+                body: Comp::Call(observe, vec![Value::Str("static".into())]),
+                dict_arity: 0,
+            }],
+        };
+        let sigs = iter::once((observe, vec![true])).collect();
+
+        assert_eq!(balanced(&core, &sigs), Ok(()));
+    }
+
+    #[test]
+    fn borrowed_boxed_scalar_must_be_let_bound() {
+        let observe = Sym::new("observe_float");
+        let core = Core {
+            fns: vec![CoreFn {
+                name: Sym::new("caller_float"),
+                params: Vec::new(),
+                body: Comp::Call(observe, vec![Value::Float(2.5)]),
+                dict_arity: 0,
+            }],
+        };
+        let sigs = iter::once((observe, vec![true])).collect();
+
+        let error = balanced(&core, &sigs).expect_err("a boxed literal loan needs an owner");
+        assert_eq!(
+            error.fault,
+            TokenFault::BorrowedArgNotBound {
+                callee: observe,
+                arg: Box::new(Value::Float(2.5)),
+            }
+        );
+    }
+
+    #[test]
     fn borrowed_heap_temporary_must_be_let_bound() {
         let observe = Sym::new("observe_heap");
         let core = Core {
@@ -324,7 +405,13 @@ mod tests {
         let sigs = iter::once((observe, vec![true])).collect();
 
         let error = balanced(&core, &sigs).expect_err("heap loan needs a caller-owned token");
-        assert!(error.contains("not a let-bound variable"), "{error}");
+        assert_eq!(
+            error.fault,
+            TokenFault::BorrowedArgNotBound {
+                callee: observe,
+                arg: Box::new(Value::Ctor("Box".into(), 0, vec![Value::Int(42)])),
+            }
+        );
     }
 
     #[test]
@@ -347,7 +434,13 @@ mod tests {
         let sigs = iter::once((observe, vec![true])).collect();
 
         let error = balanced(&core, &sigs).expect_err("pre-call drop must end the loan");
-        assert!(error.contains("borrowed call argument retained is not live"));
+        assert_eq!(
+            error.fault,
+            TokenFault::BorrowNotLive {
+                var: retained,
+                callee: observe,
+            }
+        );
     }
 
     #[test]
@@ -376,6 +469,12 @@ mod tests {
             .collect();
 
         let error = balanced(&core, &sigs).expect_err("inner binder owns its own loan");
-        assert!(error.contains("borrowed call argument borrowed is not live"));
+        assert_eq!(
+            error.fault,
+            TokenFault::BorrowNotLive {
+                var: borrowed,
+                callee: observe,
+            }
+        );
     }
 }

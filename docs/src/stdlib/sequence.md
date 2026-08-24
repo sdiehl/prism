@@ -13,7 +13,7 @@ type Step(a) = SDone | SMore(a, (Unit) -> Step(a))
 Seq(a)       = (Unit) -> Step(a)          -- read `Seq(a)` in the prose as this
 ```
 
-The step continuation is ordinary data, not an effect, so every combinator is a total pure function over `Step`. That is the whole reason this substrate exists: an earlier push design routed elements through a shared `Emit` effect, and a single `Emit(a)` label per scope made element-type changes, heterogeneous `zip`, and mixing two element types in one function unrepresentable. On pull `Step` the element type is a plain type parameter, so `map : Seq(a) -> Seq(b)` type-changes freely, `zip : (Seq(a), Seq(b)) -> Seq((a, b))` is genuinely heterogeneous, and a consumer's per-element function may perform any ambient effect (it runs directly, with no handler closing the row over it). Every combinator below exercises one of those, and the correctness corpus in `tests/cases/run` pins them on both backends.
+The step continuation is ordinary data, not an effect, so every combinator is a total pure function over `Step`. An earlier push design routed elements through a shared `Emit` effect, and a single `Emit(a)` label per scope made element-type changes, heterogeneous `zip`, and mixing two element types in one function unrepresentable. On pull `Step` the element type is a plain type parameter, so `map : Seq(a) -> Seq(b)` type-changes freely, `zip : (Seq(a), Seq(b)) -> Seq((a, b))` is genuinely heterogeneous, and a consumer's per-element function may perform any ambient effect (it runs directly, with no handler closing the row over it). Every combinator below exercises one of those, and the correctness corpus in `tests/cases/run` pins them on both backends.
 
 ## Effect-polymorphic consumers
 
@@ -147,8 +147,6 @@ Seq.to_list(Seq.take(Seq.repeat(7), 3))
 ```output
 [7, 7, 7]
 ```
-
-lint: allow(L0201)
 
 ### `unfold`
 
@@ -630,7 +628,7 @@ true
 
 ### `from_bytes`
 
-```prism,sig,h-7ffaa9c149d1567704ca207472aa7070127afe9b9317806c007aa28476c9fc2f
+```prism,sig,h-2026d625e34cd75b7dcaf35d8180221a9fa77da647eaefef58ff20fa0a01b8f6
 from_bytes : (Wire.Bytes) -> (Unit) -> Sequence.Step(Int)
 ```
 
@@ -638,7 +636,7 @@ The bytes of `bs` as a sequence of ints in `0..255`, in order.
 
 ### `to_bytes`
 
-```prism,sig,h-b83b6526cc5e8996f0a453657b790e633a5f86fe8cdc808b1c186d1e9e9ed614
+```prism,sig,h-56a305a63f45e02fb72be508b4245a70a1e5d2e9cfd74136bdca7080841a3da7
 to_bytes : ((Unit) -> Sequence.Step(Int)) -> Wire.Bytes
 ```
 

@@ -163,8 +163,7 @@ pub fn boids_run(steps: u32) -> String {
 }
 
 /// Run the boids swarm for `steps` steps and return the whole trajectory in
-/// FULL state: like [`boids_run`], but each boid is `x,y,vx,vy` (position and
-/// velocity), not just `x,y`.
+/// FULL state: like [`boids_run`], with each boid represented as `x,y,vx,vy`.
 ///
 /// The velocity is what a branching timeline needs: to fork at frame N and
 /// continue the run, the frontend perturbs that frame's full state and hands it
@@ -414,8 +413,8 @@ fn teleport_roots() -> Vec<Root> {
 /// The code-identity digest (namespace root) of the baked teleport program.
 ///
 /// Both tabs compute this from the same embedded source, so it is the hash the
-/// receiver checks an incoming envelope against; the demo shows it as the proof
-/// that teleport verifies code identity, not just moves bytes.
+/// receiver checks an incoming envelope against. This proves code identity during
+/// teleport.
 #[wasm_bindgen]
 #[must_use]
 pub fn teleport_bundle() -> String {
@@ -616,11 +615,12 @@ pub fn core_ir(src: &str) -> String {
     }
 }
 
-/// The checked-HIR fixture of the snippet: the versioned deterministic JSON the
-/// `dump hir` phase emits (schema `prism-hir-fixture-v2`), carrying the
-/// per-declaration schemes and effect rows plus the per-node checker facts
-/// (resolution, dictionary evidence, numeric lane, zonked type, and handler
-/// residual operations).
+/// The versioned checked-HIR fixture for the snippet.
+///
+/// This is the deterministic JSON emitted by `dump hir` (schema
+/// `prism-hir-fixture-v2`). It carries per-declaration schemes and effect rows,
+/// plus per-node resolution, dictionary, numeric-lane, zonked-type, and handler
+/// residual-operation facts.
 ///
 /// The prelude is prepended so snippets that reference it type-check; the
 /// browser strips the prelude declarations for display the same way the Core IR

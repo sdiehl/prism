@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/record_pattern_rest.pr
+---
+1
+2
+7
+2.5
+9
+3.5
+=> ()

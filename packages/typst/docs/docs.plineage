@@ -47,19 +47,7 @@
       }
     },
     {
-      "id": "prism-core-hash-v2:4931c120d0c4344e8eef963af5998fdfab85654549802f03ebff899ca1219d36",
-      "kind": "source-root",
-      "payload": {
-        "role": "source",
-        "name": null,
-        "origin": null,
-        "artifact_kind": "namespace",
-        "scheme": "prism-core-hash-v2",
-        "root": "4931c120d0c4344e8eef963af5998fdfab85654549802f03ebff899ca1219d36"
-      }
-    },
-    {
-      "id": "prism-core-hash-v2:b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb",
+      "id": "prism-core-hash-v2:a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851",
       "kind": "stdlib-root",
       "payload": {
         "role": "stdlib",
@@ -67,7 +55,19 @@
         "origin": null,
         "artifact_kind": "embedded-stdlib",
         "scheme": "prism-core-hash-v2",
-        "root": "b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb"
+        "root": "a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851"
+      }
+    },
+    {
+      "id": "prism-core-hash-v2:b7498ca8abf876779ff019969ae87bf0ca26a133057b3e11d8b377b24d234733",
+      "kind": "source-root",
+      "payload": {
+        "role": "source",
+        "name": null,
+        "origin": null,
+        "artifact_kind": "namespace",
+        "scheme": "prism-core-hash-v2",
+        "root": "b7498ca8abf876779ff019969ae87bf0ca26a133057b3e11d8b377b24d234733"
       }
     },
     {
@@ -114,32 +114,14 @@
       }
     },
     {
-      "id": "sha256:c889d7063f2a7f1c32af7e5e9551f9d68f64e047d371c3bc2b7ce8c727e23a05",
-      "kind": "doctest",
-      "payload": {
-        "location": "Typst (module)",
-        "output_scheme": "sha256",
-        "output_digest": "6f7529553b422f1abbcdbdf91c2cc04a52eb218e906e7aa4a04197c401e2bc5f"
-      }
-    },
-    {
-      "id": "sha256:d62b331733f25955c522475a64904d8155a8988375932b27017ef1e88069c9ff",
-      "kind": "doctest",
-      "payload": {
-        "location": "Typst.Markup (module)",
-        "output_scheme": "sha256",
-        "output_digest": "b0f161eaa2376047e1ab4b105e1418bfbf038a983a25d1bb735c84b3abafe61e"
-      }
-    },
-    {
-      "id": "sha256:ef87b07a3fa575fa0836d53030cbdef067402aa2073fda08c69d829ae08f60bf",
+      "id": "sha256:c4599ece34e777633f8b2698adc34bb5422587a1688aa3838fec8e8ec6341968",
       "kind": "compiler-identity",
       "payload": {
-        "fingerprint": "compiler=0.17.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=docs;source-root=prism-core-hash-v2:4931c120d0c4344e8eef963af5998fdfab85654549802f03ebff899ca1219d36;stdlib-root=prism-core-hash-v2:b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;erasures=true;native-effects=true;trampoline=true;fuse=false;rt-checks=false;native-kont-frames=false;",
+        "fingerprint": "compiler=0.19.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=docs;source-root=prism-core-hash-v2:b7498ca8abf876779ff019969ae87bf0ca26a133057b3e11d8b377b24d234733;stdlib-root=prism-core-hash-v2:a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;erasures=true;native-effects=true;trampoline=true;fuse=false;rt-checks=false;native-kont-frames=false;",
         "rows": [
           {
             "key": "compiler",
-            "value": "0.17.0"
+            "value": "0.19.0"
           },
           {
             "key": "hash-scheme",
@@ -155,11 +137,11 @@
           },
           {
             "key": "source-root",
-            "value": "prism-core-hash-v2:4931c120d0c4344e8eef963af5998fdfab85654549802f03ebff899ca1219d36"
+            "value": "prism-core-hash-v2:b7498ca8abf876779ff019969ae87bf0ca26a133057b3e11d8b377b24d234733"
           },
           {
             "key": "stdlib-root",
-            "value": "prism-core-hash-v2:b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb"
+            "value": "prism-core-hash-v2:a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851"
           },
           {
             "key": "opt",
@@ -211,6 +193,24 @@
           }
         ]
       }
+    },
+    {
+      "id": "sha256:c889d7063f2a7f1c32af7e5e9551f9d68f64e047d371c3bc2b7ce8c727e23a05",
+      "kind": "doctest",
+      "payload": {
+        "location": "Typst (module)",
+        "output_scheme": "sha256",
+        "output_digest": "6f7529553b422f1abbcdbdf91c2cc04a52eb218e906e7aa4a04197c401e2bc5f"
+      }
+    },
+    {
+      "id": "sha256:d62b331733f25955c522475a64904d8155a8988375932b27017ef1e88069c9ff",
+      "kind": "doctest",
+      "payload": {
+        "location": "Typst.Markup (module)",
+        "output_scheme": "sha256",
+        "output_digest": "b0f161eaa2376047e1ab4b105e1418bfbf038a983a25d1bb735c84b3abafe61e"
+      }
     }
   ],
   "edges": [
@@ -236,12 +236,12 @@
     },
     {
       "from": "sha256:828c4ec20ae71e6cc9569ad89492c00da250bd37858852f34b32e1339c410d8f",
-      "to": "prism-core-hash-v2:4931c120d0c4344e8eef963af5998fdfab85654549802f03ebff899ca1219d36",
+      "to": "prism-core-hash-v2:a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851",
       "kind": "input"
     },
     {
       "from": "sha256:828c4ec20ae71e6cc9569ad89492c00da250bd37858852f34b32e1339c410d8f",
-      "to": "prism-core-hash-v2:b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb",
+      "to": "prism-core-hash-v2:b7498ca8abf876779ff019969ae87bf0ca26a133057b3e11d8b377b24d234733",
       "kind": "input"
     },
     {
@@ -266,6 +266,11 @@
     },
     {
       "from": "sha256:828c4ec20ae71e6cc9569ad89492c00da250bd37858852f34b32e1339c410d8f",
+      "to": "sha256:c4599ece34e777633f8b2698adc34bb5422587a1688aa3838fec8e8ec6341968",
+      "kind": "identified-by"
+    },
+    {
+      "from": "sha256:828c4ec20ae71e6cc9569ad89492c00da250bd37858852f34b32e1339c410d8f",
       "to": "sha256:c889d7063f2a7f1c32af7e5e9551f9d68f64e047d371c3bc2b7ce8c727e23a05",
       "kind": "produced"
     },
@@ -273,11 +278,6 @@
       "from": "sha256:828c4ec20ae71e6cc9569ad89492c00da250bd37858852f34b32e1339c410d8f",
       "to": "sha256:d62b331733f25955c522475a64904d8155a8988375932b27017ef1e88069c9ff",
       "kind": "produced"
-    },
-    {
-      "from": "sha256:828c4ec20ae71e6cc9569ad89492c00da250bd37858852f34b32e1339c410d8f",
-      "to": "sha256:ef87b07a3fa575fa0836d53030cbdef067402aa2073fda08c69d829ae08f60bf",
-      "kind": "identified-by"
     }
   ]
 }

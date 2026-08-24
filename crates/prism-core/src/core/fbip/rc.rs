@@ -6,6 +6,7 @@ use prism_syntax::names;
 
 use super::super::cbpv::{Comp, Core, CoreFn, CorePat, HandleOp, Value};
 use super::super::fv::{comp as freev, pat_vars};
+use super::super::traverse::Rewrite;
 use super::{borrow_mask, borrowed_at, borrowed_call_vars, count_val, Set, Sigs};
 
 #[must_use]
@@ -82,6 +83,13 @@ fn rc(c: &Comp, owned: &Set, borrowed: &Set, sigs: &Sigs, fresh: &mut Fresh) -> 
             let fm = freev(m);
             let mut fnn = freev(n);
             fnn.remove(x);
+            // A bind that merely renames a loaned reference extends the loan:
+            // the binder reads the same cell the loan already keeps live, so
+            // it takes no reference of its own and joins the borrowed set for
+            // the rest of the chain. The token simulation in `balanced` keys
+            // on the identical syntactic shape.
+            let alias = x.as_str() != "_"
+                && matches!(&**m, Comp::Return(Value::Var(v)) if borrowed.contains(v));
             let owned_m: Set = owned.intersection(&fm).copied().collect();
             let owned_n: Set = owned.intersection(&fnn).copied().collect();
             let shared = by_name(owned_m.intersection(&owned_n).copied());
@@ -93,10 +101,19 @@ fn rc(c: &Comp, owned: &Set, borrowed: &Set, sigs: &Sigs, fresh: &mut Fresh) -> 
             );
             let borrowed_m: Set = borrowed.intersection(&fm).copied().collect();
             let borrowed_n: Set = borrowed.intersection(&fnn).copied().collect();
-            let m2 = rc(m, &owned_m, &borrowed_m, sigs, fresh);
+            let m2 = if alias {
+                (**m).clone()
+            } else {
+                rc(m, &owned_m, &borrowed_m, sigs, fresh)
+            };
             let mut owned_n2 = owned_n;
-            owned_n2.insert(*x);
-            let n2 = rc(n, &owned_n2, &borrowed_n, sigs, fresh);
+            let mut borrowed_n2 = borrowed_n;
+            if alias {
+                borrowed_n2.insert(*x);
+            } else {
+                owned_n2.insert(*x);
+            }
+            let n2 = rc(n, &owned_n2, &borrowed_n2, sigs, fresh);
             let mut out = Comp::Bind(Box::new(m2), *x, Box::new(n2));
             for v in shared {
                 out = dup(v, out);
@@ -111,12 +128,29 @@ fn rc(c: &Comp, owned: &Set, borrowed: &Set, sigs: &Sigs, fresh: &mut Fresh) -> 
             Box::new(rc(t, owned, borrowed, sigs, fresh)),
             Box::new(rc(e, owned, borrowed, sigs, fresh)),
         ),
-        Comp::Case(scrut, arms) => Comp::Case(
-            scrut.clone(),
-            arms.iter()
-                .map(|(p, body)| (p.clone(), rc_arm(p, body, owned, borrowed, sigs, fresh)))
-                .collect(),
-        ),
+        Comp::Case(scrut, arms) => {
+            // Matching on a loaned cell reads it without taking a reference:
+            // no arm drops the cell (it is not owned here), and the pattern
+            // binders become loans on its fields, kept live by whatever keeps
+            // the parent live. Consuming uses of a field still dup first via
+            // the borrowed leaf rule below.
+            let loaned = matches!(scrut, Value::Var(v) if borrowed.contains(v));
+            let tracked: Set = owned.union(borrowed).copied().collect();
+            Comp::Case(
+                scrut.clone(),
+                arms.iter()
+                    .map(|(p, body)| {
+                        let unshadowed = unshadow_arm(p, body, &tracked, fresh);
+                        let (p, body) =
+                            unshadowed.as_ref().map_or((p, body), |(p, body)| (p, body));
+                        (
+                            p.clone(),
+                            rc_arm(p, body, owned, borrowed, sigs, fresh, loaned),
+                        )
+                    })
+                    .collect(),
+            )
+        }
         Comp::Lam(ps, body) => {
             let ps_set: Set = ps.iter().copied().collect();
             let caps: Set = freev(body).difference(&ps_set).copied().collect();
@@ -260,6 +294,146 @@ fn rc_thunks(c: &Comp, sigs: &Sigs, fresh: &mut Fresh) -> Comp {
     }
 }
 
+/// Rebind pattern binders that reuse a name the match site still tracks.
+///
+/// A field binder spelled like a reference the site owns or borrows hides that
+/// reference for the whole arm: every occurrence in the body denotes the field,
+/// and the outer reference has none left there. Free variables are names, so
+/// the liveness test in [`rc_arm`] would read those field occurrences as uses
+/// of the outer reference, judge it live, and emit no release for it. Nor could
+/// the release be recovered inside the arm, where a `drop` of that name would
+/// name the field instead. Renaming the binder restores the arm to the shape it
+/// would have had without the collision. `Comp::Bind` needs no such treatment:
+/// its release is emitted outside the binder's scope, where the name still
+/// denotes the outer cell.
+fn unshadow_arm(
+    p: &CorePat,
+    body: &Comp,
+    tracked: &Set,
+    fresh: &mut Fresh,
+) -> Option<(CorePat, Comp)> {
+    let mut fields = Set::new();
+    pat_vars(p, &mut fields);
+    let shadowing = by_name(fields.intersection(tracked).copied());
+    if shadowing.is_empty() {
+        return None;
+    }
+    let mut p = p.clone();
+    let mut body = body.clone();
+    for from in shadowing {
+        let to = Sym::from(names::fresh_binder(names::FRESH_RC, fresh.bump()).as_str());
+        p = rename_pat(&p, from, to);
+        body = RenameFree { from, to }.comp(&body, &true);
+    }
+    Some((p, body))
+}
+
+fn rename_pat(p: &CorePat, from: Sym, to: Sym) -> CorePat {
+    let rebind = |name: &Sym| if *name == from { to } else { *name };
+    let rebind_fields = |fields: &Vec<Option<Sym>>| {
+        fields
+            .iter()
+            .map(|field| field.as_ref().map(&rebind))
+            .collect()
+    };
+    match p {
+        CorePat::Wild => CorePat::Wild,
+        CorePat::Var(name) => CorePat::Var(rebind(name)),
+        CorePat::Ctor(ctor, fields) => CorePat::Ctor(*ctor, rebind_fields(fields)),
+        CorePat::Tuple(fields) => CorePat::Tuple(rebind_fields(fields)),
+    }
+}
+
+/// Rename free occurrences of one local, stopping where a binder rebinds it.
+///
+/// The context is whether the renamed name is still the one this subterm's
+/// occurrences denote. No capture check is needed in the other direction: the
+/// replacement is an unforgeable fresh name, so nothing here can bind it.
+struct RenameFree {
+    from: Sym,
+    to: Sym,
+}
+
+impl RenameFree {
+    fn visible_under(&self, binders: impl IntoIterator<Item = Sym>) -> bool {
+        !binders.into_iter().any(|binder| binder == self.from)
+    }
+}
+
+impl Rewrite for RenameFree {
+    type Ctx = bool;
+
+    fn comp(&mut self, c: &Comp, visible: &bool) -> Comp {
+        if !*visible {
+            return c.clone();
+        }
+        match c {
+            Comp::Bind(m, x, n) => {
+                let under = self.visible_under([*x]);
+                Comp::Bind(
+                    Box::new(self.comp(m, visible)),
+                    *x,
+                    Box::new(self.comp(n, &under)),
+                )
+            }
+            Comp::Lam(params, body) => {
+                let under = self.visible_under(params.iter().copied());
+                Comp::Lam(params.clone(), Box::new(self.comp(body, &under)))
+            }
+            Comp::Case(scrut, arms) => Comp::Case(
+                self.value(scrut, visible),
+                arms.iter()
+                    .map(|(p, body)| {
+                        let mut fields = Set::new();
+                        pat_vars(p, &mut fields);
+                        let under = self.visible_under(fields);
+                        (p.clone(), self.comp(body, &under))
+                    })
+                    .collect(),
+            ),
+            Comp::WithReuse { token, freed, body } => {
+                let under = self.visible_under([*token]);
+                Comp::WithReuse {
+                    token: *token,
+                    freed: self.value(freed, visible),
+                    body: Box::new(self.comp(body, &under)),
+                }
+            }
+            Comp::Handle {
+                body,
+                return_var,
+                return_body,
+                ops,
+            } => Comp::Handle {
+                body: Box::new(self.comp(body, visible)),
+                return_var: *return_var,
+                return_body: return_body.as_ref().map(|rb| {
+                    let under = self.visible_under(return_var.iter().copied());
+                    Box::new(self.comp(rb, &under))
+                }),
+                ops: ops.rebuild(|op| HandleOp {
+                    name: op.name,
+                    params: op.params.clone(),
+                    resume: op.resume,
+                    body: {
+                        let binders = op.params.iter().copied().chain([op.resume]);
+                        let under = self.visible_under(binders);
+                        self.comp(&op.body, &under)
+                    },
+                }),
+            },
+            _ => self.descend_comp(c, visible),
+        }
+    }
+
+    fn value(&mut self, v: &Value, visible: &bool) -> Value {
+        match v {
+            Value::Var(name) if *visible && *name == self.from => Value::Var(self.to),
+            _ => self.descend_value(v, visible),
+        }
+    }
+}
+
 fn rc_arm(
     p: &CorePat,
     body: &Comp,
@@ -267,6 +441,7 @@ fn rc_arm(
     borrowed: &Set,
     sigs: &Sigs,
     fresh: &mut Fresh,
+    loaned: bool,
 ) -> Comp {
     let fb = freev(body);
     let mut fields = Set::new();
@@ -274,14 +449,20 @@ fn rc_arm(
     let live = by_name(fields.intersection(&fb).copied());
     let dead = by_name(owned.iter().filter(|v| !fb.contains(*v)).copied());
     let mut owned_b: Set = owned.intersection(&fb).copied().collect();
-    owned_b.extend(live.iter().copied());
-    let borrowed_b: Set = borrowed.intersection(&fb).copied().collect();
+    let mut borrowed_b: Set = borrowed.intersection(&fb).copied().collect();
+    if loaned {
+        borrowed_b.extend(live.iter().copied());
+    } else {
+        owned_b.extend(live.iter().copied());
+    }
     let mut out = rc(body, &owned_b, &borrowed_b, sigs, fresh);
     for v in &dead {
         out = drop_(*v, out);
     }
-    for v in live.iter().rev() {
-        out = dup(*v, out);
+    if !loaned {
+        for v in live.iter().rev() {
+            out = dup(*v, out);
+        }
     }
     out
 }

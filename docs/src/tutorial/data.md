@@ -99,7 +99,7 @@ This is the first major functional-programming habit: design the valid shapes fi
 
 A pattern performs two jobs at once. In `Visible(name, wavelength)`, it proves that the value is the `Visible` alternative and gives names to its two fields. The names exist only in that arm.
 
-More importantly, a `match` must cover every constructor:
+A `match` must cover every constructor:
 
 ```prism,compile_fail
 type Reading
@@ -131,6 +131,17 @@ fn main() =
 ```output
 9
 3
+```
+
+For a record constructor, `C { .. }` ignores all of its fields at once. It is the concise form for an arm that cares which constructor matched, but not what that constructor carries:
+
+```prism
+type Packet = Data { bytes: List(Int) } | End { code: Int }
+
+fn finished(packet : Packet) : Bool =
+  match packet of
+    Data { .. } => false
+    End { .. } => true
 ```
 
 ## `Option` makes absence explicit

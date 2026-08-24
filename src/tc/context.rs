@@ -83,19 +83,25 @@ impl Tc<'_> {
         })
     }
 
-    pub(super) fn solve_row(&mut self, v: u32, r: EffRow) -> Result<(), TcErr> {
-        // Absence of the row existential is a row-scope escape, not an internal
-        // fault. Unlike the type context, the row context does not keep every
-        // solution strictly left-referencing, so a later truncation can strand a
-        // row variable that a unification still references. That is a real (if
-        // rare) typing failure of a user program, so surface it as a user
-        // diagnostic rather than a compiler ICE. `Keep` so this precise reason
-        // survives a caller's coarse expected/got rewrite.
-        let i = self
-            .ctx
-            .iter()
-            .position(|e| matches!(e, Entry::ExRow(w) | Entry::SolvedRow(w, _) if *w == v))
+    pub(super) fn solve_row(&mut self, v: u32, r: &EffRow) -> Result<(), TcErr> {
+        if self.solved_row(v).is_some() {
+            return Err(TcErr::Ice(format!("solve_row: ^{v} is already solved")));
+        }
+        let owner = self
+            .index_unsolved_ex_row(v)
             .ok_or_else(|| TcErr::Keep(ROW_ESCAPES_SCOPE.into()))?;
+
+        // A row solution can carry both kinds of existential in its label
+        // arguments. Apply existing solutions before deciding which variables
+        // cross the owner's level; otherwise an alias can hide the actual young
+        // variable until after its marker has been dropped.
+        let mut r = self.apply_row(r);
+        let row_ty = Type::Row(r.clone());
+        let mut row_exs = BTreeSet::new();
+        row_ty.free_exist_row(&mut row_exs);
+        if row_exs.contains(&v) {
+            return Err(TcErr::Fail("recursive effect row".into()));
+        }
         if let Some(sk) = self.row_skolem_escaping(v, &r) {
             // A user program reaches this: a closure created outside a
             // row-polymorphic boundary whose effects can only be satisfied by
@@ -106,6 +112,89 @@ impl Tc<'_> {
                 r.show()
             )));
         }
+        if let Some(sk) = self.type_skolem_escaping_in_row(v, &r) {
+            return Err(TcErr::Keep(format!(
+                "effect row `{}` would capture the rigid type `{sk}`: `{sk}` is bound by an inner `forall`, and a row introduced outside that `forall` cannot depend on it",
+                r.show()
+            )));
+        }
+
+        // Lower every flexible variable introduced to the owner's right to one
+        // same-kind representative immediately to its left. The young variable
+        // is solved toward that representative while its marker is still live;
+        // the surviving row then mentions only entries that survive with it.
+        // One representative per original id preserves sharing across repeated
+        // and nested label arguments.
+        let mut type_exs = BTreeSet::new();
+        row_ty.free_exist(&mut type_exs);
+        let mut young_types = Vec::new();
+        for old in type_exs {
+            let at = self.index_ex(old).ok_or_else(|| {
+                TcErr::Ice(format!(
+                    "solve_row: proposed solution for ^{v} references escaped type existential ^{old}"
+                ))
+            })?;
+            if at > owner {
+                young_types.push(old);
+            }
+        }
+        let mut young_rows = Vec::new();
+        for old in row_exs {
+            let at = self.index_ex_row(old).ok_or_else(|| {
+                TcErr::Ice(format!(
+                    "solve_row: proposed solution for ^{v} references escaped row existential ^{old}"
+                ))
+            })?;
+            if at > owner {
+                young_rows.push(old);
+            }
+        }
+
+        let mut type_proxies = Vec::with_capacity(young_types.len());
+        for old in young_types {
+            type_proxies.push((old, self.fresh_id()));
+        }
+        let mut row_proxies = Vec::with_capacity(young_rows.len());
+        for old in young_rows {
+            let new = self.fresh_id();
+            // The proxy takes over the young variable's identity, so any side
+            // classification keyed by id must follow it: a tooltip scaffold tail
+            // rebased here is still a scaffold, not a genuinely open row.
+            if self.tooltip_row_scaffolds.contains(&old) {
+                self.tooltip_row_scaffolds.insert(new);
+            }
+            row_proxies.push((old, new));
+        }
+        if !type_proxies.is_empty() || !row_proxies.is_empty() {
+            let mut entries = Vec::with_capacity(type_proxies.len() + row_proxies.len());
+            entries.extend(type_proxies.iter().map(|(_, new)| Entry::Ex(*new)));
+            entries.extend(row_proxies.iter().map(|(_, new)| Entry::ExRow(*new)));
+            self.ctx.splice(owner..owner, entries);
+
+            for (old, new) in &type_proxies {
+                r = r.map_args(&|arg| arg.subst_exist(*old, &Type::Exist(*new)));
+            }
+            for (old, new) in &row_proxies {
+                r = r.subst_row_exist(*old, &EffRow::Exist(*new));
+            }
+
+            for (old, new) in type_proxies {
+                self.equate(&Type::Exist(old), &Type::Exist(new))?;
+            }
+            for (old, new) in row_proxies {
+                self.unify_row(&EffRow::Exist(old), &EffRow::Exist(new))?;
+            }
+        }
+
+        if !self.well_formed_row_before(v, &r) {
+            return Err(TcErr::Ice(format!(
+                "solve_row: solution `{}` for ^{v} references a forward or out-of-scope variable",
+                r.show()
+            )));
+        }
+        let i = self
+            .index_unsolved_ex_row(v)
+            .ok_or_else(|| TcErr::Ice(format!("solve_row: ^{v} escaped during rebasing")))?;
         self.ctx[i] = Entry::SolvedRow(v, r);
         Ok(())
     }
@@ -120,15 +209,14 @@ impl Tc<'_> {
         &mut self,
         a: u32,
         new_rows: &[u32],
-        solved: EffRow,
+        solved: &EffRow,
     ) -> Result<(), TcErr> {
         let pos = self
-            .index_ex_row(a)
+            .index_unsolved_ex_row(a)
             .ok_or_else(|| TcErr::Ice(format!("splice_solved_row: ^{a} not in context")))?;
-        let mut repl: Vec<Entry> = new_rows.iter().map(|r| Entry::ExRow(*r)).collect();
-        repl.push(Entry::SolvedRow(a, solved));
-        self.ctx.splice(pos..=pos, repl);
-        Ok(())
+        let repl = new_rows.iter().map(|r| Entry::ExRow(*r));
+        self.ctx.splice(pos..pos, repl);
+        self.solve_row(a, solved)
     }
 
     pub(super) fn apply_row(&self, r: &EffRow) -> EffRow {
@@ -159,6 +247,18 @@ impl Tc<'_> {
             .position(|e| matches!(e, Entry::ExRow(w) | Entry::SolvedRow(w, _) if *w == v))
     }
 
+    fn index_unsolved_ex(&self, v: u32) -> Option<usize> {
+        self.ctx
+            .iter()
+            .position(|e| matches!(e, Entry::Ex(w) if *w == v))
+    }
+
+    fn index_unsolved_ex_row(&self, v: u32) -> Option<usize> {
+        self.ctx
+            .iter()
+            .position(|e| matches!(e, Entry::ExRow(w) if *w == v))
+    }
+
     // Position of a rigid type-variable (skolem) in the context, the `Uni`
     // analogue of `index_ex`. Leftmost, matching `drop_uni`'s truncation point,
     // so the scope test agrees with the entry that actually gets dropped.
@@ -175,77 +275,109 @@ impl Tc<'_> {
             .position(|e| matches!(e, Entry::RowUni(w) if *w == n))
     }
 
-    fn solved(&self, v: u32) -> Option<Type> {
+    pub(super) fn solved(&self, v: u32) -> Option<Type> {
         self.ctx.iter().find_map(|e| match e {
             Entry::Solved(w, t) if *w == v => Some(t.clone()),
             _ => None,
         })
     }
 
-    pub(super) fn solve(&mut self, v: u32, t: Type) {
-        if let Some(i) = self.index_ex(v) {
-            // Scope guard at the origin: the solution may only reference entries
-            // to the left of `v`, so truncation never strands a referenced var
-            // and the downstream `index_ex` lookups can never miss. A forward or
-            // out-of-scope reference here is a compiler bug, caught at its cause.
-            debug_assert!(
-                self.well_formed_before(v, &t),
-                "solve: solution references a forward or out-of-scope variable"
-            );
-            self.ctx[i] = Entry::Solved(v, t);
+    pub(super) fn solve(&mut self, v: u32, t: Type) -> Result<(), TcErr> {
+        if self.solved(v).is_some() {
+            return Err(TcErr::Ice(format!("solve: ^{v} is already solved")));
         }
+        let i = self
+            .index_unsolved_ex(v)
+            .ok_or_else(|| TcErr::Ice(format!("solve: ^{v} escaped scope")))?;
+        // Scope guard at the origin: the solution may only reference entries
+        // to the left of `v`, so truncation never strands a referenced var and
+        // downstream lookups cannot miss. This is required for sound output in
+        // release builds, not a debug-only developer check.
+        if !self.well_formed_before(v, &t) {
+            return Err(TcErr::Ice(format!(
+                "solve: solution `{}` for ^{v} references a forward or out-of-scope variable",
+                t.show()
+            )));
+        }
+        self.ctx[i] = Entry::Solved(v, t);
+        Ok(())
     }
 
-    // Truncating to `i` drops every entry in `ctx[i..]`. `solve` keeps every type
-    // solution strictly left-referencing (the `well_formed_before` guard), so a
-    // surviving solution (in `ctx[..i]`) never names a dropped *type existential*;
-    // this asserts that at the boundary, the compiler bug the downstream `index_ex`
-    // `expect`s guard against. Existentials carry globally-unique fresh ids, so the
-    // disjointness test is exact.
+    // Truncating to `i` drops every entry in `ctx[i..]`. Type and row solution
+    // installers keep both kinds of existential strictly left-facing; audit
+    // that invariant at the scope boundary. Existentials carry globally unique
+    // fresh ids, so the disjointness tests are exact.
     //
-    // Skolems (`Uni`/`RowUni`) are deliberately not asserted here, for the same
-    // reason row existentials are not: the check would have no sound formulation at
-    // this boundary. A skolem is pushed under its raw forall-bound name (see the
+    // Skolems (`Uni`/`RowUni`) are deliberately not asserted here. A skolem is
+    // pushed under its raw forall-bound name (see the
     // `Forall`/`RowForall` arms of `subtype`/`inst`), not a fresh one, so skolem
     // names are not globally unique. An *ambient* rigid variable a surviving
     // solution legitimately references (a class parameter, an outer signature's
     // `forall`) can share a `Sym` with an unrelated in-context skolem being dropped,
     // and a name-based disjointness test cannot tell the two apart, so it false-
     // positives. Skolem escape is prevented soundly at its origin instead:
-    // `well_formed_before` checks *index positions* at solve time, while scopes are
-    // correctly nested, so a re-check on names at the drop boundary adds no coverage
-    // the origin guard lacks. Compiled out of release builds.
-    fn assert_no_escape(&self, i: usize) {
-        if !cfg!(debug_assertions) {
-            return;
-        }
+    // `well_formed_before`/`well_formed_row_before` check *index positions* at
+    // solve time, while scopes are correctly nested, so a re-check on names at
+    // the drop boundary adds no coverage the origin guard lacks.
+    fn scope_escape(&self, i: usize) -> Option<&'static str> {
         let mut dropped_ex = BTreeSet::new();
+        let mut dropped_rows = BTreeSet::new();
         for e in &self.ctx[i..] {
-            if let Entry::Ex(w) | Entry::Solved(w, _) = e {
-                dropped_ex.insert(*w);
+            match e {
+                Entry::Ex(w) | Entry::Solved(w, _) => {
+                    dropped_ex.insert(*w);
+                }
+                Entry::ExRow(w) | Entry::SolvedRow(w, _) => {
+                    dropped_rows.insert(*w);
+                }
+                Entry::Uni(_) | Entry::RowUni(_) | Entry::Marker(_) => {}
             }
         }
         for e in &self.ctx[..i] {
-            if let Entry::Solved(_, t) = e {
-                let mut ex = BTreeSet::new();
-                t.free_exist(&mut ex);
-                debug_assert!(
-                    ex.is_disjoint(&dropped_ex),
-                    "context truncation strands a type existential referenced by a surviving solution"
-                );
+            let ty = match e {
+                Entry::Solved(_, ty) => Some(ty.clone()),
+                Entry::SolvedRow(_, row) => Some(Type::Row(row.clone())),
+                _ => None,
+            };
+            if let Some(ty) = ty {
+                let mut exs = BTreeSet::new();
+                ty.free_exist(&mut exs);
+                if !exs.is_disjoint(&dropped_ex) {
+                    return Some(
+                        "context truncation strands a type existential referenced by a surviving solution",
+                    );
+                }
+                let mut rows = BTreeSet::new();
+                ty.free_exist_row(&mut rows);
+                if !rows.is_disjoint(&dropped_rows) {
+                    return Some(
+                        "context truncation strands a row existential referenced by a surviving solution",
+                    );
+                }
             }
+        }
+        None
+    }
+
+    fn assert_no_escape(&self, i: usize) {
+        if cfg!(debug_assertions) {
+            let escaped = self.scope_escape(i);
+            debug_assert!(escaped.is_none(), "scope escape: {escaped:?}");
         }
     }
 
-    pub(super) fn drop_marker(&mut self, m: u32) {
+    pub(super) fn drop_marker(&mut self, m: u32) -> Result<(), TcErr> {
         if let Some(i) = self
             .ctx
             .iter()
             .position(|e| matches!(e, Entry::Marker(w) if *w == m))
         {
-            self.assert_no_escape(i);
+            if let Some(msg) = self.scope_escape(i) {
+                return Err(TcErr::Ice(msg.into()));
+            }
             self.ctx.truncate(i);
         }
+        Ok(())
     }
 
     pub(super) fn drop_uni(&mut self, n: Sym) {
@@ -309,7 +441,7 @@ impl Tc<'_> {
     // A candidate solution for existential `a` is well-scoped only if every free
     // variable it names is bound to `a`'s left, so a later truncation that drops
     // `a`'s right neighbours never strands a reference. The guard closes the whole
-    // variable class, not just existentials: a `Uni`/`RowUni` skolem introduced
+    // variable class, including skolems: a `Uni`/`RowUni` introduced
     // under an inner `forall` sits to `a`'s right, so solving an outer `a` to it
     // would let the skolem escape its quantifier (the fast path in `inst` trusts
     // exactly this predicate). An existential must be in the context (its absence
@@ -324,12 +456,46 @@ impl Tc<'_> {
         };
         let mut exs = BTreeSet::new();
         t.free_exist(&mut exs);
+        let mut row_exs = BTreeSet::new();
+        t.free_exist_row(&mut row_exs);
         let mut uvars = BTreeSet::new();
         t.free_ty_vars(&mut uvars);
         let mut rvars = BTreeSet::new();
         t.free_row_vars(&mut rvars);
         exs.iter()
             .all(|e| self.index_ex(*e).is_some_and(|i| i < ai))
+            && row_exs
+                .iter()
+                .all(|e| self.index_ex_row(*e).is_some_and(|i| i < ai))
+            && uvars
+                .iter()
+                .all(|n| self.index_uni(*n).is_none_or(|i| i < ai))
+            && rvars
+                .iter()
+                .all(|n| self.index_row_uni(*n).is_none_or(|i| i < ai))
+    }
+
+    // The row-solution dual of `well_formed_before`. A row can carry type and
+    // row variables recursively inside label arguments, so all four variable
+    // classes are checked against the row existential's position.
+    pub(super) fn well_formed_row_before(&self, a: u32, r: &EffRow) -> bool {
+        let Some(ai) = self.index_ex_row(a) else {
+            return false;
+        };
+        let row_ty = Type::Row(r.clone());
+        let mut exs = BTreeSet::new();
+        row_ty.free_exist(&mut exs);
+        let mut row_exs = BTreeSet::new();
+        row_ty.free_exist_row(&mut row_exs);
+        let mut uvars = BTreeSet::new();
+        row_ty.free_ty_vars(&mut uvars);
+        let mut rvars = BTreeSet::new();
+        row_ty.free_row_vars(&mut rvars);
+        exs.iter()
+            .all(|e| self.index_ex(*e).is_some_and(|i| i < ai))
+            && row_exs
+                .iter()
+                .all(|e| self.index_ex_row(*e).is_some_and(|i| i < ai))
             && uvars
                 .iter()
                 .all(|n| self.index_uni(*n).is_none_or(|i| i < ai))
@@ -354,6 +520,15 @@ impl Tc<'_> {
             .find(|n| self.index_row_uni(*n).is_some_and(|i| i >= ai))
     }
 
+    fn type_skolem_escaping_in_row(&self, a: u32, r: &EffRow) -> Option<Sym> {
+        let ai = self.index_ex_row(a)?;
+        let row_ty = Type::Row(r.clone());
+        let mut vars = BTreeSet::new();
+        row_ty.free_ty_vars(&mut vars);
+        vars.into_iter()
+            .find(|n| self.index_uni(*n).is_some_and(|i| i >= ai))
+    }
+
     pub(super) fn articulate(
         &mut self,
         a: u32,
@@ -371,7 +546,7 @@ impl Tc<'_> {
         // It surfaces as a structured ICE rather than a raw panic, matching the
         // rest of the context/row machinery.
         let pos = self
-            .index_ex(a)
+            .index_unsolved_ex(a)
             .ok_or_else(|| TcErr::Ice(format!("articulate: ^{a} escaped scope")))?;
         let mut repl: Vec<Entry> = arg_exs.iter().map(|e| Entry::Ex(*e)).collect();
         repl.push(Entry::ExRow(row));
@@ -390,7 +565,7 @@ impl Tc<'_> {
         // Same invariant as `articulate`: a live existential is always in
         // context, so absence is a compiler bug surfaced as a structured ICE.
         let pos = self
-            .index_ex(a)
+            .index_unsolved_ex(a)
             .ok_or_else(|| TcErr::Ice(format!("splice_solved: ^{a} escaped scope")))?;
         let mut repl: Vec<Entry> = new_exs.iter().map(|e| Entry::Ex(*e)).collect();
         repl.push(Entry::Solved(a, solved));
@@ -398,38 +573,31 @@ impl Tc<'_> {
         Ok(())
     }
 
-    // Generalization is unconditional: a `let` binding generalizes its inferred
-    // type with no value restriction, even for a syntactic non-value such as
-    // `let xs = array_empty()`. This is sound here and stays sound by design,
-    // not by accident. The polymorphic-reference hazard the value restriction
-    // exists to plug needs a generalizable binding that aliases a mutable cell;
-    // Prism has no such thing and never will. There is no ML-style `ref`: the
-    // only mutable binding is `var`, which desugars to a private, monomorphic
-    // State effect (writing two element types into one `var` is a type error),
-    // and `Array`/`HashMap`/`String` are copy-on-write value types with no
-    // shared identity, so a functional allocator can never introduce aliasing.
-    // A first-class polymorphic mutable reference is deliberately outside the
-    // language, so a value restriction would only reject sound programs. Do not
-    // add one (and please leave this note for the next reader who wonders).
+    // Articulate a type existential as a row type with a fresh row
+    // existential to its left. This is the mixed-kind analogue of
+    // `splice_solved`: the solution remains valid when a later marker closes.
+    pub(super) fn articulate_row_type(&mut self, a: u32, row: u32) -> Result<(), TcErr> {
+        let pos = self
+            .index_unsolved_ex(a)
+            .ok_or_else(|| TcErr::Ice(format!("articulate_row_type: ^{a} escaped scope")))?;
+        self.ctx.splice(
+            pos..=pos,
+            [
+                Entry::ExRow(row),
+                Entry::Solved(a, Type::Row(EffRow::Exist(row))),
+            ],
+        );
+        Ok(())
+    }
+
+    // Generalization is unconditional because Prism has no first-class mutable
+    // references. `var` lowers to a private monomorphic State effect, and the
+    // mutable containers are copy-on-write values without shared identity.
     //
-    // What generalization does NOT do: it never quantifies class constraints
-    // into a scheme. There is no surface syntax for a constraint on a `let`
-    // binding (only top-level `fn`s carry `given C(a)`), and a constrained
-    // local scheme would need a dictionary lambda at the binder plus
-    // dictionary application at every local use, machinery reserved for
-    // top-level declarations. Instead, a local binding whose body incurs a
-    // dictionary obligation keeps the obligated existential monomorphic:
-    // `generalize_local` excludes every existential still mentioned by a
-    // pending obligation from the quantifier set, so the obligation stays
-    // attached to a live existential that later use sites ground
-    // (`let f = \(x) -> show(x)` followed by `f(1)` resolves `Show(Int)` at
-    // the declaration boundary) or the enclosing declaration's `given`
-    // context discharges. A binding that is never grounded still surfaces
-    // as the standard unresolved-constraint diagnostic ("cannot infer the
-    // type for constraint ...", `head_key` in classes.rs), and one used at
-    // two different constrained types is a type mismatch; both lift to a
-    // top-level `fn ... given C(a)`. Quantifying constraints locally is
-    // intentionally not implemented.
+    // Local schemes do not quantify class constraints. `generalize_local`
+    // excludes existentials mentioned by pending obligations, allowing later use
+    // sites or an enclosing `given` context to ground them. Ungrounded
+    // obligations produce the standard unresolved-constraint diagnostic.
     pub(super) fn generalize(&self, env: &Env, ty: &Type) -> Type {
         self.generalize_map(env, ty).0
     }
@@ -550,7 +718,7 @@ impl Tc<'_> {
         // canonicalized when it is generalized, so `fn at_map(m : Map(k, v), …)` is
         // published as `forall a b. (Map(a, b), a) -> b` and that is what a reader
         // sees in the signature. Preserving `k` and `v` in the body was measured and
-        // made things worse — 105 inconsistent definitions became 188 — because it
+        // increased inconsistent definitions from 105 to 188 because it
         // put the body in one convention and the rendered signature in the other.
         let reserved: BTreeSet<String> = seed
             .into_iter()

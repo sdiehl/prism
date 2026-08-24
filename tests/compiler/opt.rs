@@ -113,7 +113,7 @@ fn core_lint_clean_on_corpus() {
 }
 
 // The `--passes` spec parser: a two-stage spec lands each pass in the right
-// section, in order; a bare list defaults to the pre stage; and the validation
+// section, in order. A bare list defaults to the pre stage. The validation
 // rules each reject their bad input with a message.
 #[test]
 fn pass_spec_parse() {

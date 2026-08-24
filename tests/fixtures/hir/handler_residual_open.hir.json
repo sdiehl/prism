@@ -42,7 +42,7 @@
       "ty": "Int"
     },
     "8": {
-      "ty": "(Int) -> Int ! {Out, Wrap, ?r3}"
+      "ty": "(Int) -> Int ! {Out, Wrap, ?r8}"
     },
     "9": {
       "ty": "Int"

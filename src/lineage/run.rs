@@ -193,7 +193,7 @@ fn output_payload(bytes: &[u8]) -> OutputPayload {
 }
 
 // Assemble a run graph. Roots, argv, and observed environment/file reads are the
-// run's inputs; the compiler identifies it; the trace digest, stdout, and file
+// run's inputs. The compiler identifies it. The trace digest, stdout, and file
 // writes are what it produced. Every edge fans out from the request node.
 fn assemble_run(run: &RunLineage) -> LineageGraph {
     let request_id = graph::request_node_id(&run.request);

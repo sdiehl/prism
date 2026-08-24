@@ -25,12 +25,14 @@
 //!    LLVM bitcode);
 //! 7. trailing `k=v` counts, emitted only when real and already cheap at that phase.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 #[cfg(feature = "native")]
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+use crate::core::work::{self, WorkCounts};
 
 // The literal first field, the anchor a reader greps for to find a timing row.
 const ROW_TAG: &str = "phase";
@@ -175,6 +177,14 @@ pub(crate) enum CountKey {
     /// How many per-SCC bitcode shards the sharded backend emitted.
     #[cfg(feature = "native")]
     SccShards,
+    /// Core nodes this phase entered through the shared descent.
+    CoreVisits,
+    /// Core nodes this phase reconstructed through the shared descent.
+    RebuiltNodes,
+    /// The deepest descent observed so far in this compile. Unlike the two above
+    /// it is a running whole-compile maximum, not a per-phase delta, because a
+    /// maximum over a subrange is not a property anyone can act on.
+    MaxDepth,
 }
 
 impl CountKey {
@@ -205,6 +215,9 @@ impl CountKey {
             Self::RuntimeObjectMisses => "runtime_object_misses",
             #[cfg(feature = "native")]
             Self::SccShards => "scc_shards",
+            Self::CoreVisits => "core_visits",
+            Self::RebuiltNodes => "rebuilt_nodes",
+            Self::MaxDepth => "max_depth",
         }
     }
 }
@@ -216,6 +229,11 @@ impl CountKey {
 pub(crate) struct RowExtras {
     out: Option<(ArtifactKind, String)>,
     counts: Vec<(CountKey, usize)>,
+    // The same structural work the count fields display, kept unformatted so the
+    // sink can accumulate it. The row shows one invocation's delta; a tally wants
+    // to add them up, and re-parsing the rendered field to do so would make the
+    // display the source of truth.
+    work: WorkCounts,
 }
 
 impl RowExtras {
@@ -231,6 +249,34 @@ impl RowExtras {
     #[must_use]
     pub(crate) fn count(mut self, key: CountKey, value: usize) -> Self {
         self.counts.push((key, value));
+        self
+    }
+
+    /// Attach the structural work this phase did, as the difference between two
+    /// whole-compile readings.
+    ///
+    /// A difference rather than a reset, so a phase that contains another phase
+    /// reports its own work including the inner one's, which is what containment
+    /// means. Zero visits are left off the row entirely: the front end descends no
+    /// Core, and a row of zeros reads as a measurement when it is an absence.
+    #[must_use]
+    fn work(mut self, before: WorkCounts, after: WorkCounts) -> Self {
+        self.work = WorkCounts {
+            visits: after.visits.saturating_sub(before.visits),
+            rebuilt: after.rebuilt.saturating_sub(before.rebuilt),
+            // Not a delta: a maximum over a subrange is not a property anyone can
+            // act on, so this stays the whole-compile reading.
+            max_depth: after.max_depth,
+        };
+        if self.work.is_silent() {
+            return self;
+        }
+        let clamp = |n: u64| usize::try_from(n).unwrap_or(usize::MAX);
+        self.counts.extend([
+            (CountKey::CoreVisits, clamp(self.work.visits)),
+            (CountKey::RebuiltNodes, clamp(self.work.rebuilt)),
+            (CountKey::MaxDepth, clamp(self.work.max_depth)),
+        ]);
         self
     }
 
@@ -254,13 +300,45 @@ impl RowExtras {
     }
 }
 
+/// Everything a phase accumulated across one whole compile.
+///
+/// A phase can run more than once (a re-elaboration repeats the front end), and
+/// only the first run is printed, so this is the only place the repeats survive.
+/// That difference is the point: the row answers "what did this phase look like",
+/// the tally answers "how many times did it happen and to what total", and a
+/// receipt that quoted the row for the second question would silently drop every
+/// repeat.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PhaseTally {
+    /// How many times the phase ran, printed or not.
+    pub invocations: usize,
+    /// Summed wall time over those runs. A reading of the machine, not a property
+    /// of the compilation: unlike the work counts it will differ run to run.
+    pub wall: Duration,
+    /// Summed structural work over those runs, with `max_depth` kept as a
+    /// maximum rather than a sum, since it already is one.
+    pub work: WorkCounts,
+}
+
+impl PhaseTally {
+    fn add(&mut self, dt: Duration, work: WorkCounts) {
+        self.invocations += 1;
+        self.wall += dt;
+        self.work.visits += work.visits;
+        self.work.rebuilt += work.rebuilt;
+        self.work.max_depth = self.work.max_depth.max(work.max_depth);
+    }
+}
+
 // The mutable state a sink guards: the source digest (computed once, on the first
-// phase that carries the source) and the set of phases already emitted (so a
-// re-elaboration on the same compile does not double-print a phase).
+// phase that carries the source), the set of phases already emitted (so a
+// re-elaboration on the same compile does not double-print a phase), and the
+// per-phase tallies, which unlike the emitted set keep counting past the first.
 #[derive(Debug, Default)]
 struct Inner {
     src_digest: Option<String>,
     emitted: BTreeSet<&'static str>,
+    tallies: BTreeMap<&'static str, PhaseTally>,
 }
 
 /// The per-compile timing sink, installed on the CLI's [`Config`](super::Config).
@@ -278,6 +356,21 @@ impl TimingSink {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// What each phase accumulated, keyed by the stable phase name the timing
+    /// rows print in field 2 (`parse`, `opt.pre`, `rc`, and the rest).
+    ///
+    /// The structured read of what the rows only sample. A caller building a
+    /// receipt takes this rather than parsing stderr, so the row schema stays a
+    /// display and never becomes an interchange format.
+    #[must_use]
+    pub fn tallies(&self) -> BTreeMap<&'static str, PhaseTally> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .tallies
+            .clone()
     }
 
     // The abbreviated source key, computing (once) the digest from the first
@@ -308,13 +401,19 @@ impl TimingSink {
         status: CacheStatus,
         extras: &RowExtras,
     ) {
-        // First sight of this phase? A re-elaboration on the same compile repeats
-        // phases; the guard is released before any formatting or stderr write.
+        // Tally first, then ask whether to print: every invocation counts, only the
+        // first prints. A re-elaboration on the same compile repeats phases; the
+        // guard is released before any formatting or stderr write.
         let first = {
             let mut inner = self
                 .0
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
+            inner
+                .tallies
+                .entry(phase.label())
+                .or_default()
+                .add(dt, extras.work);
             inner.emitted.insert(phase.label())
         };
         if !first {
@@ -363,12 +462,26 @@ pub(crate) fn timed_res<T, E>(
     match timing {
         None => f(),
         Some(sink) => {
+            let before = work::snapshot();
             let start = Instant::now();
             let result = f();
             let dt = start.elapsed();
+            let after = work::snapshot();
             match &result {
-                Ok(value) => sink.record(phase, src, dt, CacheStatus::Cold, &ok_extras(value)),
-                Err(_) => sink.record(phase, src, dt, CacheStatus::Cold, &RowExtras::default()),
+                Ok(value) => sink.record(
+                    phase,
+                    src,
+                    dt,
+                    CacheStatus::Cold,
+                    &ok_extras(value).work(before, after),
+                ),
+                Err(_) => sink.record(
+                    phase,
+                    src,
+                    dt,
+                    CacheStatus::Cold,
+                    &RowExtras::default().work(before, after),
+                ),
             }
             result
         }
@@ -388,12 +501,26 @@ pub(crate) fn timed_res_status<T, E>(
     match timing {
         None => f(),
         Some(sink) => {
+            let before = work::snapshot();
             let start = Instant::now();
             let result = f();
             let dt = start.elapsed();
+            let after = work::snapshot();
             match &result {
-                Ok(value) => sink.record(phase, src, dt, status, &ok_extras(value)),
-                Err(_) => sink.record(phase, src, dt, status, &RowExtras::default()),
+                Ok(value) => sink.record(
+                    phase,
+                    src,
+                    dt,
+                    status,
+                    &ok_extras(value).work(before, after),
+                ),
+                Err(_) => sink.record(
+                    phase,
+                    src,
+                    dt,
+                    status,
+                    &RowExtras::default().work(before, after),
+                ),
             }
             result
         }

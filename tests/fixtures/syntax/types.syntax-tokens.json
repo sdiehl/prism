@@ -1,6 +1,6 @@
 {
   "schema": "prism-syntax-tokens-v1",
-  "compiler": "0.19.0",
+  "compiler": "0.20.0",
   "source": {
     "digest": "2544973d2dc5f86eed0354cfb43ba57782333229b70adef424b180a08f35198c",
     "text": "-- Type syntax: rows, kinds, dimensions, unboxed shapes, open effect tails.\neffect Tick\n  tick() : Int\n\ntype Cmd(a, e : Row) = Cmd(() -> a ! {e})\n\ntype Grid(n) = Grid(Vec(Int, n))\n\nfn poly(x : a, f : f(a)) : a = x\n\nfn generic(xs : List(Int), p : (Int, Float)) : Option(Int) = head(xs)\n\nfn effectful() : Int ! {Tick} = tick()\n\nfn forwarding(act : () -> Int ! {e}) : Int ! {Tick | e} = act()\n\nfn boxed_unboxed(t : #(Int, Float), r : #{ w : Int, h : Int }) : Int =\n  let s = #{ w = r.#w, h = r.#h }\n  let u = #(1, 2.5)\n  s.#w + s.#h\n\nfn annotated() : Int =\n  let f = (\\(v) -> v : forall a. (a) -> a)\n  f((3 : Int))\n"

@@ -268,7 +268,7 @@ fn is_signaled(status: ExitStatus) -> bool {
 }
 
 #[cfg(not(unix))]
-fn is_signaled(_status: ExitStatus) -> bool {
+const fn is_signaled(_status: ExitStatus) -> bool {
     false
 }
 

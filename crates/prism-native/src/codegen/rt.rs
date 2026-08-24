@@ -1,4 +1,4 @@
-//! Single source of truth for the C runtime symbols codegen calls by name.
+//! Canonical C runtime symbols referenced by codegen.
 //!
 //! These are the `prism_*` intrinsics defined in the `runtime/` C modules that the
 //! emitter references directly: allocation, reference counting, boxing, the IO
@@ -318,10 +318,12 @@ pub const REUSE_TOKEN: &str = "prism_reuse_token";
 pub const RC_INC: &str = "prism_rc_inc";
 pub const RC_DEC: &str = "prism_rc_dec";
 
-// Tagging: box/unbox a 63-bit payload, and the interned string-literal cell.
+// Tagging: box/unbox a 63-bit payload. String literals need no runtime call:
+// codegen bakes each distinct spelling into the image as a static cell and a
+// mention is the global's address. The C runtime keeps its own prism_str_lit
+// for the strings it builds internally.
 pub const BOX: &str = "prism_box";
 pub const UNBOX: &str = "prism_unbox";
-pub const STR_LIT: &str = "prism_str_lit";
 
 // IO intrinsics (the lowered forms of `Comp::Io`).
 pub const PRINT_INT: &str = "prism_print_int";
@@ -376,7 +378,6 @@ const ALL: &[&str] = &[
     RC_DEC,
     BOX,
     UNBOX,
-    STR_LIT,
     PRINT_INT,
     PRINT_FLOAT,
     PRINT_NL,

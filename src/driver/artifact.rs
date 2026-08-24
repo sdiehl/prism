@@ -2,9 +2,8 @@ use std::fmt::Write as _;
 #[cfg(feature = "native")]
 use std::process::Command;
 
-// The C-toolchain seam lives in `codegen::rt`, which is `native`-only, so the
-// native-toolchain identity is gated on the same feature (not merely on a
-// non-wasm target: a non-native host build has no native backend either).
+// The C-toolchain seam lives in native-only `codegen::rt`, so toolchain identity
+// uses the same feature gate. A non-native host build has no native backend.
 use crate::core::{CorePass, OptLevel, PassSpec, HASH_SCHEME};
 #[cfg(feature = "native")]
 use prism_native::rt::{cc, cc_flags, cc_overridden};
@@ -31,6 +30,7 @@ pub struct ArtifactIdentity {
     pub native_effects: bool,
     pub trampoline: bool,
     pub fuse: bool,
+    pub borrow_infer: bool,
     pub rt_checks: bool,
     pub native_kont_frames: bool,
     pub native_toolchain: Option<NativeToolchainIdentity>,
@@ -62,6 +62,7 @@ pub enum ArtifactField {
     NativeEffects,
     Trampoline,
     Fuse,
+    BorrowInfer,
     RuntimeChecks,
     NativeKontFrames,
     NativeCc,
@@ -90,6 +91,7 @@ impl ArtifactField {
             Self::NativeEffects => "native-effects",
             Self::Trampoline => "trampoline",
             Self::Fuse => "fuse",
+            Self::BorrowInfer => "borrow-infer",
             Self::RuntimeChecks => "rt-checks",
             Self::NativeKontFrames => "native-kont-frames",
             Self::NativeCc => "native-cc",
@@ -151,6 +153,7 @@ impl ArtifactIdentity {
             native_effects: cfg.flags.native_effects,
             trampoline: cfg.flags.trampoline,
             fuse: cfg.flags.fuse,
+            borrow_infer: cfg.flags.borrow_infer,
             rt_checks: cfg.flags.rt_checks,
             native_kont_frames: cfg.flags.native_kont_frames,
             native_toolchain,
@@ -234,6 +237,7 @@ impl ArtifactIdentity {
             ),
             ArtifactRow::new(ArtifactField::Trampoline, self.trampoline.to_string()),
             ArtifactRow::new(ArtifactField::Fuse, self.fuse.to_string()),
+            ArtifactRow::new(ArtifactField::BorrowInfer, self.borrow_infer.to_string()),
             ArtifactRow::new(ArtifactField::RuntimeChecks, self.rt_checks.to_string()),
             ArtifactRow::new(
                 ArtifactField::NativeKontFrames,
@@ -268,7 +272,7 @@ fn native_toolchain_for_backend() -> NativeToolchainIdentity {
 }
 
 #[cfg(not(feature = "native"))]
-fn native_toolchain_for_backend() -> NativeToolchainIdentity {
+const fn native_toolchain_for_backend() -> NativeToolchainIdentity {
     NativeToolchainIdentity {
         cc: String::new(),
         cc_version: String::new(),

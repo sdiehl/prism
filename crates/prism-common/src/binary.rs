@@ -120,9 +120,9 @@ pub fn put_indices(out: &mut Vec<u8>, idxs: &[u32]) {
 
 /// The wire number of a table entry.
 ///
-/// Its position in an ordered table that is the single source of truth for the
-/// numbering. Each codec keeps its own tables (op families, node tags) and
-/// numbers them through here, so encode and decode cannot drift.
+/// Its position in the codec's canonical ordered table. Each codec keeps its own
+/// tables (op families, node tags) and numbers them through here, so encode and
+/// decode cannot drift.
 ///
 /// # Panics
 /// When `entry` is absent from `table`: a codec bug on trusted input (a new

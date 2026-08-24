@@ -1,22 +1,22 @@
 fn x_of(_r) =
-  return _r to t@1798
-  case t@1798 of
-    Vec2(t@1799, _) =>
-      return t@1799
+  return _r to t@1796
+  case t@1796 of
+    Vec2(t@1797, _) =>
+      return t@1797
 fn with_x(_r, _v) =
-  return _r to t@1800
-  return _v to t@1801
-  case t@1800 of
-    Vec2(t@1802, t@1803) =>
-      return Vec2(t@1801, t@1803)
+  return _r to t@1798
+  return _v to t@1799
+  case t@1798 of
+    Vec2(t@1800, t@1801) =>
+      return Vec2(t@1799, t@1801)
 fn y_of(_r) =
-  return _r to t@1804
-  case t@1804 of
-    Vec2(_, t@1805) =>
-      return t@1805
+  return _r to t@1802
+  case t@1802 of
+    Vec2(_, t@1803) =>
+      return t@1803
 fn with_y(_r, _v) =
-  return _r to t@1806
-  return _v to t@1807
-  case t@1806 of
-    Vec2(t@1808, t@1809) =>
-      return Vec2(t@1808, t@1807)
+  return _r to t@1804
+  return _v to t@1805
+  case t@1804 of
+    Vec2(t@1806, t@1807) =>
+      return Vec2(t@1806, t@1805)

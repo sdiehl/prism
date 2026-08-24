@@ -632,13 +632,15 @@ type Frame = FPrint(String) | FPrintln(String)
 
 alias TraceLog = List(Frame)
 
--- Self-delimiting frame codec, the Wire/Replay discipline: a tag char (`p`/`l`),
--- the payload's decimal char-length, a `:` delimiter, then the payload. The
+-- Self-delimiting frame codec, the Wire/Replay discipline: a tag byte (`p`/`l`),
+-- the payload's decimal byte length, a `:` delimiter, then the payload. The
 -- length prefix lets a payload carry any character (newlines, `:`) and round-trip.
+-- Byte lengths on both sides, so decoding a frame costs its own size rather
+-- than its distance from the start of the log.
 fn t_enc_frame(f) =
   match f of
-    FPrint(s) => concat("p", concat(show_int(str_len(s)), concat(":", s)))
-    FPrintln(s) => concat("l", concat(show_int(str_len(s)), concat(":", s)))
+    FPrint(s) => concat("p", concat(show_int(byte_len(s)), concat(":", s)))
+    FPrintln(s) => concat("l", concat(show_int(byte_len(s)), concat(":", s)))
 
 fn t_trace_encode(frames) = str_join("", map(t_enc_frame, frames))
 
@@ -647,28 +649,28 @@ fn t_un_int(o) =
     Some(x) => x
     None => 0
 
--- Parse frames from offset `i`: one tag char, a decimal length up to `:`, then
--- that many payload chars; advance and continue. Total over hostile input: a
--- missing delimiter or a malformed length stops the walk rather than faulting.
-fn t_dec_go(s, i, colon) =
-  if i >= str_len(s) then
+-- Parse frames from byte offset `i`: one tag byte, a decimal length up to `:`,
+-- then that many payload bytes; advance and continue. Total over hostile input:
+-- a missing delimiter or a malformed length stops the walk rather than faulting.
+fn t_dec_go(s, i) =
+  if i >= byte_len(s) then
     Nil
   else
-    let tag = substring(s, i, 1)
-    let c = index_of_from(colon, s, i + 1)
+    let tag = str_slice(s, i, i + 1)
+    let c = index_of_go(":", s, i + 1)
     if c < 0 then
       Nil
     else
-      let len = t_un_int(parse_int(substring(s, i + 1, c - i - 1)))
-      let payload = substring(s, c + 1, len)
+      let len = t_un_int(parse_int(str_slice(s, i + 1, c)))
+      let payload = str_slice(s, c + 1, c + 1 + len)
       let frame =
         if str_eq(tag, "l") then
           FPrintln(payload)
         else
           FPrint(payload)
-      Cons(frame, t_dec_go(s, c + 1 + len, colon))
+      Cons(frame, t_dec_go(s, c + 1 + len))
 
-fn t_trace_decode(s) = t_dec_go(s, 0, char_at(":", 0))
+fn t_trace_decode(s) = t_dec_go(s, 0)
 
 -- A traced node. `TMemo` extends the pure memo with its recorded output trace
 -- (stored newest-first, reversed) and an `emitted` flag: false for a warm-loaded

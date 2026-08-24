@@ -14,11 +14,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use prism_common::sym::Sym;
 
 use super::super::{
-    TypedBinder, TypedComp, TypedCompKind, TypedCoreFn, TypedValue, TypedValueKind,
+    CoreQuantifier, CoreType, TypedBinder, TypedComp, TypedCompKind, TypedCoreFn, TypedValue,
+    TypedValueKind,
 };
 use super::latent::{latent, Latent, MaskOp};
 use super::peel;
 use super::walk::each_value;
+use crate::types::ty::EffRow;
 
 /// The op set a thunk performs when forced (mask-aware, like `latent`).
 pub type Sig = BTreeSet<MaskOp>;
@@ -150,13 +152,60 @@ fn buried(v: &TypedValue, loc: &Loc, lat: &Latent) -> bool {
     match &peel(v).kind {
         TypedValueKind::Ctor { fields, .. }
         | TypedValueKind::Tuple(fields)
-        | TypedValueKind::UnboxedTuple(fields) => fields
-            .iter()
-            .any(|f| !value_sig(f, loc, lat).is_empty() || buried(f, loc, lat)),
-        TypedValueKind::UnboxedRecord(fields) => fields
-            .iter()
-            .any(|(_, f)| !value_sig(f, loc, lat).is_empty() || buried(f, loc, lat)),
+        | TypedValueKind::UnboxedTuple(fields) => fields.iter().any(|f| {
+            declared_thunk_escape(f) || !value_sig(f, loc, lat).is_empty() || buried(f, loc, lat)
+        }),
+        TypedValueKind::UnboxedRecord(fields) => fields.iter().any(|(_, f)| {
+            declared_thunk_escape(f) || !value_sig(f, loc, lat).is_empty() || buried(f, loc, lat)
+        }),
         _ => false,
+    }
+}
+
+// A callback hidden in data can later be recovered only through a pattern, and
+// the flow analysis intentionally does not invent a signature for pattern
+// fields. Its stored witness is therefore authoritative even when the concrete
+// lambda performs less: a pure thunk widened to `! {Log}` still has to be
+// called at the `Log` convention after extraction. Representation wrappers are
+// evidence for that widening, so inspect their targets before following their
+// operands. A free open row stays opaque for the same reason: it stands for
+// effects chosen elsewhere. Only a row the stored function itself quantifies
+// is transparent, because each force site instantiates it in the open.
+fn declared_thunk_escape(value: &TypedValue) -> bool {
+    effectful_thunk_type(value.ty())
+        || match value.kind() {
+            TypedValueKind::Reinterpret(inner)
+            | TypedValueKind::NewtypeRepr { value: inner, .. } => declared_thunk_escape(inner),
+            _ => false,
+        }
+}
+
+fn effectful_thunk_type(ty: &CoreType) -> bool {
+    let CoreType::Thunk(outer) = ty else {
+        return false;
+    };
+    if row_claims_effects(outer.effects(), &[]) {
+        return true;
+    }
+    let CoreType::Function(function) = outer.result() else {
+        return false;
+    };
+    row_claims_effects(function.body().effects(), function.quantifiers())
+}
+
+// Whether a stored thunk's row is a claim the flow must honor. A concrete
+// label is a declared widening: the extracted thunk must be called at that
+// convention even when the lambda inside performs less. A free variable or an
+// existential stands for effects someone else chose, so it is the same
+// unknown claim. A row variable the function itself quantifies is neither: it
+// is polymorphism the caller instantiates, visible at every use site.
+fn row_claims_effects(row: &EffRow, quantifiers: &[CoreQuantifier]) -> bool {
+    match row {
+        EffRow::Empty => false,
+        EffRow::Extend(..) | EffRow::Exist(_) => true,
+        EffRow::Var(v) => !quantifiers
+            .iter()
+            .any(|q| matches!(q, CoreQuantifier::Row(r) if r == v)),
     }
 }
 
@@ -166,9 +215,9 @@ fn esc(c: &TypedComp, loc: &Loc, lat: &Latent, flow: &ThunkFlow) -> bool {
         TypedCompKind::Call { args, .. } => args
             .iter()
             .any(|a| buried(a, loc, lat) || in_thunk(a, loc, lat, flow)),
-        TypedCompKind::App { args, .. } | TypedCompKind::Do { args, .. } => args
-            .iter()
-            .any(|a| !value_sig(a, loc, lat).is_empty() || buried(a, loc, lat)),
+        TypedCompKind::App { args, .. } | TypedCompKind::Do { args, .. } => args.iter().any(|a| {
+            declared_thunk_escape(a) || !value_sig(a, loc, lat).is_empty() || buried(a, loc, lat)
+        }),
         TypedCompKind::Bind(m, x, n) => {
             esc(m, loc, lat, flow) || {
                 let mut loc2 = loc.clone();
@@ -378,5 +427,65 @@ fn visit_value(
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::core::typed::{CompSig, CoreFnSig};
+    use crate::types::ty::EffRow;
+    use crate::types::Type;
+
+    use super::*;
+
+    fn callback(row: EffRow) -> CoreType {
+        CoreType::Thunk(Box::new(CompSig::new(
+            CoreType::Function(Box::new(CoreFnSig::new(
+                Vec::new(),
+                Vec::new(),
+                CompSig::new(CoreType::Source(Type::Unit), row),
+            ))),
+            EffRow::Empty,
+        )))
+    }
+
+    // A row variable bound by the stored function's own quantifiers: the
+    // caller chooses the row at each instantiation, so the thunk claims no
+    // effects of its own.
+    fn poly_callback(row: EffRow) -> CoreType {
+        CoreType::Thunk(Box::new(CompSig::new(
+            CoreType::Function(Box::new(CoreFnSig::new(
+                vec![CoreQuantifier::Row(Sym::new("e"))],
+                Vec::new(),
+                CompSig::new(CoreType::Source(Type::Unit), row),
+            ))),
+            EffRow::Empty,
+        )))
+    }
+
+    #[test]
+    fn stored_thunk_witnesses_make_dynamic_uses_opaque() {
+        assert!(!effectful_thunk_type(&callback(EffRow::Empty)));
+        assert!(effectful_thunk_type(&callback(EffRow::singleton("Log"))));
+        assert!(effectful_thunk_type(&callback(EffRow::Var(Sym::new("e")))));
+        assert!(!effectful_thunk_type(&poly_callback(EffRow::Var(
+            Sym::new("e")
+        ))));
+        assert!(effectful_thunk_type(&CoreType::Thunk(Box::new(
+            CompSig::new(CoreType::Source(Type::Unit), EffRow::singleton("Log"))
+        ))));
+
+        let local = TypedValue::new(
+            callback(EffRow::Empty),
+            TypedValueKind::Var {
+                name: Sym::new("quiet"),
+                instantiation: Vec::new(),
+            },
+        );
+        let widened = TypedValue::new(
+            callback(EffRow::singleton("Log")),
+            TypedValueKind::Reinterpret(Box::new(local)),
+        );
+        assert!(declared_thunk_escape(&widened));
     }
 }

@@ -42,7 +42,7 @@ type DiagnosticsDoc = DiagnosticsDoc {
 }
 ```
 
-A decoded diagnostics document: the envelope identity, the embedded source every span indexes into, and the diagnostics in source order. lint: allow(L0203)
+A decoded diagnostics document: the envelope identity, the embedded source every span indexes into, and the diagnostics in source order.
 
 ## Functions and Values
 

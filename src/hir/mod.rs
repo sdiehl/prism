@@ -13,8 +13,8 @@
 //! zonked node types, and operation-local handler residual witnesses.
 //!
 //! There is deliberately no parallel elaboration path: elaboration constructs
-//! its `CheckedHir` through [`build`] (whole programs) or [`build_for_expr`]
-//! (the REPL's re-inferred expressions, which carry their own evidence).
+//! its `CheckedHir` through [`build`] (whole programs) or `build_for_expr`
+//! (the REPL's re-inferred expressions, which carry all of their own facts).
 
 pub mod lint;
 
@@ -123,9 +123,9 @@ impl HandlerResidual {
 /// The single cross-phase carrier of node-keyed checked state: resolution
 /// facts, dictionary evidence at dispatch sites, the concrete numeric lane a
 /// literal or operator site fixed to, and the zonked type synthesized for a
-/// node. Constructed once by the checker ([`NodeFacts::from_tables`]) and
+/// node. Constructed once by the checker (`NodeFacts::from_tables`) and
 /// read only through a [`CheckedHir`].
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct NodeFacts {
     res: Vec<Option<NodeRes>>,
     evidence: Vec<Option<Vec<Dict>>>,
@@ -192,6 +192,18 @@ struct NodeFactWire {
 }
 
 impl NodeFacts {
+    pub(crate) const fn empty() -> Self {
+        Self {
+            res: Vec::new(),
+            evidence: Vec::new(),
+            lane: Vec::new(),
+            ty: Vec::new(),
+            tooltip: Vec::new(),
+            handler_nodes: Vec::new(),
+            handler_residual: Vec::new(),
+        }
+    }
+
     pub(crate) fn to_json(&self) -> Result<String, serde_json::Error> {
         let rows = self
             .iter()
@@ -218,7 +230,7 @@ impl NodeFacts {
         if !rows.windows(2).all(|pair| pair[0].id < pair[1].id) {
             return Err("checked HIR facts are not in canonical node order".to_string());
         }
-        let mut facts = Self::default();
+        let mut facts = Self::empty();
         for row in rows {
             let index = row.id as usize;
             place_dense(&mut facts.res, index, row.res);
@@ -286,7 +298,7 @@ impl NodeFacts {
         clippy::too_many_arguments,
         reason = "the sole checked-HIR conversion keeps each inference fact family explicit"
     )]
-    pub fn from_tables(
+    pub(crate) fn from_tables(
         field_res: BTreeMap<NodeId, (String, usize, usize)>,
         unboxed_field: BTreeMap<NodeId, (usize, usize)>,
         path_res: PathRes,
@@ -338,19 +350,25 @@ impl NodeFacts {
     pub(crate) fn tooltip(&self, id: NodeId) -> Option<&str> {
         self.tooltip.get(id.0 as usize).and_then(Option::as_deref)
     }
+
+    /// Adopt the presentation-only tooltip table from an instrumented check of
+    /// the same program, keeping every semantic fact of this judgment. Node
+    /// identities are a pure function of the source, so the two checks agree on
+    /// which node each string describes.
+    pub(crate) fn adopt_tooltips(&mut self, from: Self) {
+        self.tooltip = from.tooltip;
+    }
 }
 
 /// The checked HIR over one checked program.
 ///
-/// The only view through which elaboration reads per-node facts. For the
-/// REPL's re-inferred expressions, an evidence override carries the
-/// expression's own dictionaries (its fresh `NodeId`s are disjoint from the
-/// session program's).
+/// The only view through which elaboration reads per-node facts. A REPL
+/// expression supplies its own complete fact artifact; it never overlays one
+/// fact family on the session program's numerically colliding node identities.
 #[derive(Debug)]
 pub struct CheckedHir<'a> {
     pub checked: &'a Checked,
     facts: &'a NodeFacts,
-    evidence_override: Option<Vec<Option<Vec<Dict>>>>,
 }
 
 impl<'a> CheckedHir<'a> {
@@ -363,11 +381,8 @@ impl<'a> CheckedHir<'a> {
     /// The dictionary evidence recorded at a dispatch site.
     #[must_use]
     pub fn evidence(&self, id: NodeId) -> Option<&[Dict]> {
-        let table = self
-            .evidence_override
-            .as_ref()
-            .unwrap_or(&self.facts.evidence);
-        table
+        self.facts
+            .evidence
             .get(id.0 as usize)
             .and_then(Option::as_ref)
             .map(Vec::as_slice)
@@ -431,22 +446,17 @@ pub fn build(checked: &Checked) -> CheckedHir<'_> {
     linted(CheckedHir {
         checked,
         facts: &checked.facts,
-        evidence_override: None,
     })
 }
 
 /// Build the checked HIR for a single re-inferred expression (the REPL).
 ///
-/// The session program's facts, with the expression's own dictionary evidence
-/// overriding the evidence table (its fresh `NodeId`s are meaningless against
-/// the session's).
+/// Every node fact comes from the expression's own inference. Expression and
+/// session `NodeId`s share a numeric namespace, so consulting any session fact
+/// here could accept a stale resolution or numeric lane before a fallback runs.
 #[must_use]
-pub fn build_for_expr<'a>(checked: &'a Checked, dicts: &DictTable) -> CheckedHir<'a> {
-    linted(CheckedHir {
-        checked,
-        facts: &checked.facts,
-        evidence_override: Some(dense(dicts.clone())),
-    })
+pub(crate) fn build_for_expr<'a>(checked: &'a Checked, facts: &'a NodeFacts) -> CheckedHir<'a> {
+    linted(CheckedHir { checked, facts })
 }
 
 #[cfg(test)]
@@ -481,6 +491,29 @@ mod tests {
             .any(|r| matches!(r, NodeRes::Field(ctor, 0, 2) if ctor == "Point")));
     }
 
+    #[test]
+    fn expression_facts_do_not_fall_through_to_colliding_session_ids() {
+        let mut c = checked(SRC);
+        let id = NodeId(1);
+        place_dense(&mut c.facts.lane, id.0 as usize, Some(Type::Int));
+        place_dense(
+            &mut c.facts.res,
+            id.0 as usize,
+            Some(NodeRes::Field("Point".into(), 0, 2)),
+        );
+        let mut expression = NodeFacts::empty();
+        place_dense(&mut expression.lane, id.0 as usize, Some(Type::Bool));
+        place_dense(
+            &mut expression.res,
+            id.0 as usize,
+            Some(NodeRes::Field("Point".into(), 1, 2)),
+        );
+
+        let hir = build_for_expr(&c, &expression);
+        assert_eq!(hir.lane(id), Some(&Type::Bool));
+        assert_eq!(hir.res(id), Some(&NodeRes::Field("Point".into(), 1, 2)));
+    }
+
     // Negative tests for the validation transition: a fabricated fact that
     // does not check against the constructor environment must be reported.
     #[test]
@@ -488,12 +521,11 @@ mod tests {
         let c = checked(SRC);
         let facts = NodeFacts {
             res: vec![Some(NodeRes::Field("NoSuchCtor".into(), 0, 2))],
-            ..NodeFacts::default()
+            ..NodeFacts::empty()
         };
         let hir = CheckedHir {
             checked: &c,
             facts: &facts,
-            evidence_override: None,
         };
         assert_eq!(lint::lint_hir(&hir).len(), 1);
     }
@@ -510,12 +542,11 @@ mod tests {
                 // An update path with an empty chain.
                 Some(NodeRes::Paths(vec![vec![]])),
             ],
-            ..NodeFacts::default()
+            ..NodeFacts::empty()
         };
         let hir = CheckedHir {
             checked: &c,
             facts: &facts,
-            evidence_override: None,
         };
         assert_eq!(lint::lint_hir(&hir).len(), 3);
     }
@@ -525,12 +556,11 @@ mod tests {
         let c = checked(SRC);
         let facts = NodeFacts {
             evidence: vec![Some(vec![Dict::Global("NoSuchInst".into(), vec![])])],
-            ..NodeFacts::default()
+            ..NodeFacts::empty()
         };
         let hir = CheckedHir {
             checked: &c,
             facts: &facts,
-            evidence_override: None,
         };
         assert_eq!(lint::lint_hir(&hir).len(), 1);
     }
@@ -554,12 +584,11 @@ mod tests {
                 "Ord".into(),
                 5,
             )])],
-            ..NodeFacts::default()
+            ..NodeFacts::empty()
         };
         let hir = CheckedHir {
             checked: &c,
             facts: &facts,
-            evidence_override: None,
         };
         assert_eq!(lint::lint_hir(&hir).len(), 1);
     }
@@ -573,12 +602,11 @@ mod tests {
         let facts = NodeFacts {
             lane: vec![Some(Type::Exist(0))],
             ty: vec![Some(Type::Exist(1))],
-            ..NodeFacts::default()
+            ..NodeFacts::empty()
         };
         let hir = CheckedHir {
             checked: &c,
             facts: &facts,
-            evidence_override: None,
         };
         assert!(lint::lint_hir(&hir).is_empty());
     }
@@ -608,7 +636,6 @@ fn run() : Int ! {} =
         let hir = CheckedHir {
             checked: &c,
             facts: &missing,
-            evidence_override: None,
         };
         assert!(lint::lint_hir(&hir)
             .iter()
@@ -619,7 +646,6 @@ fn run() : Int ! {} =
         let hir = CheckedHir {
             checked: &c,
             facts: &stale,
-            evidence_override: None,
         };
         assert!(lint::lint_hir(&hir)
             .iter()
@@ -647,7 +673,6 @@ fn run() : Int ! {} =
         let hir = CheckedHir {
             checked: &c,
             facts: &facts,
-            evidence_override: None,
         };
         assert!(lint::lint_hir(&hir)
             .iter()
@@ -663,14 +688,13 @@ fn run() : Int ! {} =
         let source = NodeFacts {
             handler_nodes: c.facts.handler_nodes.clone(),
             handler_residual: c.facts.handler_residual.clone(),
-            ..NodeFacts::default()
+            ..NodeFacts::empty()
         };
         let json = source.to_json().expect("serialize handler facts");
         let facts = NodeFacts::from_json(&json).expect("deserialize handler facts");
         let hir = CheckedHir {
             checked: &c,
             facts: &facts,
-            evidence_override: None,
         };
         assert!(lint::lint_hir(&hir).is_empty());
         assert!(facts.handler_residual.iter().flatten().any(|fact| {

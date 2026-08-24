@@ -19,9 +19,9 @@ use prism::{build_on, default_roots, Config, EffectTier, ObservationTrace, Root}
 
 use super::{effect_plan, forced};
 use crate::support::{
-    canonical_process_exit, cleanup_bin, corpus_is_sharded, heavy_corpus_delegated, leak_free,
-    parallel_check, program_stderr, require_cc, sharded_corpus, source, temp_bin, with_gate_cache,
-    CHECK_LEAKS,
+    canonical_process_exit, check_native_parity, cleanup_bin, corpus_is_sharded,
+    heavy_corpus_delegated, leak_free, parallel_check, program_stderr, require_cc, sharded_corpus,
+    source, temp_bin, with_gate_cache, CHECK_LEAKS,
 };
 
 /// Gate-cache tag for a cross-tier verdict: one marker covers the whole grid
@@ -36,6 +36,18 @@ const FIXTURE_CASES: &[&str] = &[
     "tests/fixtures/tier_cross/non_ascii.pr",
     "tests/fixtures/tier_cross/byte_seams.pr",
     "tests/fixtures/tier_cross/thunk_param.pr",
+    "tests/fixtures/tier_cross/convention_split_map.pr",
+    "tests/fixtures/tier_cross/convention_split_map_unrolled.pr",
+];
+
+/// The convention-split three-way control. All three receive ordinary native
+/// parity and leak checking; the mixed and unrolled cases additionally sit in
+/// `FIXTURE_CASES`, because their plans must move under tier forcing. The pure
+/// control intentionally has only one plan, pinned by the compiler test.
+const CONVENTION_CONTROL_CASES: &[&str] = &[
+    "tests/fixtures/tier_cross/convention_split_map_pure.pr",
+    "tests/fixtures/tier_cross/convention_split_map.pr",
+    "tests/fixtures/tier_cross/convention_split_map_unrolled.pr",
 ];
 
 const MIN_DISTINCT_TIER_PLANS: usize = 2;
@@ -244,6 +256,32 @@ fn tiers_match_each_other_on_adversarial_fixtures() {
     assert!(
         fails.is_empty(),
         "{} of {} adversarial cross-tier fixtures failed:\n{}",
+        fails.len(),
+        cases.len(),
+        fails.join("\n")
+    );
+}
+
+#[test]
+fn convention_split_controls_match_the_interpreter_and_do_not_leak() {
+    require_cc();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let roots = default_roots(Path::new("."));
+    let mut cfg = Config::from_env();
+    cfg.flags.compiler_cache = false;
+    cfg.flags.quiet = true;
+    let cases: Vec<PathBuf> = CONVENTION_CONTROL_CASES
+        .iter()
+        .map(|case| root.join(case))
+        .collect();
+    let fails = parallel_check(&cases, |case| {
+        check_native_parity(case, "convention-control", |source, output| {
+            build_on(source, &roots, output, &cfg)
+        })
+    });
+    assert!(
+        fails.is_empty(),
+        "{} of {} convention controls failed native parity/leak:\n{}",
         fails.len(),
         cases.len(),
         fails.join("\n")

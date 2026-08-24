@@ -1551,10 +1551,10 @@ impl ReflectKind {
 }
 
 // One step of an update path, read left to right. `Field(f)` descends into a
-// record field; `Each` fans out over every element of a functor; `Case(C)`
-// focuses through a sum constructor (a prism), leaving other constructors
-// untouched; `Index(i)` focuses one element of an array/list; `Where(p)` keeps
-// only foci satisfying `p`. All but `Field` are removed by desugar (lowered to
+// record field. `Each` fans out over every element of a functor. `Case(C)`
+// focuses through a sum constructor and leaves other constructors untouched.
+// `Index(i)` focuses one array or list element. `Where(p)` keeps only foci
+// satisfying `p`. All but `Field` are removed by desugar (lowered to
 // `fmap`, a `match`, `index_set`, and a guard), so a path that reaches
 // tc/elaborate is `Field`-only.
 #[derive(Clone, Debug)]

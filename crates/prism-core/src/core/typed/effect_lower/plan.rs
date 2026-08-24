@@ -1,45 +1,27 @@
-//! The canonical effect plan: the one authority on which operations a piece of
-//! code can perform, and on the facts that force the free monad.
+//! Reachable operations and the conditions that require free-monad lowering.
 //!
-//! Every question of the form "which ops can this run" is answered from here,
-//! computed once from [`ThunkFlow`] and the typed rows, so no pass carries a
-//! private reachability walk that can drift from the one the cascade acts on. A
-//! plan is a fact about one program tree, not about a compilation: the erasures
-//! read a plan for the tree they receive and the cascade reads one for the
-//! prepared tree. Those are the same computation applied to two trees, which is
-//! the thing that was missing; two *implementations* is the defect.
+//! [`EffectPlan`] centralizes operation reachability for the cascade and erasure
+//! passes. Each pass computes it for the tree it receives.
 //!
-//! Reachability is the least fixpoint of three contributions:
+//! Reachability is the least fixpoint of:
 //!
 //! * the operations a body names directly (its `do`s, handler arms, and masks,
 //!   including inside thunk literals),
 //! * the reachable set of every function it calls by name, and
 //! * the signatures that flowed into its thunk-valued parameters.
 //!
-//! The third is what a by-name call graph cannot see. A thunk arriving as a
-//! parameter and forced is not a named call, so a fixpoint over calls alone
-//! reports that such a function performs nothing at all, and every guard reading
-//! it waves the function through. That is not a precision loss, it is a wrong
-//! answer: it let a multishot handler's `var` block collapse to one shared cell.
+//! The third contribution covers forced thunk parameters, which do not appear as
+//! named call-graph edges.
 //!
-//! One residue is named rather than hidden. A thunk buried in a constructor or
-//! tuple and extracted later is tracked by neither the call graph nor
-//! `ThunkFlow`; [`EffectPlan::opaque_thunks`] reports exactly that condition,
-//! and the region planner, which must not confine a region whose forcings it
-//! cannot bound, reads it.
+//! [`EffectPlan::opaque_thunks`] records thunks hidden in constructors or tuples,
+//! whose forcing sites cannot be bounded by the call graph or [`ThunkFlow`].
 //!
-//! Capturing an effectful computation in a thunk is likewise recorded with its
-//! precision attached rather than as one flag: [`EffectPlan::tracked_captures`]
-//! are the captures whose forcing a signature already describes, and
-//! [`EffectPlan::opaque_captures`] the rest. Both capture, so everything that
-//! acts on the fact reads their union, [`EffectPlan::thunk_effects`].
+//! [`EffectPlan::tracked_captures`] contains captures described by a signature;
+//! [`EffectPlan::opaque_captures`] contains the rest. Their union is available as
+//! [`EffectPlan::thunk_effects`].
 //!
-//! Being a fact about one tree, it is a fact about that tree's effects, and the
-//! erasures exist to remove those: on the tree they receive, every local `var`
-//! block is itself an effectful thunk handed to a runner, so the flag is true
-//! of precisely the state about to be rewritten away. The erasures therefore
-//! read their own reachable set and not the flag, which would otherwise decline
-//! a rewrite because the rewrite has not happened yet.
+//! Erasure passes use the reachable set from their input tree because their work
+//! removes the effectful state represented there.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;

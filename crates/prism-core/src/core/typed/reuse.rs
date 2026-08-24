@@ -12,15 +12,16 @@ use prism_syntax::names::reuse_token;
 
 use super::{
     CoreType, Owned, ReuseLowered, TypedBinder, TypedComp, TypedCompKind, TypedCore, TypedCoreFn,
-    TypedHandleOp, TypedHandler, TypedPattern, TypedValue, TypedValueKind,
+    TypedHandleOp, TypedHandler, TypedPattern, TypedValue, TypedValueKind, UncheckedTypedCore,
 };
 
 /// Pair released constructor shells with fitting allocations without erasing
 /// any type witnesses.
 #[must_use]
-pub fn reuse(core: TypedCore<Owned>) -> TypedCore<ReuseLowered> {
-    TypedCore::new(
-        core.fns
+pub fn reuse(core: TypedCore<Owned>) -> UncheckedTypedCore<ReuseLowered> {
+    UncheckedTypedCore::new(
+        core.into_unchecked()
+            .into_functions()
             .into_iter()
             .map(|function| {
                 TypedCoreFn::new(
@@ -93,19 +94,8 @@ fn reuse_arm(scrutinee: &TypedValue, pattern: &TypedPattern, body: &TypedComp) -
     else {
         return body.clone();
     };
-    // A constructor pattern proves that the selected branch holds a boxed cell,
-    // including constructors from the effect-runtime representation. Tuples
-    // still need their source tuple witness because unboxed products share the
-    // tuple-pattern shape.
-    let capacity = match (pattern, &scrutinee.ty) {
-        // The wired nullable frees no cell when matched (its native form is
-        // the null word or the element itself), so it can never seed a token.
-        (TypedPattern::Ctor { name, .. }, _) if kw::is_or_null_ctor(name.as_str()) => {
-            return body.clone()
-        }
-        (TypedPattern::Ctor { fields, .. }, _)
-        | (TypedPattern::Tuple(fields), CoreType::Source(Type::Tuple(_))) => fields.len(),
-        _ => return body.clone(),
+    let Some(capacity) = reuse_cell_capacity(pattern, &scrutinee.ty) else {
+        return body.clone();
     };
     let token = TypedBinder::new(
         Sym::from(reuse_token(scrutinee_name.as_str())),
@@ -242,8 +232,7 @@ fn consume_alloc(comp: &TypedComp, token: &TypedBinder, capacity: usize) -> Opti
             ))
         }
         TypedCompKind::Return(value)
-            if ctor_arity(value).is_some_and(|arity| arity <= capacity)
-                && !is_or_null_alloc(value) =>
+            if rebuild_arity(value).is_some_and(|arity| arity <= capacity) =>
         {
             Some(TypedComp::new(
                 comp.sig.clone(),
@@ -303,13 +292,34 @@ fn pattern_binds(pattern: &TypedPattern, name: Sym) -> bool {
     }
 }
 
-// The wired nullable allocates no cell, so it can never spend a reuse credit.
-fn is_or_null_alloc(value: &TypedValue) -> bool {
-    matches!(&value.kind, TypedValueKind::Ctor { name, .. } if kw::is_or_null_ctor(name.as_str()))
+/// Capacity of the boxed cell a constructor-pattern arm releases, or `None`
+/// when the match frees no reusable cell. A constructor pattern proves that
+/// the selected branch holds a boxed cell, including constructors from the
+/// effect-runtime representation; the wired nullable is excluded because it
+/// frees no cell when matched (its native form is the null word or the
+/// element itself). Tuples still need their source tuple witness because
+/// unboxed products share the tuple-pattern shape. Counting fields measures
+/// the cell exactly because every cell slot is one runtime word, an invariant
+/// the typed verifier checks at each constructor and boxed tuple.
+pub(crate) fn reuse_cell_capacity(
+    pattern: &TypedPattern,
+    scrutinee_ty: &CoreType,
+) -> Option<usize> {
+    match (pattern, scrutinee_ty) {
+        (TypedPattern::Ctor { name, .. }, _) if kw::is_or_null_ctor(name.as_str()) => None,
+        (TypedPattern::Ctor { fields, .. }, _)
+        | (TypedPattern::Tuple(fields), CoreType::Source(Type::Tuple(_))) => Some(fields.len()),
+        _ => None,
+    }
 }
 
-const fn ctor_arity(value: &TypedValue) -> Option<usize> {
+/// Arity of an allocation that can be rebuilt inside a spent shell, or `None`
+/// when the value allocates no cell. The wired nullable allocates no cell, so
+/// it can never spend a reuse credit. As with the capacity, the field count
+/// measures the rebuilt cell exactly because each slot is one runtime word.
+pub(crate) fn rebuild_arity(value: &TypedValue) -> Option<usize> {
     match &value.kind {
+        TypedValueKind::Ctor { name, .. } if kw::is_or_null_ctor(name.as_str()) => None,
         TypedValueKind::Ctor { fields, .. } | TypedValueKind::Tuple(fields) => Some(fields.len()),
         TypedValueKind::Var { .. }
         | TypedValueKind::Int(_)
@@ -334,8 +344,9 @@ mod tests {
     use crate::core::{Comp, Core, CoreFn, Value};
     use crate::types::ty::EffRow;
 
-    use super::super::verify::{verify, ConstructorSig, VerifyEnv};
-    use super::super::{CompSig, CoreFnSig, TypedValueKind};
+    use super::super::verify::{ConstructorSig, VerifyEnv};
+    use super::super::violation::{ArityBound, ReuseFault, Violation};
+    use super::super::{verify, CompSig, CoreFnSig, TypedValueKind};
     use super::*;
 
     fn sym(name: &str) -> Sym {
@@ -468,19 +479,17 @@ mod tests {
     }
 
     fn assert_differential(
-        input: TypedCore<Owned>,
+        input: UncheckedTypedCore<Owned>,
         env: &VerifyEnv,
         balance: bool,
     ) -> TypedCore<ReuseLowered> {
-        if let Err(violations) = verify(&input, env) {
-            panic!("owned fixture is invalid: {violations:#?}");
-        }
+        let input = verify(input, env)
+            .unwrap_or_else(|violations| panic!("owned fixture is invalid: {violations:#?}"));
         let legacy_input = input.clone().erase();
         let expected = legacy_reuse(&legacy_input);
-        let actual = reuse(input);
-        if let Err(violations) = verify(&actual, env) {
-            panic!("reuse-lowered fixture is invalid: {violations:#?}");
-        }
+        let actual = verify(reuse(input), env).unwrap_or_else(|violations| {
+            panic!("reuse-lowered fixture is invalid: {violations:#?}")
+        });
         assert_eq!(actual.clone().erase(), expected);
         if balance {
             if let Err(error) = balanced(&actual.clone().erase(), &Sigs::new()) {
@@ -504,7 +513,7 @@ mod tests {
             pattern("Wide", 2),
             after_drop("cell", shape, ret(rebuild)),
         );
-        let input = TypedCore::new(vec![function("main", vec![scrutinee], body)]);
+        let input = UncheckedTypedCore::new(vec![function("main", vec![scrutinee], body)]);
         let actual = assert_differential(input, &env, true).erase();
 
         let Comp::Case(_, arms) = single_body(&actual) else {
@@ -531,7 +540,7 @@ mod tests {
             pattern("Wide", 2),
             ret(ctor("Narrow", 1, shape, vec![int(7)])),
         );
-        let input = TypedCore::new(vec![function("main", vec![scrutinee], body)]);
+        let input = UncheckedTypedCore::new(vec![function("main", vec![scrutinee], body)]);
         let actual = assert_differential(input, &env, false).erase();
         assert!(!format!("{:?}", single_body(&actual)).contains("WithReuse"));
     }
@@ -546,7 +555,7 @@ mod tests {
             pattern("Narrow", 1),
             after_drop("cell", shape, ret(rebuild)),
         );
-        let input = TypedCore::new(vec![function("main", vec![scrutinee], body)]);
+        let input = UncheckedTypedCore::new(vec![function("main", vec![scrutinee], body)]);
         let actual = assert_differential(input, &env, true).erase();
         assert!(!format!("{:?}", single_body(&actual)).contains("WithReuse"));
     }
@@ -568,7 +577,7 @@ mod tests {
             pattern("Wide", 2),
             after_drop("cell", shape, branches),
         );
-        let input = TypedCore::new(vec![function("main", vec![scrutinee], body)]);
+        let input = UncheckedTypedCore::new(vec![function("main", vec![scrutinee], body)]);
         let actual = assert_differential(input, &env, true).erase();
         let Comp::Case(_, arms) = single_body(&actual) else {
             panic!("expected a case");
@@ -610,7 +619,7 @@ mod tests {
             after_drop("cell", shape, branches),
         );
         let main = function("main", vec![scrutinee], body);
-        let input = TypedCore::new(vec![main, factory]);
+        let input = UncheckedTypedCore::new(vec![main, factory]);
         let actual = assert_differential(input, &env, true).erase();
         assert!(!format!("{:?}", single_body(&actual)).contains("WithReuse"));
     }
@@ -631,10 +640,10 @@ mod tests {
             shadowed_tail,
         );
         let body = case(var("cell", shape), pattern("Wide", 2), arm);
-        let input = TypedCore::new(vec![function("main", vec![outer], body)]);
-        verify(&input, &env).expect("shadowing fixture is valid Owned Core");
+        let input = UncheckedTypedCore::new(vec![function("main", vec![outer], body)]);
+        let input = verify(input, &env).expect("shadowing fixture is valid Owned Core");
         let actual = reuse(input);
-        verify(&actual, &env).expect("the safe no-reuse result remains valid");
+        let actual = verify(actual, &env).expect("the safe no-reuse result remains valid");
         assert!(!format!("{:?}", single_body(&actual.erase())).contains("WithReuse"));
     }
 
@@ -653,10 +662,10 @@ mod tests {
             ret(ctor("Narrow", 1, shape.clone(), vec![int(1)])),
         );
         let body = case(var("cell", shape), pattern, arm);
-        let input = TypedCore::new(vec![function("main", vec![outer], body)]);
-        verify(&input, &env).expect("pattern-shadow fixture is valid Owned Core");
+        let input = UncheckedTypedCore::new(vec![function("main", vec![outer], body)]);
+        let input = verify(input, &env).expect("pattern-shadow fixture is valid Owned Core");
         let actual = reuse(input);
-        verify(&actual, &env).expect("the safe no-reuse result remains valid");
+        let actual = verify(actual, &env).expect("the safe no-reuse result remains valid");
         assert!(!format!("{:?}", single_body(&actual.erase())).contains("WithReuse"));
     }
 
@@ -674,11 +683,11 @@ mod tests {
         );
         let arm = after_drop("cell", shape.clone(), shadowed_tail);
         let body = case(var("cell", shape), pattern("Wide", 2), arm);
-        let input = TypedCore::new(vec![function("main", vec![cell, other], body)]);
-        verify(&input, &env).expect("token-capture fixture is valid Owned Core");
+        let input = UncheckedTypedCore::new(vec![function("main", vec![cell, other], body)]);
+        let input = verify(input, &env).expect("token-capture fixture is valid Owned Core");
         balanced(&input.clone().erase(), &Sigs::new()).expect("the Owned fixture is balanced");
         let actual = reuse(input);
-        verify(&actual, &env).expect("the safe no-reuse result remains valid");
+        let actual = verify(actual, &env).expect("the safe no-reuse result remains valid");
         assert!(!format!("{:?}", single_body(&actual.erase())).contains("WithReuse"));
     }
 
@@ -701,7 +710,7 @@ mod tests {
         );
         let inner_case = case(var("inner", shape.clone()), pattern("Wide", 2), inner_body);
         let outer_case = case(var("outer", shape), pattern("Wide", 2), inner_case);
-        let input = TypedCore::new(vec![function("main", vec![outer, inner], outer_case)]);
+        let input = UncheckedTypedCore::new(vec![function("main", vec![outer, inner], outer_case)]);
         let actual = assert_differential(input, &env, true).erase();
         let rendered = format!("{:?}", single_body(&actual));
         assert_eq!(rendered.matches("WithReuse").count(), 2);
@@ -735,7 +744,7 @@ mod tests {
             pattern("OldShell", 2),
             after_drop("old", old_ty, ret(rebuild)),
         );
-        let input = TypedCore::new(vec![function("main", vec![old], body)]);
+        let input = UncheckedTypedCore::new(vec![function("main", vec![old], body)]);
         let actual = assert_differential(input, &env, true).erase();
         assert!(format!("{:?}", single_body(&actual)).contains("WithReuse"));
     }
@@ -768,11 +777,13 @@ mod tests {
             },
         );
         let body = case(var("cell", shape), pattern("Wide", 2), body);
-        let forged = TypedCore::<ReuseLowered>::new(vec![function("main", vec![freed], body)]);
-        let violations = verify(&forged, &env).expect_err("one branch leaves the credit live");
-        assert!(violations.iter().any(|violation| violation
-            .message()
-            .contains("branches consume different reuse-token credits")));
+        let forged =
+            UncheckedTypedCore::<ReuseLowered>::new(vec![function("main", vec![freed], body)]);
+        let violations = verify(forged, &env).expect_err("one branch leaves the credit live");
+        assert!(violations.iter().any(|violation| matches!(
+            violation.kind(),
+            Violation::Reuse(ReuseFault::UnequalCredits(_))
+        )));
     }
 
     #[test]
@@ -797,11 +808,16 @@ mod tests {
             },
         );
         let body = case(var("cell", shape), pattern("Narrow", 1), body);
-        let forged = TypedCore::<ReuseLowered>::new(vec![function("main", vec![freed], body)]);
-        let violations = verify(&forged, &env).expect_err("the rebuild exceeds the shell");
-        assert!(violations
-            .iter()
-            .any(|violation| violation.message().contains("exceeds shell capacity")));
+        let forged =
+            UncheckedTypedCore::<ReuseLowered>::new(vec![function("main", vec![freed], body)]);
+        let violations = verify(forged, &env).expect_err("the rebuild exceeds the shell");
+        assert!(violations.iter().any(|violation| matches!(
+            violation.kind(),
+            Violation::Arity {
+                bound: ArityBound::ShellCapacity,
+                ..
+            }
+        )));
     }
 
     #[test]
@@ -827,11 +843,15 @@ mod tests {
                 body: Box::new(spend),
             },
         );
-        let forged = TypedCore::<ReuseLowered>::new(vec![function("main", vec![freed], body)]);
-        let violations = verify(&forged, &env).expect_err("reuse needs case-shell authority");
-        assert!(violations.iter().any(|violation| violation
-            .message()
-            .contains("does not free the active boxed case scrutinee")));
+        let forged =
+            UncheckedTypedCore::<ReuseLowered>::new(vec![function("main", vec![freed], body)]);
+        let violations = verify(forged, &env).expect_err("reuse needs case-shell authority");
+        assert!(
+            violations
+                .iter()
+                .any(|violation| violation.kind()
+                    == &Violation::Reuse(ReuseFault::ScrutineeNotActive))
+        );
     }
 
     #[test]
@@ -877,11 +897,12 @@ mod tests {
             },
         );
         let body = case(var("cell", shape), pattern("Wide", 2), body);
-        let forged = TypedCore::<ReuseLowered>::new(vec![function("main", vec![freed], body)]);
-        let violations = verify(&forged, &env).expect_err("one shell cannot be freed twice");
-        assert!(violations
-            .iter()
-            .any(|violation| violation.message().contains("freed more than once")));
+        let forged =
+            UncheckedTypedCore::<ReuseLowered>::new(vec![function("main", vec![freed], body)]);
+        let violations = verify(forged, &env).expect_err("one shell cannot be freed twice");
+        assert!(violations.iter().any(
+            |violation| violation.kind() == &Violation::Reuse(ReuseFault::ScrutineeFreedTwice)
+        ));
     }
 
     #[test]

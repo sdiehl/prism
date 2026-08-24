@@ -113,7 +113,10 @@ fn lock_exclusive(file: &fs::File) -> io::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn lock_exclusive(_file: &fs::File) -> io::Result<()> {
+// Keep the fallible signature shared with the Unix implementation so callers
+// cannot become target-dependent merely because wasm's lock is a no-op.
+#[allow(clippy::unnecessary_wraps)]
+const fn lock_exclusive(_file: &fs::File) -> io::Result<()> {
     Ok(())
 }
 
@@ -309,6 +312,25 @@ pub(super) fn remove_ref(root: &Path, name: &str) -> io::Result<()> {
         write_refs(root, &map)?;
     }
     Ok(())
+}
+
+/// Every hash any index entry points at: `names` and `canonical` and `refs`
+/// values, plus every `deps` key and dependent. Gc's mark phase: an object
+/// reachable from any index survives the object-layer sweep alongside the
+/// query-bound outputs from [`super::queries::live_outputs`].
+///
+/// # Errors
+/// Fails on a filesystem error or a malformed index file.
+pub(super) fn all_referenced_hashes(root: &Path) -> io::Result<BTreeSet<String>> {
+    let mut out = BTreeSet::new();
+    out.extend(load_names(root)?.into_values());
+    for (hash, deps) in load_deps(root)? {
+        out.insert(hash);
+        out.extend(deps);
+    }
+    out.extend(load_canonical(root)?.into_values());
+    out.extend(load_refs(root)?.into_values());
+    Ok(out)
 }
 
 #[cfg(test)]

@@ -1,7 +1,9 @@
-# Run nextest and doctests; debug Core lint needs a larger libtest stack.
+# The cap keeps one red test from cancelling the rest of an hour-long suite,
+# while still stopping a wholesale break early. Core lint needs the larger stack.
+# Run nextest and doctests.
 [group('tests')]
 test:
-    RUST_MIN_STACK=33554432 PRISM_COMPILER_CACHE=0 cargo nextest run --all
+    RUST_MIN_STACK=33554432 PRISM_COMPILER_CACHE=0 cargo nextest run --all --max-fail 10
     PRISM_COMPILER_CACHE=0 cargo test --workspace --doc
 
 # Run the native parity tests.
@@ -9,10 +11,20 @@ test:
 parity:
     PRISM_COMPILER_CACHE=0 cargo test --test native parity::
 
+# Run the live generated parser-mutation parity gate.
+[group('tests')]
+parser-mutation:
+    PRISM_COMPILER_CACHE=0 cargo test --test compiler parser_parity::parity_generated_mutation_lanes -- --exact
+
 # Compare the corpus across all optimizer configurations.
 [group('tests')]
 opt-equiv *FLAGS:
     PRISM_COMPILER_CACHE=0 PRISM_CORE_LINT=1 PRISM_QUIET=1 cargo test {{ FLAGS }} --test differential gate::optimizer_configurations_have_identical_observation_traces -- --exact
+
+# Compare the corpus across all forced effect-tier positions.
+[group('tests')]
+tier-equiv *FLAGS:
+    PRISM_COMPILER_CACHE=0 PRISM_CORE_LINT=1 PRISM_QUIET=1 cargo test {{ FLAGS }} --test differential tier_gate::tier_configurations_have_identical_observation_traces -- --exact
 
 # Run native performance gates.
 [group('tests')]
@@ -45,7 +57,7 @@ clippy:
 [group('quality')]
 feature-matrix:
     cargo check --all-targets
-    cargo check --no-default-features --features wasm --target wasm32-unknown-unknown
+    cargo clippy --no-default-features --features wasm --target wasm32-unknown-unknown --lib -- -D warnings
     # cargo check omits cfg(test), so compile the wasm lib test harness too.
     cargo test --no-default-features --features wasm --target wasm32-unknown-unknown --lib --no-run
     cargo check --features mlir
@@ -66,6 +78,7 @@ _gate *FLAGS:
 gate:
     @just _gate --release
     @just opt-equiv --release
+    @just tier-equiv --release
 
 # Run the correctness gate in the debug profile.
 [group('gates')]

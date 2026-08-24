@@ -26,7 +26,7 @@ A branded nominal identity: one integer, one phantom namespace.
 type Binder(space) = Binder { name: Name(space), hint: String }
 ```
 
-A binder: the identity the checker compares, and the source spelling diagnostics print. Equality, ordering, and display are written by hand below, on the identity alone: a derived structural pair would let the diagnostic hint decide whether two binders are the same. lint: allow(L0203)
+A binder: the identity the checker compares, and the source spelling diagnostics print. Equality, ordering, and display are written by hand below, on the identity alone: a derived structural pair would let the diagnostic hint decide whether two binders are the same.
 
 ## Instances
 

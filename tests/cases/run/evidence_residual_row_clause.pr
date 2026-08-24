@@ -1,0 +1,23 @@
+-- An unchanged effect-polymorphic call inside a handler clause carries the
+-- enclosing function's residual-row witness. Evidence lowering replaces that
+-- source row with its ambient row through the whole body before threading.
+
+effect Tick
+  bump(Int) : Unit
+
+fn apply_poly(f : (Int, Int) -> Int ! {| e}, a : Int, b : Int) : Int ! { | e} =
+  f(a, b)
+
+fn add(a : Int, b : Int) : Int = a + b
+
+fn run(action : () -> a ! {Tick | e}) : (a, Int) =
+  var total := 0
+  let r =
+    handle action() with
+      bump(n) resume k =>
+        total := apply_poly(add, total, n)
+        k(())
+      return r => r
+  (r, total)
+
+fn main() = print(show(run(\() -> bump(3))))

@@ -16,6 +16,7 @@ use crate::resolve::default_roots;
 #[cfg(feature = "native")]
 use super::{
     finish_lowered, lowered_core_with_identity, lowered_spine_with_identity, on_typed_lower_stack,
+    validated_lowered_core,
 };
 use super::{reuse_lowered_core, Config};
 
@@ -229,7 +230,7 @@ pub fn build_on_report(
     // clone exists only to give the key a stable content encoding.
     let ctors = spine.ctors.clone();
     let semantic_cache = NativeArtifactCache::for_semantic_build(
-        || on_typed_lower_stack(|| LoweredCore::new(spine.core.clone().erase())),
+        || on_typed_lower_stack(|| validated_lowered_core(spine.core.clone().erase())),
         &sigs,
         &ctors,
         &native_kont_table,

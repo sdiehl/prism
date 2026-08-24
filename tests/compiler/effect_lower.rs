@@ -27,7 +27,9 @@ use prism::core::typed::*;
 use prism::core::EffectStrategy::{
     Evidence, LocalPartial, Pure, SelectiveFreeMonad, StateFusion, WholeProgramFreeMonad,
 };
-use prism::core::{EffectStrategy, OpGrades};
+use prism::core::{
+    audit_typed_core, verify_typed_core, EffectStrategy, OpGrades, UncheckedTypedCore,
+};
 use prism::flags::DynFlags;
 use prism::types::ty::EffRow;
 use prism::types::CtorInfo;
@@ -214,7 +216,8 @@ fn assert_lowering(
     env: &VerifyEnv,
     ctors: &BTreeMap<String, CtorInfo>,
 ) -> TypedLowering {
-    let input = TypedCore::new(functions);
+    let input = verify_typed_core(UncheckedTypedCore::new(functions), env)
+        .unwrap_or_else(|violations| panic!("input fixture is invalid: {violations:#?}"));
     assert_typed_lowering(input, env, ctors, &DynFlags::default(), &OpGrades::new())
 }
 
@@ -225,11 +228,11 @@ fn assert_typed_lowering(
     flags: &DynFlags,
     grades: &OpGrades,
 ) -> TypedLowering {
-    if let Err(violations) = verify(&input, env) {
+    if let Err(violations) = audit_typed_core(&input, env) {
         panic!("input fixture is invalid: {violations:#?}");
     }
     let out = lower_effects(input, env, ctors, flags, grades).expect("typed lowering succeeds");
-    if let Err(violations) = verify(&out.core, &out.env) {
+    if let Err(violations) = audit_typed_core(&out.core, &out.env) {
         panic!("lowered typed Core is invalid: {violations:#?}");
     }
     prism::core::residual_effects(&out.core.clone().erase())
@@ -375,8 +378,13 @@ fn every_effect_strategy_and_lowering_flag_boundary_is_accounted_for() {
             ],
         },
         Fixture {
+            // The bottom rung needs a program every partial lowering must
+            // decline: a declared-effectful callback hidden in a list is
+            // opaque to the flow analysis at every knob position. A merely
+            // effect-polymorphic caller no longer qualifies, because the
+            // builder records exact stored witnesses and the region confines.
             name: "whole",
-            source: include_str!("../../examples/eff_poly.pr"),
+            source: include_str!("../cases/run/row_widen_named_effect_list.pr"),
             expected: [
                 WholeProgramFreeMonad,
                 WholeProgramFreeMonad,
@@ -554,12 +562,12 @@ fn assert_compiled_lowering(
     ),
 ) -> TypedLowering {
     let (typed, env, ctors, grades) = compiled;
-    if let Err(violations) = verify(&typed, &env) {
+    if let Err(violations) = audit_typed_core(&typed, &env) {
         panic!("compiled fixture is invalid: {violations:#?}");
     }
     let flags = DynFlags::default();
     let out = lower_effects(typed, &env, &ctors, &flags, &grades).expect("typed lowering succeeds");
-    if let Err(violations) = verify(&out.core, &out.env) {
+    if let Err(violations) = audit_typed_core(&out.core, &out.env) {
         panic!("lowered typed Core is invalid: {violations:#?}");
     }
     prism::core::residual_effects(&out.core.clone().erase())
@@ -648,6 +656,54 @@ fn tail_resumptive_handler_lowers_by_evidence() {
     assert_eq!(out.strategy, EffectStrategy::Evidence);
 }
 
+// The evidence signature prepass replaces `run`'s source residual row with a
+// fresh ambient row. An unchanged polymorphic call retains that row in its
+// explicit Core instantiation, both inside a handler clause and after the
+// handle, so the substitution has to cover the entire typed body before the
+// threading rewrite. Both programs also compile from a lower ladder start;
+// the default evidence result and the forced fallback must independently
+// verify.
+#[test]
+fn evidence_rewrites_residual_rows_through_the_whole_body() {
+    let fixtures = [
+        include_str!("../cases/run/evidence_residual_row_clause.pr"),
+        include_str!("../cases/run/evidence_residual_row_after_handle.pr"),
+    ];
+    for src in fixtures {
+        let (typed, env, ctors, grades) = typed_from_program(src);
+        let evidence =
+            assert_typed_lowering(typed.clone(), &env, &ctors, &DynFlags::default(), &grades);
+        assert_eq!(evidence.strategy, EffectStrategy::Evidence);
+
+        let state_flags = DynFlags {
+            effect_tier: EffectTier::StateFusion,
+            ..DynFlags::default()
+        };
+        let state = assert_typed_lowering(typed, &env, &ctors, &state_flags, &grades);
+        assert_eq!(state.strategy, EffectStrategy::SelectiveFreeMonad);
+    }
+}
+
+// A callback stored in data is recovered through a pattern, so the flow plan
+// cannot attach one exact runtime convention to it. Even when every concrete
+// callback is pure, the stored effectful witness is authoritative after that
+// extraction. The cascade must recognize the opacity before a selective rung
+// commits and route both the one- and two-element forms through the uniform
+// whole-program convention.
+#[test]
+fn declared_effectful_callbacks_hidden_in_data_route_whole() {
+    let src = include_str!("../cases/run/row_widen_named_effect_list.pr");
+    for effect_tier in [EffectTier::Auto, EffectTier::StateFusion] {
+        let (typed, env, ctors, grades) = typed_from_program(src);
+        let flags = DynFlags {
+            effect_tier,
+            ..DynFlags::default()
+        };
+        let lowered = assert_typed_lowering(typed, &env, &ctors, &flags, &grades);
+        assert_eq!(lowered.strategy, EffectStrategy::WholeProgramFreeMonad);
+    }
+}
+
 // A stream producer returns an effectful thunk rather than performing in
 // the producer call itself. The signature plan must widen that returned
 // thunk from `flow.ret`, then carry the new witness through map/filter
@@ -710,7 +766,7 @@ fn arena_preparation_rewrites_constructors_and_verifies() {
     arena::insert_builtin_sigs(&mut env);
     let before = typed.clone().erase();
     let prepared = arena::prepare(typed.functions().to_vec(), &env).expect("preparation");
-    assert_eq!(verify(&prepared, &env), Ok(()));
+    assert_eq!(audit_typed_core(&prepared, &env), Ok(()));
     assert!(
         prepared
             .functions()
@@ -753,7 +809,7 @@ fn threading_eff_state_verifies_and_eliminates_effects() {
     let (threaded, threaded_env) = threaded_state_typed(typed, &env, &ctors, &flags, &grades)
         .expect("the typed cascade classifies")
         .expect("and the state engine threads this program");
-    assert_eq!(verify(&threaded, &threaded_env), Ok(()));
+    assert_eq!(audit_typed_core(&threaded, &threaded_env), Ok(()));
     prism::core::residual_effects(&threaded.erase()).expect("no raw effects survive");
 }
 
@@ -839,7 +895,7 @@ fn production_state_corpus_routes_and_eliminates_effects() {
             .unwrap_or_else(|e| panic!("{path}: the typed production rung fails: {e:?}"));
         assert_eq!(threaded.strategy, EffectStrategy::StateFusion);
         assert_eq!(
-            verify(&threaded.core, &threaded.env),
+            audit_typed_core(&threaded.core, &threaded.env),
             Ok(()),
             "{path}: typed State output must verify"
         );
@@ -874,7 +930,7 @@ fn threaded_state_corpus_verifies() {
         let (threaded, env2) = threaded_state_typed(typed, &env, &ctors, &flags, &grades)
             .unwrap_or_else(|e| panic!("{path}: cascade fails: {e:?}"))
             .unwrap_or_else(|| panic!("{path}: declines"));
-        if let Err(violations) = verify(&threaded, &env2) {
+        if let Err(violations) = audit_typed_core(&threaded, &env2) {
             failures.push(format!(
                 "{path}: {} violations, first three: {:#?}",
                 violations.len(),
@@ -895,7 +951,7 @@ fn threaded_state_bind_rows_cover_transformed_children() {
             threaded_state_typed(typed, &env, &ctors, &DynFlags::default(), &grades)
                 .unwrap_or_else(|e| panic!("{path}: cascade fails: {e:?}"))
                 .unwrap_or_else(|| panic!("{path}: state engine declines"));
-        if let Err(violations) = verify(&threaded, &env2) {
+        if let Err(violations) = audit_typed_core(&threaded, &env2) {
             panic!("{path}: transformed Bind hides child effects: {violations:#?}");
         }
     }
@@ -909,7 +965,7 @@ fn assert_threading_verifies(src: &str) {
     let (threaded, threaded_env) = threaded_state_typed(typed, &env, &ctors, &flags, &grades)
         .expect("the typed cascade classifies")
         .expect("and the state engine threads this program");
-    assert_eq!(verify(&threaded, &threaded_env), Ok(()));
+    assert_eq!(audit_typed_core(&threaded, &threaded_env), Ok(()));
     prism::core::residual_effects(&threaded.erase()).expect("no raw effects survive");
 }
 
@@ -959,10 +1015,13 @@ fn native_function_answer_region_matches_the_typed_production_route() {
     .expect("native function-answer region lowers");
     lowered.push(abi::ebind_fn());
     lowered.push(abi::qapply_fn());
-    let typed = TypedCore::<EffectLowered>::new(lowered);
     let mut lowered_env = prepared.env.clone();
     abi::insert(&mut lowered_env);
-    assert_eq!(verify(&typed, &lowered_env), Ok(()));
+    let typed = verify_typed_core(
+        UncheckedTypedCore::<EffectLowered>::new(lowered),
+        &lowered_env,
+    )
+    .expect("native function-answer lowering must mint effect-lowered authority");
     assert_eq!(typed.erase(), out.core.clone().erase());
 
     let off_flags = DynFlags {
@@ -997,8 +1056,11 @@ fn native_function_answer_region_matches_the_typed_production_route() {
     off_functions.push(abi::qapply_fn());
     let mut off_env = prepared.env;
     abi::insert(&mut off_env);
-    let off = TypedCore::<EffectLowered>::new(off_functions);
-    assert_eq!(verify(&off, &off_env), Ok(()));
+    let off = verify_typed_core(
+        UncheckedTypedCore::<EffectLowered>::new(off_functions),
+        &off_env,
+    )
+    .expect("non-native fallback must mint effect-lowered authority");
     assert_eq!(off.erase(), off_out.core.erase());
 }
 
@@ -1068,8 +1130,7 @@ fn whole_program_trampoline_is_deterministic_and_verifies() {
         .expect("second typed isolated trampoline lowering");
     second.push(trampoline::prism_drive_fn());
     assert_eq!(
-        TypedCore::<EffectLowered>::new(first).erase().fns,
-        TypedCore::<EffectLowered>::new(second).erase().fns,
+        first, second,
         "the transform must be deterministic for the same fresh-name state"
     );
 
@@ -1078,8 +1139,11 @@ fn whole_program_trampoline_is_deterministic_and_verifies() {
 
     let mut lowered_env = prepared.env;
     abi::insert(&mut lowered_env);
-    let typed = TypedCore::<EffectLowered>::new(lowered);
-    assert_eq!(verify(&typed, &lowered_env), Ok(()));
+    let typed = verify_typed_core(
+        UncheckedTypedCore::<EffectLowered>::new(lowered),
+        &lowered_env,
+    )
+    .expect("trampoline lowering must mint effect-lowered authority");
     assert_eq!(typed.erase(), out.core.erase());
 
     // The control asks for the free-monad rung without pinning its scope, so
@@ -1271,7 +1335,7 @@ fn main() : Int ! {} =
   }
 ";
     let (typed, env, ctors, grades) = typed_from_source(src);
-    if let Err(violations) = verify(&typed, &env) {
+    if let Err(violations) = audit_typed_core(&typed, &env) {
         panic!("compiled fixture is invalid: {violations:#?}");
     }
     let flags = DynFlags::default();
@@ -1495,7 +1559,7 @@ fn main() = println(logged() + answered())
     let (typed, env, ctors, grades) = typed_from_program(src);
     let out = assert_typed_lowering(typed, &env, &ctors, &DynFlags::default(), &grades);
     assert_eq!(out.strategy, EffectStrategy::LocalPartial);
-    assert_eq!(verify(&out.core, &out.env), Ok(()));
+    assert_eq!(audit_typed_core(&out.core, &out.env), Ok(()));
 }
 
 #[test]
@@ -1538,7 +1602,7 @@ fn local_partial_composes_fused_rest_and_monadic_region_exactly() {
         ))),
         "the State producer's evidence row keeps the same global hole"
     );
-    assert_eq!(verify(&combined, &lowered_env), Ok(()));
+    assert_eq!(audit_typed_core(&combined, &lowered_env), Ok(()));
     prism::core::residual_effects(&combined.erase()).expect("no raw effects survive");
 }
 
@@ -1572,7 +1636,7 @@ fn main() =
     assert!(region.contains(&sym("run_pair")));
     assert!(region.contains(&sym("logged")));
     assert_eq!(entries, BTreeSet::from([sym("logged")]));
-    assert_eq!(verify(&combined, &lowered_env), Ok(()));
+    assert_eq!(audit_typed_core(&combined, &lowered_env), Ok(()));
     prism::core::residual_effects(&combined.erase()).expect("no raw effects survive");
 }
 
@@ -1599,7 +1663,7 @@ fn local_partial_region_retains_its_direct_io_row_exactly() {
         .effects()
         .label_names()
         .contains(&Sym::from(prism_syntax::names::IO_EFFECT)));
-    assert_eq!(verify(&combined, &lowered_env), Ok(()));
+    assert_eq!(audit_typed_core(&combined, &lowered_env), Ok(()));
     prism::core::residual_effects(&combined.erase()).expect("no raw effects survive");
 }
 
@@ -1667,7 +1731,11 @@ fn local_partial_composition(
     )
     .expect("LocalPartial assembly is total after planning")
     .expect("the LocalPartial whole-style boundary is sound");
-    let combined = TypedCore::<EffectLowered>::new(artifacts.fns);
+    let combined = verify_typed_core(
+        UncheckedTypedCore::<EffectLowered>::new(artifacts.fns),
+        &artifacts.env,
+    )
+    .expect("LocalPartial assembly must mint effect-lowered authority");
     (combined, artifacts.env, region, entries)
 }
 
@@ -1707,7 +1775,7 @@ fn typed_local_decline_digests(point: LocalDeclinePoint) -> (String, String) {
     assert_eq!(probed.warning, clean.warning);
 
     for lowering in [&probed, &clean] {
-        assert_eq!(verify(&lowering.core, &lowering.env), Ok(()));
+        assert_eq!(audit_typed_core(&lowering.core, &lowering.env), Ok(()));
         prism::core::residual_effects(&lowering.core.clone().erase())
             .expect("typed fallback leaves no raw effects");
         assert!(lowering
@@ -1735,9 +1803,8 @@ fn typed_local_decline_digests(point: LocalDeclinePoint) -> (String, String) {
     (probed, clean)
 }
 
-// These pin a blake3 of the `pp_core` dump, which prints raw fresh ids, so the
-// digests are a function of the process-global `Sym` supply, not just the
-// program: adding a builtin or prelude effect shifts the supply and moves them.
+// These pin a blake3 of the `pp_core` dump, which prints raw fresh ids. The
+// digests depend on both the program and process-global `Sym` supply.
 // What the tests actually guard (probed != clean) is intact; only the concrete
 // hex is regenerated when the supply moves. Canonical (`core-hash`) output is
 // unaffected, which `tests/determinism.rs` proves.

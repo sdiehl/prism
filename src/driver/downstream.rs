@@ -9,9 +9,9 @@ use crate::core::typed::{
     inline as inline_typed, simplify as simplify_typed,
 };
 use crate::core::{
-    effective_passes, lint_core, pass_fingerprint, scc_groups, typed_verification_error,
-    verify_typed_core, Core, CorePass, PassStage, PassStats, TypedCore, TypedCoreFn,
-    TypedCorePhase, VerifyEnv,
+    audit_typed_core, effective_passes, lint_core, pass_fingerprint, scc_groups,
+    typed_verification_error, verify_typed_core, Core, CorePass, PassStage, PassStats, TypedCore,
+    TypedCoreFn, TypedCorePhase, UncheckedTypedCore, VerifyEnv,
 };
 use crate::error::Error;
 use crate::flags::DynFlags;
@@ -89,7 +89,7 @@ pub(super) fn run_typed_opt_queries<P: TypedCorePhase>(
         &cfg.disabled,
         &cfg.flags,
     );
-    verify_typed_core(&typed, env).map_err(typed_verification_error)?;
+    audit_typed_core(&typed, env).map_err(typed_verification_error)?;
     if !cache_enabled(cfg)
         || cfg.flags.core_lint
         || cfg.flags.opt_stats
@@ -106,7 +106,7 @@ pub(super) fn run_typed_opt_queries<P: TypedCorePhase>(
     let mut current = typed;
     for &pass in &passes {
         reject_off_stage(pass, stage)?;
-        current = if pass.is_scc_local() {
+        let next = if pass.is_scc_local() {
             run_typed_local_pass(
                 current,
                 &TypedSccQuery {
@@ -123,7 +123,7 @@ pub(super) fn run_typed_opt_queries<P: TypedCorePhase>(
         } else {
             run_typed_pass(pass, current, newtype_ctors, env)?.0
         };
-        verify_typed_core(&current, env).map_err(typed_verification_error)?;
+        current = verify_typed_core(next, env).map_err(typed_verification_error)?;
     }
     Ok(current)
 }
@@ -165,6 +165,7 @@ fn run_typed_stage_plain<P: TypedCorePhase>(
     for &pass in passes {
         reject_off_stage(pass, stage)?;
         let (next, ticks) = run_typed_pass(pass, current, newtype_ctors, env)?;
+        let next = verify_typed_core(next, env).map_err(typed_verification_error)?;
         stats.record(pass.name(), ticks);
         if dump_sink.is_some() || flags.core_lint {
             let erased = next.clone().erase();
@@ -174,7 +175,6 @@ fn run_typed_stage_plain<P: TypedCorePhase>(
                 ord += 1;
             }
         }
-        verify_typed_core(&next, env).map_err(typed_verification_error)?;
         current = next;
     }
     if flags.opt_stats {
@@ -200,31 +200,22 @@ fn run_typed_pass<P: TypedCorePhase>(
     core: TypedCore<P>,
     newtype_ctors: &BTreeSet<Sym>,
     env: &VerifyEnv,
-) -> Result<(TypedCore<P>, u64), Error> {
+) -> Result<(UncheckedTypedCore<P>, u64), Error> {
     Ok(match pass {
         CorePass::Fuse => {
             let (next, stats) = fuse_typed(core);
-            (next, stats.ticks())
-        }
-        CorePass::EraseNewtypes => {
-            let (next, stats) = erase_newtypes_typed(core, newtype_ctors, env);
             (next, stats.ticks())
         }
         CorePass::Specialize => {
             let (next, stats) = specialize_typed(core).map_err(Error::from)?;
             (next, stats.ticks())
         }
-        CorePass::Simplify => {
-            let (next, stats) = simplify_typed(core).map_err(Error::from)?;
-            (next, stats.ticks())
-        }
         CorePass::Inline => {
             let (next, stats) = inline_typed(core);
             (next, stats.ticks())
         }
-        CorePass::Cse => {
-            let (next, stats) = cse_typed(core);
-            (next, stats.ticks())
+        CorePass::EraseNewtypes | CorePass::Simplify | CorePass::Cse => {
+            return run_typed_local_transform(pass, core.into_unchecked(), newtype_ctors, env);
         }
     })
 }
@@ -254,7 +245,7 @@ fn optimizer_identity(members: &[Sym], stage: PassStage, pass: CorePass) -> Stri
 fn run_typed_local_pass<P: TypedCorePhase>(
     core: TypedCore<P>,
     query: &TypedSccQuery<'_>,
-) -> Result<TypedCore<P>, Error> {
+) -> Result<UncheckedTypedCore<P>, Error> {
     let erased = core.clone().erase();
     let groups = scc_groups(&erased);
     let digests = core
@@ -290,7 +281,7 @@ fn run_typed_local_pass<P: TypedCorePhase>(
 
     let mut kept = BTreeMap::new();
     let mut to_run = BTreeMap::new();
-    for function in core.into_functions() {
+    for function in core.into_unchecked().into_functions() {
         if skip.contains(&function.name()) {
             kept.insert(function.name(), function);
         } else {
@@ -310,9 +301,9 @@ fn run_typed_local_pass<P: TypedCorePhase>(
     let results =
         QueryScheduler::new(query.cfg.flags.query_threads).map_ordered(&inputs, |group| {
             stacker::maybe_grow(TYPED_PASS_STACK, TYPED_PASS_STACK, || {
-                run_typed_pass(
+                run_typed_local_transform(
                     query.pass,
-                    TypedCore::<P>::from_functions(group.clone()),
+                    UncheckedTypedCore::<P>::new(group.clone()),
                     query.newtype_ctors,
                     query.env,
                 )
@@ -323,6 +314,17 @@ fn run_typed_local_pass<P: TypedCorePhase>(
     let mut transformed = BTreeMap::<Sym, TypedCoreFn>::new();
     for (((members, key), input), result) in pending.iter().zip(&inputs).zip(results) {
         let output = result?;
+        let expected_names = members.iter().copied().collect::<BTreeSet<_>>();
+        let output_names = output
+            .iter()
+            .map(TypedCoreFn::name)
+            .collect::<BTreeSet<_>>();
+        if output.len() != members.len() || output_names != expected_names {
+            return Err(Error::InternalInvariant(format!(
+                "SCC-local pass changed the global definitions in `{}`",
+                query.pass.name()
+            )));
+        }
         let fixed_point = output == *input;
         if fixed_point {
             store_fixed_point(query.store, key, members, query.stage, query.pass)?;
@@ -368,7 +370,35 @@ fn run_typed_local_pass<P: TypedCorePhase>(
             )
         })
         .collect::<Result<Vec<_>, Error>>()?;
-    Ok(TypedCore::from_functions(fns))
+    Ok(UncheckedTypedCore::new(fns))
+}
+
+fn run_typed_local_transform<P>(
+    pass: CorePass,
+    core: UncheckedTypedCore<P>,
+    newtype_ctors: &BTreeSet<Sym>,
+    env: &VerifyEnv,
+) -> Result<(UncheckedTypedCore<P>, u64), Error> {
+    Ok(match pass {
+        CorePass::EraseNewtypes => {
+            let (next, stats) = erase_newtypes_typed(core, newtype_ctors, env);
+            (next, stats.ticks())
+        }
+        CorePass::Simplify => {
+            let (next, stats) = simplify_typed(core).map_err(Error::from)?;
+            (next, stats.ticks())
+        }
+        CorePass::Cse => {
+            let (next, stats) = cse_typed(core);
+            (next, stats.ticks())
+        }
+        CorePass::Fuse | CorePass::Specialize | CorePass::Inline => {
+            return Err(Error::InternalInvariant(format!(
+                "whole-program pass routed through SCC-local runner: {}",
+                pass.name()
+            )));
+        }
+    })
 }
 
 fn typed_query_key(
@@ -415,7 +445,15 @@ fn load_fixed_point(
     let Some(object_hash) = store.get_query(OPT_SCC_QUERY, key)? else {
         return Ok(false);
     };
-    let bytes = store.get(&object_hash)?;
+    // A query binding surviving a swept object is a normal cache miss, not
+    // corruption: gc (crate::store::disk::gc) prunes objects/meta by age
+    // without touching queries/index, so a stale binding must fall back to
+    // recompute exactly like an absent binding does above.
+    let bytes = match store.get(&object_hash) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(Error::Io(e)),
+    };
     if bytes.len() > MAX_OPT_SCC_ARTIFACT_BYTES {
         return Err(corrupt("optimized SCC artifact exceeds the size limit"));
     }

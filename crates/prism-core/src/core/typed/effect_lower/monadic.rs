@@ -2247,7 +2247,7 @@ impl<'a> Monadic<'a> {
         })
     }
 
-    /// Record why a confined attempt is refused, and decline. The first
+    /// Record why an attempt is refused, and decline. The first
     /// refusal wins: it is the innermost one, and every decline above it is
     /// only this one unwinding.
     const fn refuse<T>(&mut self, reason: Refusal, site: Site) -> Option<T> {
@@ -2259,8 +2259,8 @@ impl<'a> Monadic<'a> {
 
     /// The refusal this builder recorded, attributed to the declaration being
     /// lowered when it stopped. A decline with nothing recorded is a form the
-    /// confined builder has no rewrite for at all, which is a refusal of its
-    /// own kind rather than an unexplained one.
+    /// builder has no rewrite for at all, which is a refusal of its own kind
+    /// rather than an unexplained one.
     const fn declined(&self, function: Sym) -> Decline {
         let (reason, site) = match self.refusal {
             Some(recorded) => recorded,
@@ -3014,17 +3014,26 @@ fn monadic_quantifiers(function: &TypedCoreFn, row: &EffRow) -> Vec<CoreQuantifi
 /// Each declaration's row retains the direct effects that remain after source
 /// operations are reified; call instantiation aligns the callee with its
 /// current caller.
+///
+/// # Errors
+/// The refusal this builder recorded, attributed to the declaration it stopped
+/// in. Nothing is left to widen to at this scope, so the caller reports it; a
+/// refusal that names neither the declaration nor the form costs the reader the
+/// whole diagnosis, which is why the builder's own record is carried out here
+/// rather than collapsed into a single "no rewrite exists" verdict.
 pub fn lower_whole<R: Rows + ?Sized>(
     functions: &[TypedCoreFn],
     ops: &OpIds,
     fresh: &mut Fresh,
     rows: &R,
-) -> Option<Vec<TypedCoreFn>> {
+) -> Result<Vec<TypedCoreFn>, Decline> {
     let signatures: BTreeMap<Sym, CoreFnSig> = functions
         .iter()
         .map(|function| {
-            let row = rows.row(function.name())?;
-            Some((
+            let row = rows
+                .row(function.name())
+                .ok_or_else(|| Decline::whole(Refusal::MissingRow, function.name()))?;
+            Ok((
                 function.name(),
                 CoreFnSig::new(
                     monadic_quantifiers(function, &row),
@@ -3033,11 +3042,13 @@ pub fn lower_whole<R: Rows + ?Sized>(
                 ),
             ))
         })
-        .collect::<Option<_>>()?;
+        .collect::<Result<_, Decline>>()?;
     let mut monadic = Monadic::new(ops, fresh, EffRow::Empty, &signatures);
     let mut lowered = Vec::with_capacity(functions.len());
     for function in functions {
-        let row = rows.row(function.name())?;
+        let row = rows
+            .row(function.name())
+            .ok_or_else(|| Decline::whole(Refusal::MissingRow, function.name()))?;
         monadic.set_row(row.clone());
         monadic.quantifiers = monadic_quantifiers(function, &row);
         monadic.locals = function
@@ -3055,7 +3066,9 @@ pub fn lower_whole<R: Rows + ?Sized>(
         // Thunk signatures are per-declaration for the same reason: they are
         // keyed by binder name, and two declarations share names freely.
         monadic.thunk_sigs.clear();
-        let body = monadic.comp(function.body())?;
+        let body = monadic
+            .comp(function.body())
+            .ok_or_else(|| monadic.declined(function.name()))?;
         let entry = function.name().as_str() == ENTRY_POINT;
         let body = if entry {
             monadic.unwrap_entry(body, function.sig().body().result().clone())
@@ -3069,7 +3082,10 @@ pub fn lower_whole<R: Rows + ?Sized>(
                 CompSig::new(function.sig().body().result().clone(), row.clone()),
             )
         } else {
-            signatures.get(&function.name())?.clone()
+            signatures
+                .get(&function.name())
+                .ok_or_else(|| Decline::whole(Refusal::MissingRow, function.name()))?
+                .clone()
         };
         lowered.push(TypedCoreFn::new(
             function.name(),
@@ -3080,7 +3096,7 @@ pub fn lower_whole<R: Rows + ?Sized>(
         ));
     }
     lowered.append(&mut monadic.generated);
-    Some(lowered)
+    Ok(lowered)
 }
 
 /// Lower one clean `LocalPartial` component in the whole-style convention while
@@ -3090,8 +3106,10 @@ pub fn lower_whole<R: Rows + ?Sized>(
 /// split.
 ///
 /// # Errors
-/// A message when a region member has no planned row, or when its body has no
-/// monadic rewrite.
+/// The refusal that stopped the region: a member with no planned row, a plan
+/// naming a declaration the program does not define, or a member body the
+/// builder has no rewrite for. The plan is already committed by the time this
+/// runs, so none of these widen; the caller reports them.
 pub fn lower_region<R: Rows + ?Sized>(
     functions: &[TypedCoreFn],
     region: &BTreeSet<Sym>,
@@ -3099,36 +3117,26 @@ pub fn lower_region<R: Rows + ?Sized>(
     ops: &OpIds,
     fresh: &mut Fresh,
     rows: &R,
-) -> Result<Vec<TypedCoreFn>, String> {
+) -> Result<Vec<TypedCoreFn>, Decline> {
     let planned_rows: BTreeMap<Sym, EffRow> = functions
         .iter()
         .filter(|function| region.contains(&function.name()))
         .map(|function| {
             rows.row(function.name())
                 .map(|row| (function.name(), row))
-                .ok_or_else(|| {
-                    format!(
-                        "LocalPartial member `{}` has no residual-row plan",
-                        function.name()
-                    )
-                })
+                .ok_or_else(|| Decline::whole(Refusal::MissingRow, function.name()))
         })
         .collect::<Result<_, _>>()?;
     if let Some(missing) = region.iter().find(|name| !planned_rows.contains_key(name)) {
-        return Err(format!(
-            "LocalPartial plan names missing declaration `{missing}`"
-        ));
+        return Err(Decline::whole(Refusal::PlanMismatch, *missing));
     }
     let signatures: BTreeMap<Sym, CoreFnSig> = functions
         .iter()
         .map(|function| {
             let signature = if region.contains(&function.name()) {
-                let row = planned_rows.get(&function.name()).ok_or_else(|| {
-                    format!(
-                        "LocalPartial member `{}` lost its residual-row plan",
-                        function.name()
-                    )
-                })?;
+                let row = planned_rows
+                    .get(&function.name())
+                    .ok_or_else(|| Decline::whole(Refusal::MissingRow, function.name()))?;
                 CoreFnSig::new(
                     monadic_quantifiers(function, row),
                     function.sig().params().to_vec(),
@@ -3139,19 +3147,16 @@ pub fn lower_region<R: Rows + ?Sized>(
             };
             Ok((function.name(), signature))
         })
-        .collect::<Result<_, String>>()?;
+        .collect::<Result<_, Decline>>()?;
     let mut monadic = Monadic::new(ops, fresh, EffRow::Empty, &signatures);
     let mut lowered = Vec::with_capacity(region.len());
     for function in functions
         .iter()
         .filter(|function| region.contains(&function.name()))
     {
-        let row = planned_rows.get(&function.name()).ok_or_else(|| {
-            format!(
-                "LocalPartial member `{}` lost its prepared row",
-                function.name()
-            )
-        })?;
+        let row = planned_rows
+            .get(&function.name())
+            .ok_or_else(|| Decline::whole(Refusal::MissingRow, function.name()))?;
         monadic.set_row(row.clone());
         monadic.quantifiers = monadic_quantifiers(function, row);
         monadic.locals = function
@@ -3162,12 +3167,9 @@ pub fn lower_region<R: Rows + ?Sized>(
         monadic.word_binders.clear();
         monadic.resume_aliases.clear();
         monadic.thunk_sigs.clear();
-        let body = monadic.comp(function.body()).ok_or_else(|| {
-            format!(
-                "LocalPartial member `{}` failed after its region plan committed",
-                function.name()
-            )
-        })?;
+        let body = monadic
+            .comp(function.body())
+            .ok_or_else(|| monadic.declined(function.name()))?;
         let entry = entries.contains(&function.name());
         let body = if entry {
             monadic.unwrap_entry(body, function.sig().body().result().clone())
@@ -3184,12 +3186,10 @@ pub fn lower_region<R: Rows + ?Sized>(
                 ),
             )
         } else {
-            signatures.get(&function.name()).cloned().ok_or_else(|| {
-                format!(
-                    "LocalPartial member `{}` lost its prepared signature",
-                    function.name()
-                )
-            })?
+            signatures
+                .get(&function.name())
+                .cloned()
+                .ok_or_else(|| Decline::whole(Refusal::PlanMismatch, function.name()))?
         };
         lowered.push(TypedCoreFn::new(
             function.name(),
@@ -3358,12 +3358,13 @@ pub fn lower_selective<R: Rows + ?Sized>(
 #[cfg(test)]
 mod tests {
     use super::super::super::{
-        CoreFnSig, EffectLowered, Elaborated, TypedCore, TypedCoreFn, TypedHandleOp, TypedHandler,
+        verify, CoreFnSig, EffectLowered, Elaborated, TypedCoreFn, TypedHandleOp, TypedHandler,
+        UncheckedTypedCore,
     };
     use super::super::fixtures;
     use super::*;
     use crate::core::cbpv::{Comp, CoreOp, CorePat, Value};
-    use crate::core::typed::verify::{verify, VerifyEnv};
+    use crate::core::typed::verify::VerifyEnv;
 
     struct MissingRows;
 
@@ -3521,7 +3522,7 @@ mod tests {
             &MissingRows,
         )
         .expect_err("a committed LocalPartial plan requires every residual row");
-        assert!(error.contains("has no residual-row plan"));
+        assert_eq!(error, Decline::whole(Refusal::MissingRow, name));
         assert_eq!(fresh.bump(), 0, "planning failures cannot consume names");
     }
 
@@ -3584,8 +3585,11 @@ mod tests {
         );
         let mut env = VerifyEnv::new();
         abi::insert(&mut env);
-        let core = TypedCore::<EffectLowered>::new(vec![main, abi::ebind_fn(), abi::qapply_fn()]);
-        assert_eq!(verify(&core, &env), Ok(()));
+        verify(
+            UncheckedTypedCore::<EffectLowered>::new(vec![main, abi::ebind_fn(), abi::qapply_fn()]),
+            &env,
+        )
+        .expect("translated bind and operation verify");
 
         let m = Sym::from(names::lowered("m", 0));
         assert_eq!(
@@ -3647,10 +3651,11 @@ mod tests {
         );
         let mut env = VerifyEnv::new();
         abi::insert(&mut env);
-        assert_eq!(
-            verify(&TypedCore::<EffectLowered>::new(vec![function]), &env),
-            Ok(())
-        );
+        verify(
+            UncheckedTypedCore::<EffectLowered>::new(vec![function]),
+            &env,
+        )
+        .expect("tuple fixture verifies");
     }
 
     #[test]
@@ -3701,13 +3706,11 @@ mod tests {
         );
         let mut env = VerifyEnv::new();
         abi::insert(&mut env);
-        assert_eq!(
-            verify(
-                &TypedCore::<EffectLowered>::new(vec![consumer, invocation]),
-                &env,
-            ),
-            Ok(())
-        );
+        verify(
+            UncheckedTypedCore::<EffectLowered>::new(vec![consumer, invocation]),
+            &env,
+        )
+        .expect("retagged region call verifies");
     }
 
     #[test]
@@ -3744,10 +3747,8 @@ mod tests {
         );
         let mut env = VerifyEnv::new();
         abi::insert(&mut env);
-        assert_eq!(
-            verify(&TypedCore::<EffectLowered>::new(vec![main]), &env),
-            Ok(())
-        );
+        verify(UncheckedTypedCore::<EffectLowered>::new(vec![main]), &env)
+            .expect("dynamic application verifies");
         assert_eq!(
             body.erase(),
             Comp::App(
@@ -3802,10 +3803,11 @@ mod tests {
             .expect("whole-program convention closes direct calls");
         let mut env = VerifyEnv::new();
         abi::insert(&mut env);
-        assert_eq!(
-            verify(&TypedCore::<EffectLowered>::new(lowered.clone()), &env),
-            Ok(())
-        );
+        verify(
+            UncheckedTypedCore::<EffectLowered>::new(lowered.clone()),
+            &env,
+        )
+        .expect("whole-program direct calls verify");
         assert_eq!(
             lowered
                 .into_iter()
@@ -3874,10 +3876,8 @@ mod tests {
         );
         let mut env = VerifyEnv::new();
         abi::insert(&mut env);
-        assert_eq!(
-            verify(&TypedCore::<EffectLowered>::new(vec![main]), &env),
-            Ok(())
-        );
+        verify(UncheckedTypedCore::<EffectLowered>::new(vec![main]), &env)
+            .expect("lifted primitive verifies");
         let p = Sym::from(names::lowered("p", 0));
         assert_eq!(
             body.erase(),
@@ -4013,16 +4013,16 @@ mod tests {
             CoreFnSig::new(Vec::new(), Vec::new(), source_body.sig().clone()),
             0,
         );
-        let source = TypedCore::<Elaborated>::new(vec![main]);
+        let source = UncheckedTypedCore::<Elaborated>::new(vec![main]);
         let mut fresh = Fresh::new();
-        let mut lowered = lower_whole(&source.fns, &ops, &mut fresh, &EffRow::Empty)
+        let mut lowered = lower_whole(source.functions(), &ops, &mut fresh, &EffRow::Empty)
             .expect("open handler translates");
         lowered.push(abi::ebind_fn());
         lowered.push(abi::qapply_fn());
         let mut env = VerifyEnv::new();
         abi::insert(&mut env);
-        let typed = TypedCore::<EffectLowered>::new(lowered);
-        assert_eq!(verify(&typed, &env), Ok(()));
+        let typed = verify(UncheckedTypedCore::<EffectLowered>::new(lowered), &env)
+            .expect("open handler output verifies");
         crate::core::residual_effects(&typed.erase()).expect("no raw effects survive");
     }
 
@@ -4120,16 +4120,16 @@ mod tests {
             CoreFnSig::new(Vec::new(), Vec::new(), handled.sig().clone()),
             0,
         );
-        let source = TypedCore::<Elaborated>::new(vec![main]);
+        let source = UncheckedTypedCore::<Elaborated>::new(vec![main]);
         let mut fresh = Fresh::new();
-        let mut lowered = lower_whole(&source.fns, &ops, &mut fresh, &EffRow::Empty)
+        let mut lowered = lower_whole(source.functions(), &ops, &mut fresh, &EffRow::Empty)
             .expect("routed resume application translates");
         lowered.push(abi::ebind_fn());
         lowered.push(abi::qapply_fn());
         let mut env = VerifyEnv::new();
         abi::insert(&mut env);
-        let typed = TypedCore::<EffectLowered>::new(lowered);
-        assert_eq!(verify(&typed, &env), Ok(()));
+        let typed = verify(UncheckedTypedCore::<EffectLowered>::new(lowered), &env)
+            .expect("routed resume output verifies");
         crate::core::residual_effects(&typed.erase()).expect("no raw effects survive");
     }
 
@@ -4160,16 +4160,16 @@ mod tests {
             CoreFnSig::new(Vec::new(), Vec::new(), masked.sig().clone()),
             0,
         );
-        let source = TypedCore::<Elaborated>::new(vec![main]);
+        let source = UncheckedTypedCore::<Elaborated>::new(vec![main]);
         let mut fresh = Fresh::new();
-        let mut lowered = lower_whole(&source.fns, &ops, &mut fresh, &EffRow::Empty)
+        let mut lowered = lower_whole(source.functions(), &ops, &mut fresh, &EffRow::Empty)
             .expect("mask driver translates");
         lowered.push(abi::ebind_fn());
         lowered.push(abi::qapply_fn());
         let mut env = VerifyEnv::new();
         abi::insert(&mut env);
-        let typed = TypedCore::<EffectLowered>::new(lowered);
-        assert_eq!(verify(&typed, &env), Ok(()));
+        let typed = verify(UncheckedTypedCore::<EffectLowered>::new(lowered), &env)
+            .expect("mask driver output verifies");
         crate::core::residual_effects(&typed.erase()).expect("no raw effects survive");
     }
 
@@ -4230,15 +4230,15 @@ mod tests {
             CoreFnSig::new(Vec::new(), Vec::new(), handled.sig().clone()),
             0,
         );
-        let source = TypedCore::<Elaborated>::new(vec![main]);
-        let effects = super::super::EffectPlan::analyze(&source.fns);
+        let source = UncheckedTypedCore::<Elaborated>::new(vec![main]);
+        let effects = super::super::EffectPlan::analyze(source.functions());
         let latent = effects.latent();
-        let plan = super::super::analysis::plan(&source.fns, &effects, false);
+        let plan = super::super::analysis::plan(source.functions(), &effects, false);
         assert_eq!(plan.scope, MonadicScope::Selective);
 
         let mut fresh = Fresh::new();
         let mut lowered = lower_selective(
-            &source.fns,
+            source.functions(),
             &ops,
             &mut fresh,
             &EffRow::Empty,
@@ -4254,8 +4254,8 @@ mod tests {
         lowered.push(abi::qapply_fn());
         let mut env = VerifyEnv::new();
         abi::insert(&mut env);
-        let typed = TypedCore::<EffectLowered>::new(lowered);
-        assert_eq!(verify(&typed, &env), Ok(()));
+        let typed = verify(UncheckedTypedCore::<EffectLowered>::new(lowered), &env)
+            .expect("selective closed-handler output verifies");
         crate::core::residual_effects(&typed.erase()).expect("no raw effects survive");
     }
 
@@ -4336,13 +4336,13 @@ mod tests {
             CoreFnSig::new(Vec::new(), Vec::new(), handled.sig().clone()),
             0,
         );
-        let source = TypedCore::<Elaborated>::new(vec![main]);
-        let effects = super::super::EffectPlan::analyze(&source.fns);
+        let source = UncheckedTypedCore::<Elaborated>::new(vec![main]);
+        let effects = super::super::EffectPlan::analyze(source.functions());
         let latent = effects.latent();
-        let plan = super::super::analysis::plan(&source.fns, &effects, false);
+        let plan = super::super::analysis::plan(source.functions(), &effects, false);
         let mut fresh = Fresh::new();
         let mut lowered = lower_selective(
-            &source.fns,
+            source.functions(),
             &ops,
             &mut fresh,
             &EffRow::Empty,
@@ -4358,8 +4358,8 @@ mod tests {
         lowered.push(abi::qapply_fn());
         let mut env = VerifyEnv::new();
         abi::insert(&mut env);
-        let typed = TypedCore::<EffectLowered>::new(lowered);
-        assert_eq!(verify(&typed, &env), Ok(()));
+        let typed = verify(UncheckedTypedCore::<EffectLowered>::new(lowered), &env)
+            .expect("native-region output verifies");
         crate::core::residual_effects(&typed.erase()).expect("no raw effects survive");
     }
 
@@ -4450,10 +4450,8 @@ mod tests {
         lowered.push(abi::qapply_fn());
         let mut env = VerifyEnv::new();
         abi::insert(&mut env);
-        assert_eq!(
-            verify(&TypedCore::<EffectLowered>::new(lowered), &env),
-            Ok(())
-        );
+        verify(UncheckedTypedCore::<EffectLowered>::new(lowered), &env)
+            .expect("generic captured-handler output verifies");
     }
 
     #[test]
@@ -4461,9 +4459,9 @@ mod tests {
         let ops = OpIds::assign(&BTreeSet::from([Sym::from(fixtures::ASK_OP)]))
             .expect("one operation has an id");
         let functions = fixtures::capturing_program();
-        let source = TypedCore::<Elaborated>::new(functions);
-        let effects = super::super::EffectPlan::analyze(&source.fns);
-        let plan = super::super::analysis::plan(&source.fns, &effects, false);
+        let source = UncheckedTypedCore::<Elaborated>::new(functions);
+        let effects = super::super::EffectPlan::analyze(source.functions());
+        let plan = super::super::analysis::plan(source.functions(), &effects, false);
         assert_eq!(plan.scope, MonadicScope::Selective);
         assert!(
             !plan.members.contains(&Sym::from(ENTRY_POINT)),
@@ -4472,7 +4470,7 @@ mod tests {
 
         let mut fresh = Fresh::new();
         let mut lowered = lower_selective(
-            &source.fns,
+            source.functions(),
             &ops,
             &mut fresh,
             &EffRow::Empty,
@@ -4488,8 +4486,8 @@ mod tests {
         lowered.push(abi::qapply_fn());
         let mut env = VerifyEnv::new();
         abi::insert(&mut env);
-        let typed = TypedCore::<EffectLowered>::new(lowered);
-        assert_eq!(verify(&typed, &env), Ok(()));
+        let typed = verify(UncheckedTypedCore::<EffectLowered>::new(lowered), &env)
+            .expect("confined-region output verifies");
         crate::core::residual_effects(&typed.erase()).expect("no raw effects survive");
     }
 
@@ -4505,15 +4503,15 @@ mod tests {
             Sym::from(fixtures::LEAK_OP),
         ]))
         .expect("both operations have ids");
-        let source = TypedCore::<Elaborated>::new(fixtures::island_program());
-        let effects = super::super::EffectPlan::analyze(&source.fns);
-        let plan = super::super::analysis::plan(&source.fns, &effects, false);
+        let source = UncheckedTypedCore::<Elaborated>::new(fixtures::island_program());
+        let effects = super::super::EffectPlan::analyze(source.functions());
+        let plan = super::super::analysis::plan(source.functions(), &effects, false);
         assert_eq!(plan.scope, MonadicScope::Selective);
         assert!(plan.members.contains(&Sym::from(fixtures::RUN)));
 
         let mut fresh = Fresh::new();
         let mut lowered = lower_selective(
-            &source.fns,
+            source.functions(),
             &ops,
             &mut fresh,
             &EffRow::Empty,
@@ -4529,8 +4527,8 @@ mod tests {
         lowered.push(abi::qapply_fn());
         let mut env = VerifyEnv::new();
         abi::insert(&mut env);
-        let typed = TypedCore::<EffectLowered>::new(lowered);
-        assert_eq!(verify(&typed, &env), Ok(()));
+        let typed = verify(UncheckedTypedCore::<EffectLowered>::new(lowered), &env)
+            .expect("island-handler output verifies");
         crate::core::residual_effects(&typed.erase()).expect("no raw effects survive");
     }
 
@@ -4598,9 +4596,9 @@ mod tests {
         let ops = OpIds::assign(&BTreeSet::from([Sym::from(fixtures::ASK_OP)]))
             .expect("one operation has an id");
         let functions = fixtures::capturing_program();
-        let source = TypedCore::<Elaborated>::new(functions);
-        let effects = super::super::EffectPlan::analyze(&source.fns);
-        let mut plan = super::super::analysis::plan(&source.fns, &effects, false);
+        let source = UncheckedTypedCore::<Elaborated>::new(functions);
+        let effects = super::super::EffectPlan::analyze(source.functions());
+        let mut plan = super::super::analysis::plan(source.functions(), &effects, false);
         // Hand-narrow the region to drop the forwarder. Nothing in the planner
         // produces this shape; the point is that if anything ever did, the
         // builder refuses to emit direct code that forces a monadic thunk
@@ -4610,7 +4608,7 @@ mod tests {
 
         let mut fresh = Fresh::new();
         let refusal = lower_selective(
-            &source.fns,
+            source.functions(),
             &ops,
             &mut fresh,
             &EffRow::Empty,
@@ -4655,11 +4653,11 @@ mod tests {
             Sym::from(fixtures::LEAK_OP),
         ]))
         .expect("both operations have ids");
-        let source = TypedCore::<Elaborated>::new(functions);
-        let effects = super::super::EffectPlan::analyze(&source.fns);
+        let source = UncheckedTypedCore::<Elaborated>::new(functions);
+        let effects = super::super::EffectPlan::analyze(source.functions());
         let mut fresh = Fresh::new();
         lower_selective(
-            &source.fns,
+            source.functions(),
             &ops,
             &mut fresh,
             &EffRow::Empty,
@@ -4726,12 +4724,12 @@ mod tests {
     fn a_member_with_no_residual_row_declines_before_minting_names() {
         let ops = OpIds::assign(&BTreeSet::from([Sym::from(fixtures::ASK_OP)]))
             .expect("one operation has an id");
-        let source = TypedCore::<Elaborated>::new(fixtures::capturing_program());
-        let effects = super::super::EffectPlan::analyze(&source.fns);
-        let plan = super::super::analysis::plan(&source.fns, &effects, false);
+        let source = UncheckedTypedCore::<Elaborated>::new(fixtures::capturing_program());
+        let effects = super::super::EffectPlan::analyze(source.functions());
+        let plan = super::super::analysis::plan(source.functions(), &effects, false);
         let mut fresh = Fresh::new();
         let refusal = lower_selective(
-            &source.fns,
+            source.functions(),
             &ops,
             &mut fresh,
             &MissingRows,
@@ -4771,15 +4769,15 @@ mod tests {
             Vec::new(),
             fixtures::call(fixtures::RUN, vec![quiet], fixtures::asking()),
         ));
-        let source = TypedCore::<Elaborated>::new(functions);
-        let effects = super::super::EffectPlan::analyze(&source.fns);
-        let plan = super::super::analysis::plan(&source.fns, &effects, false);
+        let source = UncheckedTypedCore::<Elaborated>::new(functions);
+        let effects = super::super::EffectPlan::analyze(source.functions());
+        let plan = super::super::analysis::plan(source.functions(), &effects, false);
         assert_eq!(
             plan.monadic_params.get(&Sym::from(fixtures::RUN)),
             Some(&BTreeSet::from([0])),
             "the performing call site is what makes the slot monadic",
         );
-        let refusal = refusal_of(source.fns, &plan);
+        let refusal = refusal_of(source.into_functions(), &plan);
         assert_eq!(
             refusal,
             Decline::whole(Refusal::ThunkBoundary, Sym::from(fixtures::HELPER)),

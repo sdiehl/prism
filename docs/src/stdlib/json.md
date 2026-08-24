@@ -39,7 +39,7 @@ encode(JObj([("ok", JBool(true)), ("n", JInt(3))]))
 {"n":3,"ok":true}
 ```
 
-The tree is a structural carrier, and `encode` is its canonical rendering, so a derived printed form would compete with the one the module already defines. lint: allow(L0203)
+The tree is a structural carrier, and `encode` is its canonical rendering, so a derived printed form would compete with the one the module already defines.
 
 ### `JsonError`
 
@@ -199,7 +199,7 @@ line 1 col 5: unexpected character
 
 ### `decode`
 
-```prism,sig,h-f7d3245b65eba3ff60207201959315e6c8964f2b2d2ff11a6e950cd7bdd0c978
+```prism,sig,h-f1a1807db3fb4cde7cff60a627723904a5eff03d02fca629cd7be71901d86c20
 decode : (String) -> Result(Json.Json, Json.JsonError)
 ```
 
@@ -215,7 +215,7 @@ Ok(Json.JArr([Json.JInt(1), Json.JInt(2), Json.JInt(3)]))
 
 ### `decode_lossy`
 
-```prism,sig,h-02972a777432ffeb8c68439087e8206c70d0d47347aa0041d4d47b97ef6e53c2
+```prism,sig,h-a1b330838c783a6937cf3ae757de823ac359d08a128da223784332f6e53c1521
 decode_lossy : (String) -> Result(Json.Json, Json.JsonError)
 ```
 
@@ -231,7 +231,7 @@ Ok(Json.JFloat(1000))
 
 ### `encode`
 
-```prism,sig,h-281ff686253d38ee3a27760861fd94d53ad4aca5bd807dc3605f564694d9a83d
+```prism,sig,h-4f5eafffbb7364027090e47c30fef78026a0240851529a11744bb6e718fc5a40
 encode : (Json.Json) -> String
 ```
 
@@ -263,7 +263,7 @@ Json.JInt(2)
 
 ### `to_json_string`
 
-```prism,sig,h-8e0a1c390ac05fa4df9aa312bcefbb1e517fedb8117b487e3cc49a4fc0165066
+```prism,sig,h-73662517c67c451de32ef396f7e762dcac255261c48f66d79d3c35b47901cd61
 to_json_string : forall a. (a) -> String given Json.ToJson(a)
 ```
 

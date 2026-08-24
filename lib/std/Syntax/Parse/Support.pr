@@ -15,7 +15,7 @@ import Syntax.Source (..)
 import Syntax.Token (..)
 import Syntax.Diagnostic (..)
 import Syntax.Cursor (..)
-import Data.String (contains, index_of)
+import Data.String (contains, index_of, starts_with)
 
 -- | One parse step: the value and the cursor after it, an unmet expectation
 -- held in the cursor's failure record, or a finished diagnostic that no
@@ -126,38 +126,46 @@ pub fn peek_word(c : Cursor) : String =
     None => ""
     Some(t) => token_text(t)
 
--- The byte length of the `e+` or `E+` exponent marker Rust writes and the
--- artifact spelling drops the sign from.
-fn exp_marker_len() : Int = 2
-
 -- | Match Rust's stable `f64` debug spelling used by syntax artifacts. The
--- Prism lexer has already round-tripped the value through `show_float`, which
--- omits the `.0` on integral finite values.
+-- Prism lexer has already round-tripped the value through `show_float`, whose
+-- digits are the same shortest round-trip set but whose spelling differs in two
+-- places: it omits the `.0` on an integral value, and it writes the exponent
+-- signed and zero-padded.
 pub fn surface_float(s : String) : String =
-  let ep = index_of("e+", s)
-  let cap_ep = index_of("E+", s)
-  if ep >= 0 then
+  let e = exp_marker(s)
+  if e >= 0 then
     concat(
-        substring(s, 0, ep + 1),
-        substring(
-            s,
-            ep + exp_marker_len(),
-            byte_len(s) - ep - exp_marker_len(),
-          ),
+        substring(s, 0, e + 1),
+        surface_exponent(substring(s, e + 1, byte_len(s) - e - 1)),
       )
-  elif cap_ep >= 0 then
-    concat(
-        substring(s, 0, cap_ep + 1),
-        substring(
-            s,
-            cap_ep + exp_marker_len(),
-            byte_len(s) - cap_ep - exp_marker_len(),
-          ),
-      )
-  elif contains(".", s) || contains("e", s) || contains("E", s) then
+  elif contains(".", s) then
     s
   else
     concat(s, ".0")
+
+-- The offset of the exponent marker, or -1 when the spelling carries none.
+fn exp_marker(s : String) : Int =
+  let lower = index_of("e", s)
+  if lower >= 0 then
+    lower
+  else
+    index_of("E", s)
+
+-- The exponent as Rust writes it: the `+` dropped, and no leading zero on a
+-- magnitude that has another digit to stand on.
+fn surface_exponent(s : String) : String =
+  if starts_with("+", s) then
+    trim_exp_zeros(substring(s, 1, byte_len(s) - 1))
+  elif starts_with("-", s) then
+    concat("-", trim_exp_zeros(substring(s, 1, byte_len(s) - 1)))
+  else
+    trim_exp_zeros(s)
+
+fn trim_exp_zeros(s : String) : String =
+  if byte_len(s) > 1 && starts_with("0", s) then
+    trim_exp_zeros(substring(s, 1, byte_len(s) - 1))
+  else
+    s
 
 -- | Canonical decimal spelling of an already-validated integer token.
 pub fn surface_int(s : String) : String =

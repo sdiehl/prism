@@ -40,8 +40,8 @@ pub const FAIL_OP: &str = "fail";
 // Both names are spelled canonically, module-qualified: an operation is a member
 // of its declaring module's namespace exactly as a constructor is, so a bare
 // `alloc` would match any module that happened to declare one. `ARENA_MODULE`
-// plus the tests below pin the two apart, so a move of the declaration cannot
-// leave the compiler's hooks quietly matching nothing.
+// plus the tests below pin the two apart, so moving the declaration breaks a test
+// instead of disabling the compiler hooks.
 pub const ARENA_MODULE: &str = "Arena";
 pub const ALLOC_EFFECT: &str = "Arena.Alloc";
 pub const ALLOC_OP: &str = "Arena.alloc";
@@ -59,9 +59,8 @@ pub const CONTINUE_OP: &str = "loop@continue";
 // The reserved capability effects (the IO-as-effects surface). `Console`/
 // `FileSystem`/`Random`/`Env` route the nondeterministic input primitives; the
 // separate `Output` effect routes `print`/`println`. The effect declarations
-// themselves live in the prelude; this is the single source of truth for the set
-// of names, so the `replayable` row check reads it rather than re-spelling the
-// literal list.
+// themselves live in the prelude. The `replayable` row check reads this canonical
+// list rather than re-spelling the names.
 pub const OUTPUT_EFFECT: &str = "Output";
 // `Clock` (declared in `Concurrent`, not the prelude) joins the replayable set:
 // its real reads (`wall_now`/`mono_now`) are recorded observations like the other
@@ -157,7 +156,7 @@ pub const FOREVER: &str = "forever";
 // The prelude helper functions and stream op the desugarer and elaborator emit
 // calls to by name while lowering surface sugar: `run_io` is the default IO world
 // handler that `wrap_main_world` wraps `main` in; `force` is the `?.`/`??` Option
-// forcer; `guard`/`succeeds` are list-comprehension qualifier tests; `scollect`
+// forcer. `guard`/`succeeds` are list-comprehension qualifier tests. `scollect`
 // collects a comprehension's `emit`s into a list; `smap` maps a function over a
 // stream, the fusing collector a guard-free comprehension lowers through;
 // `concat_map` flattens a mapped stream; `emit` is the `Stream` effect op a
@@ -1048,6 +1047,15 @@ fn qualified_by_ops(namespace: &str, ids: &[i64]) -> String {
 #[must_use]
 pub fn specialized_clone(function: &str, n: usize) -> String {
     format!("{function}$sp{n}")
+}
+
+/// Phase-private clone at one thunk-demand convention.
+///
+/// Distinct from dictionary `$sp` clones so the independently ordered passes
+/// cannot collide even when their counters agree.
+#[must_use]
+pub fn convention_clone(function: &str, n: usize) -> String {
+    format!("{function}$ec{n}")
 }
 
 // The top-level join function stream fusion emits when it ties a driven pipeline's

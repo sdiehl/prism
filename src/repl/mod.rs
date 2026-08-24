@@ -33,9 +33,10 @@ use crate::sym::Sym;
 use crate::syntax::ast::{ClassDecl, Core, Expr, ImportDecl, Program, S};
 use crate::syntax::desugar::{desugar, desugar_expr};
 use crate::syntax::reflect::{splice, splice_expr};
+use crate::tc::infer_checked_expr;
 use crate::types::{
-    check, check_allow_holes, infer_expr, infer_expr_dicts, infer_expr_dicts_allow_holes,
-    show_effects, show_type_with_effects, Checked, CtorInfo, Type,
+    check, check_allow_holes, infer_expr, show_effects, show_type_with_effects, Checked, CtorInfo,
+    Type,
 };
 
 // Canonical commands. Any unambiguous prefix resolves to one (`:lo` -> :load,
@@ -508,17 +509,12 @@ impl Session {
         let mut surface = parse_expr(&text)?;
         built.front(&mut surface)?;
         let e = desugar_expr(&surface)?;
-        let (ty, eff, dicts) = if self.flags.holes {
-            let (ty, eff, dicts, _) = infer_expr_dicts_allow_holes(&built.checked, &e)?;
-            (ty, eff, dicts)
-        } else {
-            infer_expr_dicts(&built.checked, &e)?
-        };
+        let inferred = infer_checked_expr(&built.checked, &e, self.flags.holes)?;
         let (comp, synthesized) = elaborate_expr_defs(
             &built.checked,
             &e,
             &built.arity,
-            Some(&dicts),
+            Some(&inferred.facts),
             &built.consts,
         )?;
         // Elaboration synthesizes structural `show` helpers on demand. A
@@ -541,7 +537,11 @@ impl Session {
         };
         drop(out);
         drop(input);
-        Ok((v.repr(), ty.show(), show_effects(&eff)))
+        Ok((
+            v.repr(),
+            inferred.ty.show(),
+            show_effects(&inferred.effects),
+        ))
     }
 }
 
@@ -1793,6 +1793,56 @@ mod tests {
             fault,
             crate::error::typed_hole_fault("todo", marginalia::Span::new(0, 5))
         );
+    }
+
+    #[test]
+    fn expression_resolution_wins_when_node_ids_collide_with_the_session() {
+        let session = Session::probe(
+            vec![Seg::Text(
+                "type Point = Point { x: Int, y: Int }".to_string(),
+            )],
+            Vec::new(),
+        );
+        let (_, mut built) = session.build().expect("record declaration type checks");
+
+        // Program and prompt ids are allocated independently and both begin at
+        // one. Seed the session table at this prompt's field-access id with the
+        // wrong (but otherwise valid) field. A partial overlay would silently
+        // elaborate `.y` as `.x` and return 11.
+        let mut surface = parse_expr("(Point { x = 11, y = 22 }).y").expect("expression parses");
+        built.front(&mut surface).expect("expression resolves");
+        let expression = desugar_expr(&surface).expect("expression desugars");
+        let mut session_fields = BTreeMap::new();
+        session_fields.insert(expression.id, ("Point".to_string(), 0, 2));
+        built.checked.facts = crate::hir::NodeFacts::from_tables(
+            session_fields,
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            BTreeSet::new(),
+            BTreeMap::new(),
+        );
+
+        let (value, ty, _) = session
+            .eval_chained(&built, "(Point { x = 11, y = 22 }).y")
+            .expect("checked prompt facts elaborate independently");
+        assert_eq!(value, "22");
+        assert_eq!(ty, "Int");
+    }
+
+    #[test]
+    fn standalone_expression_runs_the_or_null_representation_check() {
+        let (session, built) = fresh();
+        let error = session
+            .eval_chained(&built, "This(())")
+            .expect_err("the zero word cannot inhabit the optimized nullable");
+        let Error::Type(error) = error else {
+            panic!("expected a type error, got {error}");
+        };
+        assert_eq!(error.code(), Some("E1019"));
     }
 
     // Elaborating a structural print/interpolation synthesizes a `_show_*`

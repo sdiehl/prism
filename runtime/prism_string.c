@@ -1,18 +1,20 @@
 /* Strings: counted string cells, their byte/codepoint operations, the scalar
  * show helpers, and the blake3 hash. */
 #include "prism_string.h"
+/* prism_string_of_raw: the one lossy UTF-8 decoder, which the byte-level slice
+ * falls back to when a window would split a character sequence. */
+#include "prism_array.h"
 #include "prism_mem.h"
 
 long *prism_str_alloc(long byte_len) {
     /* Room for the bytes plus the NUL terminator, rounded up to whole words.
      * `byte_len + 8` is computed in size_t so a near-LONG_MAX length cannot
-     * overflow before prism_cell_bytes re-checks the final allocation size. */
+     * overflow before prism_cell_malloc re-checks the final allocation size. */
     size_t span;
     if (byte_len < 0) abort();
     if (__builtin_add_overflow((size_t)byte_len, (size_t)8, &span)) abort();
     long words = (long)(span / 8);
-    long *p = malloc(prism_cell_bytes(words));
-    if (!p) abort();
+    long *p = prism_cell_malloc(words);
     p[PRISM_RC_W] = 1;
     p[PRISM_TAG_W] = PRISM_STR_TAG;
     p[PRISM_ARITY_W] = byte_len;
@@ -20,12 +22,47 @@ long *prism_str_alloc(long byte_len) {
     return p;
 }
 
+/* View field order, and the tagged-immediate encoding its two integer fields
+ * use. They are tagged because the collector's child scan walks every field of
+ * a child-bearing cell and skips only immediates and zero; a raw byte offset
+ * would be read as a pointer. */
+#define PRISM_VIEW_PARENT 0
+#define PRISM_VIEW_OFF 1
+#define PRISM_VIEW_LEN 2
+#define PRISM_VIEW_FIELDS 3
+
+static long view_tagged(long n) {
+    return (n << 1) | 1;
+}
+
+static long view_field(long s, long i) {
+    return ((long *)s)[PRISM_HDR_WORDS + i];
+}
+
+int prism_str_is_view(long s) {
+    return ((long *)s)[PRISM_TAG_W] == PRISM_STRVIEW_TAG;
+}
+
 char *prism_str_data(long s) {
+    if (prism_str_is_view(s)) {
+        long parent = view_field(s, PRISM_VIEW_PARENT);
+        return (char *)((long *)parent + PRISM_HDR_WORDS) + (view_field(s, PRISM_VIEW_OFF) >> 1);
+    }
     return (char *)((long *)s + PRISM_HDR_WORDS);
 }
 
 long prism_str_len_bytes(long s) {
+    if (prism_str_is_view(s)) return view_field(s, PRISM_VIEW_LEN) >> 1;
     return ((long *)s)[PRISM_ARITY_W];
+}
+
+char *prism_str_cstr(long s) {
+    long n = prism_str_len_bytes(s);
+    char *out = malloc(prism_ckd_size(prism_ckd_ladd(n, 1)));
+    if (!out) abort();
+    memcpy(out, prism_str_data(s), prism_ckd_size(n));
+    out[n] = 0;
+    return out;
 }
 
 long prism_str_lit(const char *src, long byte_len) {
@@ -54,7 +91,10 @@ static long utf8_step(const char *d, long b, long nb) {
  * calls print_str to echo shown values. Backends print via the prism_print_*
  * entry points below, not this one. */
 void print_str(long s) {
-    printf("%s\n", prism_str_data(s));
+    /* Length-bounded, not %s: a view's bytes are not NUL-terminated, and a
+     * String may legitimately contain U+0000, which the interpreter prints. */
+    fwrite(prism_str_data(s), 1, (size_t)prism_str_len_bytes(s), stdout);
+    putchar('\n');
 }
 
 /* String builders operate on string cells and return fresh counted cells, so
@@ -332,6 +372,59 @@ long prism_substring(long s, long start, long len) {
     memcpy(o, d + bstart, (size_t)out_len);
     o[out_len] = 0;
     return (long)p;
+}
+
+/* Whether byte `b` of a `nb`-byte string starts a UTF-8 sequence. Both ends of a
+ * string are boundaries; inside, a continuation byte (10xxxxxx) is not one. */
+static int utf8_boundary(const char *d, long b, long nb) {
+    if (b <= 0 || b >= nb) return 1;
+    return ((unsigned char)d[b] & 0xC0) != 0x80;
+}
+
+/* Allocate the view cell over an already-materialized parent, taking the
+ * caller's reference to it. Mirrors prism_str_alloc: plain malloc and one live
+ * cell, so a view is never arena-owned and the leak balance counts it exactly
+ * like the string it aliases. */
+static long str_view_cell(long parent, long off, long len) {
+    long *p = prism_cell_malloc(PRISM_VIEW_FIELDS);
+    p[PRISM_RC_W] = 1;
+    p[PRISM_TAG_W] = PRISM_STRVIEW_TAG;
+    p[PRISM_ARITY_W] = PRISM_VIEW_FIELDS;
+    p[PRISM_HDR_WORDS + PRISM_VIEW_PARENT] = parent;
+    p[PRISM_HDR_WORDS + PRISM_VIEW_OFF] = view_tagged(off);
+    p[PRISM_HDR_WORDS + PRISM_VIEW_LEN] = view_tagged(len);
+    prism_live_cells++;
+    return (long)p;
+}
+
+long prism_prim_str_slice(long s, long lo, long hi) {
+    long nb = prism_str_len_bytes(s);
+    if (lo < 0) lo = 0;
+    if (hi > nb) hi = nb;
+    if (lo >= hi) return prism_str_lit("", 0);
+    /* The whole span is the value itself; sharing it keeps a materialized
+     * string materialized rather than wrapping it for nothing. */
+    if (lo == 0 && hi == nb) {
+        prism_rc_inc(s);
+        return s;
+    }
+    const char *d = prism_str_data(s);
+    /* A span of a valid UTF-8 string is itself valid exactly when both ends sit
+     * on character boundaries, so this O(1) test is what lets the view alias the
+     * parent's bytes verbatim. A split sequence takes the copying path, which
+     * repairs it to U+FFFD byte-for-byte as the pure-Prism slice always did. */
+    if (!utf8_boundary(d, lo, nb) || !utf8_boundary(d, hi, nb)) {
+        return prism_string_of_raw((const unsigned char *)d + lo, hi - lo);
+    }
+    /* Compose onto the root so views never chain: a scanner that re-slices its
+     * remainder a million times still reads through exactly one hop. */
+    long parent = s, base = 0;
+    if (prism_str_is_view(s)) {
+        parent = view_field(s, PRISM_VIEW_PARENT);
+        base = view_field(s, PRISM_VIEW_OFF) >> 1;
+    }
+    prism_rc_inc(parent);
+    return str_view_cell(parent, base + lo, hi - lo);
 }
 
 long prism_char_at(long s, long i) {

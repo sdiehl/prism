@@ -278,15 +278,47 @@ fn contract_digest_is_stable_and_moves_on_clause_change() {
 
 // -- z3 solver-accept gate -----------------------------------------------------
 
-/// Locate a z3 binary: `PRISM_Z3` if set, else `z3` on `PATH`, confirmed by a
-/// successful `--version`. `None` means the gate is skipped (no solver present).
-fn z3_exe() -> Option<String> {
-    let exe = std::env::var("PRISM_Z3").unwrap_or_else(|_| "z3".to_string());
+/// The solvers this module can drive, each with the override that names it and
+/// the binary looked up on `PATH` when the override is unset.
+const Z3_ENV: &str = "PRISM_Z3";
+const Z3_BIN: &str = "z3";
+const CVC5_ENV: &str = "PRISM_CVC5";
+const CVC5_BIN: &str = "cvc5";
+
+/// Comma-separated solver names an environment promises to have installed, which
+/// turns a missing one into a failure instead of a skip. A developer without a
+/// solver still runs the rest of the suite; an environment that claims to cover
+/// the discharge path and silently does not is what this catches, and it is what
+/// happened here: nothing installed a solver, so every gate below skipped for as
+/// long as the subsystem has existed.
+const REQUIRE_SOLVERS_ENV: &str = "PRISM_REQUIRE_SOLVERS";
+const REQUIRE_SEP: char = ',';
+
+/// Whether the environment promised `name` would be present.
+fn solver_required(name: &str) -> bool {
+    std::env::var(REQUIRE_SOLVERS_ENV)
+        .is_ok_and(|list| list.split(REQUIRE_SEP).any(|want| want.trim() == name))
+}
+
+/// Locate a solver binary: `env_var` if set, else `default_bin` on `PATH`,
+/// confirmed by a successful `--version`. `None` skips the gate.
+fn solver_exe(env_var: &str, default_bin: &str) -> Option<String> {
+    let exe = std::env::var(env_var).unwrap_or_else(|_| default_bin.to_string());
     let ok = Command::new(&exe)
         .arg("--version")
         .output()
         .is_ok_and(|o| o.status.success());
+    assert!(
+        ok || !solver_required(default_bin),
+        "{REQUIRE_SOLVERS_ENV} names {default_bin} but {exe} did not answer \
+         `--version`; the solver-accept gate would have skipped silently"
+    );
     ok.then_some(exe)
+}
+
+/// Locate a z3 binary. `None` means the gate is skipped (no solver present).
+fn z3_exe() -> Option<String> {
+    solver_exe(Z3_ENV, Z3_BIN)
 }
 
 /// Run one canonical SMT-LIB script through z3 over stdin and parse its status
@@ -1182,15 +1214,9 @@ fn inc(x: Int): Int
 
 // -- cvc5 adapter and cross-solver agreement (gated on a present cvc5) ----------
 
-/// Locate a cvc5 binary: `PRISM_CVC5` if set, else `cvc5` on `PATH`, confirmed by a
-/// successful `--version`. `None` means the gate is skipped (cvc5 not installed).
+/// Locate a cvc5 binary. `None` means the gate is skipped (cvc5 not installed).
 fn cvc5_exe() -> Option<String> {
-    let exe = std::env::var("PRISM_CVC5").unwrap_or_else(|_| "cvc5".to_string());
-    let ok = Command::new(&exe)
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success());
-    ok.then_some(exe)
+    solver_exe(CVC5_ENV, CVC5_BIN)
 }
 
 const CONTRACT_PROG: &str = "\

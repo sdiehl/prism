@@ -1,0 +1,35 @@
+-- Two escaping components with disjoint effects share one confined region with
+-- two boundary entries. Each part stores effect-performing closures in a list
+-- and drains it through the shared `run_thunks` driver, so the region is the
+-- union of both parts plus the driver, and `main` crosses the boundary three
+-- times while the stream pipeline beside the crossings stays fused.
+effect SigA
+  siga(Int) : Int
+
+effect SigB
+  sigb(Int) : Int
+
+fn run_thunks(fs, acc) =
+  match fs of
+    Nil => acc
+    Cons(f, rest) => run_thunks(rest, acc + f())
+
+fn part_a() =
+  let fs = [\() -> siga(10), \() -> siga(20)]
+  handle run_thunks(fs, 0) with
+    siga(n) resume k => k(n + 1)
+    return r => r
+
+fn part_b() =
+  let fs = [\() -> sigb(5), \() -> sigb(6)]
+  handle run_thunks(fs, 1) with
+    sigb(n) resume k => k(n * 3)
+    return r => r
+
+fn triple(n) = n * 3
+
+fn main() =
+  println(srange(1, 40).smap(triple).ssum())
+  println(part_a())
+  println(part_b())
+  println(part_a() + part_b())

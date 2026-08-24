@@ -869,6 +869,7 @@ mod tests {
             params: (0..params.len()).map(|i| format!("p{i}")).collect(),
             ty: Type::fun(params, Type::Int),
             effects: Set::new(),
+            pure: true,
         }
     }
 

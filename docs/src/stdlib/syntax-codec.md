@@ -34,7 +34,7 @@ type TokensDoc = TokensDoc {
 }
 ```
 
-A decoded `prism-syntax-tokens-v1` document: the envelope identity, the embedded source, the raw and post-layout token streams, and the trivia events, all in stream order. lint: allow(L0203)
+A decoded `prism-syntax-tokens-v1` document: the envelope identity, the embedded source, the raw and post-layout token streams, and the trivia events, all in stream order.
 
 ### `SurfaceDoc`
 
@@ -47,7 +47,7 @@ type SurfaceDoc = SurfaceDoc {
 }
 ```
 
-A decoded `prism-surface-syntax-v1` document: the envelope identity, the embedded source, and the ordered item list of the parsed file. lint: allow(L0203)
+A decoded `prism-surface-syntax-v1` document: the envelope identity, the embedded source, and the ordered item list of the parsed file.
 
 ## Effects
 
@@ -80,7 +80,7 @@ Render a codec error as one line.
 
 ### `decode_tokens`
 
-```prism,sig,h-c2828d832d261a938b9a5ea0af7a5b3574f990387660ad128ba415a4eb1c6afa
+```prism,sig,h-78a881b0da3b64c147ec329df8d30e1a9eb974d4d12c703d70a902b43cc37add
 decode_tokens : (String) -> Result(Syntax.Codec.TokensDoc, Syntax.Codec.CodecError)
 ```
 
@@ -88,7 +88,7 @@ Decode a `prism-syntax-tokens-v1` document from its exact bytes. A wrong or miss
 
 ### `canonical_json`
 
-```prism,sig,h-4dc5ffc172d362ca60aec55be68065e4267eeb04f13b7764740813f2af831646
+```prism,sig,h-5e2aed6fd488798c5b5d56c43f975285986f35bc6afc6e8ccbde13d74e379315
 canonical_json : (Json.Json) -> String
 ```
 
@@ -96,7 +96,7 @@ Render a JSON value in the export layout the encoders here use, for tools that d
 
 ### `encode_tokens`
 
-```prism,sig,h-0b74d53e4a99bf5a35d97815e84cd37954771e461a7cb16e96b2ef804cfddaad
+```prism,sig,h-77172542e69646c0de6ad49f3497cbb4778b9549bea0c7813c2dfa9e078f1a7f
 encode_tokens : (Syntax.Codec.TokensDoc) -> String
 ```
 
@@ -112,7 +112,7 @@ The schema tag of the surface-syntax artifact.
 
 ### `encode_surface`
 
-```prism,sig,h-de68dbd1adaaa3bf7d6791ed6bd492e43c9dd919fdf058fcc4395d616873477d
+```prism,sig,h-9c9071f7174fef8aca97de42d1ee6f738a78c45599721cb81f79c145b7e993af
 encode_surface : (Syntax.Codec.SurfaceDoc) -> String
 ```
 
@@ -120,7 +120,7 @@ Encode a surface document back to the exact artifact bytes the compiler emits: `
 
 ### `decode_surface`
 
-```prism,sig,h-f260726339ae4768ffbef3fa2779fee602691eb3132d9407028d0a65e0ed7c95
+```prism,sig,h-e7ec996d1108419ba2267a10cbcab037ed71318034e0ebb82662b09c0f15c1cc
 decode_surface : (String) -> Result(Syntax.Codec.SurfaceDoc, Syntax.Codec.CodecError)
 ```
 
@@ -128,7 +128,7 @@ Decode a `prism-surface-syntax-v1` document from its exact bytes. A wrong or mis
 
 ### `decode_diagnostics`
 
-```prism,sig,h-928dbb7f1575c2ef583bd686e57375cc1fc75a680bd3d99d6fa83fc3d7159766
+```prism,sig,h-ed5428bf366ba71016aa8684f4d84e2cba926e4fef5790a50dc9ffa7d92191e0
 decode_diagnostics : (String) -> Result(Syntax.Diagnostic.DiagnosticsDoc, Syntax.Codec.CodecError)
 ```
 
@@ -136,7 +136,7 @@ Decode a `prism-syntax-diagnostics-v1` document. Total: every malformed input la
 
 ### `encode_diagnostics`
 
-```prism,sig,h-7ab96fbb44f61c6194f2036f63d353b8cf27e6b4a2af22ca2795efd4fe656e62
+```prism,sig,h-c0c583e4d39b306a69692b3cfadd7c9683d3e81566f5c7ff4241bacaa16e1cdc
 encode_diagnostics : (Syntax.Diagnostic.DiagnosticsDoc) -> String
 ```
 
@@ -152,7 +152,7 @@ Run a decoding computation, turning a `fail_decode` into `Err` and a completed d
 
 ### `decode_resolved`
 
-```prism,sig,h-40e1ce348a4406826bce8bcfc1e778b4c61b637c2e4235932bb0e8fb9d6b80c2
+```prism,sig,h-253ea6c2705128e0744d72bc3b60d07798cfec589b07713cb0ee824a2307ba9b
 decode_resolved : (String) -> Result(Syntax.Resolved.ResolvedDoc, Syntax.Codec.CodecError)
 ```
 
@@ -160,7 +160,7 @@ Decode a `prism-resolved-syntax-v1` document. Total: every malformed input lands
 
 ### `encode_resolved`
 
-```prism,sig,h-a6055170caddf10b5d0af005b026501c9d8e132985a87656f09e9d5ea506f9d7
+```prism,sig,h-337d47414e7e0534c0a874c6dcf45111d562c1a7fdc18299e94e8222031e606c
 encode_resolved : (Syntax.Resolved.ResolvedDoc) -> String
 ```
 
@@ -168,7 +168,7 @@ Encode a resolved-syntax document back to the exact artifact bytes the compiler 
 
 ### `decode_tc_input`
 
-```prism,sig,h-e78850ac5dca2fbb0831bbe1794361db9b924f357ee35ecd8d2f1d3a42b6f4d7
+```prism,sig,h-a69b38fa810a4dac0792d75030e26fb12b7e1a3c18e4a8bcf03468bb1a763324
 decode_tc_input : (String) -> Result(Syntax.TcInput.TcInputDoc, Syntax.Codec.CodecError)
 ```
 

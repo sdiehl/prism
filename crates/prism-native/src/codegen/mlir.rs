@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
-use super::abi::idx64;
+use super::abi::{idx64, STATIC_CELL, STR_TAG};
 use super::emit::{emit_with_isa, escape_str, str_builtin_decls};
 use super::isa::{Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa};
 use prism_core::core::LoweredCore;
@@ -37,13 +37,10 @@ impl Isa for MlirText {
         self.const_int(b, 0)
     }
 
-    fn str_lit(&self, b: &mut Buf, dst: &str, idx: usize, len: usize) {
+    fn str_lit(&self, b: &mut Buf, dst: &str, idx: usize, _len: usize) {
         let p = b.tmp();
         b.line(&format!("{p} = llvm.mlir.addressof @str{idx} : !llvm.ptr"));
-        let n = self.const_int(b, idx64(len));
-        b.line(&format!(
-            "{dst} = llvm.call @prism_str_lit({p}, {n}) : (!llvm.ptr, i64) -> i64"
-        ));
+        b.line(&format!("{dst} = llvm.ptrtoint {p} : !llvm.ptr to i64"));
     }
 
     fn bin(&self, b: &mut Buf, dst: &str, op: IntOp, x: &str, y: &str) {
@@ -286,7 +283,6 @@ impl Isa for MlirText {
             "llvm.func @prism_prim_read_line() -> i64",
             "llvm.func @prism_prim_rand() -> i64",
             "llvm.func @prism_srand(i64)",
-            "llvm.func @prism_str_lit(!llvm.ptr, i64) -> i64",
             // The saturating fp->int intrinsic, called by `fptosi_sat`. Quoted
             // because the symbol has dots; `mlir-translate` binds it to the real
             // `@llvm.fptosi.sat.i64.f64` (an unused declaration is harmless).
@@ -316,8 +312,40 @@ impl Isa for MlirText {
         }
     }
 
+    // A string literal's static cell: the exact heap str-cell shape
+    // `{ rc, tag, byte_len, bytes }` with the static rc marker, 8-aligned so
+    // the address is a valid cell word. Globals with a non-string element
+    // type need an initializer region in the llvm dialect, built here as an
+    // insertvalue chain over an undef aggregate.
     fn str_global(&self, out: &mut String, idx: usize, s: &str) {
-        Self::fmt_global(out, &format!("str{idx}"), s);
+        let arr = s.len() + 1;
+        let cell = format!("!llvm.struct<(i64, i64, i64, !llvm.array<{arr} x i8>)>");
+        writeln!(
+            out,
+            "llvm.mlir.global internal constant @str{idx}() {{alignment = 8 : i64}} : {cell} {{"
+        )
+        .unwrap();
+        writeln!(out, "  %v = llvm.mlir.undef : {cell}").unwrap();
+        writeln!(out, "  %rc = llvm.mlir.constant({STATIC_CELL} : i64) : i64").unwrap();
+        writeln!(out, "  %tag = llvm.mlir.constant({STR_TAG} : i64) : i64").unwrap();
+        writeln!(
+            out,
+            "  %len = llvm.mlir.constant({} : i64) : i64",
+            idx64(s.len())
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "  %bs = llvm.mlir.constant(\"{}\\00\") : !llvm.array<{arr} x i8>",
+            escape_str(s)
+        )
+        .unwrap();
+        writeln!(out, "  %v0 = llvm.insertvalue %rc, %v[0] : {cell}").unwrap();
+        writeln!(out, "  %v1 = llvm.insertvalue %tag, %v0[1] : {cell}").unwrap();
+        writeln!(out, "  %v2 = llvm.insertvalue %len, %v1[2] : {cell}").unwrap();
+        writeln!(out, "  %v3 = llvm.insertvalue %bs, %v2[3] : {cell}").unwrap();
+        writeln!(out, "  llvm.return %v3 : {cell}").unwrap();
+        writeln!(out, "}}").unwrap();
     }
 }
 

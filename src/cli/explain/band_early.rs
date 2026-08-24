@@ -261,6 +261,29 @@ pub(super) const ENTRIES: &[Explanation] = &[
               to the type the expression really has.",
     },
     Explanation {
+        code: "E1023",
+        title: "partial field projection",
+        prose: "A plain `value.field` projection carries evidence for one record constructor.\n\
+                The receiver's datatype has several constructors, so that evidence cannot\n\
+                cover every value of the receiver type, even when every constructor declares\n\
+                a same-typed field with that name.",
+        example: "type Shape = Circle { size: Int } | Square { size: Int }\n\
+                  fn size(s : Shape) : Int = s.size",
+        fix: "Pattern-match the receiver and read the field in each record-constructor arm. \
+              A plain projection is available only on a single-constructor record.",
+    },
+    Explanation {
+        code: "E1024",
+        title: "record spread from an unrefined sum",
+        prose: "A constructor spread such as `Circle { ..shape, radius = 2 }` takes its\n\
+                unchanged fields from the named constructor. The base type has several\n\
+                constructors, so its value is not known to have that layout.",
+        example: "type Shape = Circle { radius: Int } | Square { side: Int }\n\
+                  fn resize(s : Shape) : Shape = Circle { ..s, radius = 2 }",
+        fix: "Use a `?Circle` optic update to leave other constructors unchanged, or match \
+              the constructor and rebuild it from the fields bound by the pattern.",
+    },
+    Explanation {
         code: "E1098",
         title: "type mismatch (no enclosing definition)",
         prose: "The same failure E1022 reports, printed from a checker path that had not\n\

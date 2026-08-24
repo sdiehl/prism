@@ -138,6 +138,7 @@ Data.String.starts_with : (String, String) -> Bool
 Data.String.str_join : (String, List(String)) -> String
 Data.String.str_of_char : (Char) -> String
 Data.String.str_repeat : (String, Int) -> String
+Data.String.str_slice : (String, Int, Int) -> String
 Data.String.to_lower : (String) -> String
 Data.String.to_upper : (String) -> String
 Data.String.trim : (String) -> String
@@ -235,7 +236,7 @@ read_line : () -> String ! {Console} ! {Console}
 repeat : forall e0 a. (Int, () -> a ! {e0}) -> Unit ! {e0}
 repeat_while : forall e0 a. (() -> Bool ! {e0}, () -> a ! {e0}) -> Unit ! {e0}
 run_io : forall e0 a. ((Unit) -> a ! {Console, Entropy, Env, FileSystem, IO, Output, Random, e0}) -> a ! {IO, e0} ! {IO}
-scollect : forall e0 a b. ((Unit) -> b ! {Emit(a), e0}) -> List(a) ! {e0}
+scollect : forall e0 a b. ((Unit) -> a ! {Emit(b), e0}) -> List(b) ! {e0}
 sfold : forall e0 a b c. ((Unit) -> b ! {Emit(c), e0}, a, (a, c) -> a ! {e0}) -> a ! {e0}
 show_list_body : forall a. (List(a), Bool) -> String
 signum : (Int) -> Int
@@ -251,7 +252,7 @@ sort_by_ord : forall a. (List(a)) -> List(a)
 srange : forall a. (Int, Int) -> (a) -> Unit ! {Emit(Int)}
 srange_go : (Int, Int) -> Unit ! {Emit(Int)} ! {Emit}
 ssum : forall e0 a. ((Unit) -> a ! {Emit(Int), e0}) -> Int ! {e0}
-stake : forall e1 a b c. ((Unit) -> b ! {Emit(a), e1}, Int) -> (c) -> Unit ! {Emit(a), e1}
+stake : forall e1 a b c. ((Unit) -> a ! {Emit(b), e1}, Int) -> (c) -> Unit ! {Emit(b), e1}
 stake_go : forall e0 a b. ((Unit) -> a ! {Emit(b), e0}, Int) -> Unit ! {Emit(b), e0} ! {Emit}
 str_escape : (String) -> String
 str_hash : (String) -> U64

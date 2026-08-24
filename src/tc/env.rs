@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use marginalia::Span;
 
-use super::{CtorInfo, DataInfo, EffOpInfo, Env, Tc};
+use super::{CtorInfo, DataInfo, EffOpInfo, Env, NominalRepr, Tc};
 use crate::core::builtins::{Builtin, FloatOp, OUTPUT_BUILTINS};
 use crate::error::suggest;
 use crate::error::{ErrKind, TypeError};
@@ -12,6 +12,7 @@ use crate::kw;
 use crate::names;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core, Decl, Program};
+use crate::types::is_or_null_element_in;
 use crate::types::ty::{EffRow, Kind, Label, Type, BUF, CANONICAL, FLOAT_BUF, INT_BUF};
 
 // Effects the compiler knows without an `effect` declaration: the IO/Exn
@@ -118,7 +119,7 @@ impl Tc<'_> {
                     }
                     .at(span));
                 };
-                if !or_null_ast_element_ok(elem) {
+                if !self.or_null_ast_element_ok(elem) {
                     return Err(ErrKind::OrNullBadElement {
                         found: or_null_element_desc(elem),
                     }
@@ -156,9 +157,8 @@ impl Tc<'_> {
                         }
                         .at(span));
                     };
-                    // A `Row`- or `Nat`-kinded position is not merely "some type of
-                    // that kind": only a row literal or variable can be lowered as a
-                    // row, and only a dimension literal or variable as a `Nat`.
+                    // Row positions accept only row literals or variables. `Nat`
+                    // positions accept only dimension literals or variables.
                     // Anything else (an application, constructor, tuple, ...) has no
                     // representation there and was silently erased to the empty row
                     // or a fresh dimension before. A bare variable stays legal (its
@@ -436,6 +436,39 @@ impl Tc<'_> {
             .collect();
         EffRow::canonical(labels, base)
     }
+
+    // Map the representation-relevant written forms into semantic types and
+    // ask the shared policy/physical authority. A newtype-shaped or opaque
+    // nominal is not assumed to keep a wrapper after representation lowering.
+    fn or_null_ast_element_ok(&self, t: &ast::Ty) -> bool {
+        let semantic = match t {
+            ast::Ty::Int => Type::Int,
+            ast::Ty::I64 => Type::I64,
+            ast::Ty::U64 => Type::U64,
+            ast::Ty::Bool => Type::Bool,
+            ast::Ty::Str => Type::Str,
+            ast::Ty::Tuple(_) => Type::Tuple(Vec::new()),
+            ast::Ty::Con(n, _) if n != kw::TY_OR_NULL => Type::Con(Sym::from(n), Vec::new()),
+            _ => return false,
+        };
+        self.or_null_element_ok(&semantic)
+    }
+
+    /// Whether a semantic type has source permission and a proof that its
+    /// runtime element is one non-zero word.
+    pub(super) fn or_null_element_ok(&self, ty: &Type) -> bool {
+        is_or_null_element_in(ty, |name| self.nominal_is_boxed(name))
+    }
+
+    // Constructor shape is not representation evidence: ordinary one-field
+    // datatypes allocate, while source newtypes with that shape are erased.
+    // Imported opaque declarations keep this explicit fact even when their
+    // constructors are hidden.
+    fn nominal_is_boxed(&self, name: Sym) -> bool {
+        self.data
+            .get(name.as_str())
+            .is_some_and(|data| data.repr == NominalRepr::BoxedCell)
+    }
 }
 
 // Predicativity at the source: a type-constructor argument ranges over
@@ -452,29 +485,6 @@ fn no_polytype_args(args: &[ast::Ty], head: &str, span: Span) -> Result<(), Type
         .at(span));
     }
     Ok(())
-}
-
-// The AST dual of `types::is_or_null_element`: whether `t` is a written type whose
-// values occupy a single value word that is never the machine zero word. Heap
-// datatypes (any `Con`/`App`/`Tuple`) and the tagged scalars qualify. `Unit` is the
-// zero word, `Float`/`Char` are excluded, `OrNull` makes the null word ambiguous,
-// and a bare type variable may instantiate to `Unit`, so all are rejected. Keep
-// this in lockstep with the `Type`-level predicate.
-fn or_null_ast_element_ok(t: &ast::Ty) -> bool {
-    match t {
-        // Tagged scalars (odd words) and heap datatypes, tuples, and applied
-        // datatype spines are all non-zero single words.
-        ast::Ty::Int
-        | ast::Ty::I64
-        | ast::Ty::U64
-        | ast::Ty::Bool
-        | ast::Ty::Str
-        | ast::Ty::Tuple(_)
-        | ast::Ty::App(..) => true,
-        // A user datatype qualifies, but a nested `OrNull` does not.
-        ast::Ty::Con(n, _) => n != kw::TY_OR_NULL,
-        _ => false,
-    }
 }
 
 // A short description of a rejected `OrNull` element, for the diagnostic.
@@ -1043,6 +1053,7 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
             params: vec!["a".to_string()],
             param_kinds: vec![Kind::Type],
             ctors: vec![],
+            repr: NominalRepr::BoxedCell,
         },
     );
     // `Buf` is a built-in 0-parameter type: an unboxed byte buffer (a heap cell
@@ -1055,6 +1066,7 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
             params: vec![],
             param_kinds: vec![],
             ctors: vec![],
+            repr: NominalRepr::BoxedCell,
         },
     );
     // `FloatBuf` is a built-in 0-parameter type: an unboxed buffer of raw f64
@@ -1067,6 +1079,7 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
             params: vec![],
             param_kinds: vec![],
             ctors: vec![],
+            repr: NominalRepr::BoxedCell,
         },
     );
     // `IntBuf` is its i64-element sibling: the same raw-word storage cell,
@@ -1077,6 +1090,7 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
             params: vec![],
             param_kinds: vec![],
             ctors: vec![],
+            repr: NominalRepr::BoxedCell,
         },
     );
     // The 128-bit SIMD vector types (two 64-bit or four 32-bit lanes): opaque
@@ -1094,6 +1108,7 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
                 params: vec![],
                 param_kinds: vec![],
                 ctors: vec![],
+                repr: NominalRepr::Vec128,
             },
         );
     }
@@ -1108,6 +1123,11 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
                 params: dd.params.clone(),
                 param_kinds: kinds,
                 ctors: dd.ctors.iter().map(|c| c.name.clone()).collect(),
+                repr: if dd.newtype {
+                    NominalRepr::Transparent
+                } else {
+                    NominalRepr::BoxedCell
+                },
             },
         );
     }
@@ -1169,38 +1189,6 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
                 Type::fun(args, result)
             };
             env.insert(Sym::from(&c.name), wrap_scheme(&dd.params, &kinds, body));
-        }
-        // Fails-closed guard: a field read `x.field` on a sum type resolves the
-        // field type from whichever constructor `find_field` visits first, so a
-        // field name shared across this datatype's constructors with DIFFERING
-        // types is unsound (a `Square { size: String }` read as the `Circle {
-        // size: Int }` field reinterprets a string pointer as an integer).
-        // Reject that at the declaration rather than let it typecheck and fault
-        // at runtime. Identical types across constructors are the sound
-        // common-field case and stay allowed.
-        let mut seen: BTreeMap<String, Type> = BTreeMap::new();
-        for c in &dd.ctors {
-            let Some(fs) = c.fields.as_ref() else {
-                continue;
-            };
-            for ((n, _), arg) in fs.iter().zip(&c.args) {
-                let arg_ty = saturate_field(convert_data_rp(arg, &row_params), &data);
-                match seen.get(n) {
-                    Some(prev) if prev != &arg_ty => {
-                        return Err(ErrKind::ConflictingFieldType {
-                            type_name: dd.name.clone(),
-                            field: n.clone(),
-                            first: prev.show(),
-                            second: arg_ty.show(),
-                        }
-                        .at(dd.span));
-                    }
-                    Some(_) => {}
-                    None => {
-                        seen.insert(n.clone(), arg_ty);
-                    }
-                }
-            }
         }
     }
     let mut eff_ops: BTreeMap<String, EffOpInfo> = BTreeMap::new();
@@ -1284,8 +1272,92 @@ fn max_state_ex(t: &Type, hi: &mut Option<u32>) {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "native")]
+    use crate::core::builtins::{AbiArg, AbiResult, Builtin};
     use crate::sym::Sym;
     use crate::types::ty::{EffRow, Label, Type};
+    #[cfg(feature = "native")]
+    use crate::types::{layout_of_type, RcBehavior, Repr, ZeroPossibility};
+
+    // The tagged-word protocol behind `AbiArg::Immediate` and
+    // `AbiResult::RetagImmediate`: the layout authority plans a non-pointer
+    // word whose payload lives above the tag bit, so the emitter may untag an
+    // argument with a shift and retag a bare-integer result. Bool and Char are
+    // immediate outright; Int qualifies through its tagged-word plan.
+    #[cfg(feature = "native")]
+    fn tagged_word_protocol(ty: &Type) -> bool {
+        let layout = layout_of_type(ty);
+        matches!(
+            (layout.local(), layout.zero(), layout.rc()),
+            (Repr::Immediate, ZeroPossibility::Never, RcBehavior::Trivial)
+                | (
+                    Repr::NonNullValue,
+                    ZeroPossibility::Never,
+                    RcBehavior::RuntimeWord
+                )
+        )
+    }
+
+    // A convention table row and a signature table row describe the same call,
+    // so the two must agree: an argument the ABI untags must be declared with
+    // a tagged-word type, an argument it unboxes must be declared as one of
+    // the one-word payload cells (`AbiArg::BoxedFloat` is named for its first
+    // user but unboxes any such cell), and a retagged result must be declared
+    // tagged-word. A red run here is representation drift between the tables;
+    // fixing it changes emitted calls, so it belongs under the full gate,
+    // never behind a loosened assertion.
+    #[cfg(feature = "native")]
+    #[test]
+    fn builtin_abi_agrees_with_declared_signatures() {
+        for builtin in Builtin::ALL {
+            let Some(sig) = builtin.signature() else {
+                continue;
+            };
+            let name = builtin.name();
+            let (mut ty, _) = super::parse_sig(name, sig).expect("builtin signature parses");
+            while let Type::Forall(_, inner) | Type::RowForall(_, inner) = ty {
+                ty = *inner;
+            }
+            let Type::Fun(params, _, result) = ty else {
+                panic!("builtin {name} signature is not a function type");
+            };
+            let abi = builtin.abi();
+            assert!(
+                abi.args_within(params.len()),
+                "builtin {name} tags an argument its signature does not declare"
+            );
+            for (index, param) in params.iter().enumerate() {
+                match abi.arg(index) {
+                    AbiArg::Immediate => assert!(
+                        tagged_word_protocol(param),
+                        "builtin {name} untags argument {index}, but its declared type \
+                         {} is not a tagged word",
+                        param.show()
+                    ),
+                    AbiArg::BoxedFloat => {
+                        assert!(
+                            matches!(param, Type::Float | Type::I64 | Type::U64),
+                            "builtin {name} unboxes argument {index}, but its declared \
+                             type {} is not a one-word payload cell",
+                            param.show()
+                        );
+                        let layout = layout_of_type(param);
+                        assert_eq!(layout.local(), &Repr::NonNullValue);
+                        assert_eq!(layout.rc(), RcBehavior::Managed);
+                    }
+                    AbiArg::Raw => {}
+                }
+            }
+            if abi.result() == AbiResult::RetagImmediate {
+                assert!(
+                    tagged_word_protocol(&result),
+                    "builtin {name} retags its result, but its declared result type \
+                     {} is not a tagged word",
+                    result.show()
+                );
+            }
+        }
+    }
 
     #[test]
     fn builtin_signatures_parse() {

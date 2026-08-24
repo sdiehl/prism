@@ -18,6 +18,7 @@ long prism_buf_len(long b);
 long prism_buf_get(long b, long i);
 long prism_buf_set(long b, long i, long x);
 long prism_buf_push(long b, long x);
+long prism_buf_append_str(long b, long s);
 long prism_buf_slice(long b, long start, long len);
 long prism_buf_cat(long a, long b);
 long prism_buf_eq(long a, long b);

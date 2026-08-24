@@ -196,7 +196,7 @@ rw_repeat : forall e0 a. ((a) -> Option(a) ! {e0}, Int, a) -> Control.Rewrite.Rw
 
 Apply `s` to its own output until it declines, at most `fuel` times.
 
-Always terminates, whatever `s` does, and that is the whole reason it exists. The termination condition is explicit: stop when `s` declines, reporting `converged = true` and the number of applications; or stop when `fuel` applications have been made and `s` still accepts, reporting `converged = false` and the tree as it stood before the refused step. There is deliberately no unfueled closer, because a rewrite loop that may not terminate should be a value a test can assert on rather than a hang. Zero or negative fuel yields the input unchanged, converged only if `s` declines on it.
+The fuel bound guarantees termination even when `s` never declines. The termination condition is explicit: stop when `s` declines, reporting `converged = true` and the number of applications; or stop when `fuel` applications have been made and `s` still accepts, reporting `converged = false` and the tree as it stood before the refused step. There is deliberately no unfueled closer, because a rewrite loop that may not terminate should be a value a test can assert on rather than a hang. Zero or negative fuel yields the input unchanged, converged only if `s` declines on it.
 
 ```prism,mod=Control.Rewrite
 # let down = \(n) -> if n > 0 then Some(n - 1) else None

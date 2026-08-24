@@ -1,0 +1,25 @@
+-- A container whose element type declares an effect row no element ever
+-- performs: every element satisfies the annotation by subsumption, so the
+-- program compiles (with a proportionate unused-effect warning) and the
+-- unwitnessed row costs at most a slower tier, never an error. The pure
+-- elements must widen to the declared row at the container's construction.
+effect Log
+  emit(Int) : Unit
+
+fn pure_a(x : Int) : Int ! {Log} = x + 1
+
+fn pure_b(x : Int) : Int ! {Log} = x * 2
+
+fn apply_all(fs : List((Int) -> Int ! {Log}), x : Int) : Int ! {Log} =
+  match fs of
+    Nil => x
+    Cons(f, rest) => apply_all(rest, f(x))
+
+fn table() : List((Int) -> Int ! {Log}) = [pure_a, pure_b]
+
+fn main() =
+  let r =
+    handle apply_all(table(), 1) with
+      emit(_n) resume k => k(())
+      return r => r
+  println(show(r))

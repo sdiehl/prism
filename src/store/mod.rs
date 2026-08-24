@@ -17,8 +17,6 @@
 ///
 /// A digest that attests a property of another digest. The minimal certificate is
 /// a parity-passed record keyed by hash.
-/// The Incr durable-snapshot bridge: a named blob rides the store's object layer
-/// (keyed by content hash) with a ref for the caller tag; see [`bridge`].
 pub mod cert;
 pub mod codec;
 /// Store-level instance coherence.
@@ -29,6 +27,11 @@ pub mod coherence;
 /// Committing an elaborated program's definitions into the store.
 pub mod commit;
 pub use commit::commit_program;
+/// The shadow-parser comparison receipt: the deterministic half attested as a
+/// certificate, the machine readings recorded as a decision; see [`receipt`].
+pub mod receipt;
+/// The Incr durable-snapshot bridge: a named blob rides the store's object layer
+/// (keyed by content hash) with a ref for the caller tag; see [`bridge`].
 pub use prism_store::bridge;
 /// The on-disk two-layer store that holds the codec's bytes; see [`disk::Store`].
 pub use prism_store::disk;

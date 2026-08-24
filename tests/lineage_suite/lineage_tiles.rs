@@ -162,7 +162,7 @@ fn four_verb_loop_over_the_tiles_pipeline() {
     );
 
     // 4. edit one tile, re-record, and diff: exactly that tile plus its downstream
-    // move; the other tiles and the config are preserved; nothing is added/removed.
+    // move. The other tiles and the config are preserved, with no additions or removals.
     fs::write(p.join("tiles/north.gray"), NORTH_EDITED).unwrap();
     let out = prism(
         p,

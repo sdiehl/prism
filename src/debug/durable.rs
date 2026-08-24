@@ -192,18 +192,19 @@ pub fn write_atomic(path: &Path, trace: &str) -> io::Result<()> {
     let dir = parent_dir(path)?;
     fs::create_dir_all(dir)?;
     let tmp = unique_temp(dir);
-    let mut f = File::create(&tmp)?;
-    #[cfg(test)]
-    faults::hit(faults::FaultPoint::Open)?;
-    #[cfg(test)]
-    faults::partial_write(&mut f, trace.as_bytes(), faults::FaultPoint::WritePrefix)?;
-    f.write_all(trace.as_bytes())?;
-    #[cfg(test)]
-    faults::hit(faults::FaultPoint::WriteBody)?;
-    f.sync_all()?;
-    #[cfg(test)]
-    faults::hit(faults::FaultPoint::Flush)?;
-    drop(f);
+    {
+        let mut f = File::create(&tmp)?;
+        #[cfg(test)]
+        faults::hit(faults::FaultPoint::Open)?;
+        #[cfg(test)]
+        faults::partial_write(&mut f, trace.as_bytes(), faults::FaultPoint::WritePrefix)?;
+        f.write_all(trace.as_bytes())?;
+        #[cfg(test)]
+        faults::hit(faults::FaultPoint::WriteBody)?;
+        f.sync_all()?;
+        #[cfg(test)]
+        faults::hit(faults::FaultPoint::Flush)?;
+    }
     #[cfg(test)]
     faults::hit(faults::FaultPoint::Rename)?;
     let renamed = fs::rename(&tmp, path);
@@ -315,12 +316,13 @@ impl DurableLog {
     fn commit_index(&self, committed_len: u64) -> io::Result<()> {
         let dir = parent_dir(&self.idx_path)?;
         let tmp = unique_temp(dir);
-        let mut f = File::create(&tmp)?;
-        f.write_all(render_index(committed_len).as_bytes())?;
-        f.sync_all()?;
-        #[cfg(test)]
-        faults::hit(faults::FaultPoint::UpdateIndex)?;
-        drop(f);
+        {
+            let mut f = File::create(&tmp)?;
+            f.write_all(render_index(committed_len).as_bytes())?;
+            f.sync_all()?;
+            #[cfg(test)]
+            faults::hit(faults::FaultPoint::UpdateIndex)?;
+        }
         #[cfg(test)]
         faults::hit(faults::FaultPoint::Rename)?;
         let renamed = fs::rename(&tmp, &self.idx_path);

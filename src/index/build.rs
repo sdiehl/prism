@@ -58,11 +58,7 @@ pub struct IndexInput<'a> {
 pub fn build(input: IndexInput<'_>) -> Result<Index, Error> {
     let production = addressable_surface(input.source, input.roots)?;
 
-    // Walk each module's own source for what the author wrote, keyed by module.
-    // A module that does not parse is carried with its diagnostic instead of
-    // failing the build: one broken file — a scratch buffer, a fixture that
-    // exists to be invalid — must not take the index of everything else down
-    // with it. The same posture the test layer takes, for the same reason.
+    // Preserve parse failures on individual modules without failing the index.
     let mut walked = Vec::new();
     for m in input.modules {
         walked.push((m, surface::walk(&m.source, m.is_prelude)));
@@ -330,9 +326,7 @@ fn attach_tokens(defs: &mut [Def]) -> Vec<String> {
     let mut classes: Vec<String> = Vec::new();
     for def in defs.iter_mut() {
         def.tokens = pack_tokens(&def.source, &mut classes);
-        // A rendered type and effect row are not source, but they are written in
-        // the language's own syntax, so the same lexer classifies them and the
-        // consumer needs no second one.
+        // Classify rendered types and effect rows with the language lexer too.
         def.ty_tokens = def
             .ty
             .as_ref()
@@ -380,10 +374,8 @@ fn pack_tokens(text: &str, classes: &mut Vec<String>) -> String {
 
 // Add a reference for each type name written in a definition's own text.
 //
-// The renamer cannot supply these: `Ty` carries no spans, so a type name resolved
-// there has no position to report (see `occurrences`). But a written type is
-// exactly what a reader wants to click — `d : Doc` should reach `Doc` — so the
-// positions are recovered by lexing the definition's source.
+// `Ty` carries no name spans, so recover written type positions by lexing each
+// definition's source.
 //
 // Lexing rather than searching, because only the lexer knows what is code: a
 // `Doc` inside a comment or a string literal is not a reference, and a substring
@@ -472,12 +464,7 @@ fn attach_type_refs(
     };
 
     for def in defs.iter_mut() {
-        // A declaration's own member sites are not references. `Tip` and `Bin`
-        // inside `type Map = Tip | Bin(..)` are where those members come into
-        // being — `attach_members` has already recorded them, and a viewer sends
-        // them to the member's users. Resolving them here instead would turn each
-        // into a link from the declaration back to itself, and list the
-        // declaration among its own members' users.
+        // Do not turn member declarations into links back to their owner.
         let blocked: Vec<(usize, usize)> = def
             .refs
             .iter()
@@ -547,11 +534,8 @@ fn named_in(
 
 // Record where each declaration names its own members.
 //
-// The names come from the parsed declaration, so the list is complete and
-// authoritative — every constructor, method and operation, including the ones
-// nothing uses. That completeness is the point: recovering members from
-// occurrences finds only the used ones, and an effect's operations are performed
-// by *programs*, so a library index of `Output` would list none of them.
+// Read names from declarations so unused constructors, methods, and operations
+// remain discoverable.
 //
 // The positions come from lexing the declaration's own text, because the AST has
 // no span for a member's name (`ClassDecl::methods` is `(String, Ty)`, `EffOp` and
@@ -620,12 +604,8 @@ fn attach_members(
 // A name that resolves to something with no declaration of its own, mapped to the
 // declaration a reader should navigate to instead.
 //
-// A constructor is written inside a `type`, an operation inside an `effect`, a
-// method inside a `class`. None is a definition in its own right, so a reference
-// to one resolves to a name the index has no entry for — and `Cons`, `Some`, and
-// `Err` are among the most frequently written names in any program. This is the
-// same retarget `edges` applies to a lowered instance method, for the same reason:
-// send the reader where the source actually is.
+// Constructors, operations, and methods resolve to the declarations that own
+// their source.
 //
 // Only an unambiguous mapping counts. The renamer canonicalizes constructors but
 // leaves operation and method names bare (they are not module binders), so two
@@ -863,10 +843,8 @@ fn is_global(scope: Scope<'_>, decl: &surface::Decl) -> bool {
 
 // The canonical spellings a declaration could have, most specific first.
 //
-// A global declaration has exactly one: its bare name. Anything else is either
-// exported (`Data.Map.insert`) or module-private (`Data.Map@helper`), and which
-// one it is could be read off the `pub` marker — but it is read off the layer
-// instead, by probing both, so the index cannot disagree with Core about a name.
+// A global declaration has one candidate: its bare name. Probe both exported and
+// private layer names for module declarations so the index agrees with Core.
 // The bare form is deliberately *not* a candidate for a non-global module: it
 // would silently match an unrelated same-named definition in the entry module.
 fn candidates(module: &str, name: &str, global: bool) -> Vec<String> {

@@ -26,7 +26,7 @@ use prism_syntax::ast::{Core, Decl, Expr, HandlerArm, Pattern, Program, S};
 /// Members within a component are returned in declaration order. References are
 /// collected with lexical scope: a name bound by a parameter, lambda, `let`,
 /// match pattern, or handler clause shadows the same-named top-level function, so
-/// it is not a dependency. This matters for principal inference, not just
+/// it is not a dependency. This affects principal inference as well as
 /// performance: a spurious edge would merge a callee into its caller's component,
 /// switching it from generalize-then-instantiate to monomorphic mutual recursion
 /// and so changing the inferred (effect) type.

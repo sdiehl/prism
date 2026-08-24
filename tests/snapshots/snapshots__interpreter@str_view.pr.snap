@@ -1,0 +1,30 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/str_view.pr
+---
+whole: [the quick brown fox jumps over the lazy dog] len=43
+mid: [quick] len=5
+empty: [] len=0
+reversed: [] len=0
+clamped_hi: [azy dog] len=7
+clamped_lo: [the] len=3
+both_out: [] len=0
+nested: [uick] len=4
+eaten: [quick brown] len=11
+uni_aligned: [naive] len=5
+uni_split_hi: [naive cafe: �] len=15
+uni_split_lo: [�nïc] len=7
+view_trim: [quick] len=5
+view_concat: [the/quick] len=9
+view_eq: [true] len=4
+view_cmp: [0] len=1
+view_upper: [QUICK] len=5
+view_index: [6] len=1
+view_char_at: [110] len=3
+view_len: [4] len=1
+view_sub: [nï] len=3
+view_parse_float: [3.14] len=4
+view_parse_cut: [3.1] len=3
+view_parse_int: [Some(123)] len=9
+=> ()

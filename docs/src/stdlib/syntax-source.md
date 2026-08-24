@@ -71,11 +71,13 @@ Whether a byte offset falls inside the span (half-open, so the end offset is out
 
 ### `line_col`
 
-```prism,sig,h-33f2880bdc82777d01a6831e3edc0adcc2b2fb23576e0e46a44c97bf7e840066
+```prism,sig,h-4cd1d2a8b8fb17eef74c58d26ea95a1039b8095af6cf23dfd2f019deef522ac2
 line_col : (String, Int) -> (Int, Int)
 ```
 
 The one-based line and column of a byte offset, as a projection over the text. Offsets past the end clamp to the final position.
+
+Both the offset and the column it reports are counted in bytes, the same vocabulary spans use, so the projection agrees with the identity it projects from. Counting the walk in characters instead would read a byte offset as a character index and land somewhere else entirely on a line holding any multi-byte character, besides re-walking the text on every step.
 
 ```prism,mod=Syntax.Source
 line_col("ab\ncd", 4)

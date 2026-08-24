@@ -85,7 +85,7 @@ The edits sorted by start offset, stably: two edits starting at the same offset 
 
 ### `ed_apply`
 
-```prism,sig,h-5796f41a619040f5b19f2d1b2f8cc41dd9955a30bc5b8cfaa4c5e85710e90c2d
+```prism,sig,h-43ec1b75ce6bdbedbe97a68db9a2dc83efb3bf886b758a69e2e19c68acab6098
 ed_apply : (String, List(Syntax.Edit.Edit)) -> Result(String, Syntax.Edit.EditError)
 ```
 

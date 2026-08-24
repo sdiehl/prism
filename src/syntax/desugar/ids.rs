@@ -1,6 +1,6 @@
 //! Stamp every expression node, and every pattern a match arm binds, with a
-//! unique `NodeId` — the identity under which the typechecker records a node's
-//! resolution for the elaborator to read back.
+//! unique `NodeId`. The typechecker records each node's resolution under this
+//! identity for the elaborator to read back.
 //!
 //! Run as the last step of desugar, so identity is fixed on the exact tree both
 //! the typechecker and the elaborator traverse. Decoupling identity from `Span`

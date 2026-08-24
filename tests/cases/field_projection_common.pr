@@ -1,0 +1,13 @@
+-- A common field is type-consistent, but plain projection currently carries
+-- only one constructor arm. It remains rejected until Core carries multi-arm
+-- projection evidence.
+type Tagged = A { id: Int } | B { id: Int }
+
+fn tag_id_by_match(tagged : Tagged) : Int =
+  match tagged of
+    A { id = id } => id
+    B { id = id } => id
+
+fn tag_id(tagged : Tagged) : Int = tagged.id
+
+fn main() = println(0)

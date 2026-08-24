@@ -1,0 +1,18 @@
+import Json (encode, JStr)
+
+-- Encode a string whose every other byte needs escaping, so the escape count
+-- and the output length both scale with N. Appending each clean run and each
+-- escape into one growable buffer costs one pass over the input; rebuilding the
+-- accumulated output at every escape costs the escape count times the length
+-- escaped so far, which is quadratic in N and shows up as a byte total that
+-- grows with the square of the input.
+fn quoted(i : Int, acc : Buf) : Buf =
+  if i >= __N__ then
+    acc
+  else
+    quoted(i + 1, buf_push(buf_push(acc, 97), 34))
+
+fn main() : Unit ! {IO} =
+  println(
+      show_int(byte_len(encode(JStr(string_of_buf(quoted(0, buf_empty())))))),
+    )

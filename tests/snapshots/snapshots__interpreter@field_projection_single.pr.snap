@@ -1,0 +1,7 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/field_projection_single.pr
+---
+22
+=> ()

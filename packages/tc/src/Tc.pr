@@ -1,7 +1,7 @@
 -- | The type-and-row core of a Prism typechecker, written in Prism.
 --
--- This library is the first load-bearing piece of the self-hosted checker: the
--- type, row, scheme, and error ADTs, the free-variable collectors, rigid
+-- This library is the Prism-written type-and-row heart of the shadow checker:
+-- the type, row, scheme, and error ADTs, the free-variable collectors, rigid
 -- substitution with composition, metavariable zonking, row normalization, type
 -- and row unification with occurs checks, and generalization and
 -- instantiation. The grammar mirrors the statics sketch: value types and
@@ -40,6 +40,7 @@ import Control.Fresh (Fresh)
 import Data.Name (Name, Binder, fresh_binder, bound_name, name_id)
 import Data.List (map, reverse, foldl, append, filter)
 import Data.Map (map_empty, map_lookup, map_insert, map_to_list)
+import Data.Set (set_insert, set_member)
 
 -- The two rigid-variable namespaces, branded so a type identity can never
 -- stand where a row identity belongs.
@@ -350,46 +351,100 @@ fn cr_keep(
 -- Free variables: rigid identities and metavariable ids, collected in
 -- first-occurrence order without duplicates.
 
-fn add_int(seen : List(Int), x : Int) : List(Int) =
-  if elem_int(seen, x) then
+-- The collector answers membership from an ordered set and keeps the ids it
+-- has admitted in reverse first-occurrence order beside it. A bare list would
+-- answer membership by scanning and admit a new id by copying every cell
+-- already collected, which is quadratic in the metas one type mentions.
+--
+-- The set's brand is written rather than left open. A set's representation
+-- depends on the ordering it was built under, and this one is stored in a
+-- named carrier instead of flowing through a signature, so the ordering is
+-- fixed once here rather than chosen afresh at each use.
+type Seen = Seen { member: Map(Int, Unit, Canonical), order: List(Int) }
+
+fn seen_empty() : Seen = Seen { member = map_empty, order = [] }
+
+fn add_int(seen : Seen, x : Int) : Seen =
+  if set_member(x, seen.member) then
     seen
   else
-    append(seen, [x])
+    Seen { member = set_insert(x, seen.member), order = Cons(x, seen.order) }
+
+-- | The ids admitted, restored to first-occurrence order.
+fn seen_ids(seen : Seen) : List(Int) = reverse(seen.order)
 
 fn elem_int(xs : List(Int), x : Int) : Bool =
   match xs of
     Nil => false
     Cons(y, rest) => y == x || elem_int(rest, x)
 
--- | The metavariable classes occurring in a value type, in first-seen order
--- and without repeats.
-pub fn free_metas_v(ty : VTy) : List(Int) = fm_v(ty, [])
+-- Type and row classes share one solver id space, but their syntax positions
+-- determine their kinds. Keep separate first-seen indexes for kind-safe
+-- generalization and a third index for the legacy combined-order API.
+type FreeMetas = FreeMetas { all: Seen, tys: Seen, rows: Seen }
 
-fn fm_v(ty : VTy, acc : List(Int)) : List(Int) =
+fn free_empty() : FreeMetas =
+  FreeMetas { all = seen_empty(), tys = seen_empty(), rows = seen_empty() }
+
+fn add_ty_meta(free : FreeMetas, x : Int) : FreeMetas =
+  FreeMetas {
+    all = add_int(free.all, x),
+    tys = add_int(free.tys, x),
+    rows = free.rows
+  }
+
+fn add_row_meta(free : FreeMetas, x : Int) : FreeMetas =
+  FreeMetas {
+    all = add_int(free.all, x),
+    tys = free.tys,
+    rows = add_int(free.rows, x)
+  }
+
+-- | Every metavariable class occurring in a value type, in first-seen order
+-- and without repeats. New code should prefer the kind-separated collectors.
+pub fn free_metas_v(ty : VTy) : List(Int) = seen_ids(fm_v(ty, free_empty()).all)
+
+-- | Type metavariable classes occurring in a value type, in first-seen order.
+pub fn free_ty_metas_v(ty : VTy) : List(Int) = seen_ids(fm_v(ty, free_empty()).tys)
+
+-- | Row metavariable classes occurring in a value type, in first-seen order.
+pub fn free_row_metas_v(ty : VTy) : List(Int) =
+  seen_ids(fm_v(ty, free_empty()).rows)
+
+-- | Type metavariable classes occurring in a row's label arguments, in
+-- first-seen order.
+pub fn free_ty_metas_row(r : Row) : List(Int) =
+  seen_ids(fm_row(r, free_empty()).tys)
+
+-- | Row metavariable classes occurring in a row, in first-seen order.
+pub fn free_row_metas_row(r : Row) : List(Int) =
+  seen_ids(fm_row(r, free_empty()).rows)
+
+fn fm_v(ty : VTy, acc : FreeMetas) : FreeMetas =
   match ty of
-    VMeta(a) => add_int(acc, a)
+    VMeta(a) => add_ty_meta(acc, a)
     VCon(_name, args) => fm_each(args, acc)
     VTuple(items) => fm_each(items, acc)
     VThunk(c) => fm_c(c, acc)
     _ => acc
 
-fn fm_each(tys : List(VTy), acc : List(Int)) : List(Int) =
+fn fm_each(tys : List(VTy), acc : FreeMetas) : FreeMetas =
   match tys of
     Nil => acc
     Cons(t, rest) => fm_each(rest, fm_v(t, acc))
 
-fn fm_c(c : CTy, acc : List(Int)) : List(Int) =
+fn fm_c(c : CTy, acc : FreeMetas) : FreeMetas =
   match c of
     CRet(v, r) => fm_row(r, fm_v(v, acc))
     CFun(params, body) => fm_c(body, fm_each(params, acc))
 
-fn fm_row(r : Row, acc : List(Int)) : List(Int) =
+fn fm_row(r : Row, acc : FreeMetas) : FreeMetas =
   let with_labels = fm_labels(r.labels, acc)
   match r.tail of
-    TailMeta(a) => add_int(with_labels, a)
+    TailMeta(a) => add_row_meta(with_labels, a)
     _ => with_labels
 
-fn fm_labels(ls : List(Label), acc : List(Int)) : List(Int) =
+fn fm_labels(ls : List(Label), acc : FreeMetas) : FreeMetas =
   match ls of
     Nil => acc
     Cons(l, rest) => fm_labels(rest, fm_each(l.args, acc))
@@ -671,10 +726,20 @@ fn handled_name(handled : List(String), name : String) : Bool =
 -- | Zonk `ty` and read every surviving row metavariable tail as closed. Rigid
 -- row tails are left alone: those are quantified, not unconstrained.
 --
--- `generalize` expects this to have run. Type and row classes are minted from
--- one supply, and only a type class may become a rigid type binder, so a row
--- tail must be settled before quantification looks at what is free.
+-- Top-level declaration inference uses this before `generalize` to default
+-- unwritten residual rows. Local generalization may instead quantify a row
+-- class explicitly; the kind-separated collectors keep that operation safe.
 pub fn close_rows_v(ty : VTy) : VTy ! {Solve(Sol)} = close_tails_v(zonk_v(ty))
+
+-- | Zonk `ty` and close every surviving row metavariable except the listed
+-- classes. The keep set is normalized to current solver roots, so callers may
+-- retain evidence captured before same-kind classes were joined.
+--
+-- Declaration inference uses this to preserve only the residual classes
+-- reached from written open rows. With an empty keep set this is exactly
+-- `close_rows_v`, so unwritten top-level tails keep their existing default.
+pub fn close_rows_v_except(keep : List(Int), ty : VTy) : VTy ! {Solve(Sol)} =
+  close_tails_except_v(root_ids(keep), zonk_v(ty))
 
 -- | Zonk a row and read a surviving metavariable tail as closed, so an
 -- inferred row can be read off as the definite set of effects performed.
@@ -701,37 +766,114 @@ fn close_tails_row(r : Row) : Row =
 fn close_tails_label(l : Label) : Label =
   Label { name = l.name, args = map(close_tails_v, l.args) }
 
--- Generalization and instantiation. Generalizing promotes every metavariable
--- free in the zonked type but not in the ambient set to a fresh rigid binder;
--- instantiating replaces every scheme binder with a fresh metavariable.
+fn close_tails_except_v(keep : List(Int), ty : VTy) : VTy =
+  match ty of
+    VCon(name, args) =>
+      VCon(name, map(\(arg) -> close_tails_except_v(keep, arg), args))
+    VTuple(items) =>
+      VTuple(map(\(item) -> close_tails_except_v(keep, item), items))
+    VThunk(c) => VThunk(close_tails_except_c(keep, c))
+    other => other
 
--- | Generalize a value type over every metavariable free in it and not in
--- `ambient`, yielding a scheme with fresh rigid binders.
-pub fn generalize(ambient : List(Int), ty : VTy) : Scheme ! {Solve(Sol), Fresh} =
+fn close_tails_except_c(keep : List(Int), c : CTy) : CTy =
+  match c of
+    CRet(v, r) =>
+      CRet(close_tails_except_v(keep, v), close_tails_except_row(keep, r))
+    CFun(params, body) =>
+      CFun(
+          map(\(param) -> close_tails_except_v(keep, param), params),
+          close_tails_except_c(keep, body),
+        )
+
+fn close_tails_except_row(keep : List(Int), r : Row) : Row =
+  let labels = map(\(label) -> close_tails_except_label(keep, label), r.labels)
+  match r.tail of
+    TailMeta(a) =>
+      Row {
+        labels = labels,
+        tail = if elem_int(keep, a) then r.tail else TailClosed
+      }
+    _ => Row { labels = labels, tail = r.tail }
+
+fn close_tails_except_label(keep : List(Int), l : Label) : Label =
+  Label {
+    name = l.name,
+    args = map(\(arg) -> close_tails_except_v(keep, arg), l.args)
+  }
+
+-- Generalization and instantiation. Generalizing promotes every metavariable
+-- free in the zonked type but not in the held sets to a fresh rigid binder of
+-- the same kind; instantiating opens rows before types.
+
+-- | Generalize a value type over every type and row metavariable free in it
+-- and not held by the surrounding environment or ambient effect row.
+pub fn generalize(
+  held_ty : List(Int),
+  held_row : List(Int),
+  ty : VTy
+) : Scheme ! {Solve(Sol), Fresh} =
   let z = zonk_v(ty)
-  let candidates = filter(\(m) -> not(elem_int(ambient, m)), free_metas_v(z))
-  gen_go(candidates, [], z)
+  let held_ty_roots = root_ids(held_ty)
+  let held_row_roots = root_ids(held_row)
+  let tys = filter(\(m) -> not(elem_int(held_ty_roots, m)), free_ty_metas_v(z))
+  let rows =
+    filter(\(m) -> not(elem_int(held_row_roots, m)), free_row_metas_v(z))
+  gen_rows(rows, [], tys, z)
+
+fn root_ids(ids : List(Int)) : List(Int) ! {Solve(Sol)} =
+  match ids of
+    Nil => []
+    Cons(id, rest) => Cons(sv_root(id), root_ids(rest))
 
 -- The binders are minted in candidate order and the accumulator is reversed
 -- once at the end, which keeps the scheme's quantifier order stable.
 -- lint: allow(L0105)
-fn gen_go(
+fn gen_rows(
   metas : List(Int),
-  binders : List(Binder(TyVarSpace)),
+  binders : List(Binder(RowVarSpace)),
+  ty_metas : List(Int),
   body : VTy
 ) : Scheme ! {Solve(Sol), Fresh} =
   match metas of
-    Nil => Scheme { tyvars = reverse(binders), rowvars = [], body = body }
+    Nil => gen_tys(ty_metas, [], reverse(binders), body)
+    Cons(m, rest) =>
+      let binder = fresh_binder("r")
+      let solution = Row { labels = [], tail = TailVar(bound_name(binder)) }
+      sv_assign(m, RowSolved(solution))
+      gen_rows(rest, Cons(binder, binders), ty_metas, zonk_v(body))
+
+-- lint: allow(L0105)
+fn gen_tys(
+  metas : List(Int),
+  binders : List(Binder(TyVarSpace)),
+  row_binders : List(Binder(RowVarSpace)),
+  body : VTy
+) : Scheme ! {Solve(Sol), Fresh} =
+  match metas of
+    Nil =>
+      Scheme { tyvars = reverse(binders), rowvars = row_binders, body = body }
     Cons(m, rest) =>
       let binder = fresh_binder("t")
       sv_assign(m, TySolved(VVar(bound_name(binder))))
-      gen_go(rest, Cons(binder, binders), zonk_v(body))
+      gen_tys(rest, Cons(binder, binders), row_binders, zonk_v(body))
 
--- | Instantiate a scheme, replacing each binder with a fresh metavariable.
+-- | Instantiate a scheme, opening row binders before type binders.
 pub fn instantiate(scheme : Scheme) : VTy ! {Solve(Sol)} =
-  inst_go(scheme.tyvars, subst_empty, scheme.body)
+  inst_rows(scheme.rowvars, subst_empty, scheme.tyvars, scheme.body)
 
-fn inst_go(
+fn inst_rows(
+  binders : List(Binder(RowVarSpace)),
+  s : Subst,
+  ty_binders : List(Binder(TyVarSpace)),
+  body : VTy
+) : VTy ! {Solve(Sol)} =
+  match binders of
+    Nil => inst_tys(ty_binders, s, body)
+    Cons(b, rest) =>
+      let r = row_open([], fresh_row_meta())
+      inst_rows(rest, subst_row(s, bound_name(b), r), ty_binders, body)
+
+fn inst_tys(
   binders : List(Binder(TyVarSpace)),
   s : Subst,
   body : VTy
@@ -740,7 +882,7 @@ fn inst_go(
     Nil => apply_v(s, body)
     Cons(b, rest) =>
       let m = fresh_ty_meta()
-      inst_go(rest, subst_ty(s, bound_name(b), m), body)
+      inst_tys(rest, subst_ty(s, bound_name(b), m), body)
 
 -- Stable pretty-printing: rigid identities render through deterministic
 -- positional hints, metavariables by class id.

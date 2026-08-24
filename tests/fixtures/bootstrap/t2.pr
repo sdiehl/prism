@@ -34,6 +34,67 @@ fn inferred(n : Int) : Int = tick() + n
 -- ... and settles closed when it performs nothing.
 fn still_pure(n : Int) : Int = double(n)
 
+-- Written open rows belong to the enclosing declaration. Repeated uses of one
+-- spelling share a row class; distinct spellings remain distinct classes.
+fn relay(f : (a) -> b ! {Tick | e}, x : a) : b ! {Tick | e} = f(x)
+
+fn relay2(x : a, f : (a) -> b ! {| e}) : b ! { | e} = f(x)
+
+fn two_rows(
+  f : (Int) -> Int ! {| e},
+  g : (Bool) -> Bool ! {| r}
+) : ((Int) -> Int ! {| e}, (Bool) -> Bool ! {| r}) =
+  (f, g)
+
+-- The same source spelling in separate declarations must receive a fresh
+-- brand, while the two occurrences within each declaration stay shared.
+fn same_row_one(f : (Int) -> Int ! {| e}, x : Int) : Int = f(x)
+
+fn same_row_two(f : (Int) -> Int ! {| e}, x : Int) : Int = f(x)
+
+-- Calling the callback and performing another effect widens the callback and
+-- ambient rows together. A rigid inference-time tail would reject this case.
+fn widened(f : (Int) -> Int ! {Tick | e}, x : Int) : Int =
+  let _said = say(x)
+  f(x)
+
+-- A singleton row binder used only by an uncalled callback is omitted from the
+-- canonical display, but remains in the structural scheme: an effectful
+-- callback can still instantiate it at the call site.
+fn no_call(f : () -> Unit ! {| e}) : Unit ! {Tick | e} =
+  let _ticked = tick()
+  ()
+
+fn no_call_effectful() : Unit ! {Tick} =
+  no_call() fn
+    let _ticked = tick()
+    ()
+
+-- Open rows in local lambda annotations need their own lexical row scope,
+-- which K1d does not model. The authority accepts this declaration, while the
+-- shadow must keep the nested annotation on its strict refusal path.
+fn nested_open() : Unit = (\(action : () -> Unit ! {| e}) -> ())(\() -> ())
+
+-- Expression ascriptions are a second local scope. They remain fail-closed
+-- independently of the declaration-signature support added in K1d.
+fn annotated_open() : Unit = (\() -> () : () -> Unit ! {| e})()
+
+-- Constructor fields also need a declaration-local row scope before they can
+-- be represented. The authority accepts the free field tail; the shadow keeps
+-- the constructor unavailable instead of erasing it.
+type Runner = Runner(() -> Unit ! {| e})
+
+fn make_runner() = Runner(\() -> ())
+
+-- A hidden singleton binder must not consume a canonical index. The visible
+-- row comes first, followed by the two visible type binders.
+fn shifted(
+  unused : () -> Unit ! {| e},
+  f : (a) -> b ! {| z},
+  x : a
+) : b ! { | z} =
+  f(x)
+
 -- Recursion under a row: the self binding carries the same ambient row.
 fn countdown(n : Int) : Int ! {Tick} =
   if n == 0 then
@@ -58,11 +119,105 @@ fn apply_to(f : (Int) -> Int, n : Int) : Int = f(n)
 
 fn deferred(n : Int) : Int = apply_to(\(x) -> double(x), n)
 
--- A parameterized effect is deliberately outside the checked subset: its
--- operations need a binder the shadow has no way to brand, so they stay absent
--- from the environment and a body performing one counts as uncovered syntax
--- without turning an otherwise matching run into a disagreement.
+-- An effect's parameters are its own quantifiers, so an operation of
+-- `effect Cell(a)` is a scheme over `a` performing `{Cell(a)}`. Instantiating
+-- that scheme at a call mints one class shared by the row and the operation's
+-- own types, which is how a `read()` used at `Int` and the row `{Cell(Int)}`
+-- come to agree without either being written down.
 effect Cell(a)
   read() : a
+  write(a) : Unit
+
+effect Pair(a, b)
+  left() : a
+  right() : b
+
+effect Mark(a)
+  mark() : Unit
+
+type Sized(n : Nat) = Sized
 
 fn later() : Int ! {Cell(Int)} = read()
+
+fn stash(n : Int) : Unit ! {Cell(Int)} = write(n)
+
+-- The written row is shared through both a parameter and the performed
+-- effect's type argument. Checking the declared upper bound must close only
+-- the ambient tail, not this nested row witness.
+fn callback_cell(f : () -> Unit ! {| e}) : Unit ! {Cell(() -> Unit ! {| e})} =
+  write(f)
+
+-- Nothing here says what the cell holds, so the declaration quantifies over it
+-- and the row mentions the same binder the result does.
+fn borrowed() = read()
+
+-- A written binder may occur only in the declared effect row. It is still a
+-- rigid declaration variable and the reported scheme quantifies it.
+fn marked() : Unit ! {Mark(a)} = mark()
+
+-- The row is an upper bound. Since the body never performs Mark, its written
+-- variable disappears with the unused label rather than becoming vacuous.
+fn unmarked() : Unit ! {Mark(a)} = ()
+
+-- Type-level naturals have an exact VTy atom spelling and remain admissible.
+fn nat_label() : Unit ! {Mark(Sized(3))} = mark()
+
+-- A parameterized effect and a bare one meet in one ambient row.
+fn ticked_cell() : Int ! {Cell(Int), Tick} = read() + tick()
+
+-- The arguments are positional, so only an instantiation that lines them up
+-- satisfies the row: under `Pair(Int, Bool)` it is `left` that answers with an
+-- `Int`, and swapping the row's arguments would swap which one does.
+fn use_pair() : (Bool, Int) ! {Pair(Int, Bool)} = (right(), left())
+
+-- Canonical quantifiers follow inferred result occurrence, while the applied
+-- label retains the effect declaration's positional argument mapping.
+fn borrowed_pair() = (right(), left())
+
+-- An operation naming a type variable that is not one of the effect's own
+-- parameters is deliberately outside the checked subset: `b` needs a binder the
+-- effect does not supply. It stays out of the typed environment but remains in
+-- the declaration table, so a use is named operation coverage. Admission is
+-- decided one operation at a time, so `hold` is unaffected by its neighbour.
+effect Loose(a)
+  stray() : b
+  hold(a) : Unit
+
+fn holds() : Unit ! {Loose(Int)} = hold(1)
+
+fn strays() : Int ! {Loose(Int)} = stray()
+
+-- Operation schemes that the shadow cannot represent stay in the raw name
+-- table, so their uses are explicit operation coverage rather than missing
+-- bindings. The first carries an open row through a higher-order argument.
+effect Run
+  run(() -> Int ! {| e}) : Int
+
+fn run_pure() : Int ! {Run} = run(\() -> 1)
+
+-- A row literal is a Row-kinded argument. VTy has no Row node, so admitting
+-- this operation would erase `{Tick}` to a nominal placeholder.
+type Task(e : Row) = Task(Int)
+
+-- Constructor lookup follows the same fail-closed Row-kind boundary as a
+-- written Task type. This prevents a constructor scheme from erasing its row
+-- parameter even when the result annotation does not mention it explicitly.
+fn make_task() = Task(0)
+
+-- VTy has no Row-kinded data argument. This accepted authority declaration is
+-- deliberately refused by the shadow before it can erase `e` to a type var.
+fn task_id(task : Task(e)) : Task(e) = task
+
+effect Launch
+  launch(Task({Tick})) : Unit
+
+fn launch_tick() : Unit ! {Launch} = launch(Task(0))
+
+-- Applied effect arguments are checked by the same lossless type boundary.
+-- An unboxed tuple is valid Type syntax, but VTy cannot retain its product
+-- representation, so this declaration remains deliberately uncovered.
+fn unboxed_label() : Unit ! {Cell(#(Int))} = ()
+
+-- Usage facts carry representation/calling constraints that VTy cannot store;
+-- they are refused rather than silently erased inside an applied label.
+fn usage_label() : Unit ! {Cell(((Int) -> Int) @ once)} = ()

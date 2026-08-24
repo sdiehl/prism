@@ -1,13 +1,15 @@
 //! Type search and bounded, verified hole synthesis through the real CLI.
 
 use std::fs;
+use std::path::Path;
 use std::process::{Command, Output};
 
 use crate::support::TempDir;
 use serde_json::Value;
 
-fn run(args: &[&str]) -> Output {
+fn run(store: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_prism"))
+        .env("PRISM_STORE_PATH", store)
         .args(args)
         .output()
         .expect("runs prism")
@@ -70,7 +72,7 @@ entry = "src/dep_main.pr"
     .unwrap();
 
     let manifest = app.join("prism.toml");
-    let rows = json(&run(&[
+    let args = [
         "search",
         "(Int) -> Int",
         "--in",
@@ -78,19 +80,28 @@ entry = "src/dep_main.pr"
         "--limit",
         "500",
         "--json",
-    ]));
-    let rows = rows.as_array().unwrap();
-    assert!(
-        rows.iter()
-            .any(|row| row["name"] == "Own.own" && row["source"] == "project"),
-        "{rows:?}"
-    );
-    assert!(
-        rows.iter()
-            .any(|row| row["name"] == "Package.package" && row["source"] == "package"),
-        "{rows:?}"
-    );
-    assert!(rows.iter().any(|row| row["source"] == "stdlib"), "{rows:?}");
+    ];
+    // Twice against one store: the second run serves module facts from the
+    // durable cache, where an interface-only hit once dropped unimported
+    // project modules from the results.
+    for pass in ["cold", "warm"] {
+        let rows = json(&run(&dir.store_root(), &args));
+        let rows = rows.as_array().unwrap();
+        assert!(
+            rows.iter()
+                .any(|row| row["name"] == "Own.own" && row["source"] == "project"),
+            "{pass}: {rows:?}"
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row["name"] == "Package.package" && row["source"] == "package"),
+            "{pass}: {rows:?}"
+        );
+        assert!(
+            rows.iter().any(|row| row["source"] == "stdlib"),
+            "{pass}: {rows:?}"
+        );
+    }
 }
 
 #[test]
@@ -114,8 +125,8 @@ fn synth_is_depth_bounded_deterministic_and_rechecked() {
         "10",
         "--json",
     ];
-    let first = json(&run(&args));
-    let second = json(&run(&args));
+    let first = json(&run(&dir.store_root(), &args));
+    let second = json(&run(&dir.store_root(), &args));
     assert_eq!(first, second);
     let candidates = first[0]["candidates"].as_array().unwrap();
     assert!(
@@ -125,14 +136,17 @@ fn synth_is_depth_bounded_deterministic_and_rechecked() {
         "{first:?}"
     );
 
-    let shallow = json(&run(&[
-        "synth",
-        file.to_str().unwrap(),
-        "--at-hole",
-        "answer",
-        "--depth",
-        "0",
-        "--json",
-    ]));
+    let shallow = json(&run(
+        &dir.store_root(),
+        &[
+            "synth",
+            file.to_str().unwrap(),
+            "--at-hole",
+            "answer",
+            "--depth",
+            "0",
+            "--json",
+        ],
+    ));
     assert!(shallow[0]["candidates"].as_array().unwrap().is_empty());
 }

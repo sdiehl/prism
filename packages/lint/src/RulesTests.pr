@@ -101,7 +101,7 @@ fn lt_unit_body() : Sp(Expr) = lt_e(EUnit)
 
 -- The registry.
 
-test fn registry_has_every_rule() = guard(length(fd_rules()) == 12)
+test fn registry_has_every_rule() = guard(length(fd_rules()) == 13)
 
 test fn registry_titles_resolve() =
   guard(fd_known(fd_l0101) && not(fd_title(fd_l0204) == ""))
@@ -186,6 +186,43 @@ test fn accum_reverse_holds_without_recursion() =
   let body = lt_call("reverse", [lt_e(EVar("acc"))])
   let once = lt_decl("once", [lt_param("acc")], body)
   guard(not(lt_fires(fd_l0105, rl_decl_rules(once))))
+
+-- L0109 codepoint scan.
+
+test fn codepoint_scan_fires_on_recursive_char_at() =
+  let body = lt_e(ELet("c", lt_call("char_at", [lt_e(EVar("s")), lt_e(EVar("i"))]), lt_call("go", [
+      lt_e(EVar("s")),
+    ])))
+  let go = lt_decl("go", [lt_param("s")], body)
+  guard(lt_fires(fd_l0109, rl_decl_rules(go)))
+
+test fn codepoint_scan_holds_on_bytes() =
+  let body = lt_e(ELet("b", lt_call("byte_at", [lt_e(EVar("s")), lt_e(EVar("i"))]), lt_call("go", [
+      lt_e(EVar("s")),
+    ])))
+  let go = lt_decl("go", [lt_param("s")], body)
+  guard(not(lt_fires(fd_l0109, rl_decl_rules(go))))
+
+test fn codepoint_scan_holds_without_recursion() =
+  let once = lt_decl("once", [lt_param("s")], lt_call("char_at", [
+      lt_e(EVar("s")),
+      lt_e(EVar("i")),
+    ]))
+  guard(not(lt_fires(fd_l0109, rl_decl_rules(once))))
+
+test fn codepoint_scan_holds_on_fixed_position() =
+  let body = lt_e(ELet("c", lt_call("char_at", [lt_e(EVar("s")), lt_e(EInt("0", SufNone))]), lt_call("go", [
+      lt_e(EVar("rest")),
+    ])))
+  let go = lt_decl("go", [lt_param("s")], body)
+  guard(not(lt_fires(fd_l0109, rl_decl_rules(go))))
+
+test fn codepoint_scan_holds_on_length_alone() =
+  let body = lt_e(ELet("n", lt_call("str_len", [lt_e(EVar("s"))]), lt_call("go", [
+      lt_e(EVar("s")),
+    ])))
+  let go = lt_decl("go", [lt_param("s")], body)
+  guard(not(lt_fires(fd_l0109, rl_decl_rules(go))))
 
 -- L0108 magic literal.
 

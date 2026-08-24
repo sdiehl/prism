@@ -443,6 +443,10 @@ fn digits(s : String, i : Int, w : Int) : Option(Int) =
   else
     digits_go(s, i, i + w, 0)
 
+-- The scan is over one field of a timestamp, never a document: `w` is a fixed
+-- width of two to four, so the walk to reach a digit is bounded by the length
+-- of the stamp and the quadratic never has room to appear.
+-- lint: allow(L0109)
 fn digits_go(s : String, i : Int, hi : Int, acc : Int) : Option(Int) =
   if i >= hi then
     Some(acc)
@@ -466,6 +470,9 @@ fn parse_frac(s : String, i : Int) : (Int, Int) =
   else
     (0, i)
 
+-- Bounded for the same reason `digits_go` is: the fraction it walks is the
+-- tail of one timestamp.
+-- lint: allow(L0109)
 fn frac_go(s : String, i : Int, seen : Int, acc : Int) : (Int, Int) =
   if i < str_len(s) && is_digit(char_at(s, i)) then
     let acc2 =

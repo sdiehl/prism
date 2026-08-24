@@ -21,6 +21,7 @@
 
 import Data.Foldable (length)
 import Data.List (foldl)
+import Data.String (str_slice)
 import Syntax.Lex (..)
 import Syntax.Source (..)
 
@@ -103,6 +104,10 @@ fn ed_relex(out : String) : Result(String, EditError) =
     Err(le) => Err(EdRelex(le))
     Ok(_) => Ok(out)
 
+-- The splice slices by byte, because an edit's span is a byte span: slicing by
+-- character would take `lo` and `hi` for character positions and cut the wrong
+-- text out of any file holding a multi-byte character, and would re-walk the
+-- encoding at every edit besides.
 fn ed_splice(
   text : String,
   edits : List(Edit),
@@ -111,12 +116,12 @@ fn ed_splice(
   acc : String
 ) : Result(String, EditError) =
   match edits of
-    Nil => Ok(concat(acc, substring(text, at, str_len(text) - at)))
+    Nil => Ok(concat(acc, str_slice(text, at, byte_len(text))))
     Cons(e, rest) =>
       if not(span_valid(e.span)) then
         Err(EdBadSpan(e.span))
-      elif e.span.hi > str_len(text) then
-        Err(EdPastEnd(e.span, str_len(text)))
+      elif e.span.hi > byte_len(text) then
+        Err(EdPastEnd(e.span, byte_len(text)))
       elif e.span.lo < at then
         Err(EdOverlap(ed_prev_span(prev, e.span), e.span))
       else
@@ -125,7 +130,7 @@ fn ed_splice(
             rest,
             e.span.hi,
             Some(e.span),
-            concat(concat(acc, substring(text, at, e.span.lo - at)), e.text),
+            concat(concat(acc, str_slice(text, at, e.span.lo)), e.text),
           )
 
 fn ed_prev_span(prev : Option(Span), here : Span) : Span =

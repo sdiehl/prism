@@ -1,0 +1,26 @@
+-- The confined region must grow past the function holding the escaping
+-- closures: `sample` performs the two-argument `measure` op but never appears
+-- in a handler or a closure list itself, so it is pulled into the region by
+-- its latent footprint, while the pure `shared` helper (called from the region
+-- and from `main`) stays outside on the fused side with the stream pipeline.
+effect Gauge
+  measure(Int, Int) : Int
+
+fn run_thunks(fs, acc) =
+  match fs of
+    Nil => acc
+    Cons(f, rest) => run_thunks(rest, acc + f())
+
+fn sample(x) = measure(x, x + 1)
+
+fn shared(x) = x * 7
+
+fn gauged() =
+  let fs = [\() -> sample(shared(1)), \() -> sample(2), \() -> sample(3)]
+  handle run_thunks(fs, 0) with
+    measure(lo, hi) resume k => k(lo + hi)
+    return r => r
+
+fn main() =
+  println(srange(1, 30).smap(shared).ssum())
+  println(gauged() + shared(1))

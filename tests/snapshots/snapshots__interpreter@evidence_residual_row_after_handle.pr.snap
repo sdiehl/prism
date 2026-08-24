@@ -1,0 +1,6 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/evidence_residual_row_after_handle.pr
+---
+((), 3)=> ()

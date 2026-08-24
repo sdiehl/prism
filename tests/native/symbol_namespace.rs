@@ -24,7 +24,7 @@
 // codegen dispatcher before the binary is built. Those two guards are what keep
 // the gate from passing vacuously if inlining later swallows the case.
 //
-// Note that `prismlam_{tag}` needs no case here: tags are content hashes of the
+// `prismlam_{tag}` needs no case here: tags are content hashes of the
 // owning function, never small integers, so no plausible source identifier spells
 // one. The prefix split makes it impossible rather than merely improbable, but
 // there is no program to regress against.

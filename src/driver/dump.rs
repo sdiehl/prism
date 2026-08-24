@@ -47,9 +47,9 @@ use super::identity::{native_kont_table_of, NativeKontIdentityRows};
 use super::module_graph::module_graph;
 use super::report::types_section;
 use super::{
-    check_on, elaborated, frontend, hash_meta, lowered_core, prelude_fn_names, stdlib_hash,
-    strip_prelude, tooltip_checked_on, typed_effect_facts, typed_effect_plan, typed_tier_explain,
-    Config, WireKind, NAMESPACE_FORMAT,
+    check_on, elaborated, front_verdict_on, frontend, hash_meta, lowered_core, prelude_fn_names,
+    rc_borrow_sigs, stdlib_hash, strip_prelude, tooltip_checked_on, typed_effect_facts,
+    typed_effect_plan, typed_tier_explain, Config, WireKind, NAMESPACE_FORMAT,
 };
 
 /// Format tag shared by all three usage-summary projections (`usage-summary`,
@@ -172,6 +172,34 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
             let doc = ResolvedSyntax {
                 schema: RESOLVED_SYNTAX_SCHEMA,
                 compiler: COMPILER_VERSION,
+                source: ResolvedSource {
+                    digest: hash_hex(user).to_string(),
+                    text: user.to_string(),
+                },
+                functions: resolved_syntax_body(&program, src),
+            };
+            pretty_json(&doc)
+        }
+        // The checker's verdict as an artifact, for the program it refused as
+        // much as for the one it accepted. Every other front-end seam requires
+        // acceptance, so a Prism-written checker can be diffed on what this
+        // compiler admits and never on what it rejects. This carries the
+        // resolved tree desugar built before typechecking, plus the refusal's
+        // stable code, owning phase, and primary span, which is the negative
+        // half of that comparison.
+        "tc-rejection" => {
+            let (program, verdict) = front_verdict_on(src, roots, cfg)?;
+            let map = SourceMap::new(src);
+            let (user, base) = (map.user(), map.prelude_len());
+            let doc = TcRejection {
+                schema: TC_REJECTION_SCHEMA,
+                compiler: COMPILER_VERSION,
+                status: if verdict.is_some() {
+                    TC_STATUS_REJECTED
+                } else {
+                    TC_STATUS_ACCEPTED
+                },
+                error: verdict.as_ref().map(|error| rejection_row(error, base)),
                 source: ResolvedSource {
                     digest: hash_hex(user).to_string(),
                     text: user.to_string(),
@@ -443,8 +471,8 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
             Ok(out)
         }
         "fbip" => {
-            let (program, _, core) = frontend(src, roots, cfg)?;
-            let sigs = borrow_sigs(&program);
+            let (program, checked, core) = frontend(src, roots, cfg)?;
+            let sigs = rc_borrow_sigs(&program, &checked, &core, cfg);
             Ok(pp_core_pretty(&reuse(&insert_rc(&core, &sigs))))
         }
         "lowered" => {
@@ -1443,6 +1471,55 @@ struct ResolvedFunction {
     name: String,
     params: Vec<TcParam>,
     body: ResolvedNode,
+}
+
+const TC_REJECTION_SCHEMA: &str = "prism-tc-rejection-v1";
+// The two verdicts, spelled the way the artifact spells them.
+const TC_STATUS_ACCEPTED: &str = "accepted";
+const TC_STATUS_REJECTED: &str = "rejected";
+
+// The checker's verdict on a program, with the resolved tree it judged. The
+// accepted case is `resolved-syntax` plus a status; the rejected case is the
+// half no other seam exports, since every other one returns nothing when the
+// checker refuses. A Prism-written checker is diffed on both: same tree in,
+// same accept-or-refuse out, and on a refusal the same code and span.
+#[derive(Serialize)]
+struct TcRejection {
+    schema: &'static str,
+    compiler: &'static str,
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<RejectionRow>,
+    source: ResolvedSource,
+    functions: Vec<ResolvedFunction>,
+}
+
+// A refusal reduced to what a differential comparison can hold the two front
+// ends to: the stable code, the phase that owns it, and the user-relative
+// primary span. The rendered message is deliberately absent; wording is not a
+// contract, and pinning it would make every diagnostic reword a fixture break.
+#[derive(Serialize)]
+struct RejectionRow {
+    code: &'static str,
+    phase: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    span: Option<[usize; 2]>,
+}
+
+// Spans in a diagnostic are absolute in the prelude-prefixed source; the
+// artifact's are user-relative, like every other exported span. A diagnostic
+// pointing inside the prelude has no user-relative position, so it reports
+// none rather than an index into text the artifact does not carry.
+fn rejection_row(error: &Error, base: usize) -> RejectionRow {
+    let code = error.code();
+    RejectionRow {
+        code: code.as_str(),
+        phase: code.phase().as_str(),
+        span: error
+            .primary_span()
+            .filter(|span| span.start >= base)
+            .map(|span| [span.start - base, span.end - base]),
+    }
 }
 
 // One node of a resolved expression tree: its NodeId (the join key into

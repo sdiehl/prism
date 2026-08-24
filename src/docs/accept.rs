@@ -149,8 +149,8 @@ fn accept_file(
 // example tests do) is string content, not an expectation, so the scanner
 // tracks raw-literal state while walking lines. A raw literal recognizes no
 // escapes and closes at the next `"""`, which is what makes the line-level
-// tracking exact. Openers are only sought outside comment lines, since a
-// literal cannot open inside a comment but prose may well mention one.
+// tracking exact. Search for openers outside comment lines, where mentions of raw
+// literals are prose.
 const RAW_OPEN: &str = "r\"\"\"";
 const RAW_CLOSE: &str = "\"\"\"";
 

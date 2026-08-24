@@ -53,7 +53,8 @@
 //!
 //! # Totality
 //!
-//! [`decode_cert`](crate::store::cert::decode_cert) never panics on hostile bytes: every varint is byte-capped and
+//! [`decode_cert`](crate::store::cert::decode_cert) never panics on hostile bytes.
+//! Every varint is byte-capped and
 //! every length is bounded (the shared `def`-codec reader), the scheme and kind are
 //! checked before the body, and trailing bytes are rejected. Decode is a `Result`.
 
@@ -80,6 +81,11 @@ pub const CLAIM_LEAN_CHECKED: u64 = 1;
 // the number.
 const CLAIM_REPLAY_VERIFIED: u64 = 2;
 const CLAIM_LINEAGE_VERIFIED: u64 = 3;
+/// The shadow parser reproduced the authoritative parser's judgment.
+///
+/// Made over a comparison identity rather than a core hash or a sidecar digest,
+/// and the fourth member of the one global claim number space.
+pub const CLAIM_SHADOW_PARSE_AGREED: u64 = 4;
 
 /// The human-facing name of the one live claim.
 pub const CLAIM_PARITY_PASSED_NAME: &str = "parity-passed";
@@ -89,6 +95,8 @@ pub const CLAIM_LEAN_CHECKED_NAME: &str = "lean-checked";
 pub const CLAIM_REPLAY_VERIFIED_NAME: &str = "replay-verified";
 /// The human-facing name of the artifact/edge rehash claim.
 pub const CLAIM_LINEAGE_VERIFIED_NAME: &str = "lineage-verified";
+/// The human-facing name of the shadow-parser agreement claim.
+pub const CLAIM_SHADOW_PARSE_AGREED_NAME: &str = "shadow-parse-agreed";
 
 // The evidence-row keys a lineage certificate carries: one home for the family so
 // a minter and a reader never retype a key. A row is a `key = value` string pair,
@@ -147,6 +155,11 @@ impl Claim {
 fn reserved_claim_name(n: u64) -> String {
     if n == CLAIM_LEAN_CHECKED {
         CLAIM_LEAN_CHECKED_NAME.to_string()
+    } else if n == CLAIM_SHADOW_PARSE_AGREED {
+        // Named, not verified, from a parity or lineage reader's seat: the claim
+        // belongs to another family, so those readers report it as recognized
+        // rather than pretending it is theirs to check.
+        CLAIM_SHADOW_PARSE_AGREED_NAME.to_string()
     } else {
         format!("reserved-claim-{n}")
     }
@@ -234,6 +247,29 @@ pub fn decode_cert(bytes: &[u8]) -> Result<Cert, CodecError> {
     })
 }
 
+/// The subject and claim of any `cert`-kind envelope, read without committing to
+/// a claim family's body layout.
+///
+/// Every family shares one header (the scheme tag, the kind varint, the subject)
+/// and puts its claim discriminant immediately after it. That is what makes a
+/// single global claim number space useful rather than decorative: a reader that
+/// cannot parse a body can still say which family the frame belongs to, and
+/// report it as recognized rather than as corruption.
+///
+/// # Errors
+/// A foreign scheme, a non-cert kind, or a truncated header.
+pub fn envelope_head(bytes: &[u8]) -> Result<(String, u64), CodecError> {
+    let mut r = Reader::new(bytes);
+    if r.string()? != HASH_SCHEME {
+        return Err(CodecError::Scheme);
+    }
+    if r.uvarint()? != u64::from(WireKind::Cert.varint()) {
+        return Err(CodecError::Kind);
+    }
+    let subject = r.string()?;
+    Ok((subject, r.uvarint()?))
+}
+
 /// Write `cert` into the store, keyed by its subject. Idempotent: re-emitting the
 /// same certificate is a [`Written::Hit`].
 ///
@@ -262,8 +298,8 @@ pub enum CertStatus {
 /// Read and verify the certificate a subject carries, if any.
 ///
 /// A decode failure, a subject that does not match, or a foreign scheme is a named
-/// [`CertStatus::Failed`]; an absent certificate is [`CertStatus::Absent`]; a
-/// reserved claim is [`CertStatus::Unverifiable`]; the one live claim under the
+/// [`CertStatus::Failed`]. An absent certificate is [`CertStatus::Absent`]. A
+/// reserved claim is [`CertStatus::Unverifiable`]. The one live claim under the
 /// current scheme is [`CertStatus::Verified`].
 #[must_use]
 pub fn check_cert(store: &Store, subject: &str) -> CertStatus {
@@ -272,33 +308,46 @@ pub fn check_cert(store: &Store, subject: &str) -> CertStatus {
         Ok(None) => return CertStatus::Absent,
         Err(e) => return CertStatus::Failed(format!("certificate unreadable: {e}")),
     };
+    // Classify from the shared header before parsing a body. A frame minted by
+    // another claim family has a layout this reader does not know, and calling
+    // that corruption would turn a neighbour's valid certificate into an audit
+    // failure.
+    let (stored_subject, claim) = match envelope_head(&bytes) {
+        Ok(head) => head,
+        Err(e) => return CertStatus::Failed(format!("corrupt certificate ({e})")),
+    };
+    if stored_subject != subject {
+        return CertStatus::Failed(format!(
+            "certificate subject {} does not match root {}",
+            short(&stored_subject),
+            short(subject)
+        ));
+    }
+    if claim != CLAIM_PARITY_PASSED {
+        return CertStatus::Unverifiable(format!(
+            "{} (claim is recognized but unverified by this build)",
+            reserved_claim_name(claim)
+        ));
+    }
     let cert = match decode_cert(&bytes) {
         Ok(c) => c,
         Err(e) => return CertStatus::Failed(format!("corrupt certificate ({e})")),
     };
-    if cert.subject.as_str() != subject {
-        return CertStatus::Failed(format!(
-            "certificate subject {} does not match root {}",
-            short(&cert.subject),
-            short(subject)
-        ));
-    }
     if cert.scheme != HASH_SCHEME {
         return CertStatus::Failed(format!(
             "certificate made under foreign scheme {:?}; this build speaks {HASH_SCHEME:?}",
             cert.scheme
         ));
     }
-    match cert.claim {
-        Claim::ParityPassed => CertStatus::Verified(format!(
-            "{CLAIM_PARITY_PASSED_NAME}@{} by {}",
-            cert.scheme, cert.compiler
-        )),
-        Claim::Reserved(n) => CertStatus::Unverifiable(format!(
-            "{} (claim is recognized but unverified by this build)",
-            reserved_claim_name(n)
-        )),
+    // The claim was settled from the header, so this is the parity claim or the
+    // two readings of the same bytes disagree, which is corruption.
+    if cert.claim != Claim::ParityPassed {
+        return CertStatus::Failed("certificate header and body disagree on the claim".to_string());
     }
+    CertStatus::Verified(format!(
+        "{CLAIM_PARITY_PASSED_NAME}@{} by {}",
+        cert.scheme, cert.compiler
+    ))
 }
 
 // A short hash prefix for human-facing lines, matching the store's display habit.
@@ -447,26 +496,94 @@ pub fn lineage_cert(
     }
 }
 
-/// Serialize a lineage certificate to its `cert`-kind envelope. The bytes are its
-/// identity.
-#[must_use]
-pub fn encode_lineage_cert(cert: &LineageCert) -> Vec<u8> {
+/// The decoded fields of a row-body `cert` envelope, before a claim family
+/// interprets the discriminant.
+pub(crate) struct RowBody {
+    pub(crate) subject: String,
+    pub(crate) claim: u64,
+    pub(crate) scheme: String,
+    pub(crate) compiler: String,
+    pub(crate) rows: Vec<CertRow>,
+}
+
+/// Serialize the row-body `cert` envelope: the fixed header, then a claim
+/// discriminant, the scheme and compiler, and a capped list of `key = value`
+/// rows.
+///
+/// Every claim family whose evidence is rows rather than a fixed tuple shares
+/// these bytes. That is what lets the claim discriminants stay one global number
+/// space: a reader that does not know a family still decodes the envelope and
+/// reports the claim as recognized-but-untrusted, which it could not do if each
+/// family invented its own layout.
+pub(crate) fn encode_row_body(
+    subject: &str,
+    claim: u64,
+    scheme: &str,
+    compiler: &str,
+    rows: &[CertRow],
+) -> Vec<u8> {
     let mut out = Vec::new();
     put_str(&mut out, HASH_SCHEME);
     put_uvarint(&mut out, u64::from(WireKind::Cert.varint()));
-    put_str(&mut out, &cert.subject);
-    put_uvarint(&mut out, cert.claim.to_varint());
-    put_str(&mut out, &cert.scheme);
-    put_str(&mut out, &cert.compiler);
-    put_uvarint(
-        &mut out,
-        u64::try_from(cert.evidence.len()).unwrap_or(u64::MAX),
-    );
-    for r in &cert.evidence {
+    put_str(&mut out, subject);
+    put_uvarint(&mut out, claim);
+    put_str(&mut out, scheme);
+    put_str(&mut out, compiler);
+    put_uvarint(&mut out, u64::try_from(rows.len()).unwrap_or(u64::MAX));
+    for r in rows {
         put_str(&mut out, &r.key);
         put_str(&mut out, &r.value);
     }
     out
+}
+
+/// Decode a row-body `cert` envelope. Total: a `Result`, never a panic, header
+/// checked before the body, the row count capped, trailing bytes rejected.
+pub(crate) fn decode_row_body(bytes: &[u8]) -> Result<RowBody, CodecError> {
+    let mut r = Reader::new(bytes);
+    if r.string()? != HASH_SCHEME {
+        return Err(CodecError::Scheme);
+    }
+    if r.uvarint()? != u64::from(WireKind::Cert.varint()) {
+        return Err(CodecError::Kind);
+    }
+    let subject = r.string()?;
+    let claim = r.uvarint()?;
+    let scheme = r.string()?;
+    let compiler = r.string()?;
+    let count = r.uvarint()?;
+    if count > MAX_EVIDENCE_ROWS {
+        return Err(CodecError::TooLarge);
+    }
+    let mut rows = Vec::new();
+    for _ in 0..count {
+        let key = r.string()?;
+        let value = r.string()?;
+        rows.push(CertRow { key, value });
+    }
+    if !r.at_end() {
+        return Err(CodecError::TrailingBytes);
+    }
+    Ok(RowBody {
+        subject,
+        claim,
+        scheme,
+        compiler,
+        rows,
+    })
+}
+
+/// Serialize a lineage certificate to its `cert`-kind envelope. The bytes are its
+/// identity.
+#[must_use]
+pub fn encode_lineage_cert(cert: &LineageCert) -> Vec<u8> {
+    encode_row_body(
+        &cert.subject,
+        cert.claim.to_varint(),
+        &cert.scheme,
+        &cert.compiler,
+        &cert.evidence,
+    )
 }
 
 /// Decode a lineage `cert`-kind envelope. Total: a `Result`, never a panic, header
@@ -476,36 +593,13 @@ pub fn encode_lineage_cert(cert: &LineageCert) -> Vec<u8> {
 /// A foreign scheme, a non-cert kind, a truncated or oversized field, an
 /// over-count of evidence rows, or trailing bytes.
 pub fn decode_lineage_cert(bytes: &[u8]) -> Result<LineageCert, CodecError> {
-    let mut r = Reader::new(bytes);
-    if r.string()? != HASH_SCHEME {
-        return Err(CodecError::Scheme);
-    }
-    if r.uvarint()? != u64::from(WireKind::Cert.varint()) {
-        return Err(CodecError::Kind);
-    }
-    let subject = r.string()?;
-    let claim = LineageClaim::from_varint(r.uvarint()?);
-    let scheme = r.string()?;
-    let compiler = r.string()?;
-    let count = r.uvarint()?;
-    if count > MAX_EVIDENCE_ROWS {
-        return Err(CodecError::TooLarge);
-    }
-    let mut evidence = Vec::new();
-    for _ in 0..count {
-        let key = r.string()?;
-        let value = r.string()?;
-        evidence.push(CertRow { key, value });
-    }
-    if !r.at_end() {
-        return Err(CodecError::TrailingBytes);
-    }
+    let body = decode_row_body(bytes)?;
     Ok(LineageCert {
-        subject: Digest::from(subject),
-        claim,
-        scheme,
-        compiler,
-        evidence,
+        subject: Digest::from(body.subject),
+        claim: LineageClaim::from_varint(body.claim),
+        scheme: body.scheme,
+        compiler: body.compiler,
+        evidence: body.rows,
     })
 }
 

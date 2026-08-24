@@ -210,12 +210,8 @@ fn merged_source(
 
 // Whether a dotted module name is one `import` can actually say: every segment
 // an uppercase identifier, which is what the grammar demands of a module path.
-// A `.pr` file under a lowercase directory (`benches/lexbench.pr` indexed from
-// a repository root) has no importable name at all. Skipping its import is not
-// skipping the module — it is still indexed, it just cannot be reached by the
-// driver, so its definitions carry no address, the honest state [`Def::hash`]
-// documents. Synthesizing the import anyway would hand the front end a line
-// that cannot parse and fail the whole index over text the author never wrote.
+// A `.pr` file under a lowercase directory has no importable module name. Keep it
+// in the index without an address instead of synthesizing an invalid import.
 fn importable(dotted: &str) -> bool {
     !dotted.is_empty()
         && dotted.split('.').all(|segment| {

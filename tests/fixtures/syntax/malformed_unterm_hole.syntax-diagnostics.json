@@ -1,6 +1,6 @@
 {
   "schema": "prism-syntax-diagnostics-v1",
-  "compiler": "0.19.0",
+  "compiler": "0.20.0",
   "source": {
     "digest": "73fdc75464613467c12aeef960688e2c39ebd141027ed22b6be1a7763ca1b9a9",
     "text": "-- An interpolation hole that runs off the end of input: the lexer refuses this\n-- file at the opening brace, the compiler's `LexError::UnterminatedHole`\n-- (E7002). The string never closes because the hole stays open.\nfn main() = println(\"value = {x\n"

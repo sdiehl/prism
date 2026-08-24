@@ -1,0 +1,3 @@
+-- A lowercase row name must use tail syntax. In label position it is an
+-- unknown effect, not an implicitly bound row variable.
+fn bare_row_label(action : () -> Unit ! {e}) : Unit = ()

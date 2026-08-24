@@ -4,7 +4,7 @@ use marginalia::Span;
 
 use super::env::{collect_row_vars, collect_type_vars, convert_data, wrap_forall};
 use super::{
-    Canon, ClassInfo, CtorInfo, DataInfo, Dict, Env, HeadKey, InstInfo, InstKeys, Tc,
+    Canon, ClassInfo, CtorInfo, DataInfo, Dict, Env, HeadKey, InstInfo, InstKeys, NominalRepr, Tc,
     TypecheckSeed, Wanted, Warning, WarningOrigin,
 };
 use crate::error::suggest;
@@ -578,6 +578,7 @@ pub(super) fn build_classes(
                 params: vec![c.param.clone()],
                 param_kinds: vec![Kind::Type],
                 ctors: vec![dname.clone()],
+                repr: NominalRepr::BoxedCell,
             },
         );
         ctors.insert(

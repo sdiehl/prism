@@ -53,11 +53,13 @@
 //!
 //! # Totality
 //!
-//! [`decode_kont`](crate::eval::kont::decode_kont) never panics on hostile bytes: every varint is byte-capped,
+//! [`decode_kont`](crate::eval::kont::decode_kont) never panics on hostile bytes.
+//! Every varint is byte-capped,
 //! every length is bounded, the scheme, kind and bundle are checked before the
 //! body, child indices are range-checked against the already-parsed prefix,
 //! reconstruction runs against an expansion budget, and trailing bytes are
-//! rejected. [`encode_kont`](crate::eval::kont::encode_kont) is fallible: a value that cannot cross the suspend
+//! rejected. [`encode_kont`](crate::eval::kont::encode_kont) is fallible. A value
+//! that cannot cross the suspend
 //! boundary (a graph nested past the suspendable depth, the fingerprint of an
 //! unserializable capture or a cycle) is refused by name rather than encoded.
 
@@ -192,8 +194,8 @@ pub fn portable_value_type(ty: &Type) -> bool {
 
 // One discriminant for every runtime shape the table can hold, across all six
 // domains (value, node, atom, frame, environment, handler record). Encoded as a
-// uvarint; the array below is the single source of truth for the numbering, so
-// encode (`as u8`) and decode (index into the array) cannot drift. A reference is
+// uvarint; the array below defines the numbering used by both encode (`as u8`)
+// and decode (index into the array). A reference is
 // an untyped index; the builder validates the referent's tag against the domain
 // it is used in, so a cross-domain reference in a hostile frame is rejected rather
 // than misread.
@@ -1553,7 +1555,7 @@ mod tests {
 
     // A continuation exercising every value, node, atom, frame, pattern and
     // handler shape the codec must round-trip, so the idempotence and totality
-    // checks below cover the whole table, not just the common cases.
+    // checks below cover the whole table, including uncommon cases.
     fn kitchen_sink() -> Kont {
         let inner_body = cmp(Node::Prim(
             CoreOp::Add,

@@ -93,6 +93,19 @@ impl Tc<'_> {
                 self.ctors.keys().map(|k| names::bare_name(k)),
             ))
         })?;
+        let constructor_count = self
+            .ctors
+            .values()
+            .filter(|candidate| candidate.type_name == info.type_name)
+            .count();
+        if constructor_count != 1 {
+            return Err(ErrKind::RecordSpreadMultiCtor {
+                ctor: ctor_name.to_string(),
+                ty: info.type_name.to_string(),
+                constructors: constructor_count,
+            }
+            .at(span));
+        }
         let (result_ty, tsubs, rsubs) = self.open_ctor(&info);
         self.check(env, base_expr, &result_ty)?;
         for (field_name, field_expr) in field_exprs {
@@ -163,20 +176,8 @@ impl Tc<'_> {
                     }
                     .at(span));
                 };
-                let mut named: Vec<_> = self
-                    .ctors
-                    .iter()
-                    .filter(|(_, c)| c.type_name == tname)
-                    .map(|(n, c)| (n.clone(), c.args.len()))
-                    .collect();
-                let Some((cname, arity)) = named.pop().filter(|_| named.is_empty()) else {
-                    return Err(ErrKind::UpdatePathMultiCtor {
-                        ty: tname.to_string(),
-                        n: named.len() + 1,
-                    }
-                    .at(span));
-                };
-                let (ft, fi) = self.find_field(span, tname.as_str(), seg, &cur)?;
+                let (cname, ft, fi, arity) =
+                    self.find_update_field(span, tname.as_str(), seg, &cur)?;
                 chain.push((cname, fi, arity));
                 cur = ft;
             }

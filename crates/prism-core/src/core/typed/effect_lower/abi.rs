@@ -663,9 +663,9 @@ pub fn qapply_fn() -> TypedCoreFn {
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::{EffectLowered, Elaborated, TypedCore};
+    use super::super::super::{verify, EffectLowered, Elaborated, UncheckedTypedCore};
     use super::*;
-    use crate::core::typed::verify::verify;
+    use crate::core::typed::violation::Violation;
     use crate::core::IoOp;
 
     fn thunk(body: TypedComp, parameter: TypedBinder) -> TypedValue {
@@ -861,9 +861,9 @@ mod tests {
         )
     }
 
-    fn singleton<P>(body: TypedComp) -> TypedCore<P> {
+    fn singleton<P>(body: TypedComp) -> UncheckedTypedCore<P> {
         let signature = body.sig().clone();
-        TypedCore::new(vec![TypedCoreFn::new(
+        UncheckedTypedCore::new(vec![TypedCoreFn::new(
             Sym::from("main"),
             Vec::new(),
             body,
@@ -876,13 +876,20 @@ mod tests {
     fn runtime_templates_verify_under_the_phase_private_abi() {
         let mut env = VerifyEnv::new();
         insert(&mut env);
-        let core = TypedCore::<EffectLowered>::new(vec![ebind_fn(), qapply_fn()]);
-        assert_eq!(verify(&core, &env), Ok(()));
+        let core = UncheckedTypedCore::<EffectLowered>::new(vec![ebind_fn(), qapply_fn()]);
+        assert!(verify(core, &env).is_ok());
     }
 
     #[test]
     fn runtime_templates_erase_to_the_canonical_abi_names() {
-        let erased = TypedCore::<EffectLowered>::new(vec![ebind_fn(), qapply_fn()]).erase();
+        let mut env = VerifyEnv::new();
+        insert(&mut env);
+        let core = verify(
+            UncheckedTypedCore::<EffectLowered>::new(vec![ebind_fn(), qapply_fn()]),
+            &env,
+        )
+        .expect("runtime templates verify");
+        let erased = core.erase();
         assert_eq!(
             erased
                 .fns
@@ -907,8 +914,11 @@ mod tests {
             pure(word()),
             TypedCompKind::Bind(Box::new(head), x, Box::new(tail)),
         );
+        let mut env = VerifyEnv::new();
+        insert(&mut env);
         let typed = singleton::<EffectLowered>(body);
         let (actual, stats) = super::super::super::simplify::simplify(typed).expect("simplifies");
+        let actual = verify(actual, &env).expect("simplified runtime fixture verifies");
         assert_eq!(stats.ticks(), 2);
         assert_eq!(
             actual.erase().fns[0].body,
@@ -920,26 +930,30 @@ mod tests {
     fn heterogeneous_two_operation_chain_verifies() {
         let mut env = VerifyEnv::new();
         insert(&mut env);
-        let core =
-            TypedCore::<EffectLowered>::new(vec![ebind_fn(), qapply_fn(), heterogeneous_fixture()]);
-        assert_eq!(verify(&core, &env), Ok(()));
+        let core = UncheckedTypedCore::<EffectLowered>::new(vec![
+            ebind_fn(),
+            qapply_fn(),
+            heterogeneous_fixture(),
+        ]);
+        assert!(verify(core, &env).is_ok());
     }
 
     #[test]
     fn resume_and_effectful_bounce_signatures_verify() {
         let mut env = VerifyEnv::new();
         insert(&mut env);
-        let core = TypedCore::<EffectLowered>::new(remaining_constructor_fixtures());
-        assert_eq!(verify(&core, &env), Ok(()));
+        let core = UncheckedTypedCore::<EffectLowered>::new(remaining_constructor_fixtures());
+        assert!(verify(core, &env).is_ok());
     }
 
     #[test]
     fn queue_ambient_row_cannot_be_forged_at_apply() {
         let mut env = VerifyEnv::new();
         insert(&mut env);
-        let core = TypedCore::<EffectLowered>::new(vec![qapply_fn(), row_confusion_fixture()]);
+        let core =
+            UncheckedTypedCore::<EffectLowered>::new(vec![qapply_fn(), row_confusion_fixture()]);
         assert!(
-            verify(&core, &env).is_err(),
+            verify(core, &env).is_err(),
             "an IO-bearing queue must not typecheck at qApply<Empty>"
         );
     }
@@ -960,7 +974,7 @@ mod tests {
             )),
         );
         assert!(
-            verify(&singleton::<EffectLowered>(wrongly_pure), &env).is_err(),
+            verify(singleton::<EffectLowered>(wrongly_pure), &env).is_err(),
             "an IO-bearing bounce must not typecheck as Eff(Empty)"
         );
     }
@@ -971,12 +985,10 @@ mod tests {
             pure(word()),
             TypedCompKind::Return(lowered_repr(int(1), word())),
         );
-        let errors = verify(&singleton::<Elaborated>(body), &VerifyEnv::new()).unwrap_err();
-        assert!(errors.iter().any(|error| {
-            error
-                .message()
-                .contains("lowered representation evidence is not legal")
-        }));
+        let errors = verify(singleton::<Elaborated>(body), &VerifyEnv::new()).unwrap_err();
+        assert!(errors
+            .iter()
+            .any(|error| matches!(error.kind(), Violation::LoweredAbiIllegal { .. })));
     }
 
     #[test]
@@ -988,10 +1000,10 @@ mod tests {
                 eff(EffRow::Empty),
             )),
         );
-        let errors = verify(&singleton::<EffectLowered>(body), &VerifyEnv::new()).unwrap_err();
+        let errors = verify(singleton::<EffectLowered>(body), &VerifyEnv::new()).unwrap_err();
         assert!(errors
             .iter()
-            .any(|error| error.message().contains("illegal lowered representation")));
+            .any(|error| matches!(error.kind(), Violation::ReprConversionIllegal { .. })));
     }
 
     #[test]
@@ -1005,10 +1017,10 @@ mod tests {
             pure(word()),
             TypedCompKind::Return(lowered_repr(product, word())),
         );
-        let errors = verify(&singleton::<EffectLowered>(body), &VerifyEnv::new()).unwrap_err();
+        let errors = verify(singleton::<EffectLowered>(body), &VerifyEnv::new()).unwrap_err();
         assert!(errors
             .iter()
-            .any(|error| error.message().contains("illegal lowered representation")));
+            .any(|error| matches!(error.kind(), Violation::ReprConversionIllegal { .. })));
     }
 
     #[test]
@@ -1022,17 +1034,17 @@ mod tests {
                 source(Type::Unit),
             )),
         );
-        let core = TypedCore::<EffectLowered>::new(vec![TypedCoreFn::new(
+        let core = UncheckedTypedCore::<EffectLowered>::new(vec![TypedCoreFn::new(
             Sym::from("main"),
             vec![q],
             body,
             CoreFnSig::new(Vec::new(), vec![queue_ty], pure(source(Type::Unit))),
             0,
         )]);
-        let errors = verify(&core, &VerifyEnv::new()).unwrap_err();
+        let errors = verify(core, &VerifyEnv::new()).unwrap_err();
         assert!(errors
             .iter()
-            .any(|error| error.message().contains("illegal lowered representation")));
+            .any(|error| matches!(error.kind(), Violation::ReprConversionIllegal { .. })));
     }
 
     #[test]
@@ -1041,7 +1053,7 @@ mod tests {
         let parameter = binder("queue_word@", queue_ty.clone());
         let generic_pack = lowered_repr(var("queue_word@", queue_ty.clone()), word());
         let generic_body = TypedComp::new(pure(word()), TypedCompKind::Return(generic_pack));
-        let generic = TypedCore::<EffectLowered>::new(vec![TypedCoreFn::new(
+        let generic = UncheckedTypedCore::<EffectLowered>::new(vec![TypedCoreFn::new(
             Sym::from("generic_queue_pack@"),
             vec![parameter.clone()],
             generic_body,
@@ -1049,21 +1061,21 @@ mod tests {
             0,
         )]);
         assert!(
-            verify(&generic, &VerifyEnv::new()).is_err(),
+            verify(generic, &VerifyEnv::new()).is_err(),
             "the general source-word evidence must not pack a runtime queue"
         );
 
         let packed = pack_queue_word(var("queue_word@", queue_ty.clone())).expect("queue packs");
         let restored = unpack_queue_word(packed, EffRow::Empty).expect("queue unpacks");
         let body = TypedComp::new(pure(queue_ty.clone()), TypedCompKind::Return(restored));
-        let typed = TypedCore::<EffectLowered>::new(vec![TypedCoreFn::new(
+        let typed = UncheckedTypedCore::<EffectLowered>::new(vec![TypedCoreFn::new(
             Sym::from("queue_roundtrip@"),
             vec![parameter],
             body,
             CoreFnSig::new(Vec::new(), vec![queue_ty], pure(queue(EffRow::Empty))),
             0,
         )]);
-        assert_eq!(verify(&typed, &VerifyEnv::new()), Ok(()));
+        let typed = verify(typed, &VerifyEnv::new()).expect("sealed queue roundtrip verifies");
         assert!(matches!(
             typed.erase().fns[0].body,
             crate::core::cbpv::Comp::Return(crate::core::cbpv::Value::Var(name))
@@ -1079,17 +1091,17 @@ mod tests {
             pure(word()),
             TypedCompKind::Return(lowered_repr(var("token@", token_ty.clone()), word())),
         );
-        let core = TypedCore::<EffectLowered>::new(vec![TypedCoreFn::new(
+        let core = UncheckedTypedCore::<EffectLowered>::new(vec![TypedCoreFn::new(
             Sym::from("main"),
             vec![token],
             body,
             CoreFnSig::new(Vec::new(), vec![token_ty], pure(word())),
             0,
         )]);
-        let errors = verify(&core, &VerifyEnv::new()).unwrap_err();
+        let errors = verify(core, &VerifyEnv::new()).unwrap_err();
         assert!(errors
             .iter()
-            .any(|error| error.message().contains("illegal lowered representation")));
+            .any(|error| matches!(error.kind(), Violation::ReprConversionIllegal { .. })));
     }
 
     #[test]
@@ -1108,7 +1120,7 @@ mod tests {
         let bridge = try_word_bridge(var("bridge_source@", actual.clone()), expected.clone())
             .expect("both function witnesses have one runtime-word representation");
         let body = TypedComp::new(pure(expected.clone()), TypedCompKind::Return(bridge));
-        let core = TypedCore::<EffectLowered>::new(vec![TypedCoreFn::new(
+        let core = UncheckedTypedCore::<EffectLowered>::new(vec![TypedCoreFn::new(
             Sym::from("main"),
             vec![parameter],
             body,
@@ -1116,7 +1128,7 @@ mod tests {
             0,
         )]);
 
-        assert_eq!(verify(&core, &VerifyEnv::new()), Ok(()));
+        let core = verify(core, &VerifyEnv::new()).expect("word bridge verifies");
         assert_eq!(
             core.erase().fns[0].body,
             crate::core::cbpv::Comp::Return(crate::core::cbpv::Value::Var(Sym::from(

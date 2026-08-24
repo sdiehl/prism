@@ -14,7 +14,6 @@ use crate::kw;
 use crate::names;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core, Expr, HandlerArm, HandlerMode, NodeId, S};
-use crate::types::is_or_null_element;
 use crate::types::ty::{EffRow, Label, Type, LIST, NUM_CLASS, SHOW_CLASS};
 use crate::wired::Indexable;
 
@@ -58,22 +57,6 @@ impl Tc<'_> {
     // expanded conservatively by `note_opaque_row` below.
     fn note_operation(&mut self, effect: Sym, operation: Sym) {
         self.operation_uses.insert(effect, operation);
-    }
-
-    // Debug-only invariant for the operation-uses swap discipline. Every delimited
-    // scope opens with a `mem::take` (installing a fresh accumulator), lets its
-    // body accumulate, drains that accumulation with a second `mem::take`, then
-    // reinstalls the saved outer scope. Asserting the accumulator is drained
-    // immediately before each restore pins the balance: the outer scope is always
-    // reinstalled into an empty slot, so a restore can never silently drop the
-    // effect uses gathered inside (an under-approximated row). A future reorder
-    // that accumulated between the drain and the restore, or an orphaned take,
-    // would trip this. Compiled out of release builds.
-    fn assert_uses_drained(&self) {
-        debug_assert!(
-            self.operation_uses == OperationUses::default(),
-            "operation-uses accumulator must be drained before restoring the outer scope"
-        );
     }
 
     // A public effect row carries labels, not operation subsets. Treat each
@@ -260,7 +243,6 @@ impl Tc<'_> {
                     |tc| tc.check(&env2, body, ret),
                 );
                 let latent_uses = mem::take(&mut self.operation_uses);
-                self.assert_uses_drained();
                 self.operation_uses = outer_uses;
                 if propagate_latent_uses {
                     self.operation_uses.merge(latent_uses);
@@ -512,7 +494,7 @@ impl Tc<'_> {
             let elem = self.apply(elem);
             let found = if matches!(elem, Type::Exist(_) | Type::Var(_)) {
                 "an un-inferred element type (add an `OrNull(T)` annotation)".to_string()
-            } else if is_or_null_element(&elem) {
+            } else if self.or_null_element_ok(&elem) {
                 continue;
             } else {
                 format!("`{}`", elem.show())
@@ -660,7 +642,6 @@ impl Tc<'_> {
                     |tc| tc.check(&env2, body, &Type::Exist(ret)),
                 );
                 let _latent_uses = mem::take(&mut self.operation_uses);
-                self.assert_uses_drained();
                 self.operation_uses = outer_uses;
                 checked?;
                 Ok(self.apply(&Type::fun_eff(doms, EffRow::Exist(row), Type::Exist(ret))))
@@ -850,12 +831,12 @@ impl Tc<'_> {
                         return Err(ErrKind::FieldAccessNonRecord { ty: other.show() }.at(span))
                     }
                 };
-                let (field_ty, fi) = self.find_field(span, ctor_name.as_str(), field, &te)?;
-                if let Some((cname, info)) = self.ctors.iter().find(|(_, c)| {
-                    c.type_name == ctor_name && c.fields.iter().any(|f| f.as_str() == field)
-                }) {
-                    self.field_res
-                        .insert(id, (cname.clone(), fi, info.args.len()));
+                let (cname, field_ty, fi, arity) =
+                    self.find_field_projection(span, ctor_name.as_str(), field, &te)?;
+                if self.field_res.insert(id, (cname, fi, arity)).is_some() {
+                    return Err(TypeError::InternalInvariant {
+                        msg: format!("field node {} produced duplicate resolution facts", id.0),
+                    });
                 }
                 Ok(field_ty)
             }
@@ -971,6 +952,25 @@ impl Tc<'_> {
         let (body_ty, body_residual) =
             self.synth_handle_body(env, body, &scope, arms, mode, span)?;
         let ret_ex = self.push_ex();
+        // With no return clause the implicit arm is the identity, so the
+        // handler's answer type is the handled body's type. Elaboration and
+        // both runtimes already pass the body's value through unchanged
+        // (`Comp::Handle` with no return body), so leaving the answer
+        // existential unconstrained here would report a polymorphic scheme for
+        // a value that is always the body's, and any concrete use of that
+        // scheme fails at the elaboration boundary instead of here. Applied
+        // before the clauses so each one checks against the settled answer.
+        if !arms.iter().any(|arm| matches!(arm, HandlerArm::Return(..))) {
+            let a = self.apply(&body_ty);
+            let b = self.apply(&Type::Exist(ret_ex));
+            self.subtype(&a, &b).map_err(|e| {
+                e.or(TypeError::TypeMismatch {
+                    span,
+                    expected: b.show(),
+                    found: a.show(),
+                })
+            })?;
+        }
         for arm in arms {
             match arm {
                 HandlerArm::Return(x, arm_body) => {
@@ -1064,7 +1064,6 @@ impl Tc<'_> {
                 msg: format!("handler node {} produced duplicate residual facts", id.0),
             });
         }
-        self.assert_uses_drained();
         self.operation_uses = outer_uses;
         self.operation_uses.merge(residual);
         Ok(self.apply(&Type::Exist(ret_ex)))
@@ -1560,7 +1559,6 @@ impl Tc<'_> {
         let outer_uses = mem::take(&mut self.operation_uses);
         let body_ty = self.synth(env, body);
         let mut body_uses = mem::take(&mut self.operation_uses);
-        self.assert_uses_drained();
         self.operation_uses = outer_uses;
         let t = body_ty?;
         let args = (0..self.eff_arity(eff_sym))
@@ -1634,7 +1632,6 @@ impl Tc<'_> {
         let frame = self.handler_stack.pop().expect("handler frame");
         self.cur_row = saved_row;
         let mut body_uses = mem::take(&mut self.operation_uses);
-        self.assert_uses_drained();
         self.operation_uses = handler_uses;
         let body_ty = self.apply(&body_ty?);
         let handled_operations = self.handled_operations(arms);

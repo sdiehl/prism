@@ -1,0 +1,8 @@
+-- Pure control for the convention-split fixture: the shared traversal has only
+-- its direct callback convention, so no effect lowering is needed.
+
+fn bump(x : Int) : Int = x + 1
+
+fn pure_use(xs : List(Int)) : List(Int) = map(bump, xs)
+
+fn main() = print(show(pure_use([1, 2, 3])))

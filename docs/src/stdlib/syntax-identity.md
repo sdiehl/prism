@@ -29,7 +29,7 @@ source_identity(SourceFile { digest = "9f86d0", text = "fn main() = ()" })
 
 ### `surface_identity`
 
-```prism,sig,h-2b3818debb3bfccbf7782bd424a29fb0388be16f43eb5a8a72b128a8aeecd86f
+```prism,sig,h-4acfb242526deaab05c3f9f24ac4b4ce1be4433635702cdb3d3d97e9d8fca515
 surface_identity : (Syntax.Codec.SurfaceDoc) -> Result(String, Json.JsonError)
 ```
 

@@ -23,8 +23,8 @@ use prism_common::sym::Sym;
 
 use super::specialize_support::Rewrite;
 use super::{
-    TypedBinder, TypedComp, TypedCompKind, TypedCore, TypedCoreFn, TypedHandleOp, TypedHandler,
-    TypedPattern, TypedValue, TypedValueKind,
+    TypedBinder, TypedComp, TypedCompKind, TypedCoreFn, TypedHandleOp, TypedHandler, TypedPattern,
+    TypedValue, TypedValueKind, UncheckedTypedCore,
 };
 
 /// Rewrite counts for typed common subexpression elimination.
@@ -42,10 +42,10 @@ impl CseStats {
 
 /// Eliminate repeated pure scalar subexpressions, preserving every witness.
 #[must_use]
-pub fn cse<P>(core: TypedCore<P>) -> (TypedCore<P>, CseStats) {
+pub fn cse<P>(core: UncheckedTypedCore<P>) -> (UncheckedTypedCore<P>, CseStats) {
     let mut eliminator = Cse { ticks: 0 };
     let fns = core
-        .fns
+        .into_functions()
         .into_iter()
         .map(|function| {
             let body = eliminator.comp(&function.body, &Avail::new());
@@ -59,7 +59,7 @@ pub fn cse<P>(core: TypedCore<P>) -> (TypedCore<P>, CseStats) {
         })
         .collect();
     (
-        TypedCore::new(fns),
+        UncheckedTypedCore::new(fns),
         CseStats {
             ticks: eliminator.ticks,
         },
@@ -308,8 +308,11 @@ mod tests {
     use crate::types::Type;
 
     use super::super::effect_lower::lower_effects;
-    use super::super::verify::{verify, OperationSig, VerifyEnv};
-    use super::super::{CompSig, CoreFnSig, CoreType, EffectLowered, Elaborated, TypedLowering};
+    use super::super::verify::{OperationSig, VerifyEnv};
+    use super::super::{
+        verify, CompSig, CoreFnSig, CoreType, EffectLowered, Elaborated, TypedCore, TypedLowering,
+        UncheckedTypedCore,
+    };
     use super::*;
 
     fn sym(name: &str) -> Sym {
@@ -339,18 +342,14 @@ mod tests {
     }
 
     fn run_cse(functions: Vec<TypedCoreFn>, env: &VerifyEnv) -> (TypedCore<Elaborated>, u64) {
-        let input = TypedCore::new(functions);
-        if let Err(violations) = verify(&input, env) {
-            panic!("input fixture is invalid: {violations:#?}");
-        }
+        let input = UncheckedTypedCore::new(functions);
         let (actual, stats) = cse(input);
-        if let Err(violations) = verify(&actual, env) {
-            panic!("CSE'd typed Core is invalid: {violations:#?}");
-        }
+        let actual = verify(actual, env)
+            .unwrap_or_else(|violations| panic!("CSE'd typed Core is invalid: {violations:#?}"));
         (actual, stats.ticks())
     }
 
-    fn lowered_cse_fixture() -> (TypedCore<EffectLowered>, VerifyEnv) {
+    fn lowered_cse_fixture() -> (UncheckedTypedCore<EffectLowered>, VerifyEnv) {
         let operation = sym("ask");
         let effect = sym("Ask");
         let mut env = VerifyEnv::new();
@@ -383,10 +382,9 @@ mod tests {
             ),
             0,
         );
-        let input = TypedCore::<Elaborated>::new(vec![main]);
-        if let Err(violations) = verify(&input, &env) {
-            panic!("elaborated late-pass fixture is invalid: {violations:#?}");
-        }
+        let input = verify(UncheckedTypedCore::<Elaborated>::new(vec![main]), &env).unwrap_or_else(
+            |violations| panic!("elaborated late-pass fixture is invalid: {violations:#?}"),
+        );
         let flags = DynFlags {
             effect_tier: EffectTier::FreeMonad,
             quiet: true,
@@ -447,24 +445,18 @@ mod tests {
         );
         let mut functions = lowered.functions().to_vec();
         functions.push(cse_target);
-        let core = TypedCore::<EffectLowered>::new(functions);
-        if let Err(violations) = verify(&core, &env) {
-            panic!("effect-lowered late-pass fixture is invalid: {violations:#?}");
-        }
+        let core = UncheckedTypedCore::<EffectLowered>::new(functions);
         (core, env)
     }
 
     fn run_lowered_cse(
-        input: TypedCore<EffectLowered>,
+        input: UncheckedTypedCore<EffectLowered>,
         env: &VerifyEnv,
     ) -> (TypedCore<EffectLowered>, u64) {
-        if let Err(violations) = verify(&input, env) {
-            panic!("effect-lowered CSE input is invalid: {violations:#?}");
-        }
         let (actual, stats) = cse(input);
-        if let Err(violations) = verify(&actual, env) {
-            panic!("effect-lowered CSE output is invalid: {violations:#?}");
-        }
+        let actual = verify(actual, env).unwrap_or_else(|violations| {
+            panic!("effect-lowered CSE output is invalid: {violations:#?}")
+        });
         (actual, stats.ticks())
     }
 

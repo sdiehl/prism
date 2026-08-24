@@ -280,8 +280,6 @@ concat_map(\(x) -> [x, x], [1, 2])
 [1, 1, 2, 2]
 ```
 
-lint: allow(L0201)
-
 ### `zip_with`
 
 ```prism,sig,h-d4d741d31c92460d0df342a089aa7f6172b927b33c951cea8e21fd513b58efa1

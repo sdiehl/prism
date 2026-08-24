@@ -11,9 +11,11 @@
  * reference-count collector here, so it is shared rather than module-local. */
 extern long prism_live_cells;
 
-/* Checked header+payload byte size for an n-word cell; shared with the string
- * and bignum allocators so the overflow guard has one definition. */
-size_t prism_cell_bytes(long n_words);
+/* The cell allocator's raw seam: an n-word cell's worth of memory, sized with
+ * the one overflow guard and counted by the one byte total. Shared with the
+ * string, string-window, and bignum allocators, which fill in their own headers;
+ * everything else wants prism_alloc below. */
+void *prism_cell_malloc(long n_words);
 
 void *prism_alloc(long n_words);
 /* Arena bump: hand out a raw n-word cell for a constructor the arena-lowering

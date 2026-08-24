@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-"""Fail if any internal link, anchor, or {{#include}} in docs/src is broken.
+"""Fail if any internal link, anchor, or {{#include}} in the tree is broken.
 
-Checks, for every Markdown file under docs/src:
+Every committed Markdown file is checked, not only the book: an index that
+points at files which have been renamed away is wrong wherever it lives, and
+the ones outside docs/src are the ones nothing else reads on every build. The
+file set comes from git, so it is exactly what ships.
+
+Checks, for every committed Markdown file:
   - [text](#anchor)          same-file anchor, must match a heading {#anchor}
                               or <a id="anchor"> in this file
   - [text](path.md)          relative path, must exist on disk
@@ -14,11 +19,13 @@ Checks, for every Markdown file under docs/src:
 External links (http://, https://, mailto:) are not checked.
 """
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCS_SRC = ROOT / "docs" / "src"
+MARKDOWN_GLOB = "*.md"
 
 HEADING_ANCHOR_RE = re.compile(r"^#{1,6}\s+.*\{#([A-Za-z0-9_-]+)\}\s*$")
 HTML_ANCHOR_RE = re.compile(r'<a\s+id="([A-Za-z0-9_-]+)"')
@@ -141,11 +148,26 @@ def check_include(src_file, lineno, spec):
         errors.append(f"{src_file}:{lineno}: include tag '{tag}' not found in {file_part}")
 
 
+def committed_markdown():
+    """Every tracked Markdown file, by absolute path. Asking git rather than
+    walking the tree keeps the checked set equal to the shipped set: untracked
+    scratch files are not checked, and a file cannot escape the check by living
+    somewhere the walk was never taught about."""
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", MARKDOWN_GLOB],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        check=True,
+        text=True,
+    ).stdout
+    return sorted(ROOT / name for name in listed.split("\0") if name)
+
+
 def main():
     if not DOCS_SRC.is_dir():
         sys.exit(f"no such directory: {DOCS_SRC}")
 
-    for md_file in sorted(DOCS_SRC.rglob("*.md")):
+    for md_file in committed_markdown():
         text = md_file.read_text()
         raw_lines = text.splitlines()
         masked_lines = fence_masked_lines(text)

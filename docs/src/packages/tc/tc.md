@@ -4,7 +4,7 @@
 
 The type-and-row core of a Prism typechecker, written in Prism.
 
-This library is the first load-bearing piece of the self-hosted checker: the type, row, scheme, and error ADTs, the free-variable collectors, rigid substitution with composition, metavariable zonking, row normalization, type and row unification with occurs checks, and generalization and instantiation. The grammar mirrors the statics sketch: value types and computation types are split in the call-by-push-value style, a computation is a returned value with an effect row or a function into a computation, and rows are unordered sets of distinct labels over a closed, rigid, or metavariable tail.
+This library is the Prism-written type-and-row heart of the shadow checker: the type, row, scheme, and error ADTs, the free-variable collectors, rigid substitution with composition, metavariable zonking, row normalization, type and row unification with occurs checks, and generalization and instantiation. The grammar mirrors the statics sketch: value types and computation types are split in the call-by-push-value style, a computation is a returned value with an effect row or a function into a computation, and rows are unordered sets of distinct labels over a closed, rigid, or metavariable tail.
 
 Identities follow the front end's discipline: rigid type and row variables are branded `Data.Name` identities minted by resolution, never spellings, and metavariable classes live in a payload-carrying union-find, so solving a class solves every alias of it. The solver is written in the effects style: `Control.Solve` carries fresh-meta allocation, substitution lookup, and class joining as one effect, discharged once at `run_tc` together with the aborting refusal, so every rule below reads as direct style and the structural operations stay pure.
 
@@ -33,7 +33,7 @@ Bool
 type TyVarSpace = TyVarTag
 ```
 
-The brand for rigid type-variable identities. A marker type carries no instances of its own; the payload's instances do the work. lint: allow(L0203)
+The brand for rigid type-variable identities. A marker type carries no instances of its own; the payload's instances do the work.
 
 ### `RowVarSpace`
 
@@ -41,7 +41,7 @@ The brand for rigid type-variable identities. A marker type carries no instances
 type RowVarSpace = RowVarTag
 ```
 
-The brand for rigid row-variable identities, distinct from the type- variable brand so the two can never be confused. lint: allow(L0203)
+The brand for rigid row-variable identities, distinct from the type- variable brand so the two can never be confused.
 
 ### `VTy`
 
@@ -146,7 +146,7 @@ type Subst = Subst {
 }
 ```
 
-A rigid substitution: finite maps from rigid type and row identities to the types and rows they stand for. lint: allow(L0203)
+A rigid substitution: finite maps from rigid type and row identities to the types and rows they stand for.
 
 ## Effects
 
@@ -335,7 +335,39 @@ The substitution equal to applying `first` and then `second`.
 free_metas_v : (VTy) -> List(Int)
 ```
 
-The metavariable classes occurring in a value type, in first-seen order and without repeats.
+Every metavariable class occurring in a value type, in first-seen order and without repeats. New code should prefer the kind-separated collectors.
+
+### `free_ty_metas_v`
+
+```prism,sig
+free_ty_metas_v : (VTy) -> List(Int)
+```
+
+Type metavariable classes occurring in a value type, in first-seen order.
+
+### `free_row_metas_v`
+
+```prism,sig
+free_row_metas_v : (VTy) -> List(Int)
+```
+
+Row metavariable classes occurring in a value type, in first-seen order.
+
+### `free_ty_metas_row`
+
+```prism,sig
+free_ty_metas_row : (Row) -> List(Int)
+```
+
+Type metavariable classes occurring in a row's label arguments, in first-seen order.
+
+### `free_row_metas_row`
+
+```prism,sig
+free_row_metas_row : (Row) -> List(Int)
+```
+
+Row metavariable classes occurring in a row, in first-seen order.
 
 ### `row_sorted`
 
@@ -401,7 +433,17 @@ close_rows_v : (VTy) -> VTy ! {Control.Solve.Solve(Sol)}
 
 Zonk `ty` and read every surviving row metavariable tail as closed. Rigid row tails are left alone: those are quantified, not unconstrained.
 
-`generalize` expects this to have run. Type and row classes are minted from one supply, and only a type class may become a rigid type binder, so a row tail must be settled before quantification looks at what is free.
+Top-level declaration inference uses this before `generalize` to default unwritten residual rows. Local generalization may instead quantify a row class explicitly; the kind-separated collectors keep that operation safe.
+
+### `close_rows_v_except`
+
+```prism,sig
+close_rows_v_except : (List(Int), VTy) -> VTy ! {Control.Solve.Solve(Sol)}
+```
+
+Zonk `ty` and close every surviving row metavariable except the listed classes. The keep set is normalized to current solver roots, so callers may retain evidence captured before same-kind classes were joined.
+
+Declaration inference uses this to preserve only the residual classes reached from written open rows. With an empty keep set this is exactly `close_rows_v`, so unwritten top-level tails keep their existing default.
 
 ### `close_rows_row`
 
@@ -414,10 +456,10 @@ Zonk a row and read a surviving metavariable tail as closed, so an inferred row 
 ### `generalize`
 
 ```prism,sig
-generalize : (List(Int), VTy) -> Scheme ! {Control.Fresh.Fresh, Control.Solve.Solve(Sol)}
+generalize : (List(Int), List(Int), VTy) -> Scheme ! {Control.Fresh.Fresh, Control.Solve.Solve(Sol)}
 ```
 
-Generalize a value type over every metavariable free in it and not in `ambient`, yielding a scheme with fresh rigid binders.
+Generalize a value type over every type and row metavariable free in it and not held by the surrounding environment or ambient effect row.
 
 ### `instantiate`
 
@@ -425,7 +467,7 @@ Generalize a value type over every metavariable free in it and not in `ambient`,
 instantiate : (Scheme) -> VTy ! {Control.Solve.Solve(Sol)}
 ```
 
-Instantiate a scheme, replacing each binder with a fresh metavariable.
+Instantiate a scheme, opening row binders before type binders.
 
 ### `show_vty`
 

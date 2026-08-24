@@ -115,11 +115,16 @@ pub fn replay(trace, action) =
   g(trace)
 
 -- Durable trace serialization over ground types. Each TraceEntry encodes as a
--- tag char (I/S/B), the char-length of its payload, a ':' delimiter, then the
+-- tag byte (I/S/B), the byte length of its payload, a ':' delimiter, then the
 -- payload itself. The length prefix makes any payload (newlines, ':' included)
 -- round-trip, so deserialize(serialize(t)) == t for every trace.
+--
+-- Lengths and offsets are counted in bytes on both sides, so decoding a frame
+-- costs its own size rather than the distance from the start of the log. A
+-- trace is appended to for the length of a run, so a character-indexed walk
+-- would make reading one back quadratic in the run.
 fn enc_field(tag, payload) =
-  concat(tag, concat(show_int(str_len(payload)), concat(":", payload)))
+  concat(tag, concat(show_int(byte_len(payload)), concat(":", payload)))
 
 fn enc_entry(e) =
   match e of
@@ -152,17 +157,21 @@ fn de_entry(tag, payload) =
   else
     TStr(payload)
 
--- Parse from offset i: one tag char, decimal length up to ':', then that many
--- payload chars; advance past the payload and continue.
-fn de_go(s, i, colon) =
-  if i >= str_len(s) then
+-- Parse from byte offset i: one tag byte, a decimal length up to ':', then that
+-- many payload bytes; advance past the payload and continue. A frame with no
+-- delimiter is not a frame, so the walk stops rather than faulting.
+fn de_go(s, i) =
+  if i >= byte_len(s) then
     Nil
   else
-    let tag = substring(s, i, 1)
-    let c = index_of_from(colon, s, i + 1)
-    let len = un_int(parse_int(substring(s, i + 1, c - i - 1)))
-    let payload = substring(s, c + 1, len)
-    Cons(de_entry(tag, payload), de_go(s, c + 1 + len, colon))
+    let c = index_of_go(":", s, i + 1)
+    if c < 0 then
+      Nil
+    else
+      let tag = str_slice(s, i, i + 1)
+      let len = un_int(parse_int(str_slice(s, i + 1, c)))
+      let payload = str_slice(s, c + 1, c + 1 + len)
+      Cons(de_entry(tag, payload), de_go(s, c + 1 + len))
 
 -- | Decode a trace produced by `serialize`; `deserialize(serialize(t))` is `t`.
 --
@@ -175,7 +184,7 @@ fn de_go(s, i, colon) =
 -- ```output
 -- I2:42S3:abc
 -- ```
-pub fn deserialize(s) = de_go(s, 0, char_at(":", 0))
+pub fn deserialize(s) = de_go(s, 0)
 
 -- Durable record/replay driver. A persisted log freezes the observations of an
 -- interrupted run; a re-run replays that prefix (no real IO) and, once it is

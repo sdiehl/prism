@@ -1,15 +1,9 @@
 //! Diffing two indexes: what changed between one revision and another.
 //!
-//! A pure function of two artifacts. No compiler runs, because the comparison is
-//! between content addresses that a compiler already computed, which is also why
-//! this can answer questions a text diff cannot.
+//! This compares two existing artifacts without running the compiler.
 //!
-//! The classification is the point. Content addressing folds a definition's
-//! dependencies into its hash, so *most* of what moves in a real change moved
-//! only because something underneath it did. A review tool that cannot separate
-//! those from the definitions whose own text the author edited is unusable on any
-//! change of size — the signal drowns. Comparing the hash and the source text
-//! together separates them exactly:
+//! Content addressing folds dependencies into each definition's hash. Comparing
+//! the hash with the source distinguishes direct edits from dependent rehashes:
 //!
 //! | hash | source | meaning |
 //! |------|--------|---------|
@@ -18,17 +12,8 @@
 //! | differs | differs | [`Status::Changed`]: the author edited this |
 //! | differs | same | [`Status::Cone`]: only a dependency moved |
 //!
-//! With one carve-out: equal hashes prove equal *executable behavior*, and a
-//! definition carries review-facing facts the hash never sees. A claims edit
-//! (`total fn` to `assume total fn` replaces a proof with a trust root), a
-//! visibility change, a doc or deprecation edit — each is erased before the
-//! layer that is hashed, and a doc comment sits outside [`Def::source`]
-//! entirely. Those are compared separately and classified as authored, because
-//! calling a new trust root "cosmetic" (or not listing it at all) is exactly
-//! the misreport a reviewer cannot afford.
-//!
-//! The last row is the one worth having. It is the difference between "47 things
-//! changed" and "you edited 3 things, and 44 more re-hashed underneath them".
+//! Claims, visibility, documentation, and deprecation are compared separately
+//! because they do not affect executable hashes. Changes to them are authored.
 //!
 //! A rename is likewise free: a definition whose bytes are unchanged but whose
 //! canonical name moved keeps its hash, so it appears as [`Status::Moved`] rather
@@ -101,15 +86,9 @@ pub struct Entry {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Side {
     pub title: String,
-    /// That revision's namespace root, so a consumer can tell which two programs
-    /// were compared without reading a single entry — and can refuse to overlay
-    /// this diff on an index it was not made against.
+    /// That revision's namespace root, used to validate the diff's inputs.
     pub contract: String,
-    /// The highlight classes this side's carried [`Def::tokens`] index. The
-    /// entry records were copied out of their index, whose shared tables did not
-    /// come with them; without this a consumer cannot decode the old side's
-    /// spans at all, and the two revisions' tables can order classes
-    /// differently, so "borrow the new index's table" paints the wrong colors.
+    /// The highlight classes indexed by this side's [`Def::tokens`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub token_classes: Vec<String>,
     /// The rendered types this side's carried [`Def::types`] index, for the
@@ -329,11 +308,8 @@ pub fn diff(old: &Index, new: &Index) -> Result<IndexDiff, String> {
 // guess.
 fn classify(old: &Def, new: &Def) -> Option<Status> {
     let same_text = old.source == new.source;
-    // Review-facing facts the behavior hash never sees. A claim is erased before
-    // the layer that is hashed — `total fn` to `assume total fn` swaps a proof
-    // for a trust root without moving a single hashed byte — and a doc comment
-    // sits outside `source`, so a doc-only edit moves neither the hash nor the
-    // text. Both are authored, and both are exactly what a reviewer reads.
+    // Claims and other review metadata do not affect the behavior hash. Doc
+    // comments also sit outside `source`, so compare all metadata explicitly.
     let same_meta = old.claims == new.claims
         && old.vis == new.vis
         && old.doc == new.doc

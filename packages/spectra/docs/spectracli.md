@@ -38,6 +38,8 @@ type SpectraCommand
   deriving (Eq, Show)
 ```
 
+One parsed subcommand: check a project, build it to a named PDF and optionally open it, or clean its build directory.
+
 ## Functions and Values
 
 ### `spectra_command`
@@ -46,8 +48,12 @@ type SpectraCommand
 spectra_command : Cli.Command(SpectraCommand)
 ```
 
+The whole command grammar the executable parses its argument list with.
+
 ### `parse_spectra_argv`
 
 ```prism,sig
 parse_spectra_argv : (List(String)) -> Cli.Outcome(SpectraCommand)
 ```
+
+Parse an argument list against the grammar, without touching the process environment.

@@ -16,7 +16,7 @@ use inkwell::values::{
 };
 use inkwell::{AddressSpace, FloatPredicate, IntPredicate, OptimizationLevel};
 
-use super::abi::idx64;
+use super::abi::{idx64, STATIC_CELL, STR_TAG};
 use super::emit::{
     closure_summary_with_isa, emit_closure_adapters_with_isa, emit_closure_dispatch_with_isa,
     emit_lowered_with_isa, emit_selected_plan_with_isa, emit_selected_with_isa,
@@ -261,15 +261,30 @@ impl<'ctx> Inkwell<'ctx> {
         let _ = self.call_direct(f, args, "");
     }
 
-    fn str_gl(&self, idx: usize, size: usize) -> GlobalValue<'ctx> {
+    // The static string cell for literal `idx`, get-or-added so a mention may
+    // precede the initializer pass: a struct global with the exact heap-cell
+    // shape `{ rc, tag, byte_len, bytes }`, 8-aligned so the address is a valid
+    // cell word (tag bit clear). `nbytes` excludes the NUL the array carries.
+    fn str_gl(&self, idx: usize, nbytes: usize) -> GlobalValue<'ctx> {
         let name = format!(".str{idx}");
         self.module.get_global(&name).unwrap_or_else(|| {
-            let len = u32::try_from(size).unwrap_or_else(|_| {
+            let len = u32::try_from(nbytes + 1).unwrap_or_else(|_| {
                 self.ice("string literal exceeds u32 length");
                 u32::MAX
             });
-            let ty = self.ctx.i8_type().array_type(len);
-            self.module.add_global(ty, None, &name)
+            let word = self.i64t();
+            let cell = self.ctx.struct_type(
+                &[
+                    word.into(),
+                    word.into(),
+                    word.into(),
+                    self.ctx.i8_type().array_type(len).into(),
+                ],
+                false,
+            );
+            let g = self.module.add_global(cell, None, &name);
+            g.set_alignment(8);
+            g
         })
     }
 
@@ -515,15 +530,12 @@ impl Isa for Inkwell<'_> {
     }
 
     fn str_lit(&self, _b: &mut Buf, dst: &str, idx: usize, len: usize) {
-        let g = self.str_gl(idx, len + 1);
-        let f = self.decl(
-            rt::STR_LIT,
-            self.i64t()
-                .fn_type(&[self.ptr_t().into(), self.i64t().into()], false),
-        );
-        let n = self.i64t().const_int(idx64(len).cast_unsigned(), false);
-        let cs = self.call_direct(f, &[g.as_pointer_value().into(), n.into()], nm(dst));
-        self.set(dst, self.cs_basic(cs));
+        let g = self.str_gl(idx, len);
+        let r = self
+            .builder
+            .build_ptr_to_int(g.as_pointer_value(), self.i64t(), nm(dst))
+            .unwrap_or_else(|e| self.pint("str_lit", &e));
+        self.set(dst, r.into());
     }
 
     fn bin(&self, _b: &mut Buf, dst: &str, op: IntOp, x: &str, y: &str) {
@@ -894,8 +906,18 @@ impl Isa for Inkwell<'_> {
     }
 
     fn str_global(&self, _out: &mut String, idx: usize, s: &str) {
-        let g = self.str_gl(idx, s.len() + 1);
-        g.set_initializer(&self.ctx.const_string(s.as_bytes(), true));
+        let g = self.str_gl(idx, s.len());
+        let word = self.i64t();
+        let init = self.ctx.const_struct(
+            &[
+                word.const_int(STATIC_CELL.cast_unsigned(), false).into(),
+                word.const_int(STR_TAG.cast_unsigned(), false).into(),
+                word.const_int(idx64(s.len()).cast_unsigned(), false).into(),
+                self.ctx.const_string(s.as_bytes(), true).into(),
+            ],
+            false,
+        );
+        g.set_initializer(&init);
         g.set_constant(true);
         g.set_linkage(Linkage::Private);
     }

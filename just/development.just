@@ -23,6 +23,12 @@ run FILE:
 check FILE:
     cargo run -- check "{{ FILE }}"
 
+# Run the Prism-written checker from live compiler-owned package sources. The
+# release binary avoids making workbench execution pay debug-interpreter cost.
+[group('development')]
+tc +FILES: build-release
+    PRISM_TOOL_PACKAGES_ROOT=packages ./target/release/prism bootstrap check {{ FILES }} --json
+
 # Run the full test suite with compact output; deep-recursion tests need the
 # same enlarged libtest stack the ci test recipe sets.
 [group('development')]

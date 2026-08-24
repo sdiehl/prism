@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/local_mono_two_entries.pr
+---
+2340
+32
+34
+66
+=> ()

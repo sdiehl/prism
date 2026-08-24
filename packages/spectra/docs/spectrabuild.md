@@ -29,6 +29,8 @@ type DeckEnvelope = DeckEnvelope {
 } deriving (Eq, Show)
 ```
 
+The framed value a deck program prints: the Typst source, the logical slide and physical page counts, and the deck title.
+
 ## Functions and Values
 
 ### `shell_quote`
@@ -45,11 +47,15 @@ Quote one opaque argument for the POSIX shell used by `system`.
 parse_envelope : (String) -> Result((DeckEnvelope, String), String)
 ```
 
+Take the framed envelope out of a deck program's standard output, returning it beside the JSON it was carried in.
+
 ### `check_project`
 
 ```prism,sig
 check_project : (String) -> Int ! {IO, Output}
 ```
+
+Verify the external tools and the deck without writing any artifact, returning the status to exit with.
 
 ### `build_project`
 
@@ -57,8 +63,12 @@ check_project : (String) -> Int ! {IO, Output}
 build_project : (String, String, Bool) -> Int ! {FileSystem, IO, Output}
 ```
 
+Run the whole pipeline, installing the Typst source and PDF under `target/spectra`, and return the status to exit with.
+
 ### `clean_project`
 
 ```prism,sig
 clean_project : (String) -> Int ! {IO}
 ```
+
+Remove a project's `target/spectra` and nothing else, returning the status to exit with.

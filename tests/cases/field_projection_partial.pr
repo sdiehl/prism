@@ -1,0 +1,11 @@
+-- `radius` exists, but only on one arm of the unrefined `Shape` value.
+type Shape = Circle { radius: Int } | Square { side: Int }
+
+fn radius_by_match(shape : Shape) : Int =
+  match shape of
+    Circle { radius = radius } => radius
+    Square { .. } => 0
+
+fn radius(shape : Shape) : Int = shape.radius
+
+fn main() = println(0)

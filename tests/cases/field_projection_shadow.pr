@@ -1,0 +1,9 @@
+-- A bare `.radius` is always field projection. A same-named top-level function
+-- must not turn a refused partial projection into silent UFCS fallback.
+type Shape = Circle { radius: Int } | Square { side: Int }
+
+fn radius(_shape : Shape) : Int = 99
+
+fn read(shape : Shape) : Int = shape.radius
+
+fn main() = println(0)

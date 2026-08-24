@@ -47,7 +47,7 @@ Overwrite `dst[dst_off + i]` with `src[src_off + i]` for each `i` in `0 .. len` 
 
 ### `blitBytes`
 
-```prism,def,h-276dc1051da45c1b00f8511a8b76a75b4930db87c3c110143aca667ced480d37
+```prism,def,h-68897a0bd1df17044c4756ae220e203dccc763e877c9131e3ca5e239c8cb4ce4
 instance blitBytes : Blit(Bytes)
 ```
 

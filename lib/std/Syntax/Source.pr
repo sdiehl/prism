@@ -42,11 +42,18 @@ pub type SourceFile = SourceFile {
   text: String
 } deriving (Eq, Show)
 
--- The newline codepoint, the only line terminator `line_col` counts.
+-- The newline byte, the only line terminator `line_col` counts. It cannot occur
+-- inside a multi-byte character, so counting lines by byte is exact.
 fn src_newline() : Int = 10
 
 -- | The one-based line and column of a byte offset, as a projection over the
 -- text. Offsets past the end clamp to the final position.
+--
+-- Both the offset and the column it reports are counted in bytes, the same
+-- vocabulary spans use, so the projection agrees with the identity it projects
+-- from. Counting the walk in characters instead would read a byte offset as a
+-- character index and land somewhere else entirely on a line holding any
+-- multi-byte character, besides re-walking the text on every step.
 --
 -- ```prism
 -- line_col("ab\ncd", 4)
@@ -55,12 +62,12 @@ fn src_newline() : Int = 10
 -- (2, 2)
 -- ```
 pub fn line_col(text : String, off : Int) : (Int, Int) =
-  line_col_go(text, 0, min(off, str_len(text)), 1, 1)
+  line_col_go(text, 0, min(off, byte_len(text)), 1, 1)
 
 fn line_col_go(s : String, i : Int, stop : Int, l : Int, c : Int) : (Int, Int) =
   if i >= stop then
     (l, c)
-  elif char_at(s, i) == src_newline() then
+  elif byte_at(s, i) == src_newline() then
     line_col_go(s, i + 1, stop, l + 1, 1)
   else
     line_col_go(s, i + 1, stop, l, c + 1)

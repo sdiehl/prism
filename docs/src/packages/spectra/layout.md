@@ -22,11 +22,15 @@ Layout.Column(8, Layout.Left, [Layout.Text(Layout.TextStyle { size = 0, color = 
 type Align = Left | Center | Right deriving (Eq, Show)
 ```
 
+Horizontal alignment of a picture's children.
+
 ### `FitMode`
 
 ```prism,def
 type FitMode = Contain | Cover deriving (Eq, Show)
 ```
+
+How a picture fills the box it is fitted into: letterboxed inside it, or filling it and cropping the overflow.
 
 ### `Inline`
 
@@ -41,6 +45,8 @@ type Inline
   deriving (Eq, Show)
 ```
 
+A span of inline text: plain characters, an emphasis or strength wrapper, inline code, a link, or a color role.
+
 ### `TextStyle`
 
 ```prism,def
@@ -50,6 +56,8 @@ type TextStyle = TextStyle {
   align: Align
 } deriving (Eq, Show)
 ```
+
+The type settings of a text picture. A size of zero and an empty color both mean "whatever the theme says".
 
 ### `Pict`
 
@@ -69,6 +77,8 @@ type Pict
   | RawTypst(String)
   deriving (Eq, Show)
 ```
+
+A picture: the layout intent of one region of a slide, as plain data a backend interprets later.
 
 ## Functions and Values
 
@@ -118,11 +128,15 @@ A plain bullet item.
 row : (Int, List(Pict)) -> Pict
 ```
 
+Children laid out left to right, `gap` points apart.
+
 ### `column`
 
 ```prism,sig
 column : (Int, List(Pict)) -> Pict
 ```
+
+Children laid out top to bottom, `gap` points apart, left aligned.
 
 ### `centered`
 
@@ -130,11 +144,15 @@ column : (Int, List(Pict)) -> Pict
 centered : (Int, List(Pict)) -> Pict
 ```
 
+Children laid out top to bottom, `gap` points apart, centered.
+
 ### `overlay`
 
 ```prism,sig
 overlay : (List(Pict)) -> Pict
 ```
+
+Children stacked on one another, first at the back.
 
 ### `inset`
 
@@ -142,8 +160,12 @@ overlay : (List(Pict)) -> Pict
 inset : (Int, Pict) -> Pict
 ```
 
+A child padded by `all` points on every side.
+
 ### `raw_typst`
 
 ```prism,sig
 raw_typst : (String) -> Pict
 ```
+
+Typst source admitted verbatim, escaping nothing.

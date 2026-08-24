@@ -1,0 +1,46 @@
+-- An escaping Trace component confined to its region while the rest of the
+-- program fuses at the state rung rather than the evidence rung: the State
+-- handler interprets get/put by parameter passing (each clause returns a
+-- function of the running state), which the evidence rung declines, so the
+-- fused rest comes out of state threading. This pins the confinement split
+-- where the rest's own engine is the second one tried, not the first.
+effect Trace
+  emit(Int) : Int
+
+effect State
+  get() : Int
+  put(Int) : Unit
+
+fn run_thunks(fs, acc) =
+  match fs of
+    Nil => acc
+    Cons(f, rest) => run_thunks(rest, acc + f())
+
+fn traced() =
+  let fs = [\() -> emit(1), \() -> emit(2), \() -> emit(3)]
+  handle run_thunks(fs, 0) with
+    emit(n) resume k => k(n * 2)
+    return r => r
+
+fn tick() : Int ! {State} =
+  let n = get()
+  put(n + 1)
+  n
+
+fn counter() : Int ! {State} =
+  tick()
+  tick()
+  tick()
+  get()
+
+fn run_counter(init) =
+  let f =
+    handle counter() with
+      get() resume k => \(s) -> k(s)(s)
+      put(s2) resume k => \(_s) -> k(())(s2)
+      return r => \(_s) -> r
+  f(init)
+
+fn main() =
+  println(run_counter(0))
+  println(traced())

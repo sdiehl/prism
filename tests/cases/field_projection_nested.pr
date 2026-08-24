@@ -1,0 +1,8 @@
+-- A valid outer projection must not hide a partial inner projection.
+type Tagged = A { id: Int } | B { id: Int }
+
+type Outer = Outer { inner: Tagged }
+
+fn tag_id(outer : Outer) : Int = outer.inner.id
+
+fn main() = println(0)

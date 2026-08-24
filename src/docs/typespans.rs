@@ -46,7 +46,7 @@ type RangeLink = (ByteRange, ByteRange);
 /// Which language level a span's rendering describes.
 ///
 /// Value spans (the default, elided from the payload) show an expression or
-/// binder type; type spans show a type constructor's kind; hole spans show a
+/// binder type. Type spans show a type constructor's kind. Hole spans show a
 /// typed hole's inferred type. The consumer styles each level distinctly.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]

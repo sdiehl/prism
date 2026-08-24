@@ -1,6 +1,7 @@
 use prism::core::Digest;
+use prism::types::NominalRepr;
 use prism::{
-    check_with_seed, module_interface, with_prelude, ModuleInterface, Root, Sym,
+    check_with_seed, module_interface, with_prelude, Error, ModuleInterface, Root, Sym,
     MODULE_INTERFACE_FORMAT,
 };
 
@@ -104,6 +105,7 @@ fn transparent_data_shape_and_constructor_facts_rehydrate() {
 
     let shape = facts.data.get("Shape").expect("exported data metadata");
     assert_eq!(shape.ctors, ["Circle", "Square"]);
+    assert_eq!(shape.repr, NominalRepr::BoxedCell);
     assert_eq!(facts.ctors["Circle"].tag, FIRST_CTOR_TAG);
     assert_eq!(facts.ctors["Square"].tag, SECOND_CTOR_TAG);
     assert!(facts.env.contains_key(&Sym::from("Circle")));
@@ -130,8 +132,36 @@ fn opaque_data_rehydrates_shape_without_constructors() {
     );
     let facts = interface.rehydrate().unwrap();
     assert!(facts.data["Counter"].ctors.is_empty());
+    assert_eq!(facts.data["Counter"].repr, NominalRepr::BoxedCell);
     assert!(!facts.ctors.contains_key("Counter"));
     assert!(!facts.env.contains_key(&Sym::from("Counter")));
+
+    check_with_seed(
+        "fn maybe(x : Counter) : OrNull(Counter) = This(x)\n",
+        &facts.typecheck_seed(),
+    )
+    .expect("opaque ordinary data retains its boxed representation evidence");
+}
+
+#[test]
+fn opaque_newtype_keeps_transparent_representation_evidence() {
+    let interface = interface(
+        "opaque newtype Zero = Zero(Unit)\n\
+         pub fn zero() : Zero = Zero(())\n",
+    );
+    let facts = interface.rehydrate().unwrap();
+    assert!(facts.data["Zero"].ctors.is_empty());
+    assert_eq!(facts.data["Zero"].repr, NominalRepr::Transparent);
+
+    let error = check_with_seed(
+        "fn maybe(x : Zero) : OrNull(Zero) = This(x)\n",
+        &facts.typecheck_seed(),
+    )
+    .expect_err("opacity cannot turn a transparent newtype into a boxed cell");
+    let Error::Type(error) = error else {
+        panic!("expected a type error, got {error}");
+    };
+    assert_eq!(error.code(), Some("E1019"));
 }
 
 #[test]

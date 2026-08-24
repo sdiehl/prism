@@ -40,7 +40,10 @@ use crate::tc::parse_checked_signature;
 use crate::types::{Checked, Env, Type, TypecheckSeed};
 
 use super::front::{run_front, Front, FrontRequest};
-use super::{elaborated, hash_meta, with_prelude, Config, WireKind, NAMESPACE_ARTIFACT_KIND};
+use super::{
+    elaborated, hash_meta, stage_validation_error, with_prelude, Config, WireKind,
+    NAMESPACE_ARTIFACT_KIND,
+};
 #[cfg(feature = "native")]
 use super::{ArtifactField, ArtifactIdentity};
 
@@ -147,9 +150,9 @@ fn with_konsts(
     checked: &Checked,
     core: &ElaboratedCore,
 ) -> Result<ElaboratedCore, Error> {
-    let mut core = core.clone();
-    core.core_mut().fns.extend(konst_fns(program, checked)?);
-    Ok(core)
+    core.clone()
+        .with_functions(konst_fns(program, checked)?)
+        .map_err(|violations| stage_validation_error("elaborated", &violations))
 }
 
 // The layers of an already-augmented program (see [`with_konsts`]).
@@ -630,10 +633,10 @@ pub struct PublicDef {
 ///
 /// Unlike the driver's cache-bust query salts, this is a real content-identity
 /// version: it is hashed into `interface_digest`, so its value must not be
-/// renumbered casually (a change reseats every interface digest). `v3` is simply
-/// the current format; there is no legacy reader, a non-`v3` document is rejected
+/// renumbered casually (a change reseats every interface digest). `v4` is simply
+/// the current format; there is no legacy reader, a non-`v4` document is rejected
 /// outright in `validate`.
-pub const MODULE_INTERFACE_FORMAT: &str = "prism-module-interface-v3";
+pub const MODULE_INTERFACE_FORMAT: &str = "prism-module-interface-v4";
 
 /// One deterministic semantic row exported to an importing checker.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -774,10 +777,12 @@ pub fn public_surface(
     roots: &[Root],
 ) -> Result<Vec<PublicDef>, Error> {
     let exports = parse(entry_src)?.program.exports;
-    let (program, checked, mut core) = elaborated(full_src, roots)?;
+    let (program, checked, core) = elaborated(full_src, roots)?;
     // Top-level constants inline at use sites, so lift them to zero-param CoreFns
     // for their own behavior hash, exactly as the stdlib fingerprint does.
-    core.core_mut().fns.extend(konst_fns(&program, &checked)?);
+    let core = core
+        .with_functions(konst_fns(&program, &checked)?)
+        .map_err(|violations| stage_validation_error("elaborated", &violations))?;
     let defs = hash_program(
         &core,
         &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),

@@ -10,8 +10,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
-use crate::core::fbip::borrow_sigs;
-use crate::core::{elaborate_typed, insert_rc, pp_core_pretty, reuse, Digest, ElaboratedCore};
+use crate::core::{elaborate_typed, insert_rc, pp_core_pretty, reuse, Digest};
 use crate::error::Error;
 use crate::eval::{run, Rv};
 use crate::lex::lex;
@@ -19,6 +18,8 @@ use crate::parse::{parse, ParseResult};
 use crate::resolve::{default_roots, Root};
 use crate::types::Checked;
 
+#[cfg(feature = "native")]
+use crate::core::fbip::borrow_sigs;
 #[cfg(feature = "native")]
 use crate::core::{fip_annots, hash_program};
 #[cfg(feature = "native")]
@@ -33,7 +34,9 @@ use super::query::strip_target;
 use super::verify::{fip_check, replayable_check};
 #[cfg(feature = "native")]
 use super::{finish_lowered, hash_meta, lower_opt};
-use super::{frontend, Config};
+// The rendered `fbip (rc)` section is not native-gated, so its borrow masks are
+// needed on every target.
+use super::{frontend, rc_borrow_sigs, validated_elaborated_core, Config};
 
 pub(super) fn types_section(checked: &Checked) -> String {
     let mut s = String::new();
@@ -103,7 +106,13 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
         }
     };
     let (core, typed, verify_env) = elaboration.into_parts();
-    let core = ElaboratedCore::new(core);
+    let core = match validated_elaborated_core(core) {
+        Ok(core) => core,
+        Err(error) => {
+            section(&mut out, "core (cbpv)", &render(error));
+            return out;
+        }
+    };
     section(&mut out, "core (cbpv)", pp_core_pretty(&core).trim_end());
 
     if let Err(e) = fip_check(&program, &checked, &core) {
@@ -116,7 +125,7 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
         return out;
     }
 
-    let sigs = borrow_sigs(&program);
+    let sigs = rc_borrow_sigs(&program, &checked, &core, cfg);
     section(
         &mut out,
         "fbip (rc)",
@@ -136,7 +145,12 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
         finish_lowered(lowered, &sigs, cfg).map(|core| (core, ctors))
     }) {
         Ok((lowered, ctors)) => {
-            let hashes = hash_program(&core, &hash_meta(&checked, &sigs, &fip_annots(&program)));
+            // Identity reads the declared masks; the augmented `sigs` above are
+            // a reference-count decision and never part of the program's hash.
+            let hashes = hash_program(
+                &core,
+                &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
+            );
             match native_kont_table_of(&hashes, roots, cfg, NativeKontIdentityRows::Portable)
                 .and_then(|native_kont_table| {
                     emit_llvm_with_native_kont_table(

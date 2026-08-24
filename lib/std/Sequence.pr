@@ -16,8 +16,8 @@
 -- ```
 --
 -- The step continuation is ordinary data, not an effect, so every combinator is a
--- total pure function over `Step`. That is the whole reason this substrate exists:
--- an earlier push design routed elements through a shared `Emit` effect, and a
+-- total pure function over `Step`.
+-- An earlier push design routed elements through a shared `Emit` effect, and a
 -- single `Emit(a)` label per scope made element-type changes, heterogeneous `zip`,
 -- and mixing two element types in one function unrepresentable. On pull `Step` the
 -- element type is a plain type parameter, so `map : Seq(a) -> Seq(b)` type-changes

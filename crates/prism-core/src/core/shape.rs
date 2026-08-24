@@ -122,7 +122,7 @@ fn encode_data(d: &DataDecl) -> String {
     e.out.push_str("|data");
     e.tok(&d.name);
     let _ = write!(e.out, "nt{}", u8::from(d.newtype));
-    // Commit the parameter arity, not just the kinds: `param_kinds` is legally empty
+    // Commit both parameter arity and kinds: `param_kinds` is legally empty
     // (kinds default to Type), and without the count `data Phantom a` and
     // `data Phantom a b` would encode identically.
     let _ = write!(e.out, "K{}", d.params.len());

@@ -49,8 +49,7 @@ fn uninterrupted(full: &str) -> String {
 fn suspend_and_resume_reproduces_output_at_every_cut() {
     // Compile once and drive the interpreter directly (recompiling per budget is
     // needless here), but still round-trip every snapshot through the `kont`
-    // codec's bytes so this exercises encode + decode at every cut, not just the
-    // in-memory continuation.
+    // codec's bytes so this exercises encoding and decoding at every cut.
     let core = core_of(COUNTER).expect("compile");
     let want = uninterrupted(&with_prelude(COUNTER));
     let mut observed_out = Vec::new();

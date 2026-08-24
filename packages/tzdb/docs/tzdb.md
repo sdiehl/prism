@@ -313,11 +313,15 @@ Coordinated Universal Time itself, offset zero, no daylight rule.
 europe_london : () -> Zone
 ```
 
+The United Kingdom, on GMT in winter and BST under the European daylight rule.
+
 ### `europe_lisbon`
 
 ```prism,sig
 europe_lisbon : () -> Zone
 ```
+
+Portugal, on Western European Time and its summer counterpart.
 
 ### `europe_paris`
 
@@ -325,11 +329,15 @@ europe_lisbon : () -> Zone
 europe_paris : () -> Zone
 ```
 
+France, on Central European Time and its summer counterpart.
+
 ### `europe_berlin`
 
 ```prism,sig
 europe_berlin : () -> Zone
 ```
+
+Germany, on Central European Time and its summer counterpart.
 
 ### `europe_madrid`
 
@@ -337,11 +345,15 @@ europe_berlin : () -> Zone
 europe_madrid : () -> Zone
 ```
 
+Spain, on Central European Time and its summer counterpart.
+
 ### `europe_rome`
 
 ```prism,sig
 europe_rome : () -> Zone
 ```
+
+Italy, on Central European Time and its summer counterpart.
 
 ### `europe_athens`
 
@@ -349,11 +361,15 @@ europe_rome : () -> Zone
 europe_athens : () -> Zone
 ```
 
+Greece, on Eastern European Time and its summer counterpart.
+
 ### `america_new_york`
 
 ```prism,sig
 america_new_york : () -> Zone
 ```
+
+The United States Eastern zone, on the North American daylight rule.
 
 ### `america_chicago`
 
@@ -361,11 +377,15 @@ america_new_york : () -> Zone
 america_chicago : () -> Zone
 ```
 
+The United States Central zone, on the North American daylight rule.
+
 ### `america_denver`
 
 ```prism,sig
 america_denver : () -> Zone
 ```
+
+The United States Mountain zone, on the North American daylight rule.
 
 ### `america_phoenix`
 
@@ -381,11 +401,15 @@ Arizona observes no daylight time, unlike the rest of the Mountain zone.
 america_los_angeles : () -> Zone
 ```
 
+The United States Pacific zone, on the North American daylight rule.
+
 ### `america_anchorage`
 
 ```prism,sig
 america_anchorage : () -> Zone
 ```
+
+The Alaska zone, on the North American daylight rule.
 
 ### `america_sao_paulo`
 
@@ -409,11 +433,15 @@ Mexico abolished daylight time in 2022.
 asia_tokyo : () -> Zone
 ```
 
+Japan, nine hours ahead of UTC year round.
+
 ### `asia_shanghai`
 
 ```prism,sig
 asia_shanghai : () -> Zone
 ```
+
+Mainland China, eight hours ahead of UTC year round.
 
 ### `asia_kolkata`
 
@@ -429,17 +457,23 @@ India runs on a half-hour offset, five hours thirty minutes ahead of UTC.
 asia_dubai : () -> Zone
 ```
 
+The United Arab Emirates, four hours ahead of UTC year round.
+
 ### `asia_singapore`
 
 ```prism,sig
 asia_singapore : () -> Zone
 ```
 
+Singapore, eight hours ahead of UTC year round.
+
 ### `australia_sydney`
 
 ```prism,sig
 australia_sydney : () -> Zone
 ```
+
+New South Wales, on the southern-hemisphere Australian daylight rule.
 
 ### `australia_brisbane`
 
@@ -454,6 +488,8 @@ Queensland observes no daylight time, unlike New South Wales.
 ```prism,sig
 pacific_auckland : () -> Zone
 ```
+
+New Zealand, on the southern-hemisphere New Zealand daylight rule.
 
 ### `zones`
 

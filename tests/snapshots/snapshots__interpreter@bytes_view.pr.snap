@@ -1,0 +1,22 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/bytes_view.pr
+---
+whole: [68656c6c6f207769646520776f726c64] len=16
+middle: [77696465] len=4
+start negative: [68656c6c] len=4
+start past end: [] len=0
+len negative: [] len=0
+len past end: [776f726c64] len=5
+empty span: [] len=0
+nested: [207769646520] len=6
+peeled: [68656c6c6f207769646520776f726c64] len=16
+peeled text: [hello wide world]
+eq=true cmp=0
+hash=true
+concat: [77696465776f726c64] len=9
+base64 roundtrip: [wide]
+raw window: [ff10fe80] len=4
+raw window text: <not utf-8>
+=> ()

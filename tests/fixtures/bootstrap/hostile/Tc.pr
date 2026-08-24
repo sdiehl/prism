@@ -1,0 +1,10 @@
+-- A checked project's own `Tc` module, sitting where module resolution would
+-- find it first. The shadow checker imports `Tc`, so if the shadow ever
+-- resolved against the target's search path this file would supply the
+-- compiler's own oracle and the project would be choosing the implementation
+-- that judges it. It exports none of the names the real checker exports, so
+-- that mistake is loud rather than quiet.
+
+type Verdict = Always | Never
+
+fn verdict() : Verdict = Always

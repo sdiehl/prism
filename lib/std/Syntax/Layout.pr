@@ -133,36 +133,27 @@ fn ly_vclose(off : Int) : Token = ly_virt(TVClose, off)
 
 fn ly_vsep(off : Int) : Token = ly_virt(TVSemi, off)
 
--- Membership in a list of fixed-token spellings.
-fn ly_mem(s : String, xs : List(String)) : Bool =
-  match xs of
-    Nil => false
-    Cons(h, t) => s == h || ly_mem(s, t)
-
 -- The fixed tokens that open a layout block: their following indented line is
 -- the block. Matches the compiler's `opens_block` set (the synthetic head opener
--- is handled separately as `LHead`).
-fn ly_opener_words() : List(String) =
-  [
-      "=",
-      "then",
-      "else",
-      "=>",
-      "of",
-      "with",
-      "handler",
-      "fn",
-      "try",
-      "catch",
-      "transact",
-      "do",
-      "where",
-      "loop",
-    ]
-
+-- is handled separately as `LHead`). Direct comparisons, as in the bracket
+-- predicates below, so the per-token query allocates nothing.
 fn ly_opens_block(k : TokenKind) : Bool =
   match k of
-    TFixed(s) => ly_mem(s, ly_opener_words())
+    TFixed(s) =>
+      s == "="
+        || s == "then"
+        || s == "else"
+        || s == "=>"
+        || s == "of"
+        || s == "with"
+        || s == "handler"
+        || s == "fn"
+        || s == "try"
+        || s == "catch"
+        || s == "transact"
+        || s == "do"
+        || s == "where"
+        || s == "loop"
     _ => false
 
 -- Whether a fixed token opens a bracket group that suppresses layout.

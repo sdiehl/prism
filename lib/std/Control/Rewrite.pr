@@ -214,7 +214,7 @@ pub type RwFix(a) = RwFix {
 
 -- | Apply `s` to its own output until it declines, at most `fuel` times.
 --
--- Always terminates, whatever `s` does, and that is the whole reason it exists.
+-- The fuel bound guarantees termination even when `s` never declines.
 -- The termination condition is explicit: stop when `s` declines, reporting
 -- `converged = true` and the number of applications; or stop when `fuel`
 -- applications have been made and `s` still accepts, reporting

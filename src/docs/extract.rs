@@ -12,6 +12,16 @@ use std::collections::BTreeMap;
 
 use marginalia::{Trivia, TriviaTable};
 
+/// What a lint suppression line says, after its comment marker.
+///
+/// A pragma is an ordinary comment, so it lands in the same leading trivia a
+/// docstring does and would otherwise be rendered as prose. The spelling is the
+/// lint package's (`Pragma.pr` declares both forms); it is declared here rather
+/// than beside the lint host because the doc generator is the consumer that is
+/// always compiled, and `pragma_marker_matches_the_rule_package` in that host
+/// holds this copy to the package's own so the two cannot drift.
+pub(crate) const PRAGMA_MARKER: &str = "lint: allow";
+
 /// Doc text recovered from a module's trivia, keyed by the byte offset of the
 /// declaration each block documents. `module` is the top-of-file description.
 pub(crate) struct Docs {
@@ -75,6 +85,11 @@ fn render_block(lines: &[&str]) -> String {
             }
         } else if in_code {
             code.push(body.trim_end().to_string());
+        } else if trimmed.starts_with(PRAGMA_MARKER) {
+            // A lint suppression sits in the same comment run as the docstring
+            // (it has to: the linter reads a declaration's leading trivia), but
+            // it addresses the linter, not the reader. Its rationale is written
+            // in the prose above it, which is what belongs on the page.
         } else if trimmed.is_empty() {
             if !para.is_empty() {
                 blocks.push(para.join(" "));

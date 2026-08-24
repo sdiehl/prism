@@ -2,8 +2,8 @@
 //!
 //! # Supported surface
 //!
-//! Most of the compiler is exposed so that tools can build ON it, not just call
-//! it. The essential guarantee is that **merged Core is the semantic
+//! Most of the compiler is exposed so that tools can build on its components.
+//! The essential guarantee is that **merged Core is the semantic
 //! authority**, so the surface is organized around consuming and producing Core:
 //!
 //! - [`core`]: the call-by-push-value Core IR and its content-addressed
@@ -140,12 +140,12 @@ pub use driver::{
     CutReport, CutTarget, DeltaReport, DurableRun, EvidenceTier, FetchReport, ImpactReport,
     InterfaceDelta, ModuleCheckReport, ModuleGraph, ModuleGraphNode, ModuleInterface,
     ModuleInterfaceEntry, ModuleInvalidation, ModuleInvalidationCause, NamespaceIdentity,
-    NamespaceLayers, PatchRefusal, PatchRefusalBody, PatchRefusalSubject, PublicDef, RecordedRun,
-    RehydratedModuleInterface, Scheduler, SessionStats, StagedPatch, StdlibHash, StepRuler,
-    StepRulerRow, SuspendAtCut, SuspendCut, SuspendResult, TimingSink, MODULE_GRAPH_FORMAT,
-    MODULE_INTERFACE_FORMAT, PATCH_BEHAVIOR_CORPUS_FORMAT, PATCH_BEHAVIOR_FORMAT,
-    PATCH_DELTA_FORMAT, PATCH_FETCH_FORMAT, PATCH_IMPACT_FORMAT, PATCH_REFUSAL_FORMAT,
-    PATCH_STAGE_FORMAT, STEP_RULER_FORMAT,
+    NamespaceLayers, PatchRefusal, PatchRefusalBody, PatchRefusalSubject, PhaseTally, PublicDef,
+    RecordedRun, RehydratedModuleInterface, Scheduler, SessionStats, StagedPatch, StdlibHash,
+    StepRuler, StepRulerRow, SuspendAtCut, SuspendCut, SuspendResult, TimingSink,
+    MODULE_GRAPH_FORMAT, MODULE_INTERFACE_FORMAT, PATCH_BEHAVIOR_CORPUS_FORMAT,
+    PATCH_BEHAVIOR_FORMAT, PATCH_DELTA_FORMAT, PATCH_FETCH_FORMAT, PATCH_IMPACT_FORMAT,
+    PATCH_REFUSAL_FORMAT, PATCH_STAGE_FORMAT, STEP_RULER_FORMAT,
 };
 #[cfg(feature = "native")]
 pub use driver::{

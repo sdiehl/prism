@@ -1,0 +1,16 @@
+import Data.String (str_slice)
+
+-- Take a fixed number of long windows onto one N-byte string. A window shares
+-- the parent's bytes and holds it alive, so the loop allocates one small cell
+-- per window and its byte total is independent of N; a slice that copied would
+-- materialize most of the parent on every step, making the byte total grow with
+-- N times the loop count.
+fn windows(s : String, i : Int, acc : Int) : Int =
+  if i >= 200 then
+    acc
+  else
+    windows(s, i + 1, acc + byte_len(str_slice(s, i, byte_len(s))))
+
+fn main() : Unit ! {IO} =
+  let s = string_of_buf(buf_new(__N__, 65))
+  println(show_int(windows(s, 0, 0)))

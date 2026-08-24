@@ -72,7 +72,7 @@ let (_t3, again) = intern(t2, "x")
 (0, 1, 0)
 ```
 
-The table's central verb, named for the operation rather than prefixed with the type it operates on. lint: allow(L0204)
+The table's central verb, named for the operation rather than prefixed with the type it operates on.
 
 ### `intern_all`
 

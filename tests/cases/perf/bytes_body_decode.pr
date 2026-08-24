@@ -1,0 +1,34 @@
+import Wire (..)
+
+-- Decode a `Bytes` payload of N bytes, whose wire form is one signed varint per
+-- byte. The reader accumulates the decoded bytes into a growable buffer, and that
+-- buffer extends in place only while it is uniquely owned, so the whole loop is
+-- kept out of the failure row: a total scan reports a short or malformed run
+-- through its cursor and the caller raises once at the boundary. Threading the
+-- accumulator through the failure row instead shares it at every step, and each
+-- push then copies the whole accumulation, which costs the square of N.
+type Blob = Blob(Bytes) deriving (Serialize)
+
+fn mk(i : Int, n : Int, acc : Buf) : Buf =
+  if i >= n then
+    acc
+  else
+    mk(i + 1, n, buf_push(acc, 97))
+
+fn dec(bs : Bytes) : (Blob, Bytes) = decode(bs)
+
+fn body_len(bs : Bytes) : Int =
+  match dec(bs) of
+    (Blob(out), _r) => wire_len(out)
+
+-- The row is inferred (decode performs `Fail`); `caught` discharges it to a
+-- default so `main` stays pure, exactly as `wire_decode.pr` does.
+fn caught(action : () -> Int ! {Fail | e}) : Int =
+  handle action() with
+    never fail() => -1
+    return r => r
+
+fn run(bs : Bytes) : Int = caught(\() -> body_len(bs))
+
+fn main() : Unit ! {IO} =
+  println(show_int(run(encode(Blob(bytes_of_buf(mk(0, __N__, buf_empty())))))))

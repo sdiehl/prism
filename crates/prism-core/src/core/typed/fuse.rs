@@ -40,7 +40,7 @@ use super::specialize_support::{
 use super::verify::{substitute_core_type, union_rows};
 use super::{
     CompSig, CoreFnSig, CoreInstantiation, CoreType, TypedBinder, TypedComp, TypedCompKind,
-    TypedCore, TypedCoreFn, TypedPattern, TypedValue, TypedValueKind,
+    TypedCore, TypedCoreFn, TypedPattern, TypedValue, TypedValueKind, UncheckedTypedCore,
 };
 
 // A seed whose symbolic driving takes more than this many reduction steps aborts
@@ -147,10 +147,10 @@ struct Cx {
 /// configuration is left untouched (degrade to not fusing, never a partial
 /// rewrite).
 #[must_use]
-pub fn fuse<P>(core: TypedCore<P>) -> (TypedCore<P>, FuseStats) {
+pub fn fuse<P>(core: TypedCore<P>) -> (UncheckedTypedCore<P>, FuseStats) {
+    let source_functions = core.into_unchecked().into_functions();
     let mut cx = Cx {
-        fns: core
-            .fns
+        fns: source_functions
             .iter()
             .map(|function| (function.name, function.clone()))
             .collect(),
@@ -164,8 +164,7 @@ pub fn fuse<P>(core: TypedCore<P>) -> (TypedCore<P>, FuseStats) {
     // shared, so names are deterministic. When a body actually fused, its
     // now-dead upstream pipeline is removed by dead-let elimination, so the
     // fused loop stands alone instead of running beside a discarded allocation.
-    let mut fns: Vec<TypedCoreFn> = core
-        .fns
+    let mut fns: Vec<TypedCoreFn> = source_functions
         .into_iter()
         .map(|function| {
             let before = cx.joins;
@@ -184,7 +183,7 @@ pub fn fuse<P>(core: TypedCore<P>) -> (TypedCore<P>, FuseStats) {
         .collect();
     let ticks = u64::from(cx.joins);
     fns.append(&mut cx.emitted);
-    (TypedCore::new(fns), FuseStats { ticks })
+    (UncheckedTypedCore::new(fns), FuseStats { ticks })
 }
 
 // A value looked through any representation-only wrapper: those erase away
@@ -2117,8 +2116,8 @@ mod tests {
     use crate::core::CoreOp;
     use crate::types::Type;
 
-    use super::super::verify::{verify, ConstructorSig, VerifyEnv};
-    use super::super::Elaborated;
+    use super::super::verify::{ConstructorSig, VerifyEnv};
+    use super::super::{verify, Elaborated};
     use super::*;
 
     fn sym(name: &str) -> Sym {
@@ -2461,14 +2460,11 @@ mod tests {
         functions: Vec<TypedCoreFn>,
         env: &VerifyEnv,
     ) -> (TypedCore<Elaborated>, u64) {
-        let input = TypedCore::new(functions);
-        if let Err(violations) = verify(&input, env) {
-            panic!("input fixture is invalid: {violations:#?}");
-        }
+        let input = verify(UncheckedTypedCore::<Elaborated>::new(functions), env)
+            .unwrap_or_else(|violations| panic!("input fixture is invalid: {violations:#?}"));
         let (actual, stats) = fuse(input);
-        if let Err(violations) = verify(&actual, env) {
-            panic!("fused typed Core is invalid: {violations:#?}");
-        }
+        let actual = verify(actual, env)
+            .unwrap_or_else(|violations| panic!("fused typed Core is invalid: {violations:#?}"));
         (actual, stats.ticks())
     }
 

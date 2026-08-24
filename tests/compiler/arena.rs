@@ -37,6 +37,20 @@ fn shared_function_is_not_reified() {
     );
 }
 
+/// An arena scope that builds through a let-bound closure lowers like one that
+/// calls a named function. The rewrite widens the lambda, the thunk suspending
+/// it, and the binder holding that thunk; the references reading the binder have
+/// to widen with it, or the verifier rejects a reference claiming a purity its
+/// binder no longer has and the whole program fails to lower.
+#[test]
+fn arena_closure_binding_is_reified() {
+    let out = lowered("examples/fixtures/compiler/arena_closure.pr");
+    assert!(
+        out.contains("init_at"),
+        "an arena-only constructor behind a let-bound closure was not reified:\n{out}"
+    );
+}
+
 /// Every reified program carries the region bracket: `arena_enter` before the
 /// installer's handler activation and `arena_exit` threading its token and
 /// result. Without the bracket, reified `alloc`s would fall to the delegating

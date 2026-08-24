@@ -14,18 +14,18 @@
       }
     },
     {
-      "id": "blake3:f69084063e025d59b85b91bfbc2ce4cd5a3b9017a334d37f6f636d79c49d725a",
+      "id": "blake3:f562064052eb52c419ca28965aad4528a958ceb0a7cbdcdbbd0bba5dc6c0cfb5",
       "kind": "artifact",
       "payload": {
         "kind": "docs-page",
         "path": "tzdb.md",
         "digest_scheme": "blake3",
-        "digest": "f69084063e025d59b85b91bfbc2ce4cd5a3b9017a334d37f6f636d79c49d725a",
-        "bytes": 9938
+        "digest": "f562064052eb52c419ca28965aad4528a958ceb0a7cbdcdbbd0bba5dc6c0cfb5",
+        "bytes": 11076
       }
     },
     {
-      "id": "prism-core-hash-v2:29cd657ebfef29b1e00242e3df3d82b475d7db2782ec313807607c01d6630126",
+      "id": "prism-core-hash-v2:276493f4895ed66f47aa825c9066a71d521e7a737b257acfb002572d6cbe6cca",
       "kind": "source-root",
       "payload": {
         "role": "source",
@@ -33,11 +33,11 @@
         "origin": null,
         "artifact_kind": "namespace",
         "scheme": "prism-core-hash-v2",
-        "root": "29cd657ebfef29b1e00242e3df3d82b475d7db2782ec313807607c01d6630126"
+        "root": "276493f4895ed66f47aa825c9066a71d521e7a737b257acfb002572d6cbe6cca"
       }
     },
     {
-      "id": "prism-core-hash-v2:b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb",
+      "id": "prism-core-hash-v2:a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851",
       "kind": "stdlib-root",
       "payload": {
         "role": "stdlib",
@@ -45,7 +45,7 @@
         "origin": null,
         "artifact_kind": "embedded-stdlib",
         "scheme": "prism-core-hash-v2",
-        "root": "b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb"
+        "root": "a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851"
       }
     },
     {
@@ -94,14 +94,23 @@
       }
     },
     {
-      "id": "sha256:498aba3d478bd89d4dedd9e71549dc7de94ed90aed722453b84633b8553496ae",
+      "id": "sha256:5df22d78e4780cdfc4a9bb72bccf746ee52befd78048e2b8b7d71098c3e3b5b4",
+      "kind": "doctest",
+      "payload": {
+        "location": "Tzdb::abbrev_at",
+        "output_scheme": "sha256",
+        "output_digest": "f9f30a03dbf6d13fadebc24c5de77d2bec1e709761de0f5ad5b40386f9b6b444"
+      }
+    },
+    {
+      "id": "sha256:74732925f33ae72fa177250bed56a1899a71d2bc3e723eced19715fad5f751b8",
       "kind": "compiler-identity",
       "payload": {
-        "fingerprint": "compiler=0.17.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=docs;source-root=prism-core-hash-v2:29cd657ebfef29b1e00242e3df3d82b475d7db2782ec313807607c01d6630126;stdlib-root=prism-core-hash-v2:b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;erasures=true;native-effects=true;trampoline=true;fuse=false;rt-checks=false;native-kont-frames=false;",
+        "fingerprint": "compiler=0.19.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=docs;source-root=prism-core-hash-v2:276493f4895ed66f47aa825c9066a71d521e7a737b257acfb002572d6cbe6cca;stdlib-root=prism-core-hash-v2:a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;erasures=true;native-effects=true;trampoline=true;fuse=false;rt-checks=false;native-kont-frames=false;",
         "rows": [
           {
             "key": "compiler",
-            "value": "0.17.0"
+            "value": "0.19.0"
           },
           {
             "key": "hash-scheme",
@@ -117,11 +126,11 @@
           },
           {
             "key": "source-root",
-            "value": "prism-core-hash-v2:29cd657ebfef29b1e00242e3df3d82b475d7db2782ec313807607c01d6630126"
+            "value": "prism-core-hash-v2:276493f4895ed66f47aa825c9066a71d521e7a737b257acfb002572d6cbe6cca"
           },
           {
             "key": "stdlib-root",
-            "value": "prism-core-hash-v2:b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb"
+            "value": "prism-core-hash-v2:a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851"
           },
           {
             "key": "opt",
@@ -172,15 +181,6 @@
             "value": "false"
           }
         ]
-      }
-    },
-    {
-      "id": "sha256:5df22d78e4780cdfc4a9bb72bccf746ee52befd78048e2b8b7d71098c3e3b5b4",
-      "kind": "doctest",
-      "payload": {
-        "location": "Tzdb::abbrev_at",
-        "output_scheme": "sha256",
-        "output_digest": "f9f30a03dbf6d13fadebc24c5de77d2bec1e709761de0f5ad5b40386f9b6b444"
       }
     },
     {
@@ -253,17 +253,17 @@
     },
     {
       "from": "sha256:a2ac8ab18e5ee4384983c3c087761be6c770a03d128318b41b49aa4db5978bef",
-      "to": "blake3:f69084063e025d59b85b91bfbc2ce4cd5a3b9017a334d37f6f636d79c49d725a",
+      "to": "blake3:f562064052eb52c419ca28965aad4528a958ceb0a7cbdcdbbd0bba5dc6c0cfb5",
       "kind": "produced"
     },
     {
       "from": "sha256:a2ac8ab18e5ee4384983c3c087761be6c770a03d128318b41b49aa4db5978bef",
-      "to": "prism-core-hash-v2:29cd657ebfef29b1e00242e3df3d82b475d7db2782ec313807607c01d6630126",
+      "to": "prism-core-hash-v2:276493f4895ed66f47aa825c9066a71d521e7a737b257acfb002572d6cbe6cca",
       "kind": "input"
     },
     {
       "from": "sha256:a2ac8ab18e5ee4384983c3c087761be6c770a03d128318b41b49aa4db5978bef",
-      "to": "prism-core-hash-v2:b78772c402e9fdf6cce08ddd188522513bc50100c52df685b8069381186dfcfb",
+      "to": "prism-core-hash-v2:a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851",
       "kind": "input"
     },
     {
@@ -293,13 +293,13 @@
     },
     {
       "from": "sha256:a2ac8ab18e5ee4384983c3c087761be6c770a03d128318b41b49aa4db5978bef",
-      "to": "sha256:498aba3d478bd89d4dedd9e71549dc7de94ed90aed722453b84633b8553496ae",
-      "kind": "identified-by"
+      "to": "sha256:5df22d78e4780cdfc4a9bb72bccf746ee52befd78048e2b8b7d71098c3e3b5b4",
+      "kind": "produced"
     },
     {
       "from": "sha256:a2ac8ab18e5ee4384983c3c087761be6c770a03d128318b41b49aa4db5978bef",
-      "to": "sha256:5df22d78e4780cdfc4a9bb72bccf746ee52befd78048e2b8b7d71098c3e3b5b4",
-      "kind": "produced"
+      "to": "sha256:74732925f33ae72fa177250bed56a1899a71d2bc3e723eced19715fad5f751b8",
+      "kind": "identified-by"
     },
     {
       "from": "sha256:a2ac8ab18e5ee4384983c3c087761be6c770a03d128318b41b49aa4db5978bef",

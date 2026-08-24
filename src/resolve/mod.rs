@@ -1603,11 +1603,9 @@ impl<'a> Rw<'a> {
     /// [`Self::value`] where `span` is the written identifier itself, recording
     /// the reference as an [`Occurrence`].
     ///
-    /// Deliberately separate from `value`. Some resolution sites pass the span of
-    /// an *enclosing* node — the whole instance declaration, the whole
-    /// `Cons(p, rest)` pattern, the whole record literal — because the name they
-    /// resolve has no span of its own and there is nowhere narrower to point. Those
-    /// spans are right for a diagnostic, which underlines the construct, and wrong
+    /// Separate from `value`. Some resolution sites pass an enclosing node's span
+    /// because the resolved name has no span of its own. Those spans suit a
+    /// diagnostic, which underlines the construct, but are wrong
     /// for a link, which must cover the name and nothing else. Recording them would
     /// silently turn a whole declaration into one clickable region, so a site opts
     /// in here only when its span is exact: an expression variable, and an

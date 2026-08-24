@@ -121,13 +121,22 @@ ROWS = [
             " form, which the parser now uses throughout. Rewriting the parser"
             " onto them removed 1,002 code lines, fourteen percent, while the"
             " same release grew the Rust side by 279 lines of new surface"
-            " syntax, so the ratio fell from 4.31 at v0.17.0. The residual gap"
-            " stands on the remaining cause, that the generated side never pays"
-            " line by line for the productions its tables derive. No further"
-            " compiler work is pre-registered against this row; it stays failed"
-            " rather than re-excused"
+            " syntax, so the ratio fell from 4.31 at v0.17.0. It has since risen"
+            " from 3.21, and the cause is worth naming because it is not a"
+            " regression in the language: closing the last four gaps between the"
+            " two parsers put 288 code lines onto the shadow and none onto the"
+            " oracle, which already derived those productions. Coverage catching"
+            " up moves this row the unfavorable way by construction, which is"
+            " what a board measuring lines rather than capability will do. The"
+            " residual gap stands on the remaining cause, that the generated"
+            " side never pays line by line for the productions its tables"
+            " derive. No further compiler work is pre-registered against this"
+            " row; it stays failed rather than re-excused, and the rise is"
+            " recorded rather than netted against the earlier fall"
         ),
-        cost="measured, in the table above; a second receipt reproduced every ratio within noise",
+        cost="measured, in the table above, from the one run that table"
+        " transcribes; the duplicate receipt that backed the earlier reading of"
+        " this layer was not repeated, so these rates carry a single receipt",
     ),
     Row(
         name="surface AST",
@@ -166,73 +175,107 @@ ROWS = [
         threshold=f"ratio {CHECKER_RATIO:.2f} or lower at full coverage",
         verdict=lambda ratio: (
             f"recorded, not judged, at {ratio:.2f}. The Prism side checks the"
-            " pure first-order subset the bootstrap workbench supports, so the"
-            " number says what a subset costs, not what the full checker will."
-            " Both counting asymmetries push the ratio up rather than down: the"
-            " Prism files carry their own type definitions and the artifact"
-            " decoding, while the Rust side counts the inference engine alone."
-            " The threshold binds when the shadow's coverage reaches the whole"
-            " language, and the subset number stays recorded so the curve from"
-            " subset to full checker is public"
+            " subset the bootstrap workbench supports, so the number says what a"
+            " subset costs, not what the full checker will. That subset is no"
+            " longer the pure first-order one it was: this release added written"
+            " effect rows, parameterized effect labels, shared handler effect"
+            " evidence, and generalization of local types, and the Prism side"
+            " nearly doubled paying for them while the ratio rose from 0.24."
+            " That is the curve this row exists to publish and it is moving"
+            " against the claim, which is the expected shape, since the cheapest"
+            " part of a checker is the part written first. Both counting"
+            " asymmetries push the ratio up rather than down: the Prism files"
+            " carry their own type definitions and the artifact decoding, while"
+            " the Rust side counts the inference engine alone. The threshold"
+            " binds when the shadow's coverage reaches the whole language, and"
+            " every subset number stays recorded so the curve from subset to"
+            " full checker is public"
         ),
-        cost="measured 2026-08-14 on an Apple M5, release profile: the checker"
-        " compiled to a native binary and run to full parity on the committed"
-        " bootstrap fixture's exported artifacts takes 625 ms median of 30"
-        " against 11.6 ms median of 20 for the Rust typecheck phase on the same"
-        " 270-definition universe, about 54x, with artifact decode inside the"
-        " Prism figure and outside the Rust one; the shipped interpreted"
-        " workbench measures 1.9 s end to end on the same fixture",
+        cost="the reproducible figure is end to end: the shipped workbench, which"
+        " is `just tc` on the committed bootstrap fixture with the release binary"
+        " hosting the interpreter, takes 2.29 s median of 20 on an Apple M5"
+        " measured 2026-08-23, against 1.9 s for the same fixture on 2026-08-14,"
+        " the workbench having grown the effect-row and local-generalization"
+        " coverage named above in between. The pair that produced the 54x, 625 ms"
+        " for the checker compiled to a native binary and run to full parity on"
+        " the fixture's exported artifacts against 11.6 ms for the Rust typecheck"
+        " phase on the same 270-definition universe, was measured 2026-08-14 on an"
+        " apparatus that was never committed, with artifact decode inside the"
+        " Prism figure and outside the Rust one. It is carried here as vintage"
+        " rather than as a number this tree can re-derive, and a committed driver"
+        " that isolates the Rust phase and the compiled checker over one universe"
+        " is what would make that ratio quotable again",
     ),
 ]
 
 # Cost readings, transcribed by hand from one `just lexperf` run. Machine
 # dependent, hence the provenance line and hence CI leaving this half alone.
 COST_PROVENANCE = (
-    "Lex layers measured 2026-07-28 and the parse layer 2026-08-01 with `just"
-    " lexperf` on an Apple M5 running macOS 26.3, release profile, the Prism"
-    " side compiled to a native binary. The absolute"
-    " rates belong to that machine; the ratio is the figure that carries across"
-    " hosts, and `just lexperf` reprints all of it."
+    "Measured 2026-08-23, all three layers in one `just lexperf` run, on an Apple"
+    " M5 running macOS 26.3, release profile, the Prism side compiled to a native"
+    " binary. The absolute rates belong to that machine; the ratio is the figure"
+    " that carries across hosts, and `just lexperf` reprints all of it. Each class"
+    " climbs a doubling ladder until the Prism side crosses two seconds, so a row"
+    " is measured at whatever size that ladder reached and the `at KiB` column"
+    " carries it: the two peak columns compare to each other within a row and to"
+    " nothing across rows."
 )
 
 # Transcribed verbatim from the harness, ratio included rather than recomputed:
 # the rates here are already rounded for printing, so dividing them back out
 # would quietly disagree with the tool this table claims to be a copy of.
-# workload, layer, Rust MB/s, Prism MB/s, ratio, Rust peak RSS, Prism peak RSS.
+# workload, layer, size reached, Rust MB/s, Prism MB/s, ratio, and the two peaks.
 COST_ROWS = [
-    ("stdlib", "raw", "217.6", "8.223", "26x", "126.2M", "154.7M"),
-    ("example", "raw", "174.0", "5.280", "33x", "134.7M", "233.4M"),
-    ("flat", "raw", "143.7", "4.063", "35x", "184.6M", "327.9M"),
-    ("comments", "raw", "1127.0", "32.292", "35x", "29.9M", "15.4M"),
-    ("nesting", "raw", "67.4", "2.873", "23x", "476.6M", "871.7M"),
-    ("interp", "raw", "58.7", "1.325", "44x", "173.1M", "313.6M"),
-    ("stdlib", "layout", "63.8", "3.083", "21x", "202.0M", "183.0M"),
-    ("example", "layout", "45.6", "2.065", "22x", "200.3M", "287.4M"),
-    ("flat", "layout", "43.6", "1.499", "29x", "274.5M", "406.3M"),
-    ("comments", "layout", "853.1", "31.914", "27x", "25.1M", "15.4M"),
-    ("nesting", "layout", "10.5", "0.084", "126x", "48.3M", "68.9M"),
-    ("interp", "layout", "31.0", "0.857", "36x", "129.7M", "193.4M"),
-    ("stdlib", "parse", "22.4", "1.667", "13x", "299.0M", "231.4M"),
-    ("example", "parse", "16.5", "1.207", "14x", "322.9M", "346.9M"),
-    ("flat", "parse", "13.8", "0.890", "16x", "294.6M", "269.4M"),
-    ("comments", "parse", "631.4", "15.867", "40x", "30.7M", "15.6M"),
-    ("nesting", "parse", "3.8", "0.065", "59x", "27.0M", "37.9M"),
-    ("interp", "parse", "11.8", "0.569", "21x", "254.7M", "278.6M"),
+    ("stdlib", "raw", "4096", "210.6", "7.396", "28x", "130.8M", "164.3M"),
+    ("example", "raw", "4095", "175.6", "5.210", "34x", "135.6M", "233.1M"),
+    ("flat", "raw", "4096", "147.1", "4.102", "36x", "184.7M", "328.0M"),
+    ("comments", "raw", "4096", "1024.1", "29.956", "34x", "30.0M", "15.5M"),
+    ("nesting", "raw", "4096", "75.7", "3.019", "25x", "476.7M", "871.8M"),
+    ("interp", "raw", "4096", "59.0", "1.534", "38x", "173.3M", "307.9M"),
+    ("corpus", "raw", "1282", "206.0", "7.648", "27x", "35.9M", "52.5M"),
+    ("stdlib", "layout", "4096", "62.1", "4.264", "15x", "214.3M", "242.7M"),
+    ("example", "layout", "4095", "47.0", "2.993", "16x", "201.3M", "355.7M"),
+    ("flat", "layout", "4096", "43.6", "2.304", "19x", "274.7M", "493.8M"),
+    ("comments", "layout", "4096", "824.0", "29.753", "28x", "30.1M", "15.5M"),
+    ("nesting", "layout", "4096", "9.9", "1.265", "8x", "709.1M", "1272.4M"),
+    ("interp", "layout", "4096", "31.7", "1.187", "27x", "254.6M", "456.1M"),
+    ("corpus", "layout", "1282", "59.9", "4.036", "15x", "61.6M", "76.9M"),
+    ("stdlib", "parse", "4109", "26.7", "2.685", "10x", "298.9M", "276.8M"),
+    ("example", "parse", "4102", "19.0", "1.848", "10x", "323.5M", "414.3M"),
+    ("flat", "parse", "4096", "15.6", "1.359", "11x", "577.9M", "616.8M"),
+    ("comments", "parse", "4096", "673.3", "14.743", "46x", "25.9M", "15.7M"),
+    ("nesting", "parse", "2048", "3.9", "0.535", "7x", "359.7M", "669.1M"),
+    ("interp", "parse", "2048", "12.5", "0.798", "16x", "254.7M", "286.5M"),
+    ("corpus", "parse", "1282", "25.2", "2.554", "10x", "88.3M", "85.9M"),
 ]
 
 COST_NOTES = [
     "Every workload class the harness offers is above except `modules`, which it"
-    " flagged on both layers as launch dominated: most of the Prism wall clock"
-    " was process startup, subtracted rather than measured. Its ratio would be an"
-    " artifact of that subtraction, so it is named here instead of quoted.",
-    "Log-log slopes of time against input size came back between 0.94 and 1.07 on"
+    " flagged on all three layers as launch dominated: most of the Prism wall"
+    " clock was process startup, subtracted rather than measured. Its ratio would"
+    " be an artifact of that subtraction, so it is named here instead of quoted."
+    " The `corpus` class is the one input that is not synthetic, being the 110"
+    " committed modules concatenated whole, which is why its ladder stops at the"
+    " size the tree actually is rather than at a doubling.",
+    "Log-log slopes of time against input size came back between 0.91 and 1.07 on"
     " both sides, which is to say linear on both. The Prism lexer is a constant"
     " factor behind rather than asymptotically worse, and the size of that"
     " constant is the thing to keep reporting.",
     "Peak resident set is the other half of the cost, and it does not track"
     " throughput: the Prism side peaks higher on most classes and lower on the"
     " comment-heavy one, where it allocates less per byte of input than the token"
-    " stream the Rust side materializes.",
+    " stream the Rust side materializes. Read it against `at KiB` and never"
+    " against the previous reading of this table, which carried no such column: a"
+    " class that got faster climbs further up the ladder before the two-second cut"
+    " and reports a larger peak for that reason alone.",
+    "Against the readings this table replaces, the two structured layers closed"
+    " most of the way and the raw layer barely moved. Layout went from 21x to 15x"
+    " on the standard library and from 126x to 8x on the deeply nested class;"
+    " parse went from 13x to 10x and from 59x to 7x on the same two. The"
+    " comment-heavy class is the one that went the other way, 40x to 46x at parse."
+    " This run measured the tree, not the cause: nothing here attributes the move"
+    " to a particular change, and the earlier figures were taken on two separate"
+    " days against a table that did not record the size each row reached.",
 ]
 
 # Thresholds that stopped describing their module. Retired in writing, never
@@ -343,13 +386,14 @@ def cost_table():
     header = [
         "workload",
         "layer",
+        "at KiB",
         "Rust MB/s",
         "Prism MB/s",
         "ratio",
         "Rust peak",
         "Prism peak",
     ]
-    return table(header, "llrrrrr", [list(row) for row in COST_ROWS])
+    return table(header, "llrrrrrr", [list(row) for row in COST_ROWS])
 
 
 def render():

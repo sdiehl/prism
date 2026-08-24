@@ -7,6 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use super::builtins::{Builtin, FloatOp};
 use super::effect_shape::{classify_resume, ResumeUse};
 use super::traverse::Visit;
+use crate::types::Type;
 use prism_common::sym::Sym;
 use prism_syntax::ast::BinOp;
 use prism_syntax::names::ENTRY_POINT;
@@ -146,6 +147,29 @@ pub enum Value {
     // `Case`, so neither reserved node is constructed.
     UnboxedTuple(Vec<Self>),
     UnboxedRecord(Vec<(Sym, Self)>),
+}
+
+impl Value {
+    /// The canonical source type of a scalar literal, or `None` for a value
+    /// with no literal encoding (variables, structures, thunks).
+    ///
+    /// Consumers pass it to the representation authority
+    /// (`types::scalar_plan`) rather than deciding an encoding here. Mirrors
+    /// `TypedValueKind::literal_scalar_type`; erasure has already dropped the
+    /// representation-preserving wrapper nodes, so there is no recursion.
+    #[must_use]
+    pub const fn literal_scalar_type(&self) -> Option<Type> {
+        match self {
+            Self::Int(_) => Some(Type::Int),
+            Self::I64(_) => Some(Type::I64),
+            Self::U64(_) => Some(Type::U64),
+            Self::Float(_) => Some(Type::Float),
+            Self::Bool(_) => Some(Type::Bool),
+            Self::Unit => Some(Type::Unit),
+            Self::Str(_) => Some(Type::Str),
+            _ => None,
+        }
+    }
 }
 
 // The numeric lane a unary negation runs in. Unary minus elaborates to a
@@ -513,14 +537,26 @@ pub struct Core {
 ///
 /// The field is private so the stage claim is unforgeable: a value of this type
 /// was produced by the pipeline, never assembled from public parts.
+///
+/// ```compile_fail
+/// use prism_core::core::{Core, ElaboratedCore};
+/// let _ = ElaboratedCore::new(Core { fns: Vec::new() });
+/// ```
+///
+/// A caller also cannot mutate a checked wrapper after validation:
+///
+/// ```compile_fail
+/// use prism_core::core::{Core, ElaboratedCore};
+/// let mut checked = ElaboratedCore::validate(Core { fns: Vec::new() }).unwrap();
+/// checked.core_mut().fns.clear();
+/// ```
 #[derive(Clone, Debug)]
 pub struct ElaboratedCore(Core);
 
 impl ElaboratedCore {
-    /// Wrap the pipeline's own elaboration output. Crate-internal on purpose:
-    /// the stage claim is the constructor's, and only the pipeline may make it.
+    /// Wrap output that the checked public transition already validated.
     #[must_use]
-    pub const fn new(core: Core) -> Self {
+    pub(super) const fn new(core: Core) -> Self {
         Self(core)
     }
 
@@ -528,11 +564,6 @@ impl ElaboratedCore {
     #[must_use]
     pub fn into_core(self) -> Core {
         self.0
-    }
-
-    /// Mutable access for the pipeline's own late adjustments (konst injection).
-    pub const fn core_mut(&mut self) -> &mut Core {
-        &mut self.0
     }
 }
 
@@ -546,14 +577,18 @@ impl ElaboratedCore {
 /// `core::opt::lint`), the checked public constructor whose assurance is
 /// structural stage validation, lint-grade, and explicitly not typed
 /// verification.
+///
+/// ```compile_fail
+/// use prism_core::core::{Core, LoweredCore};
+/// let _ = LoweredCore::new(Core { fns: Vec::new() });
+/// ```
 #[derive(Clone, Debug)]
 pub struct LoweredCore(Core);
 
 impl LoweredCore {
-    /// Wrap the pipeline's own verified lowering output. Crate-internal on
-    /// purpose; the public checked path is `validate_structural`.
+    /// Wrap output that the checked public transition already validated.
     #[must_use]
-    pub const fn new(core: Core) -> Self {
+    pub(super) const fn new(core: Core) -> Self {
         Self(core)
     }
 }
@@ -710,7 +745,7 @@ mod tag_tests {
     // these strings, so a variant rename that also touched the tag method would
     // silently move every affected definition's hash; freezing the spelling here
     // turns that into a test failure instead. The method's own `match` is
-    // exhaustive, so a new variant cannot ship without a tag; this checks that tag.
+    // exhaustive, so a new variant cannot ship without a tag. This checks the tag.
     fn frozen<T: Copy>(table: &[(T, &str)], tag: impl Fn(T) -> &'static str) {
         let mut seen = BTreeSet::new();
         for &(variant, spelling) in table {

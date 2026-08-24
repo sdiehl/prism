@@ -6,6 +6,8 @@ String operations, byte-oriented and ASCII-accurate.
 
 Built over the primitive UTF-8 string operations. Base includes this module.
 
+Two indexing families exist and they do not cost the same. `char_at`, `substring`, and `str_len` are counted in codepoints, so each call walks the string's UTF-8 encoding from the start and costs time proportional to the length. A scanner that advances an index one position at a time through them pays that walk on every step and is quadratic in its input, which is invisible on a line and ruinous on a file. `byte_at` and `byte_len` are constant-time raw-byte access and are the first choice for a scanner, a tokenizer, or a hash. Reach for the codepoint family only when the answer itself must be counted in characters.
+
 ## Functions and Values
 
 ### `str_join`
@@ -233,9 +235,29 @@ slice_bytes : (String, Int, Int, Buf) -> Buf
 
 Helper for `trim`: collect the bytes of `s` in `[lo, hi)` into `buf`.
 
+### `str_slice`
+
+```prism,sig,h-3c249312b2d7e456c4975aa6f64aea3969b81396d33b17a5c48e3679fc35720a
+str_slice : (String, Int, Int) -> String
+```
+
+The bytes of `s` in `[lo, hi)`, clamped to the string's bounds.
+
+The byte-indexed counterpart of `substring`: both endpoints are byte offsets and reaching one is constant time, so a scanner that slices as it advances stays linear where the codepoint form is quadratic. The endpoints must fall on character boundaries, which they do when they come from comparisons against ASCII bytes or from a span the compiler emitted; a window that splits a character is repaired rather than rejected, so the result is always a well-formed String.
+
+The span shares the parent's bytes rather than copying them, and the parent stays alive for as long as the span does, so slicing costs the same whether the string is three bytes or three megabytes.
+
+```prism,mod=Data.String
+str_slice("foobar", 3, 6)
+```
+
+```output
+bar
+```
+
 ### `trim`
 
-```prism,sig,h-ac59453b969a3f728a422edac38983cd20b407a558de9d128fd46d43e6738a5a
+```prism,sig,h-cb05027745d636ecfa6c4a5c4196ba006dadf9c8f5f19b39cff265ea5ae2aa62
 trim : (String) -> String
 ```
 
@@ -257,6 +279,8 @@ index_of_from : (Int, String, Int) -> Int
 
 The index of character `c` in `s` at or after position `i`, or `-1` if absent.
 
+The codepoint index is the answer, so the walk that finds it is the walk this returns a position into: `index_of` is the byte-offset counterpart and is linear. Kept for the caller who needs a character position.
+
 ### `split_from`
 
 ```prism,sig,h-343d6472fed1f270a11c26df85acc9153a55a6940fda62a4cbe3a73d41ee1fdc
@@ -264,6 +288,8 @@ split_from : (Int, String, Int) -> List(String)
 ```
 
 Helper for `split`: split `s` on `c`, starting from position `i`.
+
+Splits at a character, so it addresses the string the way `index_of_from` answers. A caller splitting a large document wants byte offsets from `index_of` and slices from `str_slice`.
 
 ### `split`
 
@@ -304,6 +330,8 @@ chars_from : (String, Int) -> List(Char)
 ```
 
 Helper for `chars`: the characters of `s` from position `i` onward.
+
+Decoding every character is what this is for, and each one is asked for by its character position; a byte-level pass would have to decode the encoding itself to answer the same question.
 
 ### `chars`
 

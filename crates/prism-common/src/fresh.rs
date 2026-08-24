@@ -24,4 +24,12 @@ impl Fresh {
         self.0 += 1;
         n
     }
+
+    /// The raw counter, for helpers that draw ids through a `&mut u32`.
+    ///
+    /// Sharing the counter rather than a second supply is what keeps those ids
+    /// disjoint from the ones [`Self::bump`] hands out under the same prefix.
+    pub const fn counter(&mut self) -> &mut u32 {
+        &mut self.0
+    }
 }

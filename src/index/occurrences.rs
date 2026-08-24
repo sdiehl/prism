@@ -1,19 +1,12 @@
 //! The occurrence export: every resolved reference, as a versioned document.
 //!
-//! `prism dump occurrences` is the canonical producer. The facts come from the
-//! renamer itself (`resolve::Occurrence`), not from a second walk over the AST,
-//! so what this reports is by construction what the compiler decided a name
-//! means. Read forward it is goto-definition; grouped by target it is
+//! `prism dump occurrences` exports the renamer's `resolve::Occurrence` facts.
+//! Read forward they support goto-definition; grouped by target they support
 //! find-references.
 //!
 //! A reference appears only where the AST records a span for the name itself:
 //! today an expression variable, and an effect-row label. Every other resolution
-//! site — a constructor pattern, an instance's class, a record literal's type —
-//! carries the span of the construct *around* the name, which is the right thing
-//! to underline in a diagnostic and the wrong thing to make clickable, since
-//! reporting it would turn a whole declaration into one link. Those wait on a span
-//! per name in `Ty`, which is the single change that would widen this export; the
-//! collection itself needs none.
+//! site carries the enclosing construct's span, which is too broad for a link.
 
 use serde::{Deserialize, Serialize};
 

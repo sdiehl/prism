@@ -1,9 +1,11 @@
-//! Why a confined free-monad region was refused.
+//! Why a free-monad rewrite was refused.
 //!
 //! A confined region is an optimization, so refusing one is a cost outcome the
 //! program survives: the whole-program lowering below it is always available.
 //! That makes the refusal invisible unless it is carried, which is what this
-//! module is for. The reason travels as data from the site that found it to the
+//! module is for. The whole-program rung has nothing below it, so the same
+//! reason travels out of it as the message of an internal error, and it has to
+//! name the declaration and the form or the reader is left to bisect for them. The reason travels as data from the site that found it to the
 //! plan artifact and the fallback warning, so neither has to re-derive it and
 //! neither parses it back out of a message.
 
@@ -22,9 +24,10 @@ const HANDLER_ANSWER: &str = "handler-answer";
 const HANDLER_ARMS: &str = "handler-arms";
 const MEMBER_TAIL: &str = "member-tail";
 const MISSING_ROW: &str = "missing-row";
+const PLAN_MISMATCH: &str = "plan-mismatch";
 const UNSUPPORTED_FORM: &str = "unsupported-form";
 
-/// The shapes a confined attempt can refuse at.
+/// The shapes a free-monad attempt can refuse at.
 ///
 /// Every refusal in the builder and in the convention-boundary check is one of
 /// these; there is no free-prose refusal, because a reason nobody can match on
@@ -60,12 +63,18 @@ pub enum Refusal {
     /// A region member's tail is not `Eff`-shaped, so its caller would bind a
     /// value that is not a cell.
     MemberTail,
-    /// The residual row solution names no row for a member, so the monadic
-    /// signature for it cannot be written.
+    /// The residual row solution names no row for a declaration, so the
+    /// monadic signature for it cannot be written.
     MissingRow,
-    /// The confined builder has no rewrite for a form the declaration contains,
-    /// independently of the two conventions meeting. The whole-program builder
-    /// is the one that handles it.
+    /// A committed region plan and the program disagree about which
+    /// declarations exist: the plan names one the program does not define, or
+    /// the preparation the plan committed to has gone missing between building
+    /// the signatures and using them.
+    PlanMismatch,
+    /// The builder has no rewrite for a form the declaration contains,
+    /// independently of the two conventions meeting. From the confined rung
+    /// this widens to whole-program lowering; from whole-program lowering there
+    /// is nothing left to widen to.
     UnsupportedForm,
 }
 
@@ -82,6 +91,7 @@ impl Refusal {
             Self::HandlerArms => HANDLER_ARMS,
             Self::MemberTail => MEMBER_TAIL,
             Self::MissingRow => MISSING_ROW,
+            Self::PlanMismatch => PLAN_MISMATCH,
             Self::UnsupportedForm => UNSUPPORTED_FORM,
         }
     }
@@ -91,15 +101,16 @@ impl Refusal {
     #[must_use]
     pub const fn claim(self) -> &'static str {
         match self {
-            Self::DirectForce => "forces a computation the confined region owns",
-            Self::DirectHolds => "holds a computation the confined region owns",
+            Self::DirectForce => "forces a computation the free-monad rewrite owns",
+            Self::DirectHolds => "holds a computation the free-monad rewrite owns",
             Self::ThunkBoundary => "holds a direct thunk that reaches the other convention",
-            Self::WordCapture => "copies a value that reads a binder the confined region reified",
+            Self::WordCapture => "copies a value that reads a binder the rewrite reified",
             Self::HandlerAnswer => "installs a performing handler that answers with a transformer",
             Self::HandlerArms => "installs a handler whose clauses answer at different types",
             Self::MemberTail => "is a region member whose tail is not effect-shaped",
-            Self::MissingRow => "is a region member with no residual row",
-            Self::UnsupportedForm => "contains a form the confined builder cannot rewrite",
+            Self::MissingRow => "has no residual row to write a monadic signature from",
+            Self::PlanMismatch => "is named by a region plan the program does not agree with",
+            Self::UnsupportedForm => "contains a form the free-monad builder cannot rewrite",
         }
     }
 }

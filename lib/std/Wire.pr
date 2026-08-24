@@ -43,29 +43,40 @@
 --
 -- ## The `Bytes` representation
 --
--- `Bytes` is an unboxed byte buffer (`Buf`, `runtime/prism_buffer.c`) plus a read
--- cursor: `Bytes(buf, off)` is the bytes `buf[off ..]`. The buffer holds raw u8
--- with no UTF-8 interpretation, so it threads byte-for-byte identically on both
--- backends (the parity contract a `String`-of-bytes would break, since
--- reconstructing a `String` from raw bytes repairs invalid UTF-8 lossily). The cursor
--- makes `decode` cheap: peeling a byte off the front advances the offset in O(1)
--- with no copy, so a whole decode is linear. Encode accumulates into a growable
--- buffer builder (`buf_push`, amortized O(1)), so building a container or a
--- string body stays linear rather than paying the quadratic cost a right-nested
--- immutable `wire_cat` would incur. The concrete representation is owned by the
--- codec; a derived instance only ever threads a `Bytes` through the builders
--- below, never inspects it. `bytes_of_list`/`bytes_to_list` bridge to the older
--- `List(Int)` view for callers that still want it.
+-- `Bytes` is an unboxed byte buffer (`Buf`, `runtime/prism_buffer.c`) plus a
+-- window: `Bytes(buf, off, end)` is the bytes `buf[off .. end)`. The buffer holds
+-- raw u8 with no UTF-8 interpretation, so it threads byte-for-byte identically on
+-- both backends (the parity contract a `String`-of-bytes would break, since
+-- reconstructing a `String` from raw bytes repairs invalid UTF-8 lossily). The
+-- window makes `decode` cheap: peeling a byte off the front advances the offset
+-- in O(1) with no copy, so a whole decode is linear, and `bytes_window` narrows
+-- either bound the same way, so a middle slice is cursor arithmetic over the
+-- shared buffer (kept alive under every window by ordinary reference counting)
+-- rather than a copy. Encode accumulates into a growable buffer builder
+-- (`buf_push` a byte at a time, `buf_append_str` a whole string in one copy,
+-- both amortized O(1) per byte), so building a container or a string body stays
+-- linear rather than paying the quadratic cost a right-nested immutable
+-- `wire_cat` would incur. The concrete representation is owned by the codec; a
+-- derived instance only ever threads a `Bytes` through the builders below, never
+-- inspects it. `bytes_of_list`/`bytes_to_list` bridge to the older `List(Int)`
+-- view for callers that still want it.
 --
 -- ## Totality
 --
--- `decode` is total. Every read consumes at least one byte from a finite,
--- strictly shrinking list, so decode always terminates; a truncated or hostile
+-- `decode` is total. Every read advances the cursor over a finite window, so the
+-- bytes left strictly shrink and decode always terminates; a truncated or hostile
 -- input runs out of bytes and fails through `Fail` rather than looping or
 -- panicking. Varints are length-capped and container and string lengths are
 -- bounded on both encode and decode, so a hostile length prefix cannot force
 -- unbounded work. The frame's total decoder checks the scheme, kind, and digest
 -- before touching the body and rejects trailing bytes after the value.
+--
+-- A bulk reader hoists its failure to the boundary rather than raising inside its
+-- loop: a buffer being accumulated is extended in place only while it is uniquely
+-- owned, and threading it through the failure row shares it at every step, so
+-- each push would copy the whole accumulation and the read would cost the square
+-- of its length. The inner scan is therefore total, reporting a short or
+-- malformed run through its cursor, and the caller raises the same `Fail` once.
 --
 -- ## Deriving
 --
@@ -101,11 +112,16 @@ let byte_mask : Int = 256
 -- scale a magnitude by two and use the low bit as the sign.
 let zigzag_scale : Int = 2
 
--- | A compact, positional byte body: an unboxed byte buffer and a read cursor,
--- `Bytes(buf, off)` denoting the bytes `buf[off ..]`. The concrete representation
--- is owned by the codec; a derived instance only ever threads a `Bytes` through
--- the builders below, never inspects it.
-opaque type Bytes = Bytes(Buf, Int)
+-- The cursor a pure scan returns in place of a position when the bytes run out
+-- or a varint overruns its cap. No real cursor is negative, so the one caller
+-- can test for it and raise the same failure the fallible reader would have.
+let scan_bad : Int = -1
+
+-- | A compact, positional byte body: an unboxed byte buffer and a window,
+-- `Bytes(buf, off, end)` denoting the bytes `buf[off .. end)`. The concrete
+-- representation is owned by the codec; a derived instance only ever threads a
+-- `Bytes` through the builders below, never inspects it.
+opaque type Bytes = Bytes(Buf, Int, Int)
 
 -- | What a downgrade could not carry down: the names of the fields dropped when
 -- lowering a value to an older frozen version. A downgrade never silently
@@ -147,10 +163,11 @@ pub class Serialize(a)
 pub class Stable(a)
   shape_digest_of : (a) -> String
 
--- Wrap a whole buffer (cursor at 0) as a body, and recover the buffer of a body's
--- remaining bytes (compacting away a non-zero cursor with a single slice). The
--- representation seam between the buffer and the `Bytes` view; `Data.Bytes` builds
--- its utility layer over these three, never the `Bytes` constructor directly.
+-- Wrap a whole buffer (window over all of it) as a body, and recover the buffer
+-- of a body's remaining bytes (compacting away a narrowed window with a single
+-- slice). The representation seam between the buffer and the `Bytes` window;
+-- `Data.Bytes` builds its utility layer over these seam functions, never the
+-- `Bytes` constructor directly.
 -- | Wrap a whole buffer (cursor at 0) as a byte body.
 --
 -- ```prism
@@ -159,17 +176,17 @@ pub class Stable(a)
 -- ```output
 -- 0
 -- ```
-pub fn bytes_of_buf(b : Buf) : Bytes = Bytes(b, 0)
+pub fn bytes_of_buf(b : Buf) : Bytes = Bytes(b, 0, buf_len(b))
 
--- | Recover the buffer of a body's remaining bytes, compacting away a non-zero
--- cursor with a single slice.
+-- | Recover the buffer of a body's remaining bytes, compacting away a narrowed
+-- window with a single slice.
 pub fn bytes_buf(bs : Bytes) : Buf =
   match bs of
-    Bytes(b, off) =>
-      if off == 0 then
+    Bytes(b, off, end) =>
+      if off == 0 && end == buf_len(b) then
         b
       else
-        buf_slice(b, off, buf_len(b) - off)
+        buf_slice(b, off, end - off)
 
 -- | The i-th byte of a body, from the cursor. Bounds are the caller's contract
 -- (the readers check emptiness first); an out-of-range index traps.
@@ -182,10 +199,49 @@ pub fn bytes_buf(bs : Bytes) : Buf =
 -- ```
 pub fn bytes_at(bs : Bytes, i : Int) : Int =
   match bs of
-    Bytes(b, off) => buf_get(b, off + i)
+    Bytes(b, off, end) =>
+      -- An index past the window is forced onto the buffer's own out-of-range
+      -- trap, so a window never reads its parent's bytes beyond `end`.
+      buf_get(b, if off + i < end then off + i else buf_len(b))
+
+-- | The `len` bytes of a body starting at `start` (0-based from the cursor), as
+-- a window into the same buffer: cursor arithmetic, no copy, the shared buffer
+-- kept alive by the window. `start` and `len` are clamped to the window's
+-- bounds, so an out-of-range request yields the in-range remainder rather than
+-- trapping, exactly as `buf_slice` clamps.
+--
+-- ```prism
+-- bytes_to_list(bytes_window(bytes_of_list([1, 2, 3, 4]), 1, 2))
+-- ```
+-- ```output
+-- [2, 3]
+-- ```
+pub fn bytes_window(bs : Bytes, start : Int, len : Int) : Bytes =
+  match bs of
+    Bytes(b, off, end) =>
+      let n = end - off
+      let s =
+        if start < 0 then
+          0
+        elif start > n then
+          n
+        else
+          start
+      let l =
+        if len < 0 then
+          0
+        else
+          len
+      let avail = n - s
+      let take =
+        if l < avail then
+          l
+        else
+          avail
+      Bytes(b, off + s, off + s + take)
 
 -- | The empty byte body: no bytes, cursor at the start. The unit of `wire_cat`.
-pub let wire_empty : Bytes = Bytes(buf_empty(), 0)
+pub let wire_empty : Bytes = Bytes(buf_empty(), 0, 0)
 
 -- | Concatenate two byte bodies into a fresh buffer.
 --
@@ -210,7 +266,7 @@ fn wire_uncons(bs : Bytes) : (Int, Bytes) =
     fail()
   else
     match bs of
-      Bytes(b, off) => (buf_get(b, off), Bytes(b, off + 1))
+      Bytes(b, off, end) => (buf_get(b, off), Bytes(b, off + 1, end))
 
 -- | True when a body has no bytes left. The reader uses it to reject trailing
 -- bytes after a value, and a peer uses it to tell a reference frame (no body)
@@ -234,13 +290,13 @@ pub fn wire_is_empty(bs : Bytes) : Bool = wire_len(bs) == 0
 -- ```
 pub fn wire_len(bs : Bytes) : Int =
   match bs of
-    Bytes(b, off) => buf_len(b) - off
+    Bytes(_, off, end) => end - off
 
 -- Append every byte of a body onto a growable buffer, the linear accumulation
 -- primitive the encoders fold through instead of a right-nested `wire_cat`.
 fn buf_append(acc : Buf, bs : Bytes) : Buf =
   match bs of
-    Bytes(b, off) => buf_append_go(acc, b, off, buf_len(b))
+    Bytes(b, off, end) => buf_append_go(acc, b, off, end)
 
 fn buf_append_go(acc : Buf, b : Buf, i : Int, n : Int) : Buf =
   if i >= n then
@@ -307,6 +363,31 @@ fn get_uvarint_go(
           get_uvarint_go(rest, mult * varint_radix, acc2, count + 1)
 
 fn get_uvarint(bs : Bytes) : (Int, Bytes) = get_uvarint_go(bs, 1, 0, 0)
+
+-- The same reader as a total function over a raw cursor: it returns the value and
+-- the next position, or `scan_bad` when the window runs out. Both cases the
+-- fallible reader rejects are that one case, because the caller hands in a window
+-- already clamped to `varint_max_bytes`, so a hostile run ends exactly where an
+-- exhausted one does and the loop carries no separate counter. A bulk loop that
+-- accumulates into a buffer needs this, because a buffer threaded through an
+-- effectful bind is never uniquely owned and every push would copy the whole
+-- accumulation.
+fn scan_uvarint(
+  b : Buf,
+  i : Int,
+  end : Int,
+  mult : Int,
+  acc : Int
+) : (Int, Int) =
+  if i >= end then
+    (0, scan_bad)
+  else
+    let x = buf_get(b, i)
+    let acc2 = acc + mod(x, varint_radix) * mult
+    if x < varint_radix then
+      (acc2, i + 1)
+    else
+      scan_uvarint(b, i + 1, end, mult * varint_radix, acc2)
 
 -- | Encode a constructor tag (a small non-negative integer) as a varint. The
 -- derived `Serialize` for a sum prefixes its body with this.
@@ -405,30 +486,26 @@ instance serializeChar : Serialize(Char)
   fn encode(c) = put_uvarint(ord(c))
   fn decode(bs) = dec_char(bs)
 
--- Append a string's raw UTF-8 bytes to a body, one byte per index, accumulated
--- left-to-right into a buffer builder so the whole body is one linear pass. A
--- `String` is always valid UTF-8, so reconstructing it with `string_of_buf` on
--- decode is lossless on both backends.
-fn string_body(s : String, i : Int, n : Int) : Bytes =
-  bytes_of_buf(string_body_go(buf_empty(), s, i, n))
+-- Append a string's raw UTF-8 bytes to a body in one copy, rather than one call
+-- per byte: the builder takes a whole run at a time and the length is known up
+-- front, so the buffer is sized once. A `String` is always valid UTF-8, so
+-- reconstructing it with `string_of_buf` on decode is lossless on both backends.
+fn string_body(s : String) : Bytes =
+  bytes_of_buf(buf_append_str(buf_empty(), s))
 
-fn string_body_go(acc : Buf, s : String, i : Int, n : Int) : Buf =
-  if i >= n then
-    acc
+-- Read exactly `n` bytes out of a body, failing if it runs out first. The bytes
+-- are already contiguous in the shared buffer, so the read is one copy of the
+-- span plus a narrowed window over what follows, rather than one call per byte;
+-- the bounds check up front is what lets the copy skip its own.
+fn take_bytes(bs : Bytes, n : Int) : (Buf, Bytes) =
+  if n < 0 || n > wire_len(bs) then
+    fail()
   else
-    string_body_go(buf_push(acc, byte_at(s, i)), s, i + 1, n)
-
--- Read exactly `n` bytes into a buffer builder, failing if the body runs out
--- first. Accumulated left-to-right so the whole read is one linear pass.
-fn take_bytes(bs : Bytes, n : Int, acc : Buf) : (Buf, Bytes) =
-  if n <= 0 then
-    (acc, bs)
-  else
-    match wire_uncons(bs) of
-      (b, rest) => take_bytes(rest, n - 1, buf_push(acc, b))
+    match bs of
+      Bytes(b, off, end) => (buf_slice(b, off, n), Bytes(b, off + n, end))
 
 fn enc_string(s : String) : Bytes =
-  wire_cat(put_uvarint(byte_len(s)), string_body(s, 0, byte_len(s)))
+  wire_cat(put_uvarint(byte_len(s)), string_body(s))
 
 fn dec_string(bs : Bytes) : (String, Bytes) =
   match get_uvarint(bs) of
@@ -436,7 +513,7 @@ fn dec_string(bs : Bytes) : (String, Bytes) =
       if n > wire_len_max then
         fail()
       else
-        match take_bytes(r, n, buf_empty()) of
+        match take_bytes(r, n) of
           (buf, rest) => (string_of_buf(buf), rest)
 
 instance serializeString : Serialize(String)
@@ -504,14 +581,31 @@ fn dec_bytes(bs : Bytes) : (Bytes, Bytes) =
       if n > wire_len_max then
         fail()
       else
-        dec_bytes_go(buf_empty(), r, n)
+        match r of
+          Bytes(b, off, end) =>
+            match dec_bytes_go(buf_empty(), b, off, end, n) of
+              (out, j) =>
+                if j == scan_bad then
+                  fail()
+                else
+                  (bytes_of_buf(out), Bytes(b, j, end))
 
-fn dec_bytes_go(acc : Buf, bs : Bytes, n : Int) : (Bytes, Bytes) =
+-- The loop is deliberately total: it reports a short or malformed run through the
+-- cursor and lets `dec_bytes` raise, so the accumulator stays uniquely owned and
+-- each push extends it in place instead of copying it. Each element is read from a
+-- window closed at whichever comes first, the end of the run or the varint cap, so
+-- an overlong run is refused by the same bounds check that catches a short one.
+fn dec_bytes_go(acc : Buf, b : Buf, i : Int, end : Int, n : Int) : (Buf, Int) =
   if n <= 0 then
-    (bytes_of_buf(acc), bs)
+    (acc, i)
   else
-    match get_svarint(bs) of
-      (v, r) => dec_bytes_go(buf_push(acc, v), r, n - 1)
+    let cap = i + varint_max_bytes
+    match scan_uvarint(b, i, if end < cap then end else cap, 1, 0) of
+      (z, j) =>
+        if j == scan_bad then
+          (acc, scan_bad)
+        else
+          dec_bytes_go(buf_push(acc, unzigzag(z)), b, j, end, n - 1)
 
 instance serializeBytes : Serialize(Bytes)
   fn encode(b) = enc_bytes(b)

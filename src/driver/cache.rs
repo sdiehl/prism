@@ -142,7 +142,7 @@ impl NativeArtifactCache {
     /// thunk because producing that identity clones the lowered tree; a
     /// disabled cache never pays for it.
     pub(super) fn for_semantic_build(
-        core: impl FnOnce() -> LoweredCore,
+        core: impl FnOnce() -> Result<LoweredCore, Error>,
         sigs: &Sigs,
         ctors: &BTreeMap<String, CtorInfo>,
         native_kont_table: &str,
@@ -154,7 +154,7 @@ impl NativeArtifactCache {
         let store = Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))?;
         let mut h = semantic_query_hasher(
             LINKED_NATIVE_SEMANTIC_SCHEMA,
-            &core(),
+            &core()?,
             ctors,
             native_kont_table,
             cfg,
@@ -342,7 +342,15 @@ impl NativeArtifactCache {
         let Some(output_hash) = self.store.get_query(self.kind, &self.key)? else {
             return Ok(None);
         };
-        let bytes = self.store.get(&output_hash)?;
+        // A query binding surviving a swept object is a normal cache miss, not
+        // corruption: gc (crate::store::disk::gc) prunes objects/meta by age
+        // without touching queries/index, so a stale binding must fall back to
+        // recompute exactly like an absent binding does above.
+        let bytes = match self.store.get(&output_hash) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(Error::Io(e)),
+        };
         let actual = blake3::hash(&bytes).to_hex().to_string();
         if actual != output_hash {
             return Err(Error::Io(std::io::Error::new(

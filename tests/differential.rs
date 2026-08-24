@@ -1,6 +1,6 @@
-//! The differential oracles: optimizer-configuration equivalence, typed-spine
-//! erasure identity, the Lean model cross-check, replay determinism, and the
-//! runtime scrubber and suspension suites.
+//! The differential oracles: optimizer-configuration equivalence, effect-tier
+//! equivalence, typed-spine erasure identity, the Lean model cross-check,
+//! replay determinism, and the runtime scrubber and suspension suites.
 
 mod support;
 
@@ -10,6 +10,8 @@ mod determinism;
 mod gate;
 #[path = "differential/lean_fuzz.rs"]
 mod lean_fuzz;
+#[path = "tier_equiv/gate.rs"]
+mod tier_gate;
 #[path = "differential/typed_spine.rs"]
 mod typed_spine;
 

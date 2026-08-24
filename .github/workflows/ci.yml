@@ -89,7 +89,10 @@ jobs:
           "$bin" --version
 
   # docs/src cross-references anchors and {{#include}}s by hand; mdbook never
-  # validates either, so a rename or a moved example silently rots a link.
+  # validates either, so a rename or a moved example silently rots a link. Every
+  # other committed Markdown file is checked too, and those are the worse case:
+  # nothing builds them at all, so an index of the tree can point at files that
+  # were renamed away a release ago and still read as current.
   doc-links:
     name: Doc links resolve
     runs-on: ubuntu-latest
@@ -158,8 +161,11 @@ jobs:
           - name: default
             command: cargo check --all-targets
             wasm: false
+          # Lint the browser feature on its real target. A native
+          # `--all-features` run combines the wasm and MLIR/native backends into
+          # a configuration no shipped compiler uses.
           - name: wasm
-            command: cargo check --no-default-features --features wasm --target wasm32-unknown-unknown
+            command: cargo clippy --no-default-features --features wasm --target wasm32-unknown-unknown --lib -- -D warnings
             wasm: true
           - name: mlir
             command: cargo check --features mlir
@@ -384,6 +390,11 @@ jobs:
       # skipped, so a stale cache can never mask a regression.
       PRISM_GATE_CACHE: "1"
       PRISM_GATE_FINGERPRINT: source
+      # Names the solver installed below, so a workflow that stops installing it
+      # fails the solver-accept gate instead of silently skipping it. cvc5 is not
+      # listed: it is not packaged for this runner, so the two-solver agreement
+      # gate stays opt-in for a developer who has one.
+      PRISM_REQUIRE_SOLVERS: z3
     steps:
       - uses: actions/checkout@v7
 
@@ -394,6 +405,12 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "v1-libm"
+
+      # The certificate subsystem mints `prism-smt-certificate-v1` receipts by
+      # discharging obligations through an external solver, so without one
+      # installed its end-to-end path has no CI evidence behind it.
+      - name: Install z3
+        run: sudo apt-get update && sudo apt-get install -y z3
 
       # Per-shard gate-verdict cache: each partition owns a distinct key so the
       # parallel runs do not overwrite each other's snapshots.
@@ -436,7 +453,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        oracle: [fusion, tier, optimizer, typed-spine]
+        oracle: [fusion, tier, optimizer, tier-equiv, typed-spine]
         shard: [0, 1, 2, 3]
     env:
       LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
@@ -488,6 +505,10 @@ jobs:
         if: ${{ matrix.oracle == 'optimizer' }}
         run: cargo nextest run --profile ci --test differential -E 'test(optimizer_configurations_have_identical_observation_traces)'
 
+      - name: Tier-equivalence relation (shard ${{ matrix.shard }} of 4)
+        if: ${{ matrix.oracle == 'tier-equiv' }}
+        run: cargo nextest run --profile ci --test differential -E 'test(tier_configurations_have_identical_observation_traces)'
+
       - name: Typed-spine relations (shard ${{ matrix.shard }} of 4)
         if: ${{ matrix.oracle == 'typed-spine' }}
         run: cargo nextest run --profile ci --test differential -E 'test(typed_erasure_preserves_corpus_core_identity) | test(full_front_crosses_typed_newtype_prefix_across_corpus)'
@@ -528,8 +549,8 @@ jobs:
         uses: mozilla-actions/sccache-action@v0.0.10
 
       # The viewer page reads a generated artifact (`prism index`), so the native
-      # binary is needed here, and with it LLVM — the same install the other
-      # compiling jobs share.
+      # binary is needed here, and with it LLVM. The other compiling jobs use the
+      # same installation.
       - name: Install LLVM 22
         uses: ./.github/actions/setup-llvm
 
@@ -628,7 +649,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Toolchain pinned via rust-toolchain.toml (single source of truth).
+      # Toolchain pinned by rust-toolchain.toml.
       - name: Setup Rust toolchain
         run: rustup show
 
@@ -655,7 +676,7 @@ jobs:
       # progress, effect-safety) and the differential `Certificates` whose `rfl`
       # proofs pin model output to live `prism run` output, and builds the `oracle`
       # executable the differential harness runs. The toolchain is read from
-      # models/lean-toolchain (single source of truth); no mathlib, so the build is
+      # models/lean-toolchain; no mathlib, so the build is
       # self-contained and fast. This is the one formal-methods gate that used to be
       # able to silently break (Lean was outside CI).
       - name: Build Lean model
@@ -713,7 +734,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Toolchain pinned via rust-toolchain.toml (single source of truth).
+      # Toolchain pinned by rust-toolchain.toml.
       - name: Setup Rust toolchain
         run: rustup show
 
@@ -749,6 +770,13 @@ jobs:
 
       - name: Build with mlir backend
         run: cargo build --features mlir
+        env:
+          LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
+          MLIR_SYS_220_PREFIX: /usr/lib/llvm-22
+          TABLEGEN_220_PREFIX: /usr/lib/llvm-22
+
+      - name: Test shared ABI plans with mlir
+        run: cargo test -p prism-native --features mlir codegen::abi::tests
         env:
           LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
           MLIR_SYS_220_PREFIX: /usr/lib/llvm-22

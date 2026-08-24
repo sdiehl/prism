@@ -9,7 +9,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::slice;
 
-use super::abi::{idx64, HDR_BYTES, TAG_OFF, WORD_BYTES};
+use super::abi::{field_slot_off, idx64, TAG_OFF};
 use super::emit::{Cg, LamBody, LamInfo};
 use super::isa::{Buf, Isa};
 use super::rt;
@@ -136,7 +136,7 @@ impl<I: Isa> Cg<'_, I> {
             for i in 0..fvs {
                 let fp = format!("%_fp{tag}_{i}");
                 let fv = format!("%_fv{tag}_{i}");
-                let off = HDR_BYTES + idx64(i) * WORD_BYTES;
+                let off = field_slot_off(i);
                 self.isa.gep(&mut b, &fp, "%_cp", off);
                 self.isa.load(&mut b, &fv, &fp);
                 captured.push(fv);
@@ -171,7 +171,7 @@ impl<I: Isa> Cg<'_, I> {
                     let tv = self.isa.const_int(&mut b, idx64(self.lams[adapter].tag));
                     self.isa.store(&mut b, &tv, &tp);
                     for (i, fld) in fields.iter().enumerate() {
-                        let off = HDR_BYTES + idx64(i) * WORD_BYTES;
+                        let off = field_slot_off(i);
                         let fp = format!("%_afp{tag}_{i}");
                         self.isa.gep(&mut b, &fp, &cp, off);
                         self.isa.store(&mut b, fld, &fp);

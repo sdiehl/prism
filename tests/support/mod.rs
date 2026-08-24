@@ -34,18 +34,46 @@ pub const ALLOC_STATS: &str = "PRISM_ALLOC_STATS";
 /// that arms a counter strips the reports out of the program's own stderr with
 /// [`program_stderr`] and reads a value back with [`counter_report`], so no
 /// harness re-types the line format.
+///
+/// The list must name every counter the runtime can emit, not only the ones a
+/// gate reads back, because an oracle that arms one counter still has to strip
+/// its neighbours: the parity gate arms the balance and the allocation reports
+/// together, so an unlisted line from either lands in the observation trace and
+/// diverges the whole corpus against an interpreter that never printed it.
+/// [`counter_reports_are_registered`] holds the list against the runtime source.
 const COUNTER_PREFIX: &str = "prism: ";
 const LEAKED_SUFFIX: &str = " cells leaked";
 const ALLOCATED_SUFFIX: &str = " cells allocated";
+/// Companion byte total to [`ALLOCATED_SUFFIX`], reported under the same env var.
+/// Cells are not one size, so a pass that stops copying a payload and starts
+/// sharing it moves this and leaves the count alone.
+pub const ALLOCATED_BYTES_SUFFIX: &str = " cell bytes allocated";
 const REUSED_SUFFIX: &str = " cells reused";
 const EFF_OPS_SUFFIX: &str = " eff ops allocated";
 const DRIVE_STEPS_SUFFIX: &str = " drive steps";
+const PROMOTED_SUFFIX: &str = " cells promoted";
+const PROMOTION_SHARED_SUFFIX: &str = " promotion copies shared";
+const PROMOTION_NODES_SUFFIX: &str = " promotion nodes visited";
+const PROMOTION_EDGES_SUFFIX: &str = " promotion edges visited";
+const RC_INCS_SUFFIX: &str = " rc increments";
+const RC_CELL_INCS_SUFFIX: &str = " rc increments on cells";
+const RC_DECS_SUFFIX: &str = " rc decrements";
+const RC_CELL_DECS_SUFFIX: &str = " rc decrements on cells";
 const COUNTER_SUFFIXES: &[&str] = &[
     LEAKED_SUFFIX,
     ALLOCATED_SUFFIX,
+    ALLOCATED_BYTES_SUFFIX,
     REUSED_SUFFIX,
     EFF_OPS_SUFFIX,
     DRIVE_STEPS_SUFFIX,
+    PROMOTED_SUFFIX,
+    PROMOTION_SHARED_SUFFIX,
+    PROMOTION_NODES_SUFFIX,
+    PROMOTION_EDGES_SUFFIX,
+    RC_INCS_SUFFIX,
+    RC_CELL_INCS_SUFFIX,
+    RC_DECS_SUFFIX,
+    RC_CELL_DECS_SUFFIX,
 ];
 /// A balanced run leaks nothing.
 const NO_LEAKED_CELLS: i64 = 0;
@@ -57,6 +85,66 @@ const COUNTER_VALUE_FIELD: usize = 1;
 fn is_counter_report(line: &str) -> bool {
     let line = line.trim_end();
     line.starts_with(COUNTER_PREFIX) && COUNTER_SUFFIXES.iter().any(|s| line.ends_with(s))
+}
+
+/// Directory holding the C runtime sources, relative to the crate root tests run
+/// from.
+const RUNTIME_DIR: &str = "runtime";
+/// A counter report's format string, up to and after the counted value. Keying on
+/// `%ld` is what separates a counter from a genuine diagnostic: `read_file`'s
+/// failure line also opens with [`COUNTER_PREFIX`] but interpolates a `%s`, and it
+/// is program-visible stderr that must never be stripped.
+const REPORT_FORMAT_OPEN: &str = "\"prism: %ld ";
+const REPORT_FORMAT_CLOSE: &str = "\\n";
+
+/// [`COUNTER_SUFFIXES`] and the runtime name the same set of counters, in two
+/// languages, and nothing but this test makes them agree. Read the format strings
+/// back out of the C source and check both directions: an unregistered report is
+/// the expensive failure (it lands in the observation trace and diverges every
+/// parity case against an interpreter that never printed it), and a registered
+/// suffix the runtime no longer emits is a stale strip rule that would hide a
+/// future line of real program output.
+#[test]
+fn counter_reports_are_registered() {
+    let mut emitted = Vec::new();
+    let entries =
+        fs::read_dir(RUNTIME_DIR).unwrap_or_else(|e| panic!("cannot read {RUNTIME_DIR}: {e}"));
+    for entry in entries {
+        let path = entry.expect("runtime directory entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("c") {
+            continue;
+        }
+        let src = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        for rest in src.split(REPORT_FORMAT_OPEN).skip(1) {
+            // The literal ends at the next quote; these format strings escape none.
+            let literal = &rest[..rest.find('"').expect("unterminated format string")];
+            let suffix = literal
+                .strip_suffix(REPORT_FORMAT_CLOSE)
+                .expect("counter report is one whole line");
+            emitted.push((path.clone(), format!(" {suffix}")));
+        }
+    }
+
+    let unregistered: Vec<_> = emitted
+        .iter()
+        .filter(|(_, suffix)| !COUNTER_SUFFIXES.contains(&suffix.as_str()))
+        .map(|(path, suffix)| format!("  {} emits {suffix:?}", path.display()))
+        .collect();
+    assert!(
+        unregistered.is_empty(),
+        "the runtime emits counter reports this module does not strip:\n{}",
+        unregistered.join("\n")
+    );
+
+    let stale: Vec<_> = COUNTER_SUFFIXES
+        .iter()
+        .filter(|suffix| !emitted.iter().any(|(_, e)| e == *suffix))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "these registered suffixes are no longer emitted by the runtime: {stale:?}"
+    );
 }
 
 /// The value the runtime reported for the counter named by `suffix`, or `None`
@@ -76,6 +164,11 @@ pub fn counter_report(stderr: &str, suffix: &str) -> Option<i64> {
 /// Opt-in memoization of verified native cases: set it to skip programs whose
 /// complete toolchain fingerprint is unchanged since a previous green run.
 const GATE_CACHE: &str = "PRISM_GATE_CACHE";
+/// A runtime compiler-tool source override is outside the repository roots a
+/// reusable receipt commits to. Even source-fingerprint mode cannot prove what
+/// an arbitrary external directory contained, so enabling the override makes
+/// every gate run cold and prevents it from writing a misleading green marker.
+const TOOL_PACKAGES_ROOT: &str = "PRISM_TOOL_PACKAGES_ROOT";
 /// Selects how the compiler half of the cache key is fingerprinted. Unset (the
 /// default) hashes the test executable itself, maximally conservative and stable
 /// between local runs where cargo does not rebuild. Set to `source` to hash the
@@ -243,8 +336,8 @@ const CORPUS_DIRS: [&str; 2] = ["examples", "tests/cases/run"];
 /// Committed `.pr` programs intentionally outside the runnable corpus, each with
 /// why. `corpus_skip_list_is_exact` (tests/parity.rs) asserts the set of programs
 /// that actually drop out of `corpus()` equals these keys, so a regression that
-/// silently stops a program interpreting (which would quietly shrink every oracle
-/// built on the corpus) fails CI by name, and a program that becomes runnable
+/// stops a program interpreting fails CI by name instead of shrinking every
+/// corpus-based oracle. A program that becomes runnable
 /// again is flagged here as a stale entry. Labels are `dir/name.pr`.
 pub const CORPUS_SKIPS: &[(&str, &str)] = &[
     ("examples/capabilities.pr", "off-platform: getenv"),
@@ -684,6 +777,14 @@ fn collect_files(dir: &Path, filter: RootFilter, out: &mut Vec<PathBuf>) {
 /// The cache directory when memoization is enabled, else `None`. Lives under
 /// `target/` so `cargo clean` clears it and it never enters version control.
 fn gate_cache_dir() -> Option<PathBuf> {
+    if env::var_os(TOOL_PACKAGES_ROOT).is_some() {
+        if env::var_os(GATE_CACHE).is_some() {
+            eprintln!(
+                "gate-cache: disabled because {TOOL_PACKAGES_ROOT} selects runtime tool sources"
+            );
+        }
+        return None;
+    }
     env::var_os(GATE_CACHE)?;
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("target")
@@ -817,7 +918,7 @@ fn check_native_parity_uncached(
     // A program whose `main` returns a tagged-immediate value exits with that
     // value as its code; `canonical_exit` reconstructs it the way the native
     // `main` shim does, so exit-code divergence (the class the `error`/`exit`
-    // seam exposed) is now inside the oracle, not just the empty-stdin instances.
+    // seam exposed) is now inside the oracle for every instance.
     // A crash by signal reports no code and diverges here as well as truncating
     // stdout above.
     let want_exit = canonical_exit(&reference);
@@ -902,18 +1003,28 @@ pub fn parallel_collect<T: Send>(
     cases: &[PathBuf],
     check: impl Fn(&Path) -> Result<T, String> + Sync,
 ) -> (Vec<String>, Vec<T>) {
+    parallel_each(cases, |case| check(case))
+}
+
+/// The worker pool underneath [`parallel_check`], generic over the item type so
+/// generated-program sweeps reuse the same big-stack corpus workers as
+/// path-keyed sweeps.
+pub fn parallel_each<I: Sync, T: Send>(
+    items: &[I],
+    check: impl Fn(&I) -> Result<T, String> + Sync,
+) -> (Vec<String>, Vec<T>) {
     let next = AtomicUsize::new(0);
     let fails: Mutex<Vec<String>> = Mutex::new(Vec::new());
     let values: Mutex<Vec<T>> = Mutex::new(Vec::new());
     let threads = thread::available_parallelism()
         .map_or(DEFAULT_PARALLELISM, NonZeroUsize::get)
-        .min(cases.len().max(MIN_WORKER_COUNT));
+        .min(items.len().max(MIN_WORKER_COUNT));
     thread::scope(|s| {
         for _ in 0..threads {
             let worker = || loop {
                 let i = next.fetch_add(1, Ordering::Relaxed);
-                let Some(case) = cases.get(i) else { break };
-                match check(case) {
+                let Some(item) = items.get(i) else { break };
+                match check(item) {
                     Ok(v) => values.lock().unwrap().push(v),
                     Err(e) => fails.lock().unwrap().push(e),
                 }

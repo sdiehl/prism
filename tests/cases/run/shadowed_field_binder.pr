@@ -1,0 +1,32 @@
+-- A field binder may reuse the name of the value being matched. The binder
+-- hides that value for the rest of the arm, so nothing in the arm can name it,
+-- and reference counting still has to release it exactly once. `walk` and
+-- `walk_renamed` differ only in whether the second field reuses the name, so
+-- they must agree on both the answer and the live-cell count at exit.
+type Tree = Leaf(Int) | Node(List(Tree), Tree)
+
+fn walk(t : Tree) : Int =
+  match t of
+    Leaf(n) => n
+    Node(kids, t) => walk_all(kids) + walk(t)
+
+fn walk_renamed(t : Tree) : Int =
+  match t of
+    Leaf(n) => n
+    Node(kids, last) => walk_all_renamed(kids) + walk_renamed(last)
+
+fn walk_all(ts : List(Tree)) : Int =
+  match ts of
+    Nil => 0
+    Cons(x, rest) => walk(x) + walk_all(rest)
+
+fn walk_all_renamed(ts : List(Tree)) : Int =
+  match ts of
+    Nil => 0
+    Cons(x, rest) => walk_renamed(x) + walk_all_renamed(rest)
+
+fn sample() : Tree = Node([Leaf(1), Node([Leaf(2)], Leaf(3))], Leaf(4))
+
+fn main() =
+  println(show_int(walk(sample())))
+  println(show_int(walk_renamed(sample())))

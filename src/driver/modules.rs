@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::io;
 use std::sync::OnceLock;
 
 use crate::error::Error;
@@ -23,14 +24,15 @@ use super::input::field;
 use super::scheduler::QueryScheduler;
 use super::{Config, PRELUDE, ROOT_MODULE_NAME};
 
-const MODULE_CHECK_QUERY_SCHEMA: &[u8] = b"prism-module-check-query-v2";
-const CHECKED_INTERFACE_QUERY_SCHEMA: &[u8] = b"prism-checked-interface-query-v2";
+const MODULE_CHECK_QUERY_SCHEMA: &[u8] = b"prism-module-check-query-v3";
+const CHECKED_INTERFACE_QUERY_SCHEMA: &[u8] = b"prism-checked-interface-query-v3";
 const CHECKED_INTERFACE_QUERY: &str = "checked-interface";
-// v5 keys the v4 body format by semantic tokens. It still never publishes a
+// v6 keys the v4 body format by semantic tokens and explicit nominal
+// representation evidence. It still never publishes a
 // body whose inferred declarations or node facts contain unification
 // metavariables: such a body cannot be parsed back as a checked signature, and
 // a cache must never turn a valid cold build into a warm-build failure.
-const CHECKED_BODY_QUERY_SCHEMA: &[u8] = b"prism-checked-body-query-v5";
+const CHECKED_BODY_QUERY_SCHEMA: &[u8] = b"prism-checked-body-query-v6";
 const CHECKED_BODY_QUERY: &str = "checked-body";
 // v2 carries the checked handler-residual facts (known operations, opaque
 // effect labels, and an open-row marker). A v1 body cannot be promoted by
@@ -75,7 +77,15 @@ pub struct ModuleCheckReport {
     pub root: Checked,
     /// True when the root checked body was rehydrated from the durable store.
     pub root_reused: bool,
+    /// Modules whose checked bodies exist this command: freshly checked,
+    /// session hits, and durable body hits. A module served from an
+    /// interface-only durable hit has no body to carry, so it appears in
+    /// `interfaces` but not here; consumers that need every module must read
+    /// `interfaces`.
     pub modules: Vec<CheckedModule>,
+    /// The public interface of every non-shipped module in the DAG, complete
+    /// regardless of which cache tier served each module.
+    pub interfaces: BTreeMap<String, ModuleInterface>,
     /// Deterministically ordered reuse/recompilation explanations.
     pub decisions: Vec<ModuleQueryDecision>,
 }
@@ -183,6 +193,7 @@ pub fn check_modules_on(
                 root: super::check_on_in(src, roots, cfg)?,
                 root_reused: false,
                 modules: Vec::new(),
+                interfaces: BTreeMap::new(),
                 decisions: Vec::new(),
             });
         }
@@ -405,6 +416,7 @@ pub fn check_modules_on(
         root,
         root_reused,
         modules: checked_modules.into_values().collect(),
+        interfaces,
         decisions,
     })
 }
@@ -783,6 +795,9 @@ impl CheckedBody {
                         .into_iter()
                         .map(crate::sym::Sym::from)
                         .collect(),
+                    // The serialized interface carries no body-effect witness,
+                    // so a rehydrated declaration is never provably pure.
+                    pure: false,
                 })
             })
             .collect::<Result<Vec<_>, Error>>()?;
@@ -846,7 +861,15 @@ impl DurableInterfaceCache {
         let Some(output) = self.store.get_query(CHECKED_INTERFACE_QUERY, key)? else {
             return Ok(None);
         };
-        let bytes = self.store.get(&output)?;
+        // A query binding surviving a swept object is a normal cache miss, not
+        // corruption: gc (crate::store::disk::gc) prunes objects/meta by age
+        // without touching queries/index, so a stale binding must fall back to
+        // recompute exactly like an absent binding does above.
+        let bytes = match self.store.get(&output) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(Error::Io(e)),
+        };
         let actual = blake3::hash(&bytes).to_hex().to_string();
         if actual != output {
             return Err(Error::ResolveModule(format!(
@@ -870,7 +893,13 @@ impl DurableInterfaceCache {
         let Some(output) = self.store.get_query(CHECKED_BODY_QUERY, key)? else {
             return Ok(None);
         };
-        let bytes = self.store.get(&output)?;
+        // See the matching comment in `load` above: a swept object behind a
+        // surviving query binding is a normal miss, not corruption.
+        let bytes = match self.store.get(&output) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(Error::Io(e)),
+        };
         let actual = blake3::hash(&bytes).to_hex().to_string();
         if actual != output {
             return Err(Error::ResolveModule(format!(

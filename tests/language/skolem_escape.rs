@@ -76,8 +76,8 @@ fn corpus_files() -> Vec<PathBuf> {
 
 // A well-formed generalized scheme binds every variable it mentions under its
 // own `forall`/`forall`-row, so a free `Type::Var`/`EffRow::Var` left over is an
-// escaped skolem. Sweeping the whole corpus asserts the fix holds not just on
-// the repro but everywhere: no printed top-level scheme carries an unquantified
+// escaped skolem. Sweeping the whole corpus checks every program rather than only
+// the reproducer: no printed top-level scheme carries an unquantified
 // skolem. (`check` prepends the prelude, so the prelude's own schemes are swept
 // too on every file.)
 #[test]

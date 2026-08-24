@@ -10,13 +10,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use prism_common::sym::Sym;
 use prism_syntax::names;
 
+use crate::core::work;
+
 use super::verify::{
     substitute_core_type, substitute_fn_sig, substitute_label, substitute_row, substitute_sig,
     substitute_type,
 };
 use super::{
     CompSig, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, TypedBinder, TypedComp,
-    TypedCompKind, TypedCore, TypedCoreFn, TypedForward, TypedHandleOp, TypedHandler, TypedPattern,
+    TypedCompKind, TypedCoreFn, TypedForward, TypedHandleOp, TypedHandler, TypedPattern,
     TypedValue, TypedValueKind,
 };
 
@@ -104,15 +106,6 @@ pub(crate) trait Rewrite {
         )
     }
 
-    fn core<P>(&mut self, core: &TypedCore<P>, cx: &Self::Ctx) -> TypedCore<P> {
-        TypedCore::new(
-            core.fns
-                .iter()
-                .map(|function| self.function(function, cx))
-                .collect(),
-        )
-    }
-
     fn instantiations(
         &mut self,
         instantiations: &[CoreInstantiation],
@@ -126,6 +119,8 @@ pub(crate) trait Rewrite {
 
     #[allow(clippy::too_many_lines)]
     fn descend_value(&mut self, value: &TypedValue, cx: &Self::Ctx) -> TypedValue {
+        let _frame = work::frame();
+        work::rebuild();
         let kind = match &value.kind {
             TypedValueKind::Var {
                 name,
@@ -187,6 +182,8 @@ pub(crate) trait Rewrite {
 
     #[allow(clippy::too_many_lines)]
     fn descend_comp(&mut self, comp: &TypedComp, cx: &Self::Ctx) -> TypedComp {
+        let _frame = work::frame();
+        work::rebuild();
         let kind = match &comp.kind {
             TypedCompKind::Return(value) => TypedCompKind::Return(self.value(value, cx)),
             TypedCompKind::Bind(first, binder, rest) => TypedCompKind::Bind(
@@ -659,6 +656,68 @@ impl Rewrite for TermSubstitution<'_> {
     }
 }
 
+/// What the traversal hands a sink for one free reference.
+///
+/// Almost every reference is a value occurrence, which is the term the name was
+/// read through and therefore the only witness that records its instantiation. A
+/// reuse token is the exception: it names a binder directly with no value around
+/// it, so its witness is the binder itself.
+pub(crate) enum FreeRef<'a> {
+    Occurrence(&'a TypedValue),
+    Token(&'a TypedBinder),
+}
+
+/// Where a free-variable walk sends the references it finds.
+///
+/// The traversal carries no policy: a caller that wants names alone collects
+/// into a set, and a caller that has to justify a later rewrite collects the
+/// witnesses too, both from this one walk. Reference counting needs the second
+/// and must not pay for a second traversal to get it.
+pub(crate) trait FreeRefs {
+    fn see(&mut self, name: Sym, reference: &FreeRef<'_>);
+}
+
+impl FreeRefs for BTreeSet<Sym> {
+    fn see(&mut self, name: Sym, _: &FreeRef<'_>) {
+        self.insert(name);
+    }
+}
+
+/// The value a binder denotes where it is in scope.
+///
+/// A binder is monomorphic at its own binding site, so its occurrence carries an
+/// empty instantiation by construction.
+pub(crate) fn binder_occurrence(binder: &TypedBinder) -> TypedValue {
+    TypedValue::new(
+        binder.ty.clone(),
+        TypedValueKind::Var {
+            name: binder.name,
+            instantiation: Vec::new(),
+        },
+    )
+}
+
+/// First witness per free name in a typed computation.
+///
+/// "First" is in traversal order, which makes the map deterministic, and every
+/// entry is a reference live somewhere inside `comp`. That is the property a
+/// consumer needs: a witness taken from this map justifies an operation emitted
+/// against this subtree, unlike one taken from a whole-program index.
+pub(crate) fn free_comp_var_witnesses(comp: &TypedComp) -> BTreeMap<Sym, TypedValue> {
+    struct First(BTreeMap<Sym, TypedValue>);
+    impl FreeRefs for First {
+        fn see(&mut self, name: Sym, reference: &FreeRef<'_>) {
+            self.0.entry(name).or_insert_with(|| match reference {
+                FreeRef::Occurrence(value) => (*value).clone(),
+                FreeRef::Token(binder) => binder_occurrence(binder),
+            });
+        }
+    }
+    let mut sink = First(BTreeMap::new());
+    collect_comp_vars(comp, &mut BoundStack::new(), &mut sink);
+    sink.0
+}
+
 /// Free local/global term references in a typed computation.
 pub(crate) fn free_comp_vars(comp: &TypedComp) -> BTreeSet<Sym> {
     let mut free = BTreeSet::new();
@@ -752,17 +811,17 @@ impl BoundStack {
     }
 }
 
-fn collect_ref(name: Sym, bound: &BoundStack, free: &mut BTreeSet<Sym>) {
+fn collect_ref<S: FreeRefs>(name: Sym, reference: &FreeRef<'_>, bound: &BoundStack, free: &mut S) {
     if !bound.contains(name) {
-        free.insert(name);
+        free.see(name, reference);
     }
 }
 
-fn under(
+fn under<S: FreeRefs>(
     bound: &mut BoundStack,
     names: impl IntoIterator<Item = Sym>,
     body: &TypedComp,
-    free: &mut BTreeSet<Sym>,
+    free: &mut S,
 ) {
     let mark = bound.mark();
     bound.push_all(names);
@@ -770,9 +829,11 @@ fn under(
     bound.pop_to(mark);
 }
 
-fn collect_value_vars(value: &TypedValue, bound: &mut BoundStack, free: &mut BTreeSet<Sym>) {
+fn collect_value_vars<S: FreeRefs>(value: &TypedValue, bound: &mut BoundStack, free: &mut S) {
     match &value.kind {
-        TypedValueKind::Var { name, .. } => collect_ref(*name, bound, free),
+        TypedValueKind::Var { name, .. } => {
+            collect_ref(*name, &FreeRef::Occurrence(value), bound, free);
+        }
         TypedValueKind::Reinterpret(value)
         | TypedValueKind::LoweredRepr { value, proof: _ }
         | TypedValueKind::NewtypeRepr { value, .. } => {
@@ -802,7 +863,7 @@ fn collect_value_vars(value: &TypedValue, bound: &mut BoundStack, free: &mut BTr
 }
 
 #[allow(clippy::too_many_lines)]
-fn collect_comp_vars(comp: &TypedComp, bound: &mut BoundStack, free: &mut BTreeSet<Sym>) {
+fn collect_comp_vars<S: FreeRefs>(comp: &TypedComp, bound: &mut BoundStack, free: &mut S) {
     #[cfg(test)]
     FREE_COMP_VAR_VISITS.with(|visits| {
         if let Some(count) = visits.get() {
@@ -821,7 +882,7 @@ fn collect_comp_vars(comp: &TypedComp, bound: &mut BoundStack, free: &mut BTreeS
         | TypedCompKind::RefNew(value)
         | TypedCompKind::RefGet(value) => collect_value_vars(value, bound, free),
         TypedCompKind::Reuse(token, value) => {
-            collect_ref(token.name, bound, free);
+            collect_ref(token.name, &FreeRef::Token(token), bound, free);
             collect_value_vars(value, bound, free);
         }
         TypedCompKind::Prim(_, lhs, rhs)

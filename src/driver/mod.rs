@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
 use std::sync::OnceLock;
 
-use crate::core::fbip::{borrow_sigs, Fips, Sigs};
+use crate::core::fbip::{borrow_sigs, infer_borrow_sigs, Fips, Sigs};
 use crate::core::opt::PassStage;
 use crate::core::typed::{
     explain_effect_tiers, insert_rc as insert_typed_rc, lower_effects as lower_typed_effects,
@@ -86,7 +86,7 @@ pub use execution::{
     DurableRun, RecordedRun, StepRuler, StepRulerRow, SuspendAtCut, SuspendCut, SuspendResult,
     STEP_RULER_FORMAT,
 };
-use front::{run_front, Front, FrontRequest};
+use front::{run_front, run_front_verdict, Front, FrontRequest};
 #[cfg(feature = "native")]
 pub(crate) use identity::stdlib_value_schemes;
 pub(crate) use identity::{
@@ -116,7 +116,7 @@ pub use semantic_patch::{
     PATCH_IMPACT_FORMAT, PATCH_REFUSAL_FORMAT, PATCH_STAGE_FORMAT,
 };
 pub use session::{CompilerSession, QueryDecision, SessionStats};
-pub use timing::TimingSink;
+pub use timing::{PhaseTally, TimingSink};
 #[cfg(feature = "native")]
 pub use verify::attest_on;
 
@@ -418,6 +418,17 @@ fn tooltip_checked_on(
     Ok(run_front(src, roots, cfg, FrontRequest::TypedTooltips)?.into_program_checked())
 }
 
+// The resolved Core-surface tree plus the checker's verdict on it, used only by
+// `dump tc-rejection`: the one seam that exports an artifact for a program the
+// checker refused.
+fn front_verdict_on(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+) -> Result<(Program<CorePhase>, Option<Error>), Error> {
+    run_front_verdict(src, roots, cfg)
+}
+
 /// The public validity verdict behind `prism check`.
 ///
 /// Type-checks, elaborates, and runs every semantic validator (fip / replayable /
@@ -610,6 +621,24 @@ fn prepared_core(src: &str, roots: &[Root], cfg: &Config) -> Result<ElaboratedCo
     prepared_core_with_opts(src, roots, cfg, FrontRequest::Full)
 }
 
+// Prepare the verified unlowered interpreter program for a compiler-owned
+// oracle. Unlike `prepared_core`, this intentionally does not run effect
+// lowering and RC/reuse merely to discard their output: bootstrap executes the
+// elaborated tree, and the ordinary interpreter entry points retain that ICE
+// check unchanged. Crate-private so a language program cannot opt out of a
+// production validation lane. Its only caller is the CLI bootstrap path, so it
+// is gated with the `cli` module.
+#[cfg(feature = "native")]
+pub(crate) fn prepared_oracle_core(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+) -> Result<ElaboratedCore, Error> {
+    let (_program, _checked, core, _typed, _verify_env) =
+        run_front(src, roots, cfg, FrontRequest::Full)?.into_typed_pre();
+    Ok(core)
+}
+
 // Interpreter-only typed-hole lane. Native/wasm/build never call this and keep
 // the ordinary `E1021` refusal before elaboration.
 fn prepared_core_deferred_holes(
@@ -620,6 +649,32 @@ fn prepared_core_deferred_holes(
     prepared_core_with_opts(src, roots, cfg, FrontRequest::FullDeferredHoles)
 }
 
+// The borrow masks the reference-count lanes consume. With borrow inference
+// enabled, the declared masks are extended over the provably pure functions;
+// every RC consumer in one compilation reads this single map, so caller and
+// callee always agree on each call's convention. Definition identity
+// (`hash_meta`) always reads the declared `borrow_sigs` instead: the inferred
+// masks are a pure function of the checked source, a cost decision like a
+// lowering tier, never part of what a definition is.
+fn rc_borrow_sigs(
+    program: &Program<CorePhase>,
+    checked: &Checked,
+    core: &Core,
+    cfg: &Config,
+) -> Sigs {
+    let declared = borrow_sigs(program);
+    if !cfg.flags.borrow_infer {
+        return declared;
+    }
+    let pure_fns = checked
+        .decls
+        .iter()
+        .filter(|decl| decl.pure)
+        .map(|decl| Sym::new(&decl.name))
+        .collect();
+    infer_borrow_sigs(core, &pure_fns, &declared)
+}
+
 fn prepared_core_with_opts(
     src: &str,
     roots: &[Root],
@@ -628,7 +683,7 @@ fn prepared_core_with_opts(
 ) -> Result<ElaboratedCore, Error> {
     let (program, checked, core, typed, verify_env) =
         run_front(src, roots, cfg, request)?.into_typed_pre();
-    let sigs = borrow_sigs(&program);
+    let sigs = rc_borrow_sigs(&program, &checked, &core, cfg);
     let lowered = lower_opt(
         typed,
         &verify_env,
@@ -656,6 +711,22 @@ const TYPED_LOWER_STACK: usize = 64 * 1024 * 1024;
 
 fn on_typed_lower_stack<T>(f: impl FnOnce() -> T) -> T {
     stacker::maybe_grow(TYPED_LOWER_STACK, TYPED_LOWER_STACK, f)
+}
+
+fn stage_validation_error(stage: &str, violations: &[String]) -> Error {
+    Error::InternalInvariant(format!(
+        "{stage} Core failed structural validation:\n{}",
+        violations.join("\n")
+    ))
+}
+
+fn validated_elaborated_core(core: Core) -> Result<ElaboratedCore, Error> {
+    ElaboratedCore::validate(core)
+        .map_err(|violations| stage_validation_error("elaborated", &violations))
+}
+
+fn validated_lowered_core(core: Core) -> Result<LoweredCore, Error> {
+    LoweredCore::validate(core).map_err(|violations| stage_validation_error("lowered", &violations))
 }
 
 fn lower_opt(
@@ -726,16 +797,16 @@ fn finish_lowered(lowered: LoweredSpine, sigs: &Sigs, cfg: &Config) -> Result<Lo
 }
 
 fn finish_lowered_on_grown_stack(lowered: LoweredSpine, sigs: &Sigs) -> Result<LoweredCore, Error> {
-    let typed_owned = insert_typed_rc(lowered.core, sigs);
-    verify_typed_core(&typed_owned, &lowered.verify_env).map_err(typed_verification_error)?;
-    let typed_reused = reuse_typed(typed_owned);
-    verify_typed_core(&typed_reused, &lowered.verify_env).map_err(typed_verification_error)?;
+    let typed_owned = verify_typed_core(insert_typed_rc(lowered.core, sigs), &lowered.verify_env)
+        .map_err(typed_verification_error)?;
+    let typed_reused = verify_typed_core(reuse_typed(typed_owned), &lowered.verify_env)
+        .map_err(typed_verification_error)?;
     // The one semantic erasure on the native route: nothing downstream of this
     // call sees a typed node.
     let final_core = typed_reused.erase();
     balanced(&final_core, sigs)
         .map_err(|error| Error::CodegenBackend(format!("ICE: rc imbalance: {error}")))?;
-    Ok(LoweredCore::new(final_core))
+    validated_lowered_core(final_core)
 }
 
 fn lowered_core(
@@ -744,7 +815,7 @@ fn lowered_core(
     cfg: &Config,
 ) -> Result<(Checked, LoweredCore, BTreeMap<String, CtorInfo>, Sigs), Error> {
     let (checked, sigs, lowered) = lowered_front(src, roots, cfg)?;
-    let core = on_typed_lower_stack(|| LoweredCore::new(lowered.core.clone().erase()));
+    let core = on_typed_lower_stack(|| validated_lowered_core(lowered.core.clone().erase()))?;
     Ok((checked, core, lowered.ctors, sigs))
 }
 
@@ -764,9 +835,9 @@ fn lowered_front(
     roots: &[Root],
     cfg: &Config,
 ) -> Result<(Checked, Sigs, LoweredSpine), Error> {
-    let (program, checked, _, typed, verify_env) =
+    let (program, checked, core, typed, verify_env) =
         run_front(src, roots, cfg, FrontRequest::Full)?.into_typed_pre();
-    let sigs = borrow_sigs(&program);
+    let sigs = rc_borrow_sigs(&program, &checked, &core, cfg);
     let lowered = lower_opt(
         typed,
         &verify_env,
@@ -809,9 +880,10 @@ fn lowered_spine_with_identity(
     roots: &[Root],
     cfg: &Config,
 ) -> Result<(Checked, LoweredSpine, Sigs, crate::core::Hashes), Error> {
-    let (program, checked, identity_core, _, typed, verify_env) =
+    let (program, checked, identity_core, core, typed, verify_env) =
         run_front(src, roots, cfg, FrontRequest::Full)?.into_compilation();
-    let sigs = borrow_sigs(&program);
+    let declared = borrow_sigs(&program);
+    let sigs = rc_borrow_sigs(&program, &checked, &core, cfg);
     let hashes = if cfg.scheduler().retarget().is_some() {
         // Scheduler policy is execution configuration, never source identity.
         // The full path has already retargeted its surface program, so recover
@@ -826,7 +898,7 @@ fn lowered_spine_with_identity(
             ),
         )
     } else {
-        let metas = hash_meta(&checked, &sigs, &fip_annots(&program));
+        let metas = hash_meta(&checked, &declared, &fip_annots(&program));
         hash_program(&identity_core, &metas)
     };
     let lowered = lower_opt(
@@ -944,6 +1016,28 @@ mod typed_post_route_tests {
         )
         .expect("typed lowering");
         finish_lowered(lowered, &sigs, &cfg).expect("typed final route");
+    }
+
+    #[test]
+    fn production_route_finishes_with_inferred_borrows() {
+        let mut cfg = Config::default();
+        cfg.flags.borrow_infer = true;
+        cfg.flags.quiet = true;
+        // The row reaches `len` as the result of a call, which stays let-bound
+        // through optimization, so the borrowed position is covered by a named
+        // token at the call site (a literal constructor argument would force
+        // the parameter back to owned).
+        let src = "type Row = Tip | Node(Int, Row)\n\nfn build(n : Int) : Row =\n  if n == 0 then Tip else Node(n, build(n - 1))\n\nfn len(r : Row) : Int =\n  match r of\n    Tip => 0\n    Node(_, rest) => 1 + len(rest)\n\nfn main() : Int =\n  len(build(2))\n";
+        let (_, core, _, sigs) = reuse_lowered_core(src, &[], &cfg).expect("typed route");
+        balanced(&core, &sigs).expect("balanced with inferred borrows");
+        crate::core::residual_effects(&core).expect("no residual effect nodes");
+        let mask = sigs
+            .get(&Sym::new("len"))
+            .expect("len earns an inferred loan");
+        assert!(
+            mask.iter().any(|b| *b),
+            "len keeps at least one borrowed parameter"
+        );
     }
 
     #[test]
@@ -1145,8 +1239,9 @@ pub fn core_of(src: &str) -> Result<Core, Error> {
 /// Fails on front-end errors.
 pub fn core_ir_full(full: &str, base: &Path) -> Result<String, Error> {
     let prelude = prelude_fn_names()?;
-    let (program, _, core) = frontend(full, &default_roots(base), &Config::from_env())?;
-    let sigs = borrow_sigs(&program);
+    let cfg = Config::from_env();
+    let (program, checked, core) = frontend(full, &default_roots(base), &cfg)?;
+    let sigs = rc_borrow_sigs(&program, &checked, &core, &cfg);
     let optimized = reuse(&insert_rc(&core, &sigs));
     Ok(pp_core_pretty(&strip_prelude(optimized, &prelude)))
 }

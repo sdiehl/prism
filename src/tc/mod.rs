@@ -631,6 +631,67 @@ fn clean() : Int ! {} =
     }
 }
 
+#[cfg(test)]
+mod handler_return_tests {
+    use super::check;
+    use crate::parse::parse;
+    use crate::resolve::resolve;
+    use crate::syntax::ast::{Core, Program};
+    use crate::syntax::desugar::desugar;
+
+    fn core(src: &str) -> Program<Core> {
+        let surface = parse(src).expect("parse handler fixture").program;
+        let resolved = resolve(surface).expect("resolve handler fixture");
+        desugar(resolved).expect("desugar handler fixture")
+    }
+
+    const NO_RETURN_ARM: &str = "
+effect Box
+  take() : Int
+  put(Int) : Unit
+
+fn passes_through() =
+  handle put(1) with
+    take() resume k => k(0)
+    put(v) resume w => w(())
+";
+
+    #[test]
+    fn handler_without_return_arm_answers_at_the_body_type() {
+        let program = core(NO_RETURN_ARM);
+        let checked = check(&program).expect("check handler fixture");
+        let decl = checked
+            .decls
+            .iter()
+            .find(|decl| decl.name == "passes_through")
+            .expect("fixture declaration");
+        assert_eq!(decl.ty.show(), "() -> Unit");
+    }
+
+    #[test]
+    fn concrete_use_of_the_implicit_answer_fails_at_the_use_site() {
+        let src = format!("{NO_RETURN_ARM}\nfn uses_it() : Int = passes_through()\n");
+        let program = core(&src);
+        let error = check(&program).expect_err("Unit answer used at Int must be a type error");
+        assert_eq!(error.code(), Some("E1022"), "{error}");
+    }
+}
+
+/// Declaration-level runtime representation of a nominal type.
+///
+/// Constructor shape is not enough: an ordinary one-field datatype allocates
+/// a cell, while a source `newtype` with the same shape is erased. Vector
+/// builtins are multiword values and belong to neither class.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NominalRepr {
+    /// An allocated, non-zero runtime cell.
+    BoxedCell,
+    /// A source `newtype` whose wrapper is removed by mandatory lowering.
+    Transparent,
+    /// A two-word vector value.
+    Vec128,
+}
+
 #[derive(Clone, Debug)]
 pub struct DataInfo {
     pub params: Vec<String>,
@@ -642,6 +703,8 @@ pub struct DataInfo {
     // against its arguments at each annotation (see `env::check_annot_rows`).
     pub param_kinds: Vec<Kind>,
     pub ctors: Vec<String>,
+    /// Checked declaration evidence used by representation-sensitive queries.
+    pub repr: NominalRepr,
 }
 
 pub(crate) use crate::types::CtorInfo;
@@ -818,9 +881,8 @@ pub struct Checked {
     ///
     /// An instance method is not in `decls`: it is checked from inside its
     /// instance rather than as a top-level function, so its row was computed,
-    /// held to the class signature's declared labels, and dropped. A consumer that
-    /// reports what a definition performs has no other source for it — an instance
-    /// has no `DeclInfo` and Core carries no rows.
+    /// held to the class signature's declared labels, and dropped. Instances have
+    /// no `DeclInfo`, and Core carries no rows, so consumers read this table.
     pub method_effects: BTreeMap<String, Effects>,
     pub constrained: BTreeMap<Sym, (Type, Vec<(Sym, Type)>)>,
     pub seeds: u32,
@@ -988,11 +1050,8 @@ struct Tc<'a> {
     // span inside it renders under one scheme instead of canonicalizing afresh
     // per node and calling the same variable `a` in one place and `c` in another.
     decl_renames: Option<Renames>,
-    // One member's spans, held from the moment its body is inferred until its
-    // scheme exists. A recursion group is solved as a whole — a sibling's body is
-    // what pins an earlier member's parameter — so reading a member's types when
-    // its own body finishes reads them too early. One entry per member, pushed and
-    // taken in the order the group infers and generalizes them.
+    // Hold each member's spans until the whole recursion group is solved. A later
+    // sibling may still constrain an earlier member's parameters.
     deferred_spans: std::collections::VecDeque<DeferredSpans>,
     hole_sites: Vec<HoleSite>,
     holes: Vec<HoleReport>,
@@ -1273,7 +1332,7 @@ fn finalize_fn(
 ) -> Result<DeclInfo, TypeError> {
     // The labels of the inferred row. Effect-row inference is principal: it
     // discovers every effect on its own (direct performs, applied effect-carrying
-    // callees, builtin rows, `mask`), so the row is the single source of truth.
+    // callees, builtin rows, `mask`), so the row alone determines inferred effects.
     // Real under-coverage is caught downstream by `reconcile_effects` (lowered
     // ops vs the row) and the parity oracle.
     let inferred = concrete_effects(&ty);
@@ -1336,6 +1395,7 @@ fn finalize_fn(
         params: d.params.iter().map(|p| p.name.clone()).collect(),
         ty,
         effects: inferred,
+        pure: witness.effects.is_empty() && witness.closed,
     })
 }
 
@@ -1573,6 +1633,7 @@ fn check_seeded_mode(
                         params: Vec::new(),
                         ty,
                         effects: Effects::new(),
+                        pure: true,
                     });
                     continue;
                 }
@@ -1602,6 +1663,7 @@ fn check_seeded_mode(
                         params: Vec::new(),
                         ty,
                         effects: Effects::new(),
+                        pure: true,
                     });
                 } else {
                     let witness = tc.body_witness.get(&d.name).ok_or_else(|| {
@@ -1709,6 +1771,37 @@ pub fn infer_expr(checked: &Checked, e: &S<Expr<Core>>) -> Result<(Type, Effects
     infer_expr_env(checked, &Env::new(), e)
 }
 
+/// A standalone expression plus every node fact established by its inference.
+/// The REPL hands this artifact to elaboration as one unit so its fresh numeric
+/// node identities can never read facts from the resident program.
+pub(crate) struct CheckedExpr {
+    pub(crate) ty: Type,
+    pub(crate) effects: Effects,
+    #[cfg(feature = "native")]
+    pub(crate) facts: NodeFacts,
+    pub(crate) holes: Vec<HoleReport>,
+    dicts: DictTable,
+}
+
+/// Infer the complete artifact elaboration needs for a standalone expression.
+///
+/// # Errors
+/// Fails for ordinary type errors, and for typed holes unless `allow_holes` is
+/// true.
+#[cfg(feature = "native")]
+pub(crate) fn infer_checked_expr(
+    checked: &Checked,
+    e: &S<Expr<Core>>,
+    allow_holes: bool,
+) -> Result<CheckedExpr, TypeError> {
+    let inferred = infer_expr_full(checked, &Env::new(), e)?;
+    if allow_holes || inferred.holes.is_empty() {
+        Ok(inferred)
+    } else {
+        Err(hole_error(&inferred.holes))
+    }
+}
+
 /// # Errors
 /// Fails when the expression does not type check.
 pub fn infer_expr_env(
@@ -1716,11 +1809,11 @@ pub fn infer_expr_env(
     extra: &Env,
     e: &S<Expr<Core>>,
 ) -> Result<(Type, Effects), TypeError> {
-    let (t, eff, _, holes) = infer_expr_full(checked, extra, e)?;
-    if holes.is_empty() {
-        Ok((t, eff))
+    let inferred = infer_expr_full(checked, extra, e)?;
+    if inferred.holes.is_empty() {
+        Ok((inferred.ty, inferred.effects))
     } else {
-        Err(hole_error(&holes))
+        Err(hole_error(&inferred.holes))
     }
 }
 
@@ -1733,8 +1826,8 @@ pub fn infer_expr_allow_holes(
     extra: &Env,
     e: &S<Expr<Core>>,
 ) -> Result<(Type, Effects, Vec<HoleReport>), TypeError> {
-    let (ty, effects, _, holes) = infer_expr_full(checked, extra, e)?;
-    Ok((ty, effects, holes))
+    let inferred = infer_expr_full(checked, extra, e)?;
+    Ok((inferred.ty, inferred.effects, inferred.holes))
 }
 
 // Parse the canonical signature carried by a checked module interface.
@@ -1750,11 +1843,11 @@ pub fn infer_expr_dicts(
     checked: &Checked,
     e: &S<Expr<Core>>,
 ) -> Result<(Type, Effects, DictTable), TypeError> {
-    let (ty, effects, dicts, holes) = infer_expr_full(checked, &Env::new(), e)?;
-    if holes.is_empty() {
-        Ok((ty, effects, dicts))
+    let inferred = infer_expr_full(checked, &Env::new(), e)?;
+    if inferred.holes.is_empty() {
+        Ok((inferred.ty, inferred.effects, inferred.dicts))
     } else {
-        Err(hole_error(&holes))
+        Err(hole_error(&inferred.holes))
     }
 }
 
@@ -1766,14 +1859,20 @@ pub fn infer_expr_dicts_allow_holes(
     checked: &Checked,
     e: &S<Expr<Core>>,
 ) -> Result<(Type, Effects, DictTable, Vec<HoleReport>), TypeError> {
-    infer_expr_full(checked, &Env::new(), e)
+    let inferred = infer_expr_full(checked, &Env::new(), e)?;
+    Ok((
+        inferred.ty,
+        inferred.effects,
+        inferred.dicts,
+        inferred.holes,
+    ))
 }
 
 fn infer_expr_full(
     checked: &Checked,
     extra: &Env,
     e: &S<Expr<Core>>,
-) -> Result<(Type, Effects, DictTable, Vec<HoleReport>), TypeError> {
+) -> Result<CheckedExpr, TypeError> {
     let mut env = checked.env.clone();
     env.extend(extra.iter().map(|(k, v)| (*k, v.clone())));
     // Re-inference shares `eff_ops`, whose var-state markers lowered to the
@@ -1828,11 +1927,32 @@ fn infer_expr_full(
         tc.resolve_all()?;
         Ok(t)
     })?;
+    tc.check_or_null_sites()?;
     tc.flush_holes();
     let t = tc.apply(&t);
     let g = tc.generalize(&env, &t);
     tc.holes.sort_by_key(|h| (h.start, h.end, h.name.clone()));
-    Ok((g, effs, tc.dicts, tc.holes))
+    let dicts = tc.dicts;
+    #[cfg(feature = "native")]
+    let facts = NodeFacts::from_tables(
+        tc.field_res,
+        tc.unboxed_field,
+        tc.path_res,
+        tc.fixed,
+        tc.span_types,
+        dicts.clone(),
+        tc.tooltip_rows,
+        tc.handler_nodes,
+        tc.handler_residuals,
+    );
+    Ok(CheckedExpr {
+        ty: g,
+        effects: effs,
+        #[cfg(feature = "native")]
+        facts,
+        holes: tc.holes,
+        dicts,
+    })
 }
 
 // A checker context for read-only type queries. Search and synthesis use the

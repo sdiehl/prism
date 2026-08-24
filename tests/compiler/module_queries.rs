@@ -322,7 +322,14 @@ fn malformed_durable_checked_body_query_is_rejected() {
     cfg.flags.store_path = Some(store.clone());
     check_modules_on(ROOT, &roots(BEFORE_VALUE), &cfg).unwrap();
 
-    let query = fs::read_dir(store.join(CHECKED_BODY_QUERY_DIR))
+    // Query bindings sit one shard level below the kind directory.
+    let shard = fs::read_dir(store.join(CHECKED_BODY_QUERY_DIR))
+        .unwrap()
+        .filter_map(Result::ok)
+        .find(|entry| entry.path().is_dir())
+        .expect("checked body query shard")
+        .path();
+    let query = fs::read_dir(shard)
         .unwrap()
         .next()
         .expect("checked body query")

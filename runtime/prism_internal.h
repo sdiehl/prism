@@ -87,13 +87,60 @@ extern void *mi_calloc(size_t, size_t);
  * count or the zero that terminates the free worklist. */
 #define PRISM_ARENA_OWNED (1L << 62)
 
-/* A string is a refcounted cell { rc, tag=PRISM_STR_TAG, byte_len, utf8... }:
- * the bytes live inline after the header and are NUL-terminated for printf
- * interop. The distinct tag tells prism_rc_dec to free the cell without
- * recursing into the bytes (they are not child cells). Every string the program
- * builds, including literals (allocated fresh at each use), is a counted cell
- * that prism_rc_dec frees, so the live-cell balance includes strings. */
+/* Forwarding marker set on an arena cell during one promotion walk: this cell
+ * has already been copied, and the copy's address is in its tag word. It appears
+ * only on cells that also carry PRISM_ARENA_OWNED, only between the start and
+ * the end of prism_promote, and only on cells the region is about to destroy, so
+ * nothing outside that walk ever observes it and no mark needs clearing. The tag
+ * word is free to hold the pointer because prism_promote_shell copies the tag
+ * into the new cell before the mark is set, and the arena teardown that follows
+ * reads only arity and fields. Without this the walk revisits a shared arena
+ * sub-DAG once per path and copies it once per path, so a diamond costs
+ * exponential time and heap while still producing the correct value. */
+#define PRISM_ARENA_FORWARDED (1L << 61)
+
+/* Static-cell marker in the refcount word: a cell the compiler baked into the
+ * executable image (a string literal), never allocated and never freed. The
+ * cell may live in read-only memory, so every path that would write its rc
+ * word must test this bit and leave; every `rc == 1` uniqueness fast path
+ * correctly sees it as never-unique, because the marker keeps the word hugely
+ * positive and never equal to one. It is distinct from PRISM_ARENA_OWNED
+ * because the promotion walk copies arena cells out of a dying region, while a
+ * static cell outlives every region and must be shared, never copied. Static
+ * cells are outside the live-cell balance by construction: they are not
+ * allocations, so no counter moves when one is mentioned or dropped. */
+#define PRISM_STATIC_CELL (1L << 60)
+
+/* Cells the count machinery must not touch: arena-owned (the region owns the
+ * cell) and static (the image owns it). One mask, so a future inert class
+ * cannot be added to some rc-writing sites and missed at others. */
+#define PRISM_RC_INERT (PRISM_ARENA_OWNED | PRISM_STATIC_CELL)
+
+/* A string is a cell { rc, tag=PRISM_STR_TAG, byte_len, utf8... }: the bytes
+ * live inline after the header and are NUL-terminated for printf interop. The
+ * distinct tag tells prism_rc_dec to free the cell without recursing into the
+ * bytes (they are not child cells). A string the program builds at run time is
+ * a counted cell that prism_rc_dec frees, so the live-cell balance includes
+ * it; a source literal is instead one PRISM_STATIC_CELL per distinct spelling,
+ * emitted into the image and shared by every mention. */
 #define PRISM_STR_TAG 0x53545200L
+
+/* A string view is a cell { rc, tag=PRISM_STRVIEW_TAG, 3, parent, off, len }: a
+ * byte window into another string's inline bytes, taking no copy. Unlike the
+ * inline-payload tags it is an ordinary child-bearing cell, so the collector,
+ * the promotion walk, and the reuse path all handle it with no special case:
+ * the parent is a strong reference, which is exactly what makes "a view cannot
+ * outlive its parent" structural rather than a static analysis, and `off`/`len`
+ * are tagged immediates the child scan skips like any other. A view's parent is
+ * always a materialized string cell, never another view, so reading through one
+ * is a single hop no matter how many times a span is re-sliced.
+ *
+ * Two invariants pay for the aliasing. The window is UTF-8 boundary-aligned, so
+ * a view is valid UTF-8 whenever its parent is and slicing never has to repair
+ * bytes it does not own; and the bytes are NOT NUL-terminated (the parent's next
+ * byte follows them), so no path may hand `prism_str_data` to a C library
+ * function that reads to a terminator. `prism_str_cstr` is that boundary. */
+#define PRISM_STRVIEW_TAG 0x53565700L
 
 /* An Integer is a sign-magnitude bignum cell { rc, tag=PRISM_BIG_TAG, n, limbs... }:
  * n is a signed limb count whose sign is the value's sign, the magnitude is |n|
@@ -135,6 +182,13 @@ extern void *mi_calloc(size_t, size_t);
 static inline int prism_tag_has_payload(long tag) {
     return tag == PRISM_STR_TAG || tag == PRISM_BIG_TAG || tag == PRISM_BUF_TAG ||
            tag == PRISM_TBUF_TAG;
+}
+
+/* The one membership test over the two spellings of a String value: bytes held
+ * inline, or a window onto another cell's. The string accessors answer for both,
+ * so a runtime dispatch that recognizes strings by tag must admit both. */
+static inline int prism_tag_is_str(long tag) {
+    return tag == PRISM_STR_TAG || tag == PRISM_STRVIEW_TAG;
 }
 
 /* Unicode scalar-value bounds. The interpreter's show_char is char::from_u32,

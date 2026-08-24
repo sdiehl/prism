@@ -161,9 +161,8 @@ impl Decoded {
 }
 
 // The node-table tag: one discriminant for every Core value and computation
-// shape. Encoded as a uvarint; the array below is the single source of truth for
-// the numbering, so encode (`as u8`) and decode (index into the array) cannot
-// drift.
+// shape. Encoded as a uvarint; the array below defines the numbering used by both
+// encode (`as u8`) and decode (index into the array).
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 enum Tag {
@@ -1308,8 +1307,7 @@ pub fn decode_def(bytes: &[u8]) -> Result<Decoded, CodecError> {
     for _ in 0..member_count {
         let param_count = r.bounded_len()?;
         let dict_arity = r.bounded_len()?;
-        // dict_arity is not part of the hash, but a valid entry never claims more
-        // dictionary params than it has parameters.
+        // Although excluded from the hash, dict_arity cannot exceed param_count.
         if dict_arity > param_count {
             return Err(CodecError::Malformed);
         }

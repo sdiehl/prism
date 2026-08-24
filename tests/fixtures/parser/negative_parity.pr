@@ -14,6 +14,24 @@ import Syntax.Source (Span)
 
 fn sorted(xs : List(String)) : List(String) = sort(xs)
 
+-- Neither expectation set is authored here. The oracle's is the grammar's own
+-- first set, surfaced by the host canonicalizer into the artifact; the shadow's
+-- is whatever the cursor noted where it refused. Reporting the difference
+-- rather than the offset makes a divergence say which tokens it is made of, so
+-- a noteset that gains or loses one moves the report instead of leaving it true
+-- for a new reason.
+fn only_in(xs : List(String), ys : List(String)) : List(String) =
+  filter(\(x) -> not(elem(x, ys)), xs)
+
+fn commas(xs : List(String)) : String =
+  match xs of
+    Nil => ""
+    Cons(x, Nil) => x
+    Cons(x, rest) => "{x}, {commas(rest)}"
+
+fn expected_gap(got : List(String), want : List(String)) : String =
+  "missing [{commas(only_in(want, got))}], extra [{commas(only_in(got, want))}]"
+
 fn same_related(a : List(Span), b : List(Span)) : Bool =
   match (a, b) of
     (Nil, Nil) => true
@@ -41,7 +59,7 @@ fn against(text : String, want : Diagnostic) : String =
           elif not(d.span == want.span) then
             "span divergence: got {d.span.lo}:{d.span.hi}, want {want.span.lo}:{want.span.hi}"
           elif sorted(d.expected) /= sorted(want.expected) then
-            "expected-set divergence at {d.span.lo}"
+            "expected-set divergence at {d.span.lo}: {expected_gap(sorted(d.expected), sorted(want.expected))}"
           elif not(same_related(d.related, want.related)) then
             "related divergence at {d.span.lo}"
           else

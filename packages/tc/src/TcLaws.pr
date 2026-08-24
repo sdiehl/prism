@@ -6,9 +6,13 @@
 -- normalization. Generators stay shallow (types of depth three, labels from a
 -- fixed pool) because the laws are structural, not adversarial.
 
+-- Meta identities and arities in the law fixtures are arbitrary test seeds,
+-- not thresholds; naming each would only obscure the shapes under test.
+-- lint: allow-file(L0108)
+
 import Tc (..)
 import Quickcheck (..)
-import Control.Solve (Solve)
+import Control.Solve (Solve, sv_root, sv_solution)
 import Control.Fresh (Fresh, run_fresh)
 import Data.Name (Name, Binder, fresh_binder, bound_name)
 import Data.List (reverse, foldl, append)
@@ -164,16 +168,53 @@ test fn solver_strategy_is_the_handler() =
     Passed(_n) => ()
     Failed(_x, _i, _s, _z) => fail()
 
+-- Law: free metavariables keep traversal order rather than set order. Repeats
+-- across nested type, computation, label, and row-tail positions are admitted
+-- once, at their first occurrence. A label argument is a full value type, so
+-- its nested thunk contributes a row meta before the enclosing row tail.
+fn repeated_meta_row() : Row =
+  row_open(
+      [
+          Label {
+            name = "Mark",
+            args = [VMeta(5), v_fun([], c_ret(VMeta(1), row_open([], TailMeta(6))))]
+          },
+        ],
+      TailMeta(4),
+    )
+
+fn repeated_free_metas() : VTy =
+  VTuple([
+      VMeta(7),
+      VCon("Box", [VMeta(2), VMeta(7)]),
+      v_fun([VMeta(5), VMeta(2)], c_ret(VMeta(3), repeated_meta_row())),
+      VMeta(1),
+    ])
+
+test fn free_metas_keep_first_occurrence_order() =
+  let ty = repeated_free_metas()
+  let row = repeated_meta_row()
+  if (free_metas_v(ty) == [7, 2, 5, 3, 1, 6, 4]
+      && free_ty_metas_v(ty) == [7, 2, 5, 3, 1]
+      && free_row_metas_v(ty) == [6, 4]
+      && free_ty_metas_row(row) == [5, 1]
+      && free_row_metas_row(row) == [6, 4]) then
+    ()
+  else
+    fail()
+
 -- Law: generalization never captures an ambient metavariable.
 fn gen_capture_witness() : (Int, Int) ! {Solve(Sol), TcFail, Fresh} =
   let ambient = fresh_ty_meta()
+  let linked = fresh_ty_meta()
+  unify_v(ambient, linked)
   let local = fresh_ty_meta()
   let scheme =
     match ambient of
-      VMeta(a) => generalize([a], VTuple([ambient, local]))
-      _ => generalize([], VTuple([ambient, local]))
+      VMeta(a) => generalize([a], [], VTuple([linked, local]))
+      _ => generalize([], [], VTuple([linked, local]))
   let still_meta =
-    match zonk_v(ambient) of
+    match zonk_v(linked) of
       VMeta(_id) => 1
       _ => 0
   (length(scheme.tyvars), still_meta)
@@ -187,6 +228,189 @@ test fn generalize_skips_ambient() =
       else
         fail()
     Err(_e) => fail()
+
+fn held_row_witness() : (Int, Int) ! {Solve(Sol), Fresh} =
+  let held = fresh_row_meta()
+  let local = fresh_row_meta()
+  let body = VTuple([
+      v_fun([], c_ret(VUnit, row_open([], held))),
+      v_fun([], c_ret(VUnit, row_open([], local))),
+    ])
+  let scheme =
+    match held of
+      TailMeta(r) => generalize([], [r], body)
+      _ => generalize([], [], body)
+  let still_meta =
+    match zonk_row(row_open([], held)).tail of
+      TailMeta(_id) => 1
+      _ => 0
+  (length(scheme.rowvars), still_meta)
+
+test fn generalize_skips_held_row() =
+  let outcome = run_fresh(\() -> run_tc(\() -> held_row_witness()))
+  match outcome of
+    Ok((bound, still_meta)) =>
+      if bound == 1 && still_meta == 1 then
+        ()
+      else
+        fail()
+    Err(_e) => fail()
+
+-- Generalization assigns each candidate a solution of its syntactic kind.
+-- Instantiation then opens row binders before type binders, and does so anew
+-- on every call.
+type MixedGeneralization = MixedGeneralization {
+  ty_count: Int,
+  row_count: Int,
+  ty_solution: Bool,
+  row_solution: Bool,
+  first: Option((Int, Int)),
+  second: Option((Int, Int))
+}
+
+fn ty_meta_became_rigid(ty : VTy) : Bool ! {Solve(Sol)} =
+  match ty of
+    VMeta(m) =>
+      match sv_solution(sv_root(m)) of
+        Some(TySolved(VVar(_name))) => true
+        _ => false
+    _ => false
+
+fn row_meta_became_rigid(tail : Tail) : Bool ! {Solve(Sol)} =
+  match tail of
+    TailMeta(m) =>
+      match sv_solution(sv_root(m)) of
+        Some(RowSolved(row)) =>
+          match (row.labels, row.tail) of
+            (Nil, TailVar(_name)) => true
+            _ => false
+        _ => false
+    _ => false
+
+-- Return the fresh type and row meta ids from the mixed scheme's known shape.
+fn mixed_instance_ids(ty : VTy) : Option((Int, Int)) =
+  match ty of
+    VThunk(CFun(params, CRet(result, row))) =>
+      match (params, result, row.tail) of
+        (Cons(VMeta(param), Nil), VMeta(returned), TailMeta(row_meta)) =>
+          if param == returned then
+            Some((param, row_meta))
+          else
+            None
+        _ => None
+    _ => None
+
+fn mixed_generalization_witness() : MixedGeneralization ! {Solve(Sol), Fresh} =
+  let ty_meta = fresh_ty_meta()
+  let row_meta = fresh_row_meta()
+  let scheme =
+    generalize([], [], v_fun([ty_meta], c_ret(ty_meta, row_open([], row_meta))))
+  let ty_solution = ty_meta_became_rigid(ty_meta)
+  let row_solution = row_meta_became_rigid(row_meta)
+  let first = mixed_instance_ids(instantiate(scheme))
+  let second = mixed_instance_ids(instantiate(scheme))
+  MixedGeneralization {
+    ty_count = length(scheme.tyvars),
+    row_count = length(scheme.rowvars),
+    ty_solution = ty_solution,
+    row_solution = row_solution,
+    first = first,
+    second = second
+  }
+
+test fn mixed_generalization_keeps_kinds_and_fresh_order() =
+  let outcome = run_fresh(\() -> run_tc(\() -> mixed_generalization_witness()))
+  match outcome of
+    Ok(witness) =>
+      match (witness.first, witness.second) of
+        (Some((ty1, row1)), Some((ty2, row2))) =>
+          if (witness.ty_count == 1
+              && witness.row_count == 1
+              && witness.ty_solution
+              && witness.row_solution
+              && row1 < ty1
+              && row2 < ty2
+              && not(ty1 == ty2)
+              && not(row1 == row2)) then
+            ()
+          else
+            fail()
+        _ => fail()
+    Err(_e) => fail()
+
+fn closed_row_binder_count() : Int ! {Solve(Sol), Fresh} =
+  let row_meta = fresh_row_meta()
+  let closed = close_rows_v(v_fun([], c_ret(VInt, row_open([], row_meta))))
+  length(generalize([], [], closed).rowvars)
+
+test fn closing_inferred_rows_prevents_row_generalization() =
+  match run_fresh(\() -> run_tc(\() -> closed_row_binder_count())) of
+    Ok(0) => ()
+    _ => fail()
+
+-- Selective closing is conservative when nothing was written: every row meta,
+-- including one nested in a callback, has the same closed reading as the
+-- existing top-level default.
+fn empty_keep_agrees() : Bool ! {Solve(Sol)} =
+  let callback = fresh_row_meta()
+  let ambient = fresh_row_meta()
+  let ty = v_fun(
+      [v_fun([], c_ret(VInt, row_open([label0("A")], callback)))],
+      c_ret(VInt, row_open([label0("B")], ambient)),
+    )
+  close_rows_v_except([], ty) == close_rows_v(ty)
+
+test fn selective_close_empty_keep_matches_close_all() =
+  match run_tc(\() -> empty_keep_agrees()) of
+    Ok(true) => ()
+    _ => fail()
+
+-- A written open callback row remains flexible during inference. Meeting a
+-- body row with a different label widens both sides over one fresh residual;
+-- selective closing keeps that residual, and generalization makes exactly one
+-- rigid row binder shared by both widened rows.
+fn selective_widening_witness() : Bool ! {Solve(Sol), TcFail, Fresh} =
+  let written = fresh_row_meta()
+  let ambient = fresh_row_meta()
+  let unrelated = fresh_row_meta()
+  unify_row(row_open([label0("A")], written), row_open([label0("B")], ambient))
+  let keep =
+    match zonk_row(row_open([], written)).tail of
+      TailMeta(residual) => [residual]
+      _ => []
+  let ty = v_fun(
+      [
+          v_fun([], c_ret(VInt, row_open([label0("A")], written))),
+          v_fun([], c_ret(VUnit, row_open([], unrelated))),
+        ],
+      c_ret(VInt, row_open([label0("B")], ambient)),
+    )
+  let scheme = generalize([], [], close_rows_v_except(keep, ty))
+  match (scheme.rowvars, scheme.body) of
+    (
+      Cons(binder, Nil),
+      VThunk(
+        CFun(
+          Cons(
+            VThunk(CFun(Nil, CRet(VInt, callback_row))),
+            Cons(VThunk(CFun(Nil, CRet(VUnit, unrelated_row))), Nil)
+          ),
+          CRet(VInt, body_row)
+        )
+      )
+    ) =>
+      let expected =
+        row_open([label0("A"), label0("B")], TailVar(bound_name(binder)))
+      row_normalize(callback_row) == row_normalize(expected)
+        && row_normalize(body_row) == row_normalize(expected)
+        && unrelated_row == row_closed([])
+    _ => false
+
+test fn selective_close_preserves_written_widening_residual() =
+  let outcome = run_fresh(\() -> run_tc(\() -> selective_widening_witness()))
+  match outcome of
+    Ok(true) => ()
+    _ => fail()
 
 -- Law: row normalization is deterministic: any permutation of distinct
 -- labels normalizes to one spelling.

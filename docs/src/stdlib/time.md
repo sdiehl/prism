@@ -500,4 +500,4 @@ wall_unix_secs(unwrap_or(wall_of_nanos(0), parse_rfc3339("2000-01-01T00:00:00Z")
 946684800
 ```
 
-The chain of separator, range, and offset checks is the RFC 3339 grammar read left to right, and each rejection has to name the field it refused. lint: allow(L0101)
+The chain of separator, range, and offset checks is the RFC 3339 grammar read left to right, and each rejection has to name the field it refused.

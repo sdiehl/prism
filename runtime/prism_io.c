@@ -34,7 +34,9 @@ _Noreturn void prism_match_error(void) {
 }
 
 _Noreturn void prism_fatal(long s) {
-    fprintf(stderr, "fatal: %s\n", prism_str_data(s));
+    fputs("fatal: ", stderr);
+    fwrite(prism_str_data(s), 1, (size_t)prism_str_len_bytes(s), stderr);
+    fputc('\n', stderr);
     exit(1);
 }
 
@@ -109,17 +111,21 @@ long prism_prim_read_line(void) {
  * every statically-known structural type through the synthesized `show`. The
  * final `else` is an always-on guard (one tag compare, free on this IO-bound
  * path): rather than hand a foreign cell to prism_big_show, which would read its
- * header word as a limb count and its fields as magnitude, it traps. */
+ * header word as a limb count and its fields as magnitude, it traps.
+ *
+ * The string case writes the value's byte span rather than printing to a
+ * terminator: a string may hold an interior NUL (which the interpreter prints),
+ * and a view's window is followed by its parent's next byte. */
 void prism_print_int(long w) {
     if (w & 1) {
         printf("%ld", w >> 1);
     } else if (!w) {
         printf("()"); /* Unit is the zero word; match the interpreter's `()`. */
-    } else if (((long *)w)[PRISM_TAG_W] == PRISM_STR_TAG) {
-        printf("%s", prism_str_data(w));
+    } else if (prism_tag_is_str(((long *)w)[PRISM_TAG_W])) {
+        fwrite(prism_str_data(w), 1, (size_t)prism_str_len_bytes(w), stdout);
     } else if (((long *)w)[PRISM_TAG_W] == PRISM_BIG_TAG) {
         long s = prism_big_show(w);
-        printf("%s", prism_str_data(s));
+        fwrite(prism_str_data(s), 1, (size_t)prism_str_len_bytes(s), stdout);
         prism_rc_dec(s);
     } else {
         fprintf(stderr,
@@ -204,9 +210,24 @@ long prism_prim_mono_now(void) {
  * slurp so a pathological file cannot exhaust memory. */
 #define PRISM_READ_CAP (1L << 30)
 
-static _Noreturn void prism_read_fatal(const char *why, const char *path) {
-    fprintf(stderr, "prism: read_file: %s: %s\n", why, path);
+/* Takes the path cell, not a C string: the span is written length-bounded, so
+ * the diagnostic names the whole path whatever bytes it holds. */
+static _Noreturn void prism_read_fatal(const char *why, long path) {
+    fprintf(stderr, "prism: read_file: %s: ", why);
+    fwrite(prism_str_data(path), 1, (size_t)prism_str_len_bytes(path), stderr);
+    fputc('\n', stderr);
     exit(1);
+}
+
+/* fopen on a path cell, the one place the file operations cross into libc. A
+ * string value's bytes cannot be passed to a call that reads to a terminator (a
+ * view's window is followed by its parent's next byte), so the path is copied
+ * NUL-terminated for the duration of the call. */
+static FILE *prism_fopen_path(long path, const char *mode) {
+    char *name = prism_str_cstr(path);
+    FILE *f = fopen(name, mode);
+    free(name);
+    return f;
 }
 
 static int prism_argc = 0;
@@ -222,10 +243,21 @@ long prism_prim_arg(long i) {
     return prism_str_lit(a, (long)strlen(a));
 }
 
+/* The interpreter reads the environment through `env::var`, which yields the
+ * empty string both for a name it cannot hand to the OS (one holding an interior
+ * NUL) and for a value that is not UTF-8, since Prism's String is a Rust
+ * `String`. Native answers the empty string in both cases too, or the two tiers
+ * disagree on the same environment. */
 long prism_prim_getenv(long name) {
-    const char *v = getenv(prism_str_data(name));
+    if (memchr(prism_str_data(name), 0, (size_t)prism_str_len_bytes(name)))
+        return prism_str_lit("", 0);
+    char *key = prism_str_cstr(name);
+    const char *v = getenv(key);
+    free(key);
     if (!v) return prism_str_lit("", 0);
-    return prism_str_lit(v, (long)strlen(v));
+    long n = (long)strlen(v);
+    if (!prism_utf8_valid((const unsigned char *)v, n)) return prism_str_lit("", 0);
+    return prism_str_lit(v, n);
 }
 
 long prism_probe_enabled(long name) {
@@ -254,14 +286,13 @@ long prism_probe_enabled(long name) {
  * read_file (which then enforces UTF-8) and read_bytes (which reinterprets the
  * cell as a byte buffer), so neither path duplicates the open/size/cap/read. */
 static long prism_slurp_string(long path) {
-    const char *name = prism_str_data(path);
-    FILE *f = fopen(name, "rb");
-    if (!f) prism_read_fatal("cannot open", name);
+    FILE *f = prism_fopen_path(path, "rb");
+    if (!f) prism_read_fatal("cannot open", path);
     fseek(f, 0, SEEK_END);
     long n = ftell(f);
     fseek(f, 0, SEEK_SET);
-    if (n < 0) prism_read_fatal("cannot size", name);
-    if (n > PRISM_READ_CAP) prism_read_fatal("exceeds 1GB cap", name);
+    if (n < 0) prism_read_fatal("cannot size", path);
+    if (n > PRISM_READ_CAP) prism_read_fatal("exceeds 1GB cap", path);
     long *p = prism_str_alloc(n);
     char *o = (char *)(p + PRISM_HDR_WORDS);
     long got = (long)fread(o, 1, (size_t)n, f);
@@ -279,7 +310,7 @@ long prism_prim_read_file(long path) {
      * is the byte-faithful path for arbitrary content. */
     if (!prism_utf8_valid((const unsigned char *)prism_str_data(s), prism_str_len_bytes(s))) {
         prism_rc_dec(s);
-        prism_read_fatal("stream did not contain valid UTF-8", prism_str_data(path));
+        prism_read_fatal("stream did not contain valid UTF-8", path);
     }
     return s;
 }
@@ -296,7 +327,7 @@ static long prism_file_err(const char *msg) {
 }
 
 static long prism_file_write(long path, long contents, const char *mode) {
-    FILE *f = fopen(prism_str_data(path), mode);
+    FILE *f = prism_fopen_path(path, mode);
     if (!f) return prism_file_err("cannot open file for writing");
     size_t want = (size_t)prism_str_len_bytes(contents);
     size_t got = fwrite(prism_str_data(contents), 1, want, f);
@@ -326,7 +357,7 @@ long prism_prim_read_bytes(long path) {
  * the buffer payload rather than a string, so no byte is reinterpreted. Borrows
  * both arguments; returns Result(Unit, String). */
 long prism_prim_write_bytes(long path, long buf) {
-    FILE *f = fopen(prism_str_data(path), "wb");
+    FILE *f = prism_fopen_path(path, "wb");
     if (!f) return prism_file_err("cannot open file for writing");
     size_t want = (size_t)prism_buf_len(buf);
     size_t got = fwrite(prism_buf_ptr(buf), 1, want, f);
@@ -340,27 +371,31 @@ long prism_append_file(long path, long contents) {
 }
 
 long prism_prim_file_exists(long path) {
-    FILE *f = fopen(prism_str_data(path), "rb");
+    FILE *f = prism_fopen_path(path, "rb");
     if (f) fclose(f);
     return f != 0;
 }
 
 long prism_remove_file(long path) {
-    remove(prism_str_data(path));
+    char *name = prism_str_cstr(path);
+    remove(name);
+    free(name);
     return 0;
 }
 
 /* Run a shell command, returning its exit code (-1 on spawn failure or signal
    death). The result is a raw int the call site retags as an Int. */
 long prism_system(long cmd) {
-    int rc = system(prism_str_data(cmd));
+    char *line = prism_str_cstr(cmd);
+    int rc = system(line);
+    free(line);
     if (rc == -1 || !WIFEXITED(rc)) return -1;
     return WEXITSTATUS(rc);
 }
 
 /* Write a string to stderr (no trailing newline). Returns unit. */
 long prism_eprint(long s) {
-    fputs(prism_str_data(s), stderr);
+    fwrite(prism_str_data(s), 1, (size_t)prism_str_len_bytes(s), stderr);
     return 0;
 }
 

@@ -1649,7 +1649,7 @@ mod judgment_tests {
         );
         let whole = vec![function(&escaped)];
         let (_, whole_plan) = planned(&whole);
-        // Escaping, not merely captured: the thunk is returned to a caller the
+        // The thunk escapes by being returned to a caller the
         // program does not name, so no signature describes what forcing it
         // performs and the region cannot reach through it. This is the
         // classification the confinement flip deliberately left alone.

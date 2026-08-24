@@ -20,7 +20,7 @@
 //! Signing is done by an external tool behind a narrow seam ([`sign`],
 //! [`verify_signature`]), so no cryptographic dependency enters the compiler. The
 //! default is `ssh-keygen -Y sign`/`-Y verify` (namespaced signatures, present
-//! wherever OpenSSH is); `minisign` is an alternative behind the same seam; and an
+//! wherever OpenSSH is). `minisign` is an alternative behind the same seam. An
 //! explicit unsigned mode is a development escape hatch that [`audit`] refuses
 //! unless the operator allows it.
 
@@ -75,6 +75,18 @@ fn line_digest(line: &str) -> String {
 pub const INDEX_KIND_NAMESPACE: &str = crate::driver::NAMESPACE_ARTIFACT_KIND;
 /// Signed-index kind for a store-served source bundle.
 pub const INDEX_KIND_SOURCE: &str = "source-bundle";
+
+// A published package's root hash is reachable only through the signed index,
+// which the store's own query/index layers know nothing about. `store gc`
+// only ever spares a hash it can see reachability for (see
+// `prism_store::disk::gc`), so a published root additionally gets a `refs`
+// entry pointing at itself: durable, gc-visible proof that this object is a
+// package root and not stale query-cache scratch.
+const PKG_ROOT_REF_PREFIX: &str = "pkg-root-";
+
+fn pkg_root_ref(root: &str) -> String {
+    format!("{PKG_ROOT_REF_PREFIX}{root}")
+}
 
 /// One signed pointer.
 ///
@@ -1286,6 +1298,7 @@ pub fn publish_source_cmd(
     let bundle = encode_source_bundle([(name, user_src)]);
     let root = Digest::from(blake3::hash(&bundle).to_hex().to_string());
     store.put(&root, &bundle)?;
+    store.set_ref(&pkg_root_ref(root.as_str()), root.as_str())?;
     let dst = DiskTransport::open(&store_root)?;
     let log = store_log(&store_root);
     let row = IndexRow {

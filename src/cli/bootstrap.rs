@@ -1,14 +1,15 @@
 //! Rust-authoritative bootstrap shadow checking.
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use super::{file_name, resolve_input, CmdError, CmdResult};
+use super::{file_name, resolve_input, tool_package_source, CmdError, CmdResult};
 use crate::error::Error;
 use crate::scheme_canon::{canonical_scheme, SCHEME_CANON_CONTRACT};
-use crate::{dump_on, interpret_io_on_with_args, with_prelude, Config, OptLevel, Root};
+use crate::{dump_on, with_prelude, Config, OptLevel, Root};
 
 const REPORT_SCHEMA: &str = "prism-bootstrap-check-v2";
 const SHADOW_NAME: &str = "prism-t1";
@@ -27,6 +28,10 @@ const DIFF_AT: &str = "AT";
 const DIFF_LEFT_END: &str = "LEFT_END";
 const DIFF_RIGHT_END: &str = "RIGHT_END";
 const PERCENT_SCALE: f64 = 100.0;
+const BUNDLE_LABEL: &str = "bootstrap checker";
+const TOOL_PACKAGE: &str = "tc";
+const CHECKER_MODULE: &str = "Bootstrap";
+const TC_MODULE: &str = "Tc";
 const CHECKER_SRC: &str = include_str!("../../packages/tc/src/Bootstrap.pr");
 const TC_SRC: &str = include_str!("../../packages/tc/src/Tc.pr");
 
@@ -102,12 +107,106 @@ struct Protocol {
     first: Option<Divergence>,
 }
 
-/// Run the pure Prism T1 checker as evidence after Rust has accepted `file`.
+struct TargetEvidence {
+    src: String,
+    name: String,
+    report_source: String,
+    rust_facts: RustFacts,
+    args: Vec<String>,
+}
+
+/// Run the pure Prism T1 checker as evidence after Rust has accepted `files`.
 ///
 /// A disagreement is report-only. This command returns failure only when the
 /// authoritative Rust check or the workbench machinery itself cannot run.
-pub fn check_cmd(file: &Path, json: bool, cfg: &Config) -> CmdResult {
-    let (src, mut roots, name, _out) = resolve_input(file, cfg)?;
+pub fn check_cmd(files: &[PathBuf], json: bool, cfg: &Config) -> CmdResult {
+    if files.is_empty() {
+        return Err(command_error(
+            "bootstrap check requires at least one target".into(),
+            "",
+            "bootstrap check",
+        ));
+    }
+    let mut targets = Vec::with_capacity(files.len());
+    for file in files {
+        let started = Instant::now();
+        let target = target_evidence(file, cfg)?;
+        bootstrap_timing(
+            cfg,
+            "target_artifacts",
+            &target.report_source,
+            started.elapsed(),
+        );
+        targets.push(target);
+    }
+    let first = targets.first().expect("non-empty targets");
+    let first_src = first.src.clone();
+    let first_name = first.name.clone();
+
+    let (checker_src, checker_roots) =
+        checker_input(cfg).map_err(|error| (error, first_src.clone(), first_name.clone()))?;
+
+    // The checker is an interpreter oracle. Core optimization cannot improve
+    // its evidence and is disproportionately expensive for the checker.
+    let mut shadow_cfg = cfg.clone();
+    shadow_cfg.flags.opt_level = OptLevel::O0;
+    shadow_cfg.passes = None;
+    shadow_cfg.timing = None;
+    let started = Instant::now();
+    let checker = crate::driver::prepared_oracle_core(
+        &with_prelude(&checker_src),
+        &checker_roots,
+        &shadow_cfg,
+    )
+    .map_err(|error| {
+        command_error(
+            format!("Prism T1 shadow failed to prepare: {error}"),
+            &first_src,
+            &first_name,
+        )
+    })?;
+    bootstrap_timing(
+        cfg,
+        "checker_front_prepare",
+        BUNDLE_LABEL,
+        started.elapsed(),
+    );
+
+    let mut reports = Vec::with_capacity(targets.len());
+    for target in targets {
+        reports.push(run_target(&checker, target, cfg)?);
+    }
+
+    if json {
+        let rendered = if reports.len() == 1 {
+            serde_json::to_string_pretty(&reports[0])
+        } else {
+            serde_json::to_string_pretty(&reports)
+        }
+        .map_err(|error| {
+            command_error(
+                format!("could not encode bootstrap report: {error}"),
+                &first_src,
+                &first_name,
+            )
+        })?;
+        println!("{rendered}");
+    } else {
+        for (index, report) in reports.iter().enumerate() {
+            if index != 0 {
+                println!();
+            }
+            if reports.len() > 1 {
+                println!("{}:", report.source);
+            }
+            render_text(report);
+        }
+    }
+    Ok(())
+}
+
+fn target_evidence(file: &Path, cfg: &Config) -> Result<TargetEvidence, CmdError> {
+    let (src, roots, name, _out) = resolve_input(file, cfg)?;
 
     // These dumps all pass through the normal Rust checker. If it refuses, the
     // command stops here: the shadow never grants or denies compilation.
@@ -126,40 +225,43 @@ pub fn check_cmd(file: &Path, json: bool, cfg: &Config) -> CmdResult {
             &name,
         )
     })?;
-
     let oracle = rust_facts
         .decls
         .iter()
         .map(|decl| format!("{} :: {}", decl.name, canonical_scheme(&decl.scheme)))
         .collect::<Vec<_>>()
         .join("\n");
+    Ok(TargetEvidence {
+        src,
+        name,
+        report_source: file_name(file),
+        rust_facts,
+        args: vec![tc_input, resolved, surface, oracle],
+    })
+}
 
-    let mut modules = BTreeMap::new();
-    modules.insert("Tc".to_owned(), TC_SRC.to_owned());
-    roots.push(Root::source_bundle("bootstrap checker".into(), modules));
-
+fn run_target(
+    checker: &crate::core::Core,
+    target: TargetEvidence,
+    cfg: &Config,
+) -> Result<BootstrapReport, CmdError> {
+    let TargetEvidence {
+        src,
+        name,
+        report_source,
+        rust_facts,
+        args,
+    } = target;
+    let started = Instant::now();
     let mut output = Vec::new();
-    // The checker is an interpreter oracle. Core optimization cannot improve
-    // its evidence and is disproportionately expensive for the checker.
-    let mut shadow_cfg = cfg.clone();
-    shadow_cfg.flags.opt_level = OptLevel::O0;
-    shadow_cfg.passes = None;
-    shadow_cfg.timing = None;
-    interpret_io_on_with_args(
-        &with_prelude(CHECKER_SRC),
-        &roots,
-        &mut output,
-        &mut &b""[..],
-        &shadow_cfg,
-        vec![tc_input, resolved, surface, oracle],
-    )
-    .map_err(|error| {
+    crate::eval::run_io_with_args(checker, &mut output, &mut &b""[..], args).map_err(|error| {
         command_error(
             format!("Prism T1 shadow failed to run: {error}"),
             &src,
             &name,
         )
     })?;
+    bootstrap_timing(cfg, "shadow_eval", &report_source, started.elapsed());
     let protocol_text = String::from_utf8(output).map_err(|error| {
         command_error(
             format!("Prism T1 shadow emitted non-UTF-8 output: {error}"),
@@ -169,7 +271,27 @@ pub fn check_cmd(file: &Path, json: bool, cfg: &Config) -> CmdResult {
     })?;
     let protocol =
         parse_protocol(&protocol_text).map_err(|message| command_error(message, &src, &name))?;
+    Ok(report_for(report_source, rust_facts, protocol))
+}
 
+fn checker_input(cfg: &Config) -> Result<(String, Vec<Root>), Error> {
+    // Target roots end at `target_evidence`: the checker and every module it
+    // imports are compiler-owned, even when the explicit development override
+    // loads the checker package from disk.
+    let checker = tool_package_source(TOOL_PACKAGE, CHECKER_MODULE, CHECKER_SRC, cfg)?;
+    let tc = tool_package_source(TOOL_PACKAGE, TC_MODULE, TC_SRC, cfg)?;
+    let mut modules = BTreeMap::new();
+    modules.insert(TC_MODULE.to_owned(), tc);
+    Ok((
+        checker,
+        vec![
+            Root::source_bundle(BUNDLE_LABEL.into(), modules),
+            Root::Embedded(crate::stdlib::STDLIB),
+        ],
+    ))
+}
+
+fn report_for(report_source: String, rust_facts: RustFacts, protocol: Protocol) -> BootstrapReport {
     let rust_by_name: HashMap<_, _> = rust_facts
         .decls
         .into_iter()
@@ -194,7 +316,7 @@ pub fn check_cmd(file: &Path, json: bool, cfg: &Config) -> CmdResult {
     } else {
         f64::from(protocol.supported_nodes) * PERCENT_SCALE / f64::from(protocol.total_nodes)
     };
-    let report = BootstrapReport {
+    BootstrapReport {
         schema: REPORT_SCHEMA,
         scheme_contract: SCHEME_CANON_CONTRACT,
         authority: AUTHORITY,
@@ -204,7 +326,7 @@ pub fn check_cmd(file: &Path, json: bool, cfg: &Config) -> CmdResult {
         } else {
             STATUS_DISAGREEMENT
         },
-        source: file_name(file),
+        source: report_source,
         coverage: Coverage {
             supported_nodes: protocol.supported_nodes,
             total_nodes: protocol.total_nodes,
@@ -213,21 +335,16 @@ pub fn check_cmd(file: &Path, json: bool, cfg: &Config) -> CmdResult {
         unsupported: protocol.unsupported,
         facts: fact_reports,
         first_divergence: protocol.first,
-    };
-
-    if json {
-        let rendered = serde_json::to_string_pretty(&report).map_err(|error| {
-            command_error(
-                format!("could not encode bootstrap report: {error}"),
-                &src,
-                &name,
-            )
-        })?;
-        println!("{rendered}");
-    } else {
-        render_text(&report);
     }
-    Ok(())
+}
+
+fn bootstrap_timing(cfg: &Config, phase: &str, source: &str, elapsed: Duration) {
+    if cfg.timing.is_some() {
+        eprintln!(
+            "bootstrap-time\t{phase}\t{:.1}ms\tsource={source}",
+            elapsed.as_secs_f64() * 1_000.0
+        );
+    }
 }
 
 fn command_error(message: String, src: &str, name: &str) -> CmdError {

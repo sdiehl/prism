@@ -29,8 +29,8 @@ use prism_common::fresh::Fresh;
 use prism_common::sym::Sym;
 use prism_syntax::names::{self, ENTRY_POINT, FRESH_EVIDENCE_ROW};
 
-use super::super::specialize_support::{free_comp_vars, free_value_vars};
-use super::super::verify::{instantiate_fn, rename_bound_core, VerifyEnv};
+use super::super::specialize_support::{free_comp_vars, free_value_vars, substitute_witnesses};
+use super::super::verify::{instantiate_fn, rename_bound_core, row_included, VerifyEnv};
 use super::super::{
     CompSig, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, TypedBinder, TypedComp,
     TypedCompKind, TypedCoreFn, TypedHandleOp, TypedHandler, TypedValue, TypedValueKind,
@@ -443,6 +443,29 @@ fn plan_fn(
     })
 }
 
+// Rewrite the source residual-row binder to the ambient binder the evidence
+// plan appended to this callable. `plan_fn` performs the same change in the
+// declaration, including parameter witnesses; the body must make that move as
+// one capture-avoiding substitution too. In particular, unchanged calls can
+// carry the source binder in `CoreInstantiation::Row`, and rewriting only the
+// computation's outer signature leaves those witnesses stale.
+fn body_in_ambient(f: &TypedCoreFn, plan: &FnPlan) -> TypedComp {
+    let Some(ambient) = plan.ambient else {
+        return f.body().clone();
+    };
+    let EffRow::Var(source) = f.sig().body().effects().tail() else {
+        return f.body().clone();
+    };
+    if *source == ambient {
+        return f.body().clone();
+    }
+    substitute_witnesses(
+        f.body(),
+        &[CoreQuantifier::Row(*source)],
+        &[CoreInstantiation::Row(EffRow::Var(ambient))],
+    )
+}
+
 // The type of the evidence for one op at the instantiation named by the
 // enclosing callable's effect row. An evidence parameter lives inside that
 // callable's own scheme, so `Emit(a)` becomes a monomorphic clause over the
@@ -713,12 +736,14 @@ impl Retyped {
     // A `Var` reading a retyped local, rebuilt at its new type.
     #[must_use]
     pub fn lookup(&self, v: &TypedValue) -> Option<TypedValue> {
-        let name = super::as_var(v)?;
-        let ty = self.0.get(&name)?;
+        let TypedValueKind::Var { name, .. } = v.kind() else {
+            return None;
+        };
+        let ty = self.0.get(name)?;
         Some(TypedValue::new(
             ty.clone(),
             TypedValueKind::Var {
-                name,
+                name: *name,
                 instantiation: Vec::new(),
             },
         ))
@@ -727,6 +752,36 @@ impl Retyped {
     #[must_use]
     pub fn rebuild(&self, v: &TypedValue) -> TypedValue {
         self.lookup(v).unwrap_or_else(|| v.clone())
+    }
+
+    // Rebuild a local through source representation wrappers without erasing
+    // the proof those wrappers carry. A changed operand may keep an existing
+    // reinterpretation only when the verifier's representation judgment still
+    // admits its target; a newtype field is invariant and must remain exact.
+    fn try_rebuild(&self, v: &TypedValue) -> Option<TypedValue> {
+        match v.kind() {
+            TypedValueKind::Reinterpret(inner) => {
+                reinterpret_at(self.try_rebuild(inner)?, v.ty().clone())
+            }
+            TypedValueKind::NewtypeRepr {
+                constructor,
+                instantiation,
+                value,
+            } => {
+                let value2 = self.try_rebuild(value)?;
+                (value2.ty() == value.ty()).then(|| {
+                    TypedValue::new(
+                        v.ty().clone(),
+                        TypedValueKind::NewtypeRepr {
+                            constructor: *constructor,
+                            instantiation: instantiation.clone(),
+                            value: Box::new(value2),
+                        },
+                    )
+                })
+            }
+            _ => Some(self.rebuild(v)),
+        }
     }
 }
 
@@ -907,7 +962,9 @@ impl Threader<'_> {
                 TypedValueKind::Unit,
             )]
         } else {
-            args.iter().map(|a| retyped.rebuild(a)).collect()
+            args.iter()
+                .map(|a| retyped.try_rebuild(a))
+                .collect::<Option<Vec<_>>>()?
         };
         Some(TypedComp::new(
             CompSig::new(
@@ -945,11 +1002,17 @@ impl Threader<'_> {
                 TypedCompKind::Call {
                     callee,
                     instantiation: instantiation.to_vec(),
-                    args: args.iter().map(|a| retyped.rebuild(a)).collect(),
+                    args: args
+                        .iter()
+                        .map(|a| retyped.try_rebuild(a))
+                        .collect::<Option<Vec<_>>>()?,
                 },
             ));
         };
-        let mut args: Vec<TypedValue> = args.iter().map(|a| retyped.rebuild(a)).collect();
+        let mut args: Vec<TypedValue> = args
+            .iter()
+            .map(|a| rebuild_planned_argument(retyped, a))
+            .collect::<Option<_>>()?;
         let mut rows = EffRow::Empty;
         for param in &plan.evidence {
             let binder = ev.get(&param.id)?;
@@ -1112,7 +1175,9 @@ impl Threader<'_> {
                 TypedCompKind::Bind(Box::new(bound), binder, Box::new(acc)),
             );
         }
-        (acc.sig().result() == c.sig().result()).then_some(acc)
+        (acc.sig().result() == c.sig().result()
+            && threaded_row_included(acc.sig().effects(), c.sig().effects()))
+        .then_some(acc)
     }
 
     // One clause as evidence: the tail `resume(v)` stripped to `return v`, the
@@ -1152,6 +1217,27 @@ impl Threader<'_> {
     }
 }
 
+// The final guard on a rebuilt handle compares rows across two languages: the
+// source row speaks user ops, while the threaded row has discharged any op
+// whose evidence is in scope and rides its residual on a witness-only ambient
+// row variable. Inclusion holds directly when nothing was relabeled; otherwise
+// accept exactly that relabeling by rewidening the source row at the threaded
+// tail, provided the tail is one the threading itself minted (the `%evr`
+// namespace never reaches a source row, so nothing else can smuggle one in).
+fn threaded_row_included(acc: &EffRow, src: &EffRow) -> bool {
+    if row_included(acc, src) {
+        return true;
+    }
+    match acc.tail() {
+        EffRow::Var(tail) if tail.as_str().starts_with(FRESH_EVIDENCE_ROW) => {
+            let rewidened =
+                EffRow::canonical(src.labels().into_iter().cloned(), EffRow::Var(*tail));
+            row_included(acc, &rewidened)
+        }
+        _ => false,
+    }
+}
+
 // The residual row a bound clause thunk runs in.
 fn clause_row(binder: &TypedBinder) -> Option<&EffRow> {
     let CoreType::Thunk(thunk) = binder.ty() else {
@@ -1171,6 +1257,31 @@ fn binder_value(b: &TypedBinder) -> TypedValue {
             instantiation: Vec::new(),
         },
     )
+}
+
+// Retain a source reinterpretation after its operand has been threaded. Equal
+// witnesses need no wrapper; otherwise the same representation proof the
+// verifier checks must still hold. A convention change is not a row relabel
+// and makes the evidence attempt decline instead of laundering the new value
+// through the old target.
+fn reinterpret_at(value: TypedValue, expected: CoreType) -> Option<TypedValue> {
+    if value.ty() == &expected {
+        return Some(value);
+    }
+    super::super::verify::representation_preserving(value.ty(), &expected)
+        .then(|| TypedValue::new(expected, TypedValueKind::Reinterpret(Box::new(value))))
+}
+
+// Rebuild one argument of a planned call. A source wrapper whose operand the
+// threading retyped has a stale target: the operand's new witness is the
+// authoritative one, and the planned-parameter retarget re-aims the value at
+// the only type the rewritten callee accepts. Newtype fields stay invariant,
+// so only row reinterpretations are exposed this way.
+fn rebuild_planned_argument(retyped: &Retyped, a: &TypedValue) -> Option<TypedValue> {
+    retyped.try_rebuild(a).or_else(|| match a.kind() {
+        TypedValueKind::Reinterpret(inner) => rebuild_planned_argument(retyped, inner),
+        _ => None,
+    })
 }
 
 // A planned callee may expose a narrower effect row for a thunk parameter than
@@ -1207,11 +1318,47 @@ impl Threader<'_> {
         loc: &Loc,
         retyped: &mut Retyped,
     ) -> Option<TypedValue> {
+        // Representation wrappers are evidence, not transparent syntax. Thread
+        // their operand, then re-establish the proof at the original target.
+        // Peeling first would narrow a row-widened aggregate element back to
+        // its pure producer type while later uses still carry the wider row.
+        match v.kind() {
+            TypedValueKind::Reinterpret(inner) => {
+                let inner2 = self.thread_value_in(inner, ev, loc, retyped)?;
+                if inner2.ty() != inner.ty() {
+                    // Threading retyped the operand, so the source proof's
+                    // target is stale: re-proving there would widen the new
+                    // witness back to the old view and hide the narrowing the
+                    // consuming sites need. The new witness is authoritative;
+                    // each consumer re-aims at the convention it requires.
+                    return Some(inner2);
+                }
+                return reinterpret_at(inner2, v.ty().clone());
+            }
+            TypedValueKind::NewtypeRepr {
+                constructor,
+                instantiation,
+                value,
+            } => {
+                let value2 = self.thread_value_in(value, ev, loc, retyped)?;
+                return (value2.ty() == value.ty()).then(|| {
+                    TypedValue::new(
+                        v.ty().clone(),
+                        TypedValueKind::NewtypeRepr {
+                            constructor: *constructor,
+                            instantiation: instantiation.clone(),
+                            value: Box::new(value2),
+                        },
+                    )
+                });
+            }
+            _ => {}
+        }
         // A local whose type threading already changed reads at its new type.
         if let Some(rebuilt) = retyped.lookup(v) {
             return Some(rebuilt);
         }
-        match &super::peel(v).kind {
+        match v.kind() {
             TypedValueKind::Thunk(c) => match c.kind() {
                 TypedCompKind::Lam(ps, b) => self.thread_lambda_thunk(ps, b, ev, loc, retyped),
                 other_kind => {
@@ -1444,7 +1591,14 @@ pub fn try_lower_ev(
                 retyped.insert(p.name(), q.ty().clone());
             }
         }
-        let body = threader.thread_in(f.body(), &ev, &loc, &mut retyped)?;
+        // The prepass coalesces the declaration's source residual row into its
+        // fresh ambient row. Apply that alpha-renaming to every witness in the
+        // body before threading: CompSigs, nested CoreTypes, and explicit row
+        // instantiations must agree with the rewritten declaration.
+        let planned_body = plan
+            .get(f.name())
+            .map_or_else(|| f.body().clone(), |fp| body_in_ambient(f, fp));
+        let body = threader.thread_in(&planned_body, &ev, &loc, &mut retyped)?;
         out.push(TypedCoreFn::new(
             f.name(),
             params,
@@ -1518,6 +1672,83 @@ mod tests {
         let ids = OpIds::assign(&ops).expect("ids assign");
         let wanted = [sym("c"), sym("a"), sym("c")];
         assert_eq!(ids.ids_of(wanted.iter()), Some(vec![0, 2]));
+    }
+
+    #[test]
+    fn retyped_reads_preserve_representation_wrappers() {
+        let callable = |effects| {
+            CoreType::Thunk(Box::new(CompSig::new(
+                CoreType::Function(Box::new(CoreFnSig::new(
+                    Vec::new(),
+                    vec![int()],
+                    CompSig::new(int(), effects),
+                ))),
+                EffRow::Empty,
+            )))
+        };
+        let name = sym("f");
+        let original = callable(EffRow::singleton(sym("Read")));
+        let mapped = callable(EffRow::singleton(sym("Write")));
+        let target = callable(EffRow::canonical(
+            [Label::bare(sym("Read")), Label::bare(sym("Write"))],
+            EffRow::Empty,
+        ));
+        let bare = TypedValue::new(
+            original,
+            TypedValueKind::Var {
+                name,
+                instantiation: Vec::new(),
+            },
+        );
+        let wrapped = TypedValue::new(
+            target.clone(),
+            TypedValueKind::Reinterpret(Box::new(bare.clone())),
+        );
+        let mut retyped = Retyped::new();
+        retyped.insert(name, mapped.clone());
+
+        assert_eq!(
+            retyped.lookup(&bare).expect("bare read retypes").ty(),
+            &mapped
+        );
+        assert!(
+            retyped.lookup(&wrapped).is_none(),
+            "lookup must not flatten a representation wrapper"
+        );
+        let rebuilt = retyped
+            .try_rebuild(&wrapped)
+            .expect("both rows are representable at the aggregate target");
+        assert_eq!(rebuilt.ty(), &target);
+        let TypedValueKind::Reinterpret(inner) = rebuilt.kind() else {
+            panic!("the aggregate row target remains explicit")
+        };
+        assert_eq!(inner.ty(), &mapped);
+
+        let wrong_convention = CoreType::Thunk(Box::new(CompSig::new(
+            CoreType::Function(Box::new(CoreFnSig::new(
+                Vec::new(),
+                vec![CoreType::Source(Type::Bool)],
+                CompSig::new(int(), EffRow::Empty),
+            ))),
+            EffRow::Empty,
+        )));
+        retyped.insert(name, wrong_convention);
+        assert!(
+            retyped.try_rebuild(&wrapped).is_none(),
+            "a wrapper cannot conceal a changed calling convention"
+        );
+        let newtype = TypedValue::new(
+            target,
+            TypedValueKind::NewtypeRepr {
+                constructor: sym("FnBox"),
+                instantiation: Vec::new(),
+                value: Box::new(bare),
+            },
+        );
+        assert!(
+            retyped.try_rebuild(&newtype).is_none(),
+            "a newtype field cannot change witness under its constructor"
+        );
     }
 
     #[test]
@@ -1942,6 +2173,24 @@ mod tests {
                 "ambient rows live in their own namespace: {r}"
             );
         }
+    }
+
+    // A rebuilt handle whose clause re-performs through evidence rides the
+    // ambient row where its source row named the op. That relabeling, and
+    // only that relabeling, must pass the final handle guard.
+    #[test]
+    fn handle_guard_accepts_the_ambient_relabeling_and_nothing_else() {
+        let ambient = RowNames::new().next();
+        let src = EffRow::singleton("Yield");
+        // Discharged op, residual on the minted ambient: the eff_fuse shape.
+        assert!(threaded_row_included(&EffRow::Var(ambient), &src));
+        // Unchanged rows still pass through plain inclusion.
+        assert!(threaded_row_included(&src, &src));
+        // A label the source row never claimed does not launder through.
+        let leaked = EffRow::canonical([Label::bare(sym("IO"))], EffRow::Var(ambient));
+        assert!(!threaded_row_included(&leaked, &src));
+        // A tail outside the witness-only namespace is not threading's own.
+        assert!(!threaded_row_included(&EffRow::Var(sym("e")), &src));
     }
 
     // A handler in the producer is gone by the time an escaping thunk is

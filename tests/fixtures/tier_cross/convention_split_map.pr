@@ -1,0 +1,25 @@
+-- One row-polymorphic traversal is called at both a direct and an effectful
+-- thunk convention. The direct call must not inherit the handled call's
+-- runtime representation.
+
+effect Log
+  emit(Int) : Unit
+
+fn bump(x : Int) : Int = x + 1
+
+fn shout(x : Int) : Int ! {Log} =
+  let _u = emit(x)
+  x * 2
+
+fn pure_use(xs : List(Int)) : List(Int) = map(bump, xs)
+
+fn effect_use(xs : List(Int)) : List(Int) ! {Log} = map(shout, xs)
+
+fn main() =
+  let direct = pure_use([1, 2, 3])
+  let handled =
+    handle effect_use([4, 5]) with
+      emit(_n) resume k => k(())
+      return r => r
+  print(show(direct))
+  print(show(handled))

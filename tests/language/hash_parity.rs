@@ -1,38 +1,13 @@
-// The content-hash parity gate: the central invariant behind
-// content-addressed Core. A definition's hash names its pre-optimizer elaborated
-// term, and everything past that term (the deterministic Core-to-Core optimizer
-// and codegen) is a pure function of it under a fixed toolchain. So, holding the
-// compiler build and optimizer configuration fixed (the verification fingerprint,
-// which is exactly what carries optimizer/flag drift), *equal hash implies a
-// byte-identical compiled artifact*, and any change visible to the elaborated
-// term or to codegen must move the hash. That is the content-addressed analogue
-// of the interpreter/native parity oracle: there the claim is "same Core, same
-// output on every backend"; here it is "same hash, same emitted artifact," with
-// its dual "different artifact, different hash." Identity is deliberately
-// optimizer-independent; the optimizer level rides in the fingerprint, not the
-// hash, so this gate fixes it while it runs.
+// Content-hash parity under a fixed compiler and optimizer configuration. Equal
+// pre-optimizer Core hashes must produce byte-identical compiled artifacts, and
+// a codegen-visible edit must move the hash.
 //
-// The artifact compared is the emitted LLVM IR text (`emit_ir`), which is finer
-// than stdout: it reflects codegen choices (rc insertion, lowering) that never
-// reach the terminal, so it catches a hash that agrees on behavior but disagrees
-// on compiled form. Without this coupling the hash is only asserted-correct
-// against itself (`core_hash.rs`); here it is checked against the thing it claims
-// to name.
+// Compare emitted LLVM IR so codegen changes invisible in stdout remain covered.
 //
-// Three properties. Soundness over real programs: emission is deterministic and
-// reformatting (a semantics- and name-preserving reprint) moves neither the
-// artifact nor the hash. Soundness with teeth: two programs differing only in a
-// local binder name hash identically, so their compiled artifact must be
-// byte-identical too. Completeness with teeth: a codegen-visible edit must move
-// the hash. The metadata inputs fip/borrow are committed at the hash level in
-// `core_hash.rs`; on the current backend they are conservatively folded even
-// where they do not move the IR, so they are not re-tested here.
+// The cases cover deterministic emission, reformatting, local binder renames,
+// and codegen-visible edits. `core_hash.rs` covers fip/borrow metadata.
 //
-// Gated on `feature = "native"` because `emit_ir` is; no C compiler is needed
-// (the textual emitter produces IR without invoking clang), so this runs wherever
-// the native backend is compiled in. A small fixed set of committed examples
-// gives breadth without the per-program interpreter filtering the runnable-corpus
-// oracle pays; the curated tables carry the teeth and are cheap.
+// `emit_ir` requires the `native` feature but does not invoke a C compiler.
 #![cfg(feature = "native")]
 
 use std::collections::BTreeMap;
@@ -43,8 +18,7 @@ use prism::{emit_ir, format, with_prelude};
 
 // A spread of committed examples: arithmetic recursion, higher-order functions,
 // dictionary-passing type classes, algebraic-effect handlers, list
-// comprehensions. Enough shape variety that reformatting exercises real codegen,
-// not just a toy.
+// comprehensions. This gives reformatting enough variety to exercise real codegen.
 const EXAMPLES: &[&str] = &["collatz", "curry", "classes", "eff_state", "comprehension"];
 
 // The emitted LLVM IR for a full (prelude-included) program: the compiled

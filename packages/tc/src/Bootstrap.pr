@@ -5,7 +5,7 @@
 -- first-order subset with `Tc`, and uses `Data.Diff` to report the first fact
 -- that diverges. Unsupported forms are coverage, never disagreements.
 
-import Control.Fresh (Fresh, run_fresh)
+import Control.Fresh (Fresh, gensym, run_fresh)
 import Control.Solve (Solve)
 import Data.Char (is_upper)
 import Data.Diff (Divergence, DiffAt, DiffLeftEnd, DiffRightEnd, first_diff)
@@ -32,19 +32,48 @@ let arg_surface : Int = 2
 
 let arg_oracle : Int = 3
 
-type CtorInfo = CtorInfo(String, String, List(String), Scheme)
+-- The refusals the checker raises as a `Mismatch` whose expected side names a
+-- subset boundary rather than a type. `unsupported_tc_error` reads them back
+-- and turns each into a coverage row, so the two ends are one table and a
+-- rename cannot silently turn a refusal into a disagreement.
+let want_t1_binding : String = "known T1 binding"
+
+let want_constructor : String = "known constructor"
+
+let want_record_constructor : String = "known record constructor"
+
+let want_t1_operation : String = "known T1 operation"
+
+let want_unapplied_operation : String = "unapplied T1 operation"
+
+let want_annotation_row : String = "known declaration row"
+
+-- A constructor whose fields use a type shape outside T1 stays in this table
+-- only so a use of it can be reported as uncovered. Its approximate scheme is
+-- never handed to inference.
+type CtorInfo = CtorInfo(
+  String,
+  String,
+  List(String),
+  Scheme,
+  Option((String, String))
+)
 
 fn ctor_name(info : CtorInfo) : String =
   match info of
-    CtorInfo(name, _parent, _fields, _scheme) => name
+    CtorInfo(name, _parent, _fields, _scheme, _refusal) => name
 
 fn ctor_fields(info : CtorInfo) : List(String) =
   match info of
-    CtorInfo(_name, _parent, fields, _scheme) => fields
+    CtorInfo(_name, _parent, fields, _scheme, _refusal) => fields
 
 fn ctor_scheme(info : CtorInfo) : Scheme =
   match info of
-    CtorInfo(_name, _parent, _fields, scheme) => scheme
+    CtorInfo(_name, _parent, _fields, scheme, _refusal) => scheme
+
+fn ctor_refusal(info : CtorInfo) : Option((String, String)) =
+  match info of
+    CtorInfo(_name, _parent, _fields, _scheme, refusal) => refusal
 
 type Unsupported = Unsupported {
   function_name: String,
@@ -64,23 +93,120 @@ type Workbench = Workbench {
   first: Option(Divergence(String))
 }
 
+-- A declaration's type variables are rigid while its written row names stay
+-- flexible until the inferred scheme boundary. The two namespaces are
+-- separate: one spelling may legally occur at both kinds.
+type AnnotationNames = AnnotationNames {
+  tys: List((String, VTy)),
+  tyvars: List(Binder(TyVarSpace)),
+  rows: List((String, Tail))
+}
+
+-- One handler owns one argument vector per parameterized effect. Frames are
+-- lexical evidence rather than source bindings, so they live in the same
+-- immutable environment without occupying a source name.
+
+-- A named handler is the surface view of desugar's private effect. Its source
+-- effect selects operation schemes; its private effect is what directed calls
+-- perform and the enclosing named handler alone discharges.
+type InstanceInfo = InstanceInfo {
+  source_effect: String,
+  private_effect: String,
+  args: List(VTy),
+  ops: List((String, Scheme))
+}
+
+-- Values and named handler instances share one source namespace. Keeping both
+-- in one first-match environment makes ordinary lexical shadowing authoritative
+-- while handler frames remain invisible to source lookup.
+type EnvEntry
+  = BValue(String, Scheme)
+  | BOperation(String, Scheme)
+  | BInstance(String, InstanceInfo)
+  | BHandlerFrame(List((String, List(VTy))))
+
 fn mono(ty : VTy) : Scheme = Scheme { tyvars = [], rowvars = [], body = ty }
 
-fn env_get(name : String, env : List((String, Scheme))) : Option(Scheme) =
+fn env_get(name : String, env : List(EnvEntry)) : Option(Scheme) =
   match env of
     Nil => None
-    Cons((key, value), rest) =>
-      if key == name then
-        Some(value)
-      else
-        env_get(name, rest)
+    Cons(entry, rest) =>
+      match entry of
+        BValue(key, value) =>
+          if key == name then
+            Some(value)
+          else
+            env_get(name, rest)
+        BOperation(key, value) =>
+          if key == name then
+            Some(value)
+          else
+            env_get(name, rest)
+        BInstance(key, _info) =>
+          if key == name then
+            None
+          else
+            env_get(name, rest)
+        BHandlerFrame(_frame) => env_get(name, rest)
+
+fn instance_get(name : String, env : List(EnvEntry)) : Option(InstanceInfo) =
+  match env of
+    Nil => None
+    Cons(entry, rest) =>
+      match entry of
+        BValue(key, _value) =>
+          if key == name then
+            None
+          else
+            instance_get(name, rest)
+        BOperation(_key, _value) => instance_get(name, rest)
+        BInstance(key, info) =>
+          if key == name then
+            Some(info)
+          else
+            instance_get(name, rest)
+        BHandlerFrame(_frame) => instance_get(name, rest)
 
 fn env_put(
   name : String,
   scheme : Scheme,
-  env : List((String, Scheme))
-) : List((String, Scheme)) =
-  Cons((name, scheme), env)
+  env : List(EnvEntry)
+) : List(EnvEntry) =
+  Cons(BValue(name, scheme), env)
+
+fn env_put_instance(
+  name : String,
+  info : InstanceInfo,
+  env : List(EnvEntry)
+) : List(EnvEntry) =
+  Cons(BInstance(name, info), env)
+
+fn env_put_operation(
+  name : String,
+  scheme : Scheme,
+  env : List(EnvEntry)
+) : List(EnvEntry) =
+  Cons(BOperation(name, scheme), env)
+
+-- Handler heads are resolved in the operation namespace, independently of
+-- ordinary values and instances that reuse the same source spelling.
+fn operation_get(name : String, env : List(EnvEntry)) : Option(Scheme) =
+  match env of
+    Nil => None
+    Cons(entry, rest) =>
+      match entry of
+        BOperation(key, scheme) =>
+          if key == name then
+            Some(scheme)
+          else
+            operation_get(name, rest)
+        _ => operation_get(name, rest)
+
+fn env_put_frame(
+  frame : List((String, List(VTy))),
+  env : List(EnvEntry)
+) : List(EnvEntry) =
+  Cons(BHandlerFrame(frame), env)
 
 fn tyname_get(name : String, names : List((String, VTy))) : Option(VTy) =
   match names of
@@ -91,14 +217,37 @@ fn tyname_get(name : String, names : List((String, VTy))) : Option(VTy) =
       else
         tyname_get(name, rest)
 
+fn rowname_get(name : String, names : List((String, Tail))) : Option(Tail) =
+  match names of
+    Nil => None
+    Cons((key, value), rest) =>
+      if key == name then
+        Some(value)
+      else
+        rowname_get(name, rest)
+
 fn ctor_get(name : String, ctors : List(CtorInfo)) : Option(CtorInfo) =
   match ctors of
     Nil => None
     Cons(info, rest) =>
       if ctor_name(info) == name then
-        Some(info)
+        match ctor_refusal(info) of
+          Some(_) => None
+          None => Some(info)
       else
         ctor_get(name, rest)
+
+fn ctor_named_refusal(
+  name : String,
+  ctors : List(CtorInfo)
+) : Option((String, String)) =
+  match ctors of
+    Nil => None
+    Cons(info, rest) =>
+      if ctor_name(info) == name then
+        ctor_refusal(info)
+      else
+        ctor_named_refusal(name, rest)
 
 fn resolved_get(name : String, fs : List(RFunction)) : Option(RFunction) =
   match fs of
@@ -132,6 +281,32 @@ fn is_data_item(item : Item) : Bool =
   match item of
     IData { .. } => true
     _ => false
+
+-- The surface codec may omit the all-`Type` kind vector. A declaration has a
+-- Row slot only when the parallel vector is complete and contains `KRow`,
+-- matching the Rust checker's normalization of every other shape to `Type`.
+fn row_kind_data_names(items : List(Item)) : List(String) =
+  match items of
+    Nil => []
+    Cons(item, rest) =>
+      match item of
+        IData { name = name, params = params, param_kinds = kinds, .. } =>
+          if length(params) == length(kinds) && has_row_kind(kinds) then
+            Cons(name, row_kind_data_names(rest))
+          else
+            row_kind_data_names(rest)
+        _ => row_kind_data_names(rest)
+
+fn has_row_kind(kinds : List(Kind)) : Bool =
+  match kinds of
+    Nil => false
+    Cons(KRow, _rest) => true
+    Cons(_kind, rest) => has_row_kind(rest)
+
+fn row_kind_data_member(name : String, data : List(String)) : Bool =
+  match data of
+    Nil => false
+    Cons(head, rest) => name == head || row_kind_data_member(name, rest)
 
 fn names_of_params(params : List(String)) : (List((String, VTy)), List(Binder(TyVarSpace))) ! {Fresh} =
   names_of_params_go(params, [], [])
@@ -177,8 +352,8 @@ fn ty_of(ty : Ty, names : List((String, VTy))) : VTy =
           c_ret(ty_of(ret, names), row_of(row, names)),
         )
     TyForall(vars, body) =>
-      -- A nested forall is conservatively erased here. Top-level annotation
-      -- variables are branded before checking the declaration.
+      -- Compatibility conversion only: every reachable annotation and
+      -- constructor-field path refuses this shape before inference.
       ty_of(body, append(map(\(v) -> (v, VCon(v, [])), vars), names))
     TyUsage(body, _uses) => ty_of(body, names)
     TyState(n) => VCon("State", [VCon("{n}", [])])
@@ -196,25 +371,132 @@ fn row_of(row : Syntax.Ast.Row, names : List((String, VTy))) : Tc.Row =
         ),
     )
 
-fn ctor_infos(items : List(Item)) : List(CtorInfo) ! {Fresh} =
-  ctor_infos_go(item_data(items))
+-- Declaration signatures alone may name an open row. Each occurrence uses
+-- the flexible seed minted for that spelling; a missing seed is an internal
+-- admission mismatch, never permission to erase the tail.
+fn annot_ty_of(
+  ty : Ty,
+  names : List((String, VTy)),
+  rows : List((String, Tail))
+) : VTy ! {TcFail} =
+  match ty of
+    TyInt => VInt
+    TyI64 => VCon("I64", [])
+    TyU64 => VCon("U64", [])
+    TyBool => VBool
+    TyUnit => VUnit
+    TyFloat => VFloat
+    TyChar => VCon("Char", [])
+    TyStr => VString
+    TyVar(name) =>
+      match tyname_get(name, names) of
+        Some(found) => found
+        None => VCon(name, [])
+    TyApp(name, args) | TyCon(name, args) =>
+      VCon(name, map(\(t) -> annot_ty_of(t, names, rows), args))
+    TyTuple(items) => VTuple(map(\(t) -> annot_ty_of(t, names, rows), items))
+    TyFun(params, row, ret) =>
+      v_fun(
+          map(\(t) -> annot_ty_of(t, names, rows), params),
+          c_ret(annot_ty_of(ret, names, rows), annot_row_of(row, names, rows)),
+        )
+    TyForall(vars, body) =>
+      annot_ty_of(
+          body,
+          append(map(\(v) -> (v, VCon(v, [])), vars), names),
+          rows,
+        )
+    TyUsage(body, _uses) => annot_ty_of(body, names, rows)
+    TyState(n) => VCon("State", [VCon("{n}", [])])
+    TyNat(n) => VCon("{n}", [])
+    TyRowLit(_row) => VCon("Row", [])
+    TyUnboxedTuple(items) =>
+      VCon("#Tuple", map(\(t) -> annot_ty_of(t, names, rows), items))
+    TyUnboxedRecord(fields) =>
+      VCon(
+          "#Record",
+          map(\(field) -> annot_ty_of(field.ty, names, rows), fields),
+        )
+
+fn annot_row_of(
+  row : Syntax.Ast.Row,
+  names : List((String, VTy)),
+  rows : List((String, Tail))
+) : Tc.Row ! {TcFail} =
+  let labels = map(
+      \(label) -> Label { name = label.name, args = map(\(t) -> annot_ty_of(t, names, rows), label.args) },
+      row.labels,
+    )
+  match row.tail of
+    None => row_closed(labels)
+    Some(name) =>
+      match rowname_get(name, rows) of
+        Some(tail) => row_open(labels, tail)
+        None => tc_fail(Mismatch(want_annotation_row, name))
+
+-- A declaration's own effect annotation checks a closed set of concrete
+-- labels. Its syntactic tail is forwarding documentation, not a binder, while
+-- open rows nested in label argument types still share declaration seeds.
+fn declared_row_of(
+  row : Syntax.Ast.Row,
+  names : List((String, VTy)),
+  rows : List((String, Tail))
+) : Tc.Row ! {TcFail} =
+  row_closed(
+      map(
+          \(label) -> Label { name = label.name, args = map(\(t) -> annot_ty_of(t, names, rows), label.args) },
+          row.labels,
+        ),
+    )
+
+fn ctor_infos(
+  items : List(Item),
+  row_data : List(String)
+) : List(CtorInfo) ! {Fresh} =
+  ctor_infos_go(item_data(items), row_data)
 
 -- Spelled out rather than routed through `concat_map`: the shared combinator's
 -- function slot is a single calling convention for the whole program, so a
 -- performing element function handed to it would settle that slot for every
 -- pure caller too.
-fn ctor_infos_go(items : List(Item)) : List(CtorInfo) ! {Fresh} =
+fn ctor_infos_go(
+  items : List(Item),
+  row_data : List(String)
+) : List(CtorInfo) ! {Fresh} =
   match items of
     Nil => []
-    Cons(item, rest) => append(ctors_of_item(item), ctor_infos_go(rest))
+    Cons(item, rest) =>
+      append(ctors_of_item(item, row_data), ctor_infos_go(rest, row_data))
 
-fn ctors_of_item(item : Item) : List(CtorInfo) ! {Fresh} =
+fn ctors_of_item(
+  item : Item,
+  row_data : List(String)
+) : List(CtorInfo) ! {Fresh} =
   match item of
     IData { name = name, params = params, ctors = ctors, .. } =>
-      let (names, binders) = names_of_params(params)
-      let result = VCon(name, map(snd, names))
-      ctor_infos_of(name, names, binders, result, ctors)
+      if row_kind_data_member(name, row_data) then
+        refused_ctor_infos(name, ctors)
+      else
+        let (names, binders) = names_of_params(params)
+        let result = VCon(name, map(snd, names))
+        ctor_infos_of(name, names, binders, result, ctors, row_data)
     _ => []
+
+fn refused_ctor_infos(parent : String, ctors : List(Ctor)) : List(CtorInfo) =
+  match ctors of
+    Nil => []
+    Cons(ctor, rest) =>
+      let fields =
+        match ctor.shape of
+          CPositional(_args) => []
+          CRecord(fs) => map(\(field) -> field.name, fs)
+      Cons(
+          CtorInfo(ctor.name, parent, fields, mono(VUnit), Some((
+              "row-kinded-data-argument",
+              "Row-kinded data arguments are not T1",
+            ))),
+          refused_ctor_infos(parent, rest),
+        )
 
 -- The per-constructor traversal is spelled out for the same reason as
 -- `ctor_infos_go`, and additionally because the names and binders it carries
@@ -222,110 +504,213 @@ fn ctors_of_item(item : Item) : List(CtorInfo) ! {Fresh} =
 -- copied verbatim into direct code, where those bindings no longer stand at
 -- their source type. Passing them as ordinary arguments keeps every mention a
 -- plain reference.
+-- lint: allow(L0103)
 fn ctor_infos_of(
   parent : String,
   names : List((String, VTy)),
   binders : List(Binder(TyVarSpace)),
   result : VTy,
-  ctors : List(Ctor)
+  ctors : List(Ctor),
+  row_data : List(String)
 ) : List(CtorInfo) =
   match ctors of
     Nil => []
     Cons(ctor, rest) =>
       Cons(
-          ctor_info(parent, names, binders, result, ctor),
-          ctor_infos_of(parent, names, binders, result, rest),
+          ctor_info(parent, names, binders, result, ctor, row_data),
+          ctor_infos_of(parent, names, binders, result, rest, row_data),
         )
 
+-- lint: allow(L0103)
 fn ctor_info(
   parent : String,
   names : List((String, VTy)),
   binders : List(Binder(TyVarSpace)),
   result : VTy,
-  ctor : Ctor
+  ctor : Ctor,
+  row_data : List(String)
 ) : CtorInfo =
   match ctor.shape of
     CPositional(args) =>
-      let params = map(\(t) -> ty_of(t, names), args)
-      CtorInfo(
-          ctor.name,
-          parent,
-          [],
-          Scheme {
-            tyvars = binders,
-            rowvars = [],
-            body = if length(params) == 0
-              then result
-              else v_fun(params, c_ret(result, row_closed([])))
-          },
-        )
+      match tys_refusal(args, row_data) of
+        Some(refusal) =>
+          CtorInfo(ctor.name, parent, [], mono(VUnit), Some(refusal))
+        None =>
+          let params = map(\(t) -> ty_of(t, names), args)
+          CtorInfo(
+              ctor.name,
+              parent,
+              [],
+              Scheme {
+                tyvars = binders,
+                rowvars = [],
+                body = if length(params) == 0
+                  then result
+                  else v_fun(params, c_ret(result, row_closed([])))
+              },
+              None,
+            )
     CRecord(fields) =>
-      let params = map(\(field) -> ty_of(field.ty, names), fields)
-      CtorInfo(
-          ctor.name,
-          parent,
-          map(\(field) -> field.name, fields),
-          Scheme {
-            tyvars = binders,
-            rowvars = [],
-            body = if length(params) == 0
-              then result
-              else v_fun(params, c_ret(result, row_closed([])))
-          },
-        )
+      let field_tys = map(\(field) -> field.ty, fields)
+      match tys_refusal(field_tys, row_data) of
+        Some(refusal) =>
+          CtorInfo(
+              ctor.name,
+              parent,
+              map(\(field) -> field.name, fields),
+              mono(VUnit),
+              Some(refusal),
+            )
+        None =>
+          let params = map(\(field) -> ty_of(field.ty, names), fields)
+          CtorInfo(
+              ctor.name,
+              parent,
+              map(\(field) -> field.name, fields),
+              Scheme {
+                tyvars = binders,
+                rowvars = [],
+                body = if length(params) == 0
+                  then result
+                  else v_fun(params, c_ret(result, row_closed([])))
+              },
+              None,
+            )
 
-fn ctor_env(
-  ctors : List(CtorInfo),
-  env : List((String, Scheme))
-) : List((String, Scheme)) =
-  foldl(
-      \(out, info) -> env_put(ctor_name(info), ctor_scheme(info), out),
-      env,
-      ctors,
-    )
+fn ctor_env(ctors : List(CtorInfo), env : List(EnvEntry)) : List(EnvEntry) =
+  match ctors of
+    Nil => env
+    Cons(info, rest) =>
+      match ctor_refusal(info) of
+        Some(_) => ctor_env(rest, env)
+        None => ctor_env(rest, env_put(ctor_name(info), ctor_scheme(info), env))
 
 -- Effect operations enter the environment the way constructors do. An
 -- operation of `effect E` is a function into a computation whose row is
 -- exactly `{E}`, which is the whole of how performing shows up in a type: a
 -- call site absorbs that row into the ambient one, and nothing else is needed
 -- to infer where an effect came from.
+-- Spelled out rather than folded through `concat_map` for the reason
+-- `ctor_infos_go` gives: minting an effect's binders performs, and the shared
+-- combinator's function slot is one calling convention for the whole program.
 fn op_env(
   items : List(Item),
-  env : List((String, Scheme))
-) : List((String, Scheme)) =
+  row_data : List(String),
+  env : List(EnvEntry)
+) : List(EnvEntry) ! {Fresh} =
+  match items of
+    Nil => env
+    Cons(item, rest) =>
+      op_env(rest, row_data, put_entries(ops_of_item(item, row_data), env))
+
+fn put_entries(
+  entries : List((String, Scheme)),
+  env : List(EnvEntry)
+) : List(EnvEntry) =
   foldl(
-      \(out, entry) -> env_put(fst(entry), snd(entry), out),
+      \(out, entry) -> env_put_operation(fst(entry), snd(entry), out),
       env,
-      concat_map(ops_of_item, items),
+      entries,
     )
 
-fn ops_of_item(item : Item) : List((String, Scheme)) =
+-- An effect's parameters are its own quantifiers, so an operation of
+-- `effect Cell(a)` is a scheme over `a` performing `{Cell(a)}`. Instantiating
+-- that scheme at a call mints one class shared by the row and the operation's
+-- own types, which is how `read()` used at `Int` and the row `{Cell(Int)}` come
+-- to agree without either being written down.
+fn ops_of_item(
+  item : Item,
+  row_data : List(String)
+) : List((String, Scheme)) ! {Fresh} =
   match item of
     IEffect { name = name, params = params, ops = ops, .. } =>
-      if length(params) == 0 then
-        concat_map(\(op) -> op_entry(name, op), ops)
-      else
-        []
+      let (names, binders) = names_of_params(params)
+      let performed = Label { name = name, args = map(snd, names) }
+      op_entries(performed, names, binders, ops, row_data)
     _ => []
 
--- A parameterized effect, a graded operation, and an operation whose signature
--- mentions a type variable all stay outside the checked subset: each needs a
--- binder the shadow has no way to brand. Their operations are simply absent
--- from the environment, so a body performing one reports as an unresolved
--- binding, which is coverage rather than a disagreement.
-fn op_entry(effect_name : String, op : EffOp) : List((String, Scheme)) =
-  if op_is_ground(op) then
-    let params = map(\(t) -> ty_of(t, []), op.params)
-    let performed = row_closed([label0(effect_name)])
-    let ty = v_fun(params, c_ret(ty_of(op.ret, []), performed))
-    [(op.name, mono(ty))]
+-- The names and binders are passed rather than captured, for the reason
+-- `ctor_infos_of` gives: they come out of a performing call, so a closure over
+-- them would not stand at its source type once copied into direct code.
+fn op_entries(
+  performed : Label,
+  names : List((String, VTy)),
+  binders : List(Binder(TyVarSpace)),
+  ops : List(EffOp),
+  row_data : List(String)
+) : List((String, Scheme)) =
+  match ops of
+    Nil => []
+    Cons(op, rest) =>
+      append(
+          op_entry(performed, names, binders, op, row_data),
+          op_entries(performed, names, binders, rest, row_data),
+        )
+
+-- A graded operation, an operation over a type shape outside T1, and an
+-- operation naming a type variable that is not one of the effect's own
+-- parameters all stay outside the checked subset: each needs a binder the
+-- shadow has no way to brand. Those operations stay out of the typed
+-- environment but remain in the declaration table, so a use is named operation
+-- coverage rather than a disagreement. The effect's other operations are
+-- unaffected, because admission is decided one operation at a time.
+fn op_entry(
+  performed : Label,
+  names : List((String, VTy)),
+  binders : List(Binder(TyVarSpace)),
+  op : EffOp,
+  row_data : List(String)
+) : List((String, Scheme)) =
+  if op_is_ground(op, names, row_data) then
+    let params = map(\(t) -> ty_of(t, names), op.params)
+    let ty = v_fun(params, c_ret(ty_of(op.ret, names), row_closed([performed])))
+    [(op.name, Scheme { tyvars = binders, rowvars = [], body = ty })]
   else
     []
 
-fn op_is_ground(op : EffOp) : Bool =
+fn op_is_ground(
+  op : EffOp,
+  names : List((String, VTy)),
+  row_data : List(String)
+) : Bool =
   match op.grade of
     Some(_word) => false
-    None => length(concat_map(tyvars_of, Cons(op.ret, op.params))) == 0
+    None =>
+      let tys = Cons(op.ret, op.params)
+      tys_refusal(tys, row_data) == None
+        && all_bound(concat_map(tyvars_of, tys), names)
+
+-- Keep every effect/operation association even when its scheme is outside T1.
+-- A use of one is then reported as an unsupported operation rather than as an
+-- unrelated missing binding, and later partial-handler coverage can ask which
+-- other operations belong to the same effect without reconstructing the AST.
+fn operation_table(items : List(Item)) : List((String, String)) =
+  match items of
+    Nil => []
+    Cons(item, rest) =>
+      match item of
+        IEffect { name = effect_name, ops = ops, .. } =>
+          append(
+              map(\(op) -> (effect_name, op.name), ops),
+              operation_table(rest),
+            )
+        _ => operation_table(rest)
+
+fn operation_declared(
+  name : String,
+  operations : List((String, String))
+) : Bool =
+  match operations of
+    Nil => false
+    Cons((_effect, op), rest) => op == name || operation_declared(name, rest)
+
+fn all_bound(vars : List(String), names : List((String, VTy))) : Bool =
+  match vars of
+    Nil => true
+    Cons(v, rest) =>
+      match tyname_get(v, names) of
+        Some(_found) => all_bound(rest, names)
+        None => false
 
 fn kind_of_expr(e : Expr) : String =
   match e of
@@ -338,12 +723,6 @@ fn kind_of_expr(e : Expr) : String =
     EUnboxedField(_, _) => "unboxed-field"
     ERecordUpdate(_, _, _) => "record-update"
     EPathUpdate(_, _) => "record-update-path"
-    -- A partial handler leaves the operations it does not name in the residual
-    -- row, which the shadow cannot spell without the effect's operation table,
-    -- and a named instance dispatches through a binding rather than by name,
-    -- so what a clause discharges is not readable from the clause alone.
-    EHandle(_, _, true) => "handle-partial"
-    ENamedHandle(_, _, _) => "handle-named"
     EMask(_, _) => "mask"
     EInst(_, _) => "inst"
     EIndex(_, _) => "index"
@@ -360,41 +739,78 @@ fn kind_of_expr(e : Expr) : String =
       "surface-sugar"
     _ => "supported"
 
-fn first_unsupported(sp : Sp(Expr)) : Option((String, Span, String)) =
+fn first_unsupported(
+  sp : Sp(Expr),
+  row_data : List(String)
+) : Option((String, Span, String)) =
   let own = kind_of_expr(sp.node)
   if not(own == "supported") then
     Some((own, sp.span, "outside the T1 pure first-order subset"))
   else
-    first_unsupported_supported(sp.node)
+    match sp.node of
+      EAnn(value, ty) =>
+        match ty_refusal(ty, row_data) of
+          Some((kind, reason)) => Some((kind, sp.span, reason))
+          None => first_unsupported(value, row_data)
+      _ => first_unsupported_supported(sp.node, row_data)
 
-fn first_unsupported_supported(e : Expr) : Option((String, Span, String)) =
+fn first_unsupported_supported(
+  e : Expr,
+  row_data : List(String)
+) : Option((String, Span, String)) =
   match e of
     EInt(_, _) | EFloat(_) | EBool(_) | EUnit | EStr(_) | EVar(_) => None
     EBin(_, left, right) =>
-      first_some(first_unsupported(left), first_unsupported(right))
-    ENeg(value) => first_unsupported(value)
+      first_some(
+          first_unsupported(left, row_data),
+          first_unsupported(right, row_data),
+        )
+    ENeg(value) => first_unsupported(value, row_data)
     EIf(cond, yes, no) =>
       first_some(
-          first_unsupported(cond),
-          first_some(first_unsupported(yes), first_unsupported(no)),
+          first_unsupported(cond, row_data),
+          first_some(
+              first_unsupported(yes, row_data),
+              first_unsupported(no, row_data),
+            ),
         )
     ELet(_, value, body) =>
-      first_some(first_unsupported(value), first_unsupported(body))
+      first_some(
+          first_unsupported(value, row_data),
+          first_unsupported(body, row_data),
+        )
     ELam(params, body) =>
-      match unsupported_params(params) of
-        None => first_unsupported(body)
+      match unsupported_params(params, row_data) of
+        None => first_unsupported(body, row_data)
         some => some
     ECall(callee, args) =>
-      first_some(first_unsupported(callee), first_unsupported_list(args))
+      first_some(
+          first_unsupported(callee, row_data),
+          first_unsupported_list(args, row_data),
+        )
     EPipe(value, callee) =>
-      first_some(first_unsupported(value), first_unsupported(callee))
+      first_some(
+          first_unsupported(value, row_data),
+          first_unsupported(callee, row_data),
+        )
     EMatch(scrutinee, arms) =>
-      first_some(first_unsupported(scrutinee), unsupported_arms(arms))
+      first_some(
+          first_unsupported(scrutinee, row_data),
+          unsupported_arms(arms, row_data),
+        )
     EHandle(body, arms, _partial) =>
-      first_some(first_unsupported(body), unsupported_handler_arms(arms))
-    ETuple(items) => first_unsupported_list(items)
-    ERecord(_name, fields) => first_unsupported_named(fields)
-    EAnn(value, _ty) => first_unsupported(value)
+      first_some(
+          first_unsupported(body, row_data),
+          unsupported_handler_arms(arms, row_data),
+        )
+    ENamedHandle(_name, body, arms) =>
+      first_some(
+          first_unsupported(body, row_data),
+          unsupported_handler_arms(arms, row_data),
+        )
+    ETuple(items) => first_unsupported_list(items, row_data)
+    ERecord(_name, fields) => first_unsupported_named(fields, row_data)
+    EAnn(value, _ty) => first_unsupported(value, row_data)
     _ =>
       Some((
           kind_of_expr(e),
@@ -407,19 +823,39 @@ fn first_some(x : Option(a), y : Option(a)) : Option(a) =
     Some(_) => x
     None => y
 
-fn first_unsupported_list(xs : List(Sp(Expr))) : Option((String, Span, String)) =
+fn first_unsupported_list(
+  xs : List(Sp(Expr)),
+  row_data : List(String)
+) : Option((String, Span, String)) =
   match xs of
     Nil => None
     Cons(x, rest) =>
-      first_some(first_unsupported(x), first_unsupported_list(rest))
+      first_some(
+          first_unsupported(x, row_data),
+          first_unsupported_list(rest, row_data),
+        )
 
-fn first_unsupported_named(xs : List(NamedExpr)) : Option((String, Span, String)) =
+fn first_unsupported_named(
+  xs : List(NamedExpr),
+  row_data : List(String)
+) : Option((String, Span, String)) =
   match xs of
     Nil => None
     Cons(x, rest) =>
-      first_some(first_unsupported(x.value), first_unsupported_named(rest))
+      first_some(
+          first_unsupported(x.value, row_data),
+          first_unsupported_named(rest, row_data),
+        )
 
-fn unsupported_params(params : List(Param)) : Option((String, Span, String)) =
+fn unsupported_params(
+  params : List(Param),
+  row_data : List(String)
+) : Option((String, Span, String)) =
+  match unsupported_param_shapes(params) of
+    Some(found) => Some(found)
+    None => unsupported_param_types(params, row_data)
+
+fn unsupported_param_shapes(params : List(Param)) : Option((String, Span, String)) =
   match params of
     Nil => None
     Cons(p, rest) =>
@@ -438,76 +874,210 @@ fn unsupported_params(params : List(Param)) : Option((String, Span, String)) =
               Span { lo = 0, hi = 0 },
               "borrow parameters are not T1",
             ))
-        _ => unsupported_params(rest)
+        _ => unsupported_param_shapes(rest)
 
--- A row the shadow can put in a canonical scheme carries no open tail and no
--- label applied to type arguments. An open tail is a row binder the scheme
--- spelling has no quantifier for, and a label's arguments would print through
--- the pretty-printer rather than the canonical renderer; either way the two
--- checkers' spellings would be free to drift apart.
-fn row_refusal(row : Syntax.Ast.Row) : Option((String, String)) =
+fn unsupported_param_types(
+  params : List(Param),
+  row_data : List(String)
+) : Option((String, Span, String)) =
+  match params of
+    Nil => None
+    Cons(param, rest) =>
+      let own =
+        match param.ty of
+          None => None
+          Some(ty) => ty_refusal(ty, row_data)
+      match own of
+        Some((kind, reason)) => Some((kind, Span { lo = 0, hi = 0 }, reason))
+        None => unsupported_param_types(rest, row_data)
+
+-- A row the shadow can put in a canonical scheme carries no open tail: that is
+-- a row binder the scheme spelling has no quantifier for, so the two checkers'
+-- spellings would be free to drift apart. A label's type arguments are fine,
+-- because they are ordinary types the canonical renderer already spells.
+fn row_refusal(
+  row : Syntax.Ast.Row,
+  row_data : List(String)
+) : Option((String, String)) =
   if not(row.tail == None) then
     Some(("effect-row-open", "open effect rows are not T1"))
   else
-    label_refusal(row.labels)
+    label_refusal(row.labels, row_data)
 
-fn label_refusal(labels : List(EffLabel)) : Option((String, String)) =
+fn label_refusal(
+  labels : List(EffLabel),
+  row_data : List(String)
+) : Option((String, String)) =
   match labels of
     Nil => None
     Cons(label, rest) =>
-      if length(label.args) > 0 then
-        Some((
-            "effect-row-applied",
-            "effect labels with type arguments are not T1",
-          ))
-      elif not(is_upper(char_at(label.name, 0))) then
+      if not(is_upper(char_at(label.name, 0))) then
         -- A label position spelled in lower case is a row variable, not an
         -- effect: it stands for whatever the caller performs, so it needs the
         -- same binder an open tail does and is refused for the same reason.
         Some(("effect-row-open", "effect row variables are not T1"))
       else
-        label_refusal(rest)
+        -- A label's type arguments are ordinary types and are refused by the
+        -- same table that judges every other annotation, so `{Cell(Int)}` is
+        -- admitted and `{Cell(forall a. (a) -> a)}` is not. The canonical
+        -- renderer spells them, so admitting one costs no spelling drift.
+        first_some(
+            tys_refusal(label.args, row_data),
+            label_refusal(rest, row_data),
+          )
 
 -- The same restriction reaching inside a signature: a function type written in
 -- a parameter or a result carries a row of its own, and that row lands in the
 -- scheme just as the declaration's does.
-fn ty_refusal(ty : Ty) : Option((String, String)) =
+fn ty_refusal(ty : Ty, row_data : List(String)) : Option((String, String)) =
   match ty of
-    TyApp(_, args) | TyCon(_, args) | TyTuple(args) | TyUnboxedTuple(args) =>
-      tys_refusal(args)
-    TyForall(_vars, body) => ty_refusal(body)
+    -- An applied lower-case head is a higher-kinded variable, whereas `VTy`
+    -- can represent only saturated named constructors. Treating it as `VCon`
+    -- would silently turn a signature binder into a nominal type.
+    TyApp(_, _args) =>
+      Some(("higher-kinded-application", "applied type variables are not T1"))
+    TyCon(name, args) =>
+      if row_kind_data_member(name, row_data) then
+        Some((
+            "row-kinded-data-argument",
+            "Row-kinded data arguments are not T1",
+          ))
+      else
+        tys_refusal(args, row_data)
+    TyTuple(args) => tys_refusal(args, row_data)
+    -- A quantifier written inside a signature is refused rather than checked.
+    -- The canonical spelling normalizes one leading `forall` and nothing
+    -- deeper, so an inner binder would keep the name it was written with and
+    -- two alpha-variants of the same signature would compare unequal. The
+    -- value representation has no place to put the binder either, so checking
+    -- it would mean erasing it.
+    TyForall(_vars, _body) =>
+      Some(("nested-forall", "quantifiers inside a signature are not T1"))
+    -- These source forms have no faithful VTy representation. Refuse them at
+    -- the one conversion boundary rather than erase a row/usage qualifier or
+    -- change an unboxed product's canonical shape and field identity.
+    TyState(_) =>
+      Some(("internal-state-type", "internal state types are not T1"))
+    TyRowLit(_) =>
+      Some(("row-literal-type", "row-kinded type arguments are not T1"))
+    TyUnboxedTuple(_) | TyUnboxedRecord(_) =>
+      Some(("unboxed-type", "unboxed types are not T1"))
+    TyUsage(_, _) =>
+      Some(("usage-qualified-type", "usage-qualified types are not T1"))
     TyFun(params, row, ret) =>
       first_some(
-          row_refusal(row),
-          first_some(tys_refusal(params), ty_refusal(ret)),
+          row_refusal(row, row_data),
+          first_some(tys_refusal(params, row_data), ty_refusal(ret, row_data)),
         )
-    TyUsage(body, _uses) => ty_refusal(body)
-    TyUnboxedRecord(fields) => tys_refusal(map(\(field) -> field.ty, fields))
     _ => None
 
-fn tys_refusal(tys : List(Ty)) : Option((String, String)) =
+fn tys_refusal(
+  tys : List(Ty),
+  row_data : List(String)
+) : Option((String, String)) =
   match tys of
     Nil => None
-    Cons(ty, rest) => first_some(ty_refusal(ty), tys_refusal(rest))
+    Cons(ty, rest) =>
+      first_some(ty_refusal(ty, row_data), tys_refusal(rest, row_data))
 
-fn signature_refusal(decl : Decl) : Option((String, String)) =
-  first_some(
-      eff_refusal(decl.eff),
+-- Open tails are admitted only while judging a top-level declaration
+-- signature. Every other lossy type form retains the strict refusal above.
+fn decl_row_refusal(
+  row : Syntax.Ast.Row,
+  row_data : List(String)
+) : Option((String, String)) =
+  decl_label_refusal(row.labels, row_data)
+
+fn decl_label_refusal(
+  labels : List(EffLabel),
+  row_data : List(String)
+) : Option((String, String)) =
+  match labels of
+    Nil => None
+    Cons(label, rest) =>
+      if not(is_upper(char_at(label.name, 0))) then
+        Some(("effect-row-open", "effect row variables are not T1"))
+      else
+        first_some(
+            decl_tys_refusal(label.args, row_data),
+            decl_label_refusal(rest, row_data),
+          )
+
+fn decl_ty_refusal(
+  ty : Ty,
+  row_data : List(String)
+) : Option((String, String)) =
+  match ty of
+    TyApp(_, _args) =>
+      Some(("higher-kinded-application", "applied type variables are not T1"))
+    TyCon(name, args) =>
+      if row_kind_data_member(name, row_data) then
+        Some((
+            "row-kinded-data-argument",
+            "Row-kinded data arguments are not T1",
+          ))
+      else
+        decl_tys_refusal(args, row_data)
+    TyTuple(args) => decl_tys_refusal(args, row_data)
+    TyForall(_vars, _body) =>
+      Some(("nested-forall", "quantifiers inside a signature are not T1"))
+    TyState(_) =>
+      Some(("internal-state-type", "internal state types are not T1"))
+    TyRowLit(_) =>
+      Some(("row-literal-type", "row-kinded type arguments are not T1"))
+    TyUnboxedTuple(_) | TyUnboxedRecord(_) =>
+      Some(("unboxed-type", "unboxed types are not T1"))
+    TyUsage(_, _) =>
+      Some(("usage-qualified-type", "usage-qualified types are not T1"))
+    TyFun(params, row, ret) =>
       first_some(
-          tys_refusal(concat_map(param_ty_list, decl.params)),
-          result_refusal(decl.ret),
+          decl_row_refusal(row, row_data),
+          first_some(
+              decl_tys_refusal(params, row_data),
+              decl_ty_refusal(ret, row_data),
+            ),
+        )
+    _ => None
+
+fn decl_tys_refusal(
+  tys : List(Ty),
+  row_data : List(String)
+) : Option((String, String)) =
+  match tys of
+    Nil => None
+    Cons(ty, rest) =>
+      first_some(
+          decl_ty_refusal(ty, row_data),
+          decl_tys_refusal(rest, row_data),
+        )
+
+fn signature_refusal(
+  decl : Decl,
+  row_data : List(String)
+) : Option((String, String)) =
+  first_some(
+      eff_refusal(decl.eff, row_data),
+      first_some(
+          decl_tys_refusal(concat_map(param_ty_list, decl.params), row_data),
+          result_refusal(decl.ret, row_data),
         ),
     )
 
-fn eff_refusal(eff : Option(Syntax.Ast.Row)) : Option((String, String)) =
+fn eff_refusal(
+  eff : Option(Syntax.Ast.Row),
+  row_data : List(String)
+) : Option((String, String)) =
   match eff of
     None => None
-    Some(row) => row_refusal(row)
+    Some(row) => decl_row_refusal(row, row_data)
 
-fn result_refusal(ty : Option(Ty)) : Option((String, String)) =
+fn result_refusal(
+  ty : Option(Ty),
+  row_data : List(String)
+) : Option((String, String)) =
   match ty of
     None => None
-    Some(t) => ty_refusal(t)
+    Some(t) => decl_ty_refusal(t, row_data)
 
 fn param_ty_list(param : Param) : List(Ty) =
   match param.ty of
@@ -517,8 +1087,11 @@ fn param_ty_list(param : Param) : List(Ty) =
 -- A flat refusal table over the declaration forms outside the checked subset;
 -- the nesting is one case per form, not control flow.
 -- lint: allow(L0101)
-fn unsupported_decl(decl : Decl) : Option((String, Span, String)) =
-  match unsupported_params(decl.params) of
+fn unsupported_decl(
+  decl : Decl,
+  row_data : List(String)
+) : Option((String, Span, String)) =
+  match unsupported_param_shapes(decl.params) of
     Some(found) => Some(found)
     None =>
       if length(decl.constraints) > 0 then
@@ -535,7 +1108,7 @@ fn unsupported_decl(decl : Decl) : Option((String, Span, String)) =
             if unsupported_modifier(decl) then
               Some(("modifier", decl.span, "resource modifiers are not T1"))
             else
-              match signature_refusal(decl) of
+              match signature_refusal(decl, row_data) of
                 Some((kind, reason)) => Some((kind, decl.span, reason))
                 None => None
 
@@ -552,23 +1125,50 @@ fn unsupported_modifier(decl : Decl) : Bool =
 -- reach. Both come from outside the module under check, so nothing the shadow
 -- could conclude about the declaration would be evidence either way, and the
 -- declaration counts as uncovered instead of divergent.
-fn unsupported_tc_error(err : TcError) : Option((String, String)) =
+fn unsupported_tc_error(
+  err : TcError,
+  ctors : List(CtorInfo),
+  operations : List((String, String))
+) : Option((String, String)) =
   match err of
     Mismatch(want, got) =>
-      if want == "known T1 binding" then
-        Some(("external-binding", "external or unresolved binding `{got}`"))
-      elif want == "known constructor" then
-        Some((
-            "external-constructor",
-            "external or unresolved constructor `{got}`",
-          ))
-      elif want == "known T1 operation" then
+      if want == want_t1_binding then
+        if operation_declared(got, operations) then
+          Some((
+              "external-operation",
+              "operation `{got}` outside the T1 subset",
+            ))
+        else
+          match ctor_named_refusal(got, ctors) of
+            Some(found) => Some(found)
+            None =>
+              Some((
+                  "external-binding",
+                  "external or unresolved binding `{got}`",
+                ))
+      elif (want == want_constructor || want == want_record_constructor) then
+        match ctor_named_refusal(got, ctors) of
+          Some(found) => Some(found)
+          None =>
+            Some((
+                "external-constructor",
+                "external or unresolved constructor `{got}`",
+              ))
+      elif want == want_t1_operation then
         Some(("external-operation", "operation `{got}` outside the T1 subset"))
+      elif want == want_unapplied_operation then
+        Some((
+            "handle-applied",
+            "handling `{got}` needs the effect's type arguments, which are not T1",
+          ))
       else
         None
     _ => None
 
-fn unsupported_arms(arms : List(Arm)) : Option((String, Span, String)) =
+fn unsupported_arms(
+  arms : List(Arm),
+  row_data : List(String)
+) : Option((String, Span, String)) =
   match arms of
     Nil => None
     Cons(arm, rest) =>
@@ -577,24 +1177,36 @@ fn unsupported_arms(arms : List(Arm)) : Option((String, Span, String)) =
         None =>
           first_some(
               unsupported_pat(arm.pat),
-              first_some(first_unsupported(arm.body), unsupported_arms(rest)),
+              first_some(
+                  first_unsupported(arm.body, row_data),
+                  unsupported_arms(rest, row_data),
+                ),
             )
 
-fn unsupported_handler_arms(arms : List(HandlerArm)) : Option((String, Span, String)) =
+fn unsupported_handler_arms(
+  arms : List(HandlerArm),
+  row_data : List(String)
+) : Option((String, Span, String)) =
   match arms of
     Nil => None
     Cons(arm, rest) =>
-      first_some(unsupported_handler_arm(arm), unsupported_handler_arms(rest))
+      first_some(
+          unsupported_handler_arm(arm, row_data),
+          unsupported_handler_arms(rest, row_data),
+        )
 
 -- Every clause form binds its own names and then an ordinary expression, so
 -- the only thing to look for is what that expression contains.
-fn unsupported_handler_arm(arm : HandlerArm) : Option((String, Span, String)) =
+fn unsupported_handler_arm(
+  arm : HandlerArm,
+  row_data : List(String)
+) : Option((String, Span, String)) =
   match arm of
-    HReturn(_name, body) => first_unsupported(body)
-    HOp(_op, _params, _resume, body) => first_unsupported(body)
-    HOnce(_op, _params, body) => first_unsupported(body)
-    HVal(_op, init) => first_unsupported(init)
-    HNever(_op, _params, body) => first_unsupported(body)
+    HReturn(_name, body) => first_unsupported(body, row_data)
+    HOp(_op, _params, _resume, body) => first_unsupported(body, row_data)
+    HOnce(_op, _params, body) => first_unsupported(body, row_data)
+    HVal(_op, init) => first_unsupported(init, row_data)
+    HNever(_op, _params, body) => first_unsupported(body, row_data)
 
 fn unsupported_pat(sp : Sp(Pat)) : Option((String, Span, String)) =
   match sp.node of
@@ -619,6 +1231,67 @@ fn unsupported_pat_fields(xs : List(PatField)) : Option((String, Span, String)) 
     Cons(x, rest) =>
       first_some(unsupported_pat(x.pat), unsupported_pat_fields(rest))
 
+-- Classes owned by the surrounding scope cannot be generalized at a local
+-- binding. Keep the two solver kinds separate: type arguments inside the
+-- ambient effect row hold type classes, while its tail holds row classes.
+fn held_metas(
+  ambient : Tc.Row,
+  env : List(EnvEntry)
+) : (List(Int), List(Int)) ! {Solve(Sol)} =
+  let ambient_z = zonk_row(ambient)
+  match env_metas(env) of
+    (env_ty, env_row) =>
+      (
+          append(free_ty_metas_row(ambient_z), env_ty),
+          append(free_row_metas_row(ambient_z), env_row),
+        )
+
+fn env_metas(env : List(EnvEntry)) : (List(Int), List(Int)) ! {Solve(Sol)} =
+  match env of
+    Nil => ([], [])
+    Cons(entry, rest) =>
+      match env_metas(rest) of
+        (rest_ty, rest_row) =>
+          match entry of
+            BValue(_name, scheme) =>
+              let body = zonk_v(scheme.body)
+              (
+                  append(free_ty_metas_v(body), rest_ty),
+                  append(free_row_metas_v(body), rest_row),
+                )
+            BOperation(_name, scheme) =>
+              let body = zonk_v(scheme.body)
+              (
+                  append(free_ty_metas_v(body), rest_ty),
+                  append(free_row_metas_v(body), rest_row),
+                )
+            BInstance(_name, info) =>
+              append_metas(vtys_metas(info.args), (rest_ty, rest_row))
+            BHandlerFrame(frame) =>
+              append_metas(frame_metas(frame), (rest_ty, rest_row))
+
+fn append_metas(
+  left : (List(Int), List(Int)),
+  right : (List(Int), List(Int))
+) : (List(Int), List(Int)) =
+  (append(fst(left), fst(right)), append(snd(left), snd(right)))
+
+fn vtys_metas(tys : List(VTy)) : (List(Int), List(Int)) ! {Solve(Sol)} =
+  match tys of
+    Nil => ([], [])
+    Cons(ty, rest) =>
+      let zonked = zonk_v(ty)
+      append_metas(
+          (free_ty_metas_v(zonked), free_row_metas_v(zonked)),
+          vtys_metas(rest),
+        )
+
+fn frame_metas(frame : List((String, List(VTy)))) : (List(Int), List(Int)) ! {Solve(Sol)} =
+  match frame of
+    Nil => ([], [])
+    Cons((_effect, args), rest) =>
+      append_metas(vtys_metas(args), frame_metas(rest))
+
 -- `ambient` is the row the enclosing computation may perform in. Only a call
 -- adds to it, and it adds by absorption rather than equality, so a pure callee
 -- is admissible wherever an effectful one is. A lambda is the one place the
@@ -628,7 +1301,7 @@ fn unsupported_pat_fields(xs : List(PatField)) : Option((String, Span, String)) 
 fn infer_expr(
   sp : Sp(Expr),
   ambient : Tc.Row,
-  env : List((String, Scheme)),
+  env : List(EnvEntry),
   ctors : List(CtorInfo),
   names : List((String, VTy))
 ) : VTy ! {Solve(Sol), TcFail, Fresh} =
@@ -641,7 +1314,7 @@ fn infer_expr(
     EVar(name) =>
       match env_get(name, env) of
         Some(scheme) => instantiate(scheme)
-        None => tc_fail(Mismatch("known T1 binding", name))
+        None => tc_fail(Mismatch(want_t1_binding, name))
     EBin(op, left, right) =>
       infer_bin(op, left, right, ambient, env, ctors, names)
     ENeg(value) =>
@@ -657,7 +1330,8 @@ fn infer_expr(
       yt
     ELet(name, value, body) =>
       let value_ty = infer_expr(value, ambient, env, ctors, names)
-      let value_scheme = generalize([], value_ty)
+      let (held_ty, held_row) = held_metas(ambient, env)
+      let value_scheme = generalize(held_ty, held_row, value_ty)
       infer_expr(body, ambient, env_put(name, value_scheme, env), ctors, names)
     ELam(params, body) =>
       let (param_tys, local) = infer_params(params, env, names)
@@ -665,13 +1339,18 @@ fn infer_expr(
       let result = infer_expr(body, inner, local, ctors, names)
       v_fun(param_tys, c_ret(result, inner))
     ECall(callee, args) =>
-      let callee_ty = infer_expr(callee, ambient, env, ctors, names)
-      let arg_tys = infer_exprs(args, ambient, env, ctors, names)
-      let result = fresh_ty_meta()
-      let performed = row_open([], fresh_row_meta())
-      unify_v(callee_ty, v_fun(arg_tys, c_ret(result, performed)))
-      row_absorb(ambient, performed)
-      result
+      match directed_call(callee, args, env) of
+        Some((op, info, rest)) =>
+          infer_directed(op, info, rest, ambient, env, ctors, names)
+        None =>
+          let callee_ty = infer_expr(callee, ambient, env, ctors, names)
+          let arg_tys = infer_exprs(args, ambient, env, ctors, names)
+          let result = fresh_ty_meta()
+          let performed = row_open([], fresh_row_meta())
+          unify_v(callee_ty, v_fun(arg_tys, c_ret(result, performed)))
+          link_call_row(performed, env)
+          row_absorb(ambient, performed)
+          result
     EPipe(value, callee) =>
       infer_expr(
           Sp { node = ECall(callee, [value]), span = sp.span, synth = true },
@@ -685,8 +1364,10 @@ fn infer_expr(
       let result = fresh_ty_meta()
       infer_arms(arms, scrutinee_ty, result, ambient, env, ctors, names)
       result
-    EHandle(body, arms, _partial) =>
-      infer_handle(body, arms, ambient, env, ctors, names)
+    EHandle(body, arms, partial) =>
+      infer_handle(body, arms, partial, ambient, env, ctors, names)
+    ENamedHandle(instance_name, body, arms) =>
+      infer_named_handle(instance_name, body, arms, ambient, env, ctors, names)
     ETuple(items) => VTuple(infer_exprs(items, ambient, env, ctors, names))
     ERecord(name, fields) =>
       infer_record(name, fields, ambient, env, ctors, names)
@@ -697,6 +1378,118 @@ fn infer_expr(
       wanted
     _ => tc_fail(Mismatch("T1 expression", kind_of_expr(sp.node)))
 
+-- Named-method syntax is exported in UFCS form: the operation is the callee
+-- and the instance is the first argument. A value binding of the same name
+-- stops instance lookup, so ordinary lexical shadowing falls through to the
+-- ordinary call rule.
+fn directed_call(
+  callee : Sp(Expr),
+  args : List(Sp(Expr)),
+  env : List(EnvEntry)
+) : Option((String, InstanceInfo, List(Sp(Expr)))) =
+  match (callee.node, args) of
+    (EVar(op), Cons(receiver, rest)) =>
+      match receiver.node of
+        EVar(name) =>
+          match instance_get(name, env) of
+            Some(info) => Some((op, info, rest))
+            None => None
+        _ => None
+    _ => None
+
+-- A directed operation instantiates through the vector stored at the named
+-- handler introduction. It performs the instance's private effect, not the
+-- source effect, so only that named handler can discharge it.
+-- lint: allow(L0103)
+fn infer_directed(
+  op : String,
+  info : InstanceInfo,
+  args : List(Sp(Expr)),
+  ambient : Tc.Row,
+  env : List(EnvEntry),
+  ctors : List(CtorInfo),
+  names : List((String, VTy))
+) : VTy ! {Solve(Sol), TcFail, Fresh} =
+  match instance_op_get(op, info.ops) of
+    None => tc_fail(Mismatch(want_t1_operation, op))
+    Some(scheme) =>
+      match (op_parts_with(op, scheme, [(info.source_effect, info.args)])) of
+        (params, ret, _effect_name) =>
+          let found = infer_exprs(args, ambient, env, ctors, names)
+          unify_arg_vectors(params, found)
+          row_absorb(ambient, row_closed([
+              Label { name = info.private_effect, args = info.args },
+            ]))
+          ret
+
+fn instance_op_get(
+  name : String,
+  ops : List((String, Scheme))
+) : Option(Scheme) =
+  match ops of
+    Nil => None
+    Cons((key, scheme), rest) =>
+      if key == name then
+        Some(scheme)
+      else
+        instance_op_get(name, rest)
+
+fn unify_arg_vectors(
+  wanted : List(VTy),
+  found : List(VTy)
+) : Unit ! {Solve(Sol), TcFail} =
+  match (wanted, found) of
+    (Nil, Nil) => ()
+    (Cons(w, wrest), Cons(f, frest)) =>
+      unify_v(w, f)
+      unify_arg_vectors(wrest, frest)
+    _ => tc_fail(Mismatch("operation arity", "call arity"))
+
+-- Link an ordinary callee's latent applied labels to the innermost anonymous
+-- handler frame before the row is absorbed. This is deliberately on the call
+-- row rather than the callee syntax, so function values take the same path.
+fn link_call_row(
+  row : Tc.Row,
+  env : List(EnvEntry)
+) : Unit ! {Solve(Sol), TcFail} =
+  let zonked = zonk_row(row)
+  link_call_labels(zonked.labels, env)
+
+fn link_call_labels(
+  labels : List(Label),
+  env : List(EnvEntry)
+) : Unit ! {Solve(Sol), TcFail} =
+  match labels of
+    Nil => ()
+    Cons(label, rest) =>
+      match frame_args(label.name, env) of
+        Some(args) => unify_arg_vectors(args, label.args)
+        None => ()
+      link_call_labels(rest, env)
+
+fn frame_args(effect_name : String, env : List(EnvEntry)) : Option(List(VTy)) =
+  match env of
+    Nil => None
+    Cons(entry, rest) =>
+      match entry of
+        BHandlerFrame(frame) =>
+          match frame_get(effect_name, frame) of
+            Some(args) => Some(args)
+            None => frame_args(effect_name, rest)
+        _ => frame_args(effect_name, rest)
+
+fn frame_get(
+  effect_name : String,
+  frame : List((String, List(VTy)))
+) : Option(List(VTy)) =
+  match frame of
+    Nil => None
+    Cons((name, args), rest) =>
+      if name == effect_name then
+        Some(args)
+      else
+        frame_get(effect_name, rest)
+
 -- The elementwise traversal is spelled out rather than routed through `map`.
 -- A shared combinator's function slot carries one calling convention for the
 -- whole program, so handing it a performing element rule would settle that
@@ -705,7 +1498,7 @@ fn infer_expr(
 fn infer_exprs(
   items : List(Sp(Expr)),
   ambient : Tc.Row,
-  env : List((String, Scheme)),
+  env : List(EnvEntry),
   ctors : List(CtorInfo),
   names : List((String, VTy))
 ) : List(VTy) ! {Solve(Sol), TcFail, Fresh} =
@@ -725,7 +1518,7 @@ fn infer_bin(
   left : Sp(Expr),
   right : Sp(Expr),
   ambient : Tc.Row,
-  env : List((String, Scheme)),
+  env : List(EnvEntry),
   ctors : List(CtorInfo),
   names : List((String, VTy))
 ) : VTy ! {Solve(Sol), TcFail, Fresh} =
@@ -748,19 +1541,19 @@ fn infer_bin(
 
 fn infer_params(
   params : List(Param),
-  env : List((String, Scheme)),
+  env : List(EnvEntry),
   names : List((String, VTy))
-) : (List(VTy), List((String, Scheme))) ! {Solve(Sol)} =
+) : (List(VTy), List(EnvEntry)) ! {Solve(Sol)} =
   infer_params_go(params, env, names, [])
 
 -- The parameter types are accumulated in reverse and turned once at the end.
 -- lint: allow(L0105)
 fn infer_params_go(
   params : List(Param),
-  env : List((String, Scheme)),
+  env : List(EnvEntry),
   names : List((String, VTy)),
   rev : List(VTy)
-) : (List(VTy), List((String, Scheme))) ! {Solve(Sol)} =
+) : (List(VTy), List(EnvEntry)) ! {Solve(Sol)} =
   match params of
     Nil => (reverse(rev), env)
     Cons(param, rest) =>
@@ -775,6 +1568,40 @@ fn infer_params_go(
           Cons(ty, rev),
         )
 
+fn infer_annot_params(
+  params : List(Param),
+  env : List(EnvEntry),
+  names : List((String, VTy)),
+  rows : List((String, Tail))
+) : (List(VTy), List(EnvEntry)) ! {Solve(Sol), TcFail} =
+  infer_annot_params_go(params, env, names, rows, [])
+
+-- The top-level variant differs only at its conversion boundary: written row
+-- tails use the declaration's shared flexible seeds. The reversal keeps the
+-- accumulator tail-recursive over annotation lists of any length.
+-- lint: allow(L0105)
+fn infer_annot_params_go(
+  params : List(Param),
+  env : List(EnvEntry),
+  names : List((String, VTy)),
+  rows : List((String, Tail)),
+  rev : List(VTy)
+) : (List(VTy), List(EnvEntry)) ! {Solve(Sol), TcFail} =
+  match params of
+    Nil => (reverse(rev), env)
+    Cons(param, rest) =>
+      let ty =
+        match param.ty of
+          Some(t) => annot_ty_of(t, names, rows)
+          None => fresh_ty_meta()
+      infer_annot_params_go(
+          rest,
+          env_put(param.name, mono(ty), env),
+          names,
+          rows,
+          Cons(ty, rev),
+        )
+
 -- The inference context is three parallel environments the rules read but
 -- never rebind wholesale; bundling them would hide which one a rule uses.
 -- lint: allow(L0103)
@@ -783,7 +1610,7 @@ fn infer_arms(
   scrutinee : VTy,
   result : VTy,
   ambient : Tc.Row,
-  env : List((String, Scheme)),
+  env : List(EnvEntry),
   ctors : List(CtorInfo),
   names : List((String, VTy))
 ) : Unit ! {Solve(Sol), TcFail, Fresh} =
@@ -795,33 +1622,381 @@ fn infer_arms(
       unify_v(result, body_ty)
       infer_arms(rest, scrutinee, result, ambient, env, ctors, names)
 
+-- Operation-use evidence for partial discharge. A partial handler keeps an
+-- effect in its residual row unless every operation the body can perform is
+-- one its clauses cover, so a walk over the handled body records what is
+-- known. A direct operation call contributes that operation by name; a call
+-- through a binding whose entry declares a closed row contributes every
+-- effect on that row as opaque, since the row names the effect but hides
+-- which operations run behind it; a call the walk cannot classify at all, an
+-- unknown or computed callee or a declared row with an open tail, marks the
+-- whole evidence open. Open evidence discharges nothing, an opaque effect is
+-- never discharged partially, and a known effect is discharged exactly when
+-- its used operations are a subset of the covered ones, which is the same
+-- rule the authority applies.
+
+type OpSet = OKnown(List(String)) | OAll
+
+-- lint: allow(L0203)
+type OpUses = OpUses { known: List((String, OpSet)), open_row: Bool }
+
+let uses_none : OpUses = OpUses { known = [], open_row = false }
+
+let uses_open : OpUses = OpUses { known = [], open_row = true }
+
+fn uses_op(effect_name : String, op : String) : OpUses =
+  OpUses { known = [(effect_name, OKnown([op]))], open_row = false }
+
+fn uses_all(effect_name : String) : OpUses =
+  OpUses { known = [(effect_name, OAll)], open_row = false }
+
+fn op_name_in(name : String, names : List(String)) : Bool =
+  match names of
+    Nil => false
+    Cons(n, rest) => n == name || op_name_in(name, rest)
+
+fn opset_get(
+  effect_name : String,
+  known : List((String, OpSet))
+) : Option(OpSet) =
+  match known of
+    Nil => None
+    Cons((name, ops), rest) =>
+      if name == effect_name then
+        Some(ops)
+      else
+        opset_get(effect_name, rest)
+
+-- Joining evidence for one effect: anything joined with opaque is opaque,
+-- and two known sets union.
+fn opset_join(a : OpSet, b : OpSet) : OpSet =
+  match (a, b) of
+    (OKnown(xs), OKnown(ys)) => OKnown(op_names_union(xs, ys))
+    _ => OAll
+
+fn op_names_union(xs : List(String), ys : List(String)) : List(String) =
+  match ys of
+    Nil => xs
+    Cons(y, rest) =>
+      if op_name_in(y, xs) then
+        op_names_union(xs, rest)
+      else
+        op_names_union(append(xs, [y]), rest)
+
+fn opset_put(
+  effect_name : String,
+  ops : OpSet,
+  known : List((String, OpSet))
+) : List((String, OpSet)) =
+  match known of
+    Nil => [(effect_name, ops)]
+    Cons((name, prior), rest) =>
+      if name == effect_name then
+        Cons((name, opset_join(prior, ops)), rest)
+      else
+        Cons((name, prior), opset_put(effect_name, ops, rest))
+
+fn known_merge(
+  a : List((String, OpSet)),
+  b : List((String, OpSet))
+) : List((String, OpSet)) =
+  match b of
+    Nil => a
+    Cons((name, ops), rest) => known_merge(opset_put(name, ops, a), rest)
+
+fn uses_merge(a : OpUses, b : OpUses) : OpUses =
+  OpUses {
+    known = known_merge(a.known, b.known),
+    open_row = a.open_row || b.open_row
+  }
+
+-- What a nested handler discharges no longer escapes to the enclosing
+-- handler's dynamic extent, so its effects leave the evidence. Openness stays:
+-- an unclassifiable call is unclassifiable at every depth.
+fn uses_minus(u : OpUses, discharged : List(String)) : OpUses =
+  OpUses { known = known_minus(u.known, discharged), open_row = u.open_row }
+
+fn known_minus(
+  known : List((String, OpSet)),
+  discharged : List(String)
+) : List((String, OpSet)) =
+  match known of
+    Nil => []
+    Cons((name, ops), rest) =>
+      if op_name_in(name, discharged) then
+        known_minus(rest, discharged)
+      else
+        Cons((name, ops), known_minus(rest, discharged))
+
+-- The effects a declared row contributes when a call runs behind it: each
+-- label is opaque, and an open tail admits operations no label names, which
+-- opens the whole evidence.
+fn row_uses_of(row : Tc.Row) : OpUses =
+  let labeled = row_labels_uses(row.labels)
+  match row.tail of
+    TailClosed => labeled
+    _ => uses_merge(uses_open, labeled)
+
+fn row_labels_uses(labels : List(Label)) : OpUses =
+  match labels of
+    Nil => uses_none
+    Cons(label, rest) => uses_merge(uses_all(label.name), row_labels_uses(rest))
+
+-- A callee bound as an ordinary value contributes the row its entry declares.
+-- Zonking first lets a monomorphic binding solved during inference of the
+-- handled body speak with its solved row rather than its metavariables.
+fn scheme_row_uses(scheme : Scheme) : OpUses ! {Solve(Sol)} =
+  match zonk_v(scheme.body) of
+    VThunk(CFun(_params, CRet(_ret, row))) => row_uses_of(zonk_row(row))
+    _ => uses_open
+
+fn body_op_uses(
+  sp : Sp(Expr),
+  env : List(EnvEntry)
+) : OpUses ! {Solve(Sol), TcFail} =
+  match sp.node of
+    EBin(_op, left, right) =>
+      uses_merge(body_op_uses(left, env), body_op_uses(right, env))
+    ENeg(value) => body_op_uses(value, env)
+    EIf(cond, yes, no) =>
+      uses_merge(
+          body_op_uses(cond, env),
+          uses_merge(body_op_uses(yes, env), body_op_uses(no, env)),
+        )
+    ELet(_name, value, body) =>
+      uses_merge(body_op_uses(value, env), body_op_uses(body, env))
+    ELam(_params, _body) => uses_none
+    ECall(callee, args) => call_op_uses(callee, args, env)
+    EPipe(value, callee) => call_op_uses(callee, [value], env)
+    EMatch(scrutinee, arms) =>
+      uses_merge(body_op_uses(scrutinee, env), arms_op_uses(arms, env))
+    ETuple(items) => exprs_op_uses(items, env)
+    ERecord(_name, fields) => fields_op_uses(fields, env)
+    EAnn(value, _ty) => body_op_uses(value, env)
+    EHandle(body, arms, partial) => handled_op_uses(body, arms, partial, env)
+    ENamedHandle(_name, body, arms) =>
+      uses_merge(body_op_uses(body, env), handler_arms_op_uses(arms, env))
+    EInt(_, _) | EFloat(_) | EBool(_) | EUnit | EStr(_) | EVar(_) => uses_none
+    _ => uses_open
+
+-- A call is the only expression that performs. A direct operation call is the
+-- one form that yields a known operation; everything else speaks through a
+-- declared row or not at all.
+fn call_op_uses(
+  callee : Sp(Expr),
+  args : List(Sp(Expr)),
+  env : List(EnvEntry)
+) : OpUses ! {Solve(Sol), TcFail} =
+  let from_args = exprs_op_uses(args, env)
+  match callee.node of
+    EVar(name) =>
+      match operation_get(name, env) of
+        Some(scheme) =>
+          match op_label_of(scheme) of
+            Some(label) => uses_merge(uses_op(label.name, name), from_args)
+            None => uses_merge(uses_open, from_args)
+        None =>
+          match env_get(name, env) of
+            Some(scheme) => uses_merge(scheme_row_uses(scheme), from_args)
+            None => uses_merge(uses_open, from_args)
+    _ => uses_merge(uses_open, uses_merge(body_op_uses(callee, env), from_args))
+
+-- A nested handler's clause bodies run in the enclosing dynamic extent, so
+-- their uses stay; the handled body's uses lose what the nested handler
+-- itself discharges.
+fn handled_op_uses(
+  body : Sp(Expr),
+  arms : List(HandlerArm),
+  partial : Bool,
+  env : List(EnvEntry)
+) : OpUses ! {Solve(Sol), TcFail} =
+  let inner = body_op_uses(body, env)
+  let discharged =
+    if partial then
+      partial_discharged(arms, inner, env)
+    else
+      handled_effects(arms, env)
+  uses_merge(uses_minus(inner, discharged), handler_arms_op_uses(arms, env))
+
+fn exprs_op_uses(
+  xs : List(Sp(Expr)),
+  env : List(EnvEntry)
+) : OpUses ! {Solve(Sol), TcFail} =
+  match xs of
+    Nil => uses_none
+    Cons(x, rest) => uses_merge(body_op_uses(x, env), exprs_op_uses(rest, env))
+
+fn arms_op_uses(
+  arms : List(Arm),
+  env : List(EnvEntry)
+) : OpUses ! {Solve(Sol), TcFail} =
+  match arms of
+    Nil => uses_none
+    Cons(arm, rest) =>
+      let guarded =
+        match arm.guard of
+          Some(guard) => body_op_uses(guard, env)
+          None => uses_none
+      uses_merge(
+          guarded,
+          uses_merge(body_op_uses(arm.body, env), arms_op_uses(rest, env)),
+        )
+
+fn fields_op_uses(
+  fields : List(NamedExpr),
+  env : List(EnvEntry)
+) : OpUses ! {Solve(Sol), TcFail} =
+  match fields of
+    Nil => uses_none
+    Cons(field, rest) =>
+      uses_merge(body_op_uses(field.value, env), fields_op_uses(rest, env))
+
+fn handler_arms_op_uses(
+  arms : List(HandlerArm),
+  env : List(EnvEntry)
+) : OpUses ! {Solve(Sol), TcFail} =
+  match arms of
+    Nil => uses_none
+    Cons(arm, rest) =>
+      let own =
+        match arm of
+          HReturn(_name, body) => body_op_uses(body, env)
+          HOp(_op, _params, _resume, body) => body_op_uses(body, env)
+          HOnce(_op, _params, body) => body_op_uses(body, env)
+          HVal(_op, init) => body_op_uses(init, env)
+          HNever(_op, _params, body) => body_op_uses(body, env)
+      uses_merge(own, handler_arms_op_uses(rest, env))
+
+-- The effects a partial handler discharges: none when the evidence is open,
+-- and otherwise each covered effect whose known used operations all have
+-- clauses. An effect the body never reaches discharges vacuously.
+fn partial_discharged(
+  arms : List(HandlerArm),
+  uses : OpUses,
+  env : List(EnvEntry)
+) : List(String) ! {TcFail} =
+  if uses.open_row then
+    []
+  else
+    covered_discharged(covered_by_effect(arms, env), uses.known)
+
+fn covered_by_effect(
+  arms : List(HandlerArm),
+  env : List(EnvEntry)
+) : List((String, List(String))) ! {TcFail} =
+  match arms of
+    Nil => []
+    Cons(arm, rest) =>
+      let prior = covered_by_effect(rest, env)
+      match arm_op(arm) of
+        None => prior
+        Some(op) =>
+          match op_scheme_label(op, env) of
+            (_scheme, label) => covered_add(label.name, op, prior)
+
+fn covered_add(
+  effect_name : String,
+  op : String,
+  table : List((String, List(String)))
+) : List((String, List(String))) =
+  match table of
+    Nil => [(effect_name, [op])]
+    Cons((name, ops), rest) =>
+      if name == effect_name then
+        Cons((name, Cons(op, ops)), rest)
+      else
+        Cons((name, ops), covered_add(effect_name, op, rest))
+
+fn covered_discharged(
+  covered : List((String, List(String))),
+  known : List((String, OpSet))
+) : List(String) =
+  match covered of
+    Nil => []
+    Cons((name, ops), rest) =>
+      match opset_get(name, known) of
+        None => Cons(name, covered_discharged(rest, known))
+        Some(OKnown(used)) =>
+          if ops_subset(used, ops) then
+            Cons(name, covered_discharged(rest, known))
+          else
+            covered_discharged(rest, known)
+        Some(OAll) => covered_discharged(rest, known)
+
+fn ops_subset(used : List(String), covered : List(String)) : Bool =
+  match used of
+    Nil => true
+    Cons(op, rest) => op_name_in(op, covered) && ops_subset(rest, covered)
+
 -- A handler's clauses name the operations it covers, so the effects it
 -- discharges are the effects those operations belong to. The handled body is
 -- checked against a row of its own and what survives subtracting the
 -- discharged effects is what the enclosing computation still performs, which
 -- is why installing a handler can only ever shrink a row. The clauses run
 -- where the handler is installed rather than inside the handled body, so what
--- they perform is absorbed into the ambient row like any other call.
+-- they perform is absorbed into the ambient row like any other call. An
+-- exhaustive handler discharges every effect its clauses name; a partial one
+-- discharges only what the body's operation-use evidence proves covered.
 -- lint: allow(L0103)
 fn infer_handle(
   body : Sp(Expr),
   arms : List(HandlerArm),
+  partial : Bool,
   ambient : Tc.Row,
-  env : List((String, Scheme)),
+  env : List(EnvEntry),
   ctors : List(CtorInfo),
   names : List((String, VTy))
 ) : VTy ! {Solve(Sol), TcFail, Fresh} =
+  let frame = handler_frame(arms, env)
   let inner = row_open([], fresh_row_meta())
-  let body_ty = infer_expr(body, inner, env, ctors, names)
-  let handled = handled_effects(arms, env)
-  row_absorb(ambient, row_discharge(close_rows_row(inner), handled))
+  let body_ty = infer_expr(body, inner, env_put_frame(frame, env), ctors, names)
+  let discharged =
+    if partial then
+      partial_discharged(arms, body_op_uses(body, env), env)
+    else
+      handled_effects(arms, env)
+  row_absorb(ambient, row_discharge(close_ambient_tail(inner), discharged))
   let result = fresh_ty_meta()
   -- Without a return clause the handled body's own result is the answer.
   if has_return_arm(arms) then
     ()
   else
     unify_v(result, body_ty)
-  infer_handler_arms(arms, body_ty, result, ambient, env, ctors, names)
+  infer_handler_arms(arms, body_ty, result, ambient, frame, env, ctors, names)
+  result
+
+-- A named handler is checked as the private effect desugar gives to the Rust
+-- checker: directed calls accumulate in an inner row under one private label,
+-- then only that label is discharged. Source-effect calls remain residual.
+-- lint: allow(L0103)
+fn infer_named_handle(
+  instance_name : String,
+  body : Sp(Expr),
+  arms : List(HandlerArm),
+  ambient : Tc.Row,
+  env : List(EnvEntry),
+  ctors : List(CtorInfo),
+  names : List((String, VTy))
+) : VTy ! {Solve(Sol), TcFail, Fresh} =
+  let info = named_instance_info(arms, env)
+  let inner = row_open([], fresh_row_meta())
+  let body_ty = infer_expr(
+      body,
+      inner,
+      env_put_instance(instance_name, info, env),
+      ctors,
+      names,
+    )
+  row_absorb(ambient, row_discharge(close_ambient_tail(inner), [
+      info.private_effect,
+    ]))
+  let result = fresh_ty_meta()
+  if has_return_arm(arms) then
+    ()
+  else
+    unify_v(result, body_ty)
+  let frame = [(info.source_effect, info.args)]
+  infer_handler_arms(arms, body_ty, result, ambient, frame, env, ctors, names)
   result
 
 fn has_return_arm(arms : List(HandlerArm)) : Bool =
@@ -840,38 +2015,181 @@ fn arm_op(arm : HandlerArm) : Option(String) =
     HVal(op, _init) => Some(op)
     HNever(op, _params, _body) => Some(op)
 
+fn arm_ops(arms : List(HandlerArm)) : List(String) =
+  match arms of
+    Nil => []
+    Cons(arm, rest) =>
+      match arm_op(arm) of
+        Some(op) => Cons(op, arm_ops(rest))
+        None => arm_ops(rest)
+
+fn handler_frame(
+  arms : List(HandlerArm),
+  env : List(EnvEntry)
+) : List((String, List(VTy))) ! {Solve(Sol), TcFail} =
+  handler_frame_go(arms, env, [])
+
+fn handler_frame_go(
+  arms : List(HandlerArm),
+  env : List(EnvEntry),
+  frame : List((String, List(VTy)))
+) : List((String, List(VTy))) ! {Solve(Sol), TcFail} =
+  match arms of
+    Nil => frame
+    Cons(arm, rest) =>
+      match arm_op(arm) of
+        None => handler_frame_go(rest, env, frame)
+        Some(op) =>
+          match op_scheme_label(op, env) of
+            (_scheme, label) =>
+              if (length(label.args) == 0
+                  || not(frame_get(label.name, frame) == None)) then
+                handler_frame_go(rest, env, frame)
+              else
+                let args = fresh_effect_args(label.args)
+                handler_frame_go(rest, env, Cons((label.name, args), frame))
+
+fn fresh_effect_args(args : List(VTy)) : List(VTy) ! {Solve(Sol)} =
+  match args of
+    Nil => []
+    Cons(_arg, rest) => Cons(fresh_ty_meta(), fresh_effect_args(rest))
+
+fn named_instance_info(
+  arms : List(HandlerArm),
+  env : List(EnvEntry)
+) : InstanceInfo ! {Solve(Sol), TcFail, Fresh} =
+  let op_names = arm_ops(arms)
+  match op_names of
+    Nil =>
+      tc_fail(Mismatch(want_t1_operation, "named handler without operations"))
+    Cons(first, rest) =>
+      match op_scheme_label(first, env) of
+        (_scheme, label) =>
+          require_same_effect(rest, label.name, env)
+          InstanceInfo {
+            source_effect = label.name,
+            private_effect = gensym("@handler"),
+            args = fresh_effect_args(label.args),
+            ops = capture_op_schemes(op_names, env)
+          }
+
+fn capture_op_schemes(
+  names : List(String),
+  env : List(EnvEntry)
+) : List((String, Scheme)) ! {TcFail} =
+  match names of
+    Nil => []
+    Cons(name, rest) =>
+      match op_scheme_label(name, env) of
+        (scheme, _label) => Cons((name, scheme), capture_op_schemes(rest, env))
+
+fn require_same_effect(
+  ops : List(String),
+  effect_name : String,
+  env : List(EnvEntry)
+) : Unit ! {TcFail} =
+  match ops of
+    Nil => ()
+    Cons(op, rest) =>
+      match op_scheme_label(op, env) of
+        (_scheme, label) =>
+          if label.name == effect_name then
+            require_same_effect(rest, effect_name, env)
+          else
+            tc_fail(Mismatch("single-effect named handler", label.name))
+
 fn handled_effects(
   arms : List(HandlerArm),
-  env : List((String, Scheme))
-) : List(String) ! {Solve(Sol), TcFail} =
+  env : List(EnvEntry)
+) : List(String) ! {TcFail} =
   match arms of
     Nil => []
     Cons(arm, rest) =>
       match arm_op(arm) of
         None => handled_effects(rest, env)
         Some(op) =>
-          match op_parts(op, env) of
-            (_params, _ret, effect_name) =>
-              Cons(effect_name, handled_effects(rest, env))
+          match op_scheme_label(op, env) of
+            (_scheme, label) => Cons(label.name, handled_effects(rest, env))
 
 -- An operation's entry says everything a clause needs: what it takes, what it
 -- answers with, and which effect it belongs to. The effect is read off the row
 -- the entry performs, so the clause never has to name it.
-fn op_parts(
+fn op_scheme_label(
   name : String,
-  env : List((String, Scheme))
+  env : List(EnvEntry)
+) : (Scheme, Label) ! {TcFail} =
+  match operation_get(name, env) of
+    None => tc_fail(Mismatch(want_t1_binding, name))
+    Some(scheme) => (scheme, op_scheme_label_of(name, scheme))
+
+-- Instantiate a handler operation with the vector minted at its handler
+-- boundary. Ground effects retain ordinary instantiation; an applied effect
+-- without matching frame evidence still fails closed.
+fn op_parts_in(
+  name : String,
+  frame : List((String, List(VTy))),
+  env : List(EnvEntry)
 ) : (List(VTy), VTy, String) ! {Solve(Sol), TcFail} =
-  match env_get(name, env) of
-    None => tc_fail(Mismatch("known T1 binding", name))
-    Some(scheme) => op_parts_of(name, instantiate(scheme))
+  match op_scheme_label(name, env) of
+    (scheme, _label) => op_parts_with(name, scheme, frame)
+
+fn op_parts_with(
+  name : String,
+  scheme : Scheme,
+  frame : List((String, List(VTy)))
+) : (List(VTy), VTy, String) ! {Solve(Sol), TcFail} =
+  match op_scheme_label_of(name, scheme) of
+    label =>
+      match label.args of
+        Nil => op_parts_of(name, instantiate(scheme))
+        _ =>
+          match frame_get(label.name, frame) of
+            Some(args) => op_parts_of(name, instantiate_effect(scheme, args))
+            None => tc_fail(Mismatch(want_unapplied_operation, name))
+
+-- The single effect label an operation's entry performs, read without
+-- refusing, so the evidence walk can also classify a callee that turns out
+-- not to be an operation at all.
+fn op_label_of(scheme : Scheme) : Option(Label) =
+  match scheme.body of
+    VThunk(CFun(_params, CRet(_ret, row))) =>
+      match row.labels of
+        Cons(label, Nil) => Some(label)
+        _ => None
+    _ => None
+
+fn op_scheme_label_of(name : String, scheme : Scheme) : Label ! {TcFail} =
+  match op_label_of(scheme) of
+    Some(label) => label
+    None => tc_fail(Mismatch(want_t1_operation, name))
+
+fn instantiate_effect(scheme : Scheme, args : List(VTy)) : VTy ! {TcFail} =
+  instantiate_effect_go(scheme.tyvars, args, subst_empty, scheme.body)
+
+fn instantiate_effect_go(
+  binders : List(Binder(TyVarSpace)),
+  args : List(VTy),
+  subst : Subst,
+  body : VTy
+) : VTy ! {TcFail} =
+  match (binders, args) of
+    (Nil, Nil) => apply_v(subst, body)
+    (Cons(binder, brest), Cons(arg, arest)) =>
+      instantiate_effect_go(
+          brest,
+          arest,
+          subst_ty(subst, bound_name(binder), arg),
+          body,
+        )
+    _ => tc_fail(Mismatch("effect argument arity", "handler argument arity"))
 
 fn op_parts_of(name : String, ty : VTy) : (List(VTy), VTy, String) ! {TcFail} =
   match ty of
     VThunk(CFun(params, CRet(ret, row))) =>
       match row.labels of
         Cons(label, Nil) => (params, ret, label.name)
-        _ => tc_fail(Mismatch("known T1 operation", name))
-    _ => tc_fail(Mismatch("known T1 operation", name))
+        _ => tc_fail(Mismatch(want_t1_operation, name))
+    _ => tc_fail(Mismatch(want_t1_operation, name))
 
 -- lint: allow(L0103)
 fn infer_handler_arms(
@@ -879,15 +2197,34 @@ fn infer_handler_arms(
   handled_ty : VTy,
   result : VTy,
   ambient : Tc.Row,
-  env : List((String, Scheme)),
+  frame : List((String, List(VTy))),
+  env : List(EnvEntry),
   ctors : List(CtorInfo),
   names : List((String, VTy))
 ) : Unit ! {Solve(Sol), TcFail, Fresh} =
   match arms of
     Nil => ()
     Cons(arm, rest) =>
-      infer_handler_arm(arm, handled_ty, result, ambient, env, ctors, names)
-      infer_handler_arms(rest, handled_ty, result, ambient, env, ctors, names)
+      infer_handler_arm(
+          arm,
+          handled_ty,
+          result,
+          ambient,
+          frame,
+          env,
+          ctors,
+          names,
+        )
+      infer_handler_arms(
+          rest,
+          handled_ty,
+          result,
+          ambient,
+          frame,
+          env,
+          ctors,
+          names,
+        )
 
 -- The four operation clauses differ only in what their body answers with: a
 -- full clause and an abandoning one answer at the handle's own type, a
@@ -899,7 +2236,8 @@ fn infer_handler_arm(
   handled_ty : VTy,
   result : VTy,
   ambient : Tc.Row,
-  env : List((String, Scheme)),
+  frame : List((String, List(VTy))),
+  env : List(EnvEntry),
   ctors : List(CtorInfo),
   names : List((String, VTy))
 ) : Unit ! {Solve(Sol), TcFail, Fresh} =
@@ -908,7 +2246,7 @@ fn infer_handler_arm(
       let local = env_put(name, mono(handled_ty), env)
       unify_v(result, infer_expr(body, ambient, local, ctors, names))
     HOp(op, params, resume, body) =>
-      match op_parts(op, env) of
+      match op_parts_in(op, frame, env) of
         (param_tys, ret, _effect_name) =>
           let bound = bind_op_params(params, param_tys, env)
           -- The resumption takes what the operation answers with and finishes
@@ -917,16 +2255,16 @@ fn infer_handler_arm(
           let local = env_put(resume, mono(k), bound)
           unify_v(result, infer_expr(body, ambient, local, ctors, names))
     HOnce(op, params, body) =>
-      match op_parts(op, env) of
+      match op_parts_in(op, frame, env) of
         (param_tys, ret, _effect_name) =>
           let bound = bind_op_params(params, param_tys, env)
           unify_v(ret, infer_expr(body, ambient, bound, ctors, names))
     HVal(op, init) =>
-      match op_parts(op, env) of
+      match op_parts_in(op, frame, env) of
         (_param_tys, ret, _effect_name) =>
           unify_v(ret, infer_expr(init, ambient, env, ctors, names))
     HNever(op, params, body) =>
-      match op_parts(op, env) of
+      match op_parts_in(op, frame, env) of
         (param_tys, _ret, _effect_name) =>
           let bound = bind_op_params(params, param_tys, env)
           unify_v(result, infer_expr(body, ambient, bound, ctors, names))
@@ -934,8 +2272,8 @@ fn infer_handler_arm(
 fn bind_op_params(
   params : List(String),
   tys : List(VTy),
-  env : List((String, Scheme))
-) : List((String, Scheme)) ! {TcFail} =
+  env : List(EnvEntry)
+) : List(EnvEntry) ! {TcFail} =
   match (params, tys) of
     (Nil, Nil) => env
     (Cons(param, prest), Cons(ty, trest)) =>
@@ -945,10 +2283,10 @@ fn bind_op_params(
 fn infer_pat(
   sp : Sp(Pat),
   expected : VTy,
-  env : List((String, Scheme)),
+  env : List(EnvEntry),
   ctors : List(CtorInfo),
   names : List((String, VTy))
-) : List((String, Scheme)) ! {Solve(Sol), TcFail} =
+) : List(EnvEntry) ! {Solve(Sol), TcFail} =
   match sp.node of
     PWild => env
     PVar(name) => env_put(name, mono(expected), env)
@@ -983,10 +2321,10 @@ fn fresh_ty_metas(pats : List(Sp(Pat))) : List(VTy) ! {Solve(Sol)} =
 fn infer_pats(
   pats : List(Sp(Pat)),
   tys : List(VTy),
-  env : List((String, Scheme)),
+  env : List(EnvEntry),
   ctors : List(CtorInfo),
   names : List((String, VTy))
-) : List((String, Scheme)) ! {Solve(Sol), TcFail} =
+) : List(EnvEntry) ! {Solve(Sol), TcFail} =
   match (pats, tys) of
     (Nil, Nil) => env
     (Cons(pat, prest), Cons(ty, trest)) =>
@@ -1013,12 +2351,12 @@ fn infer_ctor_pat(
   name : String,
   args : List(Sp(Pat)),
   expected : VTy,
-  env : List((String, Scheme)),
+  env : List(EnvEntry),
   ctors : List(CtorInfo),
   names : List((String, VTy))
-) : List((String, Scheme)) ! {Solve(Sol), TcFail} =
+) : List(EnvEntry) ! {Solve(Sol), TcFail} =
   match ctor_get(name, ctors) of
-    None => tc_fail(Mismatch("known constructor", name))
+    None => tc_fail(Mismatch(want_constructor, name))
     Some(info) =>
       let instantiated = instantiate(ctor_scheme(info))
       let (params, result) = split_ctor(instantiated)
@@ -1032,12 +2370,12 @@ fn infer_record(
   name : String,
   fields : List(NamedExpr),
   ambient : Tc.Row,
-  env : List((String, Scheme)),
+  env : List(EnvEntry),
   ctors : List(CtorInfo),
   names : List((String, VTy))
 ) : VTy ! {Solve(Sol), TcFail, Fresh} =
   match ctor_get(name, ctors) of
-    None => tc_fail(Mismatch("known record constructor", name))
+    None => tc_fail(Mismatch(want_record_constructor, name))
     Some(info) =>
       let instantiated = instantiate(ctor_scheme(info))
       let (params, result) = split_ctor(instantiated)
@@ -1069,7 +2407,7 @@ fn infer_record_fields(
   tys : List(VTy),
   fields : List(NamedExpr),
   ambient : Tc.Row,
-  env : List((String, Scheme)),
+  env : List(EnvEntry),
   ctors : List(CtorInfo),
   names : List((String, VTy))
 ) : Unit ! {Solve(Sol), TcFail, Fresh} =
@@ -1090,12 +2428,12 @@ fn infer_record_pat(
   name : String,
   fields : List(PatField),
   expected : VTy,
-  env : List((String, Scheme)),
+  env : List(EnvEntry),
   ctors : List(CtorInfo),
   names : List((String, VTy))
-) : List((String, Scheme)) ! {Solve(Sol), TcFail} =
+) : List(EnvEntry) ! {Solve(Sol), TcFail} =
   match ctor_get(name, ctors) of
-    None => tc_fail(Mismatch("known record constructor", name))
+    None => tc_fail(Mismatch(want_record_constructor, name))
     Some(info) =>
       let instantiated = instantiate(ctor_scheme(info))
       let (params, result) = split_ctor(instantiated)
@@ -1125,10 +2463,10 @@ fn infer_record_pat_fields(
   labels : List(String),
   tys : List(VTy),
   fields : List(PatField),
-  env : List((String, Scheme)),
+  env : List(EnvEntry),
   ctors : List(CtorInfo),
   names : List((String, VTy))
-) : List((String, Scheme)) ! {Solve(Sol), TcFail} =
+) : List(EnvEntry) ! {Solve(Sol), TcFail} =
   match (labels, tys) of
     (Nil, Nil) => env
     (Cons(label, lrest), Cons(ty, trest)) =>
@@ -1145,40 +2483,140 @@ fn infer_record_pat_fields(
             )
     _ => tc_fail(Mismatch("record pattern", "constructor layout"))
 
-fn annotation_names(decl : Decl) : List((String, VTy)) ! {Fresh} =
-  let vars = unique_strings(
-      append(concat_map(param_tyvars, decl.params), option_tyvars(decl.ret)),
+-- Type names enter checking rigid. Written row names instead receive one
+-- flexible seed per spelling: inference may widen a seed before its surviving
+-- residual is branded by `generalize` at the declaration boundary.
+fn annotation_names(decl : Decl) : AnnotationNames ! {Fresh, Solve(Sol)} =
+  let ty_names = unique_strings(
+      append(
+          concat_map(param_tyvars, decl.params),
+          append(option_tyvars(decl.ret), option_row_tyvars(decl.eff)),
+        ),
     )
-  fst(names_of_params(vars))
+  let row_names = unique_strings(
+      append(
+          concat_map(param_rowvars, decl.params),
+          append(option_rowvars(decl.ret), option_row_arg_rowvars(decl.eff)),
+        ),
+    )
+  let (tys, tyvars) = names_of_params(ty_names)
+  AnnotationNames {
+    tys = tys,
+    tyvars = tyvars,
+    rows = row_names_of_params(row_names)
+  }
+
+fn row_names_of_params(params : List(String)) : List((String, Tail)) ! {Solve(Sol)} =
+  match params of
+    Nil => []
+    Cons(name, rest) =>
+      Cons((name, fresh_row_meta()), row_names_of_params(rest))
 
 fn param_tyvars(param : Param) : List(String) =
   match param.ty of
     None => []
     Some(ty) => tyvars_of(ty)
 
+fn param_rowvars(param : Param) : List(String) =
+  match param.ty of
+    None => []
+    Some(ty) => rowvars_of(ty)
+
 fn option_tyvars(ty : Option(Ty)) : List(String) =
   match ty of
     None => []
     Some(t) => tyvars_of(t)
 
-fn tyvars_of(ty : Ty) : List(String) =
+fn option_rowvars(ty : Option(Ty)) : List(String) =
   match ty of
-    TyVar(name) => [name]
-    TyApp(_, args) | TyCon(_, args) | TyTuple(args) | TyUnboxedTuple(args) =>
-      concat_map(tyvars_of, args)
-    TyForall(vars, body) => append(vars, tyvars_of(body))
+    None => []
+    Some(t) => rowvars_of(t)
+
+fn option_row_tyvars(row : Option(Syntax.Ast.Row)) : List(String) =
+  match row of
+    None => []
+    Some(r) =>
+      concat_map(\(label) -> concat_map(tyvars_of, label.args), r.labels)
+
+-- The declaration row's own tail is deliberately absent: Rust checks its
+-- concrete label set as closed. Tails inside those labels' argument types are
+-- ordinary declaration annotations and share the same row-name map.
+fn option_row_arg_rowvars(row : Option(Syntax.Ast.Row)) : List(String) =
+  match row of
+    None => []
+    Some(r) =>
+      concat_map(\(label) -> concat_map(rowvars_of, label.args), r.labels)
+
+fn tyvars_of(ty : Ty) : List(String) = tyvars_free(ty, [])
+
+fn rowvars_of(ty : Ty) : List(String) = rowvars_free(ty, [])
+
+-- Free variables only: a nested binder shadows the same spelling in its body.
+-- Nested `forall` is currently refused before inference, but keeping this walk
+-- lexical makes its declaration-binder contract independent of that horizon.
+fn tyvars_free(ty : Ty, bound : List(String)) : List(String) =
+  match ty of
+    TyVar(name) =>
+      if string_member(name, bound) then
+        []
+      else
+        [name]
+    TyApp(name, args) =>
+      append(
+          if string_member(name, bound) then [] else [name],
+          concat_map(\(t) -> tyvars_free(t, bound), args),
+        )
+    TyCon(_, args) | TyTuple(args) | TyUnboxedTuple(args) =>
+      concat_map(\(t) -> tyvars_free(t, bound), args)
+    TyForall(vars, body) => tyvars_free(body, append(vars, bound))
     TyFun(params, row, ret) =>
       append(
-          concat_map(tyvars_of, params),
+          concat_map(\(t) -> tyvars_free(t, bound), params),
           append(
-              concat_map(\(l) -> concat_map(tyvars_of, l.args), row.labels),
-              tyvars_of(ret),
+              concat_map(
+                  \(l) -> concat_map(\(t) -> tyvars_free(t, bound), l.args),
+                  row.labels,
+                ),
+              tyvars_free(ret, bound),
             ),
         )
-    TyUsage(body, _) => tyvars_of(body)
+    TyUsage(body, _) => tyvars_free(body, bound)
     TyUnboxedRecord(fields) =>
-      concat_map(\(field) -> tyvars_of(field.ty), fields)
+      concat_map(\(field) -> tyvars_free(field.ty, bound), fields)
     _ => []
+
+fn rowvars_free(ty : Ty, bound : List(String)) : List(String) =
+  match ty of
+    TyApp(_, args) | TyCon(_, args) | TyTuple(args) | TyUnboxedTuple(args) =>
+      concat_map(\(t) -> rowvars_free(t, bound), args)
+    TyForall(vars, body) => rowvars_free(body, append(vars, bound))
+    TyFun(params, row, ret) =>
+      append(
+          concat_map(\(t) -> rowvars_free(t, bound), params),
+          append(rowvars_free_row(row, bound), rowvars_free(ret, bound)),
+        )
+    TyUsage(body, _) => rowvars_free(body, bound)
+    TyUnboxedRecord(fields) =>
+      concat_map(\(field) -> rowvars_free(field.ty, bound), fields)
+    TyRowLit(row) => rowvars_free_row(row, bound)
+    _ => []
+
+fn rowvars_free_row(row : Syntax.Ast.Row, bound : List(String)) : List(String) =
+  let tail =
+    match row.tail of
+      None => []
+      Some(name) =>
+        if string_member(name, bound) then
+          []
+        else
+          [name]
+  append(
+      concat_map(
+          \(label) -> concat_map(\(t) -> rowvars_free(t, bound), label.args),
+          row.labels,
+        ),
+      tail,
+    )
 
 fn unique_strings(xs : List(String)) : List(String) =
   reverse(
@@ -1189,36 +2627,109 @@ fn unique_strings(xs : List(String)) : List(String) =
         ),
     )
 
+-- A written variable is quantified only if it survives in the inferred type.
+-- In particular, a declared effect row is an upper bound: a variable that
+-- appears only in an unperformed label must disappear with that label rather
+-- than becoming a vacuous top-level quantifier.
+fn used_binders(
+  binders : List(Binder(TyVarSpace)),
+  ty : VTy
+) : List(Binder(TyVarSpace)) =
+  filter(\(binder) -> v_has_name(ty, name_id(bound_name(binder))), binders)
+
+fn v_has_name(ty : VTy, wanted : Int) : Bool =
+  match ty of
+    VCon(_name, args) => any_v_has_name(args, wanted)
+    VTuple(items) => any_v_has_name(items, wanted)
+    VThunk(c) => c_has_name(c, wanted)
+    VVar(name) => name_id(name) == wanted
+    _ => false
+
+fn any_v_has_name(tys : List(VTy), wanted : Int) : Bool =
+  match tys of
+    Nil => false
+    Cons(ty, rest) => v_has_name(ty, wanted) || any_v_has_name(rest, wanted)
+
+fn c_has_name(ty : CTy, wanted : Int) : Bool =
+  match ty of
+    CRet(value, row) => v_has_name(value, wanted) || row_has_name(row, wanted)
+    CFun(params, body) =>
+      any_v_has_name(params, wanted) || c_has_name(body, wanted)
+
+fn row_has_name(row : Tc.Row, wanted : Int) : Bool =
+  any_label_has_name(row.labels, wanted)
+
+fn any_label_has_name(labels : List(Label), wanted : Int) : Bool =
+  match labels of
+    Nil => false
+    Cons(label, rest) =>
+      any_v_has_name(label.args, wanted) || any_label_has_name(rest, wanted)
+
 fn string_member(x : String, xs : List(String)) : Bool =
   match xs of
     Nil => false
     Cons(y, rest) => x == y || string_member(x, rest)
 
+fn int_member(x : Int, xs : List(Int)) : Bool =
+  match xs of
+    Nil => false
+    Cons(y, rest) => x == y || int_member(x, rest)
+
+-- A written seed can solve to labels over a newer residual. Preserve that
+-- terminal residual, not the obsolete seed ID, and deduplicate converged names
+-- in first-spelling order.
+fn written_row_residuals(rows : List((String, Tail))) : List(Int) ! {Solve(Sol)} =
+  written_row_residuals_go(rows, [])
+
+-- lint: allow(L0105)
+fn written_row_residuals_go(
+  rows : List((String, Tail)),
+  seen : List(Int)
+) : List(Int) ! {Solve(Sol)} =
+  match rows of
+    Nil => reverse(seen)
+    Cons((_name, seed), rest) =>
+      match zonk_row(row_open([], seed)).tail of
+        TailMeta(residual) =>
+          if int_member(residual, seen) then
+            written_row_residuals_go(rest, seen)
+          else
+            written_row_residuals_go(rest, Cons(residual, seen))
+        _ => written_row_residuals_go(rest, seen)
+
 fn infer_decl(
   decl : Decl,
-  env : List((String, Scheme)),
+  env : List(EnvEntry),
   ctors : List(CtorInfo)
 ) : Result(Scheme, TcError) ! {Fresh} =
   run_tc(\() -> infer_decl_action(decl, env, ctors))
 
 fn infer_decl_action(
   decl : Decl,
-  env : List((String, Scheme)),
+  env : List(EnvEntry),
   ctors : List(CtorInfo)
 ) : Scheme ! {Solve(Sol), TcFail, Fresh} =
-  let names = annotation_names(decl)
-  let (params, local) = infer_params(decl.params, env, names)
+  let annotation = annotation_names(decl)
+  let (params, local) =
+    infer_annot_params(decl.params, env, annotation.tys, annotation.rows)
   let result =
     match decl.ret of
-      Some(ty) => ty_of(ty, names)
+      Some(ty) => annot_ty_of(ty, annotation.tys, annotation.rows)
       None => fresh_ty_meta()
   let ambient = row_open([], fresh_row_meta())
   let self_ty = v_fun(params, c_ret(result, ambient))
   let self_env = env_put(decl.name, mono(self_ty), local)
-  let body_ty = infer_expr(decl.body, ambient, self_env, ctors, names)
+  let body_ty = infer_expr(decl.body, ambient, self_env, ctors, annotation.tys)
   unify_v(body_ty, result)
-  check_declared_row(decl, names, ambient)
-  generalize([], close_rows_v(self_ty))
+  check_declared_row(decl, annotation.tys, annotation.rows, ambient)
+  let keep = written_row_residuals(annotation.rows)
+  let inferred = generalize([], [], close_rows_v_except(keep, self_ty))
+  -- Quantifier order is part of the spelling, so it is copied rather than
+  -- chosen: what the body forced the checker to invent comes first, and what
+  -- the signature wrote down follows in the order it was written.
+  { inferred
+  | tyvars = append(inferred.tyvars, used_binders(annotation.tyvars, inferred.body))
+  }
 
 -- An effect-row annotation is an upper bound, not the reported row: what a
 -- declaration performs is read off its body, and the annotation only says the
@@ -1227,12 +2738,24 @@ fn infer_decl_action(
 fn check_declared_row(
   decl : Decl,
   names : List((String, VTy)),
+  rows : List((String, Tail)),
   ambient : Tc.Row
 ) : Unit ! {Solve(Sol), TcFail} =
   match decl.eff of
     None => ()
     Some(row) =>
-      row_absorb(row_normalize(row_of(row, names)), close_rows_row(ambient))
+      row_absorb(
+          row_normalize(declared_row_of(row, names, rows)),
+          close_ambient_tail(ambient),
+        )
+
+-- Read the concrete effects the body performed while closing only its ambient
+-- residual. `close_rows_row` is intentionally recursive and would also close
+-- written row seeds inside a performed label's type arguments; those are part
+-- of the declaration interface and must survive to selective generalization.
+fn close_ambient_tail(row : Tc.Row) : Tc.Row ! {Solve(Sol)} =
+  let zonked = zonk_row(row)
+  row_closed(zonked.labels)
 
 fn binder_index(
   name : Int,
@@ -1247,7 +2770,84 @@ fn binder_index(
       else
         binder_index(name, rest, i + 1)
 
-fn canon_v(ty : VTy, binders : List(Binder(TyVarSpace))) : String =
+fn row_binder_index(
+  name : Int,
+  binders : List(Binder(RowVarSpace)),
+  i : Int
+) : Option(Int) =
+  match binders of
+    Nil => None
+    Cons(b, rest) =>
+      if name_id(bound_name(b)) == name then
+        Some(i)
+      else
+        row_binder_index(name, rest, i + 1)
+
+fn row_binder_member(name : Int, binders : List(Binder(RowVarSpace))) : Bool =
+  match row_binder_index(name, binders, 0) of
+    Some(_) => true
+    None => false
+
+fn row_occurrences_v(ty : VTy, wanted : Int) : Int =
+  match ty of
+    VCon(_, args) | VTuple(args) => row_occurrences_vs(args, wanted)
+    VThunk(c) => row_occurrences_c(c, wanted)
+    _ => 0
+
+fn row_occurrences_vs(tys : List(VTy), wanted : Int) : Int =
+  match tys of
+    Nil => 0
+    Cons(ty, rest) =>
+      row_occurrences_v(ty, wanted) + row_occurrences_vs(rest, wanted)
+
+fn row_occurrences_c(c : CTy, wanted : Int) : Int =
+  match c of
+    CRet(value, row) =>
+      row_occurrences_v(value, wanted) + row_occurrences_row(row, wanted)
+    CFun(params, body) =>
+      row_occurrences_vs(params, wanted) + row_occurrences_c(body, wanted)
+
+fn row_occurrences_row(row : Tc.Row, wanted : Int) : Int =
+  let nested = row_occurrences_labels(row.labels, wanted)
+  match row.tail of
+    TailVar(name) =>
+      if name_id(name) == wanted then
+        nested + 1
+      else
+        nested
+    _ => nested
+
+fn row_occurrences_labels(labels : List(Label), wanted : Int) : Int =
+  match labels of
+    Nil => 0
+    Cons(label, rest) =>
+      row_occurrences_vs(label.args, wanted)
+        + row_occurrences_labels(rest, wanted)
+
+fn phantom_row_binders(
+  binders : List(Binder(RowVarSpace)),
+  body : VTy
+) : List(Binder(RowVarSpace)) =
+  filter(
+      \(binder) -> row_occurrences_v(body, name_id(bound_name(binder))) == 1,
+      binders,
+    )
+
+fn visible_row_binders(
+  binders : List(Binder(RowVarSpace)),
+  phantom : List(Binder(RowVarSpace))
+) : List(Binder(RowVarSpace)) =
+  filter(
+      \(binder) -> not(row_binder_member(name_id(bound_name(binder)), phantom)),
+      binders,
+    )
+
+fn canon_v(
+  ty : VTy,
+  binders : List(Binder(TyVarSpace)),
+  rows : List(Binder(RowVarSpace)),
+  phantom : List(Binder(RowVarSpace))
+) : String =
   match ty of
     VInt => "Int"
     VFloat => "Float"
@@ -1255,34 +2855,104 @@ fn canon_v(ty : VTy, binders : List(Binder(TyVarSpace))) : String =
     VUnit => "Unit"
     VString => "String"
     VCon(name, Nil) => name
-    VCon(name, args) => "{name}({canon_join(args, binders)})"
-    VTuple(items) => "({canon_join(items, binders)})"
-    VThunk(c) => canon_c(c, binders)
+    VCon(name, args) => "{name}({canon_join(args, binders, rows, phantom)})"
+    VTuple(items) => "({canon_join(items, binders, rows, phantom)})"
+    VThunk(c) => canon_c(c, binders, rows, phantom)
     VVar(v) =>
       match binder_index(name_id(v), binders, 0) of
-        Some(i) => "${i}"
+        Some(i) => "${length(rows) + i}"
         None => "$rigid{name_id(v)}"
     VMeta(_) => "?"
 
-fn canon_join(tys : List(VTy), binders : List(Binder(TyVarSpace))) : String =
+fn canon_join(
+  tys : List(VTy),
+  binders : List(Binder(TyVarSpace)),
+  rows : List(Binder(RowVarSpace)),
+  phantom : List(Binder(RowVarSpace))
+) : String =
   match tys of
     Nil => ""
-    Cons(ty, Nil) => canon_v(ty, binders)
-    Cons(ty, rest) => "{canon_v(ty, binders)}, {canon_join(rest, binders)}"
+    Cons(ty, Nil) => canon_v(ty, binders, rows, phantom)
+    Cons(ty, rest) =>
+      "{canon_v(ty, binders, rows, phantom)}, {canon_join(rest, binders, rows, phantom)}"
 
-fn canon_c(c : CTy, binders : List(Binder(TyVarSpace))) : String =
+fn canon_c(
+  c : CTy,
+  binders : List(Binder(TyVarSpace)),
+  rows : List(Binder(RowVarSpace)),
+  phantom : List(Binder(RowVarSpace))
+) : String =
   match c of
     CRet(value, row) =>
       -- The labels are sorted here rather than at inference: a row's identity
       -- is its label set, so the one place order can be observed is the
       -- spelling, and that is the place to fix it.
       let sorted = row_sorted(row)
-      if length(sorted.labels) == 0 && sorted.tail == TailClosed then
-        canon_v(value, binders)
+      if not(canon_row_visible(sorted, phantom)) then
+        canon_v(value, binders, rows, phantom)
       else
-        "{canon_v(value, binders)} ! {show_row(sorted)}"
+        "{canon_v(value, binders, rows, phantom)} ! {canon_row(sorted, binders, rows, phantom)}"
     CFun(params, body) =>
-      "({canon_join(params, binders)}) -> {canon_c(body, binders)}"
+      "({canon_join(params, binders, rows, phantom)}) -> {canon_c(body, binders, rows, phantom)}"
+
+fn canon_row_visible(row : Tc.Row, phantom : List(Binder(RowVarSpace))) : Bool =
+  if length(row.labels) > 0 then
+    true
+  else
+    match row.tail of
+      TailClosed => false
+      TailVar(name) => not(row_binder_member(name_id(name), phantom))
+      TailMeta(_) => true
+
+-- A row is spelled here rather than through `show_row` for the reason
+-- `canon_v` exists at all: label arguments and row tails share one positional
+-- binder namespace. Concrete labels sort first and a visible tail is appended
+-- last with comma syntax, matching the authority's `Type::show`.
+fn canon_row(
+  r : Tc.Row,
+  binders : List(Binder(TyVarSpace)),
+  rows : List(Binder(RowVarSpace)),
+  phantom : List(Binder(RowVarSpace))
+) : String =
+  let inner = canon_labels(r.labels, binders, rows, phantom)
+  match r.tail of
+    TailClosed => "\{{inner}\}"
+    TailVar(v) =>
+      if row_binder_member(name_id(v), phantom) then
+        "\{{inner}\}"
+      else
+        match row_binder_index(name_id(v), rows, 0) of
+          Some(i) => canon_row_with_tail(inner, "${i}")
+          None => canon_row_with_tail(inner, "$rowrigid{name_id(v)}")
+    TailMeta(a) => canon_row_with_tail(inner, "?{a}")
+
+fn canon_row_with_tail(inner : String, tail : String) : String =
+  if inner == "" then
+    "\{{tail}\}"
+  else
+    "\{{inner}, {tail}\}"
+
+fn canon_labels(
+  ls : List(Label),
+  binders : List(Binder(TyVarSpace)),
+  rows : List(Binder(RowVarSpace)),
+  phantom : List(Binder(RowVarSpace))
+) : String =
+  match ls of
+    Nil => ""
+    Cons(l, Nil) => canon_label(l, binders, rows, phantom)
+    Cons(l, rest) =>
+      "{canon_label(l, binders, rows, phantom)}, {canon_labels(rest, binders, rows, phantom)}"
+
+fn canon_label(
+  l : Label,
+  binders : List(Binder(TyVarSpace)),
+  rows : List(Binder(RowVarSpace)),
+  phantom : List(Binder(RowVarSpace))
+) : String =
+  match l.args of
+    Nil => l.name
+    args => "{l.name}({canon_join(args, binders, rows, phantom)})"
 
 -- The version of the canonical scheme spelling this checker emits. The Rust
 -- side pins the same identifier and refuses a mismatched header, so a change
@@ -1290,10 +2960,14 @@ fn canon_c(c : CTy, binders : List(Binder(TyVarSpace))) : String =
 fn scheme_contract() : String = "prism-scheme-canon-v1"
 
 fn canon_scheme(scheme : Scheme) : String =
-  let body = canon_v(scheme.body, scheme.tyvars)
-  match scheme.tyvars of
-    Nil => body
-    binders => "forall {canon_binders(length(binders), 0)}. {body}"
+  let phantom = phantom_row_binders(scheme.rowvars, scheme.body)
+  let rows = visible_row_binders(scheme.rowvars, phantom)
+  let body = canon_v(scheme.body, scheme.tyvars, rows, phantom)
+  let n = length(rows) + length(scheme.tyvars)
+  if n == 0 then
+    body
+  else
+    "forall {canon_binders(n, 0)}. {body}"
 
 fn canon_binders(n : Int, i : Int) : String =
   if i >= n then
@@ -1323,7 +2997,9 @@ fn check_decls(
   resolved : ResolvedDoc,
   input : TcInputDoc,
   ctors : List(CtorInfo),
-  env : List((String, Scheme)),
+  operations : List((String, String)),
+  row_data : List(String),
+  env : List(EnvEntry),
   facts : List(ShadowFact),
   unsupported : List(Unsupported),
   supported_nodes : Int,
@@ -1339,6 +3015,8 @@ fn check_decls(
               resolved,
               input,
               ctors,
+              operations,
+              row_data,
               env,
               facts,
               unsupported,
@@ -1361,6 +3039,8 @@ fn check_decls(
                 resolved,
                 input,
                 ctors,
+                operations,
+                row_data,
                 env,
                 facts,
                 Cons(miss, unsupported),
@@ -1368,7 +3048,10 @@ fn check_decls(
                 total_nodes + nodes,
               )
           else
-            match (first_some(unsupported_decl(decl), first_unsupported(decl.body))) of
+            match (first_some(
+                  unsupported_decl(decl, row_data),
+                  first_unsupported(decl.body, row_data),
+                )) of
               Some((kind, span, reason)) =>
                 let miss =
                   Unsupported {
@@ -1383,6 +3066,8 @@ fn check_decls(
                     resolved,
                     input,
                     ctors,
+                    operations,
+                    row_data,
                     env,
                     facts,
                     Cons(miss, unsupported),
@@ -1392,7 +3077,7 @@ fn check_decls(
               None =>
                 match infer_decl(decl, env, ctors) of
                   Err(err) =>
-                    match unsupported_tc_error(err) of
+                    match unsupported_tc_error(err, ctors, operations) of
                       Some((kind, reason)) =>
                         let miss =
                           Unsupported {
@@ -1407,6 +3092,8 @@ fn check_decls(
                             resolved,
                             input,
                             ctors,
+                            operations,
+                            row_data,
                             env,
                             facts,
                             Cons(miss, unsupported),
@@ -1423,6 +3110,8 @@ fn check_decls(
                             resolved,
                             input,
                             ctors,
+                            operations,
+                            row_data,
                             env,
                             Cons(fact, facts),
                             unsupported,
@@ -1439,6 +3128,8 @@ fn check_decls(
                         resolved,
                         input,
                         ctors,
+                        operations,
+                        row_data,
                         env_put(decl.name, scheme, env),
                         Cons(fact, facts),
                         unsupported,
@@ -1476,10 +3167,23 @@ fn build_workbench(
   input : TcInputDoc,
   oracle_text : String
 ) : Workbench ! {Fresh} =
-  let ctors = ctor_infos(items)
-  let env = op_env(items, ctor_env(ctors, []))
-  let (facts, unsupported, supported_nodes, total_nodes) =
-    check_decls(item_decls(items), resolved, input, ctors, env, [], [], 0, 0)
+  let row_data = row_kind_data_names(items)
+  let ctors = ctor_infos(items, row_data)
+  let operations = operation_table(items)
+  let env = op_env(items, row_data, ctor_env(ctors, []))
+  let (facts, unsupported, supported_nodes, total_nodes) = check_decls(
+      item_decls(items),
+      resolved,
+      input,
+      ctors,
+      operations,
+      row_data,
+      env,
+      [],
+      [],
+      0,
+      0,
+    )
   let actual = map(fact_line, facts)
   let selected =
     expected_for(map(\(fact) -> fact.name, facts), expected_lines(oracle_text))
@@ -1513,6 +3217,46 @@ fn print_diff(first : Option(Divergence(String))) : Unit ! {IO} =
     Some(DiffAt(i, rust, shadow)) => println("DIFF\tAT\t{i}\t{rust}\t{shadow}")
     Some(DiffLeftEnd(i, shadow)) => println("DIFF\tLEFT_END\t{i}\t\t{shadow}")
     Some(DiffRightEnd(i, rust)) => println("DIFF\tRIGHT_END\t{i}\t{rust}\t")
+
+-- The negative cannot enter the authority-report fixture because Rust rejects
+-- the source before exporting artifacts. Drive the real named-dispatch helper
+-- twice instead: both calls must reuse the one stored argument vector.
+test fn named_dispatch_reuses_effect_arguments() =
+  let outcome = run_fresh(\() -> run_tc(\() -> contradictory_named_dispatch()))
+  match outcome of
+    Err(Mismatch(left, right)) =>
+      if left == "Int" && right == "String" then
+        ()
+      else
+        fail()
+    _ => fail()
+
+fn contradictory_named_dispatch() : Unit ! {Solve(Sol), TcFail, Fresh} =
+  let binder = fresh_binder("a")
+  let arg = VVar(bound_name(binder))
+  let scheme =
+    Scheme {
+      tyvars = [binder],
+      rowvars = [],
+      body = v_fun([arg], c_ret(VUnit, row_closed([
+          Label { name = "Cell", args = [arg] },
+        ])))
+    }
+  let shared = fresh_ty_meta()
+  let info = InstanceInfo {
+    source_effect = "Cell",
+    private_effect = "@handler-test",
+    args = [shared],
+    ops = [("write", scheme)]
+  }
+  let env = []
+  let ambient = row_open([], fresh_row_meta())
+  let span = Span { lo = 0, hi = 0 }
+  let int_arg = Sp { node = EInt("1", SufNone), span = span, synth = false }
+  let str_arg = Sp { node = EStr("x"), span = span, synth = false }
+  let _first = infer_directed("write", info, [int_arg], ambient, env, [], [])
+  let _second = infer_directed("write", info, [str_arg], ambient, env, [], [])
+  ()
 
 -- Artifact bytes are supplied in memory by the Rust CLI. The only output is a
 -- compact protocol Rust renders as either text or the stable JSON report.

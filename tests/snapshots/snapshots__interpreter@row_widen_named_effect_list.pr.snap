@@ -1,0 +1,7 @@
+---
+source: tests/snapshots.rs
+expression: interp_output(path)
+input_file: tests/cases/run/row_widen_named_effect_list.pr
+---
+(2, 4)
+=> ()

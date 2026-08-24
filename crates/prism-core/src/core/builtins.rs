@@ -1,4 +1,4 @@
-//! Single source of truth for builtins: surface name, arity, lowering kind.
+//! Canonical builtin table: surface name, arity, and lowering kind.
 //!
 //! Consumed by the elaborator (arity map, head dispatch), the REPL session,
 //! and the backend preludes (runtime declares).
@@ -447,6 +447,7 @@ builtins! {
     StrEq "str_eq" "StrEq" 2 RETAG surface 2 Str "(String, String) -> Bool";
     StrCmp "str_cmp" "StrCmp" 3 RETAG surface 2 Str "(String, String) -> Int";
     Substring "substring" "Substring" 4 IDX12 surface 3 Str "(String, Int, Int) -> String";
+    StrSlice "prim_str_slice" "StrSlice" 137 IDX12 surface 3 Str "(String, Int, Int) -> String";
     CharAt "char_at" "CharAt" 5 IDX1_RETAG surface 2 Str "(String, Int) -> Int";
     ShowChar "show_char" "ShowChar" 6 IMM0 surface 1 Str "(Char) -> String";
     Blake3 "blake3" "Blake3" 7 RAW surface 1 Str "(String) -> String";
@@ -527,6 +528,7 @@ builtins! {
     BufSet "buf_set" "BufSet" 82 IDX12 surface 3 Str "(Buf, Int, Int) -> Buf";
     BufPush "buf_push" "BufPush" 83 IDX1 surface 2 Str "(Buf, Int) -> Buf";
     BufSlice "buf_slice" "BufSlice" 84 IDX12 surface 3 Str "(Buf, Int, Int) -> Buf";
+    BufAppendStr "buf_append_str" "BufAppendStr" 138 RAW surface 2 Str "(Buf, String) -> Buf";
     BufCat "buf_cat" "BufCat" 85 RAW surface 2 Str "(Buf, Buf) -> Buf";
     BufEq "buf_eq" "BufEq" 86 RETAG surface 2 Str "(Buf, Buf) -> Bool";
     BufCmp "buf_cmp" "BufCmp" 87 RETAG surface 2 Str "(Buf, Buf) -> Int";
@@ -569,7 +571,7 @@ builtins! {
     // matches the pinned registry (`simd_builtin_tags_match_registry` guards it).
     // The interpreter defines the bit-exact semantics; native lowers each to its
     // `prism_simd_*` runtime symbol over a two-word vector cell. A `splat` unboxes
-    // its scalar (`F0`/`RAW`); `extract` untags its lane index (`IDX1`); the
+    // its scalar (`F0`/`RAW`). `extract` untags its lane index (`IDX1`). The
     // lane-wise binary ops thread two vector cells raw.
     SimdFSplat "simd_fsplat" "SimdFSplat" 108 F0 surface 1 Str "(Float) -> F64x2";
     SimdFExtract "simd_fextract" "SimdFExtract" 109 IDX1 surface 2 Str "(F64x2, Int) -> Float";
@@ -757,6 +759,7 @@ mod tag_tests {
                 (Builtin::StrEq, "StrEq"),
                 (Builtin::StrCmp, "StrCmp"),
                 (Builtin::Substring, "Substring"),
+                (Builtin::StrSlice, "StrSlice"),
                 (Builtin::CharAt, "CharAt"),
                 (Builtin::ShowChar, "ShowChar"),
                 (Builtin::Blake3, "Blake3"),
@@ -837,6 +840,7 @@ mod tag_tests {
                 (Builtin::BufSet, "BufSet"),
                 (Builtin::BufPush, "BufPush"),
                 (Builtin::BufSlice, "BufSlice"),
+                (Builtin::BufAppendStr, "BufAppendStr"),
                 (Builtin::BufCat, "BufCat"),
                 (Builtin::BufEq, "BufEq"),
                 (Builtin::BufCmp, "BufCmp"),

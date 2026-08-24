@@ -38,6 +38,9 @@ let single_quote : Int = 39
 -- request that ran and failed exits with.
 let exit_refused : Int = 2
 
+-- The walk is over one shell argument, a path or a flag, so it is bounded by
+-- what a command line can carry rather than by the size of any input.
+-- lint: allow(L0109)
 fn quote_body(value : String, i : Int, acc : String) : String =
   if i >= str_len(value) then
     acc

@@ -2,6 +2,16 @@
 --
 -- Built over the primitive UTF-8 string operations. Base includes this
 -- module.
+--
+-- Two indexing families exist and they do not cost the same. `char_at`,
+-- `substring`, and `str_len` are counted in codepoints, so each call walks the
+-- string's UTF-8 encoding from the start and costs time proportional to the
+-- length. A scanner that advances an index one position at a time through them
+-- pays that walk on every step and is quadratic in its input, which is
+-- invisible on a line and ruinous on a file. `byte_at` and `byte_len` are
+-- constant-time raw-byte access and are the first choice for a scanner, a
+-- tokenizer, or a hash. Reach for the codepoint family only when the answer
+-- itself must be counted in characters.
 
 import Data.Char (is_space, to_upper_c, to_lower_c)
 
@@ -197,6 +207,29 @@ pub fn slice_bytes(s, lo, hi, buf) =
   else
     slice_bytes(s, lo + 1, hi, buf_push(buf, byte_at(s, lo)))
 
+-- | The bytes of `s` in `[lo, hi)`, clamped to the string's bounds.
+--
+-- The byte-indexed counterpart of `substring`: both endpoints are byte offsets
+-- and reaching one is constant time, so a scanner that slices as it advances
+-- stays linear where the codepoint form is quadratic. The endpoints must fall
+-- on character boundaries, which they do when they come from comparisons
+-- against ASCII bytes or from a span the compiler emitted; a window that splits
+-- a character is repaired rather than rejected, so the result is always a
+-- well-formed String.
+--
+-- The span shares the parent's bytes rather than copying them, and the parent
+-- stays alive for as long as the span does, so slicing costs the same whether
+-- the string is three bytes or three megabytes.
+--
+-- ```prism
+-- str_slice("foobar", 3, 6)
+-- ```
+-- ```output
+-- bar
+-- ```
+pub fn str_slice(s : String, lo : Int, hi : Int) : String =
+  prim_str_slice(s, lo, hi)
+
 -- | Strip leading and trailing ASCII whitespace.
 --
 -- ```prism
@@ -206,14 +239,14 @@ pub fn slice_bytes(s, lo, hi, buf) =
 -- hi
 -- ```
 pub fn trim(s : String) : String =
-  let lo = ltrim_idx(s, 0)
-  let hi = rtrim_idx(s, byte_len(s))
-  if lo >= hi then
-    ""
-  else
-    string_of_buf(slice_bytes(s, lo, hi, buf_empty()))
+  str_slice(s, ltrim_idx(s, 0), rtrim_idx(s, byte_len(s)))
 
 -- | The index of character `c` in `s` at or after position `i`, or `-1` if absent.
+--
+-- The codepoint index is the answer, so the walk that finds it is the walk this
+-- returns a position into: `index_of` is the byte-offset counterpart and is
+-- linear. Kept for the caller who needs a character position.
+-- lint: allow(L0109)
 pub fn index_of_from(c, s, i) =
   if i >= str_len(s) then
     -1
@@ -223,6 +256,11 @@ pub fn index_of_from(c, s, i) =
     index_of_from(c, s, i + 1)
 
 -- | Helper for `split`: split `s` on `c`, starting from position `i`.
+--
+-- Splits at a character, so it addresses the string the way `index_of_from`
+-- answers. A caller splitting a large document wants byte offsets from
+-- `index_of` and slices from `str_slice`.
+-- lint: allow(L0109)
 pub fn split_from(c, s, i) =
   let j = index_of_from(c, s, i)
   if j < 0 then
@@ -251,6 +289,11 @@ pub fn split(c, s) = split_from(c, s, 0)
 pub fn str_of_char(c) = show_char(c)
 
 -- | Helper for `chars`: the characters of `s` from position `i` onward.
+--
+-- Decoding every character is what this is for, and each one is asked for by
+-- its character position; a byte-level pass would have to decode the encoding
+-- itself to answer the same question.
+-- lint: allow(L0109)
 pub fn chars_from(s : String, i : Int) : List(Char) =
   if i >= str_len(s) then
     Nil

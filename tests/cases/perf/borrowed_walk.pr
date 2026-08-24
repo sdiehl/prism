@@ -1,0 +1,21 @@
+-- A read-only walk repeated over one shared list. The walk never consumes the
+-- spine, so once its parameters are inferred borrowed, every pass threads no
+-- reference-count traffic on cells: the only counted release is the list's own
+-- teardown. With inference disabled the same program pays a retain/release
+-- pair per level per pass, which is the floor the gate uses to prove the
+-- probe still exercises real pressure.
+
+fn sum_walk(xs, acc) =
+  match xs of
+    Nil => acc
+    Cons(h, t) => sum_walk(t, acc + h)
+
+fn walk_rounds(k, xs, acc) =
+  if k == 0 then
+    acc
+  else
+    walk_rounds(k - 1, xs, acc + sum_walk(xs, 0))
+
+fn main() =
+  let xs = range(1, 1000)
+  println(walk_rounds(20, xs, 0))

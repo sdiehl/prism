@@ -1,0 +1,66 @@
+-- The observable contract of a byte-string window, which is the same on both
+-- tiers whether the window shares the parent's bytes or copies them. What is
+-- pinned here: both endpoints are clamped to what the value actually holds, so a
+-- negative start, a start past the end, a negative length, and a length past the
+-- remainder all yield the in-range part rather than trapping; a window onto a
+-- window addresses the original, so re-slicing a remainder never deepens a chain;
+-- a window is an ordinary `Bytes` everywhere downstream, including equality,
+-- comparison, hashing, concatenation, and the codecs; and a window over raw
+-- non-UTF-8 bytes stays raw, so it round-trips through hex verbatim while
+-- decoding to a `String` reports the failure instead of repairing it.
+
+import Data.Bytes (..)
+
+fn show_case(label : String, bs : Bytes) : Unit ! {IO} =
+  println("{label}: [{hex_encode(bs)}] len={bytes_length(bs)}")
+
+fn show_text(label : String, bs : Bytes) : Unit ! {IO} =
+  match bytes_to_string(bs) of
+    Some(s) => println("{label}: [{s}]")
+    None => println("{label}: <not utf-8>")
+
+-- A window onto a window onto a window: the composition addresses the original,
+-- so the result is the same span a single slice of the original would give.
+fn nest(bs : Bytes) : Bytes =
+  bytes_slice(bytes_slice(bytes_slice(bs, 2, 20), 1, 9), 2, 6)
+
+-- Peel one byte at a time off the front, reassembling what falls off. Every step
+-- takes a window onto the whole remainder, which is where a chain would grow.
+fn peel(bs : Bytes, acc : Bytes) : Bytes =
+  if bytes_length(bs) == 0 then
+    acc
+  else
+    peel(
+        bytes_slice(bs, 1, bytes_length(bs) - 1),
+        bytes_push(acc, bytes_index(bs, 0)),
+      )
+
+fn main() : Unit ! {IO} =
+  let bs = string_to_bytes("hello wide world")
+  show_case("whole", bs)
+  show_case("middle", bytes_slice(bs, 6, 4))
+  -- Every out-of-range endpoint clamps to the value rather than trapping.
+  show_case("start negative", bytes_slice(bs, -5, 4))
+  show_case("start past end", bytes_slice(bs, 99, 4))
+  show_case("len negative", bytes_slice(bs, 3, -1))
+  show_case("len past end", bytes_slice(bs, 11, 99))
+  show_case("empty span", bytes_slice(bs, 4, 0))
+  show_case("nested", nest(bs))
+  show_case("peeled", peel(bs, bytes_empty))
+  show_text("peeled text", peel(bs, bytes_empty))
+  -- A window is an ordinary value downstream: it compares, hashes, concatenates,
+  -- and re-encodes exactly like a value built from its own bytes.
+  let win = bytes_slice(bs, 6, 4)
+  let own = string_to_bytes("wide")
+  println("eq={bytes_eq(win, own)} cmp={show_int(bytes_compare(win, own))}")
+  println("hash={bytes_hash(win) == bytes_hash(own)}")
+  show_case("concat", bytes_concat(win, bytes_slice(bs, 11, 5)))
+  show_text(
+      "base64 roundtrip",
+      unwrap_or(bytes_empty, base64_decode(base64_encode(win))),
+    )
+  -- Raw bytes with no UTF-8 reading: the window keeps them verbatim, so hex
+  -- round-trips and the string decode reports the failure rather than repairing it.
+  let raw = unwrap_or(bytes_empty, hex_decode("00ff10fe80c3"))
+  show_case("raw window", bytes_slice(raw, 1, 4))
+  show_text("raw window text", bytes_slice(raw, 1, 4))

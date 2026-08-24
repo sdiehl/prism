@@ -1,13 +1,13 @@
--- Differential witness: consume the Rust parser's canonical surface artifact,
--- parse its embedded source again through the Prism-owned frontend, and compare
--- the exact re-encoded AST bytes (including spans and synth bits).
+-- Differential witness: consume pairs of Rust surface artifacts and mismatch
+-- paths, parse each embedded source again through the Prism-owned frontend, and
+-- compare the exact re-encoded AST bytes (including spans and synth bits).
 
 import Syntax.Lex (..)
 import Syntax.Codec (..)
 import Syntax.Parse (..)
 
-fn main() =
-  match decode_surface(read_file(arg(0))) of
+fn replay(artifact : String, mismatch : String) : Unit ! {FileSystem, IO} =
+  match decode_surface(read_file(artifact)) of
     Err(e) => println("decode {codec_error_message(e)}")
     Ok(want) =>
       match parse_source(want.source.text) of
@@ -23,5 +23,15 @@ fn main() =
           if encode_surface(got) == encode_surface(want) then
             println("ok")
           else
-            write_file(arg(1), encode_surface(got))
-            println("mismatch {arg(1)}")
+            write_file(mismatch, encode_surface(got))
+            println("mismatch {mismatch}")
+
+fn replay_pairs(argv : List(String)) : Unit ! {FileSystem, IO} =
+  match argv of
+    Nil => ()
+    Cons(artifact, Cons(mismatch, rest)) =>
+      replay(artifact, mismatch)
+      replay_pairs(rest)
+    _ => println("expected artifact/mismatch argument pairs")
+
+fn main() = replay_pairs(args())

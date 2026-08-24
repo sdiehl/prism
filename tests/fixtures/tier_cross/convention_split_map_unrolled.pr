@@ -1,0 +1,27 @@
+-- Hand-unrolled control for the convention-split fixture: only the effectful
+-- traversal changes shape, while the hot pure use still calls the shared map.
+
+effect Log
+  emit(Int) : Unit
+
+fn bump(x : Int) : Int = x + 1
+
+fn shout(x : Int) : Int ! {Log} =
+  let _u = emit(x)
+  x * 2
+
+fn pure_use(xs : List(Int)) : List(Int) = map(bump, xs)
+
+fn effect_use(xs : List(Int)) : List(Int) ! {Log} =
+  match xs of
+    Nil => Nil
+    Cons(x, rest) => Cons(shout(x), effect_use(rest))
+
+fn main() =
+  let direct = pure_use([1, 2, 3])
+  let handled =
+    handle effect_use([4, 5]) with
+      emit(_n) resume k => k(())
+      return r => r
+  print(show(direct))
+  print(show(handled))

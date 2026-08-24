@@ -161,10 +161,7 @@ fn imported_module_definitions_are_addressed_by_visibility() {
     assert!(targets(&index, EdgeKind::Calls, "Parser.parse").contains(&"Parser@normalize"));
 }
 
-// The set a build compiles is not the set a reader reads. A module outside the
-// entry's import closure — a library package's whole surface — must still be
-// addressed, or the index would be empty of exactly the code someone opened it to
-// review.
+// Modules outside the entry's import closure must still receive addresses.
 #[test]
 fn a_module_the_entry_never_imports_is_still_addressed() {
     let dir = TempDir::project("library");
@@ -178,7 +175,7 @@ fn a_module_the_entry_never_imports_is_still_addressed() {
         );
     }
     assert_eq!(def(&index, "Library.Doc").kind, Kind::Type);
-    // And its relationships resolve, not just its address.
+    // Its relationships resolve as well.
     assert!(targets(&index, EdgeKind::UsesType, "Library.render").contains(&"Library.Doc"));
     // Nothing reaches it, so it has no callers; that is a fact about the code, and
     // the reason the reader wanted to see the module in the first place.
