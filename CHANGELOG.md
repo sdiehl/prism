@@ -10,6 +10,7 @@
 - Strings and bytes: slicing is now a constant-time window rather than a copy.
 - Strings: literals are static cells, allocated once and shared by every mention.
 - Performance: layout and parse throughput improved, the adversarially nested case tenfold.
+- Builds: native links select lld where the toolchain has it, so an artifact's bytes follow only from its inputs.
 - Lint: a new rule catches the recursive codepoint scan that turns traversals quadratic.
 - Effect tiers: shapes that used to fall to the free monad now hold the evidence tier.
 - Effect rows: callbacks stored in data keep exact witnesses, and pure ones stay direct.

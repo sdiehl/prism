@@ -1,4 +1,4 @@
-# Bundles LLVM 22 + clang so prism runs with no host toolchain.
+# Bundles LLVM 22 + clang + lld so prism runs with no host toolchain.
 FROM rust:1-bookworm AS builder
 RUN set -eux; \
     apt-get update; \
@@ -25,7 +25,7 @@ RUN set -eux; \
     echo "deb http://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-22 main" \
       > /etc/apt/sources.list.d/llvm.list; \
     apt-get update; \
-    apt-get install -y --no-install-recommends llvm-22 clang-22; \
+    apt-get install -y --no-install-recommends llvm-22 clang-22 lld-22; \
     apt-get purge -y wget gnupg; apt-get autoremove -y; \
     rm -rf /var/lib/apt/lists/*
 COPY --from=builder /src/target/release/prism /usr/bin/prism

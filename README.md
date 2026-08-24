@@ -76,7 +76,7 @@ LLVM_SYS_221_PREFIX="$(brew --prefix llvm@22)" \
   cargo install --git https://github.com/sdiehl/prism
 
 # Debian/Ubuntu (after enabling apt.llvm.org as above)
-sudo apt install llvm-22-dev libpolly-22-dev clang-22
+sudo apt install llvm-22-dev libpolly-22-dev clang-22 lld-22
 LLVM_SYS_221_PREFIX=/usr/lib/llvm-22 \
   PRISM_CC=/usr/lib/llvm-22/bin/clang \
   cargo install --git https://github.com/sdiehl/prism

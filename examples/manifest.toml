@@ -718,6 +718,12 @@ title = "Zygomorphisms"
 category = "Functions"
 
 [[example]]
+path = "fixtures/compiler/arena_closure.pr"
+title = "Arena closure lowering"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
 path = "fixtures/compiler/arena_escape.pr"
 title = "Arena escape lowering"
 category = "Compiler"

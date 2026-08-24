@@ -9,6 +9,7 @@
 // spelling, and we side with plain `pub`.
 #![allow(dead_code, unreachable_pub)]
 
+use std::mem::size_of;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -525,6 +526,140 @@ pub fn cleanup_bin(bin: &Path) {
 /// directory the other's C compiler is still writing into.
 pub fn temp_bin(tag: &str, stem: &str) -> PathBuf {
     env::temp_dir().join(format!("prism_parity_{tag}_{}_{stem}", std::process::id()))
+}
+
+/// Bytes of context printed either side of a first difference.
+const DIFFERENCE_WINDOW: usize = 12;
+/// Digest characters that name a binary; enough to tell two builds apart.
+const DIGEST_PREFIX: usize = 16;
+
+/// Byte offsets into the ELF64 header and its section headers, named so the
+/// reader below walks a documented layout instead of a pile of literals.
+const ELF_MAGIC: &[u8] = b"\x7fELF";
+const ELF_CLASS_OFFSET: usize = 4;
+const ELF_CLASS_64: u8 = 2;
+const ELF_DATA_OFFSET: usize = 5;
+const ELF_DATA_LITTLE_ENDIAN: u8 = 1;
+const ELF_SECTION_TABLE_OFFSET: usize = 0x28;
+const ELF_SECTION_ENTRY_SIZE_OFFSET: usize = 0x3a;
+const ELF_SECTION_COUNT_OFFSET: usize = 0x3c;
+const ELF_SECTION_NAME_TABLE_OFFSET: usize = 0x3e;
+const SECTION_NAME_OFFSET: usize = 0x00;
+const SECTION_TYPE_OFFSET: usize = 0x04;
+const SECTION_FILE_OFFSET: usize = 0x18;
+const SECTION_SIZE_OFFSET: usize = 0x20;
+/// A section that occupies no file bytes, so no file offset falls inside it.
+const SECTION_TYPE_NOBITS: u64 = 8;
+
+/// A little-endian integer field of `width` bytes.
+fn le_number(bytes: &[u8], at: usize, width: usize) -> Option<u64> {
+    let field = bytes.get(at..at.checked_add(width)?)?;
+    Some(field.iter().enumerate().fold(0, |value, (index, byte)| {
+        value | u64::from(*byte) << (index * 8)
+    }))
+}
+
+/// The name of the ELF section holding a file offset.
+///
+/// `None` for any other container (a Mach-O image, a truncated file), where the
+/// offset and the bytes around it have to speak for themselves.
+fn elf_section_at(bytes: &[u8], offset: u64) -> Option<String> {
+    if !bytes.starts_with(ELF_MAGIC)
+        || bytes.get(ELF_CLASS_OFFSET) != Some(&ELF_CLASS_64)
+        || bytes.get(ELF_DATA_OFFSET) != Some(&ELF_DATA_LITTLE_ENDIAN)
+    {
+        return None;
+    }
+    let table = le_number(bytes, ELF_SECTION_TABLE_OFFSET, size_of::<u64>())?;
+    let entry = le_number(bytes, ELF_SECTION_ENTRY_SIZE_OFFSET, size_of::<u16>())?;
+    let count = le_number(bytes, ELF_SECTION_COUNT_OFFSET, size_of::<u16>())?;
+    let name_section = le_number(bytes, ELF_SECTION_NAME_TABLE_OFFSET, size_of::<u16>())?;
+    let section_header =
+        |index: u64| usize::try_from(table.checked_add(index.checked_mul(entry)?)?).ok();
+    let names = le_number(
+        bytes,
+        section_header(name_section)? + SECTION_FILE_OFFSET,
+        size_of::<u64>(),
+    )?;
+    for index in 0..count {
+        let header = section_header(index)?;
+        if le_number(bytes, header + SECTION_TYPE_OFFSET, size_of::<u32>())? == SECTION_TYPE_NOBITS
+        {
+            continue;
+        }
+        let start = le_number(bytes, header + SECTION_FILE_OFFSET, size_of::<u64>())?;
+        let size = le_number(bytes, header + SECTION_SIZE_OFFSET, size_of::<u64>())?;
+        if offset < start || offset >= start.checked_add(size)? {
+            continue;
+        }
+        let name = le_number(bytes, header + SECTION_NAME_OFFSET, size_of::<u32>())?;
+        let at = usize::try_from(names.checked_add(name)?).ok()?;
+        let text = bytes.get(at..)?;
+        let end = text.iter().position(|byte| *byte == 0)?;
+        return String::from_utf8(text[..end].to_vec()).ok();
+    }
+    None
+}
+
+fn short_digest(bytes: &[u8]) -> String {
+    blake3::hash(bytes).to_hex()[..DIGEST_PREFIX].to_string()
+}
+
+fn hex_window(bytes: &[u8], at: usize) -> String {
+    let at = at.min(bytes.len());
+    let start = at.saturating_sub(DIFFERENCE_WINDOW);
+    let end = (at + DIFFERENCE_WINDOW).min(bytes.len());
+    bytes[start..end]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Asserts two linked artifacts are byte-identical, and explains any difference.
+///
+/// Byte identity is the assertion; legibility is why this exists. Comparing the
+/// two byte vectors directly prints both binaries as decimal arrays, tens of
+/// thousands of lines that truncate a CI log and still never say what moved. A
+/// linked binary differs structurally, so report structure: a digest naming each
+/// side, the two lengths, where they first diverge and in which section, how
+/// many bytes differ in all, and the bytes around the divergence. That is the
+/// difference between "the link is not reproducible" and knowing whether code
+/// or only its placement changed.
+pub fn assert_same_binary(what: &str, expected: &[u8], actual: &[u8]) {
+    if expected == actual {
+        return;
+    }
+    let shared = expected.len().min(actual.len());
+    let first = expected
+        .iter()
+        .zip(actual)
+        .position(|(left, right)| left != right)
+        .unwrap_or(shared);
+    let differing = expected
+        .iter()
+        .zip(actual)
+        .filter(|(left, right)| left != right)
+        .count();
+    let section = u64::try_from(first)
+        .ok()
+        .and_then(|offset| elf_section_at(expected, offset))
+        .map_or_else(String::new, |name| format!(" in {name}"));
+    panic!(
+        "{what}: linked bytes differ\n  \
+         expected  {} bytes  blake3 {}\n  \
+         actual    {} bytes  blake3 {}\n  \
+         first difference at byte {first} ({first:#x}){section}, \
+         {differing} of {shared} shared bytes differ\n  \
+         expected  {}\n  \
+         actual    {}",
+        expected.len(),
+        short_digest(expected),
+        actual.len(),
+        short_digest(actual),
+        hex_window(expected, first),
+        hex_window(actual, first),
+    );
 }
 
 /// The single leak predicate for every native oracle: the balance report must be

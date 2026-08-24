@@ -8,8 +8,8 @@ inputs:
   packages:
     description: >
       Extra apt packages beyond the base set (llvm-22-dev, libpolly-22-dev,
-      clang-22), space-separated. e.g. "clang-tidy-22" or "libmlir-22-dev
-      mlir-22-tools".
+      clang-22, lld-22), space-separated. e.g. "clang-tidy-22" or
+      "libmlir-22-dev mlir-22-tools".
     required: false
     default: ""
 
@@ -35,13 +35,22 @@ runs:
     - name: Install LLVM 22 (cached)
       uses: awalsh128/cache-apt-pkgs-action@v1
       with:
-        packages: llvm-22-dev libpolly-22-dev clang-22 ${{ inputs.packages }}
-        version: llvm22
+        packages: llvm-22-dev libpolly-22-dev clang-22 lld-22 ${{ inputs.packages }}
+        # Bumped whenever the base package set changes, so a cache entry resolved
+        # from the old set can never be restored in place of the new one.
+        version: llvm22-lld
 
     # mold is a far faster linker than ld; the compiler links libLLVM on every
     # build, so linking is a real chunk of wall-clock. make-default routes rustc's
     # cc linking through mold with no RUSTFLAGS, so it adds no sccache-key churn.
     # (Pinned to a tag like the action above; pin to a SHA to harden further.)
+    #
+    # make-default replaces the host `ld`, so it would otherwise also link the
+    # binaries prism itself emits. That link runs under ThinLTO, where the
+    # linker is the code generator and decides final layout, and its bytes are
+    # pinned by oracles. lld-22 above is what keeps it on the same LLVM the rest
+    # of the pipeline uses: prism selects it explicitly rather than inheriting
+    # whichever linker happens to own `ld` on the host.
     - name: Install mold linker
       uses: rui314/setup-mold@v1
       with:

@@ -21,6 +21,6 @@ contents:
 
 overrides:
   deb:
-    depends: [llvm-22, clang-22]
+    depends: [llvm-22, clang-22, lld-22]
   rpm:
-    depends: [llvm, clang]
+    depends: [llvm, clang, lld]

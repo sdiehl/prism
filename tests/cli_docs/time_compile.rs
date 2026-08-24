@@ -218,7 +218,15 @@ fn native_link_reports_direct_cc_work_and_reuses_runtime_objects() {
     let first_compile = count_field(first_link, "cc_compile_invocations");
     let first_links = count_field(first_link, "cc_link_invocations");
     let first_runtime_misses = count_field(first_link, "runtime_object_misses");
-    assert_eq!(first_probe, 1, "one toolchain-version probe is cold");
+    // Not an exact count: how many components a link resolves is a property of
+    // the platform, not of this program. Apple platforms take their SDK linker
+    // without asking, while elsewhere prism resolves the linker itself so the
+    // ThinLTO link cannot inherit whichever one happens to own `ld`. What every
+    // platform owes is that the probes happened and are accounted for below.
+    assert!(
+        first_probe >= 1,
+        "a cold process must probe the toolchain before linking"
+    );
     assert!(first_compile > 0, "native build must compile an object");
     assert_eq!(first_links, 1, "native build must invoke one final link");
     assert!(

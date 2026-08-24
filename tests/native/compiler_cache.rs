@@ -12,7 +12,7 @@ use prism::{
     SessionStats,
 };
 
-use crate::support::{require_cc, TempDir};
+use crate::support::{assert_same_binary, require_cc, TempDir};
 
 // The default worker count auto-detects host parallelism, so the sequential
 // arm of each byte-diff oracle must pin one worker explicitly.
@@ -200,7 +200,11 @@ fn warm_native_build_materializes_byte_identical_binary() {
     assert_eq!(second.bitcode_cache, NativeCacheStatus::Disabled);
     assert!(second.definition_hashes.is_none());
     assert_eq!(second.cache_explanation(), "linked artifact key matched");
-    assert_eq!(fs::read(&bin).unwrap(), cold);
+    assert_same_binary(
+        "warm link hit vs cold build",
+        &cold,
+        &fs::read(&bin).unwrap(),
+    );
     assert!(!bin.with_extension("bc").exists());
     let warm_run = Command::new(&bin).output().unwrap();
     let warm_trace = prism::ObservationTrace::from_process(
@@ -218,7 +222,11 @@ fn warm_native_build_materializes_byte_identical_binary() {
     fs::remove_file(&bin).unwrap();
     let parallel = build_on_report(&src, &roots, &bin, &parallel_cfg).unwrap();
     assert_eq!(parallel.cache, NativeCacheStatus::Hit);
-    assert_eq!(fs::read(&bin).unwrap(), cold);
+    assert_same_binary(
+        "parallel workers vs cold build",
+        &cold,
+        &fs::read(&bin).unwrap(),
+    );
     let parallel_run = Command::new(&bin).output().unwrap();
     assert_eq!(
         prism::ObservationTrace::from_process(
@@ -240,7 +248,11 @@ fn warm_native_build_materializes_byte_identical_binary() {
         relocation.cache_explanation(),
         "linked artifact key matched"
     );
-    assert_eq!(fs::read(&relocated).unwrap(), cold);
+    assert_same_binary(
+        "relocated output vs cold build",
+        &cold,
+        &fs::read(&relocated).unwrap(),
+    );
     assert_eq!(
         query_count(&tmp.store_root(), NATIVE_OBJECT_QUERIES),
         native_objects
@@ -259,7 +271,11 @@ fn warm_native_build_materializes_byte_identical_binary() {
     let semantic = build_on_report(&formatted_only, &roots, &bin, &cfg).unwrap();
     assert_eq!(semantic.cache, NativeCacheStatus::Hit);
     assert!(semantic.definition_hashes.is_some());
-    assert_eq!(fs::read(&bin).unwrap(), cold);
+    assert_same_binary(
+        "formatting-only edit vs cold build",
+        &cold,
+        &fs::read(&bin).unwrap(),
+    );
     assert_eq!(
         query_count(&tmp.store_root(), OPTIMIZED_SCC_QUERIES),
         optimized_sccs,
@@ -316,7 +332,7 @@ fn warm_native_build_materializes_byte_identical_binary() {
     let report = build_on_report(&changed, &roots, &bin, &cfg).unwrap();
     assert_eq!(report.cache, NativeCacheStatus::Disabled);
     let uncached = fs::read(&bin).unwrap();
-    assert_eq!(uncached, changed_cached);
+    assert_same_binary("cache disabled vs cache warm", &changed_cached, &uncached);
     let uncached_run = Command::new(&bin).output().unwrap();
     assert_eq!(
         prism::ObservationTrace::from_process(
@@ -417,7 +433,11 @@ fn typed_route_second_build_preserves_warm_cache_artifacts() {
         "an unchanged input must reuse the final artifact"
     );
     assert_eq!(warm_report.bitcode_cache, NativeCacheStatus::Disabled);
-    assert_eq!(fs::read(observed_bin).unwrap(), observed_bytes);
+    assert_same_binary(
+        "warm rebuild vs observed build",
+        &observed_bytes,
+        &fs::read(observed_bin).unwrap(),
+    );
 }
 
 #[test]
@@ -483,8 +503,16 @@ fn incremental_store_reaches_the_fresh_final_artifacts() {
     let incremental_bytes = fs::read(&incremental_bin).unwrap();
     let fresh_bytes = fs::read(&fresh_bin).unwrap();
     let parallel_bytes = fs::read(&parallel_bin).unwrap();
-    assert_eq!(incremental_bytes, fresh_bytes);
-    assert_eq!(parallel_bytes, fresh_bytes);
+    assert_same_binary(
+        "incremental store vs fresh store",
+        &fresh_bytes,
+        &incremental_bytes,
+    );
+    assert_same_binary(
+        "parallel workers vs fresh store",
+        &fresh_bytes,
+        &parallel_bytes,
+    );
 
     let run = |path: &Path| {
         let output = Command::new(path).output().unwrap();
@@ -556,9 +584,10 @@ fn sequential_and_parallel_scc_artifacts_are_identical() {
         query_bindings(&parallel.store_root(), CLOSURE_SUMMARY_QUERIES),
         "worker count must not alter closure summary identities"
     );
-    assert_eq!(
-        fs::read(sequential_bin).unwrap(),
-        fs::read(parallel_bin).unwrap()
+    assert_same_binary(
+        "sequential SCC backend vs parallel SCC backend",
+        &fs::read(sequential_bin).unwrap(),
+        &fs::read(parallel_bin).unwrap(),
     );
 }
 
@@ -709,7 +738,11 @@ fn effectful_build_publishes_no_legacy_effect_queries_and_retires_stale_facts() 
     assert_eq!(second_report.cache, NativeCacheStatus::Hit);
     assert_eq!(second_report.bitcode_cache, NativeCacheStatus::Disabled);
     let second = Command::new(&first_bin).output().unwrap();
-    assert_eq!(fs::read(&first_bin).unwrap(), first_bytes);
+    assert_same_binary(
+        "session warm rebuild vs first build",
+        &first_bytes,
+        &fs::read(&first_bin).unwrap(),
+    );
     assert_eq!(second.stdout, first.stdout);
     assert_eq!(second.stderr, first.stderr);
     assert_eq!(second.status.code(), first.status.code());
@@ -921,7 +954,11 @@ fn session_semantic_hit_matches_cold_native_build() {
     fs::remove_file(&bin).unwrap();
     let second = build_on_report(&formatted, &roots, &bin, &cfg).unwrap();
     assert_eq!(second.cache, NativeCacheStatus::Disabled);
-    assert_eq!(fs::read(&bin).unwrap(), cold);
+    assert_same_binary(
+        "session semantic hit vs cold build",
+        &cold,
+        &fs::read(&bin).unwrap(),
+    );
     assert_eq!(
         session.stats(),
         SessionStats {
