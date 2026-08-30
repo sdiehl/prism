@@ -560,7 +560,11 @@ Indexing (`a[i]`, `a[i] := v`) is resolved the same way the `print`/interpolatio
 
 A bracket with two or more indices lowers to a list-keyed index for the tensor's strided lookup. A receiver whose type is still an unsolved existential when first synthesized (a `var` indexed before its initializer fixes its state type) defers to one pass at the end of the declaration, after the initializer has constrained it. Concrete indexing is a closed, wired dispatch rather than a class or type-system extension; the desugar targets are `index` and `index_set`.
 
-Effect-row inference is **principal**: each declaration infers its most general row from its body alone. The row unifier discovers every label on its own (a **row** is a function's effect set; see [types and kinds](./spec.md#types-and-kinds)) from direct performs, applied effect-carrying callees, builtin rows, and `mask`. At a call it adds the callee's row to the caller's **ambient row** (the effect set accumulated for the body so far), and a handler removes the operations it discharges. The row alone determines the effect set: there is no separate set-pass seed and no subset reconciliation against one.
+Local type generalization follows a value restriction at the checker/elaborator seam. A syntactic value (a literal, variable, lambda, tuple, unboxed tuple, or list whose elements are values; annotations are transparent) whose free names are all top-level may generalize its free type variables; checking marks that binding in the HIR, and elaboration expands the value at each use so each occurrence receives its own instantiation. A computation, or a value closed over an enclosing local, keeps one monotype and becomes an ordinary source mismatch if two uses demand different types. Row variables may still generalize in either case. At declaration generalization, unconstrained row existentials survive only when a caller can reach them through the outer function row or a parameter type; slack rows nested only in a return or constant default to empty.
+
+Under-applied constructor annotations are saturated before their schemes are exported. The saturation memo spans one complete signature, so identical constructor-and-argument prefixes in its parameters and result receive the same omitted phantom or row arguments. `Map(k, v) -> Map(k, v)` therefore exports one shared brand variable rather than the impossible claim that it converts between two unrelated brands.
+
+Effect-row inference is **principal**: each declaration infers its most general row from its body alone. The row unifier discovers every label occurrence on its own (a **row** is a multiset of handler obligations; see [types and kinds](./spec.md#types-and-kinds)) from direct performs, applied effect-carrying callees, builtin rows, and `mask`. At a call it joins the callee's row into the caller's **ambient row**, and a handler removes one occurrence of the effect it discharges. The row alone determines those obligations: there is no separate set-pass seed and no subset reconciliation against one.
 
 A syntactic **set-pass** (a pass that computes a _set_ of operation labels by a call-graph fixpoint) still runs, but only to feed the syntactic purity checks: it confirms a `konst` declaration and a declared-pure instance method perform nothing. It no longer seeds the row. After lowering, `reconcile_effects` checks the operations the lowered code actually performs against the inferred row, and the interpreter parity oracle (see [verification](#verification)) is the final backstop. Effect lowering computes its own per-function **latent** operation set by an independent call-graph fixpoint (see [effect lowering](#effect-lowering)), so the two phases no longer share the set-pass result.
 
@@ -857,7 +861,7 @@ Core exists at two moments, and only one of them names a definition. **Pre-optim
 
 `prism dump core-identity` publishes that surface. It renders the user program's pre-optimizer core as deterministic JSON, tagged with the same node names the hasher folds, and adds the three facts the tree alone does not carry: each definition's dictionary arity and its elaboration metadata (generalized type, principal effect row, `fip` keyword, borrow mask), the recursive-group partition the hasher works one component at a time, and the content hash of every definition outside the export that the export refers to. Those last two are what make it self-contained: a group's hashes are a function of its members plus its dependencies' hashes, so the artifact carries exactly that closure and nothing about the prelude it was compiled against.
 
-The export is an observation, never a participant. It introduces no core node, changes no encoding, and is computed only when asked, so dumping it cannot perturb a hash; the [differential gate](#verification) asserts that directly, alongside the property it exists for. A Prism program reads the artifact, re-encodes each definition in the `prism-core-hash-v2` byte scheme, re-derives the canonical order inside each recursive group, and recomputes every hash, which must equal what `prism dump core-hash` prints. Distinguish what that does and does not establish: the reader recomputes the encoding and the folding from structure, and no definition's own digest appears in the artifact, so it cannot echo an answer; but the metadata rendering, the group partition, and the dependency digests are consumed rather than re-derived, and the encoder's byte scheme was transcribed rather than independently specified. It is a drift gate on the scheme, and a completeness gate on the export, not a second proof that the scheme is the right one.
+The export is an observation, never a participant. It introduces no core node, changes no encoding, and is computed only when asked, so dumping it cannot perturb a hash; the [differential gate](#verification) asserts that directly, alongside the property it exists for. A Prism program reads the artifact, re-encodes each definition in the `prism-core-hash-v2` byte scheme, re-derives the canonical indexing inside each recursive group, and recomputes every hash, which must equal what `prism dump core-hash` prints. Distinguish what that does and does not establish: the reader recomputes the encoding and the folding from structure, and no definition's own digest appears in the artifact, so it cannot echo an answer; but the metadata rendering, the group partition, and the dependency digests are consumed rather than re-derived, and the encoder's byte scheme was transcribed rather than independently specified. It is a drift gate on the scheme, and a completeness gate on the export, not a second proof that the scheme is the right one.
 
 ## 8. The High-Level Intermediate Representation {#the-checked-hir}
 
@@ -865,19 +869,19 @@ Between type inference and elaboration sits one boundary artifact, the **checked
 
 At fifty thousand feet, the front end does two separable jobs. It first **decides**: lexing, parsing, desugaring, and name resolution turn source text into a sugar-free tree of canonical symbols, and type-and-effect inference then resolves every choice the surface left implicit, which record a `.f` names, which instance discharges a constraint, which concrete numeric type a bare literal takes, what type each node has. It then **emits**: elaboration walks that same tree and writes out the [call-by-push-value core](#the-core-calculus), turning each recorded decision into a concrete projection, dictionary, or builtin. The HIR is the seam between the two, the point at which every decision has been made and nothing has yet been lowered. Everything above it is inference, which is hard and needs the whole type system; everything below it is transcription, which is mechanical and needs none of it. Freezing the decisions into one artifact at that seam is what lets the deciding and the emitting be built, proof-checked, dumped, and cached as independent halves.
 
-Concretely, the HIR is not a new tree. It is the desugared surface tree `Expr<Core>` (the sugar-free phase whose `NodeId`s are assigned just after desugar) carried unchanged, plus a dense side value keyed by that `NodeId`. What flows _in_ from checking is five families of decision, one lookup per node: the resolution a field access, unboxed projection, or record-update path landed on; the dictionary evidence discharging each constrained call; the concrete numeric lane a literal or operator fixed to; the node's **zonked**[^zonk] type; and the operation-local residual proof for each handler. What flows _out_ to core is the image of each: a resolution becomes a constructor projection or rebuild, an evidence entry becomes a dictionary handed to a call (and a method call a field read on it), a lane selects the concrete arithmetic builtin, the type drives the type-directed lowerings (`print` and interpolation, exponentiation, indexing), and a handler residual records exactly which operations or opaque effects forward and remain in the row. Because each is a lookup and never a fresh judgment, elaboration makes no type-system decision of its own, the property the rest of this section rests on.
+Concretely, the HIR is not a new tree. It is the desugared surface tree `Expr<Core>` (the sugar-free phase whose `NodeId`s are assigned just after desugar) carried unchanged, plus a dense side value keyed by that `NodeId`. What flows _in_ from checking is six families of decision, one lookup per node: the resolution a field access, unboxed projection, or record-update path landed on; the dictionary evidence discharging each constrained call; the concrete numeric lane a literal or operator fixed to; the node's **zonked**[^zonk] type; the operation-local residual proof for each handler; and a marker on a local value whose type was generalized. What flows _out_ to core is the image of each: a resolution becomes a constructor projection or rebuild, an evidence entry becomes a dictionary handed to a call (and a method call a field read on it), a lane selects the concrete arithmetic builtin, the type drives the type-directed lowerings (`print` and interpolation, exponentiation, indexing), a handler residual records exactly which operations or opaque effects forward and remain in the row, and a generalized local value is expanded independently at each use instead of forced into Core's monomorphic `Bind`. Because each is a lookup and never a fresh judgment, elaboration makes no type-system decision of its own, the property the rest of this section rests on.
 
 [^zonk]: **Zonk** is jargon from the Glasgow Haskell Compiler, where zonking is the pass that walks an inferred type and replaces every solved (filled-in) unification metavariable with the type it was unified to, flattening the mutable inference variables into their final form. The word itself is onomatopoeic, a comic-book sound effect adopted with characteristic GHC whimsy and no deeper meaning; Prism keeps it because it names the same operation.
 
 ### 8.1 The Checked Artifact {#the-checked-artifact}
 
-Those five families live in one value, `NodeFacts`, dense by `NodeId`; the resolution form is `NodeRes`, spanning field access, unboxed projection, and record-update rebuild chains. Elaboration never sees `NodeFacts` directly; it reads a `CheckedHir`, built only by `build` (whole programs) or `build_for_expr` (the REPL's re-inferred expressions), through five accessors (`res`, `evidence`, `lane`, `node_type`, `handler_residual`), the sole channel by which a checked decision reaches elaboration. A standalone expression carries a complete fact set of its own: because program and prompt `NodeId`s share a numeric range, no missing prompt fact may fall through to the resident program's table.
+Those six families live in one value, `NodeFacts`, dense by `NodeId`; the resolution form is `NodeRes`, spanning field access, unboxed projection, and record-update rebuild chains. Elaboration never sees `NodeFacts` directly; it reads a `CheckedHir`, built only by `build` (whole programs) or `build_for_expr` (the REPL's re-inferred expressions), through six semantic accessors (`res`, `evidence`, `lane`, `node_type`, `handler_residual`, `poly_let`), the sole channel by which a checked decision reaches elaboration. A standalone expression carries a complete fact set of its own: because program and prompt `NodeId`s share a numeric range, no missing prompt fact may fall through to the resident program's table.
 
-Two of the five families are stored but never judged: the numeric lane and the zonked node type. Both are zonked, in the sense that every solved existential has been substituted, but zonking is substitution, not a promise of existential-freedom, and an under-determined site (a numeric literal before defaulting, a node the elaborator's own use-site filter still pins down) legitimately keeps an unsolved existential in either family. Resolution, evidence, and handler residuals are independently checked by the HIR lint before a downstream pass may rely on them.
+Three of the six families are stored but not independently judged: the numeric lane, the zonked node type, and the polymorphic-local marker. The first two are zonked, in the sense that every solved existential has been substituted, but zonking is substitution, not a promise of existential-freedom, and an under-determined site (a numeric literal before defaulting, a node the elaborator's own use-site filter still pins down) legitimately keeps an unsolved existential in either family. Rechecking the local marker would repeat the checker's value-restriction and closedness judgment rather than verify a compact witness. Resolution, evidence, and handler residuals are independently checked by the HIR lint before a downstream pass may rely on them.
 
 ### 8.2 The Lint {#the-hir-lint}
 
-Both constructors route through `lint_hir`, an independent proof-checker that runs unconditionally in debug and test builds and panics on any violation, because a violation there is a compiler bug, never a user error. It is proof checking, not proof search: each judgment re-verifies one stored fact against the live constructor, instance, class, and effect environment rather than re-inferring it. A resolution fact must name a real constructor, its recorded arity must match the constructor's declared arity, and its field index must be in bounds; dictionary evidence must name a real instance (`Dict::Global`) or a real class with an in-bounds superclass projection (`Dict::Super`), recursing through `Dict::Tuple`. The one evidence form it skips is `Dict::Param`, a hidden dictionary parameter: its binder is not in per-node scope, and judging it would mean re-deriving the enclosing function's dictionary layout, which is inference, not checking. A handler residual fact must be paired with a handler node, use canonical operation/effect sets, name declared operations or builtin effects, and forward only operations that remain residual. The lane and type families are stored but not independently asserted.
+Both constructors route through `lint_hir`, an independent proof-checker that runs unconditionally in debug and test builds and panics on any violation, because a violation there is a compiler bug, never a user error. It is proof checking, not proof search: each judgment re-verifies one stored fact against the live constructor, instance, class, and effect environment rather than re-inferring it. A resolution fact must name a real constructor, its recorded arity must match the constructor's declared arity, and its field index must be in bounds; dictionary evidence must name a real instance (`Dict::Global`) or a real class with an in-bounds superclass projection (`Dict::Super`), recursing through `Dict::Tuple`. The one evidence form it skips is `Dict::Param`, a hidden dictionary parameter: its binder is not in per-node scope, and judging it would mean re-deriving the enclosing function's dictionary layout, which is inference, not checking. A handler residual fact must be paired with a handler node, use canonical operation/effect sets, name declared operations or builtin effects, and forward only operations that remain residual. The lane, type, and polymorphic-local families are stored but not independently asserted.
 
 ## 9. Elaborator {#elaboration}
 
@@ -977,6 +981,8 @@ The witness-carrying typed implementation is the sole lowering authority. The fo
 | whole-program free monad          | the effect escapes static tracking or no sound selective split exists           | every effectful continuation as heap-allocated `EPure`/`EOp`  |
 
 They are six compilations of that one mechanism, differing in how much of `k` they make manifest, from nothing to heap-allocated trees. A check then confirms no effect construct survives. The chosen strategy is a pure cost decision[^cost], never observable in output, and it is pinned: `prism dump tier` prints a program's classification, and a committed manifest records the tier of every corpus program, so a refactor that silently defeats a fast path corpus-wide fails the perf gate by name rather than shipping as an invisible performance collapse. A tier change in either direction updates the manifest loudly, like a snapshot.
+
+Two measurement controls perturb the search without changing its contract. `PRISM_EFFECT_TIER` sets a floor, skipping every cheaper rung; the experimental `PRISM_EFFECT_EXCLUDE` accepts a comma- or whitespace-separated list of rung names and removes only those engines, so their marginal value can be measured against the next applicable rung. The ordinary default excludes nothing, and parity gates require every forced route to preserve output.
 
 Before the cascade, arena preparation is followed by a bounded convention pass that separates statically named higher-order callees by the exact mask-aware thunk signatures their direct calls demand. It preserves schemes and call instantiations, leaves unknown and first-class uses on the conservative original, prunes unreachable variants, and re-verifies the arena-prepared program. One effectful callback use therefore cannot change the convention paid by every pure use of the same combinator.
 
@@ -1096,7 +1102,9 @@ The bug this closes was quiet for a reason worth naming, because it generalizes.
 
 The LLVM backend implements `Isa` over inkwell, emitting LLVM IR that `clang` compiles and links against the runtime. This is the default native path.
 
-Prism runs no LLVM optimization passes itself: it verifies the module, writes bitcode, and hands the rest to `clang -O2 -flto=thin`, compiling the emitted bitcode and the C runtime in one invocation so ThinLTO inlines the runtime into the generated code. Every emitted function carries `nounwind` (Prism has no exceptions and this backend emits no invokes or landingpads), which lets the `-O2` pipeline drop unwind tables and treat each call as non-throwing. Three knobs tune this last step, all distinct from the Core-to-Core `-O` of [optimization](#optimization): `--backend-opt <0|1|2|3|s|z>` (or the `PRISM_BACKEND_OPT` env var) sets the `clang -O` level, defaulting to `2`; `PRISM_CC` picks the compiler (default `clang`); and `PRISM_CC_FLAGS` appends arbitrary flags after the defaults, so a trailing `-O0` wins or `-march=native`/`-g` can be added. ThinLTO stays on at every level, since it is what folds the runtime into the program.
+By default Prism runs no LLVM optimization passes itself: it verifies the module, writes bitcode, and hands the rest to `clang -O2 -flto=thin`, compiling the emitted bitcode and the C runtime so ThinLTO can inline the runtime into generated code. Every emitted function carries `nounwind` (Prism has no exceptions and this backend emits no invokes or landingpads), which lets the `-O2` pipeline drop unwind tables and treat each call as non-throwing. The backend knobs are distinct from the Core-to-Core `-O` of [optimization](#optimization): `--backend-opt <0|1|2|3|s|z>` (or `PRISM_BACKEND_OPT`) sets the backend pipeline level, defaulting to `2`; `PRISM_CC` picks the compiler/linker driver (default `clang`); and `PRISM_CC_FLAGS` appends arbitrary host-toolchain flags. ThinLTO stays on at every level in the default path, since it is what folds the runtime into the program.
+
+`--direct-object` (or `PRISM_DIRECT_OBJECT=1`) is the development exception. Prism loads each emitted SCC bitcode module through the already-linked LLVM target machine, runs the selected LLVM pipeline, writes a native object in-process, and invokes `cc` only for the final non-LTO platform link against cached non-LTO runtime objects. It preserves the SCC bitcode cache boundary and changes only cost, but gives up cross-module and runtime ThinLTO; `--backend-opt 0` is therefore the intended low-latency pairing, while release builds retain the default ThinLTO path.
 
 `StoreGet`, `StorePut`, and `StoreHas` are interpreter-only. The native backend rejects them with a diagnostic instead of emitting unresolved runtime calls because the runtime exposes no store ABI.
 
@@ -1380,7 +1388,7 @@ A small integer is an immediate, `(n << 1) | 1`. An operation whose fixed-width 
 
 ### 14.7 Strings {#strings}
 
-A string is a cell tagged `0x53545200` whose field words hold its UTF-8 bytes inline, length-prefixed by the arity word and NUL-terminated for C interop. A string the program builds at run time is a counted cell, so the leak counter (see [instrumentation](#instrumentation)) accounts for it like any other allocation. A source literal is not: each distinct spelling is emitted once into the image as a static cell that every mention shares, marked in its count word so retain and release leave it alone and no uniqueness fast path ever mistakes it for unique. A literal inside a loop therefore allocates nothing, and static cells stay outside the live-cell balance by construction. Two indexing families coexist: `char_at`, `substring`, and `str_len` work in Unicode codepoints, walking the UTF-8 encoding (and so are O(n)), while `byte_at` and `byte_len` give O(1) raw-byte access for a scanner or hash.
+A string is a cell tagged `0x53545200` whose field words hold its UTF-8 bytes inline, length-prefixed by the arity word and NUL-terminated for C interop. A string the program builds at run time is a counted cell, so the leak counter (see [instrumentation](#instrumentation)) accounts for it like any other allocation. A source literal is not: each distinct spelling is emitted once into the image as a static cell that every mention shares, marked in its count word so retain and release leave it alone and no uniqueness fast path ever mistakes it for unique. A literal inside a loop therefore allocates nothing, and static cells stay outside the live-cell balance by construction. Two indexing families coexist: `char_at`, `substring`, and `str_len` work in Unicode codepoints, walking the UTF-8 encoding (and so are `O(n)`), while `byte_at` and `byte_len` give `O(1)` raw-byte access for a scanner or hash. Source lint `L0109` reports a recursive scanner that calls `char_at` or `substring` at a computed position, since repeatedly walking from the start makes the scan quadratic; byte indexing is the constant-time replacement when raw UTF-8 is the intended input.
 
 Slicing does not copy. `str_slice` returns a window: a small cell tagged `0x53565700` holding a counted reference to the parent string and a byte offset and length into it, so a slice of three megabytes costs what a slice of three bytes costs and the parent stays alive exactly as long as some window still reads through it. A window is an ordinary counted cell, so the collector, promotion, and reuse paths need no special case for it, and windows never chain: slicing a window re-aims at the same parent rather than stacking a second indirection. Two properties follow from the representation and are enforced where the window is built. A window is taken only when both endpoints sit on a codepoint boundary, which is an O(1) test on the two bytes; a span that would split a character falls back to copying, which repairs the split exactly as a byte-level slice always did. So every window is itself well-formed UTF-8 and the codepoint family works through one unchanged. The bytes are not NUL-terminated, since they sit in the middle of someone else's payload, so the conversion to a C string is the one place that materializes a copy.
 
@@ -1432,7 +1440,7 @@ Incremental compilation has its own oracle family: fresh, warm, edit-built, sequ
 
 A layout test pins the cell ABI: it reads the runtime source at compile time, parses the `#define`s for the tag offset, the header size, and the reserved string and bignum tags, and asserts each equals the constant the code generator emits against, so the runtime and the backends cannot drift apart without failing the build.
 
-A static bar is enforced across the tree. It carries no `todo!`, `unimplemented!`, `FIXME`, or `allow(dead_code)` markers (a CI grep rejects them), and every `unsafe` block lives behind an audited local allow with a safety comment. `cargo clippy` runs clean with the `pedantic`, `nursery`, and `cargo` groups as warnings under `-D warnings`, and the C runtime compiles under `-Werror` with a broad warning set plus `clang-tidy`. Continuous integration (`.github/workflows/ci.yml`) runs on pull requests, pushes to `main`, and manual dispatch: formatting, the two lint passes, the full test suite (the parity and performance gates included), a re-run of the native parity corpus with the C runtime built under AddressSanitizer and UndefinedBehaviorSanitizer, the formatter checking its own corpus (`prism fmt --check`), a `PRISM_CORE_LINT` compile of every example, the WebAssembly playground (lint and type-check), the MLIR backend's parity test, and the Lean model (`lake build --wfail`).
+A static bar is enforced across the tree. It carries no `todo!`, `unimplemented!`, `FIXME`, or `allow(dead_code)` markers (a CI grep rejects them), and every `unsafe` block lives behind an audited local allow with a safety comment. `cargo clippy` runs clean with the `pedantic`, `nursery`, and `cargo` groups as warnings under `-D warnings`, and the C runtime compiles under `-Werror` with a broad warning set plus `clang-tidy`. Continuous integration (`.github/workflows/ci.yml`) runs on pull requests, pushes to `main`, and manual dispatch: formatting, the two lint passes, the full test suite (the parity and performance gates included), a re-run of the native parity corpus with the C runtime built under AddressSanitizer and UndefinedBehaviorSanitizer, the formatter checking its own corpus (`prism fmt --check`), a `PRISM_CORE_LINT` compile of every example, the WebAssembly playground (lint and type-check), the MLIR backend's parity test, and the default Lean targets under both `lake build --wfail` and `lake lint`.
 
 ### 15.1 The Lean Model {#the-lean-model}
 
@@ -1448,7 +1456,9 @@ The model's central theorem connects the two. A big-step natural semantics speci
 
 Determinism, progress, and effect-safety therefore rest on `propext` and `Quot.sound` alone, with `Classical.choice` confined to the float-formatting path.
 
-The trusted stack is therefore explicit: the Lean 4 kernel; the hand-written Core JSON decoder; and the correspondence between the compiler's serialized Core and the model's syntax. The mechanized result covers the Core machine and its stated theorems, not the typechecker algorithm. `Classical.choice` enters only through float evaluation; the remaining axioms are `propext` and `Quot.sound` as reported above.
+The trusted stack is therefore explicit: the Lean 4 kernel; the hand-written Core JSON decoder; and the correspondence between the compiler's serialized Core and the model's syntax. `Classical.choice` enters only through float evaluation; the remaining axioms are `propext` and `Quot.sound` as reported above.
+
+A separate `Tc` model is a typechecker proof scaffold and sits in the default `lake build --wfail` target. Its concrete layer is `sorry`-free: it proves canonical row normalization as a sorted multiset, soundness of kind checking, and preservation plus idempotence of substitution under their stated hypotheses. It does **not** yet prove the Rust typechecker sound. Unification, expression inference, and the Rust-certificate boundary remain throwing stubs or explicit `.assumed` predicates, so their current soundness theorems are vacuous or hold by construction; replacing a stub or refining a placeholder deliberately resurfaces the corresponding proof obligation.
 
 ### 15.2 The Model as a Differential Oracle {#the-model-as-a-differential-oracle}
 
@@ -1491,11 +1501,11 @@ Two boundaries deserve emphasis. First, the gate cache never keys on Prism's own
 
 ## 16. Optimization {#optimization}
 
-The mid-level Core-to-Core tier is a composable pass framework in the spirit of GHC's `[CoreToDo]` pipeline. One shared traversal (`Rewrite`/`Visit`) replaces the hand-rolled Core walkers, so newtype erasure, dictionary specialization, free-variable collection, call collection, and substitution all ride a single visitor (the canonical hasher from [architecture](#architecture) and the tail-recursion classifier from [reference counting and FBIP reuse](#reference-counting-and-fbip-reuse) stay bespoke by design). Each pass is a `CorePass` keyed by a `PassStage`, and the whole pipeline runs from one ordered, level-keyed list through a single `opt::run` entry.
+The mid-level Core-to-Core tier is a composable pass framework in the spirit of GHC's `[CoreToDo]` pipeline. One shared traversal (`Rewrite`/`Visit`) replaces the hand-rolled Core walkers, so newtype erasure, dictionary and higher-order specialization, free-variable collection, call collection, and substitution all ride a single visitor (the canonical hasher from [architecture](#architecture) and the tail-recursion classifier from [reference counting and FBIP reuse](#reference-counting-and-fbip-reuse) stay bespoke by design). Each pass is a `CorePass` keyed by a `PassStage`, and the whole pipeline runs from one ordered, level-keyed list through a single `opt::run` entry.
 
 The pipeline spans two stages around effect lowering, so passes are not freely reorderable across it. **Pre-lowering** passes run in the front end on the elaborated core (see [the core calculus](#the-core-calculus)); **late** passes run on the verified typed lowered Core, after [effect lowering](#effect-lowering) has fixed the fusion strategy. The split is important for performance. The simplifier runs in the late stage on purpose: run before effect lowering it rewrote the Core shapes the var/State fusion analysis depends on and degraded that fusion (a regression bisected to copy-propagation), so it runs after lowering, where it cannot defeat the fusion.
 
-The pipeline currently implements six passes, given below in pipeline order; each subsection heading is the name `--passes` uses. Three controls switch a pass on and off ([controlling the pipeline](#explicit-pass-lists)): the `-O` level enables passes in groups ([optimization levels](#optimization-levels)), a `--no-<pass>` flag subtracts a single pass from that pipeline, and `--passes` replaces the level with an exact ordered list. Each example shows the same fragment before and after the pass, with the others held off so the rewrite is the only change.
+The pipeline currently implements seven passes, given below in pipeline order; each subsection heading is the name `--passes` uses. Three controls switch a pass on and off ([controlling the pipeline](#explicit-pass-lists)): the `-O` level enables passes in groups ([optimization levels](#optimization-levels)), a `--no-<pass>` flag subtracts a single pass from that pipeline, and `--passes` replaces the level with an exact ordered list. Each example shows the same fragment before and after the pass, with the others held off so the rewrite is the only change.
 
 ### 16.1 Fuse {#pass-fuse}
 
@@ -1572,7 +1582,47 @@ render(7)
 
 {{#endtabs }}
 
-### 16.4 Simplify (Gentle Simplifier) {#pass-simplify}
+### 16.4 HoSpecialize {#pass-ho-specialize}
+
+- **Stage:** pre-lowering
+- **Levels:** `-O1`, `-O2`
+- **Disable:** `--no-ho-spec` (or `PRISM_NO_HO_SPEC`)
+
+Higher-order specialization finds value parameters that reach a force-and-apply, directly or through another higher-order function. At a call site that supplies a closed eta-wrapper around one top-level function, it clones the callee with that callable fixed, removes the callable parameter, and turns the indirect application into a direct call. Recursive calls reuse the same clone, so a fold, traversal, or optic combinator stops allocating and applying the same closure on every step.
+
+The pass is deliberately bounded and pre-lowering-aware. It makes at most sixteen callable variants of one definition and requires a ground type-and-row instantiation; an identical fixed-callable set reuses a clone only at that exact instantiation, while another ground instantiation may receive its own clone within the same bound. It leaves any handler installer or function that can forward into one unchanged: effect lowering recognizes the thunk boundary those functions install around, so cloning it away would make a lowering tier observable. A declined site remains an ordinary call.
+
+{{#tabs }}
+
+{{#tab name="Before" }}
+
+```prism,ignore
+fn walk(step, xs) =
+  match xs of
+    Nil => 0
+    Cons(x, rest) => step(x) + walk(step, rest)
+
+walk(\(x) -> score(x), values)
+```
+
+{{#endtab }}
+
+{{#tab name="After" }}
+
+```prism,ignore
+fn walk_hs1(xs) =
+  match xs of
+    Nil => 0
+    Cons(x, rest) => score(x) + walk_hs1(rest)
+
+walk_hs1(values)
+```
+
+{{#endtab }}
+
+{{#endtabs }}
+
+### 16.5 Simplify (Gentle Simplifier) {#pass-simplify}
 
 - **Stage:** late
 - **Levels:** `-O1`, `-O2`
@@ -1605,7 +1655,7 @@ match p of
 
 {{#endtabs }}
 
-### 16.5 Inline {#pass-inline}
+### 16.6 Inline {#pass-inline}
 
 - **Stage:** late
 - **Levels:** `-O1`, `-O2`
@@ -1636,7 +1686,7 @@ fn main() = println(21 * 2)
 
 {{#endtabs }}
 
-### 16.6 Cse {#pass-cse}
+### 16.7 Cse {#pass-cse}
 
 - **Stage:** late
 - **Levels:** `-O1`, `-O2`
@@ -1665,22 +1715,22 @@ fn f(x, y) = let t = x * y in t + t
 
 {{#endtabs }}
 
-### 16.7 Optimization Levels {#optimization-levels}
+### 16.8 Optimization Levels {#optimization-levels}
 
 The `-O`/`--opt` flag selects a level; the default is `-O1` and a bare `-O` is the highest. A level is a named pipeline, from which `--no-<pass>` can then subtract individual passes ([controlling the pipeline](#explicit-pass-lists)).
 
 `-O0` is representation only. It runs just [`EraseNewtypes`](#pass-erase-newtypes), the one pass both backends require, and nothing more, so the compiled core stays a direct image of the elaborated program. This is the level to reach for when reading `dump core` or bisecting whether an optimization caused a change.
 
-`-O1`, the default, is the real optimization level. On top of `EraseNewtypes` it runs [`Specialize`](#pass-specialize) before effect lowering and, after it, the late pipeline [`Simplify`](#pass-simplify) -> [`Inline`](#pass-inline) -> [`Simplify`](#pass-simplify) -> [`Cse`](#pass-cse) -> [`Simplify`](#pass-simplify): dictionary specialization, then a gentle simplifier brought to a fixed point around a bounded inliner and scalar CSE. This is the GHC simplify/inline/simplify shape, and it is what the compiler runs unless told otherwise.
+`-O1`, the default, is the real optimization level. On top of `EraseNewtypes` it runs [`Specialize`](#pass-specialize) and [`HoSpecialize`](#pass-ho-specialize) before effect lowering and, after it, the late pipeline [`Simplify`](#pass-simplify) -> [`Inline`](#pass-inline) -> [`Simplify`](#pass-simplify) -> [`Cse`](#pass-cse) -> [`Simplify`](#pass-simplify): dictionary and constant-callable specialization, then a gentle simplifier brought to a fixed point around a bounded inliner and scalar CSE. This is the GHC simplify/inline/simplify shape, and it is what the compiler runs unless told otherwise.
 
 `-O2`, the highest level, adds [`Fuse`](#pass-fuse) at the start of the pre-lowering stage and a second `Inline` -> `Simplify` round before `Cse`. Fusion collapses recognized pull-sequence pipelines before effect lowering changes their shape; the extra inlining round flattens two-hop wrapper chains exposed by the first. The exact pipeline is:
 
 ```text
-Fuse -> EraseNewtypes -> Specialize,
+Fuse -> EraseNewtypes -> Specialize -> HoSpecialize,
 then Simplify -> Inline -> Simplify -> Inline -> Simplify -> Cse -> Simplify
 ```
 
-### 16.8 Controlling the Pipeline {#explicit-pass-lists}
+### 16.9 Controlling the Pipeline {#explicit-pass-lists}
 
 Below the `-O` level, two mechanisms drive the passes directly. The `-O`/`--opt`, `--passes`, and `--no-<pass>` flags are global, so they apply to building, running, and `dump core` alike.
 
@@ -1690,10 +1740,11 @@ A `--no-<pass>` flag subtracts a single pass from whatever pipeline is otherwise
 prism PROGRAM -O1 --no-inline             # the -O1 pipeline, minus Inline
 prism PROGRAM -O1 --no-inline --no-cse    # ...minus Inline and Cse
 prism PROGRAM --no-specialize             # default -O1, minus Specialize
+prism PROGRAM --no-ho-spec                # default -O1, minus HoSpecialize
 prism dump core PROGRAM -O0 --no-erase-newtypes   # the raw elaborated core, nothing run
 ```
 
-`--no-specialize` is the flag form of the `PRISM_NO_SPECIALIZE` environment variable; the two are equivalent and combine. `--no-erase-newtypes` is honored but rarely wise, since both backends assume newtype erasure has run.
+`--no-specialize` and `--no-ho-spec` are the flag forms of `PRISM_NO_SPECIALIZE` and `PRISM_NO_HO_SPEC`; each disables only its own specialization pass. `--no-erase-newtypes` is honored but rarely wise, since both backends assume newtype erasure has run.
 
 `--passes` instead replaces the level outright with an explicit, ordered list, the LLVM `opt -passes=` / GHC `[CoreToDo]` analogue; it is mutually exclusive with `-O`. The spec names the two stages around effect lowering:
 
@@ -1701,11 +1752,11 @@ prism dump core PROGRAM -O0 --no-erase-newtypes   # the raw elaborated core, not
 --passes '[pre:<names>][;late:<names>]'
 ```
 
-`<names>` is a comma-separated list in run order; a bare list with no marker is the pre stage. The pre passes are `EraseNewtypes` and `Specialize`; the late passes are `Simplify`, `Inline`, and `Cse`. Each section is exactly the passes named, with no level defaults filled in, so explicit means explicit. The `-O1` pipeline written out in full, and a pre-only run that stops after specialization:
+`<names>` is a comma-separated list in run order; a bare list with no marker is the pre stage. The pre passes are `Fuse`, `EraseNewtypes`, `Specialize`, and `HoSpecialize`; the late passes are `Simplify`, `Inline`, and `Cse`. Each section is exactly the passes named, with no level defaults filled in, so explicit means explicit. The `-O1` pipeline written out in full, and a pre-only run that stops after specialization:
 
 ```console
-prism PROGRAM --passes 'pre:EraseNewtypes,Specialize;late:Simplify,Inline,Simplify,Cse,Simplify'
-prism dump core PROGRAM --passes 'pre:EraseNewtypes,Specialize'
+prism PROGRAM --passes 'pre:EraseNewtypes,Specialize,HoSpecialize;late:Simplify,Inline,Simplify,Cse,Simplify'
+prism dump core PROGRAM --passes 'pre:EraseNewtypes,Specialize,HoSpecialize'
 ```
 
 A `--no-<pass>` flag still applies on top of an explicit list, filtering it:
@@ -1714,33 +1765,35 @@ A `--no-<pass>` flag still applies on top of an explicit list, filtering it:
 prism PROGRAM --passes 'late:Simplify,Inline,Simplify' --no-inline   # Inline dropped from the list
 ```
 
-The parser rejects an unknown name (suggesting the closest known one), a pass placed in the wrong stage, a pre section that orders `Specialize` before `EraseNewtypes`, and an empty spec.
+The parser rejects an unknown name (suggesting the closest known one), a pass placed in the wrong stage, a pre section that orders `Specialize` before `EraseNewtypes` or `HoSpecialize` before `Specialize`, and an empty spec.
 
-### 16.9 Controlling LLVM Codegen {#controlling-llvm-codegen}
+### 16.10 Controlling LLVM Codegen {#controlling-llvm-codegen}
 
 The `-O` level and the controls above tune the Core-to-Core optimizer, which runs identically on both backends. A separate set of knobs tunes the native backend's own codegen, the last step where the emitted bitcode and the C runtime are compiled and linked. They are independent of the Core `-O`: a program can pair an aggressive Core pipeline with a light backend, or the reverse, for granular control of the generated code.
 
-Prism runs no LLVM optimization passes in process. It verifies the module, writes bitcode, and hands the rest to `clang`, which compiles the bitcode and the C runtime in one `-flto=thin` invocation so ThinLTO inlines the runtime into the generated code. ThinLTO stays on at every level, since it is what folds the runtime in, and every emitted function carries `nounwind` (Prism has no exceptions and this backend emits no invokes or landingpads), which lets the pipeline drop unwind tables. Four controls override this step:
+The default path verifies each module, writes bitcode, and hands it to `clang -flto=thin`; ThinLTO optimizes across SCC modules and the runtime. `--direct-object` (or `PRISM_DIRECT_OBJECT=1`) is the development path: Prism uses its linked LLVM target machine to optimize each cached bitcode module and emit a native object in-process, then invokes `cc` once for an ordinary non-LTO platform link against cached runtime objects. Direct-object mode preserves the SCC bitcode cache boundary and observable behavior but gives up cross-module and runtime ThinLTO, so `--backend-opt 0` is the intended minimum-latency pairing. Every emitted function carries `nounwind` in either mode.
 
-| Control                    | Default | Effect                                                                                                           |
-| -------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
-| `--backend-opt`            | `2`     | the `clang -O` level over the emitted bitcode: `0`, `1`, `2`, `3`, or `s`/`z` for size; also `PRISM_BACKEND_OPT` |
-| `PRISM_CC`                 | `clang` | the compiler driver invoked for the compile-and-link step (e.g. a pinned `clang-18`)                             |
-| `PRISM_CC_FLAGS`           | (none)  | arbitrary flags appended after the defaults, so a trailing token wins                                            |
-| `PRISM_NATIVE_KONT_FRAMES` | off     | preserve frame pointers, unwind tables, and non-mandatory call frames for experimental native-kont frame capture |
+| Control                    | Default | Effect                                                                                                            |
+| -------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------- |
+| `--backend-opt`            | `2`     | backend pipeline level: `0`, `1`, `2`, `3`, or `s`/`z`; Clang in the default path, in-process LLVM in direct mode |
+| `--direct-object`          | off     | emit program objects in-process and retain one non-LTO `cc` link; also `PRISM_DIRECT_OBJECT`                      |
+| `PRISM_CC`                 | `clang` | compiler/linker driver for runtime objects and the final platform link                                            |
+| `PRISM_CC_FLAGS`           | (none)  | arbitrary host-toolchain flags appended after the defaults                                                        |
+| `PRISM_NATIVE_KONT_FRAMES` | off     | preserve frame pointers, unwind tables, and non-mandatory call frames for experimental native-kont frame capture  |
 
-Because `PRISM_CC_FLAGS` is appended last and `clang` honors the final `-O` it sees, a trailing `-O0` there overrides `--backend-opt`; the same hook adds `-march=native`, `-g`, or a sanitizer such as `-fsanitize=undefined`:
+In the default path, `PRISM_CC_FLAGS` is appended last and a trailing `-O0` overrides `--backend-opt`; the same hook adds `-march=native`, `-g`, or a sanitizer such as `-fsanitize=undefined`:
 
 ```console
 prism PROGRAM --backend-opt 3                       # heaviest backend pipeline
+prism PROGRAM --direct-object --backend-opt 0       # shortest native development path
 PRISM_CC_FLAGS='-march=native -g' prism PROGRAM     # native tuning plus debug info
 PRISM_CC=clang-18 prism PROGRAM --backend-opt z     # a pinned compiler, optimized for size
 PRISM_NATIVE_KONT_FRAMES=1 prism PROGRAM            # make native frame capture less optimizer-dependent
 ```
 
-These controls drive the `clang` step shared by the LLVM and MLIR backends; `prism run` invokes no compiler, so they do not affect the interpreter. The native-kont frame mode is deliberately not a native suspend/resume switch: it defines `PRISM_NATIVE_KONT_FRAMES` for the runtime, asks the toolchain to preserve enough call-frame structure for `prism_native_kont_capture_frames` to produce stable symbol and PC-offset anchors, and enables the generated entry-ABI shadow stack used to report function argument values. Arbitrary suspended locals, stack slots, and registers remain unserialized.
+These controls affect native compilation only; `prism run` invokes no compiler, so they do not affect the interpreter. The native-kont frame mode is deliberately not a native suspend/resume switch: it defines `PRISM_NATIVE_KONT_FRAMES` for the runtime, asks the toolchain to preserve enough call-frame structure for `prism_native_kont_capture_frames` to produce stable symbol and PC-offset anchors, and enables the generated entry-ABI shadow stack used to report function argument values. Arbitrary suspended locals, stack slots, and registers remain unserialized.
 
-### 16.10 Lint, Telemetry, and Parity {#lint-telemetry-and-parity}
+### 16.11 Lint, Telemetry, and Parity {#lint-telemetry-and-parity}
 
 A Core Lint well-formedness check, pipeline idempotence, and per-pass tick telemetry gate every pass, alongside the triple-backend parity oracle (see [verification](#verification)). Parity is the invariant: compiled behavior at every level, and under any `--passes` spec, is byte-identical under the oracle, so optimization can only change cost, never meaning.
 
@@ -1753,6 +1806,7 @@ Several environment knobs aid debugging, all off by default.
 | `PRISM_DUMP_CORE`     | writes the Core after each pass to a stream or to run-namespaced files under `target/` |
 | `PRISM_OPT_LEVEL`     | overrides the level when no `-O` flag is given                                         |
 | `PRISM_NO_SPECIALIZE` | disables dictionary specialization                                                     |
+| `PRISM_NO_HO_SPEC`    | disables higher-order constant-callable specialization                                 |
 
 ## 17. The Interactive Shell {#the-interactive-shell}
 
@@ -1804,7 +1858,7 @@ Editor support is, to put it generously, nascent. What exists today is a depende
 
 Prism identifies every top-level definition by a hash of its elaborated core rather than by its name. `prism dump core-hash` computes that hash over the core after three normalizations. Every free reference to another top-level symbol is replaced by that symbol's own hash, so a definition's hash transitively commits to everything it calls and the program becomes a Merkle DAG.
 
-Bound variables are alpha-normalized to positions, and source spans, comments, and formatting are erased. The hash commits to both the term and the elaboration inputs an importer reads: the generalized type, the principal effect row, the `fip`/`fbip` mode, and the borrow mask. A recursive group is hashed as one strongly-connected component (reusing the shared Tarjan machinery from [name resolution](#name-resolution-and-modules)) with members keyed by index. The result is a name-independent, position-independent identifier for behavior: a rename, a reformat, or a local-variable rename leaves it unchanged, while any change to type, effect row, or computed result changes it.
+Bound variables are alpha-normalized to positions, and source spans, comments, and formatting are erased. The hash commits to both the term and the elaboration inputs an importer reads: the generalized type, the principal effect row, the `fip`/`fbip` mode, and the borrow mask. A recursive group is hashed as one strongly-connected component (reusing the shared Tarjan machinery from [name resolution](#name-resolution-and-modules)) with members keyed by a structural equivalence-class index. The result is a name-independent, position-independent identifier for behavior: a rename, a reformat, or a local-variable rename leaves it unchanged, while any change to type, effect row, or computed result changes it.
 
 Declarations with no term body are committed the same way by structural digest: a datatype or effect by the shape of its constructors and operations, a type class by its interface, and an instance by its identity, meaning its class, head type, and the behavior hashes of its methods. Top-level constants, which the compiler inlines rather than compiling to a node, are elaborated as zero-parameter definitions for hashing, so nothing a reader sees on a page is left unaddressed except transparent aliases, which have no content of their own.
 
@@ -1820,20 +1874,21 @@ refer(s)   = "b" ++ end(i)       s bound at de Bruijn depth i (a param, let, or 
            | "g" ++ tok(s)       otherwise, a free leaf: a builtin, a constructor, an effect op
 
 encode(f)  = "fn" ++ arity(f) ++ "d" ++ end(dicts(f)) ++ walk(body(f))
-H(f)       = blake3(SCHEME ++ meta(f) ++ encode(f))
 ```
 
-`walk` tags each node with its variant name and then its children, resolving every variable through `refer`; `H(f)` is the singleton case, where a non-recursive definition is a group of one. A strongly-connected component `{f1, ..., fn}` (mutual recursion) hashes as a unit instead, in two passes, since a member's final index does not exist until every member's shape is known:
+`walk` tags each node with its variant name and then its children, resolving every variable through `refer`. Every definition belongs to a strongly-connected component `{f1, ..., fn}`; an ordinary non-recursive definition is the singleton case, and mutual recursion supplies two or more members. The component's index is computed by partition refinement, because a member's class depends on the classes of the members it calls:
 
 ```text
-order      = sort by (encoding, name) of  [ (encode(fi, self = "r?"), fi)  for fi in scc ]
-idx(fi)    = position of fi in order
-blob       = SCHEME ++ concat  [ meta(fi) ++ encode(fi, self = "r" ++ idx(·))  for fi in order ]
+class0(fi) = rank(encode(fi, self = "r?"), meta(fi))
+classN(fi) = rank(classN-1(fi), encode(fi, self = "r" ++ classN-1(·)))
+classes    = repeat classN until the partition stops changing
+order      = sort members by classes(fi)
+blob       = SCHEME ++ concat  [ meta(fi) ++ encode(fi, self = "r" ++ classes(·))  for fi in order ]
 component  = blake3(blob)
-H(fi)      = blake3(component ++ ":" ++ idx(fi))
+H(fi)      = blake3(component ++ ":" ++ classes(fi))
 ```
 
-The first pass orders the group with every intra-group reference behind the neutral placeholder `"r?"`, so the order itself never depends on names; the second pass re-encodes each member with real indices and folds the result into `component`, and a member's own hash is `component` tagged with its position, so every member of the group gets a distinct hash from one shared digest. `meta(f)` folds in the elaboration inputs above (type, row, `fip`/`fbip` mode, borrow mask) as one more length-prefixed field.[^effect-op-canon]
+The seed sees each member's metadata and body with every intra-group reference behind the neutral placeholder `"r?"`. Each later round substitutes only the prior structural class of a referenced member; no source name ever enters the key. A changing round strictly refines the partition, so the process terminates. Members still tied at the fixed point have byte-identical metadata and bodies up to references into the same classes: they are bisimilar recursive definitions and deliberately share one content address. Distinct classes receive distinct hashes from the shared component digest. `meta(f)` folds in the elaboration inputs above (type, row, `fip`/`fbip` mode, borrow mask) as one more length-prefixed field.[^effect-op-canon]
 
 [^effect-op-canon]: Effect-op names canonicalize too: a `var`-desugared `get@x@n`/`set@x@n` becomes `get@#k`/`set@#k`, a per-definition id assigned by first occurrence, so renaming the `var` or reordering top-level definitions never moves the hash; a genuine effect operation's name is committed verbatim, since renaming one of those is a behavior change.
 
@@ -2252,33 +2307,34 @@ Verbs over content-addressed code identity ([the store](#content-addressed-core)
 
 Optimizer, effect-lowering, query, and compiler-diagnostic controls are global because they affect multiple commands; output and operation-specific flags belong to the command shown. `-h`/`--help` works on the binary and every subcommand, and `-V`/`--version` on the binary.
 
-| Flag                             | Applies to               | Default                        | Meaning                                                                                                                                                                                                                                                                                                        |
-| -------------------------------- | ------------------------ | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-o`, `--out <PATH>`             | bare build, `build`      | source stem, or `target/<pkg>` | Output path for the compiled binary.                                                                                                                                                                                                                                                                           |
-| `--mlir`                         | bare build, `build`      | off (LLVM)                     | Lower through the MLIR backend instead of the textual LLVM emitter (requires the `mlir` build feature).                                                                                                                                                                                                        |
-| `--watch`                        | `build`, `check`, `test` | off                            | Keep the compiler session resident and rerun the verb when the watched sources change: a project's manifest, lock, and source roots, or a single file's own directory. Under `build --verbose` it also prints unit/Merkle impact and rebuild timing.                                                           |
-| `-O`, `--opt [LEVEL]`            | global                   | `1` (bare `-O` is `2`)         | Core optimizer level (`0`/`1`/`2`); see [optimization levels](#optimization-levels).                                                                                                                                                                                                                           |
-| `--passes <SPEC>`                | global                   | unset                          | Run an explicit ordered pass list, overriding `-O` (mutually exclusive); see [controlling the pipeline](#explicit-pass-lists).                                                                                                                                                                                 |
-| `--no-<pass>`                    | global                   | off                            | Remove one pass from the pipeline: `--no-fuse`, `--no-erase-newtypes`, `--no-specialize`, `--no-simplify`, `--no-inline`, `--no-cse`; see [controlling the pipeline](#explicit-pass-lists).                                                                                                                    |
-| `--fuse`                         | global                   | on only at `-O2`               | Force whole-program pull-sequence fusion below `-O2`; `--no-fuse` takes precedence.                                                                                                                                                                                                                            |
-| `--backend-opt <LEVEL>`          | global                   | `2`                            | LLVM-backend opt level handed to the C compiler as `-O<LEVEL>`: `0`, `1`, `2`, `3`, or `s`/`z` for size. Distinct from `-O`, which tunes Prism's Core optimizer.                                                                                                                                               |
-| `--scheduler <POLICY>`           | global                   | `cooperative`                  | Select the default scheduler policy: `cooperative` (FIFO) or `lifo`.                                                                                                                                                                                                                                           |
-| `--no-native-effects`            | global                   | off                            | Disable the native closed-handler driver and use the mutually recursive free-monad driver.                                                                                                                                                                                                                     |
-| `--no-trampoline`                | global                   | off                            | Disable the constant-stack trampoline for the free-monad fallback.                                                                                                                                                                                                                                             |
-| `--core-lint`                    | global                   | off                            | Run Core Lint between optimizer passes.                                                                                                                                                                                                                                                                        |
-| `--opt-stats`                    | global                   | off                            | Print per-pass rewrite counts to stderr.                                                                                                                                                                                                                                                                       |
-| `--compiler-stats`               | global                   | off                            | Print compiler-query hit, miss, and write counts.                                                                                                                                                                                                                                                              |
-| `--explain-cache`                | global                   | off                            | Print immediate native artifact-cache decisions after a build.                                                                                                                                                                                                                                                 |
-| `--query-threads <N>`            | global                   | host parallelism, capped at 8  | Set the positive worker count for independent compiler queries; result collection remains deterministic.                                                                                                                                                                                                       |
-| `--verbose`                      | global                   | off, or `PRISM_VERBOSE=1`      | Print effect-lowering fusion-fallback warnings; under `build --watch`, also show unit/Merkle impact, cache decisions, and timing.                                                                                                                                                                              |
-| `--no-compiler-cache`            | global                   | off                            | Disable persistent semantic compiler artifacts for a from-scratch build; invariant, toolchain-keyed C runtime objects remain a cost-only prebuild layer.                                                                                                                                                       |
-| `--dump-core <SINK>`             | global                   | unset                          | Dump Core after each pass to `stdout`, `stderr`, or a directory.                                                                                                                                                                                                                                               |
-| `--time-compile`                 | compiling commands       | off, or `PRISM_TIME_COMPILE=1` | Emit one tab-separated timing row per compiler phase on stderr: phase, wall time, abbreviated input artifact key, cache status, output key and counts where they exist. Native `cc.link` rows include direct compiler probe/compile/link counts and summed milliseconds plus runtime-object cache hits/misses. |
-| `--warn-dupes[=LEVEL]`           | global                   | off                            | Report (`warn`) or reject (`strict`) user definitions with equal behavior hashes; bare `--warn-dupes` means `warn`.                                                                                                                                                                                            |
-| `--warn-stdlib-dupes[=LEVEL]`    | global                   | `warn`                         | Report or reject standard-library reimplementations; `off` silences the diagnostic.                                                                                                                                                                                                                            |
-| `--warn-prelude-capture[=LEVEL]` | global                   | `warn`                         | Report or reject a definition taking a name the prelude already opened; `off` silences the diagnostic.                                                                                                                                                                                                         |
-| `-h`, `--help`                   | binary, all commands     |                                | Print help.                                                                                                                                                                                                                                                                                                    |
-| `-V`, `--version`                | binary                   |                                | Print the version.                                                                                                                                                                                                                                                                                             |
+| Flag                             | Applies to               | Default                        | Meaning                                                                                                                                                                                                                                                                                                       |
+| -------------------------------- | ------------------------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-o`, `--out <PATH>`             | bare build, `build`      | source stem, or `target/<pkg>` | Output path for the compiled binary.                                                                                                                                                                                                                                                                          |
+| `--mlir`                         | bare build, `build`      | off (LLVM)                     | Lower through the MLIR backend instead of the textual LLVM emitter (requires the `mlir` build feature).                                                                                                                                                                                                       |
+| `--watch`                        | `build`, `check`, `test` | off                            | Keep the compiler session resident and rerun the verb when the watched sources change: a project's manifest, lock, and source roots, or a single file's own directory. Under `build --verbose` it also prints unit/Merkle impact and rebuild timing.                                                          |
+| `-O`, `--opt [LEVEL]`            | global                   | `1` (bare `-O` is `2`)         | Core optimizer level (`0`/`1`/`2`); see [optimization levels](#optimization-levels).                                                                                                                                                                                                                          |
+| `--passes <SPEC>`                | global                   | unset                          | Run an explicit ordered pass list, overriding `-O` (mutually exclusive); see [controlling the pipeline](#explicit-pass-lists).                                                                                                                                                                                |
+| `--no-<pass>`                    | global                   | off                            | Remove one pass from the pipeline: `--no-fuse`, `--no-erase-newtypes`, `--no-specialize`, `--no-ho-spec`, `--no-simplify`, `--no-inline`, `--no-cse`; see [controlling the pipeline](#explicit-pass-lists).                                                                                                   |
+| `--fuse`                         | global                   | on only at `-O2`               | Force whole-program pull-sequence fusion below `-O2`; `--no-fuse` takes precedence.                                                                                                                                                                                                                           |
+| `--backend-opt <LEVEL>`          | global                   | `2`                            | Native LLVM-backend opt level: `0`, `1`, `2`, `3`, or `s`/`z` for size. The default path hands it to Clang; direct-object mode selects the corresponding in-process LLVM pipeline. Distinct from `-O`, which tunes Prism's Core optimizer.                                                                    |
+| `--direct-object`                | global                   | off                            | Development native path: optimize and lower LLVM bitcode to objects inside Prism, omit ThinLTO, and retain one `cc` invocation for the final platform link. Pair with `--backend-opt 0` for minimum build latency; release builds retain ThinLTO by default.                                                  |
+| `--scheduler <POLICY>`           | global                   | `cooperative`                  | Select the default scheduler policy: `cooperative` (FIFO) or `lifo`.                                                                                                                                                                                                                                          |
+| `--no-native-effects`            | global                   | off                            | Disable the native closed-handler driver and use the mutually recursive free-monad driver.                                                                                                                                                                                                                    |
+| `--no-trampoline`                | global                   | off                            | Disable the constant-stack trampoline for the free-monad fallback.                                                                                                                                                                                                                                            |
+| `--core-lint`                    | global                   | off                            | Run Core Lint between optimizer passes.                                                                                                                                                                                                                                                                       |
+| `--opt-stats`                    | global                   | off                            | Print per-pass rewrite counts to stderr.                                                                                                                                                                                                                                                                      |
+| `--compiler-stats`               | global                   | off                            | Print compiler-query hit, miss, and write counts.                                                                                                                                                                                                                                                             |
+| `--explain-cache`                | global                   | off                            | Print immediate native artifact-cache decisions after a build.                                                                                                                                                                                                                                                |
+| `--query-threads <N>`            | global                   | host parallelism, capped at 8  | Set the positive worker count for independent compiler queries; result collection remains deterministic.                                                                                                                                                                                                      |
+| `--verbose`                      | global                   | off, or `PRISM_VERBOSE=1`      | Print effect-lowering fusion-fallback warnings; under `build --watch`, also show unit/Merkle impact, cache decisions, and timing.                                                                                                                                                                             |
+| `--no-compiler-cache`            | global                   | off                            | Disable persistent semantic compiler artifacts for a from-scratch build; invariant, toolchain-keyed C runtime objects remain a cost-only prebuild layer.                                                                                                                                                      |
+| `--dump-core <SINK>`             | global                   | unset                          | Dump Core after each pass to `stdout`, `stderr`, or a directory.                                                                                                                                                                                                                                              |
+| `--time-compile`                 | compiling commands       | off, or `PRISM_TIME_COMPILE=1` | Emit one tab-separated timing row per compiler phase on stderr: phase, wall time, abbreviated input artifact key, cache status, output key and counts where they exist. Native `cc.link` rows separate in-process LLVM object emissions from compiler probes, runtime-object compilation, and the final link. |
+| `--warn-dupes[=LEVEL]`           | global                   | off                            | Report (`warn`) or reject (`strict`) user definitions with equal behavior hashes; bare `--warn-dupes` means `warn`.                                                                                                                                                                                           |
+| `--warn-stdlib-dupes[=LEVEL]`    | global                   | `warn`                         | Report or reject standard-library reimplementations; `off` silences the diagnostic.                                                                                                                                                                                                                           |
+| `--warn-prelude-capture[=LEVEL]` | global                   | `warn`                         | Report or reject a definition taking a name the prelude already opened; `off` silences the diagnostic.                                                                                                                                                                                                        |
+| `-h`, `--help`                   | binary, all commands     |                                | Print help.                                                                                                                                                                                                                                                                                                   |
+| `-V`, `--version`                | binary                   |                                | Print the version.                                                                                                                                                                                                                                                                                            |
 
 The same compiler controls can be set in a project's `[flags]` table with kebab-case names. Built-in defaults are overlaid by `prism.toml`, then `PRISM_*` environment variables, then explicit CLI flags; unknown manifest keys and invalid values are rejected.
 
@@ -2345,14 +2401,17 @@ These are read by the compiler at build time. They select toolchain inputs, cach
 | `PRISM_CC`                   | C compiler used to assemble and link the runtime (default `clang`).                                                                                                                                                                                                          |
 | `PRISM_CC_FLAGS`             | Extra flags passed to the C compiler (e.g. `-march=native`, `-g`, `-DPRISM_RT_DEBUG`).                                                                                                                                                                                       |
 | `PRISM_BACKEND_OPT`          | LLVM-backend opt level (same values as `--backend-opt`); the flag wins when both are set.                                                                                                                                                                                    |
+| `PRISM_DIRECT_OBJECT`        | `1` selects in-process LLVM object emission and a non-LTO final platform link; off by default.                                                                                                                                                                               |
 | `PRISM_OPT_LEVEL`            | Core optimizer level used when `-O` is not passed (same values as `-O`).                                                                                                                                                                                                     |
 | `PRISM_SCHEDULER`            | Default cooperative scheduler policy, `cooperative`/`fifo` or `lifo`; overridden by `--scheduler`.                                                                                                                                                                           |
 | `PRISM_EFFECT_TIER`          | Debug floor on effect lowering, one position per rung: `auto`, `state-fusion`, `local-partial`, `selective-free-monad`, `whole-program-free-monad`.                                                                                                                          |
+| `PRISM_EFFECT_EXCLUDE`       | Experimental comma- or whitespace-separated set of individual effect-lowering rungs to skip when measuring one engine's marginal value; empty by default.                                                                                                                    |
 | `PRISM_ERASURES`             | `0` skips the var and loop-control erasures that precede the cascade; on otherwise. Independent of the floor above.                                                                                                                                                          |
 | `PRISM_NATIVE_EFFECTS`       | `0` opts out of the native closed-handler driver, back to the mutually recursive free-monad driver; on otherwise.                                                                                                                                                            |
 | `PRISM_TRAMPOLINE`           | `0` disables the constant-stack trampoline for the free-monad fallback; on otherwise.                                                                                                                                                                                        |
 | `PRISM_NATIVE_KONT_FRAMES`   | If set, add frame-preservation flags to native builds so experimental native-kont frame capture is less optimizer-dependent; off by default.                                                                                                                                 |
 | `PRISM_NO_SPECIALIZE`        | If set, skip the dictionary-specialization pass.                                                                                                                                                                                                                             |
+| `PRISM_NO_HO_SPEC`           | If set, skip higher-order constant-callable specialization without disabling dictionary specialization.                                                                                                                                                                      |
 | `PRISM_FUSE`                 | Boolean override that forces whole-program pull-sequence fusion below `-O2`; `--no-fuse` still disables it.                                                                                                                                                                  |
 | `PRISM_BORROW_INFER`         | Infer borrow masks for provably pure functions at reference-count insertion, loaning read-only arguments instead of retain/release pairs; on by default, `0` leaves only declared annotations.                                                                               |
 | `PRISM_CORE_LINT`            | If set, run Core Lint (IR well-formedness) between every optimizer pass.                                                                                                                                                                                                     |
@@ -2456,7 +2515,7 @@ $ prism synth widget.pr --at-hole answer --depth 2 --limit 5
 ```console
 $ prism search '(String) -> Bool' --limit 3
 fs_file_exists : (String) -> Bool  [stdlib:Base]
-probe_enabled : (String) -> Bool  [stdlib:Base]
+Control.Validate.refute : forall e a. (e) -> a  [stdlib:Control.Validate]
 Syntax.Lex.lex_incomplete : (String) -> Bool  [stdlib:Syntax.Lex]
 ```
 

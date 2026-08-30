@@ -25,7 +25,7 @@ Opt-in: not in Base.
 
 ### `Intern`
 
-```prism,def,h-db623307a07b722270662f9358b80c72004f6f5dbda441505aae5a818cb043fd
+```prism,def,h-65e4463549980a5e784fb2c6d3f457bb046ec3fedd1c86f665213a4b806c8800
 type Intern = Intern {
   ids: Map(String, Int),
   names: Map(Int, String),

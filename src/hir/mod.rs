@@ -137,6 +137,10 @@ pub struct NodeFacts {
     tooltip: Vec<Option<String>>,
     handler_nodes: Vec<bool>,
     handler_residual: Vec<Option<HandlerResidual>>,
+    // Keyed by the value expression of a local `let` whose type generalized to a
+    // scheme with at least one type quantifier. Core's `Bind` carries no scheme,
+    // so elaboration reads this to expand the binding per use.
+    poly_lets: Vec<bool>,
 }
 
 fn place_dense<T>(table: &mut Vec<Option<T>>, index: usize, value: Option<T>) {
@@ -189,6 +193,8 @@ struct NodeFactWire {
     handler: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     handler_residual: Option<HandlerResidual>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    poly_let: bool,
 }
 
 impl NodeFacts {
@@ -201,6 +207,7 @@ impl NodeFacts {
             tooltip: Vec::new(),
             handler_nodes: Vec::new(),
             handler_residual: Vec::new(),
+            poly_lets: Vec::new(),
         }
     }
 
@@ -219,6 +226,7 @@ impl NodeFacts {
                     .copied()
                     .unwrap_or(false),
                 handler_residual: facts.handler_residual.cloned(),
+                poly_let: self.poly_lets.get(id as usize).copied().unwrap_or(false),
             })
             .collect::<Vec<_>>();
         serde_json::to_string(&rows)
@@ -250,6 +258,10 @@ impl NodeFacts {
             }
             facts.handler_nodes[index] = row.handler;
             place_dense(&mut facts.handler_residual, index, row.handler_residual);
+            if facts.poly_lets.len() <= index {
+                facts.poly_lets.resize(index + 1, false);
+            }
+            facts.poly_lets[index] = row.poly_let;
         }
         Ok(facts)
     }
@@ -266,7 +278,8 @@ impl NodeFacts {
             .max(self.lane.len())
             .max(self.ty.len())
             .max(self.handler_nodes.len())
-            .max(self.handler_residual.len());
+            .max(self.handler_residual.len())
+            .max(self.poly_lets.len());
         (0..n).filter_map(move |i| {
             let refs = NodeFactRefs {
                 res: self.res.get(i).and_then(Option::as_ref),
@@ -284,7 +297,8 @@ impl NodeFacts {
                 && refs.lane.is_none()
                 && refs.ty.is_none()
                 && !self.handler_nodes.get(i).copied().unwrap_or(false)
-                && refs.handler_residual.is_none();
+                && refs.handler_residual.is_none()
+                && !self.poly_lets.get(i).copied().unwrap_or(false);
             // The dense index is the node's `NodeId`, itself a `u32`, so it fits.
             (!empty).then(|| (u32::try_from(i).expect("node index fits u32"), refs))
         })
@@ -308,6 +322,7 @@ impl NodeFacts {
         tooltips: BTreeMap<NodeId, String>,
         handler_nodes: BTreeSet<NodeId>,
         handler_residuals: BTreeMap<NodeId, HandlerResidual>,
+        poly_lets: BTreeSet<NodeId>,
     ) -> Self {
         let place = |res: &mut Vec<Option<NodeRes>>, id: NodeId, fact: NodeRes| {
             let i = id.0 as usize;
@@ -335,6 +350,15 @@ impl NodeFacts {
         for id in handler_nodes {
             dense_handler_nodes[id.0 as usize] = true;
         }
+        let poly_len = poly_lets
+            .iter()
+            .map(|id| id.0 as usize + 1)
+            .max()
+            .unwrap_or(0);
+        let mut dense_poly_lets = vec![false; poly_len];
+        for id in poly_lets {
+            dense_poly_lets[id.0 as usize] = true;
+        }
         Self {
             res,
             evidence: dense(dicts),
@@ -343,6 +367,7 @@ impl NodeFacts {
             tooltip: dense(tooltips),
             handler_nodes: dense_handler_nodes,
             handler_residual: dense(handler_residuals),
+            poly_lets: dense_poly_lets,
         }
     }
 
@@ -398,6 +423,19 @@ impl<'a> CheckedHir<'a> {
     #[must_use]
     pub fn node_type(&self, id: NodeId) -> Option<&Type> {
         self.facts.ty.get(id.0 as usize).and_then(Option::as_ref)
+    }
+
+    /// True when checking generalized this local `let` binding's value to a
+    /// scheme with at least one type quantifier. Core's `Bind` carries no
+    /// scheme, so elaboration expands such a binding at each use instead of
+    /// emitting one monomorphic bind.
+    #[must_use]
+    pub fn poly_let(&self, id: NodeId) -> bool {
+        self.facts
+            .poly_lets
+            .get(id.0 as usize)
+            .copied()
+            .unwrap_or(false)
     }
 
     /// The presentable `type ! row` text for a node, when the checker was asked to

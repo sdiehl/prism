@@ -78,6 +78,11 @@ pub enum CorePass {
     EraseNewtypes,
     /// Specialize constrained calls on known global dictionaries to direct calls.
     Specialize,
+    /// Higher-order specialization: clone a function on a constant callable
+    /// argument that never varies across the recursion, turning the indirect
+    /// force-and-apply into a direct call. Runs after `Specialize` so a callable
+    /// threaded through a dictionary clone is already visible as a top-level call.
+    HoSpecialize,
     /// The fixed-point gentle simplifier (case-of-known-constructor, trivial
     /// copy-propagation, dead-let elimination, const-fold, case-of-case,
     /// used-once-thunk inlining).
@@ -91,10 +96,11 @@ pub enum CorePass {
 impl CorePass {
     /// Every pass, in declaration order. The one table the name lookup and the
     /// misspelling suggestion read, so a new variant reaches both.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Fuse,
         Self::EraseNewtypes,
         Self::Specialize,
+        Self::HoSpecialize,
         Self::Simplify,
         Self::Inline,
         Self::Cse,
@@ -107,6 +113,7 @@ impl CorePass {
             Self::Fuse => "Fuse",
             Self::EraseNewtypes => "EraseNewtypes",
             Self::Specialize => "Specialize",
+            Self::HoSpecialize => "HoSpecialize",
             Self::Simplify => "Simplify",
             Self::Inline => "Inline",
             Self::Cse => "Cse",
@@ -129,7 +136,9 @@ impl CorePass {
             // before effect lowering rewrites the shapes it matches on. Erasure is a
             // representation both backends consume; specialization needs the
             // pre-lowering dictionary shapes.
-            Self::Fuse | Self::EraseNewtypes | Self::Specialize => PassStage::PreLowering,
+            Self::Fuse | Self::EraseNewtypes | Self::Specialize | Self::HoSpecialize => {
+                PassStage::PreLowering
+            }
             // The simplifier, inliner, and CSE must run after effect lowering:
             // pre-lowering they rewrite the Core shapes the var/State fusion
             // analysis matches on.
@@ -217,6 +226,12 @@ impl PassSpec {
                 return Err("EraseNewtypes must precede Specialize".into());
             }
         }
+        let ho_pos = out.pre.iter().position(|p| *p == CorePass::HoSpecialize);
+        if let (Some(s), Some(h)) = (spec_pos, ho_pos) {
+            if h < s {
+                return Err("Specialize must precede HoSpecialize".into());
+            }
+        }
         if out.pre.is_empty() && out.late.is_empty() {
             return Err("pass specification is empty".into());
         }
@@ -298,6 +313,7 @@ pub fn pipeline(level: OptLevel) -> Vec<CorePass> {
         OptLevel::O1 => vec![
             CorePass::EraseNewtypes,
             CorePass::Specialize,
+            CorePass::HoSpecialize,
             CorePass::Simplify,
             CorePass::Inline,
             CorePass::Simplify,
@@ -321,6 +337,7 @@ pub fn pipeline(level: OptLevel) -> Vec<CorePass> {
             CorePass::Fuse,
             CorePass::EraseNewtypes,
             CorePass::Specialize,
+            CorePass::HoSpecialize,
             CorePass::Simplify,
             CorePass::Inline,
             CorePass::Simplify,

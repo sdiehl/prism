@@ -6,31 +6,31 @@
 
 ### `GeneratedPatternReceipt`
 
-```prism,def,h-6ca00093f89bc48873dcc2a2b5ecbdc1bcf6968058e03c87e997ef946593f9fa
+```prism,def,h-fbd8caf81d5badb49c357ec8decbc689fbe1b8888211f1004d30f2a6c94263db
 type GeneratedPatternReceipt = PRPlain | PRBareUid | PRBareQual
 ```
 
 ### `GeneratedPatternDone`
 
-```prism,def,h-e58380c8899192ec6e666af49df4170d1113761633903d224095cc17207eaec0
+```prism,def,h-633cc3f6150b07c861c581e4a5a11317ef8e1b3601b5b18ddb654666c362d169
 type GeneratedPatternDone = PatternDone(Sp(Pat), GeneratedPatternReceipt)
 ```
 
 ### `GeneratedLetReceipt`
 
-```prism,def,h-ae89362bd9ba885aee08e3d7ff126bff75f5c80417512ba5e580954ffd3f1b09
+```prism,def,h-469178d048215aba1fbecdc926a9eaafa66262c2c007546f90a374a5884d7489
 type GeneratedLetReceipt = GLClosed | GLNamed
 ```
 
 ### `GeneratedLetDone`
 
-```prism,def,h-50e3efdaacf72dbd4bdfa76c3241af06553f1b58e0f598814cde76bb3f6bbd53
+```prism,def,h-fe69dc756a6b480e7dc3f63682a49da26e907e0a466adb733da52162cb9fa7bf
 type GeneratedLetDone = LetDone(Sp(Pat), GeneratedLetReceipt)
 ```
 
 ### `GeneratedFieldReceipt`
 
-```prism,def,h-576839f22de98a0abf612607e5e64b1860e9990fd0c928c892a6a6c7e8050268
+```prism,def,h-114edd353a79eb2bb66fb77c49a2926bc5f6767515731534333f6af62f43dd2b
 type GeneratedFieldReceipt = GFShorthand | GFExplicit(GeneratedPatternReceipt)
 ```
 

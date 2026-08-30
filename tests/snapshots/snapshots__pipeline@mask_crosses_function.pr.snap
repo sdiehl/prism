@@ -1,0 +1,181 @@
+---
+source: tests/snapshots.rs
+expression: "normalize_pipeline_report(&prism::report(&src))"
+input_file: tests/cases/mask_crosses_function.pr
+---
+== tokens ==
+VOpen Effect UIdent("E") VOpen Ident("op") LParen KwInt RParen Colon KwInt VClose VSemi Fn Ident("g") LParen RParen Eq Mask Lt UIdent("E") Gt LParen Ident("op") LParen Int(IntLit { value: 1, suffix: None }) RParen RParen VSemi Fn Ident("main") LParen RParen Colon KwUnit Bang LBrace UIdent("IO") RBrace Eq VOpen Let Ident("r") Eq VOpen Handle Ident("g") LParen RParen With VOpen Ident("op") LParen Ident("x") RParen Ident("resume") Ident("k") FatArrow Ident("k") LParen Ident("x") RParen VSemi Return Ident("r") FatArrow Ident("r") VClose VClose VSemi Ident("println") LParen Ident("r") RParen VClose VClose
+
+== ast ==
+Program {
+    types: [],
+    effects: [
+        EffectDecl {
+            name: "E",
+            params: [],
+            ops: [
+                EffOp {
+                    name: "op",
+                    params: [
+                        Int,
+                    ],
+                    ret: Int,
+                    grade: Many,
+                },
+            ],
+            span: 360..384,
+        },
+    ],
+    errors: [],
+    aliases: [],
+    classes: [],
+    instances: [],
+    fns: [
+        Decl {
+            name: "g",
+            params: [],
+            ret: None,
+            eff: None,
+            constraints: [],
+            body: Spanned {
+                node: Mask(
+                    "E",
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "op",
+                                ),
+                                span: 403..405,
+                            },
+                            [
+                                Spanned {
+                                    node: Int(
+                                        IntLit {
+                                            value: 1,
+                                            suffix: None,
+                                        },
+                                    ),
+                                    span: 406..407,
+                                },
+                            ],
+                        ),
+                        span: 403..408,
+                    },
+                ),
+                span: 395..409,
+            },
+            wheres: [],
+            span: 386..409,
+        },
+        Decl {
+            name: "main",
+            params: [],
+            ret: Some(
+                Unit,
+            ),
+            eff: Some(
+                [
+                    EffLabel {
+                        name: "IO",
+                        args: [],
+                    },
+                ],
+            ),
+            constraints: [],
+            body: Spanned {
+                node: Let(
+                    "r",
+                    Spanned {
+                        node: Handle(
+                            Spanned {
+                                node: Call(
+                                    Spanned {
+                                        node: Var(
+                                            "g",
+                                        ),
+                                        span: 458..459,
+                                    },
+                                    [],
+                                ),
+                                span: 458..461,
+                            },
+                            [
+                                Op(
+                                    "op",
+                                    [
+                                        "x",
+                                    ],
+                                    "k",
+                                    Spanned {
+                                        node: Call(
+                                            Spanned {
+                                                node: Var(
+                                                    "k",
+                                                ),
+                                                span: 491..492,
+                                            },
+                                            [
+                                                Spanned {
+                                                    node: Var(
+                                                        "x",
+                                                    ),
+                                                    span: 493..494,
+                                                },
+                                            ],
+                                        ),
+                                        span: 491..495,
+                                    },
+                                ),
+                                Return(
+                                    "r",
+                                    Spanned {
+                                        node: Var(
+                                            "r",
+                                        ),
+                                        span: 514..515,
+                                    },
+                                ),
+                            ],
+                            Exhaustive,
+                        ),
+                        span: 451..515,
+                    },
+                    Spanned {
+                        node: Call(
+                            Spanned {
+                                node: Var(
+                                    "println",
+                                ),
+                                span: 518..525,
+                            },
+                            [
+                                Spanned {
+                                    node: Var(
+                                        "r",
+                                    ),
+                                    span: 526..527,
+                                },
+                            ],
+                        ),
+                        span: 518..528,
+                    },
+                ),
+                span: 439..528,
+            },
+            wheres: [],
+            span: 411..528,
+        },
+    ],
+}
+
+== types ==
+[E5004] Type Error: in `main`: effect `E` not declared in annotation
+    ╭─[ <source>:12:3 ]
+    │
+ 12 │ ╭─▶   let r =
+    ┆ ┆   
+ 16 │ ├─▶   println(r)
+    │ │                  
+    │ ╰────────────────── in `main`: effect `E` not declared in annotation
+────╯

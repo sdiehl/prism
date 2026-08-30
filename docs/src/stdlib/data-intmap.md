@@ -10,13 +10,15 @@ The branch word of a key is its two's-complement bit pattern with the sign bit f
 
 A branch node carries the prefix its keys agree on, the single-bit mask of the position where they split, and the subtrees whose branch bit is zero and one. Every branch keeps two non-empty children, so a node's mask is exactly the highest bit on which two of its keys differ and a key set determines the tree uniquely. Iteration order therefore depends on the key set alone and never on insertion order, and the stronger statement holds too: maps built from the same bindings in different orders are structurally equal, so `intmap_to_list`, `intmap_fold`, and the derived `Eq` and `Show` all agree across orders.
 
+In the complexity bounds below, `n` is the number of bindings and `W` is the trie depth, at most 64 for `I64`. Thus O(W) operations are O(1) with respect to the collection size, while spelling out `W` makes the bounded traversal visible.
+
 Opt-in: not in Base.
 
 ## Types
 
 ### `IntMap`
 
-```prism,def,h-367535ae13aecd2136e0b32ff403d0351545657372d09e897686aed5eb8905ce
+```prism,def,h-d93780ffd9b0c23bc30300040eb2bd0e14d24b54a6b72ff1bad91b3512bfb9b4
 type IntMap(v)
   = IMEmpty
   | IMLeaf(I64, v)
@@ -36,7 +38,7 @@ A map from `I64` keys to values of type `v`.
 intmap_empty : forall a. Data.IntMap.IntMap(a)
 ```
 
-The empty map.
+The empty map. Time complexity: O(1).
 
 ```prism,mod=Data.IntMap
 intmap_is_empty(intmap_empty)
@@ -52,7 +54,7 @@ true
 intmap_singleton : forall a. (I64, a) -> Data.IntMap.IntMap(a)
 ```
 
-The map binding `key` to `value` and nothing else.
+The map binding `key` to `value` and nothing else. Time complexity: O(1).
 
 ```prism,mod=Data.IntMap
 intmap_to_list(intmap_singleton(7i64, "a"))
@@ -68,7 +70,7 @@ intmap_to_list(intmap_singleton(7i64, "a"))
 intmap_insert : forall a. (I64, a, Data.IntMap.IntMap(a)) -> Data.IntMap.IntMap(a)
 ```
 
-Insert `key` with `value`, overwriting any existing binding.
+Insert `key` with `value`, overwriting any existing binding. Time complexity: O(W), with `W <= 64`.
 
 ```prism,mod=Data.IntMap
 intmap_lookup(1i64, intmap_insert(1i64, "a", intmap_empty))
@@ -84,7 +86,7 @@ Some(a)
 intmap_insert_with : forall e0 a. ((a, a) -> a ! {e0}, I64, a, Data.IntMap.IntMap(a)) -> Data.IntMap.IntMap(a) ! {e0}
 ```
 
-Insert `key` with `value`, combining a clash as `f(new, old)`.
+Insert `key` with `value`, combining a clash as `f(new, old)`. Time complexity: O(W), with `W <= 64`, excluding a call to `f`.
 
 ```prism,mod=Data.IntMap
 intmap_to_list(
@@ -102,7 +104,7 @@ intmap_to_list(
 intmap_lookup : forall a. (I64, Data.IntMap.IntMap(a)) -> Option(a)
 ```
 
-The value bound to `key` as `Some`, or `None` when absent.
+The value bound to `key` as `Some`, or `None` when absent. Time complexity: O(W), with `W <= 64`.
 
 ```prism,mod=Data.IntMap
 intmap_lookup(2i64, intmap_from_list([(1i64, "a"), (2i64, "b")]))
@@ -118,7 +120,7 @@ Some(b)
 intmap_member : forall a. (I64, Data.IntMap.IntMap(a)) -> Bool
 ```
 
-True when `key` is bound.
+True when `key` is bound. Time complexity: O(W), with `W <= 64`.
 
 ```prism,mod=Data.IntMap
 intmap_member(2i64, intmap_from_list([(1i64, "a"), (2i64, "b")]))
@@ -134,7 +136,7 @@ true
 intmap_delete : forall a. (I64, Data.IntMap.IntMap(a)) -> Data.IntMap.IntMap(a)
 ```
 
-Remove `key` (a no-op when absent).
+Remove `key` (a no-op when absent). Time complexity: O(W), with `W <= 64`.
 
 ```prism,mod=Data.IntMap
 intmap_to_list(intmap_delete(1i64, intmap_from_list([(1i64, "a"), (2i64, "b")])))
@@ -150,7 +152,7 @@ intmap_to_list(intmap_delete(1i64, intmap_from_list([(1i64, "a"), (2i64, "b")]))
 intmap_size : forall a. (Data.IntMap.IntMap(a)) -> Int
 ```
 
-The number of bindings.
+The number of bindings. Time complexity: O(n); sizes are not cached.
 
 ```prism,mod=Data.IntMap
 intmap_size(intmap_from_list([(1i64, "a"), (2i64, "b")]))
@@ -166,7 +168,7 @@ intmap_size(intmap_from_list([(1i64, "a"), (2i64, "b")]))
 intmap_is_empty : forall a. (Data.IntMap.IntMap(a)) -> Bool
 ```
 
-True when the map has no bindings.
+True when the map has no bindings. Time complexity: O(1).
 
 ```prism,mod=Data.IntMap
 intmap_is_empty(intmap_empty)
@@ -182,7 +184,7 @@ true
 intmap_union : forall a. (Data.IntMap.IntMap(a), Data.IntMap.IntMap(a)) -> Data.IntMap.IntMap(a)
 ```
 
-The union of two maps, keeping the left value where a key is in both.
+The union of two maps, keeping the left value where a key is in both. Time complexity: O(n + m) for input sizes `n` and `m`.
 
 ```prism,mod=Data.IntMap
 intmap_to_list(
@@ -205,7 +207,7 @@ intmap_union_with : forall e0 a. ((a, a) -> a ! {e0}, Data.IntMap.IntMap(a), Dat
 
 The union of two maps, combining a key present in both as `f(left, right)`.
 
-The two branch nodes are walked together: the shallower one is descended into until the masks meet, so the merge costs the shape of the two tries rather than a re-insertion of every binding.
+The two branch nodes are walked together: the shallower one is descended into until the masks meet, so the merge costs the shape of the two tries rather than a re-insertion of every binding. Time complexity: O(n + m), excluding calls to `f`.
 
 ```prism,mod=Data.IntMap
 intmap_to_list(
@@ -227,7 +229,7 @@ intmap_to_list(
 intmap_intersection : forall a b. (Data.IntMap.IntMap(a), Data.IntMap.IntMap(b)) -> Data.IntMap.IntMap(a)
 ```
 
-The bindings of `t1` whose key is also in `t2`, with `t1`'s values.
+The bindings of `t1` whose key is also in `t2`, with `t1`'s values. Time complexity: O(nW), where `n` is the size of `t1` and `W <= 64`.
 
 ```prism,mod=Data.IntMap
 intmap_to_list(
@@ -248,7 +250,7 @@ intmap_to_list(
 intmap_difference : forall a b. (Data.IntMap.IntMap(a), Data.IntMap.IntMap(b)) -> Data.IntMap.IntMap(a)
 ```
 
-The bindings of `t1` whose key is not in `t2`.
+The bindings of `t1` whose key is not in `t2`. Time complexity: O(nW), where `n` is the size of `t1` and `W <= 64`.
 
 ```prism,mod=Data.IntMap
 intmap_to_list(
@@ -271,7 +273,7 @@ intmap_filter : forall e0 a. ((I64, a) -> Bool ! {e0}, Data.IntMap.IntMap(a)) ->
 
 The bindings satisfying `keep(key, value)`.
 
-A surviving branch still splits on the highest bit two of its remaining keys differ on, because a branch whose child empties collapses, so filtering lands on the same tree the survivors would have built from scratch.
+A surviving branch still splits on the highest bit two of its remaining keys differ on, because a branch whose child empties collapses, so filtering lands on the same tree the survivors would have built from scratch. Time complexity: O(n), excluding calls to `keep`.
 
 ```prism,mod=Data.IntMap
 intmap_to_list(
@@ -292,7 +294,7 @@ intmap_to_list(
 intmap_map_values : forall e0 a b. ((a) -> b ! {e0}, Data.IntMap.IntMap(a)) -> Data.IntMap.IntMap(b) ! {e0}
 ```
 
-Apply `f` to every value, keeping keys and tree shape.
+Apply `f` to every value, keeping keys and tree shape. Time complexity: O(n), excluding calls to `f`.
 
 ```prism,mod=Data.IntMap
 intmap_values(
@@ -312,7 +314,7 @@ intmap_fold : forall e0 a b. ((a, I64, b) -> a ! {e0}, a, Data.IntMap.IntMap(b))
 
 Fold `f(acc, key, value)` over the bindings in ascending key order.
 
-The zero subtree of a branch holds the smaller branch words and branch-word order is key order, so a left-to-right walk is ascending with no sign case.
+The zero subtree of a branch holds the smaller branch words and branch-word order is key order, so a left-to-right walk is ascending with no sign case. Time complexity: O(n), excluding calls to `f`.
 
 ```prism,mod=Data.IntMap
 intmap_fold(\(acc, k, _v) -> acc + k, 0i64, intmap_from_list([(1i64, "a"), (2i64, "b")]))
@@ -328,7 +330,7 @@ intmap_fold(\(acc, k, _v) -> acc + k, 0i64, intmap_from_list([(1i64, "a"), (2i64
 intmap_to_list : forall a. (Data.IntMap.IntMap(a)) -> List((I64, a))
 ```
 
-The `(key, value)` pairs in ascending key order, negative keys first.
+The `(key, value)` pairs in ascending key order, negative keys first. Time complexity: O(n).
 
 ```prism,mod=Data.IntMap
 intmap_to_list(intmap_from_list([(2i64, "b"), (0i64, "z"), (1i64, "a")]))
@@ -344,7 +346,7 @@ intmap_to_list(intmap_from_list([(2i64, "b"), (0i64, "z"), (1i64, "a")]))
 intmap_keys : forall a. (Data.IntMap.IntMap(a)) -> List(I64)
 ```
 
-The keys in ascending order.
+The keys in ascending order. Time complexity: O(n).
 
 ```prism,mod=Data.IntMap
 intmap_keys(intmap_from_list([(2i64, "b"), (1i64, "a")]))
@@ -360,7 +362,7 @@ intmap_keys(intmap_from_list([(2i64, "b"), (1i64, "a")]))
 intmap_values : forall a. (Data.IntMap.IntMap(a)) -> List(a)
 ```
 
-The values in ascending key order.
+The values in ascending key order. Time complexity: O(n).
 
 ```prism,mod=Data.IntMap
 intmap_values(intmap_from_list([(1i64, "a"), (2i64, "b")]))
@@ -376,7 +378,7 @@ intmap_values(intmap_from_list([(1i64, "a"), (2i64, "b")]))
 intmap_from_list : forall a. (List((I64, a))) -> Data.IntMap.IntMap(a)
 ```
 
-Build a map from `(key, value)` pairs; a later pair overwrites an earlier one with the same key. The result depends only on the surviving bindings, so any ordering of the same list of distinct keys builds the identical tree.
+Build a map from `(key, value)` pairs; a later pair overwrites an earlier one with the same key. The result depends only on the surviving bindings, so any ordering of the same list of distinct keys builds the identical tree. Time complexity: O(nW) for `n` input pairs and `W <= 64`.
 
 ```prism,mod=Data.IntMap
 intmap_to_list(intmap_from_list([(2i64, "b"), (1i64, "a")]))

@@ -684,14 +684,12 @@ jobs:
         with:
           lake-package-directory: models
           build-args: --wfail
-          # The package sets `builtinLint`, which the action auto-detects and
-          # turns into a `lake lint` stage over every library, including the
-          # `sorry`-bearing scaffold that is deliberately outside the default
-          # targets. That sweep does not terminate inside the job's budget and
-          # is killed, so the gate we do want (`lake build --wfail` over the
-          # default targets) is reported as a failure for a reason unrelated to
-          # the model. This job asserts the build; nothing here asks for a lint.
-          lint: "false"
+          # The package sets `builtinLint`, so the action also runs a
+          # `lake lint` stage over the default-target libraries. With the tree
+          # sorry-free (Tc included), the sweep replays the modules already
+          # built above and finishes in seconds, making it a cheap second
+          # assertion on top of `lake build --wfail`.
+          lint: "true"
 
       # The fixture oracle above is curated. Exercise the same compiler-to-JSON
       # boundary on deterministic generated pure/effectful programs as well, with

@@ -40,6 +40,39 @@ pub struct CtorInfo {
     pub fields: Vec<Sym>,
 }
 
+impl CtorInfo {
+    /// A stable content encoding for cache keys, not the `Debug` rendering.
+    ///
+    /// Fields use canonical renderings and length prefixes to avoid ambiguity.
+    #[must_use]
+    pub fn identity_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        let put = |out: &mut Vec<u8>, bytes: &[u8]| {
+            out.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+            out.extend_from_slice(bytes);
+        };
+        put(&mut out, self.type_name.as_str().as_bytes());
+        out.extend_from_slice(&(self.params.len() as u64).to_le_bytes());
+        for p in &self.params {
+            put(&mut out, p.as_str().as_bytes());
+        }
+        out.extend_from_slice(&(self.param_kinds.len() as u64).to_le_bytes());
+        for k in &self.param_kinds {
+            put(&mut out, k.show().as_bytes());
+        }
+        out.extend_from_slice(&(self.args.len() as u64).to_le_bytes());
+        for a in &self.args {
+            put(&mut out, a.show().as_bytes());
+        }
+        out.extend_from_slice(&(self.tag as u64).to_le_bytes());
+        out.extend_from_slice(&(self.fields.len() as u64).to_le_bytes());
+        for f in &self.fields {
+            put(&mut out, f.as_str().as_bytes());
+        }
+        out
+    }
+}
+
 /// One top-level declaration's checked facts as elaboration and the FBIP
 /// checker consume them.
 #[derive(Clone, Debug)]

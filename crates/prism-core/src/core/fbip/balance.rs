@@ -3,34 +3,25 @@ use std::collections::BTreeMap;
 use prism_common::sym::Sym;
 
 use super::super::cbpv::{Comp, Core, Value};
+use super::super::effect_check::{residual_effect_node, HANDLE_NODE};
 use super::super::fv::{comp as freev, pat_vars};
-#[cfg(debug_assertions)]
-use super::super::traverse::Visit;
 use super::imbalance::{Imbalance, TokenFault};
 use super::{borrow_mask, borrowed_at, borrowed_call_vars, count_val, Set, Sigs};
 
-// Independent verifier: simulate the inserted ops as a linear token machine. Each
-// owned variable starts with one token; dup adds one, drop and every consuming
-// use remove one. A use must never drive a count below zero, every binding must
-// reach zero before leaving scope, and the two sides of a branch must agree. A
-// pass that under-dups, over-drops, or unbalances a branch fails here.
+// Verify inserted RC operations with a linear token simulation. Counts must
+// remain nonnegative, reach zero at scope exit, and agree across branches.
 /// # Errors
 /// The token fault that broke the simulation, attributed to the declaration it
 /// was found in.
 pub fn balanced(core: &Core, sigs: &Sigs) -> Result<(), Imbalance> {
-    // This runs only on effect-lowered Core (the compiled pipeline). `sim` treats
-    // a stray `Handle`/`Do`/`Mask` as a no-op, which would silently mask an RC
-    // imbalance in its clauses, so assert lowering really ran first rather than
-    // leave the precondition to a comment.
-    // `effect_free` is itself `#[cfg(debug_assertions)]`, and `debug_assert!` still
-    // compiles its body in release; gate the whole assertion so the helper is never
-    // referenced outside debug builds.
-    #[cfg(debug_assertions)]
-    debug_assert!(
-        core.fns.iter().all(|f| effect_free(&f.body)),
-        "balanced: effect nodes survived to the reuse linearity check; lower_effects must run first"
-    );
     for f in &core.fns {
+        // `sim` does not enter handler clauses, so reject unlowered Core.
+        if let Some(node) = residual_effect_node(&f.body) {
+            return Err(Imbalance::in_function(
+                TokenFault::UnloweredEffect { node },
+                f.name,
+            ));
+        }
         let mask = sigs.get(&f.name).map(Vec::as_slice);
         let mut env: BTreeMap<Sym, i64> = f
             .params
@@ -62,24 +53,6 @@ pub fn balanced(core: &Core, sigs: &Sigs) -> Result<(), Imbalance> {
     Ok(())
 }
 
-// Whether `c` is free of the effect nodes that effect lowering removes. Used only
-// by the debug-mode precondition of `balanced`.
-#[cfg(debug_assertions)]
-fn effect_free(c: &Comp) -> bool {
-    struct Scan(bool);
-    impl Visit for Scan {
-        fn visit_comp(&mut self, c: &Comp) {
-            if matches!(c, Comp::Handle { .. } | Comp::Do(..) | Comp::Mask(..)) {
-                self.0 = false;
-            }
-            self.descend_comp(c);
-        }
-    }
-    let mut s = Scan(true);
-    s.visit_comp(c);
-    s.0
-}
-
 fn use_val(v: &Value, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), TokenFault> {
     let mut counts = BTreeMap::new();
     count_val(v, &mut counts);
@@ -87,6 +60,26 @@ fn use_val(v: &Value, env: &mut BTreeMap<Sym, i64>, sigs: &Sigs) -> Result<(), T
         consume(x, i64::try_from(k).unwrap_or(i64::MAX), env)?;
     }
     verify_thunks(v, sigs)
+}
+
+// Closure parameters start owned; captures start borrowed.
+fn sim_lambda(params: &Set, body: &Comp, sigs: &Sigs) -> Result<(), TokenFault> {
+    let free = freev(body);
+    let external: Set = free.difference(params).copied().collect();
+    let mut env: BTreeMap<Sym, i64> = free.into_iter().map(|x| (x, 0)).collect();
+    for p in params {
+        env.insert(*p, 1);
+    }
+    sim(body, &mut env, sigs, &external)?;
+    for (x, n) in &env {
+        if x.as_str() != "_" && *n != 0 {
+            return Err(TokenFault::ThunkCapture {
+                var: *x,
+                tokens: *n,
+            });
+        }
+    }
+    Ok(())
 }
 
 // Closure bodies hide inside thunk values, so the top-level per-function walk
@@ -100,22 +93,7 @@ fn verify_thunks(v: &Value, sigs: &Sigs) -> Result<(), TokenFault> {
                 Comp::Lam(ps, b) => (ps.iter().copied().collect(), b),
                 other => (Set::new(), other),
             };
-            let free = freev(body);
-            let external: Set = free.difference(&params).copied().collect();
-            let mut env: BTreeMap<Sym, i64> = free.into_iter().map(|x| (x, 0)).collect();
-            for p in &params {
-                env.insert(*p, 1);
-            }
-            sim(body, &mut env, sigs, &external)?;
-            for (x, n) in &env {
-                if x.as_str() != "_" && *n != 0 {
-                    return Err(TokenFault::ThunkCapture {
-                        var: *x,
-                        tokens: *n,
-                    });
-                }
-            }
-            Ok(())
+            sim_lambda(&params, body, sigs)
         }
         Value::Ctor(_, _, fs) | Value::Tuple(fs) | Value::UnboxedTuple(fs) => {
             fs.iter().try_for_each(|f| verify_thunks(f, sigs))
@@ -292,14 +270,30 @@ fn sim(
             consume(*tok, 1, env)?;
             use_val(v, env, sigs)
         }
-        // Post-lowering (arena) node, unreachable in this pre-lowering balance
-        // check; kept total by consuming the cell and constructor values.
+        // Arena node: this check runs on lowered Core, where arena placement
+        // has already happened, so the node is reachable; both the cell and
+        // the constructed value are consumed.
         Comp::InitAt(cell, v) => {
             use_val(cell, env, sigs)?;
             use_val(v, env, sigs)
         }
         Comp::Mask(_, b) => sim(b, env, sigs, external),
-        Comp::Lam(..) | Comp::Handle { .. } | Comp::Dup(_) | Comp::Drop(_) => Ok(()),
+        // A bare lambda computation moves no tokens in the enclosing scope
+        // (its captures are loans, unlike a thunk's, which `count_val`
+        // charges), but its body must balance like any closure body. The
+        // thunk walk covers only the outermost lambda under a `Thunk`; this
+        // arm covers a curried inner lambda and a bare top-level one, which
+        // previously went unsimulated entirely.
+        Comp::Lam(ps, b) => sim_lambda(&ps.iter().copied().collect(), b, sigs),
+        // Dup/Drop of a non-variable value: the counting arms above cover the
+        // variable forms, and the RC inserter only ever emits those, so
+        // nothing is counted here.
+        Comp::Dup(_) | Comp::Drop(_) => Ok(()),
+        // A handler's clauses would go unsimulated, so an unlowered tree is
+        // refused rather than certified. The per-function guard in `balanced`
+        // rejects it first; this arm keeps the refusal even for a bare
+        // simulation entered without that guard.
+        Comp::Handle { .. } => Err(TokenFault::UnloweredEffect { node: HANDLE_NODE }),
     }
 }
 
@@ -331,7 +325,7 @@ mod tests {
     use std::iter;
 
     use super::*;
-    use crate::core::cbpv::CoreFn;
+    use crate::core::cbpv::{CheckedHandler, CoreFn};
 
     #[test]
     fn borrowed_immediate_needs_no_retained_token() {
@@ -476,5 +470,34 @@ mod tests {
                 callee: observe,
             }
         );
+    }
+
+    // The simulation cannot see into a handler's clauses, so a tree that still
+    // carries one must be refused, never certified as balanced. This must hold
+    // in release builds too, where a debug assertion would compile away.
+    #[test]
+    fn an_unlowered_handler_is_refused_not_certified() {
+        let name = Sym::new("unlowered");
+        let core = Core {
+            fns: vec![CoreFn {
+                name,
+                params: Vec::new(),
+                body: Comp::Handle {
+                    body: Box::new(Comp::Return(Value::Unit)),
+                    return_var: None,
+                    return_body: None,
+                    ops: CheckedHandler::new(Vec::new()).expect("no clauses, no duplicates"),
+                },
+                dict_arity: 0,
+            }],
+        };
+        let sigs = Sigs::new();
+
+        let error = balanced(&core, &sigs).expect_err("an unlowered handler must be refused");
+        assert_eq!(
+            error.fault,
+            TokenFault::UnloweredEffect { node: HANDLE_NODE }
+        );
+        assert_eq!(error.function, Some(name));
     }
 }

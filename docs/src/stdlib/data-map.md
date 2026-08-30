@@ -8,6 +8,8 @@ The `Map(k, v)` type and its `Tip`/`Bin` constructors are wired in; this module 
 
 A map's representation depends on the canonical `Ord` instance used to build it. The compiler therefore classifies `Ord` (and `Hash`) as representation-affecting in `store::coherence::is_representation_affecting`. Map identity does not currently encode that instance, so programs exchanging a map across an assembly boundary must agree on its canonical ordering.
 
+In the complexity bounds below, `n` is the number of entries in the map. A bound stated in comparisons excludes the cost of the `Ord` comparison itself.
+
 ## Functions and Values
 
 ### `map_empty`
@@ -16,7 +18,7 @@ A map's representation depends on the canonical `Ord` instance used to build it.
 map_empty : forall a b c. Map(a, b, c)
 ```
 
-The empty map.
+The empty map. Time complexity: O(1).
 
 ### `map_height`
 
@@ -24,7 +26,7 @@ The empty map.
 map_height : forall a b c. (Map(a, b, c)) -> Int
 ```
 
-Helper: the cached height of the tree (0 for the empty map).
+Helper: the cached height of the tree (0 for the empty map). Time complexity: O(1).
 
 ### `map_node`
 
@@ -32,7 +34,7 @@ Helper: the cached height of the tree (0 for the empty map).
 map_node : forall a b c. (a, b, Map(a, b, c), Map(a, b, c)) -> Map(a, b, c)
 ```
 
-Helper: build a `Bin` node, computing its height from its children.
+Helper: build a `Bin` node, computing its height from its children. Time complexity: O(1).
 
 ### `map_bf`
 
@@ -40,7 +42,7 @@ Helper: build a `Bin` node, computing its height from its children.
 map_bf : forall a b c. (Map(a, b, c)) -> Int
 ```
 
-Helper: the balance factor of a node (left height minus right height).
+Helper: the balance factor of a node (left height minus right height). Time complexity: O(1).
 
 ### `map_rot_right`
 
@@ -48,7 +50,7 @@ Helper: the balance factor of a node (left height minus right height).
 map_rot_right : forall a b c. (Map(a, b, c)) -> Map(a, b, c)
 ```
 
-Helper: a single right AVL rotation.
+Helper: a single right AVL rotation. Time complexity: O(1).
 
 ### `map_rot_left`
 
@@ -56,7 +58,7 @@ Helper: a single right AVL rotation.
 map_rot_left : forall a b c. (Map(a, b, c)) -> Map(a, b, c)
 ```
 
-Helper: a single left AVL rotation.
+Helper: a single left AVL rotation. Time complexity: O(1).
 
 ### `map_balance`
 
@@ -64,7 +66,7 @@ Helper: a single left AVL rotation.
 map_balance : forall a b c. (Map(a, b, c)) -> Map(a, b, c)
 ```
 
-Helper: rebalance a node after an insert or delete unbalanced it.
+Helper: rebalance a node after an insert or delete unbalanced it. Time complexity: O(1).
 
 ### `map_insert`
 
@@ -72,7 +74,7 @@ Helper: rebalance a node after an insert or delete unbalanced it.
 map_insert : forall a b c. (b, c, Map(b, c, a)) -> Map(b, c, a) given Ord(b)
 ```
 
-Insert `key` with `value`, overwriting any existing binding, and rebalance.
+Insert `key` with `value`, overwriting any existing binding, and rebalance. Time complexity: O(log n) comparisons.
 
 ```prism,mod=Data.Map
 map_lookup(1, map_insert(1, "a", map_empty))
@@ -88,7 +90,7 @@ Some(a)
 map_lookup : forall a b c. (b, Map(b, c, a)) -> Option(c) given Ord(b)
 ```
 
-The value bound to `key` as `Some`, or `None` when absent.
+The value bound to `key` as `Some`, or `None` when absent. Time complexity: O(log n) comparisons.
 
 ```prism,mod=Data.Map
 map_lookup(2, map_from_list([(1, "a"), (2, "b")]))
@@ -104,7 +106,7 @@ Some(b)
 map_member : forall a b c. (b, Map(b, c, a)) -> Bool given Ord(b)
 ```
 
-True when `key` is present in the map.
+True when `key` is present in the map. Time complexity: O(log n) comparisons.
 
 ```prism,mod=Data.Map
 map_member(2, map_from_list([(1, "a"), (2, "b")]))
@@ -120,7 +122,7 @@ true
 map_size : forall a b c. (Map(a, b, c)) -> Int
 ```
 
-The number of entries.
+The number of entries. Time complexity: O(n); sizes are not cached.
 
 ```prism,mod=Data.Map
 map_size(map_from_list([(1, "a"), (2, "b")]))
@@ -136,7 +138,7 @@ map_size(map_from_list([(1, "a"), (2, "b")]))
 map_min : forall a b c. (Map(a, b, c)) -> Option((a, b))
 ```
 
-The smallest key and its value as `Some`, or `None` when empty.
+The smallest key and its value as `Some`, or `None` when empty. Time complexity: O(log n).
 
 ```prism,mod=Data.Map
 map_min(map_from_list([(2, "b"), (1, "a")]))
@@ -152,7 +154,7 @@ Some((1, a))
 map_delete : forall a b c. (b, Map(b, c, a)) -> Map(b, c, a) given Ord(b)
 ```
 
-Remove `key` (a no-op if absent), rebalancing the tree.
+Remove `key` (a no-op if absent), rebalancing the tree. Time complexity: O(log n) comparisons.
 
 ```prism,mod=Data.Map
 map_to_list(map_delete(1, map_from_list([(1, "a"), (2, "b")])))
@@ -168,7 +170,7 @@ map_to_list(map_delete(1, map_from_list([(1, "a"), (2, "b")])))
 map_to_list : forall a b c. (Map(a, b, c)) -> List((a, b))
 ```
 
-The `(key, value)` pairs in ascending key order.
+The `(key, value)` pairs in ascending key order. Time complexity: O(n).
 
 ```prism,mod=Data.Map
 map_to_list(map_from_list([(2, "b"), (1, "a")]))
@@ -184,7 +186,7 @@ map_to_list(map_from_list([(2, "b"), (1, "a")]))
 map_keys : forall a b c. (Map(a, b, c)) -> List(a)
 ```
 
-The keys in ascending order.
+The keys in ascending order. Time complexity: O(n).
 
 ```prism,mod=Data.Map
 map_keys(map_from_list([(2, "b"), (1, "a")]))
@@ -200,7 +202,7 @@ map_keys(map_from_list([(2, "b"), (1, "a")]))
 map_values : forall a b c. (Map(a, b, c)) -> List(b)
 ```
 
-The values in ascending key order.
+The values in ascending key order. Time complexity: O(n).
 
 ```prism,mod=Data.Map
 map_values(map_from_list([(1, "a"), (2, "b")]))
@@ -216,7 +218,7 @@ map_values(map_from_list([(1, "a"), (2, "b")]))
 map_to_lists : forall a b c. (Map(a, b, c)) -> (List(a), List(b))
 ```
 
-The ascending keys and their values as two aligned lists, produced by one tree walk. This is the representation used by the frozen map wire codec.
+The ascending keys and their values as two aligned lists, produced by one tree walk. This is the representation used by the frozen map wire codec. Time complexity: O(n).
 
 ### `map_from_list`
 
@@ -224,7 +226,7 @@ The ascending keys and their values as two aligned lists, produced by one tree w
 map_from_list : forall a b c. (List((b, c))) -> Map(b, c, a) given Ord(b)
 ```
 
-Build a map from `(key, value)` pairs; a later pair overwrites an earlier one with the same key.
+Build a map from `(key, value)` pairs; a later pair overwrites an earlier one with the same key. Time complexity: O(n log n) comparisons for an input of `n` pairs.
 
 ```prism,mod=Data.Map
 map_to_list(map_from_list([(2, "b"), (1, "a")]))
@@ -240,7 +242,7 @@ map_to_list(map_from_list([(2, "b"), (1, "a")]))
 map_map_values : forall e0 a b c d e. ((e) -> d ! {e0}, Map(a, e, b)) -> Map(a, d, c) ! {e0}
 ```
 
-Apply `f` to every value, keeping keys and tree structure.
+Apply `f` to every value, keeping keys and tree structure. Time complexity: O(n), excluding calls to `f`.
 
 ```prism,mod=Data.Map
 map_values(map_map_values(\(v) -> v + 1, map_from_list([(1, 10), (2, 20)])))

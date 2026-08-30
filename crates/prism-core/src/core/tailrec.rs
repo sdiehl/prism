@@ -1,23 +1,19 @@
 //! Shared tail-recursion / TRMC classification.
 //!
-//! One analysis, two consumers:
-//! `check_fip` (`core::fbip`) reads it to PROVE a `fip` function runs in
-//! constant stack, and `emit.rs` reads it to lower a recursive tail into a
-//! loop. Keeping the decision here means a `fip` function is accepted exactly
-//! when codegen can in fact make it constant-stack: the static promise and the
-//! generated code can never disagree because they share this module.
+//! The FBIP checker and native emitter share this classification so accepted
+//! `fip` functions are exactly those codegen can make constant-stack.
 //!
 //! TRMC (tail recursion modulo constructor / addition): a function whose
 //! recursive call feeds exactly one constructor field in tail position, like
 //! `Cons(y, map(f, rest))`, or sits under an associative `1 + f(x)`, runs in
-//! constant stack once the backend turns the cons/add into a hole-passing or
-//! accumulator loop. A plain tail call is the degenerate case (no surrounding
-//! constructor). Anything else grows the stack one frame per recursive step.
+//! constant stack after hole-passing or accumulator lowering. A plain tail call
+//! is the degenerate case.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::cbpv::{Comp, Core, CoreOp, Value};
 use super::fv;
+use super::traverse::Visit;
 use prism_common::sym::Sym;
 
 // A heap tag / field index as `i64`. Mirrors `emit::idx64`: a count that large
@@ -135,6 +131,36 @@ pub fn trmc_mode(name: &str, arity: usize, body: &Comp) -> Option<TrmcMode> {
         (false, true) => Some(TrmcMode::Acc),
         _ => None,
     }
+}
+
+// Whether the TRMC rewrite is sound against resumption for `body`.
+//
+// The hole rewrite threads one mutable cell through the recursion and fills it
+// in place. That is sound only when no surrounding effect can resume the
+// continuation more than once: a second resumption re-entering the half-built
+// recursion would observe the shared cell and corrupt an earlier resumption's
+// result. Effect lowering reifies every multishot handler into the free-monad
+// driver before emission, so a function that reaches the direct rewrite carries
+// no effect node (`Do`/`Handle`/`Mask`) at all -- those are the only nodes that
+// can install or resume a continuation. This states that precondition rather
+// than leaving it implicit in pass ordering: it holds today because effect
+// lowering runs first, and a future reordering that ran the rewrite before
+// effect lowering trips this check instead of silently miscompiling a multishot
+// handler.
+#[must_use]
+pub fn trmc_resumption_safe(body: &Comp) -> bool {
+    struct Scan(bool);
+    impl Visit for Scan {
+        fn visit_comp(&mut self, c: &Comp) {
+            match c {
+                Comp::Do(..) | Comp::Handle { .. } | Comp::Mask(..) => self.0 = false,
+                _ => self.descend_comp(c),
+            }
+        }
+    }
+    let mut scan = Scan(true);
+    Visit::visit_comp(&mut scan, body);
+    scan.0
 }
 
 // Elaboration nests binds to the left, hiding the recursive call from the tail
@@ -503,6 +529,44 @@ mod tests {
         );
         let body = Comp::Case(Value::Var("xs".into()), vec![arm]);
         assert_eq!(classes(&body, 1), [TailClass::Tail]);
+    }
+
+    #[test]
+    fn pure_trmc_body_is_resumption_safe() {
+        // `Cons(h, f(x))` with no effect node: the in-place hole is confined to
+        // one pure invocation, so the rewrite is sound.
+        let body = bind_call(
+            vec![Value::Var("x".into())],
+            Comp::Return(Value::Ctor(
+                "Cons".into(),
+                1,
+                vec![Value::Var("h".into()), Value::Var("t".into())],
+            )),
+        );
+        assert!(trmc_resumption_safe(&body));
+    }
+
+    #[test]
+    fn effectful_trmc_body_trips_resumption_guard() {
+        // The same cons tail, but a `perform` sits in the recursive spine: a
+        // multishot handler could resume the continuation twice and observe the
+        // shared hole. The rewrite precondition must reject it. This is the
+        // deliberate trip: it stands in for a future pass reordering that ran
+        // the rewrite before effect lowering removed the effect node.
+        let tail = bind_call(
+            vec![Value::Var("x".into())],
+            Comp::Return(Value::Ctor(
+                "Cons".into(),
+                1,
+                vec![Value::Var("h".into()), Value::Var("t".into())],
+            )),
+        );
+        let body = Comp::Bind(
+            Box::new(Comp::Do("op".into(), vec![])),
+            "h".into(),
+            Box::new(tail),
+        );
+        assert!(!trmc_resumption_safe(&body));
     }
 
     fn fnamed(name: &str, body: Comp) -> CoreFn {

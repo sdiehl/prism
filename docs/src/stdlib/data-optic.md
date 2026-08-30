@@ -41,7 +41,7 @@ Opt-in: not in Base.
 
 ### `Lens`
 
-```prism,def,h-46f30df7f24f5d95d2dce9d28f2deed1abdf2708e14527add7fc00de9e3c67be
+```prism,def,h-048a20401300e0b750d2b5dd7c5ef04f3febd00583807d7a4549537cab77baf5
 type Lens(whole, part) = MkLens((whole) -> part, (whole, part) -> whole)
 ```
 
@@ -51,7 +51,7 @@ The constructor is spelled `MkLens` rather than `Lens` on purpose: constructors 
 
 ### `Traversal`
 
-```prism,def,h-2d9e54de649eef62eb2bb42575d06410087ba169adab8b379dd986f55d7af0a1
+```prism,def,h-0afcfc5136a78802141fdf13524370d6f41c3d714a7445b8b9025cdd0b74df39
 type Traversal(whole, part) = MkTraversal(
   (whole) -> List(part),
   (whole, List(part)) -> whole

@@ -14,7 +14,7 @@ Opt-in: this module is not in Base, so ambient effect rows and the unbranded `Ma
 
 ### `OrdWitness`
 
-```prism,def,h-3f7b432495bade83b7f13a098beeeca56dea56c1668bd2deb28f0ceceb9fea68
+```prism,def,h-306ed51ad61306722cbdd6c01f18e311c07d97804da3f36661b446f9e9dab80a
 newtype OrdWitness(k, brand) = OrdBy((k, k) -> Int)
 ```
 
@@ -22,7 +22,7 @@ An ordering witness: a comparator branded by the phantom `brand`. The only way t
 
 ### `OrderedMap`
 
-```prism,def,h-db9f25e3fdf3a56a43e718354950db2d0170e3abdc9f73c67e6708a1a0a43cb3
+```prism,def,h-e944aad617d34df6f3c3e27a6058fbb8de6306574a0039597720281d651bfba5
 newtype OrderedMap(k, v, brand) = OrderedMap(Map(k, v, brand))
 ```
 
@@ -57,7 +57,7 @@ Named as the scoping form it is, since it reads at the call site as the block th
 ord_empty : forall a b c. (Data.Ordered.OrdWitness(a, b)) -> Data.Ordered.OrderedMap(a, c, b)
 ```
 
-The empty map under witness `w`, carrying `w`'s brand.
+The empty map under witness `w`, carrying `w`'s brand. Time complexity: O(1).
 
 ### `ord_insert`
 
@@ -65,7 +65,7 @@ The empty map under witness `w`, carrying `w`'s brand.
 ord_insert : forall a b c. (Data.Ordered.OrdWitness(a, b), a, c, Data.Ordered.OrderedMap(a, c, b)) -> Data.Ordered.OrderedMap(a, c, b)
 ```
 
-Insert under witness `w`; the result carries `w`'s brand.
+Insert under witness `w`; the result carries `w`'s brand. Time complexity: O(log n) comparator calls.
 
 ```prism,mod=Data.Ordered
 with_ordering(\(a, b) -> cmp(a, b), \(w) ->
@@ -82,7 +82,7 @@ with_ordering(\(a, b) -> cmp(a, b), \(w) ->
 ord_lookup : forall a b c. (Data.Ordered.OrdWitness(a, b), a, Data.Ordered.OrderedMap(a, c, b)) -> Option(c)
 ```
 
-Look `key` up under witness `w`. Only a map of `w`'s brand type-checks here.
+Look `key` up under witness `w`. Only a map of `w`'s brand type-checks here. Time complexity: O(log n) comparator calls.
 
 ```prism,mod=Data.Ordered
 with_ordering(\(a, b) -> cmp(a, b), \(w) ->
@@ -99,7 +99,7 @@ None
 ord_member : forall a b c. (Data.Ordered.OrdWitness(a, b), a, Data.Ordered.OrderedMap(a, c, b)) -> Bool
 ```
 
-True when `key` is present under witness `w`.
+True when `key` is present under witness `w`. Time complexity: O(log n) comparator calls.
 
 ```prism,mod=Data.Ordered
 with_ordering(\(a, b) -> cmp(a, b), \(w) ->
@@ -116,7 +116,7 @@ true
 ord_to_list : forall a b c. (Data.Ordered.OrdWitness(a, b), Data.Ordered.OrderedMap(a, c, b)) -> List((a, c))
 ```
 
-The `(key, value)` pairs of a `w`-branded map, in tree (in-order) order.
+The `(key, value)` pairs of a `w`-branded map, in tree (in-order) order. Time complexity: O(n).
 
 ```prism,mod=Data.Ordered
 with_ordering(\(a, b) -> cmp(a, b), \(w) ->
@@ -133,7 +133,7 @@ with_ordering(\(a, b) -> cmp(a, b), \(w) ->
 ord_size : forall a b c. (Data.Ordered.OrdWitness(a, b), Data.Ordered.OrderedMap(a, c, b)) -> Int
 ```
 
-The number of entries in a `w`-branded map.
+The number of entries in a `w`-branded map. Time complexity: O(n); sizes are not cached.
 
 ```prism,mod=Data.Ordered
 with_ordering(\(a, b) -> cmp(a, b), \(w) ->

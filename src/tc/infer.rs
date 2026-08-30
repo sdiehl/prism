@@ -51,7 +51,158 @@ fn same_modulo_latent_row(a: &Type, b: &Type) -> bool {
     bare(a) == bare(b)
 }
 
+// Whether an expression is a syntactic value: a form whose elaboration can be
+// duplicated at each use site without duplicating an effect, a computation, or
+// an observable identity. Lambdas, literals, and variables qualify, an
+// annotation is transparent, and an aggregate qualifies when every element
+// does. This is the admission rule for both halves of local generalization:
+// only a value generalizes over types, and only a value may be expanded per use
+// by elaboration.
+fn is_syntactic_value(e: &Expr<Core>) -> bool {
+    match e {
+        Expr::Int(_)
+        | Expr::Float(_)
+        | Expr::Char(_)
+        | Expr::Bool(_)
+        | Expr::Unit
+        | Expr::Str(_)
+        | Expr::Var(_)
+        | Expr::Lam(_, _) => true,
+        Expr::Ann(inner, _) => is_syntactic_value(&inner.node),
+        Expr::Tuple(elems) | Expr::UnboxedTuple(elems) | Expr::List(elems) => {
+            elems.iter().all(|elem| is_syntactic_value(&elem.node))
+        }
+        _ => false,
+    }
+}
+
+// The number of type quantifiers in a scheme's prenex prefix. Row quantifiers
+// are peeled through but not counted: every local lambda is row-generalized, so
+// a row binder says nothing about whether use sites can disagree on a type.
+fn type_quantifiers(ty: &Type) -> usize {
+    let mut ty = ty;
+    let mut n = 0;
+    loop {
+        match ty {
+            Type::Forall(_, body) => {
+                n += 1;
+                ty = body;
+            }
+            Type::RowForall(_, body) => ty = body,
+            _ => return n,
+        }
+    }
+}
+
+// Push every name `p` binds, in support of `open_vars`' scope tracking. The
+// traversal is `Pattern::each_child`, so a new pattern variant cannot silently
+// hide a binder.
+fn pattern_binders(p: &S<ast::Pattern>, bound: &mut Vec<String>) {
+    if let ast::Pattern::Var(x) = &p.node {
+        bound.push(x.clone());
+    }
+    p.node.each_child(&mut |sub| pattern_binders(sub, bound));
+}
+
+// Collect the free term variables of `e`: every `Var` not bound by a binder
+// within `e` itself. Binder forms are handled here; every other form recurses
+// through `Expr::each_child`, so a future variant is walked with no binders
+// tracked, which can only over-report a variable as free (the safe direction
+// for `generalize_let`'s admission decision).
+fn open_vars(e: &S<Expr<Core>>, bound: &mut Vec<String>, out: &mut BTreeSet<String>) {
+    match &e.node {
+        Expr::Var(x) => {
+            if !bound.iter().any(|b| b == x) {
+                out.insert(x.clone());
+            }
+        }
+        Expr::Let(x, v, b) => {
+            open_vars(v, bound, out);
+            bound.push(x.clone());
+            open_vars(b, bound, out);
+            bound.pop();
+        }
+        Expr::Lam(ps, body) => {
+            let depth = bound.len();
+            bound.extend(ps.iter().map(|p| p.name.clone()));
+            open_vars(body, bound, out);
+            bound.truncate(depth);
+        }
+        Expr::Match(scrut, arms) => {
+            open_vars(scrut, bound, out);
+            for arm in arms {
+                let depth = bound.len();
+                pattern_binders(&arm.pat, bound);
+                if let Some(g) = &arm.guard {
+                    open_vars(g, bound, out);
+                }
+                open_vars(&arm.body, bound, out);
+                bound.truncate(depth);
+            }
+        }
+        Expr::Handle(body, arms, _) => {
+            open_vars(body, bound, out);
+            for arm in arms {
+                match arm {
+                    HandlerArm::Return(x, arm_body) => {
+                        bound.push(x.clone());
+                        open_vars(arm_body, bound, out);
+                        bound.pop();
+                    }
+                    HandlerArm::Op(_, params, resume, arm_body) => {
+                        let depth = bound.len();
+                        bound.extend(params.iter().cloned());
+                        bound.push(resume.clone());
+                        open_vars(arm_body, bound, out);
+                        bound.truncate(depth);
+                    }
+                    #[expect(
+                        clippy::uninhabited_references,
+                        reason = "Never is uninhabited in Core; arm is unreachable"
+                    )]
+                    HandlerArm::Sugar(never) => match *never {},
+                }
+            }
+        }
+        other => other.each_child(&mut |child| open_vars(child, bound, out)),
+    }
+}
+
+// A value generalizes only when every free variable resolves to a top-level
+// definition. Elaboration expands a generalized value at each use site, and a
+// free reference to an enclosing local would be re-read in the use site's
+// scope, where a legal (if warned) same-named binder between the `let` and the
+// use would capture it; a top-level reference is immune because elaboration
+// resolves it to the definition, never to a name in local scope.
+fn locally_closed(value: &S<Expr<Core>>, env: &Env) -> bool {
+    let mut free = BTreeSet::new();
+    open_vars(value, &mut Vec::new(), &mut free);
+    free.iter().all(|name| !env.binds_locally(&Sym::from(name)))
+}
+
 impl Tc<'_> {
+    // Generalize a local `let`'s bound type, and record whether elaboration must
+    // expand the binding at each use rather than bind it once.
+    //
+    // Core's `Bind` carries no scheme, so a binder that reaches typed Core is
+    // re-inferred there as a single monotype: a value used at two types would
+    // make the two uses contradict each other. A type-polymorphic value is
+    // marked here by the id of the bound expression, and elaboration
+    // re-elaborates it at each use instead. Duplicating a value is
+    // observationally free, which is why only a locally-closed value takes this
+    // path; a computation, or a value referencing an enclosing local, stays
+    // monomorphic in its type existentials.
+    fn generalize_let(&mut self, env: &Env, value: &S<Expr<Core>>, ty: &Type) -> Type {
+        if !is_syntactic_value(&value.node) || !locally_closed(value, env) {
+            return self.generalize_local_mono(env, ty);
+        }
+        let scheme = self.generalize_local(env, ty);
+        if type_quantifiers(&scheme) > 0 {
+            self.generalized_lets.insert(value.id);
+        }
+        scheme
+    }
+
     // Record a syntactically direct operation. This is the only source of a
     // singleton operation summary; all calls through a type/signature row are
     // expanded conservatively by `note_opaque_row` below.
@@ -205,7 +356,7 @@ impl Tc<'_> {
                         }
                         None => d.clone(),
                     };
-                    env2.insert(Sym::from(&p.name), bound);
+                    env2.insert_local(Sym::from(&p.name), bound);
                 }
                 // Scope the body's effects into the expected arrow row: its fixed
                 // labels become the prefix (so a body that performs them adds
@@ -261,12 +412,12 @@ impl Tc<'_> {
             }
             (Expr::Let(x, v, b), _) => {
                 let tv = self.synth(env, v)?;
-                // Unconditional generalization; no value restriction, and any
-                // constraint-obligated existential stays monomorphic (see
-                // `generalize` and `generalize_local`).
-                let g = self.generalize_local(env, &tv);
+                // Types generalize for a syntactic value only; any
+                // constraint-obligated existential stays monomorphic besides
+                // (see `generalize` and `generalize_local`).
+                let g = self.generalize_let(env, v, &tv);
                 let mut env2 = env.clone();
-                env2.insert(Sym::from(x), g);
+                env2.insert_local(Sym::from(x), g);
                 self.check(&env2, b, ty)
             }
             (Expr::Match(s, arms), _) => {
@@ -607,12 +758,12 @@ impl Tc<'_> {
             }
             Expr::Let(x, v, b) => {
                 let tv = self.synth(env, v)?;
-                // Unconditional generalization; no value restriction, and any
-                // constraint-obligated existential stays monomorphic (see
-                // `generalize` and `generalize_local`).
-                let g = self.generalize_local(env, &tv);
+                // Types generalize for a syntactic value only; any
+                // constraint-obligated existential stays monomorphic besides
+                // (see `generalize` and `generalize_local`).
+                let g = self.generalize_let(env, v, &tv);
                 let mut env2 = env.clone();
-                env2.insert(Sym::from(x), g);
+                env2.insert_local(Sym::from(x), g);
                 self.synth(&env2, b)
             }
             Expr::Lam(ps, body) => {
@@ -624,7 +775,7 @@ impl Tc<'_> {
                     let dom = self
                         .param_annot(p, span)?
                         .unwrap_or_else(|| Type::Exist(self.push_ex()));
-                    env2.insert(Sym::from(&p.name), dom.clone());
+                    env2.insert_local(Sym::from(&p.name), dom.clone());
                     doms.push(dom);
                 }
                 let ret = self.push_ex();
@@ -975,7 +1126,7 @@ impl Tc<'_> {
             match arm {
                 HandlerArm::Return(x, arm_body) => {
                     let mut env2 = env.clone();
-                    env2.insert(Sym::from(x), body_ty.clone());
+                    env2.insert_local(Sym::from(x), body_ty.clone());
                     self.check(&env2, arm_body, &Type::Exist(ret_ex))?;
                 }
                 HandlerArm::Op(op_name, params, k_var, arm_body) => {
@@ -992,7 +1143,7 @@ impl Tc<'_> {
                         self.open_op_rows(&mut op_params, &mut op_ret);
                         let mut env2 = env.clone();
                         for (pname, pty) in params.iter().zip(op_params.iter()) {
-                            env2.insert(Sym::from(pname), pty.clone());
+                            env2.insert_local(Sym::from(pname), pty.clone());
                         }
                         // The continuation performs the handler body's residual
                         // effects when resumed. That residual is an open row
@@ -1005,7 +1156,7 @@ impl Tc<'_> {
                         let k_row = self.push_ex_row();
                         let k_ty =
                             Type::fun_eff(vec![op_ret], EffRow::Exist(k_row), Type::Exist(ret_ex));
-                        env2.insert(Sym::from(k_var), k_ty);
+                        env2.insert_local(Sym::from(k_var), k_ty);
                         // The summary is keyed on the freshly minted row, which
                         // is the binder's identity; the spelling is not, and a
                         // nested clause that reuses the name gets its own key.
@@ -1472,12 +1623,29 @@ impl Tc<'_> {
             super::env::collect_row_vars(p, &mut rows);
         }
         super::env::collect_row_vars(ret, &mut rows);
+        if rows.is_empty() {
+            return;
+        }
         for v in rows {
             for p in params.iter_mut() {
                 *p = p.subst_row_var(v, &target);
             }
             *ret = ret.subst_row_var(v, &target);
         }
+        // The op's own effect label was just absorbed into the ambient tail
+        // (`perform_ty`, rule 1), and that same tail is what the callback row
+        // variable now binds to; a higher-order op like `fork(() -> a ! {Async(a)
+        // | e})` therefore splices its own `Async` back on top of the copy it
+        // already contributed, yielding a spurious `{Async(a), Async(a) | e0}`.
+        // Rows are multisets, so that second copy would otherwise survive into
+        // Typed Core and read as a `mask`. Collapse it here, at its one source, by
+        // zonking (so the tail's absorbed copy is visible) and deduplicating; a
+        // real `mask` copy is added in `synth_mask`, never through this splice, so
+        // it is untouched.
+        for p in params.iter_mut() {
+            *p = self.apply(p).map_rows(&super::subsume::dedup_row);
+        }
+        *ret = self.apply(ret).map_rows(&super::subsume::dedup_row);
     }
 
     // The type of a perform site for a parametric op: the op signature with
@@ -1536,10 +1704,15 @@ impl Tc<'_> {
     }
 
     // `mask<E>(body)`: the masked ops bypass the innermost `E` handler, so the
-    // expression still demands an enclosing one. Inject one `E` label into the
-    // ambient row so the unifier does not under-report it, and mark the nearest
-    // enclosing `E` handler so it leaves the label in its residual row instead of
-    // discharging it.
+    // expression demands one more enclosing `E` handler than the body itself
+    // does. Rows are multisets, so this is a typing rule, not lexical
+    // bookkeeping: the mask's contribution to the enclosing row is everything the
+    // body performs PLUS one extra copy of `E`, and each enclosing `E` handler
+    // discharges exactly one copy. The body is synthesised under a fresh ambient
+    // so its effects are computed in isolation and then merged (matching, so
+    // sibling effects reconcile to a shared count) rather than accumulated in
+    // place; a plain absorb of `{E}` would MATCH the body's own `E` and lose the
+    // tunnelled copy, which is exactly the pre-repair under-reporting bug.
     fn synth_mask(
         &mut self,
         env: &Env,
@@ -1556,10 +1729,21 @@ impl Tc<'_> {
             }
             .at(span));
         }
+        let body_row = self.push_ex_row();
+        let prefix = self
+            .cur_row
+            .as_ref()
+            .map_or_else(Vec::new, |s| s.prefix.clone());
+        let saved_row = self.cur_row.replace(RowScope {
+            tail: body_row,
+            prefix,
+            expected: EffRow::Exist(body_row),
+        });
         let outer_uses = mem::take(&mut self.operation_uses);
         let body_ty = self.synth(env, body);
         let mut body_uses = mem::take(&mut self.operation_uses);
         self.operation_uses = outer_uses;
+        self.cur_row = saved_row;
         let t = body_ty?;
         let args = (0..self.eff_arity(eff_sym))
             .map(|_| Type::Exist(self.push_ex()))
@@ -1568,7 +1752,13 @@ impl Tc<'_> {
             name: eff_sym,
             args,
         };
-        let masked = EffRow::Extend(label, Box::new(EffRow::Empty));
+        // `{E | body_eff}`: prepend the extra masked copy to the body's own row,
+        // then absorb the whole thing. Absorbing splices the extra `E` onto the
+        // ambient's open end while matching the body's effects against whatever
+        // the enclosing scope already carries, giving `max(existing, body) + 1`
+        // copies of `E` -- the correct multiset for a tunnelled operation.
+        let body_eff = self.apply_row(&EffRow::Exist(body_row));
+        let contribution = EffRow::Extend(label, Box::new(body_eff));
         // Mask changes which handler frame may subtract an operation, not the
         // operation's identity. Preserve a direct Known set (so an adjacent
         // outer partial handler can still cancel it); only introduce OpaqueAll
@@ -1577,15 +1767,7 @@ impl Tc<'_> {
             body_uses.insert_all(eff_sym);
         }
         self.operation_uses.merge(body_uses);
-        self.absorb_row(&masked).map_err(|e| e.at(span))?;
-        if let Some(frame) = self
-            .handler_stack
-            .iter_mut()
-            .rev()
-            .find(|f| f.handled.contains(&eff_sym))
-        {
-            frame.masked.insert(eff_sym);
-        }
+        self.absorb_row(&contribution).map_err(|e| e.at(span))?;
         Ok(t)
     }
 
@@ -1624,10 +1806,7 @@ impl Tc<'_> {
                 _ => None,
             })
             .collect();
-        self.handler_stack.push(HandlerFrame {
-            handled,
-            masked: BTreeSet::new(),
-        });
+        self.handler_stack.push(HandlerFrame { handled });
         let body_ty = self.in_row_scope(scope, |tc| tc.synth(env, body));
         let frame = self.handler_stack.pop().expect("handler frame");
         self.cur_row = saved_row;
@@ -1660,20 +1839,31 @@ impl Tc<'_> {
                 })
                 .collect(),
         };
-        // A masked effect tunnels past this handler: keep it in the residual row
-        // rather than discharging it, so the surrounding function still demands
-        // an enclosing handler for it.
-        let discharged: BTreeSet<Sym> = discharge_candidates
-            .difference(&frame.masked)
-            .copied()
-            .collect();
-        self.discharge_row(body_row, &discharged)
+        // Discharge one occurrence of each handled effect from the multiset row.
+        // A `mask` inside the body added a surplus copy, so a tunnelled effect
+        // survives in the residual and the surrounding function still demands an
+        // enclosing handler for it -- no separate mask bookkeeping is needed. The
+        // returned `live` set is the effects still present after discharge; an
+        // effect is only fully cancelled (and its operations subtracted below)
+        // when it is absent from `live`.
+        let live = self
+            .discharge_row(body_row, &discharge_candidates)
             .map_err(|e| e.at(span))?;
-        let opaque_discharge = match mode {
-            HandlerMode::Exhaustive => frame.handled.clone(),
-            HandlerMode::Partial => BTreeSet::new(),
+        // A handled effect that stays live after this handler cancelled one of
+        // its copies carries a `mask`-tunnelled surplus, so its operations belong
+        // to an enclosing handler and are NOT subtracted here. An effect present
+        // only because this handler never discharged it (a `partial` handler
+        // whose body also performs an operation it does not cover) is not masked:
+        // its covered operations are still discharged. The surplus is exactly the
+        // live effects this handler actually attempted to discharge, so intersect
+        // `live` with the discharge candidates.
+        let masked: BTreeSet<Sym> = live.intersection(&discharge_candidates).copied().collect();
+        let no_discharge = BTreeSet::new();
+        let opaque_discharge: &BTreeSet<Sym> = match mode {
+            HandlerMode::Exhaustive => &frame.handled,
+            HandlerMode::Partial => &no_discharge,
         };
-        let residual = body_uses.subtract(&handled_operations, &opaque_discharge, &frame.masked);
+        let residual = body_uses.subtract(&handled_operations, opaque_discharge, &masked);
         self.operation_uses.merge(residual.clone());
         Ok((body_ty, residual))
     }

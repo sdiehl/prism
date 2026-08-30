@@ -10,7 +10,7 @@ One document per source file: the embedded source identity and every syntax-boun
 
 ### `DiagPhase`
 
-```prism,def,h-e414102dfc871ddc5c848aefdf20f81e8d10ee0b98ced69a14434cb8faa88839
+```prism,def,h-84646654d75dd16e4df8d35502080b6a8d98a5ac6957a5de83872a315fc63f89
 type DiagPhase = DPLex | DPParse deriving (Eq, Show)
 ```
 
@@ -18,7 +18,7 @@ The phase that raised a diagnostic.
 
 ### `Diagnostic`
 
-```prism,def,h-9949442920ded62525925a7e4e8cd2e5bc59dffccab706988352a8d10fd27319
+```prism,def,h-7e6a1ea832afe7699068f862994f5a8b18fbe0f03ce93d3331c8eaf1d9479e53
 type Diagnostic = Diagnostic {
   code: String,
   phase: DiagPhase,
@@ -33,7 +33,7 @@ One diagnostic: the stable append-only code, the raising phase, the primary half
 
 ### `DiagnosticsDoc`
 
-```prism,def,h-fe92b42c220df81559fa3eb6176f97bce8b1da97dea3160a8681c2fc9d3b049e
+```prism,def,h-3dcf755ca4c2094157094c67260da203e6d87c1ea46c9dfd7f41b175881c0b72
 type DiagnosticsDoc = DiagnosticsDoc {
   schema: String,
   compiler: String,

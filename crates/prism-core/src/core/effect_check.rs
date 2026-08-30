@@ -1,6 +1,13 @@
 //! Post-lowering erased-Core effect invariants.
 
-use super::cbpv::{Comp, Core, Value};
+use super::cbpv::{Comp, Core};
+use super::traverse::Visit;
+
+// The raw effect node names, shared with the reuse linearity check so its
+// refusal names an unlowered node the same way this check does.
+pub const DO_NODE: &str = "do";
+pub const HANDLE_NODE: &str = "handle";
+pub const MASK_NODE: &str = "mask";
 
 /// Reject any raw `do`, `handle`, or `mask` node that survives typed effect
 /// lowering and erasure.
@@ -9,7 +16,7 @@ use super::cbpv::{Comp, Core, Value};
 /// A message naming the first function that still carries such a node.
 pub fn residual_effects(core: &Core) -> Result<(), String> {
     for function in &core.fns {
-        if raw_effects(&function.body) {
+        if residual_effect_node(&function.body).is_some() {
             return Err(format!(
                 "residual effect in `{}` after lowering",
                 function.name
@@ -19,46 +26,28 @@ pub fn residual_effects(core: &Core) -> Result<(), String> {
     Ok(())
 }
 
-fn raw_effects(comp: &Comp) -> bool {
-    if matches!(comp, Comp::Do(..) | Comp::Handle { .. } | Comp::Mask(..)) {
-        return true;
-    }
-    match comp {
-        Comp::Return(value)
-        | Comp::Force(value)
-        | Comp::Error(value)
-        | Comp::FloatBuiltin(_, value)
-        | Comp::Neg(_, value)
-        | Comp::Dup(value)
-        | Comp::Drop(value)
-        | Comp::Reuse(_, value)
-        | Comp::RefNew(value)
-        | Comp::RefGet(value)
-        | Comp::UnboxedProject(value, _) => raw_effects_value(value),
-        Comp::WithReuse { freed, body, .. } => raw_effects_value(freed) || raw_effects(body),
-        Comp::Prim(_, left, right) | Comp::RefSet(left, right) | Comp::InitAt(left, right) => {
-            raw_effects_value(left) || raw_effects_value(right)
-        }
-        Comp::App(function, args) => raw_effects(function) || args.iter().any(raw_effects_value),
-        Comp::Call(_, args) | Comp::StrBuiltin(_, args) | Comp::Io(_, args) => {
-            args.iter().any(raw_effects_value)
-        }
-        Comp::Bind(bound, _, body) => raw_effects(bound) || raw_effects(body),
-        Comp::Lam(_, body) => raw_effects(body),
-        Comp::If(value, then_branch, else_branch) => {
-            raw_effects_value(value) || raw_effects(then_branch) || raw_effects(else_branch)
-        }
-        Comp::Case(value, arms) => {
-            raw_effects_value(value) || arms.iter().any(|(_, body)| raw_effects(body))
-        }
-        Comp::Do(..) | Comp::Mask(..) | Comp::Handle { .. } => true,
-    }
+/// The first raw effect node in the computation, including nested values.
+#[must_use]
+pub fn residual_effect_node(comp: &Comp) -> Option<&'static str> {
+    let mut finder = EffectNodeFinder { found: None };
+    finder.visit_comp(comp);
+    finder.found
 }
 
-fn raw_effects_value(value: &Value) -> bool {
-    match value {
-        Value::Thunk(comp) => raw_effects(comp),
-        Value::Ctor(_, _, fields) | Value::Tuple(fields) => fields.iter().any(raw_effects_value),
-        _ => false,
+struct EffectNodeFinder {
+    found: Option<&'static str>,
+}
+
+impl Visit for EffectNodeFinder {
+    fn visit_comp(&mut self, c: &Comp) {
+        if self.found.is_some() {
+            return;
+        }
+        match c {
+            Comp::Do(..) => self.found = Some(DO_NODE),
+            Comp::Handle { .. } => self.found = Some(HANDLE_NODE),
+            Comp::Mask(..) => self.found = Some(MASK_NODE),
+            _ => self.descend_comp(c),
+        }
     }
 }

@@ -26,7 +26,7 @@ Opt-in: not in Base.
 
 ### `Divergence`
 
-```prism,def,h-db46ec22c3f60fa1c2ce55e847bef04d69b0f1368134eee372b206967edd4063
+```prism,def,h-2b033d3c7a0b88161b7f2c7fc1a92edec9ef73361b37e36e542aaa61e00fa022
 type Divergence(a)
   = DiffAt(Int, a, a)
   | DiffLeftEnd(Int, a)

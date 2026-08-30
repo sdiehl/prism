@@ -81,6 +81,9 @@ impl Config {
         if flags.no_specialize {
             disabled.push(CorePass::Specialize);
         }
+        if flags.no_ho_spec {
+            disabled.push(CorePass::HoSpecialize);
+        }
         Self {
             // The mode is a CLI decision (`prism test`), never an env knob.
             mode: BuildMode::Production,
@@ -116,6 +119,13 @@ impl Config {
     #[must_use]
     pub const fn backend_opt(&self) -> BackendOpt {
         self.flags.backend_opt
+    }
+
+    /// Whether LLVM bitcode is lowered to native objects in-process before one
+    /// ordinary platform link, instead of being handed to Clang `ThinLTO`.
+    #[must_use]
+    pub const fn direct_object(&self) -> bool {
+        self.flags.direct_object
     }
 
     /// Which cooperative scheduler `run_cooperative` binds to (the `--scheduler`

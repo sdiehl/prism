@@ -3144,12 +3144,7 @@ pub fn fold_uniform(fns: &[TypedCoreFn], analysis: &StateAnalysis<'_>) -> Option
     // threads such callees through the flow analysis; this one does not.
     let forcers = generic_forcers(fns);
     if fns.iter().any(|f| {
-        let loc: Loc = f
-            .params()
-            .iter()
-            .map(TypedBinder::name)
-            .zip(flow.param[&f.name()].iter().cloned())
-            .collect();
+        let loc: Loc = flow::param_loc(f, flow);
         state_escapes(f.body(), &loc, &ops, &forcers, latent, flow)
     }) {
         return None;

@@ -1,0 +1,22 @@
+---
+source: tests/tooling/lint.rs
+expression: stdout
+---
+{
+  "schema": "prism-lint-v1",
+  "files": 1,
+  "suppressed": 0,
+  "findings": [
+    {
+      "code": "L0109",
+      "path": "tests/fixtures/lint/codepoint_scan.pr",
+      "line": 6,
+      "col": 1,
+      "span": [
+        365,
+        485
+      ],
+      "message": "`sum_codes` recurses while indexing by codepoint; each call re-walks the encoding, so the scan is quadratic in its input (`byte_at` and `byte_len` are constant time)"
+    }
+  ]
+}

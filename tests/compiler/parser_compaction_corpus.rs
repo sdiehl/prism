@@ -1,11 +1,8 @@
 //! Structural gate for the independent parser-compaction corpus.
 //!
 //! The Python driver owns byte hashing and the generated ledgers. These tests
-//! deliberately run its read-only `check` mode only: oracle acceptance is a
-//! guarded, detached-worktree operation and must never happen as a test side
-//! effect. Curated tranche 2 closes the declared structural inventory and
-//! three direct-entry receipts. Depth and mutation checks still assert that
-//! their pending ledgers remain visible instead of claiming semantic parity.
+//! use its read-only `check` mode and assert both completed receipts and the
+//! pending depth and mutation ledgers.
 
 use std::path::Path;
 use std::process::Command;

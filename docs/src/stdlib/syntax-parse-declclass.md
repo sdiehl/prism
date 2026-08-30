@@ -10,7 +10,7 @@ These declarations share two pieces of grammar that do not belong in the top-lev
 
 ### `parse_given_clause`
 
-```prism,sig,h-b6080036c4856666bb11d4bf802606528532f2d8b015caf5648335f832c77d9f
+```prism,sig,h-98798c048b82705d765d40fb6596dcbd533ab37be976a84759633c0a7b8e48ec
 parse_given_clause : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(List(Syntax.Ast.Constraint))
 ```
 
@@ -18,7 +18,7 @@ Parse an optional `given Class(Type), ...` clause.  This is public because ordin
 
 ### `parse_effect_item`
 
-```prism,sig,h-2b002f1e7cc67dd0849f15de206987addd5d95c2ac4b662d5f68c344d498e387
+```prism,sig,h-749860c4af295e0fb1033c40ed8ed2ab1c12d4bfef95d49a017c6f76cd3e41ac
 parse_effect_item : (Syntax.Cursor.Cursor, Int, Option(String)) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Item)
 ```
 
@@ -26,7 +26,7 @@ Parse an `effect` item. `c` points at the keyword, and `vis` is the already-deco
 
 ### `parse_alias_item`
 
-```prism,sig,h-57acdcd12dfa19b3a734a08dc44ff8846a12a247adb4aaf42258ae89b96e3c46
+```prism,sig,h-b8382d180eead96b9a9ec1a49d3bd11d0698550606b32289ec12d739752dee69
 parse_alias_item : (Syntax.Cursor.Cursor, Int, Option(String)) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Item)
 ```
 
@@ -34,7 +34,7 @@ Parse the shared `alias` family. A brace RHS constructs an effect alias; every o
 
 ### `parse_class_item`
 
-```prism,sig,h-b3e48f4e97e2a2b558ab21d9f3f74a37d0cca76e90ad5cb86e8b36fda4cd0e2c
+```prism,sig,h-0827a313490b46131a5083077cdb60d6a7051c8c09797e35934d302826faaa79
 parse_class_item : (Syntax.Cursor.Cursor, Int, Option(String)) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Item)
 ```
 
@@ -42,7 +42,7 @@ Parse a class declaration, including marker classes without a body and layout bo
 
 ### `parse_instance_item`
 
-```prism,sig,h-e7e5aafe0ceb6158c9ede70ab82ec2a58424e5a80b4c62956a090299bf0e8245
+```prism,sig,h-a794a9971ccd98cf0e23648dbcaac9691899822cfb5bb614210bc5b6ffd9369c
 parse_instance_item : (Syntax.Cursor.Cursor, Int, Option(String)) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Item)
 ```
 
@@ -50,7 +50,7 @@ Parse an instance declaration, including marker instances and layout bodies of c
 
 ### `parse_canonical_item`
 
-```prism,sig,h-ce79f04864211aabda87d580f4dd190569eab538e2001ca94becc6bc83eb18aa
+```prism,sig,h-57dd3d0e49f6c48c06b9d1a5ca754ac516754074bbb87cec573a288019db2277
 parse_canonical_item : (Syntax.Cursor.Cursor, Int, Option(String)) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Item)
 ```
 

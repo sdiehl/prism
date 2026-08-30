@@ -26,7 +26,7 @@ Hex and base64 are written in pure Prism over the buffer builders rather than as
 bytes_length : (Wire.Bytes) -> Int
 ```
 
-The number of bytes in a `Bytes`.
+The number of bytes in a `Bytes`. Time complexity: O(1).
 
 ```prism,mod=Data.Bytes
 bytes_length(string_to_bytes("Hello"))
@@ -42,7 +42,7 @@ bytes_length(string_to_bytes("Hello"))
 bytes_index : (Wire.Bytes, Int) -> Int
 ```
 
-The byte at index `i` (0-based). Out of range traps, like array indexing.
+The byte at index `i` (0-based). Out of range traps, like array indexing. Time complexity: O(1).
 
 ```prism,mod=Data.Bytes
 bytes_index(string_to_bytes("ABC"), 0)
@@ -58,7 +58,7 @@ bytes_index(string_to_bytes("ABC"), 0)
 bytes_empty : Wire.Bytes
 ```
 
-The empty `Bytes`.
+The empty `Bytes`. Time complexity: O(1).
 
 ### `bytes_push`
 
@@ -66,7 +66,7 @@ The empty `Bytes`.
 bytes_push : (Wire.Bytes, Int) -> Wire.Bytes
 ```
 
-Append one byte (masked into `0..255`) to the end of a `Bytes`. Threaded linearly this is the byte-string builder; a uniquely owned buffer is extended in place (FBIP), a shared one copied.
+Append one byte (masked into `0..255`) to the end of a `Bytes`. Threaded linearly this is the byte-string builder; a uniquely owned buffer is extended in place (FBIP), a shared one copied. Time complexity: amortized O(1) for a full-buffer, uniquely owned value; O(n) when a shared buffer or narrowed window must be copied.
 
 ```prism,mod=Data.Bytes
 bytes_to_string(bytes_push(bytes_empty, 65))
@@ -82,7 +82,7 @@ Some(A)
 bytes_slice : (Wire.Bytes, Int, Int) -> Wire.Bytes
 ```
 
-The `len` bytes starting at `start` (0-based), as a window into the same bytes: cursor arithmetic over the shared buffer, no copy. `start` and `len` are clamped to the bounds, so an over-long or out-of-range window yields the in-range remainder rather than trapping.
+The `len` bytes starting at `start` (0-based), as a window into the same bytes: cursor arithmetic over the shared buffer, no copy. `start` and `len` are clamped to the bounds, so an over-long or out-of-range window yields the in-range remainder rather than trapping. Time complexity: O(1); the returned value shares the original buffer.
 
 ```prism,mod=Data.Bytes
 bytes_to_string(bytes_slice(string_to_bytes("hello"), 1, 3))
@@ -98,7 +98,7 @@ Some(ell)
 bytes_concat : (Wire.Bytes, Wire.Bytes) -> Wire.Bytes
 ```
 
-Concatenate two byte strings.
+Concatenate two byte strings. Time complexity: O(n + m).
 
 ```prism,mod=Data.Bytes
 bytes_to_string(bytes_concat(string_to_bytes("foo"), string_to_bytes("bar")))
@@ -114,7 +114,7 @@ Some(foobar)
 bytes_eq : (Wire.Bytes, Wire.Bytes) -> Bool
 ```
 
-Structural equality of two byte strings.
+Structural equality of two byte strings. Time complexity: O(n + m) in the worst case, including compaction of narrowed windows; full-buffer inputs compare in O(min(n, m)).
 
 ```prism,mod=Data.Bytes
 bytes_eq(string_to_bytes("a"), string_to_bytes("a"))
@@ -130,7 +130,7 @@ true
 bytes_compare : (Wire.Bytes, Wire.Bytes) -> Int
 ```
 
-Lexicographic comparison (`-1`/`0`/`1`) of two byte strings.
+Lexicographic comparison (`-1`/`0`/`1`) of two byte strings. Time complexity: O(n + m) in the worst case, including compaction of narrowed windows; full-buffer inputs compare in O(min(n, m)).
 
 ```prism,mod=Data.Bytes
 bytes_compare(string_to_bytes("a"), string_to_bytes("b"))
@@ -146,7 +146,7 @@ bytes_compare(string_to_bytes("a"), string_to_bytes("b"))
 bytes_hash : (Wire.Bytes) -> String
 ```
 
-The blake3 content hash of a byte string as lowercase hex, byte-identical to a `String`'s `blake3` over the same bytes.
+The blake3 content hash of a byte string as lowercase hex, byte-identical to a `String`'s `blake3` over the same bytes. Time complexity: O(n).
 
 ### `string_to_bytes`
 
@@ -154,7 +154,7 @@ The blake3 content hash of a byte string as lowercase hex, byte-identical to a `
 string_to_bytes : (String) -> Wire.Bytes
 ```
 
-Total: a string's raw UTF-8 bytes as a `Bytes`.
+Total: a string's raw UTF-8 bytes as a `Bytes`. Time complexity: O(n) in the string's byte length.
 
 ```prism,mod=Data.Bytes
 hex_encode(string_to_bytes("Hi"))
@@ -170,7 +170,7 @@ hex_encode(string_to_bytes("Hi"))
 bytes_to_string : (Wire.Bytes) -> Option(String)
 ```
 
-Validate the bytes as UTF-8 and, when well-formed, recover the `String`; `None` on any ill-formed sequence. The single deterministic conversion seam back from `Bytes` to `String`.
+Validate the bytes as UTF-8 and, when well-formed, recover the `String`; `None` on any ill-formed sequence. The single deterministic conversion seam back from `Bytes` to `String`. Time complexity: O(n).
 
 ```prism,mod=Data.Bytes
 bytes_to_string(string_to_bytes("hey"))
@@ -186,7 +186,7 @@ Some(hey)
 hex_encode : (Wire.Bytes) -> String
 ```
 
-Lowercase hex encoding: two hex digits per byte.
+Lowercase hex encoding: two hex digits per byte. Time complexity: O(n).
 
 ```prism,mod=Data.Bytes
 hex_encode(string_to_bytes("Hi"))
@@ -202,7 +202,7 @@ hex_encode(string_to_bytes("Hi"))
 hex_decode : (String) -> Option(Wire.Bytes)
 ```
 
-Decode a hex string to bytes, or `None` on an odd length or a non-hex character. Upper and lower case digits are both accepted.
+Decode a hex string to bytes, or `None` on an odd length or a non-hex character. Upper and lower case digits are both accepted. Time complexity: O(n).
 
 ```prism,mod=Data.Bytes
 map_option(bytes_length, hex_decode("4869"))
@@ -218,7 +218,7 @@ Some(2)
 base64_encode : (Wire.Bytes) -> String
 ```
 
-Standard base64 encoding with `=` padding.
+Standard base64 encoding with `=` padding. Time complexity: O(n).
 
 ```prism,mod=Data.Bytes
 base64_encode(string_to_bytes("Hi"))
@@ -234,7 +234,7 @@ SGk=
 base64_decode : (String) -> Option(Wire.Bytes)
 ```
 
-Decode standard base64 (with `=` padding) to bytes, or `None` on a length that is not a multiple of four, a stray character, or misplaced padding.
+Decode standard base64 (with `=` padding) to bytes, or `None` on a length that is not a multiple of four, a stray character, or misplaced padding. Time complexity: O(n).
 
 ```prism,mod=Data.Bytes
 map_option(bytes_length, base64_decode("SGk="))
@@ -250,7 +250,7 @@ Some(2)
 read_bytes : (String) -> Wire.Bytes ! {FileSystem}
 ```
 
-Read the file at `path` as raw bytes. Carries the `FileSystem` capability (the `fs_read_bytes` op the default world handler discharges, via Base's `read_file_bytes` wrapper) and is replay-recorded like `read_file`, so a recorded run reproduces the same bytes.
+Read the file at `path` as raw bytes. Carries the `FileSystem` capability (the `fs_read_bytes` op the default world handler discharges, via Base's `read_file_bytes` wrapper) and is replay-recorded like `read_file`, so a recorded run reproduces the same bytes. Time complexity: O(n) in the file size, excluding filesystem latency.
 
 ```prism,no_run,mod=Data.Bytes
 bytes_length(read_bytes("data.bin"))
@@ -262,7 +262,7 @@ bytes_length(read_bytes("data.bin"))
 write_bytes : (String, Wire.Bytes) -> Result(Unit, String) ! {IO}
 ```
 
-Write `bs` verbatim to the file at `path`, returning `Ok(())` on success or `Err(msg)` on failure. The write is the same off-platform output as `write_file`, over the raw byte buffer so no byte is reinterpreted.
+Write `bs` verbatim to the file at `path`, returning `Ok(())` on success or `Err(msg)` on failure. The write is the same off-platform output as `write_file`, over the raw byte buffer so no byte is reinterpreted. Time complexity: O(n) in the byte length, excluding filesystem latency.
 
 ```prism,no_run,mod=Data.Bytes
 write_bytes("out.bin", string_to_bytes("hi"))

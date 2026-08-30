@@ -24,6 +24,7 @@ pub struct ArtifactIdentity {
     pub passes: String,
     pub disabled: String,
     pub backend_opt: String,
+    pub direct_object: bool,
     pub scheduler: &'static str,
     pub effect_tier: &'static str,
     pub erasures: bool,
@@ -56,6 +57,7 @@ pub enum ArtifactField {
     Passes,
     Disabled,
     BackendOpt,
+    DirectObject,
     Scheduler,
     EffectTier,
     Erasures,
@@ -85,6 +87,7 @@ impl ArtifactField {
             Self::Passes => "passes",
             Self::Disabled => "disabled",
             Self::BackendOpt => "backend-opt",
+            Self::DirectObject => "direct-object",
             Self::Scheduler => "scheduler",
             Self::EffectTier => "effect-tier",
             Self::Erasures => "erasures",
@@ -147,6 +150,7 @@ impl ArtifactIdentity {
             passes: pass_spec_label(cfg.passes.as_ref()),
             disabled: disabled_label(&cfg.disabled),
             backend_opt: cfg.backend_opt().as_str().to_string(),
+            direct_object: cfg.direct_object(),
             scheduler: cfg.scheduler().label(),
             effect_tier: cfg.flags.effect_tier.label(),
             erasures: cfg.flags.erasures,
@@ -228,6 +232,14 @@ impl ArtifactIdentity {
             ArtifactRow::new(ArtifactField::Passes, self.passes.clone()),
             ArtifactRow::new(ArtifactField::Disabled, self.disabled.clone()),
             ArtifactRow::new(ArtifactField::BackendOpt, self.backend_opt.clone()),
+        ]);
+        // Preserve the shipped ThinLTO identity byte-for-byte. Direct object
+        // emission is an opt-in derivation, so only that path needs an extra
+        // discriminator; serializing `false` would churn every default artifact.
+        if self.direct_object {
+            rows.push(ArtifactRow::new(ArtifactField::DirectObject, "true"));
+        }
+        rows.extend([
             ArtifactRow::new(ArtifactField::Scheduler, self.scheduler),
             ArtifactRow::new(ArtifactField::EffectTier, self.effect_tier),
             ArtifactRow::new(ArtifactField::Erasures, self.erasures.to_string()),
@@ -380,5 +392,19 @@ mod tests {
         assert!(!rows.contains(&ArtifactField::NativeCc));
         assert!(!rows.contains(&ArtifactField::NativeCcVersion));
         assert!(!rows.contains(&ArtifactField::NativeCcFlags));
+    }
+
+    #[test]
+    fn direct_object_mode_has_a_distinct_artifact_identity() {
+        let normal = ArtifactIdentity::from_config(&Config::default(), "llvm");
+        let mut cfg = Config::default();
+        cfg.flags.direct_object = true;
+        let direct = ArtifactIdentity::from_config(&cfg, "llvm");
+
+        assert_ne!(normal.fingerprint(), direct.fingerprint());
+        assert!(direct
+            .rows()
+            .iter()
+            .any(|row| { row.field == ArtifactField::DirectObject && row.value == "true" }));
     }
 }

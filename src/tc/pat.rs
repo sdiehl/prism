@@ -62,7 +62,7 @@ impl Tc<'_> {
                     self.pending_tooltip_rows.push((p.id, EffRow::Empty));
                 }
                 let mut e2 = env.clone();
-                e2.insert(Sym::from(x), ty.clone());
+                e2.insert_local(Sym::from(x), ty.clone());
                 Ok(e2)
             }
             Pattern::Int(lit) => {

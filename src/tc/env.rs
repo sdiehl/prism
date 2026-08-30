@@ -13,7 +13,7 @@ use crate::names;
 use crate::sym::Sym;
 use crate::syntax::ast::{self, Core, Decl, Program};
 use crate::types::is_or_null_element_in;
-use crate::types::ty::{EffRow, Kind, Label, Type, BUF, CANONICAL, FLOAT_BUF, INT_BUF};
+use crate::types::ty::{EffRow, Kind, Label, Type, ARRAY, BUF, CANONICAL, FLOAT_BUF, INT_BUF};
 
 // Effects the compiler knows without an `effect` declaration: the IO/Exn
 // builtins, the indexing/`??` `Fail`, and the internal loop/return control
@@ -530,60 +530,98 @@ fn ty_row_vars(t: &ast::Ty, out: &mut BTreeSet<String>) {
     t.each_child(&mut |c| ty_row_vars(c, out));
 }
 
+// Repeated under-applied constructor spellings in one signature share their
+// fills. Otherwise `Map(k, v) -> Map(k, v)` could acquire distinct phantom
+// brands in its parameter and result.
+type SaturateMemo = BTreeMap<(Sym, Vec<Type>), Vec<Type>>;
+
 // Saturate an under-applied constructor spine: `Map(k, v)` names the arity-3
 // `Map(k, v, ord)`, filling each omitted trailing parameter of its declared
 // kind. `fill` supplies each omitted `Type`-kinded parameter (the phantom
 // brand); a `Row`-kinded one always takes a fresh row variable. Only a partial
 // application fills: a bare `Map` head is a higher-kinded operand and is left
-// untouched, and a fully applied spine is unchanged.
+// untouched, and a fully applied spine is unchanged. `memo` scopes fill
+// sharing (see `SaturateMemo`).
 fn saturate_fill(
     t: Type,
     data: &BTreeMap<String, super::DataInfo>,
     fill: &dyn Fn() -> Type,
+    memo: &mut SaturateMemo,
 ) -> Type {
-    let go = |x: Type| saturate_fill(x, data, fill);
     match t {
         Type::Con(n, args) => {
-            let mut conv: Vec<Type> = args.into_iter().map(go).collect();
+            let mut conv: Vec<Type> = Vec::with_capacity(args.len());
+            for x in args {
+                conv.push(saturate_fill(x, data, fill, memo));
+            }
             if let Some(info) = data.get(n.as_str()) {
-                if !conv.is_empty() {
-                    for k in info.param_kinds.iter().skip(conv.len()) {
-                        conv.push(match k {
-                            Kind::Row => Type::Row(EffRow::Var(Sym::fresh())),
-                            _ => fill(),
-                        });
-                    }
+                if !conv.is_empty() && conv.len() < info.param_kinds.len() {
+                    let kinds = &info.param_kinds[conv.len()..];
+                    let suffix = memo
+                        .entry((n, conv.clone()))
+                        .or_insert_with(|| {
+                            kinds
+                                .iter()
+                                .map(|k| match k {
+                                    Kind::Row => Type::Row(EffRow::Var(Sym::fresh())),
+                                    _ => fill(),
+                                })
+                                .collect()
+                        })
+                        .clone();
+                    conv.extend(suffix);
                 }
             }
             Type::Con(n, conv)
         }
-        Type::Fun(ps, row, r) => Type::Fun(
-            ps.into_iter().map(go).collect(),
-            row,
-            Box::new(saturate_fill(*r, data, fill)),
-        ),
-        Type::Tuple(xs) => Type::Tuple(xs.into_iter().map(go).collect()),
-        Type::UnboxedTuple(xs) => Type::UnboxedTuple(xs.into_iter().map(go).collect()),
-        Type::UnboxedRecord(fs) => {
-            Type::UnboxedRecord(fs.into_iter().map(|(n, t)| (n, go(t))).collect())
+        Type::Fun(ps, row, r) => {
+            let mut conv: Vec<Type> = Vec::with_capacity(ps.len());
+            for x in ps {
+                conv.push(saturate_fill(x, data, fill, memo));
+            }
+            Type::Fun(conv, row, Box::new(saturate_fill(*r, data, fill, memo)))
         }
-        Type::App(h, a) => Type::App(
-            Box::new(saturate_fill(*h, data, fill)),
-            Box::new(saturate_fill(*a, data, fill)),
+        Type::Tuple(xs) => Type::Tuple(saturate_each(xs, data, fill, memo)),
+        Type::UnboxedTuple(xs) => Type::UnboxedTuple(saturate_each(xs, data, fill, memo)),
+        Type::UnboxedRecord(fs) => Type::UnboxedRecord(
+            fs.into_iter()
+                .map(|(n, t)| (n, saturate_fill(t, data, fill, memo)))
+                .collect(),
         ),
-        Type::OrNull(a) => Type::OrNull(Box::new(go(*a))),
-        Type::Forall(v, b) => Type::Forall(v, Box::new(saturate_fill(*b, data, fill))),
-        Type::RowForall(v, b) => Type::RowForall(v, Box::new(saturate_fill(*b, data, fill))),
+        Type::App(h, a) => Type::App(
+            Box::new(saturate_fill(*h, data, fill, memo)),
+            Box::new(saturate_fill(*a, data, fill, memo)),
+        ),
+        Type::OrNull(a) => Type::OrNull(Box::new(saturate_fill(*a, data, fill, memo))),
+        Type::Forall(v, b) => Type::Forall(v, Box::new(saturate_fill(*b, data, fill, memo))),
+        Type::RowForall(v, b) => Type::RowForall(v, Box::new(saturate_fill(*b, data, fill, memo))),
         other => other,
     }
+}
+
+fn saturate_each(
+    xs: Vec<Type>,
+    data: &BTreeMap<String, super::DataInfo>,
+    fill: &dyn Fn() -> Type,
+    memo: &mut SaturateMemo,
+) -> Vec<Type> {
+    xs.into_iter()
+        .map(|x| saturate_fill(x, data, fill, memo))
+        .collect()
 }
 
 // The exported-scheme twin of the fill in `convert_annot` (which mints
 // existentials for the body check): each omitted brand is a fresh variable,
 // quantified into the scheme by the caller's `collect_*_vars`, so a function
-// signature over `Map(k, v)` stays brand-polymorphic.
-fn saturate_cons(t: Type, data: &BTreeMap<String, super::DataInfo>) -> Type {
-    saturate_fill(t, data, &|| Type::Var(Sym::fresh()))
+// signature over `Map(k, v)` stays brand-polymorphic. `memo` must span every
+// annotation of one declaration (params and result together), so a spelling
+// repeated across them shares its fill.
+fn saturate_cons(
+    t: Type,
+    data: &BTreeMap<String, super::DataInfo>,
+    memo: &mut SaturateMemo,
+) -> Type {
+    saturate_fill(t, data, &|| Type::Var(Sym::fresh()), memo)
 }
 
 // Datatype-field saturation: an omitted brand is pinned to the concrete
@@ -592,7 +630,13 @@ fn saturate_cons(t: Type, data: &BTreeMap<String, super::DataInfo>) -> Type {
 // `Map`-backed newtype field (`type Graph(k) = Graph(Map(k, List(k)))`) agree
 // with a `Map` value, which a fresh per-field variable could not.
 fn saturate_field(t: Type, data: &BTreeMap<String, super::DataInfo>) -> Type {
-    saturate_fill(t, data, &|| Type::Con(Sym::from(CANONICAL), vec![]))
+    // The constant fill makes sharing a no-op; the memo is per-field scratch.
+    saturate_fill(
+        t,
+        data,
+        &|| Type::Con(Sym::from(CANONICAL), vec![]),
+        &mut SaturateMemo::new(),
+    )
 }
 
 // Normalize a declaration's parallel `param_kinds` to a full-length vector: an
@@ -922,11 +966,14 @@ pub(super) fn annotation_scheme(
         ann_row_var_names(t, data, &mut row_names);
     }
     ann_row_var_names(ret, data, &mut row_names);
+    // One fill scope for the whole signature: a spelling repeated between a
+    // parameter and the result shares its minted brand (see `SaturateMemo`).
+    let mut memo = SaturateMemo::new();
     let pt: Vec<Type> = annots
         .into_iter()
-        .map(|t| saturate_cons(convert_data_rp(t, &row_names), data))
+        .map(|t| saturate_cons(convert_data_rp(t, &row_names), data, &mut memo))
         .collect();
-    let rt = saturate_cons(convert_data_rp(ret, &row_names), data);
+    let rt = saturate_cons(convert_data_rp(ret, &row_names), data, &mut memo);
     let mut tvars = BTreeSet::new();
     let mut rvars = BTreeSet::new();
     for t in &pt {
@@ -949,7 +996,7 @@ pub(super) fn fn_stub(d: &Decl<Core>, data: &BTreeMap<String, super::DataInfo>) 
         return d.ret.as_ref().map_or_else(
             || Type::Var(Sym::fresh()),
             |ann| {
-                let t = saturate_cons(convert_data(ann), data);
+                let t = saturate_cons(convert_data(ann), data, &mut SaturateMemo::new());
                 let mut vars = BTreeSet::new();
                 collect_type_vars(&t, &mut vars);
                 wrap_forall(&vars.into_iter().collect::<Vec<_>>(), t)
@@ -1048,7 +1095,7 @@ pub(super) fn build_data(prog: &Program<Core>) -> Result<BuildDataResult, TypeEr
     // `Array(a)` is a built-in 1-parameter type: a heap cell with no surface
     // constructors, manipulated only through the `array_*` builtins.
     data.insert(
-        "Array".to_string(),
+        ARRAY.to_string(),
         DataInfo {
             params: vec!["a".to_string()],
             param_kinds: vec![Kind::Type],
@@ -1369,7 +1416,8 @@ mod tests {
                 | "prim_getenv" | "prim_read_file" | "prim_read_bytes" | "prim_write_bytes"
                 | "write_file" | "prim_file_exists" | "append_file" | "remove_file"
                 | "prim_store_get" | "prim_store_put" | "prim_store_has" | "prim_args_count"
-                | "prim_arg" | "prim_wall_now" | "prim_mono_now" | "prim_entropy" => &["IO"],
+                | "prim_arg" | "prim_wall_now" | "prim_mono_now" | "prim_entropy"
+                | "probe_enabled" => &["IO"],
                 "error" | "fatal" => &["Exn"],
                 _ => &[],
             };

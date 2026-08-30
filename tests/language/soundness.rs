@@ -799,6 +799,123 @@ fn repl_refuses_multi_constructor_update_path() {
     );
 }
 
+// Datatype arguments are invariant unless explicitly known covariant. Otherwise
+// `Consumer(a)`, which stores `(a) -> Int`, could reverse a multiplicity widening.
+const COVARIANT_DATATYPE_ARG: &str =
+    include_str!("../fixtures/language/soundness/covariant_datatype_arg.pr");
+
+#[test]
+fn covariant_datatype_argument_is_rejected_at_source() {
+    let src = prism::with_prelude(COVARIANT_DATATYPE_ARG);
+    let err = prism::check(&src)
+        .expect_err("an invariant datatype argument cannot widen `@ once` to `@ many`");
+    let Error::Type(ty) = &err else {
+        panic!("expected a type error, got: {err}");
+    };
+    // Reject during source checking rather than Typed-Core construction.
+    assert_ne!(
+        ty.code(),
+        Some("E9996"),
+        "the conversion must fail in source checking, not reach Typed-Core: {err}"
+    );
+    let text = err.to_string();
+    assert!(
+        text.contains("wrong_way") && text.contains("once"),
+        "the rejection must name the function and the multiplicity reason: {err}"
+    );
+}
+
+// A generalized local value is expanded and instantiated independently per use.
+const POLYMORPHIC_LOCAL_LET: &str = include_str!("../cases/run/local_polymorphic_let.pr");
+
+#[test]
+fn a_polymorphic_local_let_instantiates_per_use() {
+    let src = prism::with_prelude(POLYMORPHIC_LOCAL_LET);
+    let run = prism::interpret(&src).expect("a polymorphic local `let` must check and run");
+    assert_eq!(
+        run.term, "1\nhi\n",
+        "each use of the binding must instantiate on its own"
+    );
+}
+
+// A computation-bound local remains monomorphic, so incompatible uses produce
+// a source type error.
+const COMPUTATION_LOCAL_LET: &str = r#"fn mk_id() = \(x) -> x
+fn main() =
+  let g = mk_id()
+  println(g(1))
+  println(g("hi"))
+"#;
+
+#[test]
+fn a_local_let_never_reaches_typed_core_with_a_witness_conflict() {
+    // Interpretation also exercises Typed-Core construction.
+    let err = prism::interpret(&prism::with_prelude(COMPUTATION_LOCAL_LET))
+        .expect_err("a computation-bound `let` used at two types must be rejected");
+    let text = err.to_string();
+    for code in ["E9996", "E9997"] {
+        assert!(
+            !text.contains(code),
+            "the conflict must not reach typed-Core construction ({code}): {err}"
+        );
+    }
+    let Error::Type(ty) = &err else {
+        panic!("expected a source type error, got: {err}");
+    };
+    assert_eq!(
+        ty.code(),
+        Some("E1022"),
+        "the two use types must disagree as a plain mismatch, got: {err}"
+    );
+}
+
+// A value that closes over a local remains monomorphic and keeps its definition
+// scope when a later binder shadows the captured name.
+const OPEN_LOCAL_VALUE_SHADOWED: &str = r#"fn main() =
+  let tag = "!"
+  let mark = \(x) -> (tag, x)
+  let tag = 9
+  match mark(tag) of
+    (a, _) => println(a)
+"#;
+
+#[test]
+fn an_open_local_value_reads_its_definition_scope() {
+    let run = prism::interpret(&prism::with_prelude(OPEN_LOCAL_VALUE_SHADOWED))
+        .expect("an open local value used at one type must check and run");
+    assert_eq!(
+        run.term, "!\n",
+        "the value must see the `tag` its definition closed over, not the use site's"
+    );
+}
+
+// The same open value used at two types: with generalization declined, the
+// disagreement is an ordinary source mismatch, never an internal typed-Core
+// error and never an expansion.
+const OPEN_LOCAL_VALUE_TWO_TYPES: &str = r#"fn main() =
+  let tag = "!"
+  let mark = \(x) -> (tag, x)
+  println(show(mark(1)))
+  println(show(mark(true)))
+"#;
+
+#[test]
+fn an_open_local_value_stays_monomorphic() {
+    let err = prism::interpret(&prism::with_prelude(OPEN_LOCAL_VALUE_TWO_TYPES))
+        .expect_err("an open local value used at two types must be rejected");
+    let text = err.to_string();
+    for code in ["E9996", "E9997"] {
+        assert!(
+            !text.contains(code),
+            "the conflict must not reach typed-Core construction ({code}): {err}"
+        );
+    }
+    assert!(
+        matches!(&err, Error::Type(_)),
+        "expected a source type error, got: {err}"
+    );
+}
+
 // The control that keeps the two refusals honest: on a single-constructor
 // record the very same projection and update are unambiguous, and the session
 // evaluates them rather than refusing everything it is handed.

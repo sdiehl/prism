@@ -52,7 +52,7 @@ A bulk reader hoists its failure to the boundary rather than raising inside its 
 
 ### `Bytes`
 
-```prism,def,h-c183b9e6fb5b8dff10287d027a2464149f8b72233b8f36f5ae268e68d26aac38
+```prism,def,h-537c0dd6ce77bdf7009543ca55522caa9b655879426150fa813c609bf51218cd
 type Bytes = Bytes(Buf, Int, Int)
 ```
 
@@ -60,7 +60,7 @@ A compact, positional byte body: an unboxed byte buffer and a window, `Bytes(buf
 
 ### `Loss`
 
-```prism,def,h-10592e2985d5e277d2c9d324e8a45e36f5ad5d67ace0644119f39792a395007e
+```prism,def,h-be31d77fbf1ef21ed7ceb0351da9ac2c38d62de4d2603e9a56c5624447bf71be
 newtype Loss = Loss(List(String)) deriving (Eq, Show)
 ```
 
@@ -68,7 +68,7 @@ What a downgrade could not carry down: the names of the fields dropped when lowe
 
 ### `Policy`
 
-```prism,def,h-e7a5c13c0613cbde8cde93e74eb744544e5b5c6a85eb61ce51a68a67c264c13d
+```prism,def,h-a8bc860ff8a6dc50ff1e2990817b1406106fe3d0f12a6fd7d0d7cf92a078a02f
 type Policy = Reject | LargestSafeSubset deriving (Eq, Show)
 ```
 
@@ -78,7 +78,7 @@ How to reconcile a higher-version value that a reader cannot represent at its ow
 
 ### `Serialize`
 
-```prism,def,h-eb46098664cacaba26764c57141c7627128048d26d908da519270ef6044256a3
+```prism,def,h-bdd88bb032e488863af804f89578a70fa9c25e8a5a2ed28e469b3b090f10f8c3
 class Serialize(a)
   encode : (a) -> Bytes
   decode : (Bytes) -> (a, Bytes) ! {Fail | e}
@@ -98,7 +98,7 @@ The codec, derived structurally by `deriving (Serialize)`. `encode` writes a val
 
 ### `Stable`
 
-```prism,def,h-da77c06bffea86637836987368bc315d3aa37751f6c7d81d5317cbbfdf6b1859
+```prism,def,h-fc8b7f82e758186e162f7b93abffd943ad2853ba138fe26d107f4f485bf3d0f0
 class Stable(a)
   shape_digest_of : (a) -> String
 ```
@@ -153,7 +153,7 @@ instance serializeString : Serialize(String)
 
 ### `serializeList`
 
-```prism,def,h-b469194cac8b518aee6a6a3217dd32b57c442e3280d70da9511330e814442230
+```prism,def,h-b298611e3e40eb6eac5a1e879c48ac2514b4184637cc9c7e3b791b3a6f5d8e36
 instance serializeList : Serialize(List(a))
 ```
 
@@ -165,25 +165,25 @@ instance serializeBytes : Serialize(Bytes)
 
 ### `serializeOption`
 
-```prism,def,h-da2b4c93adce47199b54bd6721bbbbabc82171228aacf9637d3bc510a336091d
+```prism,def,h-37fe045ba0c0fe10c319ed8cb318a4cddfbbde90fe975015e4186f8fca6315ea
 instance serializeOption : Serialize(Option(a))
 ```
 
 ### `serializePair`
 
-```prism,def,h-bf673cf47af5a65e2fbf366b0ca0fcf4bd06673a87c805eb23fc088bf2faeea9
+```prism,def,h-8220ef4c3662ef9ed0ab8bfb21d7fa62bb03ad01b156435d79f461e517c3014b
 instance serializePair : Serialize((a, b))
 ```
 
 ### `serializeTriple`
 
-```prism,def,h-1b9d3137fc40309dd371470ce414be28da30d54f5842520ccd320251d2290a7e
+```prism,def,h-c5707c5fbcfb7ee3f09c6e6eb79a16cbd5c93b9dc1d554aea8e4997a346ae091
 instance serializeTriple : Serialize((a, b, c))
 ```
 
 ### `serializeMap`
 
-```prism,def,h-5817f3ea276df450d2ef2758512401654475435c66da487cd924cd4ef3abccf7
+```prism,def,h-f64a3341a4e316190768b0a597784b506c024e89bbe75249864d36fa8f5f0212
 instance serializeMap : Serialize(Map(k, v, ord))
 ```
 

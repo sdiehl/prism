@@ -5,12 +5,26 @@ use super::{Entry, Tc, TcErr};
 use crate::names::{self, ScopedEscape};
 use crate::sym::Sym;
 use crate::types::coeffect::{CoeffectFact, CoeffectRow};
-use crate::types::ty::{EffRow, Label, Type};
+use crate::types::ty::{EffRow, Label, Type, ARRAY};
 
 // Multiplicity as a level: `@ once` is 1 (restrictive), the default `@ many` is
 // 0. A value fits a context iff its level does not exceed the context's.
 fn mult_level(row: &CoeffectRow) -> u8 {
     u8::from(matches!(row.multiplicity(), Some(CoeffectFact::Once)))
+}
+
+// Whether a nominal constructor's arguments are compared covariantly. Every
+// user-defined and built-in constructor is invariant except this explicit
+// covariant set, which today holds only `Array`. `Array(a)`'s element is
+// covariant, sound solely under its runtime value semantics: `array_set`
+// mutates in place at rc 1 and copies otherwise, so a widened alias can never
+// observe a write through a narrower one (pinned by
+// `tests/cases/run/array_value_semantics.pr`). This is the whole nominal
+// variance policy in one place; a later inferred-variance pass will replace the
+// table with per-parameter signs transported through module interfaces, and
+// this predicate is the seam it plugs into.
+fn con_args_covariant(name: &Sym) -> bool {
+    names::bare_name(name.as_str()) == ARRAY
 }
 
 // A value of multiplicity `value` used in a context requiring `context`: the
@@ -67,20 +81,26 @@ impl Tc<'_> {
                 }
                 Ok(())
             }
-            // Constructor arguments are matched covariantly (each `x <: y`), with no
-            // separate invariant rule for mutable containers like `Array`. That is
-            // sound only because every value is copy-on-write: `array_set` mutates in
-            // place only when the cell is uniquely owned (rc 1) and copies otherwise,
-            // so two live aliases can never share a cell across a mutation. Without
-            // that, covariance on a mutable element type would be a classic hole (write
-            // through a widened view, read the change back through the original). With
-            // it, no such observation exists, so covariance is safe. The value-
-            // semantics guarantee is pinned by `tests/cases/run/array_value_semantics.pr`.
+            // A constructor's arguments are invariant by default: `Con(n, xs)` fits
+            // `Con(n, ys)` only when each pair is mutually compatible, so a source
+            // program cannot smuggle a subtyping step (a multiplicity widening or a
+            // nested function conversion) through a datatype parameter and have it
+            // silently reversed at a later phase. The one covariant exception is
+            // `Array`, whose element covariance is sound under copy-on-write value
+            // semantics (see `con_args_covariant`). Invariant compatibility routes
+            // existentials through the real unification path and rolls back cleanly
+            // on rejection (see `invariant_compat`), never leaving a half-applied
+            // solution behind.
             (Type::Con(n, xs), Type::Con(m, ys)) if n == m && xs.len() == ys.len() => {
+                let covariant = con_args_covariant(n);
                 for (x, y) in xs.iter().zip(ys) {
                     let x = self.apply(x);
                     let y = self.apply(y);
-                    self.subtype(&x, &y)?;
+                    if covariant {
+                        self.subtype(&x, &y)?;
+                    } else {
+                        self.invariant_compat(&x, &y)?;
+                    }
                 }
                 Ok(())
             }
@@ -110,26 +130,32 @@ impl Tc<'_> {
                 let b = self.apply(b0);
                 self.subtype(a, &b)
             }
-            // Two application spines unify head-to-head, argument-to-argument.
+            // Two application spines unify head-to-head; the argument is invariant.
+            // The head is a flexible constructor (an existential or type variable),
+            // so its parameter's variance is unknown until it resolves; the safe
+            // containment choice is to require the arguments mutually compatible
+            // rather than assume covariance a later solution might not license.
             (Type::App(h1, a1), Type::App(h2, a2)) => {
                 let h1 = self.apply(h1);
                 let h2 = self.apply(h2);
                 self.subtype(&h1, &h2)?;
                 let a1 = self.apply(a1);
                 let a2 = self.apply(a2);
-                self.subtype(&a1, &a2)
+                self.invariant_compat(&a1, &a2)
             }
             // Higher-kinded application versus a concrete constructor: peel the
             // last argument off the saturated side and match the (`* -> *`) head
             // against the partially-applied constructor. `f(a) ~ List(b)` gives
-            // `f := List, a := b`; deeper spines recurse.
+            // `f := List, a := b`; deeper spines recurse. The peeled argument is
+            // the flexible head's parameter, so it is invariant for the same
+            // reason as the `App`-vs-`App` case above.
             (Type::App(h, a), Type::Con(m, ys)) if !ys.is_empty() => {
                 let (init, last) = ys.split_at(ys.len() - 1);
                 let h = self.apply(h);
                 self.subtype(&h, &Type::Con(*m, init.to_vec()))?;
                 let a = self.apply(a);
                 let last = self.apply(&last[0]);
-                self.subtype(&a, &last)
+                self.invariant_compat(&a, &last)
             }
             (Type::Con(m, ys), Type::App(h, a)) if !ys.is_empty() => {
                 let (init, last) = ys.split_at(ys.len() - 1);
@@ -137,7 +163,7 @@ impl Tc<'_> {
                 self.subtype(&Type::Con(*m, init.to_vec()), &h)?;
                 let a = self.apply(a);
                 let last = self.apply(&last[0]);
-                self.subtype(&last, &a)
+                self.invariant_compat(&last, &a)
             }
             (Type::Fun(a1, eff1, r1), Type::Fun(a2, eff2, r2)) if a1.len() == a2.len() => {
                 for (x, y) in a1.iter().zip(a2) {
@@ -418,8 +444,14 @@ impl Tc<'_> {
     // another row, rewrite that row to expose `l` at its head, then unify the
     // tails. A bare existential tail absorbs any missing label by extending.
     pub(super) fn unify_row(&mut self, a: &EffRow, b: &EffRow) -> Result<(), TcErr> {
-        let a = dedup_row(&self.apply_row(a));
-        let b = dedup_row(&self.apply_row(b));
+        // Rows are multisets: a label may legitimately repeat (this is what makes
+        // `mask<E>` a typing rule, adding a second `E` an extra handler must
+        // discharge). `unify_row` must therefore NOT collapse repeats -- doing so
+        // would silently erase a mask's tunnelled copy. Zonk both sides and unify
+        // structurally; the (rare) mechanical coincidences that used to be swept
+        // here are removed at their source instead (see `dedup_row`).
+        let a = self.apply_row(a);
+        let b = self.apply_row(b);
         match (&a, &b) {
             (EffRow::Empty, EffRow::Empty) => Ok(()),
             (EffRow::Var(x), EffRow::Var(y)) if x == y => Ok(()),
@@ -452,6 +484,18 @@ impl Tc<'_> {
                 self.solve_row(*x, other)
             }
             (EffRow::Extend(l, rest1), _) => {
+                // Shared-tail guard: when both spines end in the same
+                // existential and `b` lacks `l` among its heads, no unifier
+                // exists; any solution of that one tail feeds the same labels
+                // to both sides, so the head difference can never be absorbed.
+                // Rewriting instead would splice `l` into the shared tail,
+                // regrow this row's own spine through it, and recurse forever
+                // on the same mismatch, minting a fresh existential each round.
+                if let (EffRow::Exist(x), EffRow::Exist(y)) = (a.tail(), b.tail()) {
+                    if x == y && !b.labels().iter().any(|w| w.name == l.name) {
+                        return Err(TcErr::Fail(self.missing_effect(l)));
+                    }
+                }
                 let rest2 = self.rewrite_row(&b, l)?;
                 let r1 = self.apply_row(rest1);
                 let r2 = self.apply_row(&rest2);
@@ -587,15 +631,22 @@ impl Tc<'_> {
 
     // After a handler body accumulated into `body_row`, fold its row minus the
     // handled labels back into the enclosing ambient obligation, so a handled
-    // effect vanishes from the surrounding function's row.
+    // effect vanishes from the surrounding function's row. One handler removes
+    // exactly ONE occurrence of each handled effect (rows are multisets): a body
+    // that performed the effect twice -- because a `mask` tunnelled a copy past
+    // this handler -- keeps the surplus copy in the residual, demanding an
+    // enclosing handler. Returns the effect names still live in that residual, so
+    // the caller can decide operation-level discharge coherently with the row.
     pub(super) fn discharge_row(
         &mut self,
         body_row: u32,
         handled: &BTreeSet<Sym>,
-    ) -> Result<(), TcErr> {
+    ) -> Result<BTreeSet<Sym>, TcErr> {
         let row = self.apply_row(&EffRow::Exist(body_row));
-        let resid = without_labels(&row, handled);
-        self.absorb_row(&resid)
+        let resid = without_labels_once(&row, handled);
+        let live = resid.label_names();
+        self.absorb_row(&resid)?;
+        Ok(live)
     }
 
     // A row is missing `label`. When `label` is a scoped effect that leaked out
@@ -622,6 +673,48 @@ impl Tc<'_> {
             args: l.args.iter().map(|a| self.apply(a)).collect(),
         }
         .show()
+    }
+
+    // Invariant compatibility: two types stand in an invariant argument position
+    // (a non-`Array` nominal parameter, or a flexible application argument) and
+    // must each subsume the other. Existential-versus-monotype pairs unify
+    // directly through `inst` (the real unification path, single direction, no
+    // residue), exactly as `equate` does. Every other pair is checked
+    // transactionally: the solver context is snapshotted, both directions run,
+    // and any failure restores the snapshot before propagating. That is the one
+    // property this cannot share with `equate`'s structural fallback, whose
+    // first `subtype` leaves its partial solution installed when the second
+    // direction rejects. Invariance is a rejection path in source checking (it
+    // exists to fail a program the covariant rule wrongly accepted), so a
+    // half-applied solution leaking into a sibling constraint would be a silent
+    // miscompile; the rollback keeps a rejection observationally clean. On
+    // success both directions held, so the retained context is the same one a
+    // single symmetric unification would have produced.
+    pub(super) fn invariant_compat(&mut self, a: &Type, b: &Type) -> Result<(), TcErr> {
+        let a = self.apply(a);
+        let b = self.apply(b);
+        match (&a, &b) {
+            (Type::Exist(x), Type::Exist(y)) if x == y => return Ok(()),
+            (Type::Exist(x), t) if t.is_mono() && !occurs_ex(*x, t) => return self.inst_l(*x, t),
+            (t, Type::Exist(x)) if t.is_mono() && !occurs_ex(*x, t) => return self.inst_r(t, *x),
+            _ => {}
+        }
+        // `next` (the fresh-id counter) is deliberately not restored: ids are
+        // globally unique and monotonic, so skipping the ones a rolled-back
+        // attempt minted strands nothing. Only the context entries carry solver
+        // state that a failed direction could corrupt.
+        let ctx = self.ctx.clone();
+        let row_ctx = self.row_ctx.clone();
+        let result = self.subtype(&a, &b).and_then(|()| {
+            let a = self.apply(&a);
+            let b = self.apply(&b);
+            self.subtype(&b, &a)
+        });
+        if result.is_err() {
+            self.ctx = ctx;
+            self.row_ctx = row_ctx;
+        }
+        result
     }
 
     // Equality. Existential vs monotype unifies directly through inst, so the
@@ -662,18 +755,19 @@ fn replace_tail(r: &EffRow, t: EffRow) -> EffRow {
     }
 }
 
-// Rows are sets of effect labels: an effect required twice is required once.
-// Coincident labels (same name and, after zonking, identical instantiation
-// arguments) arise mechanically when an op's own effect is both listed in its
-// parameter row and folded into the ambient tail that row's variable binds to
-// (`bind_op_rows_to_ambient` splices the just-absorbed label back in via the
-// tail), so the second copy is spurious. Drop every label whose (name, args)
+// Collapse mechanically-coincident labels. Rows are multisets in general -- a
+// repeated label is meaningful (a `mask`'s tunnelled copy) -- so this is NOT run
+// blanket over every unification; it is the explicit deduplicating construction
+// reached for at the one site that fabricates a *spurious* second copy: an op's
+// own effect both listed in its parameter row and folded into the ambient tail
+// that row's variable binds to (`bind_op_rows_to_ambient` splices the
+// just-absorbed label back in via the tail). Drop every label whose (name, args)
 // already appeared earlier in the spine, keeping the first occurrence and the
 // tail. Assumes `r` is already zonked, so argument equality is structural: a
 // label whose args merely differ (`Async(Int)` versus an unsolved `Async(?9)`)
 // is kept, so a genuine two-instantiation reconciliation still routes through
 // `rewrite_row`.
-fn dedup_row(r: &EffRow) -> EffRow {
+pub(super) fn dedup_row(r: &EffRow) -> EffRow {
     fn go(r: &EffRow, seen: &mut Vec<Label>) -> EffRow {
         match r {
             EffRow::Extend(l, rest) if seen.contains(l) => go(rest, seen),
@@ -687,20 +781,21 @@ fn dedup_row(r: &EffRow) -> EffRow {
     go(r, &mut Vec::new())
 }
 
-// Drop every label whose effect name is in `names`, keeping the tail. Used both
-// to skip prefix labels when absorbing and to discharge handled effects.
-pub(super) fn without_labels(r: &EffRow, names: &BTreeSet<Sym>) -> EffRow {
-    match r {
-        EffRow::Extend(l, rest) => {
-            let rest = without_labels(rest, names);
-            if names.contains(&l.name) {
-                rest
-            } else {
-                EffRow::Extend(l.clone(), Box::new(rest))
-            }
+// Drop at most ONE occurrence of each name in `names`, keeping every later copy
+// and the tail. This is the multiset discharge: one handler cancels one copy of
+// the effect it handles, so a doubled label (a `mask` tunnelled a copy past this
+// handler) leaves its surplus behind for an enclosing handler. Walks head-first
+// so the removed occurrence is the outermost; order is immaterial once the row
+// is re-canonicalised.
+pub(super) fn without_labels_once(r: &EffRow, names: &BTreeSet<Sym>) -> EffRow {
+    fn go(r: &EffRow, remaining: &mut BTreeSet<Sym>) -> EffRow {
+        match r {
+            EffRow::Extend(l, rest) if remaining.remove(&l.name) => go(rest, remaining),
+            EffRow::Extend(l, rest) => EffRow::Extend(l.clone(), Box::new(go(rest, remaining))),
+            other => other.clone(),
         }
-        other => other.clone(),
     }
+    go(r, &mut names.clone())
 }
 
 #[cfg(test)]
@@ -768,6 +863,7 @@ mod tests {
             precise_calls: BTreeMap::new(),
             handler_nodes: BTreeSet::new(),
             handler_residuals: BTreeMap::new(),
+            generalized_lets: BTreeSet::new(),
         }
     }
 

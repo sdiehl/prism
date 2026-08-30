@@ -36,42 +36,51 @@ use super::super::{
     TypedCompKind, TypedCoreFn, TypedHandleOp, TypedHandler, TypedValue, TypedValueKind,
 };
 use super::diagnostics::DriftLog;
-use super::flow::{Loc, ThunkFlow};
+use super::flow::{param_loc, Loc, ThunkFlow};
 use super::latent::Latent;
 
 /// The effect ops of a program, numbered alphabetically by name so
 /// `ev@<id>` ordering and trap order are stable across compilations.
 #[derive(Debug)]
-pub struct OpIds(BTreeMap<Sym, i64>);
+pub struct OpIds {
+    ids: BTreeMap<Sym, i64>,
+    /// [`op`](Self::op)'s inverse table: ids are dense positions in the sorted
+    /// name order, so the name an id numbers is a direct index.
+    names: Vec<Sym>,
+}
 
 impl OpIds {
     /// Assign every op an id. `None` when a program declares more ops than an
     /// `i64` can number.
+    #[must_use]
     pub fn assign(ops: &BTreeSet<Sym>) -> Option<Self> {
-        let mut sorted: Vec<Sym> = ops.iter().copied().collect();
-        sorted.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-        sorted
-            .into_iter()
+        let mut names: Vec<Sym> = ops.iter().copied().collect();
+        names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        let ids = names
+            .iter()
             .enumerate()
-            .map(|(i, name)| i64::try_from(i).ok().map(|id| (name, id)))
-            .collect::<Option<BTreeMap<_, _>>>()
-            .map(Self)
+            .map(|(i, name)| i64::try_from(i).ok().map(|id| (*name, id)))
+            .collect::<Option<BTreeMap<_, _>>>()?;
+        Some(Self { ids, names })
     }
 
     #[must_use]
     pub fn id(&self, op: Sym) -> Option<i64> {
-        self.0.get(&op).copied()
+        self.ids.get(&op).copied()
     }
 
     /// The inverse of [`id`](Self::id).
     #[must_use]
     pub fn op(&self, id: i64) -> Option<Sym> {
-        self.0.iter().find(|(_, v)| **v == id).map(|(k, _)| *k)
+        usize::try_from(id)
+            .ok()
+            .and_then(|i| self.names.get(i))
+            .copied()
     }
 
     #[must_use]
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = (Sym, i64)> + '_ {
-        self.0.iter().map(|(name, id)| (*name, *id))
+        self.ids.iter().map(|(name, id)| (*name, *id))
     }
 
     /// Map a set of ops to their ids in ascending order. Force sites, thunk
@@ -841,6 +850,8 @@ impl Threader<'_> {
             // A mask is meaningless once evidence is passed lexically: the
             // eligibility prologue rejects any program containing one, so this
             // is only reachable if that guard changes.
+            #[allow(clippy::match_same_arms)]
+            // Declines for a different reason than the RC arms below.
             TypedCompKind::Mask(..) => None,
             TypedCompKind::Bind(m, x, n) => {
                 let m2 = self.thread_in(m, ev, loc, retyped)?;
@@ -919,8 +930,135 @@ impl Threader<'_> {
                     TypedCompKind::Force(v2),
                 ))
             }
-            _ => Some(c.clone()),
+            // A computation-position lambda (a function-typed branch or
+            // callee). Its body runs under the lexical evidence in scope, the
+            // same scoping a handle clause threads under. A body whose
+            // signature threading moved would invalidate the enclosing
+            // function type, so that shape declines instead.
+            TypedCompKind::Lam(params, body) => {
+                let body2 = self.thread_in(body, ev, loc, retyped)?;
+                (body2.sig() == body.sig()).then(|| {
+                    TypedComp::new(
+                        c.sig().clone(),
+                        TypedCompKind::Lam(params.clone(), Box::new(body2)),
+                    )
+                })
+            }
+            TypedCompKind::Prim(op, a, b) => {
+                let a2 = self.leaf_value(a, ev, loc, retyped)?;
+                let b2 = self.leaf_value(b, ev, loc, retyped)?;
+                Some(TypedComp::new(
+                    c.sig().clone(),
+                    TypedCompKind::Prim(*op, a2, b2),
+                ))
+            }
+            TypedCompKind::Io(op, args) => {
+                let args2 = self.leaf_values(args, ev, loc, retyped)?;
+                Some(TypedComp::new(
+                    c.sig().clone(),
+                    TypedCompKind::Io(*op, args2),
+                ))
+            }
+            TypedCompKind::StrBuiltin {
+                op,
+                instantiation,
+                args,
+            } => {
+                let args2 = self.leaf_values(args, ev, loc, retyped)?;
+                Some(TypedComp::new(
+                    c.sig().clone(),
+                    TypedCompKind::StrBuiltin {
+                        op: *op,
+                        instantiation: instantiation.clone(),
+                        args: args2,
+                    },
+                ))
+            }
+            TypedCompKind::Error(v) => {
+                let v2 = self.leaf_value(v, ev, loc, retyped)?;
+                Some(TypedComp::new(c.sig().clone(), TypedCompKind::Error(v2)))
+            }
+            TypedCompKind::FloatBuiltin(op, v) => {
+                let v2 = self.leaf_value(v, ev, loc, retyped)?;
+                Some(TypedComp::new(
+                    c.sig().clone(),
+                    TypedCompKind::FloatBuiltin(*op, v2),
+                ))
+            }
+            TypedCompKind::Neg(lane, v) => {
+                let v2 = self.leaf_value(v, ev, loc, retyped)?;
+                Some(TypedComp::new(
+                    c.sig().clone(),
+                    TypedCompKind::Neg(*lane, v2),
+                ))
+            }
+            TypedCompKind::UnboxedProject(v, field) => {
+                let v2 = self.leaf_value(v, ev, loc, retyped)?;
+                Some(TypedComp::new(
+                    c.sig().clone(),
+                    TypedCompKind::UnboxedProject(v2, *field),
+                ))
+            }
+            TypedCompKind::InitAt(cell, ctor) => {
+                let cell2 = self.leaf_value(cell, ev, loc, retyped)?;
+                let ctor2 = self.leaf_value(ctor, ev, loc, retyped)?;
+                Some(TypedComp::new(
+                    c.sig().clone(),
+                    TypedCompKind::InitAt(cell2, ctor2),
+                ))
+            }
+            TypedCompKind::RefNew(v) => {
+                let v2 = self.leaf_value(v, ev, loc, retyped)?;
+                Some(TypedComp::new(c.sig().clone(), TypedCompKind::RefNew(v2)))
+            }
+            TypedCompKind::RefGet(v) => {
+                let v2 = self.leaf_value(v, ev, loc, retyped)?;
+                Some(TypedComp::new(c.sig().clone(), TypedCompKind::RefGet(v2)))
+            }
+            TypedCompKind::RefSet(cell, v) => {
+                let cell2 = self.leaf_value(cell, ev, loc, retyped)?;
+                let v2 = self.leaf_value(v, ev, loc, retyped)?;
+                Some(TypedComp::new(
+                    c.sig().clone(),
+                    TypedCompKind::RefSet(cell2, v2),
+                ))
+            }
+            // RC and reuse shells are inserted after effect lowering, so the
+            // evidence engine sees one only if the pass order changes; decline
+            // rather than pass a node this phase has no rules for.
+            TypedCompKind::Dup(..)
+            | TypedCompKind::Drop(..)
+            | TypedCompKind::WithReuse { .. }
+            | TypedCompKind::Reuse(..) => None,
         }
+    }
+
+    // Thread one operand of a value-position leaf. The node's own signature
+    // stays: these operations fix their operand conventions, so threading that
+    // moves the operand's type (a thunk widened with evidence parameters)
+    // declines rather than leaving the witness stale.
+    fn leaf_value(
+        &mut self,
+        v: &TypedValue,
+        ev: &Env,
+        loc: &Loc,
+        retyped: &mut Retyped,
+    ) -> Option<TypedValue> {
+        let v2 = self.thread_value_in(v, ev, loc, retyped)?;
+        (v2.ty() == v.ty()).then_some(v2)
+    }
+
+    fn leaf_values(
+        &mut self,
+        values: &[TypedValue],
+        ev: &Env,
+        loc: &Loc,
+        retyped: &mut Retyped,
+    ) -> Option<Vec<TypedValue>> {
+        values
+            .iter()
+            .map(|v| self.leaf_value(v, ev, loc, retyped))
+            .collect()
     }
 
     // `do op(args)` becomes `force(ev@<id>)(args)`: the active clause, applied
@@ -1222,14 +1360,16 @@ impl Threader<'_> {
 // whose evidence is in scope and rides its residual on a witness-only ambient
 // row variable. Inclusion holds directly when nothing was relabeled; otherwise
 // accept exactly that relabeling by rewidening the source row at the threaded
-// tail, provided the tail is one the threading itself minted (the `%evr`
-// namespace never reaches a source row, so nothing else can smuggle one in).
+// tail, provided the tail is one the threading itself minted (the ambient
+// namespace never reaches a source row, so nothing else can smuggle one in;
+// membership is decided by the namespace's own predicate in `names`, beside
+// the formatters that mint into it).
 fn threaded_row_included(acc: &EffRow, src: &EffRow) -> bool {
     if row_included(acc, src) {
         return true;
     }
     match acc.tail() {
-        EffRow::Var(tail) if tail.as_str().starts_with(FRESH_EVIDENCE_ROW) => {
+        EffRow::Var(tail) if names::is_evidence_row(tail.as_str()) => {
             let rewidened =
                 EffRow::canonical(src.labels().into_iter().cloned(), EffRow::Var(*tail));
             row_included(acc, &rewidened)
@@ -1482,11 +1622,11 @@ fn lambda_thunk(
 /// Returns the program's handles for the caller's own per-handler shape check,
 /// or `None` when a guard fails.
 #[must_use]
-pub fn fusion_handles(
-    fns: &[TypedCoreFn],
+pub fn fusion_handles<'a>(
+    fns: &'a [TypedCoreFn],
     latent: &Latent,
     flow: &ThunkFlow,
-) -> Option<Vec<TypedComp>> {
+) -> Option<Vec<&'a TypedComp>> {
     if fns.iter().any(|f| contains_mask(f.body())) {
         return None;
     }
@@ -1515,9 +1655,9 @@ fn contains_mask(c: &TypedComp) -> bool {
     found
 }
 
-fn find_handles(c: &TypedComp, out: &mut Vec<TypedComp>) {
+fn find_handles<'a>(c: &'a TypedComp, out: &mut Vec<&'a TypedComp>) {
     if matches!(c.kind(), TypedCompKind::Handle { .. }) {
-        out.push(c.clone());
+        out.push(c);
     }
     super::walk::each_subterm(c, &mut |sc| find_handles(sc, out));
 }
@@ -1575,12 +1715,7 @@ pub fn try_lower_ev(
                 (params, fp.sig.clone(), ev)
             },
         );
-        let loc: Loc = f
-            .params()
-            .iter()
-            .map(TypedBinder::name)
-            .zip(flow.param[&f.name()].iter().cloned())
-            .collect();
+        let loc: Loc = param_loc(f, flow);
         // A parameter the prepass re-typed is already in scope at its new type,
         // so every read of it in this body must be rebuilt at that type. The
         // threading traversal learns about locals as it binds them; a parameter
@@ -2169,7 +2304,7 @@ mod tests {
         assert_ne!(a, b);
         for r in [a, b] {
             assert!(
-                r.as_str().starts_with(FRESH_EVIDENCE_ROW),
+                names::is_evidence_row(r.as_str()),
                 "ambient rows live in their own namespace: {r}"
             );
         }

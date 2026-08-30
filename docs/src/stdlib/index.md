@@ -5,8 +5,8 @@ Prism's standard library is ordinary Prism source, not compiler built-ins. A sma
 ## Merkle root
 
 - **Scheme**: `prism-core-hash-v2`
-- **Hash**: `c2fabaf2406a2ef30bbf1b94effcea78e6a8be638bf47330d87f21e090cd6115`
-- **Compiler version**: Prism v0.20.0
+- **Hash**: `9d4820696a00f42302d02b45cc0a1e1db4f625b0c6c50990ad71163a702dbe54`
+- **Compiler version**: Prism v0.21.0
 
 ## Modules
 

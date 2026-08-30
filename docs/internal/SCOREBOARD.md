@@ -118,6 +118,14 @@ across hosts, and `just lexperf` reprints all of it. Each class climbs a
 doubling ladder until the Prism side crosses two seconds, so a row is measured
 at whatever size that ladder reached and the `at KiB` column carries it: the two
 peak columns compare to each other within a row and to nothing across rows.
+Re-run 2026-08-25 on the shipped v0.20.0 tree (the squash commit `92392b70`, the
+same tree these numbers were transcribed from) on the same machine class: every
+row reproduced within box noise, the structured-layer ratios and the peak
+resident set everywhere unchanged, so the table is confirmed as the shipped
+tree's reading rather than an artifact of a pre-cut checkout. The
+comment-dominated class's ratio wanders by a few x between runs by construction,
+its Rust side being microsecond-fast, and the rows are left at their measured
+2026-08-23 values rather than overwritten with a noisier same-tree re-read.
 
 | workload | layer  | at KiB | Rust MB/s | Prism MB/s | ratio | Rust peak | Prism peak |
 | -------- | ------ | -----: | --------: | ---------: | ----: | --------: | ---------: |
@@ -188,14 +196,20 @@ Where the other pairs stand on cost:
   hosting the interpreter, takes 2.29 s median of 20 on an Apple M5 measured
   2026-08-23, against 1.9 s for the same fixture on 2026-08-14, the workbench
   having grown the effect-row and local-generalization coverage named above in
-  between. The pair that produced the 54x, 625 ms for the checker compiled to a
-  native binary and run to full parity on the fixture's exported artifacts
-  against 11.6 ms for the Rust typecheck phase on the same 270-definition
-  universe, was measured 2026-08-14 on an apparatus that was never committed,
-  with artifact decode inside the Prism figure and outside the Rust one. It is
-  carried here as vintage rather than as a number this tree can re-derive, and a
-  committed driver that isolates the Rust phase and the compiled checker over
-  one universe is what would make that ratio quotable again.
+  between. Re-measured 2026-08-25 on the shipped tree with the fixture set named
+  for once and a quiet box (stdev under 0.02 s over 20 runs):
+  `tests/fixtures/bootstrap/t1.pr` alone is 2.11 s median, reproducing that
+  single-fixture 2.29 s reading, and the full committed workbench
+  `t1`+`t2`+`t3`, 556 surface nodes with every fixture at parity, is 4.68 s, the
+  difference being the fixtures checked and not a slowdown. The pair that
+  produced the 54x, 625 ms for the checker compiled to a native binary and run
+  to full parity on the fixture's exported artifacts against 11.6 ms for the
+  Rust typecheck phase on the same 270-definition universe, was measured
+  2026-08-14 on an apparatus that was never committed, with artifact decode
+  inside the Prism figure and outside the Rust one. It is carried here as
+  vintage rather than as a number this tree can re-derive, and a committed
+  driver that isolates the Rust phase and the compiled checker over one universe
+  is what would make that ratio quotable again.
 
 ## Retirements
 

@@ -16,7 +16,7 @@ The refusals are the useful part of the result, and they are the gap to report: 
 
 ### `RnUse`
 
-```prism,def,h-222578f7643337b107f2f97e411f58cff68de07b85ed3642ad0719fe7d2597c6
+```prism,def,h-63c0e38448ad4c82022931a79e959b499b91b54abb106453f556e93d6f712f2a
 type RnUse = RnUse { id: Int, span: Span, name: String } deriving (Eq, Show)
 ```
 
@@ -24,7 +24,7 @@ One variable reference: the node id the checker facts join on, the exact span of
 
 ### `RenameRefusal`
 
-```prism,def,h-6e9fee93e3b925c4fb7531229537b680de4e19b60259c559201c3787a58d5af6
+```prism,def,h-75813e248aa381fb3ec6f6c52786c73a417591da8cf26d87ca03aaac37ef9ad1
 type RenameRefusal
   = RnNotAnIdent(String)
   | RnTaken(String)
@@ -39,7 +39,7 @@ Why a rename was refused. Every case is a fact about the document, not a guess a
 
 ### `RenameError`
 
-```prism,def,h-fcfacb69af9862540b0331bb2ddd824bddfacf757393fd9627818dff883a355e
+```prism,def,h-01f7e293ff78ef0c1b497679140009a9df95ebd4441db8f9821fe7bb61931c4a
 type RenameError
   = RnRefused(RenameRefusal)
   | RnEdit(EditError)

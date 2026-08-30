@@ -14,7 +14,7 @@ The surface covers construction, indexing, transpose-by-name, a contiguity-check
 
 ### `Tensor`
 
-```prism,def,h-ff23f13391ea93b018f5afe7c0a6ae02705a3e78e45ad958a520b6279de96c07
+```prism,def,h-c8037a7d23e8d11f7d42a251ee4a722c515562c565adf82920686fceed205c2d
 type Tensor = MkTensor {
   data: FloatBuf,
   dims: List(Int),

@@ -817,4 +817,19 @@ pub(super) const ENTRIES: &[Explanation] = &[
         fix: "Rename the local definition, or keep the name and call the library \
               function by its qualified name where you meant it.",
     },
+    Explanation {
+        code: "E6074",
+        title: "a derived lens accessor takes an existing top-level name",
+        prose: "A derived lens synthesizes `<field>_of` and `with_<field>` (and, \
+                when the optic library is in scope, a lens value named for its \
+                type). Top-level names share one flat namespace that holds one \
+                definition per name, so a synthesized accessor whose name is \
+                already bound, by a function you wrote or one a module opened, \
+                would define that name twice. The derivation is refused here \
+                rather than reaching Core as two definitions of one name, or \
+                silently resolving to whichever the merge kept.",
+        example: "fn x_of(p) = 0\n\ntype Point = Point { x : Int } deriving (Lens)\n\nfn main() = println(1)",
+        fix: "Rename the field, or drop `Lens` from the `deriving` clause and \
+              write that field's accessor by hand under a name of your own.",
+    },
 ];

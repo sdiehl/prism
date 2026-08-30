@@ -8,11 +8,13 @@ Sets of 64-bit integers, reusing the patricia trie.
 
 Elements are `I64` for the reason keys are in `Data.IntMap`: branching is a bit test on a fixed-width word. Opt-in: not in Base.
 
+In the complexity bounds below, `n` is the number of elements and `W` is the trie depth, at most 64 for `I64`. Thus O(W) operations are O(1) with respect to the collection size.
+
 ## Types
 
 ### `IntSet`
 
-```prism,def,h-ff17748d7423626fada3122ed59d125fc875b8fdea2427ed741c7c653777e99c
+```prism,def,h-0a25803bb32e1cf57043e8356bc9f74c0b285bab4ac4f1943f397842c7767e44
 newtype IntSet = IntSet(IntMap(Unit))
 ```
 
@@ -26,7 +28,7 @@ A set of fixed-width integers. Its trie and unit payload are private.
 intset_empty : Data.IntSet.IntSet
 ```
 
-The empty set.
+The empty set. Time complexity: O(1).
 
 ```prism,mod=Data.IntSet
 intset_is_empty(intset_empty)
@@ -42,7 +44,7 @@ true
 intset_singleton : (I64) -> Data.IntSet.IntSet
 ```
 
-The set containing `x` alone.
+The set containing `x` alone. Time complexity: O(1).
 
 ```prism,mod=Data.IntSet
 intset_to_list(intset_singleton(7i64))
@@ -58,7 +60,7 @@ intset_to_list(intset_singleton(7i64))
 intset_insert : (I64, Data.IntSet.IntSet) -> Data.IntSet.IntSet
 ```
 
-Add `x` (a no-op when already present).
+Add `x` (a no-op when already present). Time complexity: O(W), with `W <= 64`.
 
 ```prism,mod=Data.IntSet
 intset_to_list(intset_insert(2i64, intset_insert(1i64, intset_empty)))
@@ -74,7 +76,7 @@ intset_to_list(intset_insert(2i64, intset_insert(1i64, intset_empty)))
 intset_member : (I64, Data.IntSet.IntSet) -> Bool
 ```
 
-True when `x` is a member.
+True when `x` is a member. Time complexity: O(W), with `W <= 64`.
 
 ```prism,mod=Data.IntSet
 intset_member(2i64, intset_from_list([1i64, 2i64, 3i64]))
@@ -90,7 +92,7 @@ true
 intset_delete : (I64, Data.IntSet.IntSet) -> Data.IntSet.IntSet
 ```
 
-Remove `x` (a no-op when absent).
+Remove `x` (a no-op when absent). Time complexity: O(W), with `W <= 64`.
 
 ```prism,mod=Data.IntSet
 intset_to_list(intset_delete(2i64, intset_from_list([1i64, 2i64, 3i64])))
@@ -106,7 +108,7 @@ intset_to_list(intset_delete(2i64, intset_from_list([1i64, 2i64, 3i64])))
 intset_size : (Data.IntSet.IntSet) -> Int
 ```
 
-The number of elements.
+The number of elements. Time complexity: O(n); sizes are not cached.
 
 ```prism,mod=Data.IntSet
 intset_size(intset_from_list([1i64, 2i64, 2i64, 3i64]))
@@ -122,7 +124,7 @@ intset_size(intset_from_list([1i64, 2i64, 2i64, 3i64]))
 intset_is_empty : (Data.IntSet.IntSet) -> Bool
 ```
 
-True when the set has no elements.
+True when the set has no elements. Time complexity: O(1).
 
 ```prism,mod=Data.IntSet
 intset_is_empty(intset_empty)
@@ -138,7 +140,7 @@ true
 intset_to_list : (Data.IntSet.IntSet) -> List(I64)
 ```
 
-The elements in ascending order, negatives first.
+The elements in ascending order, negatives first. Time complexity: O(n).
 
 ```prism,mod=Data.IntSet
 intset_to_list(intset_from_list([3i64, 1i64, 2i64, 1i64]))
@@ -154,7 +156,7 @@ intset_to_list(intset_from_list([3i64, 1i64, 2i64, 1i64]))
 intset_from_list : (List(I64)) -> Data.IntSet.IntSet
 ```
 
-Build a set from a list, dropping duplicates.
+Build a set from a list, dropping duplicates. Time complexity: O(nW) for `n` input elements and `W <= 64`.
 
 ```prism,mod=Data.IntSet
 intset_to_list(intset_from_list([3i64, 1i64, 2i64, 1i64]))
@@ -170,7 +172,7 @@ intset_to_list(intset_from_list([3i64, 1i64, 2i64, 1i64]))
 intset_union : (Data.IntSet.IntSet, Data.IntSet.IntSet) -> Data.IntSet.IntSet
 ```
 
-Every element in either set, merged by walking the two tries together.
+Every element in either set, merged by walking the two tries together. Time complexity: O(n + m) for input sizes `n` and `m`.
 
 ```prism,mod=Data.IntSet
 intset_to_list(intset_union(intset_from_list([1i64, 2i64]), intset_from_list([2i64, 3i64])))
@@ -186,7 +188,7 @@ intset_to_list(intset_union(intset_from_list([1i64, 2i64]), intset_from_list([2i
 intset_intersection : (Data.IntSet.IntSet, Data.IntSet.IntSet) -> Data.IntSet.IntSet
 ```
 
-The elements in both sets.
+The elements in both sets. Time complexity: O(nW), where `n` is the size of `s1` and `W <= 64`.
 
 ```prism,mod=Data.IntSet
 intset_to_list(
@@ -207,7 +209,7 @@ intset_to_list(
 intset_difference : (Data.IntSet.IntSet, Data.IntSet.IntSet) -> Data.IntSet.IntSet
 ```
 
-The elements of `s1` that are not in `s2`.
+The elements of `s1` that are not in `s2`. Time complexity: O(nW), where `n` is the size of `s1` and `W <= 64`.
 
 ```prism,mod=Data.IntSet
 intset_to_list(
@@ -225,7 +227,7 @@ intset_to_list(
 intset_filter : forall e0. ((I64) -> Bool ! {e0}, Data.IntSet.IntSet) -> Data.IntSet.IntSet ! {e0}
 ```
 
-The elements satisfying `keep`.
+The elements satisfying `keep`. Time complexity: O(n), excluding calls to `keep`.
 
 ```prism,mod=Data.IntSet
 intset_to_list(intset_filter(\(x) -> x > 1i64, intset_from_list([1i64, 2i64, 3i64])))
@@ -241,7 +243,7 @@ intset_to_list(intset_filter(\(x) -> x > 1i64, intset_from_list([1i64, 2i64, 3i6
 intset_fold : forall e0 a. ((a, I64) -> a ! {e0}, a, Data.IntSet.IntSet) -> a ! {e0}
 ```
 
-Fold `f(acc, x)` over the elements in ascending order.
+Fold `f(acc, x)` over the elements in ascending order. Time complexity: O(n), excluding calls to `f`.
 
 ```prism,mod=Data.IntSet
 intset_fold(\(acc, x) -> acc + x, 0i64, intset_from_list([1i64, 2i64, 3i64]))
@@ -257,7 +259,7 @@ intset_fold(\(acc, x) -> acc + x, 0i64, intset_from_list([1i64, 2i64, 3i64]))
 intset_map : forall e0. ((I64) -> I64 ! {e0}, Data.IntSet.IntSet) -> Data.IntSet.IntSet ! {e0}
 ```
 
-Apply `f` to every element, rebuilding the set (`f` need not be injective).
+Apply `f` to every element, rebuilding the set (`f` need not be injective). Time complexity: O(nW), excluding calls to `f`, with `W <= 64`.
 
 ```prism,mod=Data.IntSet
 intset_to_list(intset_map(\(x) -> x * 2i64, intset_from_list([1i64, 2i64, 3i64])))

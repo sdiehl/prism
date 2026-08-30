@@ -1,0 +1,16 @@
+-- An annotation is a multiset, so declaring `E` once does not cover a body
+-- whose `mask<E>` raises the demand to two copies. Set-membership would accept
+-- this program (`E` is declared), and the surviving copy would then underflow
+-- `main`'s single handler and abort at runtime; the count comparison rejects
+-- `masked` at compile time instead (E5004).
+effect E
+  op(Int) : Int
+
+fn masked() : Int ! {E} = mask<E>(op(1))
+
+fn main() : Unit ! {IO} =
+  let r =
+    handle masked() with
+      op(x) resume k => k(x)
+      return r => r
+  println(r)

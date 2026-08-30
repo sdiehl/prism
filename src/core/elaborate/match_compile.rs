@@ -5,6 +5,15 @@ use super::{
     CorePhase, CtorInfo, Elab, Error, Locals, NodeId, Pattern, Span, Spanned, Sym, Value, S,
 };
 
+// The binders one arm's pattern introduces, on their own rather than merged into
+// the enclosing scope: the arm body needs both the extended scope and the bare
+// list of names, which shadow any polymorphic `let` of the same name.
+fn arm_binders(p: &S<Pattern>) -> Locals {
+    let mut bound = Locals::new();
+    pat_vars(p, &mut bound);
+    bound
+}
+
 // Convert a shallow surface pattern (the residual after match compilation, whose
 // ctor/tuple fields are always plain binders) into a core pattern. Literal and
 // record patterns are compiled into tests upstream and never reach a `Case` arm.
@@ -111,20 +120,29 @@ impl Elab<'_> {
             .unwrap_or(arms.len());
         let mut cases = Vec::new();
         for arm in &arms[..cut] {
+            let bound = arm_binders(&arm.pat);
             let mut l2 = locals.clone();
-            pat_vars(&arm.pat, &mut l2);
-            cases.push((self.flat_pat(&arm.pat), self.elab(&arm.body, &l2)?));
+            l2.extend(bound.clone());
+            let body =
+                self.shadowing(bound.keys().map(String::as_str), |s| s.elab(&arm.body, &l2))?;
+            cases.push((self.flat_pat(&arm.pat), body));
         }
         let mut join: Option<(Sym, Comp)> = None;
         if let Some(arm) = arms.get(cut) {
             let rest = self.elab_arms(vs, &arms[cut + 1..], locals, true)?;
+            let bound = arm_binders(&arm.pat);
             let mut l2 = locals.clone();
-            pat_vars(&arm.pat, &mut l2);
+            l2.extend(bound.clone());
             let Some(g) = arm.guard.as_ref() else {
                 return Err(Error::InternalInvariant("cut marks a guarded arm".into()));
             };
-            let cg = self.elab(g, &l2)?;
-            let cb = self.elab(&arm.body, &l2)?;
+            // The guard and the body share the arm's scope, so they share one
+            // shadowing window.
+            let guarded: Result<(Comp, Comp), Error> = self
+                .shadowing(bound.keys().map(String::as_str), |s| {
+                    Ok((s.elab(g, &l2)?, s.elab(&arm.body, &l2)?))
+                });
+            let (cg, cb) = guarded?;
             let flat = self.flat_pat(&arm.pat);
             let mut map = Vec::new();
             let pat = self.freshen(&flat, &mut map);

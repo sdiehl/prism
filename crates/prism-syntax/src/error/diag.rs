@@ -617,6 +617,15 @@ pub enum ErrKind {
         setter: String,
     },
     #[error(
+        "cannot derive Lens for {ty}: field `{field}` synthesizes `{name}`, but a \
+         top-level definition named `{name}` already exists"
+    )]
+    LensAccessorShadowsValue {
+        ty: String,
+        field: String,
+        name: String,
+    },
+    #[error(
         "cannot derive Stable for {ty}: {field} has type `{field_ty}`, which is not Stable. \
          A frozen format cannot contain a value that is not itself serializable."
     )]
@@ -941,6 +950,7 @@ impl ErrKind {
             Self::LensNeedsRecord { .. } => "E6019",
             Self::LensNeedsNamedFields { .. } => "E6020",
             Self::LensAccessorCollision { .. } => "E6072",
+            Self::LensAccessorShadowsValue { .. } => "E6074",
             Self::StableFieldNotStable { .. } => "E6021",
             Self::EmptyInterpolation { .. } => "E6022",
             Self::StableNeedsClass { .. } => "E6023",
@@ -1331,6 +1341,7 @@ mod tests {
                 getter,
                 setter
             },
+            LensAccessorShadowsValue { ty, field, name },
             StableFieldNotStable {
                 ty,
                 field,

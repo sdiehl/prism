@@ -8,6 +8,8 @@ Built over the primitive UTF-8 string operations. Base includes this module.
 
 Two indexing families exist and they do not cost the same. `char_at`, `substring`, and `str_len` are counted in codepoints, so each call walks the string's UTF-8 encoding from the start and costs time proportional to the length. A scanner that advances an index one position at a time through them pays that walk on every step and is quadratic in its input, which is invisible on a line and ruinous on a file. `byte_at` and `byte_len` are constant-time raw-byte access and are the first choice for a scanner, a tokenizer, or a hash. Reach for the codepoint family only when the answer itself must be counted in characters.
 
+In the bounds below, `n` and `m` are byte lengths and `c` is a codepoint count. Builder bounds assume the accumulator is threaded linearly.
+
 ## Functions and Values
 
 ### `str_join`
@@ -16,7 +18,7 @@ Two indexing families exist and they do not cost the same. `char_at`, `substring
 str_join : (String, List(String)) -> String
 ```
 
-Join a list of strings, placing `sep` between adjacent elements.
+Join a list of strings, placing `sep` between adjacent elements. Time complexity: O(kN) in the worst case for `k` strings and `N` output bytes, because the immutable suffix is copied repeatedly.
 
 ```prism,mod=Data.String
 str_join(", ", ["a", "b", "c"])
@@ -32,7 +34,7 @@ a, b, c
 str_repeat : (String, Int) -> String
 ```
 
-`s` repeated `n` times (the empty string when `n <= 0`).
+`s` repeated `n` times (the empty string when `n <= 0`). Time complexity: O(n^2 * |s|), because each immutable suffix is copied again.
 
 ```prism,mod=Data.String
 str_repeat("ab", 3)
@@ -48,7 +50,7 @@ ababab
 pad_left : (String, Int) -> String
 ```
 
-Right-align `s` to width `w` by prepending spaces (unchanged if already wider).
+Right-align `s` to width `w` by prepending spaces (unchanged if already wider). Time complexity: O(|s| + p^2), where `p` is the padding width.
 
 ```prism,mod=Data.String
 pad_left("42", 5)
@@ -64,7 +66,7 @@ pad_left("42", 5)
 pad_right : (String, Int) -> String
 ```
 
-Left-align `s` to width `w` by appending spaces (unchanged if already wider).
+Left-align `s` to width `w` by appending spaces (unchanged if already wider). Time complexity: O(|s| + p^2), where `p` is the padding width.
 
 ```prism,mod=Data.String
 pad_right("42", 5)
@@ -80,7 +82,7 @@ pad_right("42", 5)
 lines_of : (List(String)) -> String
 ```
 
-Join a list of strings with newlines between them.
+Join a list of strings with newlines between them. Time complexity: the same O(kN) worst-case bound as `str_join`.
 
 ```prism,mod=Data.String
 lines_of(["one", "two"])
@@ -97,7 +99,7 @@ two
 occurs_at : (String, String, Int, Int) -> Bool
 ```
 
-Helper for the substring queries: whether `needle` sits at byte offset `j` in `s`, comparing from position `k`.
+Helper for the substring queries: whether `needle` sits at byte offset `j` in `s`, comparing from position `k`. Time complexity: O(m - k) in the worst case, where `m` is `needle`'s byte length.
 
 ### `starts_with`
 
@@ -105,7 +107,7 @@ Helper for the substring queries: whether `needle` sits at byte offset `j` in `s
 starts_with : (String, String) -> Bool
 ```
 
-True when `s` begins with `prefix`.
+True when `s` begins with `prefix`. Time complexity: O(min(n, m)) in the worst case.
 
 ```prism,mod=Data.String
 starts_with("foo", "foobar")
@@ -121,7 +123,7 @@ true
 ends_with : (String, String) -> Bool
 ```
 
-True when `s` ends with `suffix`.
+True when `s` ends with `suffix`. Time complexity: O(m) in the worst case.
 
 ```prism,mod=Data.String
 ends_with("bar", "foobar")
@@ -137,7 +139,7 @@ true
 index_of_go : (String, String, Int) -> Int
 ```
 
-Helper for `index_of`: search for `needle` in `s` from byte offset `j`.
+Helper for `index_of`: search for `needle` in `s` from byte offset `j`. Time complexity: O((n - j)m) in the worst case.
 
 ### `index_of`
 
@@ -145,7 +147,7 @@ Helper for `index_of`: search for `needle` in `s` from byte offset `j`.
 index_of : (String, String) -> Int
 ```
 
-The byte offset of the first occurrence of `needle` in `s`, or `-1` if absent.
+The byte offset of the first occurrence of `needle` in `s`, or `-1` if absent. Time complexity: O(nm) in the worst case.
 
 ```prism,mod=Data.String
 index_of("bar", "foobar")
@@ -161,7 +163,7 @@ index_of("bar", "foobar")
 contains : (String, String) -> Bool
 ```
 
-True when `needle` occurs anywhere in `s`.
+True when `needle` occurs anywhere in `s`. Time complexity: O(nm) in the worst case.
 
 ```prism,mod=Data.String
 contains("oob", "foobar")
@@ -177,7 +179,7 @@ true
 map_case : (String, Int, Buf, Bool) -> Buf
 ```
 
-Helper for `to_upper`/`to_lower`: fold ASCII case mapping over `s` into a byte buffer (`up` selects upper- vs lower-casing).
+Helper for `to_upper`/`to_lower`: fold ASCII case mapping over `s` into a byte buffer (`up` selects upper- vs lower-casing). Time complexity: O(n - i).
 
 ### `to_upper`
 
@@ -185,7 +187,7 @@ Helper for `to_upper`/`to_lower`: fold ASCII case mapping over `s` into a byte b
 to_upper : (String) -> String
 ```
 
-ASCII upper-case of `s` (non-letters unchanged).
+ASCII upper-case of `s` (non-letters unchanged). Time complexity: O(n).
 
 ```prism,mod=Data.String
 to_upper("Hello")
@@ -201,7 +203,7 @@ HELLO
 to_lower : (String) -> String
 ```
 
-ASCII lower-case of `s` (non-letters unchanged).
+ASCII lower-case of `s` (non-letters unchanged). Time complexity: O(n).
 
 ```prism,mod=Data.String
 to_lower("Hello")
@@ -217,7 +219,7 @@ hello
 ltrim_idx : (String, Int) -> Int
 ```
 
-Helper for `trim`: the first non-whitespace byte index at or after `i`.
+Helper for `trim`: the first non-whitespace byte index at or after `i`. Time complexity: O(n - i).
 
 ### `rtrim_idx`
 
@@ -225,7 +227,7 @@ Helper for `trim`: the first non-whitespace byte index at or after `i`.
 rtrim_idx : (String, Int) -> Int
 ```
 
-Helper for `trim`: the index just past the last non-whitespace byte before `i`.
+Helper for `trim`: the index just past the last non-whitespace byte before `i`. Time complexity: O(i).
 
 ### `slice_bytes`
 
@@ -233,7 +235,7 @@ Helper for `trim`: the index just past the last non-whitespace byte before `i`.
 slice_bytes : (String, Int, Int, Buf) -> Buf
 ```
 
-Helper for `trim`: collect the bytes of `s` in `[lo, hi)` into `buf`.
+Helper for `trim`: collect the bytes of `s` in `[lo, hi)` into `buf`. Time complexity: O(hi - lo).
 
 ### `str_slice`
 
@@ -245,7 +247,7 @@ The bytes of `s` in `[lo, hi)`, clamped to the string's bounds.
 
 The byte-indexed counterpart of `substring`: both endpoints are byte offsets and reaching one is constant time, so a scanner that slices as it advances stays linear where the codepoint form is quadratic. The endpoints must fall on character boundaries, which they do when they come from comparisons against ASCII bytes or from a span the compiler emitted; a window that splits a character is repaired rather than rejected, so the result is always a well-formed String.
 
-The span shares the parent's bytes rather than copying them, and the parent stays alive for as long as the span does, so slicing costs the same whether the string is three bytes or three megabytes.
+The span shares the parent's bytes rather than copying them, and the parent stays alive for as long as the span does, so slicing costs the same whether the string is three bytes or three megabytes. Time complexity: O(1).
 
 ```prism,mod=Data.String
 str_slice("foobar", 3, 6)
@@ -261,7 +263,7 @@ bar
 trim : (String) -> String
 ```
 
-Strip leading and trailing ASCII whitespace.
+Strip leading and trailing ASCII whitespace. Time complexity: O(n); the returned slice itself is O(1).
 
 ```prism,mod=Data.String
 trim("  hi  ")
@@ -279,7 +281,7 @@ index_of_from : (Int, String, Int) -> Int
 
 The index of character `c` in `s` at or after position `i`, or `-1` if absent.
 
-The codepoint index is the answer, so the walk that finds it is the walk this returns a position into: `index_of` is the byte-offset counterpart and is linear. Kept for the caller who needs a character position.
+The codepoint index is the answer, so the walk that finds it is the walk this returns a position into. Each `char_at` starts at the beginning, however, so the repeated walks are quadratic on an ASCII string. `index_of` is the byte-offset counterpart. Time complexity: O(nc), worst-case O(n^2), for `c` codepoints examined.
 
 ### `split_from`
 
@@ -289,7 +291,7 @@ split_from : (Int, String, Int) -> List(String)
 
 Helper for `split`: split `s` on `c`, starting from position `i`.
 
-Splits at a character, so it addresses the string the way `index_of_from` answers. A caller splitting a large document wants byte offsets from `index_of` and slices from `str_slice`.
+Splits at a character, so it addresses the string the way `index_of_from` answers. A caller splitting a large document wants byte offsets from `index_of` and slices from `str_slice`. Time complexity: O(nc), worst-case O(n^2), including the codepoint-indexed search and substrings.
 
 ### `split`
 
@@ -297,7 +299,7 @@ Splits at a character, so it addresses the string the way `index_of_from` answer
 split : (Int, String) -> List(String)
 ```
 
-Split `s` into the pieces between each occurrence of character `c`.
+Split `s` into the pieces between each occurrence of character `c`. Time complexity: O(nc), worst-case O(n^2).
 
 ```prism,mod=Data.String
 split(char_at(",", 0), "a,b,c")
@@ -313,7 +315,7 @@ split(char_at(",", 0), "a,b,c")
 str_of_char : (Char) -> String
 ```
 
-The single-character string containing `c`.
+The single-character string containing `c`. Time complexity: O(1); a Unicode scalar encodes to at most four bytes.
 
 ```prism,mod=Data.String
 str_of_char(chr(65))
@@ -331,7 +333,7 @@ chars_from : (String, Int) -> List(Char)
 
 Helper for `chars`: the characters of `s` from position `i` onward.
 
-Decoding every character is what this is for, and each one is asked for by its character position; a byte-level pass would have to decode the encoding itself to answer the same question.
+Decoding every character is what this is for, and each one is asked for by its character position; a byte-level pass would have to decode the encoding itself to answer the same question. Time complexity: O(nc), worst-case O(n^2), because each `char_at` restarts at the beginning.
 
 ### `chars`
 
@@ -339,7 +341,7 @@ Decoding every character is what this is for, and each one is asked for by its c
 chars : (String) -> List(Char)
 ```
 
-The list of characters in `s`.
+The list of characters in `s`. Time complexity: O(nc), worst-case O(n^2).
 
 ```prism,mod=Data.String
 chars("hi")

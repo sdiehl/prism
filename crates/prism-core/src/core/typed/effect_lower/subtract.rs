@@ -16,10 +16,21 @@ use super::super::specialize_support::Rewrite;
 use super::super::{CompSig, CoreFnSig, CoreInstantiation, CoreType, LoweredType};
 
 pub(crate) fn subtract_row(row: &EffRow, label: Sym) -> EffRow {
+    // Rows are multisets: `mask` adds one copy of a label, so discharging one
+    // handler removes exactly one occurrence, leaving any surplus copies for
+    // the handlers still outstanding.
+    let mut removed = false;
     EffRow::canonical(
         row.labels()
             .into_iter()
-            .filter(|l| l.name != label)
+            .filter(|l| {
+                if !removed && l.name == label {
+                    removed = true;
+                    false
+                } else {
+                    true
+                }
+            })
             .cloned(),
         row.tail().clone(),
     )

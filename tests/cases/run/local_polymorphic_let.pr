@@ -1,0 +1,9 @@
+-- A local `let` bound to a syntactic value generalizes over the types its uses
+-- disagree on. Core's `Bind` binds one type, so elaboration expands the value at
+-- each use rather than emitting a bind, and the two uses below are checked at
+-- `Int` and `String` independently. Both tiers must print the same two lines.
+
+fn main() =
+  let same = \(x) -> x
+  println(same(1))
+  println(same("hi"))

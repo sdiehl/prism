@@ -208,6 +208,28 @@ typedef struct {
     long i;
 } PrismPromoteFrame;
 
+/* The ordinary cells marked PRISM_PROMOTE_SEEN during one walk, so the marks can
+ * be cleared before prism_promote returns (the region keeps these cells). */
+typedef struct {
+    long **cells;
+    long sp, cap;
+} PrismPromoteSeen;
+
+/* Mark an ordinary cell descended in place, recording it so the mark is cleared
+ * on the way out. Grown like the promotion worklist itself. */
+static void prism_promote_see(PrismPromoteSeen *s, long *cell) {
+    if (s->sp == s->cap) {
+        long ncap = prism_ckd_grow(s->cap, 1);
+        long **ns = (long **)realloc((void *)s->cells,
+                                     prism_ckd_size(prism_ckd_lmul(ncap, (long)sizeof *ns)));
+        if (!ns) abort();
+        s->cells = ns;
+        s->cap = ncap;
+    }
+    cell[PRISM_RC_W] |= PRISM_PROMOTE_SEEN;
+    s->cells[s->sp++] = cell;
+}
+
 /* Deep-promote every arena-owned cell reachable from `v` into ordinary
  * refcounted cells. `v` is borrowed; the result is an owned reference (the
  * original when nothing was arena-owned at the root). Iterative with an
@@ -218,15 +240,17 @@ typedef struct {
  * in the region is therefore preserved in the promoted result rather than
  * expanded into a tree.
  *
- * An ordinary cell reached by more than one path is still descended into once
- * per path. That is wasted time on a shared spine but never wasted memory: the
- * descent only rewrites arena-valued fields in place, and after the first visit
- * there are none left to rewrite. */
+ * An ordinary cell reached by more than one path is descended in place exactly
+ * once, tracked by the PRISM_PROMOTE_SEEN mark: the descent only rewrites
+ * arena-valued fields, so after the first visit there is no work left, and
+ * re-descending a shared ordinary spine once per path would cost exponential
+ * time on a diamond. */
 static long prism_promote(long v) {
     if ((v & 1) || !v) return v;
     long *root = (long *)v;
     PrismPromoteFrame *stack = NULL;
-    size_t sp = 0, cap = 0;
+    long sp = 0, cap = 0;
+    PrismPromoteSeen seen = {NULL, 0, 0};
     long out;
     if (root[PRISM_RC_W] & PRISM_ARENA_OWNED) {
         long *q = prism_promote_shell(root);
@@ -244,6 +268,7 @@ static long prism_promote(long v) {
             stack = malloc(sizeof *stack);
             if (!stack) abort();
             cap = 1;
+            prism_promote_see(&seen, root);
             stack[sp++] = (PrismPromoteFrame){root, NULL, 0};
         }
     }
@@ -286,11 +311,17 @@ static long prism_promote(long v) {
                 f->dst[PRISM_HDR_WORDS + idx] = c;
             }
             if (!prism_cell_has_children(cp)) continue;
+            /* Descend an ordinary cell in place at most once: its arena fields
+             * are rewritten on the first visit, so a second path has no work and
+             * re-descending a shared spine would be exponential. */
+            if (cp[PRISM_RC_W] & PRISM_PROMOTE_SEEN) continue;
+            prism_promote_see(&seen, cp);
             next = (PrismPromoteFrame){cp, NULL, 0};
         }
         if (sp == cap) { /* grow; `f` is dead past this point */
-            size_t ncap = cap * 2;
-            PrismPromoteFrame *ns = realloc(stack, ncap * sizeof *ns);
+            long ncap = prism_ckd_grow(cap, 1);
+            PrismPromoteFrame *ns =
+                realloc(stack, prism_ckd_size(prism_ckd_lmul(ncap, (long)sizeof *ns)));
             if (!ns) abort();
             stack = ns;
             cap = ncap;
@@ -298,6 +329,9 @@ static long prism_promote(long v) {
         stack[sp++] = next;
     }
     free(stack);
+    /* Clear the visited marks the region's surviving cells carry. */
+    for (long k = 0; k < seen.sp; k++) { seen.cells[k][PRISM_RC_W] &= ~PRISM_PROMOTE_SEEN; }
+    free((void *)seen.cells);
     return out;
 }
 
@@ -484,6 +518,7 @@ long prism_ref_new(long v) {
 }
 
 long prism_ref_get(long c) {
+    PRISM_RT_CHECK(c, "prism_ref_get"); /* same tag assertion its sibling ref_set carries */
     long e = ((long *)c)[PRISM_HDR_WORDS];
     prism_rc_inc(e); /* an owned snapshot; the caller rc_decs the cell */
     return e;

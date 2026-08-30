@@ -1,6 +1,6 @@
 {
   "schema": "prism-syntax-diagnostics-v1",
-  "compiler": "0.20.0",
+  "compiler": "0.21.0",
   "source": {
     "digest": "c025e67e984f56f67a95de415733f5b802c38515484bf092520c1cb9639993d1",
     "text": "-- Verification surface: logic fns, contracts, totality, disciplines.\nlogic fn nonneg(x : Int) : Bool = x >= 0\n\nfn clamp(x : Int, lo : Int, hi : Int) : Int\n  requires lo <= hi\n  ensures |r| nonneg(r)\n  =\n    if x < lo then\n      lo\n    elif x > hi then\n      hi\n    else\n      x\n\ntotal fn down(n : Int) : Int\n  decreases n\n  =\n    if n <= 0 then\n      0\n    else\n      down(n - 1)\n\nassume total fn trusted(n : Int) : Int = n\n\ntest fn clamp_holds() = assert_eq(clamp(5, 0, 3), 3)\n\nfip fn swap(p : (Int, Int)) : (Int, Int) =\n  match p of\n    (a, b) => (b, a)\n"

@@ -371,6 +371,38 @@ fn main() = println(x_of(Point { x = 1, y = 2 }))
     assert_eq!(run(src), "1\n");
 }
 
+// A synthesized accessor may not take a name a top-level function already holds.
+// `x_of` for field `x` would otherwise reach Core as two definitions of one name
+// against the hand-written function, or, were the name a library one, silently
+// resolve to whichever the merge kept. The derive is refused with a named
+// diagnostic, whichever order the function and the type are written in.
+#[test]
+fn lens_rejects_accessor_that_shadows_a_function() {
+    let clash = |fn_first: bool| {
+        let func = "fn x_of(r) = 0";
+        let ty = "type Point = Point { x: Int } deriving (Lens)";
+        let src = if fn_first {
+            format!("{func}\n{ty}\nfn main() = println(1)\n")
+        } else {
+            format!("{ty}\n{func}\nfn main() = println(1)\n")
+        };
+        check_diag(&src)
+    };
+    for diag in [clash(true), clash(false)] {
+        assert_eq!(diag.kind.code(), "E6074");
+        let msg = diag.to_string();
+        assert!(
+            msg.contains("Point") && msg.contains("x_of"),
+            "the report names the type and the accessor: {msg}"
+        );
+        assert!(diag.help.is_some(), "the report offers no fix");
+        assert!(
+            !diag.notes.is_empty(),
+            "the report explains the flat namespace"
+        );
+    }
+}
+
 // The blake3 builtin the interpreter and native runtime share must agree on the
 // empty string and a known vector, so a drift in either implementation is caught
 // here rather than only through a derived instance.

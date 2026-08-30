@@ -1,12 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use prism_common::sym::Sym;
+use prism_syntax::names;
 
 use crate::types::ty::{EffRow, Label};
 use crate::types::Type;
 
 use super::super::build::lower_value_type;
 use super::super::{CompSig, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, LoweredType};
+use super::compat::union_rows;
 
 #[must_use]
 pub fn substitute_core_type(
@@ -108,7 +110,7 @@ pub fn substitute_fn_sig(
             };
             let mut suffix = 0;
             let fresh = loop {
-                let candidate = Sym::from(format!("{name}$typedq{suffix}"));
+                let candidate = Sym::from(names::typed_quantifier(name.as_str(), suffix));
                 suffix += 1;
                 if !inserted_types.contains(&candidate)
                     && !inserted_rows.contains(&candidate)
@@ -403,28 +405,54 @@ fn substitute_row_with(
     bound_types: &mut BTreeSet<Sym>,
     bound_rows: &mut BTreeSet<Sym>,
 ) -> EffRow {
-    match row {
-        EffRow::Var(name) if !bound_rows.contains(name) => {
-            rows.get(name).cloned().unwrap_or_else(|| row.clone())
+    // Collect the concrete head labels (substituting each label's type args),
+    // then substitute the tail row-variable once and concatenate the head onto
+    // it. Rows are multisets and an instantiation row is, by construction, the
+    // demand BEYOND the declared head: the builder's `subsume_row` consumes
+    // expected occurrences one-to-one and routes only a surplus copy into the
+    // flexible tail. Substituting `e := {E | e0}` under a declared head `E`
+    // must therefore stack to `{E, E | e0}`; a per-label MAX here would erase
+    // the extra handler level the instantiation carries (the enclosing
+    // combinator's own discharge) and understate the expected row.
+    let mut head: Vec<Label> = Vec::new();
+    let mut cur = row;
+    loop {
+        match cur {
+            EffRow::Extend(label, rest) => {
+                head.push(Label {
+                    name: label.name,
+                    args: label
+                        .args
+                        .iter()
+                        .map(|ty| substitute_type_with(ty, types, rows, bound_types, bound_rows))
+                        .collect(),
+                });
+                cur = rest;
+            }
+            EffRow::Var(name) if !bound_rows.contains(name) => {
+                let tail = rows.get(name).cloned().unwrap_or_else(|| cur.clone());
+                // An evidence-row variable is the threading's own rewidening
+                // artifact: it stands for the residual ambient row, whose
+                // labels are demand at the SAME handler level as the declared
+                // head and may overlap it. Concatenating there would fabricate
+                // a phantom extra level ({IO | %evr} at %evr := {IO} is one
+                // IO handler, not two), so it merges per-label MAX instead.
+                if names::is_evidence_row(name.as_str()) {
+                    let head_row = EffRow::canonical(head.iter().cloned(), EffRow::Empty);
+                    if let Ok(merged) = union_rows(&head_row, &tail) {
+                        return merged;
+                    }
+                }
+                return EffRow::canonical(
+                    head.into_iter().chain(tail.labels().into_iter().cloned()),
+                    tail.tail().clone(),
+                );
+            }
+            // Terminal tail: Empty, a bound row var, or an existential.
+            EffRow::Empty | EffRow::Var(_) | EffRow::Exist(_) => {
+                return EffRow::canonical(head, cur.clone());
+            }
         }
-        EffRow::Extend(label, rest) => EffRow::Extend(
-            Label {
-                name: label.name,
-                args: label
-                    .args
-                    .iter()
-                    .map(|ty| substitute_type_with(ty, types, rows, bound_types, bound_rows))
-                    .collect(),
-            },
-            Box::new(substitute_row_with(
-                rest,
-                types,
-                rows,
-                bound_types,
-                bound_rows,
-            )),
-        ),
-        EffRow::Empty | EffRow::Var(_) | EffRow::Exist(_) => row.clone(),
     }
 }
 

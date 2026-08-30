@@ -13,7 +13,8 @@ pub use emit::emit_with_isa;
 pub use emit::ClosureSummary;
 pub use isa::{Buf, Cmp, FloatBinOp, FloatIntrinsic, IntOp, Isa};
 pub use llvm::{
-    emit as emit_llvm, emit_bitcode as emit_llvm_bc,
+    compile_bitcode_to_object as compile_llvm_bitcode_to_object, emit as emit_llvm,
+    emit_bitcode as emit_llvm_bc,
     emit_bitcode_with_native_kont_table as emit_llvm_bc_with_native_kont_table,
     emit_native_kont_plan_bitcode as emit_llvm_native_kont_plan_bc,
     emit_selected_bitcode as emit_llvm_scc_bc,

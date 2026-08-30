@@ -1,0 +1,5 @@
+newtype Consumer(a) = Consumer((a) -> Int)
+
+fn wrong_way(c : Consumer((Int) -> Int)) : Consumer(((Int) -> Int) @ once) = c
+
+fn main() = ()

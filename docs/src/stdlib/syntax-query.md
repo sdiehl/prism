@@ -12,7 +12,7 @@ Every field is a pure function of the artifact bytes. Nothing here reads ambient
 
 ### `DeclHead`
 
-```prism,def,h-75fe6fd31ba6e33fa4c9aa0de993e7fa73e1d06a8da7f5bc3ffe013fa32a5042
+```prism,def,h-55a5006446e23a49230765619c48c72336244f5a98e9266679753da5b7a171b8
 type DeclHead = DeclHead {
   keyword: String,
   name: String,
@@ -24,7 +24,7 @@ The head of a top-level declaration: its leading keyword, the first name it bind
 
 ### `KindCount`
 
-```prism,def,h-9242b126e23904eeaa44487707ce4483989a87598690d9b2f5bb14442e074050
+```prism,def,h-a1bfb8f2cc5dedcd00ff6106c9022d10a2196e061106c87e4deb8ca7e6e2bd04
 type KindCount = KindCount { kind: String, count: Int } deriving (Eq, Show)
 ```
 
@@ -32,7 +32,7 @@ One bucket of the token-kind histogram: a wire kind and how many raw tokens carr
 
 ### `QueryReport`
 
-```prism,def,h-8f1649119cefa45c00d5d1a9ce2fdd709f301561b1f6efb5c921687dd00f0df5
+```prism,def,h-f233fab0223fd960eba0cad4b337e374e72ac139b8223ed6572f8ef3fef9a665
 type QueryReport = QueryReport {
   digest: String,
   imports: List(String),

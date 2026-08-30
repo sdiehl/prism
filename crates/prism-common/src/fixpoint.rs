@@ -1,13 +1,18 @@
 //! A least-fixpoint over a finite map-of-sets lattice.
 //!
-//! Each round recomputes, per key, `next[k] = current[k] | step(k, current)`:
-//! a union, never a replace, so every value only grows. Because the lattice is
-//! finite and each round is monotone, the measure "elements not yet added"
-//! strictly decreases on every non-stationary round, so the iteration reaches
-//! its least fixpoint and stops. Termination is structural: no iteration cap and
-//! no non-monotonicity backstop are meaningful here.
+//! Each round unions `step(k, current)` into `current[k]`. Monotonic growth over
+//! the finite lattice guarantees termination.
 
 use std::collections::{BTreeMap, BTreeSet};
+
+/// Iterate `round` until a round reports no change, returning the stable state.
+///
+/// `round` mutates `state` once and reports whether it changed. The caller must
+/// ensure that each change advances a finite monotone measure.
+pub fn stabilize<S>(mut state: S, mut round: impl FnMut(&mut S) -> bool) -> S {
+    while round(&mut state) {}
+    state
+}
 
 /// Solve `x = seed ⊔ step(x)` for the least `x`.
 ///

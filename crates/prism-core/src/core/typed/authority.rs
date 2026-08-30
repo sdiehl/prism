@@ -13,8 +13,9 @@ use crate::core::Core;
 /// Whole-program typed Core awaiting independent verification at phase `P`.
 ///
 /// This is the honest result type for rewrites and partial SCC work: its
-/// functions carry witnesses, but the complete global table and phase-local
-/// judgments have not yet been checked.
+/// functions carry witnesses awaiting the independent whole-program check,
+/// and only [`verify`] can promote them to the authoritative [`TypedCore`]
+/// marker the next compiler transition consumes.
 #[derive(Debug, PartialEq)]
 pub struct UncheckedTypedCore<P> {
     fns: Vec<TypedCoreFn>,

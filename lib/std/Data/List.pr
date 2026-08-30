@@ -6,19 +6,23 @@
 -- everywhere; a project module reaches them with `import Data.List`. The
 -- container-generic queries (`length`, `sum`, `all`, `find`, and friends) live
 -- in `Data.Foldable` and work on any `Foldable`, this type included.
+--
+-- In the complexity bounds below, `n` is the input list length. Bounds for
+-- higher-order operations exclude the cost of calling the supplied function.
 
 import Data.Foldable (..)
 
--- | The one-element list `Cons(x, Nil)`.
+-- | The one-element list `Cons(x, Nil)`. Time complexity: O(1).
 pub fn singleton(x) = Cons(x, Nil)
 
--- | True for the empty list.
+-- | True for the empty list. Time complexity: O(1).
 pub fn is_nil(borrow xs) : Bool @ noalloc =
   match xs of
     Nil => true
     Cons(_x, _rest) => false
 
 -- | The first element as `Some`, or `None` when the list is empty.
+-- Time complexity: O(1).
 --
 -- ```prism
 -- head([1, 2, 3])
@@ -32,12 +36,14 @@ pub fn head(borrow xs) =
     Cons(x, _) => Some(x)
 
 -- | Everything after the first element (`Nil` for the empty list).
+-- Time complexity: O(1).
 pub fn tail(borrow xs) =
   match xs of
     Nil => Nil
     Cons(_, rest) => rest
 
 -- | The final element as `Some`, or `None` when the list is empty.
+-- Time complexity: O(n).
 --
 -- ```prism
 -- last([1, 2, 3])
@@ -52,6 +58,7 @@ pub fn last(borrow xs) =
     Cons(_, rest) => last(rest)
 
 -- | The element at index `n` (zero-based) as `Some`, or `None` if out of range.
+-- Time complexity: O(min(l, n + 1)), where `l` is the list length.
 --
 -- ```prism
 -- nth(1, [10, 20, 30])
@@ -68,6 +75,7 @@ pub fn nth(n, borrow xs) =
       Cons(_, rest) => nth(n - 1, rest)
 
 -- | The first `n` elements (fewer if the list is shorter).
+-- Time complexity: O(min(l, n)), where `l` is the list length.
 --
 -- ```prism
 -- take(2, [1, 2, 3, 4])
@@ -84,6 +92,7 @@ pub fn take(n, xs) =
       Cons(x, rest) => Cons(x, take(n - 1, rest))
 
 -- | The list with its first `n` elements removed.
+-- Time complexity: O(min(l, n)), where `l` is the list length.
 --
 -- ```prism
 -- drop(2, [1, 2, 3, 4])
@@ -100,6 +109,8 @@ pub fn drop(n, xs) =
       Cons(_, rest) => drop(n - 1, rest)
 
 -- | The longest prefix of elements satisfying `p`.
+-- Time complexity: O(k), where `k` is the number of elements examined (at most
+-- `n`), excluding calls to `p`.
 --
 -- ```prism
 -- take_while(\(x) -> x < 3, [1, 2, 3, 1])
@@ -117,6 +128,8 @@ pub fn take_while(p, xs) =
         Nil
 
 -- | The suffix remaining after `take_while(p, xs)`.
+-- Time complexity: O(k), where `k` is the number of elements examined (at most
+-- `n`), excluding calls to `p`.
 --
 -- ```prism
 -- drop_while(\(x) -> x < 3, [1, 2, 3, 1])
@@ -134,6 +147,7 @@ pub fn drop_while(p, xs) =
         xs
 
 -- | `(take(n, xs), drop(n, xs))`, sharing one traversal of the prefix.
+-- Time complexity: O(min(l, n)), where `l` is the list length.
 pub fn split_at(n, xs) =
   if n == 0 then
     (Nil, xs)
@@ -145,6 +159,7 @@ pub fn split_at(n, xs) =
           (prefix, suffix) => (Cons(x, prefix), suffix)
 
 -- | Apply `f` to every element, preserving order and length.
+-- Time complexity: O(n), excluding calls to `f`.
 --
 -- ```prism
 -- map(\(x) -> x + 1, [1, 2, 3])
@@ -158,6 +173,7 @@ pub fn map(f, xs) =
     Cons(x, rest) => Cons(f(x), map(f, rest))
 
 -- | Keep the elements satisfying `p`.
+-- Time complexity: O(n), excluding calls to `p`.
 --
 -- ```prism
 -- filter(\(x) -> x > 1, [1, 2, 3])
@@ -175,6 +191,7 @@ pub fn filter(p, xs) =
         filter(p, rest)
 
 -- | Right fold: `f(x0, f(x1, ... f(xn, z)))`.
+-- Time complexity: O(n), excluding calls to `f`.
 --
 -- ```prism
 -- foldr(\(x, acc) -> x + acc, 0, [1, 2, 3])
@@ -188,6 +205,7 @@ pub fn foldr(f, z, xs) =
     Cons(x, rest) => f(x, foldr(f, z, rest))
 
 -- | Left fold: `f(... f(f(z, x0), x1) ..., xn)`. Tail-recursive.
+-- Time complexity: O(n), excluding calls to `f`.
 --
 -- ```prism
 -- foldl(\(a, b) -> a + b, 0, [1, 2, 3])
@@ -201,6 +219,7 @@ pub fn foldl(f, z, xs) =
     Cons(x, rest) => foldl(f, f(z, x), rest)
 
 -- | Concatenate two lists.
+-- Time complexity: O(n), where `n` is the length of `xs`; `ys` is shared.
 --
 -- ```prism
 -- append([1, 2], [3, 4])
@@ -214,6 +233,7 @@ pub fn append(xs, ys) =
     Cons(x, rest) => Cons(x, append(rest, ys))
 
 -- | The list in reverse order.
+-- Time complexity: O(n).
 --
 -- ```prism
 -- reverse([1, 2, 3])
@@ -224,6 +244,7 @@ pub fn append(xs, ys) =
 pub fn reverse(xs) = foldl(\(acc, x) -> Cons(x, acc), Nil, xs)
 
 -- | Concatenate a list of lists.
+-- Time complexity: O(N), where `N` is the total number of inner-list elements.
 --
 -- ```prism
 -- flatten([[1, 2], [3], [4, 5]])
@@ -236,6 +257,8 @@ pub fn flatten(xss) = foldr(append, Nil, xss)
 -- | Map `f` over the list and concatenate the resulting lists. `Data.List` is
 -- where this name is defined; anything else answering to `concat_map` is a
 -- specialization of it.
+-- Time complexity: O(n + N), where `N` is the total length of the lists returned
+-- by `f`, excluding calls to `f`.
 --
 -- ```prism
 -- concat_map(\(x) -> [x, x], [1, 2])
@@ -250,6 +273,7 @@ pub fn concat_map(f, xs) =
     Cons(x, rest) => append(f(x), concat_map(f, rest))
 
 -- | Combine two lists elementwise with `f`, stopping at the shorter length.
+-- Time complexity: O(min(n, m)), excluding calls to `f`.
 --
 -- ```prism
 -- zip_with(\(x, y) -> x + y, [1, 2, 3], [10, 20])
@@ -266,6 +290,7 @@ pub fn zip_with(f, xs, ys) =
         Cons(y, yr) => Cons(f(x, y), zip_with(f, xr, yr))
 
 -- | Pair up two lists elementwise, stopping at the shorter length.
+-- Time complexity: O(min(n, m)).
 --
 -- ```prism
 -- zip([1, 2], ["a", "b"])
@@ -276,6 +301,7 @@ pub fn zip_with(f, xs, ys) =
 pub fn zip(xs, ys) = zip_with(\(x, y) -> (x, y), xs, ys)
 
 -- | Split a list of pairs into a pair of lists.
+-- Time complexity: O(n).
 --
 -- ```prism
 -- unzip([(1, "a"), (2, "b")])
@@ -291,6 +317,7 @@ pub fn unzip(ps) =
         (xs, ys) => (Cons(x, xs), Cons(y, ys))
 
 -- | The number of elements satisfying `p`.
+-- Time complexity: O(n), excluding calls to `p`.
 --
 -- ```prism
 -- count(\(x) -> x > 1, [1, 2, 3])
@@ -305,7 +332,8 @@ fn count_go(p, xs, acc) =
     Nil => acc
     Cons(x, rest) => count_go(p, rest, if p(x) then acc + 1 else acc)
 
--- | Helper for `position`: search from index `n`.
+-- | Helper for `position`: search from index `n`. Time complexity: O(k), where
+-- `k` is the number of elements examined, excluding calls to `p`.
 pub fn position_go(p, n, xs) =
   match xs of
     Nil => None
@@ -316,6 +344,8 @@ pub fn position_go(p, n, xs) =
         position_go(p, n + 1, rest)
 
 -- | The index of the first element satisfying `p` as `Some`, or `None`.
+-- Time complexity: O(k), where `k` is the number of elements examined (at most
+-- `n`), excluding calls to `p`.
 --
 -- ```prism
 -- position(\(x) -> x == 2, [1, 2, 3])
@@ -326,6 +356,7 @@ pub fn position_go(p, n, xs) =
 pub fn position(p, xs) = position_go(p, 0, xs)
 
 -- | The greatest element as `Some`, or `None` for the empty list.
+-- Time complexity: O(n) comparisons.
 --
 -- ```prism
 -- maximum([3, 1, 2])
@@ -339,6 +370,7 @@ pub fn maximum(borrow xs) =
     Cons(x, rest) => Some(foldl(max, x, rest))
 
 -- | The least element as `Some`, or `None` for the empty list.
+-- Time complexity: O(n) comparisons.
 --
 -- ```prism
 -- minimum([3, 1, 2])
@@ -352,6 +384,7 @@ pub fn minimum(borrow xs) =
     Cons(x, rest) => Some(foldl(min, x, rest))
 
 -- | A list of `n` copies of `x`.
+-- Time complexity: O(n).
 --
 -- ```prism
 -- replicate(3, 0)
@@ -366,6 +399,7 @@ pub fn replicate(n, x) =
     Cons(x, replicate(n - 1, x))
 
 -- | The ascending list `[lo, lo+1, ..., hi-1]` (empty when `lo >= hi`).
+-- Time complexity: O(max(hi - lo, 0)).
 --
 -- ```prism
 -- range(0, 5)
@@ -380,6 +414,7 @@ pub fn range(lo, hi) =
     Cons(lo, range(lo + 1, hi))
 
 -- | The list `[f(0), f(1), ..., f(n-1)]`.
+-- Time complexity: O(n), excluding calls to `f`.
 --
 -- ```prism
 -- tabulate(3, \(i) -> i * i)
@@ -396,6 +431,8 @@ fn tabulate_go(i, n, f) =
     Cons(f(i), tabulate_go(i + 1, n, f))
 
 -- | Insert `x` into an already-ascending list, keeping it sorted.
+-- Time complexity: O(k) comparisons, where `k` is the insertion index (up to
+-- `n`).
 --
 -- ```prism
 -- insert_sorted(3, [1, 2, 4])
@@ -413,12 +450,14 @@ pub fn insert_sorted(x, xs) =
         Cons(y, insert_sorted(x, rest))
 
 -- | The first element as `Some`, or `None` (an `Option` view of the head).
+-- Time complexity: O(1).
 pub fn list_to_option(borrow xs) =
   match xs of
     Nil => None
     Cons(x, _) => Some(x)
 
 -- | Split into `(matching, non-matching)` by predicate `p`.
+-- Time complexity: O(n), excluding calls to `p`.
 --
 -- ```prism
 -- partition(\(x) -> x > 1, [1, 2, 3])
@@ -439,6 +478,7 @@ pub fn partition(p, xs) =
             (yes, Cons(x, no))
 
 -- | Break the list into consecutive chunks of up to `n` elements.
+-- Time complexity: O(l), where `l` is the list length.
 --
 -- ```prism
 -- chunks_of(2, [1, 2, 3, 4, 5])
@@ -456,6 +496,7 @@ pub fn chunks_of(n, xs) =
       (chunk, rest) => Cons(chunk, chunks_of(n, rest))
 
 -- | Left scan: the running accumulators of `foldl`, starting from `z`.
+-- Time complexity: O(n), excluding calls to `f`.
 --
 -- ```prism
 -- scan_left(\(a, b) -> a + b, 0, [1, 2, 3])
@@ -470,6 +511,8 @@ pub fn scan_left(f, z, xs) =
     )
 
 -- | Applicative apply for lists: every function in `fs` applied to every `x`.
+-- Time complexity: O(nm), where `n` is the number of functions and `m` is the
+-- number of values, excluding function-call costs.
 --
 -- ```prism
 -- list_ap([\(x) -> x + 1, \(x) -> x * 2], [10, 20])

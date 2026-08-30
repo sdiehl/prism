@@ -12,7 +12,7 @@ Instance resolution keys on the head type constructor, so a carrier admits exact
 
 ### `Semilattice`
 
-```prism,def,h-baf82bc081012965c87abab77247dbe7d1508dca44a599fb3df8280f58119bd8
+```prism,def,h-e861e7442ca67a67e496e0e9fe250dad347fce357f7d56a72bf3ea83d5ea748e
 class Semilattice(a)
   lat_bottom : () -> a
   lat_join : (a, a) -> a
@@ -47,7 +47,7 @@ Disjunction, ordered `false` below `true`: the carrier a reachability or "is thi
 
 ### `latOption`
 
-```prism,def,h-c5d5b71fa90d50b5e0dce11f49e94a5ab256f826a8d6535033586d86b0c2819b
+```prism,def,h-f92e86ef88fc01f2a1a9c39787c9c727bb3d1efea1700d94080c4849a65bdb60
 instance latOption : Semilattice(Option(a))
 ```
 
@@ -55,7 +55,7 @@ The lifted lattice: `None` strictly below every `Some`, and two `Some`s joined u
 
 ### `latPair`
 
-```prism,def,h-c3965713116b0216aa0ca8efc25c517960977b9754abee97e6d21e98879f06f2
+```prism,def,h-38ebe0d541d8a0f99718aff11527fd4de2c8298761c9be16584d7232e17bb0f8
 instance latPair : Semilattice((a, b))
 ```
 
@@ -63,7 +63,7 @@ The product lattice: componentwise join, componentwise order. Two analyses run a
 
 ### `latMap`
 
-```prism,def,h-595954f3d2a10fe8f09e1d56c8b0c7157db77999767150df18c02646c84172c7
+```prism,def,h-f08070667a595bf1efe7361d28f589d563f253bb1766e1c53c491a4f2ee068fb
 instance latMap : Semilattice(Map(k, v, ord))
 ```
 

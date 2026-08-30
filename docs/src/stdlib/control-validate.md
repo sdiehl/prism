@@ -12,7 +12,7 @@ Unlike Haskell's `ValidateT`, Prism does not give ordinary effectful sequencing 
 
 ### `Validate`
 
-```prism,def,h-75c61dbbd7df2da4c631e26abaa02ac8febbb505a833c94b3f6a54d19c359a2a
+```prism,def,h-512171f650d814a8490220b190e9cc18234e0ed978fb971090017ef67238c8f3
 effect Validate(e)
   never refute(e) : a
   dispute(e) : Unit

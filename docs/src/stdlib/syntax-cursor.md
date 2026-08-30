@@ -12,7 +12,7 @@ Expectations are token wire names, the vocabulary of `Syntax.Token`, and a refus
 
 ### `Cursor`
 
-```prism,def,h-0809e96a4afc68454786901b09754d7b9e29a0e0fcf8fb9eef24b379d62567aa
+```prism,def,h-6ef113797f6bfa79a6539647095858f7f8acaca6b56aa5b261ace80aa020cbf1
 type Cursor = Cursor {
   toks: Array(Token),
   pos: Int,
@@ -26,7 +26,7 @@ A token cursor: the tokens being read, the read position, the byte offset the en
 
 ### `Reply`
 
-```prism,def,h-dedae554b14c1e311ba7d4283f43ac69b3c4115e554e84edc18361f8efbd5555
+```prism,def,h-0fbb371977b8d30b5d868dc91c65518e2ae8efac363b0808ca9b26e9aa4a8b72
 type Reply(a) = Took(a, Cursor) | Stuck(Cursor)
 ```
 
@@ -34,7 +34,7 @@ The reply of a cursor step: the value and the advanced cursor, or the cursor alo
 
 ### `Assoc`
 
-```prism,def,h-a6e8abaab968e9650d7e082b3f735682297b3ac3d6575482e3bd239cde841630
+```prism,def,h-ff79d967a6ba4ee32bcfb86a840857e1fb1754a9cc39f2ef770b3f419ec6c22a
 type Assoc = ALeft | ARight | ANone deriving (Eq, Show)
 ```
 
@@ -42,7 +42,7 @@ How an infix operator groups a chain of its own level. A non-associative operato
 
 ### `Infix`
 
-```prism,def,h-26b0ccd2a185fe148888ab6e9dacfb097a504ec2036c0524c80f8dcfc3402d83
+```prism,def,h-18655a9ea22ac04fdf4355f77ca48c2b6e8786ae681e868cdb80e29b9402331e
 type Infix = Infix { op: String, level: Int, assoc: Assoc } deriving (Eq, Show)
 ```
 
@@ -50,7 +50,7 @@ One infix operator: the token spelling, its level (higher binds tighter), and ho
 
 ### `Prefix`
 
-```prism,def,h-eb6e20d9f732bcfd0473745f904a5ded2c86e39b2d2e4c1f0f539474d954573d
+```prism,def,h-54aee4fff183f8f54be416dc29010c3b97f9de836f42f901480f6c6092be7dc9
 type Prefix = Prefix { op: String, level: Int } deriving (Eq, Show)
 ```
 
@@ -58,7 +58,7 @@ One prefix operator: the token spelling and the level its operand is parsed at. 
 
 ### `Pratt`
 
-```prism,def,h-217628769ede9df6d7fe6b193231a541ff5776900bd1678b68887c9bd469849e
+```prism,def,h-12fd7a3be9d15defbea4160137d2ec3c98c224110c761cc53bf588a3d14c5bc1
 type Pratt(a) = Pratt {
   infixes: List(Infix),
   prefixes: List(Prefix),

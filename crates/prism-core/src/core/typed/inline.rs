@@ -14,6 +14,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::types::ty::EffRow;
+use prism_common::scc::tarjan_scc;
 use prism_common::sym::Sym;
 use prism_syntax::names::{self, ENTRY_POINT};
 
@@ -21,9 +22,7 @@ use super::effect_lower::walk;
 use super::specialize_support::{
     free_comp_vars, freshen_with, next_fresh, substitute_witnesses, Rewrite,
 };
-use super::verify::{
-    representation_preserving, representation_preserving_stable, substitute_core_type,
-};
+use super::verify::{representation_preserving_stable, substitute_core_type};
 use super::{
     CompSig, CoreInstantiation, TypedBinder, TypedComp, TypedCompKind, TypedCore, TypedCoreFn,
     TypedValue, TypedValueKind, UncheckedTypedCore,
@@ -113,34 +112,31 @@ pub fn inline<P>(core: TypedCore<P>) -> (UncheckedTypedCore<P>, InlineStats) {
 }
 
 // The functions that (transitively) call themselves. Never inlined: it would
-// not terminate and would reshape the spines native codegen expects.
+// not terminate and would reshape the spines native codegen expects. A name is
+// recursive when the call graph induced on `names` puts it in a multi-member
+// strongly connected component or gives it a self-edge.
 fn recursive_set<P>(core: &TypedCore<P>, names: &BTreeSet<Sym>) -> BTreeSet<Sym> {
-    let mut edges: BTreeMap<Sym, BTreeSet<Sym>> = BTreeMap::new();
+    let order: Vec<Sym> = names.iter().copied().collect();
+    let index: BTreeMap<Sym, usize> = order.iter().enumerate().map(|(i, &n)| (n, i)).collect();
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); order.len()];
     for function in core.functions() {
-        let heads = calls_in(&function.body);
-        edges.insert(
-            function.name,
-            heads
-                .into_iter()
-                .filter(|head| names.contains(head))
-                .collect(),
-        );
+        let Some(&v) = index.get(&function.name) else {
+            continue;
+        };
+        let mut heads: Vec<usize> = calls_in(&function.body)
+            .into_iter()
+            .filter_map(|head| index.get(&head).copied())
+            .collect();
+        heads.sort_unstable();
+        heads.dedup();
+        adj[v] = heads;
     }
-    let mut recursive = BTreeSet::new();
-    for &start in names {
-        let mut seen = BTreeSet::new();
-        let mut stack: Vec<Sym> = edges.get(&start).into_iter().flatten().copied().collect();
-        while let Some(next) = stack.pop() {
-            if next == start {
-                recursive.insert(start);
-                break;
-            }
-            if seen.insert(next) {
-                stack.extend(edges.get(&next).into_iter().flatten().copied());
-            }
-        }
-    }
-    recursive
+    tarjan_scc(&adj)
+        .into_iter()
+        .filter(|scc| scc.len() > 1 || adj[scc[0]].contains(&scc[0]))
+        .flatten()
+        .map(|v| order[v])
+        .collect()
 }
 
 // Every direct `Call` head reachable anywhere in `comp`, including inside
@@ -347,16 +343,22 @@ fn arguments_admissible(
 }
 
 /// Every representation-preserving coercion in the tree still satisfies the
-/// verifier's rule. Witness substitution can break one: a cast that erased a
-/// row quantifier's abstract tail (`!{X | e}` to `!{X}`) is legal until the
-/// call instantiates `e` to a row with more labels, which widens the cast's
-/// source but not its already-closed target, leaving a concrete label
-/// vanishing into a smaller concrete row. Such a body must not be spliced.
+/// substitution-stable cast rule after witness substitution. Substitution can
+/// break one: a cast that erased a row quantifier's abstract tail (`!{X | e}`
+/// to `!{X}`) is legal until the call instantiates `e` to a row with more
+/// labels, which widens the cast's source but not its already-closed target,
+/// leaving a concrete label vanishing into a smaller concrete row. Such a
+/// body must not be spliced. The recheck is the stable rule, not the
+/// verifier's, because the spliced cast lands in a pre-fusion tree: with the
+/// absorb rule, a widened source label could sink into a still-open target
+/// tail, and stream fusion reads purity off a row's explicit heads, so the
+/// splice would hide an effectful thunk behind the open tail. Declining the
+/// inline instead is a pure cost decision.
 fn casts_verify(c: &TypedComp) -> bool {
     fn value_ok(v: &TypedValue) -> bool {
         match &v.kind {
             TypedValueKind::Reinterpret(inner) => {
-                representation_preserving(inner.ty(), v.ty()) && value_ok(inner)
+                representation_preserving_stable(inner.ty(), v.ty()) && value_ok(inner)
             }
             TypedValueKind::LoweredRepr { value: inner, .. }
             | TypedValueKind::NewtypeRepr { value: inner, .. } => value_ok(inner),

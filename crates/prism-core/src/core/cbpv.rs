@@ -125,7 +125,7 @@ mod f64_bits {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Value {
     Var(Sym),
     Int(i64),
@@ -148,6 +148,36 @@ pub enum Value {
     UnboxedTuple(Vec<Self>),
     UnboxedRecord(Vec<(Sym, Self)>),
 }
+
+// Content identity, not IEEE arithmetic: `Float` compares by bit pattern, so
+// `NaN` equals itself and `0.0` differs from `-0.0`, matching the `f64_bits`
+// codec above and the content hash. Core equality asks "same term?", and the
+// two places the IEEE derive answers wrongly are exactly where a fold must
+// not conflate spellings (negative zero) or refuse to recognize one (NaN).
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Var(a), Self::Var(b)) => a == b,
+            (Self::Int(a), Self::Int(b)) | (Self::I64(a), Self::I64(b)) => a == b,
+            (Self::U64(a), Self::U64(b)) => a == b,
+            (Self::Float(a), Self::Float(b)) => a.to_bits() == b.to_bits(),
+            (Self::Bool(a), Self::Bool(b)) => a == b,
+            (Self::Unit, Self::Unit) => true,
+            (Self::Str(a), Self::Str(b)) => a == b,
+            (Self::Thunk(a), Self::Thunk(b)) => a == b,
+            (Self::Ctor(an, aa, avs), Self::Ctor(bn, ba, bvs)) => {
+                an == bn && aa == ba && avs == bvs
+            }
+            (Self::Tuple(a), Self::Tuple(b)) | (Self::UnboxedTuple(a), Self::UnboxedTuple(b)) => {
+                a == b
+            }
+            (Self::UnboxedRecord(a), Self::UnboxedRecord(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Value {}
 
 impl Value {
     /// The canonical source type of a scalar literal, or `None` for a value

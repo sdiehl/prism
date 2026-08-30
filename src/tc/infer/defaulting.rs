@@ -9,15 +9,20 @@ pub(super) enum NumClass {
     Arith,
 }
 
+// Default row existentials that no caller can solve. Keep the function's own
+// latent row and rows reachable from parameters; default the rest to empty.
 pub(super) fn default_open_rows(ty: &Type) -> Type {
-    let Type::Fun(doms, eff, _) = ty else {
-        return ty.clone();
-    };
     let mut keep = BTreeSet::new();
-    for param in doms {
-        param.free_exist_row(&mut keep);
+    let mut inner = ty;
+    while let Type::Forall(_, b) | Type::RowForall(_, b) = inner {
+        inner = b;
     }
-    eff.free_exist_row(&mut keep);
+    if let Type::Fun(doms, eff, _) = inner {
+        for param in doms {
+            param.free_exist_row(&mut keep);
+        }
+        eff.free_exist_row(&mut keep);
+    }
     let mut all_rows = BTreeSet::new();
     ty.free_exist_row(&mut all_rows);
     let mut out = ty.clone();

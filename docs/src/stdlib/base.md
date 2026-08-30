@@ -6,11 +6,13 @@ Base, the always-on surface: wired-in types, the type-class tower, core combinat
 
 The broad data-structure surface (lists, maybe/result, maps, sets, strings, chars) lives in importable stdlib modules under `Data.*`; the glob imports below re-open them into unqualified scope so every name stays available without an explicit import.
 
+The growable `Array(a)` uses copy-on-write value semantics. `array_empty`, `array_len`, and `array_get` are O(1), while `array_new(n, x)` is O(n). On a uniquely owned array, `array_set` and `array_pop` are O(1) and `array_push` is amortized O(1); when the array is shared, each update copies its O(n) live elements before making the change.
+
 ## Types
 
 ### `Option`
 
-```prism,def,h-82efdebdb9c189d6f53419d867a33be55e05924bbaf0f6b70b8772979cb4776f
+```prism,def,h-f50f57d9414dbff44e7d378b8f410e888a0fad8c49675e6f98f6add756b47bf7
 type Option(a) = None | Some(a) deriving (Eq, Show)
 ```
 
@@ -18,7 +20,7 @@ The optional type: `None`, or `Some(a)` holding a value.
 
 ### `Result`
 
-```prism,def,h-5e6e5b387f8ba63c2a0b0f5e069d03060ca1d6975e0cf1de2058c402a9f31e3f
+```prism,def,h-f2d079d9a33dfcd8d3c36d3023f5305907f5b29cdc7d7121af6572545dcb4cc6
 type Result(a, e) = Ok(a) | Err(e) deriving (Eq, Show)
 ```
 
@@ -26,7 +28,7 @@ A computation outcome: `Ok(a)` on success or `Err(e)` on failure.
 
 ### `List`
 
-```prism,def,h-06956a51f74dcb4a1b64ab7a2c647963e28b67684f3821c27178b0bf705de0bf
+```prism,def,h-9fcb1fcfe80c251ff231c934629f4b56e16da33fde0d776ac1008b71449cde7f
 type List(a) = Nil | Cons(a, List(a)) deriving (Eq)
 ```
 
@@ -34,7 +36,7 @@ A singly-linked list: `Nil`, or `Cons(head, tail)`. Backs `[..]` literals.
 
 ### `Map`
 
-```prism,def,h-41634cb550fe4b5104f13d5966f715a45ebec748ee3a6fb039452d10aab065a5
+```prism,def,h-7db470a4f0f7b24a6b2cf26a5344bd1cce2049fcc3660cb10d00c1fe87758e4a
 type Map(k, v, ord) = Tip | Bin(Int, k, v, Map(k, v, ord), Map(k, v, ord))
 ```
 
@@ -42,7 +44,7 @@ A persistent ordered map, an AVL tree (`Tip`/`Bin`); see `Data.Map`. The third p
 
 ### `Canonical`
 
-```prism,def,h-30af52041f8cf7dca1a39873ed6b618dfefb1cd9864466e03423341444692586
+```prism,def,h-3a19e45729bf0e1655446a380963e8552cae377036f72734e86d9b1a56b05841
 type Canonical = MkCanonical
 ```
 
@@ -50,17 +52,19 @@ The brand of a map built under the ambient canonical ordering, when no explicit 
 
 ### `HashMap`
 
-```prism,def,h-6ccbd2d5208e3231dc782994b190a591e9a64fecd95be252323588043a1a4df7
+```prism,def,h-bf845a5492bd2eafa0a1d4339df62adca47a2cea931ddfc809faca6911acf855
 type HashMap(v) = HM { buckets: Array(List((String, v))), size: Int }
 ```
 
 A separate-chaining hash table with `String` keys, built on the growable `Array`: each bucket is an association list, and the table doubles its bucket count when the load factor passes 1. Iteration order is a pure function of the inserts, identical across the interpreter and native backends.
 
+Hash-map complexities are expected bounds under well-distributed FNV hashes; an adversarial collision puts every entry in one bucket and makes lookup, insert, and delete linear in the entries and key bytes examined. Hashing a key always costs O(|key|). Update bounds assume the bucket array is uniquely owned; updating a shared map additionally copies its O(n) buckets.
+
 ## Type Classes
 
 ### `Eq`
 
-```prism,def,h-4346f50b20b1be123625889c6ec6a0f7e33b4927f1cdda30487b0139fc37c992
+```prism,def,h-28122b4a9f1c3286c519fc094675a3e40d081598b654cfb3ea0d319b692a939f
 class Eq(a)
   eq : (a, a) -> Bool
 ```
@@ -77,7 +81,7 @@ true
 
 ### `Ord`
 
-```prism,def,h-02edf9a8334c164b1d71bda261d7108a3734e26ee3b5f83c16408be6c0d49054
+```prism,def,h-9111f20bb6716e1d4da6dded0cc5e3cb129ff73ae7fce708e526aa27d3f88b05
 class Ord(a) given Eq(a)
   cmp : (a, a) -> Int
 ```
@@ -94,7 +98,7 @@ cmp("a", "b")
 
 ### `Show`
 
-```prism,def,h-d4ccfa8fd8f23db2e84b759cb5570642a18ed63b3e33207a59127e93141d0321
+```prism,def,h-901c745e7de57f171dcbcc0c88ef4a6d5e50dd34d8fe8e87e54e4417b2b665c1
 class Show(a)
   show : (a) -> String
 ```
@@ -111,7 +115,7 @@ show([1, 2, 3])
 
 ### `Hash`
 
-```prism,def,h-18a03b2334900f0825d08b4521d48e6fb9343a7fa00be9f53622673538694bd8
+```prism,def,h-af79d935ee2e47055c42880ae46517a9cdadee4392b38022f9f990375545c1b0
 class Hash(a)
   hash : (a) -> String
 ```
@@ -128,7 +132,7 @@ hash(5)
 
 ### `Plate`
 
-```prism,def,h-07901d628097b3a5d27f7b52a9eb2c1cdee0cd4964a0a20ce32415df20b94c13
+```prism,def,h-3dac282a33e37483741f738d7919e2fadc26b0034ecb778aaee3eed62d0e40a3
 class Plate(a)
   children : (a) -> List(a)
   rebuild : (a, List(a)) -> a ! {Fail | e}
@@ -144,7 +148,7 @@ The derivation is structural rather than compositional, so it differs from the o
 
 ### `Pow`
 
-```prism,def,h-4989be78c7a4ebcde332f32e8cf7878e6ee1ed509f5a4b9aa4fec8a714da8017
+```prism,def,h-f01ae68a35bcdd2a6efe5c7942184fc316ca56862edb7869d34828c763b0ac68
 class Pow(a)
   pow : (a, a) -> a
 ```
@@ -161,7 +165,7 @@ pow(2, 10)
 
 ### `Num`
 
-```prism,def,h-0c28769e839ae153cd63b331bc80903f2e0058beeabb1d3295b4f87d26d340cb
+```prism,def,h-554927b68be403b023b779d6f063e4ad1371ae94b3da148664acd6373a2f5bb7
 class Num(a)
   plus : (a, a) -> a
   minus : (a, a) -> a
@@ -182,7 +186,7 @@ plus(3, 4)
 
 ### `Div`
 
-```prism,def,h-e00613190f2f56249e05c3c1992090c247ccfa76d3b0b056d7798210a3c53183
+```prism,def,h-445743ee3f99249c8458a9193464cbc16cb1d14a9e0630336dad996ed9d933ac
 class Div(a)
   quotient : (a, a) -> a
   modulo : (a, a) -> a
@@ -200,7 +204,7 @@ quotient(7, 2)
 
 ### `Functor`
 
-```prism,def,h-9ce1149cc0d18ba7f4a52af20e7679630c6221c1d000abf42993947f7b2e5bb6
+```prism,def,h-c0e38cbf82a26375f8b8da941e130d6de029ffe744512fbf2e5c5a9b726f342b
 class Functor(f)
   fmap : ((a) -> b ! {| e}, f(a)) -> f(b) ! {| e}
 ```
@@ -209,7 +213,7 @@ A container that can be mapped over. `fmap` is effect-polymorphic, so mapping an
 
 ### `Foldable`
 
-```prism,def,h-199cc417956e801b73a35bbf4b889270331c1293015e5612a82301a9be2827da
+```prism,def,h-57a1a7134613e59389519f3eae71e807d63af802fc84cf78e25908ca2c239456
 class Foldable(t)
   fold_r : ((a, b) -> b ! {| e}, b, t(a)) -> b ! {| e}
   fold_l : ((b, a) -> b ! {| e}, b, t(a)) -> b ! {| e}
@@ -219,7 +223,7 @@ A container collapsible with an effect-polymorphic fold from either end. `fold_l
 
 ### `Applicative`
 
-```prism,def,h-5cf1424b82fec5b0efb3e9a03dddda9117f93879465112380206c690260fa957
+```prism,def,h-953f6f5d3dc0f6194ee2712a382522d5a36ea0ec9b3a0caefd70b050eba0e0ab
 class Applicative(f) given Functor(f)
   pure : (a) -> f(a)
   ap : (f((a) -> b ! {| e}), f(a)) -> f(b) ! {| e}
@@ -229,7 +233,7 @@ A `Functor` with `pure` (inject a value) and `ap` (apply a wrapped function).
 
 ### `Monad`
 
-```prism,def,h-0c78b62dca8c8decaf4b0e045776707aef2930d7c03908d52d0dd14f585f6723
+```prism,def,h-52e3a6d3f9ed86d1151510462a97d28e87d2d972a200d6f4e18fe433e49375b2
 class Monad(m) given Applicative(m)
   bind : (m(a), (a) -> m(b) ! {| e}) -> m(b) ! {| e}
 ```
@@ -238,7 +242,7 @@ Structural sequencing via `bind`. Side effects ride the effect system, so this i
 
 ### `Traversable`
 
-```prism,def,h-a04f1df140b1d95211d07f1355e584d8f2a22a93f58d45b258826ba31443d63a
+```prism,def,h-2078cb7c87ae644dd5f0a1987c5f4c7fe193ca7ed49fb173fd2564c6d394b793
 class Traversable(t) given Functor(t), Foldable(t)
   traverse : ((a) -> b ! {| e}, t(a)) -> t(b) ! {| e}
 ```
@@ -249,7 +253,7 @@ An effect-polymorphic traversal: `traverse` is an effectful `map`, the per-eleme
 
 ### `Emit`
 
-```prism,def,h-81ed0bc133a3e8da3450b006674585532d62add39f064ea4551ae126d5e35068
+```prism,def,h-eae20352bc9ae43cfb3e7904a7d2cf0906dee9c3cdaff0e4aec77431053db058
 effect Emit(a)
   emit(a) : Unit
 ```
@@ -404,25 +408,25 @@ instance ordFloat : Ord(Float)
 
 ### `eqPair`
 
-```prism,def,h-a81bf8d47bbfb5b2397390941462059f96106f7cc622660650b6beb11afbf26d
+```prism,def,h-5f8caf08f188e585625b90b6beea31c237081df2ddfc239c209483c473b6a751
 instance eqPair : Eq((a, b))
 ```
 
 ### `ordPair`
 
-```prism,def,h-4faa5ad05d5fe0934a3ce1651312b86d359e57570069b76e4099c1646b790346
+```prism,def,h-e84d56b3b483de3940713fa45156d2d751ff57ea9538510f6612d9a6d1062846
 instance ordPair : Ord((a, b))
 ```
 
 ### `eqTriple`
 
-```prism,def,h-f77dba1299264640c789ccc272d5d0945f4753e1eb690037c7bcf70c558c5631
+```prism,def,h-64b938943a9b68b41a755d988d332a15d6002d873c3edd6d92753afd7cf58c5c
 instance eqTriple : Eq((a, b, c))
 ```
 
 ### `ordTriple`
 
-```prism,def,h-b050fd914719289d1966d64727d052d4e928022f0ba839ba6b9161e4c24f6ff1
+```prism,def,h-10c2e60d52c1b117affdda00c4d56c93fb0d213714139991e89bd5b5c5adfcd3
 instance ordTriple : Ord((a, b, c))
 ```
 
@@ -476,7 +480,7 @@ instance showUnit : Show(Unit)
 
 ### `showList`
 
-```prism,def,h-bd40d9f8234bfb8131a8e0ae4d1d62f3d4fe496544b6d589307210821309274b
+```prism,def,h-e906b7397f40a5e8e9d40f941c18743b269b740b07975be5cbf6494d0bafbd46
 instance showList : Show(List(a))
 ```
 
@@ -1176,7 +1180,7 @@ default(\() -> at_list([1, 2], 9), 0)
 at_list : forall a. (List(a), Int) -> a ! {Fail}
 ```
 
-The element at index `i`, or `fail()` if out of range. Backs `xs[i]`, so `xs.at_list(i) ?? d` defaults cleanly through `??`.
+The element at index `i`, or `fail()` if out of range. Backs `xs[i]`, so `xs.at_list(i) ?? d` defaults cleanly through `??`. Time complexity: O(min(n, i + 1)).
 
 ```prism
 at_list([10, 20, 30], 1)
@@ -1192,7 +1196,7 @@ at_list([10, 20, 30], 1)
 at_map : forall a b c. (Map(b, c, a), b) -> c ! {Fail} given Ord(b)
 ```
 
-The value bound to `key`, or `fail()` if absent. Backs `m[k]`.
+The value bound to `key`, or `fail()` if absent. Backs `m[k]`. Time complexity: O(log n) key comparisons.
 
 ### `force`
 
@@ -1216,7 +1220,7 @@ force(Some(5))
 at_array : forall a. (Array(a), Int) -> a ! {Fail}
 ```
 
-The array element at `i`, or `fail()` out of bounds. Backs `a[i]`.
+The array element at `i`, or `fail()` out of bounds. Backs `a[i]`. Time complexity: O(1).
 
 ```prism
 at_array(array_of_list([5, 6, 7]), 2)
@@ -1232,7 +1236,7 @@ at_array(array_of_list([5, 6, 7]), 2)
 at_hashmap : forall a. (HashMap(a), String) -> a ! {Fail}
 ```
 
-The hash-map value for `k`, or `fail()` if absent. Backs `m[k]`.
+The hash-map value for `k`, or `fail()` if absent. Backs `m[k]`. Time complexity: the same as `hm_lookup`: expected O(|k|), with a linear collision worst case.
 
 ```prism
 at_hashmap(hm_from_list([("a", 1)]), "a")
@@ -1248,7 +1252,7 @@ at_hashmap(hm_from_list([("a", 1)]), "a")
 at_byte : (String, Int) -> Int ! {Fail}
 ```
 
-The byte at index `i` of a string, or `fail()` out of bounds. Backs `s[i]`.
+The byte at index `i` of a string, or `fail()` out of bounds. Backs `s[i]`. Time complexity: O(1).
 
 ```prism
 at_byte("hi", 0)
@@ -1264,7 +1268,7 @@ at_byte("hi", 0)
 list_set : forall a. (List(a), Int, a) -> List(a)
 ```
 
-A new list with element `i` replaced by `v` (out of range: unchanged). Backs `xs[i] := v` and the `[i]` optic path on lists.
+A new list with element `i` replaced by `v` (out of range: unchanged). Backs `xs[i] := v` and the `[i]` optic path on lists. Time complexity: O(min(n, i + 1)); the prefix is rebuilt and the suffix shared.
 
 ```prism
 list_set([1, 2, 3], 1, 9)
@@ -1280,7 +1284,7 @@ list_set([1, 2, 3], 1, 9)
 sort : forall a. (List(a)) -> List(a) given Ord(a)
 ```
 
-Sort a list in ascending order, a stable O(n log n) merge sort. Primitive element types are specialized to a native kernel at the call site; any other `Ord` type uses the generic path.
+Sort a list in ascending order, a stable O(n log n) merge sort. Primitive element types are specialized to a native kernel at the call site; any other `Ord` type uses the generic path. Time complexity: O(n log n) comparisons in the worst case.
 
 ```prism
 sort([3, 1, 2])
@@ -1648,7 +1652,7 @@ scollect(srange(1, 4))
 concat_map : forall e0 a b. ((a) -> List(b) ! {e0}, List(a)) -> List(b) ! {e0}
 ```
 
-Map `f` over `xs` and concatenate the resulting lists. Kept in Base (as well as `Data.List`) because optic-path desugaring synthesizes calls to it by bare name.
+Map `f` over `xs` and concatenate the resulting lists. Kept in Base (as well as `Data.List`) because optic-path desugaring synthesizes calls to it by bare name. Time complexity: O(n + N), where `N` is the total length of the lists returned by `f`, excluding calls to `f`.
 
 ```prism
 concat_map(\(x) -> [x, x], [1, 2])
@@ -1676,7 +1680,7 @@ eprintln("uh oh")
 push_all : forall a. (Array(a), List(a)) -> Array(a)
 ```
 
-Helper for `array_of_list`: push each element of `xs` onto `arr`.
+Helper for `array_of_list`: push each element of `xs` onto `arr`. Time complexity: amortized O(n) when `arr` is uniquely owned, for an `n`-element list; copying a shared `arr` adds the cost described by `Array` above.
 
 ### `array_of_list`
 
@@ -1684,7 +1688,7 @@ Helper for `array_of_list`: push each element of `xs` onto `arr`.
 array_of_list : forall a. (List(a)) -> Array(a)
 ```
 
-Build a growable `Array` from a list.
+Build a growable `Array` from a list. Time complexity: amortized O(n).
 
 ```prism
 array_to_list(array_of_list([1, 2, 3]))
@@ -1700,7 +1704,7 @@ array_to_list(array_of_list([1, 2, 3]))
 concat_all : (List(String)) -> String
 ```
 
-Join a list of strings into one with a single allocation (an O(n) builder that replaces a right-nested chain of `concat`).
+Join a list of strings into one with a single allocation (an O(n) builder that replaces a right-nested chain of `concat`). Time complexity: O(N + n), where `n` is the number of strings and `N` is the total byte length of the result.
 
 ```prism
 concat_all(["a", "b", "c"])
@@ -1740,7 +1744,7 @@ Helper: the bucket index of key `k` in a table of `n` buckets.
 hm_new : forall a. () -> HashMap(a)
 ```
 
-An empty hash map.
+An empty hash map. Time complexity: O(1).
 
 ```prism
 hm_size(hm_new())
@@ -1764,7 +1768,7 @@ Helper: look up `k` in an association-list bucket (matches pairs directly so it 
 hm_lookup : forall a. (HashMap(a), String) -> Option(a)
 ```
 
-The value bound to `k` as `Some`, or `None`.
+The value bound to `k` as `Some`, or `None`. Time complexity: expected O(|k|); worst-case O(|k| + B), where `B` is the total number of key bytes examined in a colliding bucket.
 
 ```prism
 hm_lookup(hm_insert(hm_new(), "a", 1), "a")
@@ -1780,7 +1784,7 @@ Some(1)
 hm_member : forall a. (HashMap(a), String) -> Bool
 ```
 
-True when `k` is present.
+True when `k` is present. Time complexity: the same as `hm_lookup`: expected O(|k|), worst-case O(|k| + B) for a colliding bucket containing `B` key bytes.
 
 ```prism
 hm_member(hm_from_list([("a", 1)]), "a")
@@ -1796,7 +1800,7 @@ true
 hm_get_or : forall a. (a, HashMap(a), String) -> a
 ```
 
-The value bound to `k`, or the default `d`.
+The value bound to `k`, or the default `d`. Time complexity: the same as `hm_lookup`: expected O(|k|), worst-case O(|k| + B) for a colliding bucket containing `B` key bytes.
 
 ```prism
 hm_get_or(0, hm_from_list([("a", 1)]), "b")
@@ -1836,7 +1840,7 @@ Helper for `hm_to_list`: concatenate buckets `i..n`.
 hm_to_list : forall a. (HashMap(a)) -> List((String, a))
 ```
 
-The `(key, value)` pairs, in bucket order.
+The `(key, value)` pairs, in bucket order. Time complexity: O(n + b), where `n` is the number of entries and `b` is the number of buckets.
 
 ```prism
 hm_to_list(hm_from_list([("a", 1)]))
@@ -1860,7 +1864,7 @@ Helper: the keys of a list of pairs.
 hm_keys : forall a. (HashMap(a)) -> List(String)
 ```
 
-The keys of the map.
+The keys of the map. Time complexity: O(n + b), where `b` is the number of buckets.
 
 ```prism
 hm_keys(hm_from_list([("a", 1), ("b", 2)]))
@@ -1876,7 +1880,7 @@ hm_keys(hm_from_list([("a", 1), ("b", 2)]))
 hm_size : forall a. (HashMap(a)) -> Int
 ```
 
-The number of entries.
+The number of entries. Time complexity: O(1).
 
 ```prism
 hm_size(hm_from_list([("a", 1), ("b", 2)]))
@@ -1900,7 +1904,7 @@ Helper for `hm_insert`: re-insert every pair into a fresh table.
 hm_insert : forall a. (HashMap(a), String, a) -> HashMap(a)
 ```
 
-Insert or overwrite `k`, doubling the bucket count and rehashing once the load factor exceeds 1.
+Insert or overwrite `k`, doubling the bucket count and rehashing once the load factor exceeds 1. Time complexity: expected amortized O(|k|); a resize is O(n + K), where `K` is the total byte length of all keys. A colliding bucket or a shared bucket array incurs the worst cases described on `HashMap` above.
 
 ```prism
 hm_lookup(hm_insert(hm_new(), "a", 1), "a")
@@ -1916,7 +1920,7 @@ Some(1)
 hm_delete : forall a. (HashMap(a), String) -> HashMap(a)
 ```
 
-Remove `k` (a no-op if absent).
+Remove `k` (a no-op if absent). Time complexity: expected O(|k|); worst-case O(|k| + B), plus O(n) when a shared bucket array must be copied.
 
 ```prism
 hm_size(hm_delete(hm_from_list([("a", 1), ("b", 2)]), "a"))
@@ -1948,7 +1952,7 @@ Helper: the values of a list of pairs.
 hm_values : forall a. (HashMap(a)) -> List(a)
 ```
 
-The values of the map.
+The values of the map. Time complexity: O(n + b), where `b` is the number of buckets.
 
 ```prism
 hm_values(hm_from_list([("a", 1), ("b", 2)]))
@@ -1972,7 +1976,7 @@ Helper for `hm_from_list`.
 hm_from_list : forall a. (List((String, a))) -> HashMap(a)
 ```
 
-Build a hash map from `(key, value)` pairs (later pairs win).
+Build a hash map from `(key, value)` pairs (later pairs win). Time complexity: expected O(n + K), where `K` is the total byte length of the input keys; worst-case quadratic in `n` under adversarial collisions.
 
 ```prism
 hm_lookup(hm_from_list([("a", 1), ("b", 2)]), "b")
@@ -1988,7 +1992,7 @@ Some(2)
 hm_adjust : forall e0 a. ((a) -> a ! {e0}, HashMap(a), String) -> HashMap(a) ! {e0}
 ```
 
-Apply `f` to the value at `k` if present, otherwise leave the map unchanged.
+Apply `f` to the value at `k` if present, otherwise leave the map unchanged. Time complexity: expected O(|k|), excluding a call to `f`; it has the same collision and sharing worst cases as `hm_lookup` plus `hm_insert`.
 
 ```prism
 hm_get_or(0, hm_adjust(\(x) -> x + 100, hm_from_list([("a", 1)]), "a"), "a")
@@ -2012,7 +2016,7 @@ Helper for `array_foldl`.
 array_foldl : forall e0 a b. ((a, b) -> a ! {e0}, a, Array(b)) -> a ! {e0}
 ```
 
-Left-fold `f` over the elements of an array from `acc`.
+Left-fold `f` over the elements of an array from `acc`. Time complexity: O(n), excluding calls to `f`.
 
 ```prism
 array_foldl(\(a, x) -> a + x, 0, array_of_list([1, 2, 3]))
@@ -2036,7 +2040,7 @@ Helper for `array_to_list`.
 array_to_list : forall a. (Array(a)) -> List(a)
 ```
 
-The elements of an array as a list, in order.
+The elements of an array as a list, in order. Time complexity: O(n).
 
 ```prism
 array_to_list(array_of_list([1, 2, 3]))

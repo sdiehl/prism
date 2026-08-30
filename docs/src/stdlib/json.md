@@ -18,7 +18,7 @@ Strings are validated UTF-8 by construction (the `String` type), so invalid UTF-
 
 ### `Json`
 
-```prism,def,h-04a506598cb8be595e0a5aa2dab794fa56d31142863cad36f361e8ef1e0582a0
+```prism,def,h-e4397961557ce06a8583d412fce05c02b6c8fbb2b833f1132b6dd19408e51e3b
 type Json
   = JNull
   | JBool(Bool)
@@ -43,7 +43,7 @@ The tree is a structural carrier, and `encode` is its canonical rendering, so a 
 
 ### `JsonError`
 
-```prism,def,h-1e2e5cf374d235d92d59c6123e189654b80e4fd580d366fa9c98b5aff5a7c05e
+```prism,def,h-8932eb2bdbbeead4418d63f32f3843067142bcd243e2157c61e52cae9952fce7
 type JsonError = JsonError(String, Int, Int) deriving (Eq, Show)
 ```
 
@@ -53,7 +53,7 @@ A decode failure: a human-readable message and the 1-based line and column of th
 
 ### `ToJson`
 
-```prism,def,h-07e6f7d5d2166eb337090ddd8f60d9b6a3fc0a988865c8edbde18b501e20134f
+```prism,def,h-87dbb443c1c7039b546930afc03682e8d2b0fe3d117a3b3065d4c88447637925
 class ToJson(a)
   to_json : (a) -> Json
 ```
@@ -74,7 +74,7 @@ Json.JArr([Json.JInt(1), Json.JInt(2), Json.JInt(3)])
 
 ### `FromJson`
 
-```prism,def,h-bc04cd3309b50265c7d33235513d828f8c5fa81ffdc6be5e8d34c315a65827dd
+```prism,def,h-aef8c1909ab82a865bfa03327fcbb9a90088cd12c95948794acc608b0a18389a
 class FromJson(a)
   from_json : (Json) -> a ! {Fail | e}
 ```
@@ -121,19 +121,19 @@ instance toJsonString : ToJson(String)
 
 ### `toJsonList`
 
-```prism,def,h-65ac1b0c736a5fdd8dfc54b77e588e963b93bc910abe3ddf1459ecedc2950d61
+```prism,def,h-4560e9377e48dd9fb36033c79778931f7eef7a2af624992221a3f289e1665cf4
 instance toJsonList : ToJson(List(a))
 ```
 
 ### `toJsonOption`
 
-```prism,def,h-01463f92b33a5a1b8e6c5644426182efbaafc0b6ea94337ea5ac89b1ec2715f2
+```prism,def,h-977cd7e1a09895cd84906a205b315ad7d06b985f3fd4df36fe4a029a4cde33d0
 instance toJsonOption : ToJson(Option(a))
 ```
 
 ### `toJsonPair`
 
-```prism,def,h-ec436d594144372fa822ae6f3b8c26f15ea278c1a85ca724e562b4f1273a6e63
+```prism,def,h-f91a8d0d1c90082ced5c0b6bf541468588e9a5768327e44a60a732767fd23a39
 instance toJsonPair : ToJson((a, b))
 ```
 
@@ -163,19 +163,19 @@ instance fromJsonString : FromJson(String)
 
 ### `fromJsonList`
 
-```prism,def,h-d38d96ac6f6ff8f9e5d7fecb03c98879fd3e01e5e44759ef3c9b7e119fdcb8b3
+```prism,def,h-b445689fafc442b242ae379273e282cdff4c77c9ba2501dfa9d5ce647ac870e8
 instance fromJsonList : FromJson(List(a))
 ```
 
 ### `fromJsonOption`
 
-```prism,def,h-37d42f6efa3035c4816212618c0b4b109caa9c824bf62f90b82614e22627b83d
+```prism,def,h-65f0d8491a302210be567eb2609d1b7eb0ce1255310b8d9b07b453bb68b7c6bd
 instance fromJsonOption : FromJson(Option(a))
 ```
 
 ### `fromJsonPair`
 
-```prism,def,h-0b27528352f1195f14c9adb0df85f564448a7035782cf982520f10c788b54ac4
+```prism,def,h-1deedfe6e9db914099d90dd6447746f5279f1432736006f0bac9e50dd7559b4d
 instance fromJsonPair : FromJson((a, b))
 ```
 

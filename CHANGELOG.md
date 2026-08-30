@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.21.0
+
+- Effect rows: multiset accounting preserves `mask` depth across calls and rejects insufficient handler stacks.
+- Typechecker: datatype arguments are invariant, preventing multiplicity widening; copy-on-write `Array` remains covariant.
+- Type inference: closed local values generalize per use; computations and captured values remain monomorphic.
+- Type inference: repeated under-applied type constructors share omitted phantom arguments within a signature.
+- Deriving: `Lens` rejects generated accessors or values that collide with top-level names (E6074).
+- Lint: added L0109 for recursive codepoint indexing that makes string scans quadratic.
+- Optimizer: closed higher-order calls gain bounded ground specialization at `-O1` and `-O2`.
+- Effect lowering: specialization preserves handler installers and forwarding behavior across every tier.
+- Effect lowering: generated carriers cannot collide with standard-library constructors.
+- Handlers: actual continuation use overrides stale operation grades when enforcing multishot safety.
+- Effect accountability: added per-tier exclusion measurement and a downward-only free-monad population ratchet.
+- Native builds: added `--direct-object` for one-link development builds; releases retain ThinLTO.
+- Compile timing: separated LLVM object emission, compiler probes, runtime compilation, and linking.
+- Arenas: promotion of mixed shared graphs is now linear.
+- Runtime: hardened array sizing, continuation splicing, buffer fault parity, and float workspaces.
+- Tail recursion: modulo-cons lowering now declines bodies observable through multishot resumptions.
+- Content addressing: recursive-group hashes are rename-stable, and shape encodings delimit every numeric field.
+
 ## 0.20.0
 
 - Representations: one layout query decides storage, ABI, zero words, and ownership for every consumer.

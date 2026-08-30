@@ -8,7 +8,7 @@
 #define PRISM_TBUF_ELEM0 (PRISM_HDR_WORDS + 1)
 
 _Noreturn void prism_tbuf_oob(void) {
-    fprintf(stderr, "fatal: buffer index out of bounds\n");
+    fprintf(stderr, "fatal: " PRISM_BUFFER_INDEX_ERROR "\n");
     exit(1);
 }
 

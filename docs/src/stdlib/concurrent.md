@@ -18,7 +18,7 @@ A channel carries the shared result type `a`; fibers in one run share `a` (use a
 
 ### `Fiber`
 
-```prism,def,h-f4153f5f960d5df810e8493989ffe66c7e9a29953d4ecf1c41c99fda6527eee0
+```prism,def,h-3bbfa2ca1de4708fcb4a03802e1f5814c6d3476af9af26f3d9926e8d0e36c344
 newtype Fiber = Fiber(Int)
 ```
 
@@ -26,7 +26,7 @@ A handle to a spawned fiber, returned by `fork` and passed to `await`/`cancel`.
 
 ### `Chan`
 
-```prism,def,h-e503dca856791765b6ac54bd331f545c747004430d6f634dbfdd24f5b678bb7d
+```prism,def,h-2669cdee090b44ce18ca72d8e589d77744586203b3dbf7a734bc6b35abf0ab85
 newtype Chan = Chan(Int)
 ```
 
@@ -34,7 +34,7 @@ A handle to a buffered FIFO channel, opened with `channel`.
 
 ### `Outcome`
 
-```prism,def,h-528f262f1b1f406c518cc80508c2d0d3f84d75f075c7088b4246ab06301ec2e0
+```prism,def,h-d6267c28c0127da609fb17f724573bb0411b1f8631d144e955b239a00433d8ae
 type Outcome(a) = Completed(a) | Was_Cancelled deriving (Eq, Show)
 ```
 
@@ -44,7 +44,7 @@ The outcome of `try_await`: a fiber that completed with a value, or one that was
 
 ### `Async`
 
-```prism,def,h-e549a0f8249f993be38410e162daadb6fd4a1ef91ff4712750fe147bdaa09731
+```prism,def,h-da43afcd8d24f14182cb5dff58dd5a947e437b03a0a5f6d54d806881926a9d26
 effect Async(a)
   fork(() -> a ! {Async(a) | e}) : Fiber
   poll_yield() : Signal

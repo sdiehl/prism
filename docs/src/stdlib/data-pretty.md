@@ -14,7 +14,7 @@ Import explicitly (`import Data.Pretty`); these names are not in Base's unqualif
 
 ### `Doc`
 
-```prism,def,h-233af0511b8f86e7de9a86c113a735a54a7392c4ab1b1fa3a9cabd78b7e56843
+```prism,def,h-f8a78d12f89ba855d394221c49a8f62b0d58c413d5791d1aea774d02a5eb2cb0
 type Doc
   = DNil
   | DText(String)

@@ -14,7 +14,7 @@ Determinism is part of the public contract, not a courtesy: `ufp_union_with` kee
 
 ### `UnionFind`
 
-```prism,def,h-1982cd7165d0e38622f02eb2ac34911082a9145695ae89249afac447bef21da6
+```prism,def,h-d8b5065cbea61475ecd9d907d731fd8d40a4e58edd73c76c59ee6ab1cab82b2f
 type UnionFind(k, a) = Ufp { parents: Map(k, k), payloads: Map(k, a) }
 ```
 
@@ -22,7 +22,7 @@ A payload-carrying forest over ordered keys. The constructor is the module's pri
 
 ### `UfError`
 
-```prism,def,h-6e86f9d5493537f570a5b2b92c8dd94cd1e029d5f4e6f5bf271f48069db660eb
+```prism,def,h-90d92809766acd701316aca341f96c7b184c103cda94f3946a3b42156626c5cb
 type UfError = UfDuplicate | UfAbsent deriving (Eq, Show)
 ```
 

@@ -12,7 +12,7 @@ Instance resolution keys on the head type constructor, so a carrier admits exact
 
 ### `Sum`
 
-```prism,def,h-971980bbc87b8fe24fec075379351d0196976471724ce7a6b8f2a114ca5db19e
+```prism,def,h-4d25deda7756877a0acc998c426fdb814499220afe236b5a9018b343f83b5435
 newtype Sum(a) = MkSum(a) deriving (Eq, Show)
 ```
 
@@ -20,7 +20,7 @@ Addition, chosen by wrapper. `get_sum(mconcat(map(mk_sum, xs)))` is `sum(xs)`.
 
 ### `Product`
 
-```prism,def,h-8816a58ab76fa8ec03a1a8f4a6aaea4a38bed923bdc8513df5684969e214707d
+```prism,def,h-67284ef1e4e3e383d349765015d9218f43bd139448b9594b76b913902a44c826
 newtype Product(a) = MkProduct(a) deriving (Eq, Show)
 ```
 
@@ -28,7 +28,7 @@ Multiplication, chosen by wrapper.
 
 ### `All`
 
-```prism,def,h-d96375fd4176e9be4f963f2a5ab406be260f3de5e6c3b6d0e3453b76b16cd23f
+```prism,def,h-5de931368178fb564d507fcc3ae26f94dbe34fe9e8c036e34d4a41e60855769d
 newtype All = MkAll(Bool) deriving (Eq, Show)
 ```
 
@@ -36,7 +36,7 @@ Conjunction: `mempty` is `true`, and a fold answers "did every element hold".
 
 ### `Any`
 
-```prism,def,h-f9021692c989d1fbacd5d6f733f330a7c93e6e56cbd273a365737ac1939b4314
+```prism,def,h-a168a94c450dc54ceafa712a3df6bf631291e0386f8f791247b4314b5e1a8dab
 newtype Any = MkAny(Bool) deriving (Eq, Show)
 ```
 
@@ -44,7 +44,7 @@ Disjunction: `mempty` is `false`, and a fold answers "did any element hold".
 
 ### `Min`
 
-```prism,def,h-ecae7e8f9fb45ab90e79046f9fa49c0436ce5d775be1bd7fae61f1a25d591f33
+```prism,def,h-4514fb8f5d8985a7d91faa265b3f05fc652bb7f2bc61e266d673f5d8e70c8756
 newtype Min(a) = MkMin(a) deriving (Eq, Show)
 ```
 
@@ -52,7 +52,7 @@ The lesser of two values under `Ord`. A `Semigroup` only: with no greatest eleme
 
 ### `Max`
 
-```prism,def,h-b212634378804bb7aa186ef13a00ac3006f3d7fd71ed3589a2b0c70863226117
+```prism,def,h-641d461eebedc3df1e3a3e3a7bc6270d9c67255910bc159759daaf34ad302aec
 newtype Max(a) = MkMax(a) deriving (Eq, Show)
 ```
 
@@ -62,7 +62,7 @@ The greater of two values under `Ord`. A `Semigroup` only, for the dual reason.
 
 ### `Semigroup`
 
-```prism,def,h-5b7e0a930802fd29f9f9cc9b110ce11ba8dd53ae5c0075ac100519148e371596
+```prism,def,h-cc1aa1b48361a65035de20d227364939f181d78044498d2b8770125b6c77887c
 class Semigroup(a)
   mappend : (a, a) -> a
 ```
@@ -71,7 +71,7 @@ An associative combination: `mappend(x, mappend(y, z))` and `mappend(mappend(x, 
 
 ### `Monoid`
 
-```prism,def,h-b54e2a8cdb52b52890861beada208c42ae0b16640f71aa6de61c682122c61a40
+```prism,def,h-474244b433e050fe5b4602ac56538d7dfde81be4ab25d123a12e073fcc01102f
 class Monoid(a) given Semigroup(a)
   mempty : () -> a
 ```
@@ -82,13 +82,13 @@ A `Semigroup` with an identity: `mappend(mempty(), x)` and `mappend(x, mempty())
 
 ### `semigroupList`
 
-```prism,def,h-70244668ba68b4ec4a122250def09d570f5c8747944cd1593aeed782fe26ac41
+```prism,def,h-8cd6cbe48f281446979340e59cb73b217b11b064052e480c9abe5d638da052e0
 instance semigroupList : Semigroup(List(a))
 ```
 
 ### `monoidList`
 
-```prism,def,h-da7086ba65c49766033124b0b28210b30be80f6f3230a0f7d29681947342a5b9
+```prism,def,h-53a33a9f40ca2b0632284fa52dfd7412451cf707d3b82a6ca0a8db829b7556af
 instance monoidList : Monoid(List(a))
 ```
 
@@ -118,7 +118,7 @@ instance monoidUnit : Monoid(Unit)
 
 ### `semigroupOption`
 
-```prism,def,h-c422e434a5cec57e6d96dc4fd7e48ff56c866ab8f100dd5714e22e5361e1a473
+```prism,def,h-c097a3e305863d0495b795350ffcff403e33a2b6fee60758f499c0aa9579c857
 instance semigroupOption : Semigroup(Option(a))
 ```
 
@@ -126,31 +126,31 @@ instance semigroupOption : Semigroup(Option(a))
 
 ### `monoidOption`
 
-```prism,def,h-c500704493a3622ed91fc04fd4ba39513b50d3dd36a8743993d91596e62e8353
+```prism,def,h-a141bc0506daa9e7b8e9e2c803305d860168f7b4c9196a1077d0e6e879fff4c4
 instance monoidOption : Monoid(Option(a))
 ```
 
 ### `semigroupSum`
 
-```prism,def,h-ec81211e527dcd7933b2327e6aa6a4afc18121faaba8da9967f45a0ac3cd0058
+```prism,def,h-ec668d60011df59645715af1ac0cec4f3c0c87e80f8506e056fe6d3a55385184
 instance semigroupSum : Semigroup(Sum(a))
 ```
 
 ### `monoidSum`
 
-```prism,def,h-d941abbb4ecfacee78bc63cd2d1f9ac109795ef9838128f9ec303e6e4f3d0d49
+```prism,def,h-c5a6bef594419d08bbdab59678d9780f278cc11d4d31f335b665a7e6beb19032
 instance monoidSum : Monoid(Sum(a))
 ```
 
 ### `semigroupProduct`
 
-```prism,def,h-ac5bce3c818a73c2564a6fb6a80312d644cdc9ff37afab57e37684d78d43d255
+```prism,def,h-acc1269928b2908b433026bc0ddce400c5fde1ba16a3d51829c82842417e7fbe
 instance semigroupProduct : Semigroup(Product(a))
 ```
 
 ### `monoidProduct`
 
-```prism,def,h-59d8a43d8ae68fd89e1874cbda68f94dbfa9b5b27553ce3730bad41f8f036c4c
+```prism,def,h-b328ae168f3872f484f77f2c0e138d18e28b7284ccae614db8746047b53aed40
 instance monoidProduct : Monoid(Product(a))
 ```
 
@@ -180,13 +180,13 @@ instance monoidAny : Monoid(Any)
 
 ### `semigroupMin`
 
-```prism,def,h-a63c1b74f0fa638a73298660ea3f636cba648fac1d7d2f70d0b92ecc8a93a403
+```prism,def,h-50f0a8ec4ba07a2c414d4ccda7de9808bb5ed8f413a56188f3dc64f3767ccd3d
 instance semigroupMin : Semigroup(Min(a))
 ```
 
 ### `semigroupMax`
 
-```prism,def,h-418a314104ff8936586f7bb7f3454d089ded1bac020896e0d0d9e17efcca33e1
+```prism,def,h-4320b337339410c3f99f36ad64695b0e13e72ae6f3454fc231d71cdcddb48d57
 instance semigroupMax : Semigroup(Max(a))
 ```
 

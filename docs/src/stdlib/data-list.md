@@ -6,6 +6,8 @@ Singly-linked list operations.
 
 The `List(a)` type and its `Nil`/`Cons` constructors are wired into the language (list literals, deriving); this module is the function surface over them. Base includes it, so these names are in scope unqualified everywhere; a project module reaches them with `import Data.List`. The container-generic queries (`length`, `sum`, `all`, `find`, and friends) live in `Data.Foldable` and work on any `Foldable`, this type included.
 
+In the complexity bounds below, `n` is the input list length. Bounds for higher-order operations exclude the cost of calling the supplied function.
+
 ## Functions and Values
 
 ### `singleton`
@@ -14,7 +16,7 @@ The `List(a)` type and its `Nil`/`Cons` constructors are wired into the language
 singleton : forall a. (a) -> List(a)
 ```
 
-The one-element list `Cons(x, Nil)`.
+The one-element list `Cons(x, Nil)`. Time complexity: O(1).
 
 ### `is_nil`
 
@@ -22,7 +24,7 @@ The one-element list `Cons(x, Nil)`.
 is_nil : forall a. (List(a)) -> Bool
 ```
 
-True for the empty list.
+True for the empty list. Time complexity: O(1).
 
 ### `head`
 
@@ -30,7 +32,7 @@ True for the empty list.
 head : forall a. (List(a)) -> Option(a)
 ```
 
-The first element as `Some`, or `None` when the list is empty.
+The first element as `Some`, or `None` when the list is empty. Time complexity: O(1).
 
 ```prism,mod=Data.List
 head([1, 2, 3])
@@ -46,7 +48,7 @@ Some(1)
 tail : forall a. (List(a)) -> List(a)
 ```
 
-Everything after the first element (`Nil` for the empty list).
+Everything after the first element (`Nil` for the empty list). Time complexity: O(1).
 
 ### `last`
 
@@ -54,7 +56,7 @@ Everything after the first element (`Nil` for the empty list).
 last : forall a. (List(a)) -> Option(a)
 ```
 
-The final element as `Some`, or `None` when the list is empty.
+The final element as `Some`, or `None` when the list is empty. Time complexity: O(n).
 
 ```prism,mod=Data.List
 last([1, 2, 3])
@@ -70,7 +72,7 @@ Some(3)
 nth : forall a. (Int, List(a)) -> Option(a)
 ```
 
-The element at index `n` (zero-based) as `Some`, or `None` if out of range.
+The element at index `n` (zero-based) as `Some`, or `None` if out of range. Time complexity: O(min(l, n + 1)), where `l` is the list length.
 
 ```prism,mod=Data.List
 nth(1, [10, 20, 30])
@@ -86,7 +88,7 @@ Some(20)
 take : forall a. (Int, List(a)) -> List(a)
 ```
 
-The first `n` elements (fewer if the list is shorter).
+The first `n` elements (fewer if the list is shorter). Time complexity: O(min(l, n)), where `l` is the list length.
 
 ```prism,mod=Data.List
 take(2, [1, 2, 3, 4])
@@ -102,7 +104,7 @@ take(2, [1, 2, 3, 4])
 drop : forall a. (Int, List(a)) -> List(a)
 ```
 
-The list with its first `n` elements removed.
+The list with its first `n` elements removed. Time complexity: O(min(l, n)), where `l` is the list length.
 
 ```prism,mod=Data.List
 drop(2, [1, 2, 3, 4])
@@ -118,7 +120,7 @@ drop(2, [1, 2, 3, 4])
 take_while : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0}
 ```
 
-The longest prefix of elements satisfying `p`.
+The longest prefix of elements satisfying `p`. Time complexity: O(k), where `k` is the number of elements examined (at most `n`), excluding calls to `p`.
 
 ```prism,mod=Data.List
 take_while(\(x) -> x < 3, [1, 2, 3, 1])
@@ -134,7 +136,7 @@ take_while(\(x) -> x < 3, [1, 2, 3, 1])
 drop_while : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0}
 ```
 
-The suffix remaining after `take_while(p, xs)`.
+The suffix remaining after `take_while(p, xs)`. Time complexity: O(k), where `k` is the number of elements examined (at most `n`), excluding calls to `p`.
 
 ```prism,mod=Data.List
 drop_while(\(x) -> x < 3, [1, 2, 3, 1])
@@ -150,7 +152,7 @@ drop_while(\(x) -> x < 3, [1, 2, 3, 1])
 split_at : forall a. (Int, List(a)) -> (List(a), List(a))
 ```
 
-`(take(n, xs), drop(n, xs))`, sharing one traversal of the prefix.
+`(take(n, xs), drop(n, xs))`, sharing one traversal of the prefix. Time complexity: O(min(l, n)), where `l` is the list length.
 
 ### `map`
 
@@ -158,7 +160,7 @@ split_at : forall a. (Int, List(a)) -> (List(a), List(a))
 map : forall e0 a b. ((b) -> a ! {e0}, List(b)) -> List(a) ! {e0}
 ```
 
-Apply `f` to every element, preserving order and length.
+Apply `f` to every element, preserving order and length. Time complexity: O(n), excluding calls to `f`.
 
 ```prism,mod=Data.List
 map(\(x) -> x + 1, [1, 2, 3])
@@ -174,7 +176,7 @@ map(\(x) -> x + 1, [1, 2, 3])
 filter : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> List(a) ! {e0}
 ```
 
-Keep the elements satisfying `p`.
+Keep the elements satisfying `p`. Time complexity: O(n), excluding calls to `p`.
 
 ```prism,mod=Data.List
 filter(\(x) -> x > 1, [1, 2, 3])
@@ -190,7 +192,7 @@ filter(\(x) -> x > 1, [1, 2, 3])
 foldr : forall e0 a b. ((a, b) -> b ! {e0}, b, List(a)) -> b ! {e0}
 ```
 
-Right fold: `f(x0, f(x1, ... f(xn, z)))`.
+Right fold: `f(x0, f(x1, ... f(xn, z)))`. Time complexity: O(n), excluding calls to `f`.
 
 ```prism,mod=Data.List
 foldr(\(x, acc) -> x + acc, 0, [1, 2, 3])
@@ -206,7 +208,7 @@ foldr(\(x, acc) -> x + acc, 0, [1, 2, 3])
 foldl : forall e0 a b. ((a, b) -> a ! {e0}, a, List(b)) -> a ! {e0}
 ```
 
-Left fold: `f(... f(f(z, x0), x1) ..., xn)`. Tail-recursive.
+Left fold: `f(... f(f(z, x0), x1) ..., xn)`. Tail-recursive. Time complexity: O(n), excluding calls to `f`.
 
 ```prism,mod=Data.List
 foldl(\(a, b) -> a + b, 0, [1, 2, 3])
@@ -222,7 +224,7 @@ foldl(\(a, b) -> a + b, 0, [1, 2, 3])
 append : forall a. (List(a), List(a)) -> List(a)
 ```
 
-Concatenate two lists.
+Concatenate two lists. Time complexity: O(n), where `n` is the length of `xs`; `ys` is shared.
 
 ```prism,mod=Data.List
 append([1, 2], [3, 4])
@@ -238,7 +240,7 @@ append([1, 2], [3, 4])
 reverse : forall a. (List(a)) -> List(a)
 ```
 
-The list in reverse order.
+The list in reverse order. Time complexity: O(n).
 
 ```prism,mod=Data.List
 reverse([1, 2, 3])
@@ -254,7 +256,7 @@ reverse([1, 2, 3])
 flatten : forall a. (List(List(a))) -> List(a)
 ```
 
-Concatenate a list of lists.
+Concatenate a list of lists. Time complexity: O(N), where `N` is the total number of inner-list elements.
 
 ```prism,mod=Data.List
 flatten([[1, 2], [3], [4, 5]])
@@ -270,7 +272,7 @@ flatten([[1, 2], [3], [4, 5]])
 concat_map : forall e0 a b. ((a) -> List(b) ! {e0}, List(a)) -> List(b) ! {e0}
 ```
 
-Map `f` over the list and concatenate the resulting lists. `Data.List` is where this name is defined; anything else answering to `concat_map` is a specialization of it.
+Map `f` over the list and concatenate the resulting lists. `Data.List` is where this name is defined; anything else answering to `concat_map` is a specialization of it. Time complexity: O(n + N), where `N` is the total length of the lists returned by `f`, excluding calls to `f`.
 
 ```prism,mod=Data.List
 concat_map(\(x) -> [x, x], [1, 2])
@@ -286,7 +288,7 @@ concat_map(\(x) -> [x, x], [1, 2])
 zip_with : forall e0 a b c. ((b, c) -> a ! {e0}, List(b), List(c)) -> List(a) ! {e0}
 ```
 
-Combine two lists elementwise with `f`, stopping at the shorter length.
+Combine two lists elementwise with `f`, stopping at the shorter length. Time complexity: O(min(n, m)), excluding calls to `f`.
 
 ```prism,mod=Data.List
 zip_with(\(x, y) -> x + y, [1, 2, 3], [10, 20])
@@ -302,7 +304,7 @@ zip_with(\(x, y) -> x + y, [1, 2, 3], [10, 20])
 zip : forall a b. (List(a), List(b)) -> List((a, b))
 ```
 
-Pair up two lists elementwise, stopping at the shorter length.
+Pair up two lists elementwise, stopping at the shorter length. Time complexity: O(min(n, m)).
 
 ```prism,mod=Data.List
 zip([1, 2], ["a", "b"])
@@ -318,7 +320,7 @@ zip([1, 2], ["a", "b"])
 unzip : forall a b. (List((a, b))) -> (List(a), List(b))
 ```
 
-Split a list of pairs into a pair of lists.
+Split a list of pairs into a pair of lists. Time complexity: O(n).
 
 ```prism,mod=Data.List
 unzip([(1, "a"), (2, "b")])
@@ -334,7 +336,7 @@ unzip([(1, "a"), (2, "b")])
 count : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> Int ! {e0}
 ```
 
-The number of elements satisfying `p`.
+The number of elements satisfying `p`. Time complexity: O(n), excluding calls to `p`.
 
 ```prism,mod=Data.List
 count(\(x) -> x > 1, [1, 2, 3])
@@ -350,7 +352,7 @@ count(\(x) -> x > 1, [1, 2, 3])
 position_go : forall e0 a. ((a) -> Bool ! {e0}, Int, List(a)) -> Option(Int) ! {e0}
 ```
 
-Helper for `position`: search from index `n`.
+Helper for `position`: search from index `n`. Time complexity: O(k), where `k` is the number of elements examined, excluding calls to `p`.
 
 ### `position`
 
@@ -358,7 +360,7 @@ Helper for `position`: search from index `n`.
 position : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> Option(Int) ! {e0}
 ```
 
-The index of the first element satisfying `p` as `Some`, or `None`.
+The index of the first element satisfying `p` as `Some`, or `None`. Time complexity: O(k), where `k` is the number of elements examined (at most `n`), excluding calls to `p`.
 
 ```prism,mod=Data.List
 position(\(x) -> x == 2, [1, 2, 3])
@@ -374,7 +376,7 @@ Some(1)
 maximum : (List(Int)) -> Option(Int)
 ```
 
-The greatest element as `Some`, or `None` for the empty list.
+The greatest element as `Some`, or `None` for the empty list. Time complexity: O(n) comparisons.
 
 ```prism,mod=Data.List
 maximum([3, 1, 2])
@@ -390,7 +392,7 @@ Some(3)
 minimum : (List(Int)) -> Option(Int)
 ```
 
-The least element as `Some`, or `None` for the empty list.
+The least element as `Some`, or `None` for the empty list. Time complexity: O(n) comparisons.
 
 ```prism,mod=Data.List
 minimum([3, 1, 2])
@@ -406,7 +408,7 @@ Some(1)
 replicate : forall a. (Int, a) -> List(a)
 ```
 
-A list of `n` copies of `x`.
+A list of `n` copies of `x`. Time complexity: O(n).
 
 ```prism,mod=Data.List
 replicate(3, 0)
@@ -422,7 +424,7 @@ replicate(3, 0)
 range : (Int, Int) -> List(Int)
 ```
 
-The ascending list `[lo, lo+1, ..., hi-1]` (empty when `lo >= hi`).
+The ascending list `[lo, lo+1, ..., hi-1]` (empty when `lo >= hi`). Time complexity: O(max(hi - lo, 0)).
 
 ```prism,mod=Data.List
 range(0, 5)
@@ -438,7 +440,7 @@ range(0, 5)
 tabulate : forall e0 a. (Int, (Int) -> a ! {e0}) -> List(a) ! {e0}
 ```
 
-The list `[f(0), f(1), ..., f(n-1)]`.
+The list `[f(0), f(1), ..., f(n-1)]`. Time complexity: O(n), excluding calls to `f`.
 
 ```prism,mod=Data.List
 tabulate(3, \(i) -> i * i)
@@ -454,7 +456,7 @@ tabulate(3, \(i) -> i * i)
 insert_sorted : (Int, List(Int)) -> List(Int)
 ```
 
-Insert `x` into an already-ascending list, keeping it sorted.
+Insert `x` into an already-ascending list, keeping it sorted. Time complexity: O(k) comparisons, where `k` is the insertion index (up to `n`).
 
 ```prism,mod=Data.List
 insert_sorted(3, [1, 2, 4])
@@ -470,7 +472,7 @@ insert_sorted(3, [1, 2, 4])
 list_to_option : forall a. (List(a)) -> Option(a)
 ```
 
-The first element as `Some`, or `None` (an `Option` view of the head).
+The first element as `Some`, or `None` (an `Option` view of the head). Time complexity: O(1).
 
 ### `partition`
 
@@ -478,7 +480,7 @@ The first element as `Some`, or `None` (an `Option` view of the head).
 partition : forall e0 a. ((a) -> Bool ! {e0}, List(a)) -> (List(a), List(a)) ! {e0}
 ```
 
-Split into `(matching, non-matching)` by predicate `p`.
+Split into `(matching, non-matching)` by predicate `p`. Time complexity: O(n), excluding calls to `p`.
 
 ```prism,mod=Data.List
 partition(\(x) -> x > 1, [1, 2, 3])
@@ -494,7 +496,7 @@ partition(\(x) -> x > 1, [1, 2, 3])
 chunks_of : forall a. (Int, List(a)) -> List(List(a))
 ```
 
-Break the list into consecutive chunks of up to `n` elements.
+Break the list into consecutive chunks of up to `n` elements. Time complexity: O(l), where `l` is the list length.
 
 ```prism,mod=Data.List
 chunks_of(2, [1, 2, 3, 4, 5])
@@ -510,7 +512,7 @@ chunks_of(2, [1, 2, 3, 4, 5])
 scan_left : forall e0 a b. ((a, b) -> a ! {e0}, a, List(b)) -> List(a) ! {e0}
 ```
 
-Left scan: the running accumulators of `foldl`, starting from `z`.
+Left scan: the running accumulators of `foldl`, starting from `z`. Time complexity: O(n), excluding calls to `f`.
 
 ```prism,mod=Data.List
 scan_left(\(a, b) -> a + b, 0, [1, 2, 3])
@@ -526,7 +528,7 @@ scan_left(\(a, b) -> a + b, 0, [1, 2, 3])
 list_ap : forall e0 a b. (List((b) -> a ! {e0}), List(b)) -> List(a) ! {e0}
 ```
 
-Applicative apply for lists: every function in `fs` applied to every `x`.
+Applicative apply for lists: every function in `fs` applied to every `x`. Time complexity: O(nm), where `n` is the number of functions and `m` is the number of values, excluding function-call costs.
 
 ```prism,mod=Data.List
 list_ap([\(x) -> x + 1, \(x) -> x * 2], [10, 20])

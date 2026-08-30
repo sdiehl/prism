@@ -14,12 +14,7 @@ pub const EPURE: &str = "EPure";
 pub const EOP: &str = "EOp";
 pub const ERESUME: &str = "EResume";
 pub const EBOUNCE: &str = "EBounce";
-/// Every constructor of the reified effect cell, in one place because a phase
-/// that recognizes a cell has to recognize all of them.
-///
-/// A computation whose tail answers with any of these is answering at the
-/// monadic convention, and a list that names only some of them reads a legal
-/// tail as a broken one.
+/// Every constructor of the reified effect cell.
 pub const EFF_CTORS: [&str; 4] = [EPURE, EOP, ERESUME, EBOUNCE];
 
 pub const TQ: &str = "TQ";
@@ -38,22 +33,16 @@ pub const QAPPLY: &str = "qApply";
 
 pub const MORE_TAG: usize = 0;
 pub const DONE_TAG: usize = 1;
-pub const STEP: &str = "Step";
-pub const SMORE: &str = "SMore";
-pub const SDONE: &str = "SDone";
-
-/// The counter a sample driver name is minted with when deriving the spelling
-/// every instance of that driver shares. Any value works; the derivation drops
-/// it again.
-const DRIVER_SUFFIX_SAMPLE: u32 = 0;
+/// Private step-carrier constructors used to turn resumptions into loops. The
+/// `@` sigil is not source-spellable, preventing collisions with user types.
+pub const STEP: &str = "Eff@Step";
+pub const SMORE: &str = "Eff@SMore";
+pub const SDONE: &str = "Eff@SDone";
 
 /// The residual free-monad driver templates that typed lowering generates.
 ///
-/// Entering one is one native structural reduction step, so lowering and native
-/// codegen have to agree on exactly which generated functions are drivers. That
-/// agreement travels as this enum: lowering names a variant and mints through
-/// [`FreeMonadDriver::mint`], so the words below are the only place a driver is
-/// spelled, and the minter and the recognizer move together under a rename.
+/// Lowering and codegen share this enum so driver names and recognition cannot
+/// drift apart.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FreeMonadDriver {
     /// Drives one handler's reified computation to its answer.
@@ -83,26 +72,11 @@ impl FreeMonadDriver {
         names::lowered(self.hint(), n)
     }
 
-    /// The spelling every instance of this driver ends with, whatever its
-    /// counter.
-    ///
-    /// Derived from [`Self::mint`] by dropping the leading counter rather than
-    /// re-typed, so the separator the minter inserts is spelled in exactly one
-    /// place and cannot drift from it.
-    #[must_use]
-    pub fn suffix(self) -> String {
-        self.mint(DRIVER_SUFFIX_SAMPLE)
-            .trim_start_matches(|c: char| c.is_ascii_digit())
-            .to_string()
-    }
-
-    /// The driver a generated `name` was minted for, or `None` for any other
-    /// name.
+    /// The driver a generated `name` was minted for, or `None` otherwise.
     #[must_use]
     pub fn of_name(name: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|driver| name.ends_with(driver.suffix().as_str()))
+        let (_, hint) = names::parse_lowered(name)?;
+        Self::ALL.into_iter().find(|driver| driver.hint() == hint)
     }
 }
 
@@ -169,22 +143,13 @@ mod tests {
         }
     }
 
-    // The suffix must survive an arbitrary counter and must not be a bare word a
-    // source identifier could end with, or an ordinary function would be counted
-    // as a driver.
+    // Recognition accepts only names produced by the minter.
     #[test]
-    fn the_driver_suffix_is_counter_free_and_unspellable() {
-        for driver in FreeMonadDriver::ALL {
-            let suffix = driver.suffix();
-            assert!(
-                !suffix.starts_with(|c: char| c.is_ascii_alphanumeric()),
-                "{suffix} must lead with the minter's separator"
-            );
-            for n in COUNTERS {
-                assert!(driver.mint(n).ends_with(&suffix), "{suffix} at {n}");
-            }
-        }
+    fn only_minted_names_are_recognized() {
         assert_eq!(FreeMonadDriver::of_name("handle"), None);
         assert_eq!(FreeMonadDriver::of_name("region"), None);
+        assert_eq!(FreeMonadDriver::of_name("x7@handle"), None);
+        assert_eq!(FreeMonadDriver::of_name("7@handles"), None);
+        assert_eq!(FreeMonadDriver::of_name("7@drv"), None);
     }
 }

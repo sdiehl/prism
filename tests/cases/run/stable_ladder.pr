@@ -14,7 +14,7 @@ import Test (..)
 import Quickcheck (..)
 
 stable Order {
-  V1 = { id: Int, qty: Int, sym: String } frozen "d74ae517ebfe5ba8",
+  V1 = { id: Int, qty: Int, sym: String } frozen "a50f56d8b33fd611",
   V2 = { ..V1, tif: Int = 0 }
 }
 
@@ -58,7 +58,7 @@ fn rt_frame(o : Order) : Bool = caught(false, \() -> rt_frame_go(o))
 
 -- The committed V1 golden is the digest a V1 frame carries; the generated
 -- `decode_ladder_Order` matches it against the same compiler-computed digest.
-let v1_digest : String = "d74ae517ebfe5ba8"
+let v1_digest : String = "a50f56d8b33fd611"
 
 -- A digest matching no rung, to check that an unknown frame is rejected.
 let bogus_digest : String = "deadbeefdeadbeef"

@@ -16,6 +16,8 @@ mod index;
 mod isa_fixture;
 #[path = "tooling/lane_ledger.rs"]
 mod lane_ledger;
+#[path = "tooling/lint.rs"]
+mod lint;
 #[path = "tooling/prism_test.rs"]
 mod prism_test;
 #[path = "tooling/stable_lock.rs"]

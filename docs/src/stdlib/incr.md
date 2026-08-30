@@ -14,7 +14,7 @@ Values are heterogeneous across a single run (an `Int` total beside a `Map` of s
 
 ### `Incr`
 
-```prism,def,h-c9a7102d09e0cc369e3cf8117e2ab15af0e2ead7e9d09075ee113596b8bc4f88
+```prism,def,h-e85639d71741903dacfd8585d1cade5e7d9b4089e7eed6ac88a795f489921a2f
 newtype Incr(a) = IncrRef(String)
 ```
 

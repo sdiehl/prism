@@ -3,7 +3,7 @@
 import Wire (..)
 
 stable Save {
-  V1 = { hero: String, depth: Int } frozen "43155dc037063174",
+  V1 = { hero: String, depth: Int } frozen "3bc7e1cbf59d3206",
   V2 = { ..V1, fog: Int = 30 },
   migrations {
     V1 -> V2 = auto

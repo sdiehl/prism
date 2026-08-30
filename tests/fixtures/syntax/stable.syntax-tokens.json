@@ -1,6 +1,6 @@
 {
   "schema": "prism-syntax-tokens-v1",
-  "compiler": "0.20.0",
+  "compiler": "0.21.0",
   "source": {
     "digest": "8f7f59322ffaa712c60fff1c424bd7c02c640d52fa9fe7652f33833222054821",
     "text": "-- A stable family: rungs, defaults, a migrations table with an override.\nimport Wire (..)\n\nstable Save {\n  V1 = { hero: String, depth: Int },\n  V2 = { ..V1, fog: Int = 30 },\n  V3 = { ..V2, mist: Int = 5 },\n  migrations {\n    V1 -> V2 = auto\n    V2 -> V3 = version(upgrade = \\(s) -> Save { hero = s.hero, depth = s.depth, fog = s.fog, mist = 7 }, downgrade = auto)\n    V1 -> V3 = auto\n  }\n}\n\nfn current() : Save = Save { hero = \"Ada\", depth = 12, fog = 30, mist = 99 }\n"

@@ -1824,6 +1824,7 @@ mod tests {
             BTreeMap::new(),
             BTreeSet::new(),
             BTreeMap::new(),
+            BTreeSet::new(),
         );
 
         let (value, ty, _) = session

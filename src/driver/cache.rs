@@ -405,7 +405,10 @@ fn semantic_query_hasher(
         );
     }
     field(&mut h, &lowered_core_identity(core)?);
-    field(&mut h, format!("{ctors:?}").as_bytes());
+    for (name, info) in ctors {
+        field(&mut h, name.as_bytes());
+        field(&mut h, &info.identity_bytes());
+    }
     field(&mut h, native_kont_table.as_bytes());
     Ok(h)
 }

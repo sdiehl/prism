@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use prism_common::sym::Sym;
+use prism_syntax::names;
 
 use crate::types::ty::{EffRow, Label};
 use crate::types::{repr_of_type, Type};
@@ -9,8 +10,11 @@ use super::super::violation::RowUnionError;
 use super::super::{CompSig, CoreFnSig, CoreQuantifier, CoreType, LoweredType};
 use super::subst::rename_fn_quantifier;
 
-/// The canonical union of two effect rows, which the verifier uses wherever a
+/// The multiset join of two effect rows, which the verifier uses wherever a
 /// node's row is the join of its subterms'.
+///
+/// Rows are multisets, so the join takes each label's maximum multiplicity.
+/// This preserves the extra occurrence introduced by `mask<E>`.
 ///
 /// # Errors
 /// [`RowUnionError`] showing both tails, when they are distinct open ones: the
@@ -26,26 +30,46 @@ pub fn union_rows(left: &EffRow, right: &EffRow) -> Result<EffRow, RowUnionError
             });
         }
     };
-    let mut labels: BTreeMap<Sym, Label> = BTreeMap::new();
-    for label in left.labels().into_iter().chain(right.labels()) {
-        match labels.get(&label.name) {
-            Some(existing) if existing.args == label.args => {}
-            Some(existing) if existing.args.is_empty() => {
-                labels.insert(label.name, label.clone());
-            }
-            Some(_) if label.args.is_empty() => {}
-            Some(existing) => {
-                return Err(RowUnionError::Labels {
-                    left: existing.clone(),
-                    right: label.clone(),
-                });
+    // Per name: the reconciled label value plus each side's occurrence count.
+    let mut names: BTreeMap<Sym, (Label, usize, usize)> = BTreeMap::new();
+    for (label, is_left) in left
+        .labels()
+        .into_iter()
+        .map(|l| (l, true))
+        .chain(right.labels().into_iter().map(|l| (l, false)))
+    {
+        match names.get_mut(&label.name) {
+            Some((existing, cl, cr)) => {
+                // A bare label adopts the other occurrence's arguments; two
+                // differently parameterized occurrences conflict. Desugared
+                // `var` labels reach the verifier in both bare and typed forms.
+                if existing.args != label.args {
+                    if existing.args.is_empty() {
+                        existing.args.clone_from(&label.args);
+                    } else if !label.args.is_empty() {
+                        return Err(RowUnionError::Labels {
+                            left: existing.clone(),
+                            right: label.clone(),
+                        });
+                    }
+                }
+                *(if is_left { cl } else { cr }) += 1;
             }
             None => {
-                labels.insert(label.name, label.clone());
+                names.insert(
+                    label.name,
+                    (label.clone(), usize::from(is_left), usize::from(!is_left)),
+                );
             }
         }
     }
-    Ok(EffRow::canonical(labels.into_values(), tail))
+    let mut out: Vec<Label> = Vec::new();
+    for (label, cl, cr) in names.into_values() {
+        for _ in 0..cl.max(cr) {
+            out.push(label.clone());
+        }
+    }
+    Ok(EffRow::canonical(out, tail))
 }
 
 pub(super) fn core_subtype(actual: &CoreType, expected: &CoreType) -> bool {
@@ -80,6 +104,11 @@ pub fn lowered_representation_conversion(actual: &CoreType, expected: &CoreType)
     match (actual, expected) {
         (actual, CoreType::Lowered(LoweredType::Word)) if runtime_word(actual) => true,
         (CoreType::Lowered(LoweredType::Word), expected) if runtime_word(expected) => true,
+        // The empty continuation queue IS the unit immediate at runtime: the
+        // interpreter's and the native runtime's `taq_uncons` both read the
+        // unit/zero word as `TQNil`. This licenses exactly `abi::empty_queue`,
+        // which mints the trampoline's initial queue by reinterpreting a
+        // source unit rather than allocating a nil cell.
         (CoreType::Source(Type::Unit), CoreType::Lowered(LoweredType::Queue(_))) => true,
         _ => false,
     }
@@ -138,9 +167,16 @@ fn representation_preserving_by(
 
 /// Whether a representation-preserving coercion may relabel a thunk's inner
 /// row from `actual` to `expected`. A target row with an abstract tail
-/// absorbs anything: no consumer can prove purity from an open row, so no
-/// effect is laundered by hiding it there (the evidence tier's flow-planned
-/// recast relies on this). Against a concrete target, the source's own
+/// absorbs anything. That absorption is sound only for casts minted at
+/// effect lowering, where the flow plan is the proof and the evidence tier's
+/// recast relies on it: one consumer does prove purity from an open row's
+/// explicit heads (stream fusion's effect witness), so an absorb-blessed cast
+/// reaching fusion would hide an effectful thunk behind the tail. Fusion runs
+/// strictly before lowering, and every pre-lowering mint or splice site (the
+/// typed builder's cast shortcut, inline's post-substitution recheck) uses
+/// [`representation_preserving_stable`] instead, which is what keeps the
+/// laundering shape out of the trees fusion walks. Against a concrete
+/// target, the source's own
 /// abstract tail may instantiate away, but every concrete label the source
 /// names must survive into the target. The one locally refutable laundering
 /// shape, a concrete label vanishing into a smaller concrete row (`{IO}` to
@@ -161,9 +197,16 @@ fn fn_sig_subtype(actual: &CoreFnSig, expected: &CoreFnSig) -> bool {
     actual.params() == expected.params() && sig_subtype(actual.body(), expected.body())
 }
 
-/// Rename corresponding function quantifiers to shared fresh names before a
-/// structural comparison. Quantifier spelling is not part of a Core type, and
-/// substitution deliberately changes it to avoid capture.
+/// Rename corresponding function quantifiers to shared names before a structural
+/// comparison. Quantifier spelling is not part of a Core type, and substitution
+/// deliberately changes it to avoid capture.
+///
+/// The rename target is a deterministic per-index binder ([`names::compare_binder`]),
+/// not a global fresh symbol: a read-only compatibility check must not mint
+/// identities, or the count and order of comparisons the verifier happens to
+/// perform would shift every downstream generated name and let a debug and a
+/// release build disagree on binder identity. The `%cmp` namespace is disjoint
+/// from every source and witness quantifier, so the rename stays capture-free.
 fn alpha_align_fn_sigs(actual: &CoreFnSig, expected: &CoreFnSig) -> Option<(CoreFnSig, CoreFnSig)> {
     if actual.quantifiers().len() != expected.quantifiers().len() {
         return None;
@@ -186,9 +229,9 @@ fn alpha_align_fn_sigs(actual: &CoreFnSig, expected: &CoreFnSig) -> Option<(Core
     let mut actual = actual.clone();
     let mut expected = expected.clone();
     for index in 0..actual.quantifiers().len() {
-        let fresh = Sym::fresh();
-        actual = rename_fn_quantifier(&actual, index, fresh);
-        expected = rename_fn_quantifier(&expected, index, fresh);
+        let shared = Sym::new(&names::compare_binder(index));
+        actual = rename_fn_quantifier(&actual, index, shared);
+        expected = rename_fn_quantifier(&expected, index, shared);
     }
     Some((actual, expected))
 }
@@ -257,15 +300,32 @@ pub(in crate::core::typed) fn row_included(actual: &EffRow, expected: &EffRow) -
     if actual == expected || actual == &EffRow::Empty {
         return true;
     }
+    let expected_labels = expected.labels();
     for label in actual.labels() {
-        let Some(wanted) = expected.labels().into_iter().find(|wanted| {
+        // A label matches an occurrence with the same name whose argument
+        // lists agree, where a bare spelling agrees with anything (the same
+        // two-point join `union_rows` applies, and for the same client: a
+        // desugared `var` cell's private label reaches comparisons both bare
+        // and carrying its state type). Two *differently* parameterized
+        // occurrences never match.
+        if !expected_labels.iter().any(|wanted| {
             wanted.name == label.name
                 && (wanted.args == label.args || wanted.args.is_empty() || label.args.is_empty())
-        }) else {
+        }) {
             return false;
-        };
-        if label.args != wanted.args && !label.args.is_empty() && !wanted.args.is_empty() {
-            return false;
+        }
+    }
+    // Closed and rigid upper bounds must cover each label's multiplicity. An
+    // existential tail can absorb any surplus occurrence.
+    if matches!(expected.tail(), EffRow::Empty | EffRow::Var(_)) {
+        let mut demanded: BTreeMap<Sym, usize> = BTreeMap::new();
+        for label in actual.labels() {
+            *demanded.entry(label.name).or_default() += 1;
+        }
+        for (name, count) in demanded {
+            if count > expected_labels.iter().filter(|w| w.name == name).count() {
+                return false;
+            }
         }
     }
     match actual.tail() {

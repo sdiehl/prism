@@ -3,6 +3,7 @@ use std::io;
 
 use serde::{Deserialize, Serialize};
 
+use crate::core::typed::specialize::ho_specialize as ho_specialize_typed;
 use crate::core::typed::specialize::specialize as specialize_typed;
 use crate::core::typed::{
     cse as cse_typed, erase_newtypes as erase_newtypes_typed, fuse as fuse_typed,
@@ -121,7 +122,7 @@ pub(super) fn run_typed_opt_queries<P: TypedCorePhase>(
                 },
             )?
         } else {
-            run_typed_pass(pass, current, newtype_ctors, env)?.0
+            run_typed_pass(pass, current, newtype_ctors, env, cfg.flags.opt_stats)?.0
         };
         current = verify_typed_core(next, env).map_err(typed_verification_error)?;
     }
@@ -164,7 +165,7 @@ fn run_typed_stage_plain<P: TypedCorePhase>(
     let mut current = typed;
     for &pass in passes {
         reject_off_stage(pass, stage)?;
-        let (next, ticks) = run_typed_pass(pass, current, newtype_ctors, env)?;
+        let (next, ticks) = run_typed_pass(pass, current, newtype_ctors, env, flags.opt_stats)?;
         let next = verify_typed_core(next, env).map_err(typed_verification_error)?;
         stats.record(pass.name(), ticks);
         if dump_sink.is_some() || flags.core_lint {
@@ -200,6 +201,7 @@ fn run_typed_pass<P: TypedCorePhase>(
     core: TypedCore<P>,
     newtype_ctors: &BTreeSet<Sym>,
     env: &VerifyEnv,
+    report_declines: bool,
 ) -> Result<(UncheckedTypedCore<P>, u64), Error> {
     Ok(match pass {
         CorePass::Fuse => {
@@ -208,6 +210,10 @@ fn run_typed_pass<P: TypedCorePhase>(
         }
         CorePass::Specialize => {
             let (next, stats) = specialize_typed(core).map_err(Error::from)?;
+            (next, stats.ticks())
+        }
+        CorePass::HoSpecialize => {
+            let (next, stats) = ho_specialize_typed(core, report_declines).map_err(Error::from)?;
             (next, stats.ticks())
         }
         CorePass::Inline => {
@@ -392,7 +398,7 @@ fn run_typed_local_transform<P>(
             let (next, stats) = cse_typed(core);
             (next, stats.ticks())
         }
-        CorePass::Fuse | CorePass::Specialize | CorePass::Inline => {
+        CorePass::Fuse | CorePass::Specialize | CorePass::HoSpecialize | CorePass::Inline => {
             return Err(Error::InternalInvariant(format!(
                 "whole-program pass routed through SCC-local runner: {}",
                 pass.name()

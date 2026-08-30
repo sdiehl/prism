@@ -15,14 +15,18 @@
 -- representation-affecting in `store::coherence::is_representation_affecting`.
 -- Set identity does not currently encode that instance, so programs exchanging a
 -- set across an assembly boundary must agree on its canonical ordering.
+--
+-- In the complexity bounds below, `n` is the number of elements in a set. A
+-- bound stated in comparisons excludes the cost of the `Ord` comparison itself.
 
 import Data.Map (map_empty, map_insert, map_member, map_delete, map_size, map_keys)
 import Data.List (foldl, filter)
 
--- | The empty set.
+-- | The empty set. Time complexity: O(1).
 pub let set_empty : Map(k, Unit) = map_empty
 
 -- | Add `x` to the set (a no-op if already present).
+-- Time complexity: O(log n) comparisons.
 --
 -- ```prism
 -- set_to_list(set_insert(2, set_insert(1, set_empty)))
@@ -34,6 +38,7 @@ pub fn set_insert(x : k, s : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
   map_insert(x, (), s)
 
 -- | True when `x` is a member of the set.
+-- Time complexity: O(log n) comparisons.
 --
 -- ```prism
 -- set_member(2, set_from_list([1, 2, 3]))
@@ -45,6 +50,7 @@ pub fn set_member(x : k, borrow s : Map(k, Unit)) : Bool given Ord(k) =
   map_member(x, s)
 
 -- | Remove `x` from the set (a no-op if absent).
+-- Time complexity: O(log n) comparisons.
 --
 -- ```prism
 -- set_to_list(set_delete(2, set_from_list([1, 2, 3])))
@@ -56,6 +62,7 @@ pub fn set_delete(x : k, s : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
   map_delete(x, s)
 
 -- | The number of elements.
+-- Time complexity: O(n); the underlying map does not cache its size.
 --
 -- ```prism
 -- set_size(set_from_list([1, 2, 2, 3]))
@@ -66,6 +73,7 @@ pub fn set_delete(x : k, s : Map(k, Unit)) : Map(k, Unit) given Ord(k) =
 pub fn set_size(borrow s) = map_size(s)
 
 -- | The elements in ascending order.
+-- Time complexity: O(n).
 --
 -- ```prism
 -- set_to_list(set_from_list([3, 1, 2, 1]))
@@ -76,6 +84,7 @@ pub fn set_size(borrow s) = map_size(s)
 pub fn set_to_list(borrow s) = map_keys(s)
 
 -- | Build a set from a list, dropping duplicates.
+-- Time complexity: O(n log n) comparisons for an input of `n` elements.
 --
 -- ```prism
 -- set_to_list(set_from_list([3, 1, 2, 1]))
@@ -87,6 +96,7 @@ pub fn set_from_list(xs : List(k)) : Map(k, Unit) given Ord(k) =
   foldl(\(acc, x) -> set_insert(x, acc), set_empty, xs)
 
 -- | Every element in either set.
+-- Time complexity: O(m log(n + m)) comparisons, where `m` is the size of `s2`.
 --
 -- ```prism
 -- set_to_list(set_union(set_from_list([1, 2]), set_from_list([2, 3])))
@@ -98,6 +108,7 @@ pub fn set_union(s1 : Map(k, Unit), s2 : Map(k, Unit)) : Map(k, Unit) given Ord(
   foldl(\(acc, x) -> set_insert(x, acc), s1, set_to_list(s2))
 
 -- | The elements in both sets.
+-- Time complexity: O(N log N) comparisons, where `N` is the combined input size.
 --
 -- ```prism
 -- set_to_list(set_intersection(set_from_list([1, 2, 3]), set_from_list([2, 3, 4])))
@@ -112,6 +123,7 @@ pub fn set_intersection(
   set_from_list(filter(\(x) -> set_member(x, s2), set_to_list(s1)))
 
 -- | The elements of `s1` that are not in `s2`.
+-- Time complexity: O(N log N) comparisons, where `N` is the combined input size.
 --
 -- ```prism
 -- set_to_list(set_difference(set_from_list([1, 2, 3]), set_from_list([2, 3])))

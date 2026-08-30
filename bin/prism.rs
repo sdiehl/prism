@@ -45,9 +45,12 @@ struct Cli {
     /// Explicit pass list, overriding -O (see docs)
     #[arg(long = "passes", value_name = "SPEC", global = true)]
     passes: Option<String>,
-    /// C-compiler optimization level for the emitted code (0-3, s, z)
+    /// Native-backend optimization level for emitted code (0-3, s, z)
     #[arg(long = "backend-opt", value_name = "LEVEL", global = true)]
     backend_opt: Option<String>,
+    /// Emit native objects through LLVM in-process and skip `ThinLTO`
+    #[arg(long = "direct-object", global = true)]
+    direct_object: bool,
     /// Default cooperative scheduler policy (cooperative or lifo)
     #[arg(long = "scheduler", value_name = "POLICY", global = true)]
     scheduler: Option<String>,
@@ -57,6 +60,9 @@ struct Cli {
     /// Disable the dictionary-specialization pass
     #[arg(long, global = true)]
     no_specialize: bool,
+    /// Disable the higher-order-specialization pass
+    #[arg(long, global = true)]
+    no_ho_spec: bool,
     /// Disable the simplifier pass
     #[arg(long, global = true)]
     no_simplify: bool,
@@ -782,6 +788,9 @@ fn main() -> ExitCode {
         };
         cfg.flags.backend_opt = level;
     }
+    if cli.direct_object {
+        cfg.flags.direct_object = true;
+    }
     if let Some(s) = &cli.scheduler {
         let Some(sched) = prism::Scheduler::parse(s) else {
             eprintln!("invalid scheduler `--scheduler {s}` (expected cooperative, fifo, or lifo)");
@@ -793,6 +802,7 @@ fn main() -> ExitCode {
         [
             (cli.no_erase_newtypes, prism::CorePass::EraseNewtypes),
             (cli.no_specialize, prism::CorePass::Specialize),
+            (cli.no_ho_spec, prism::CorePass::HoSpecialize),
             (cli.no_simplify, prism::CorePass::Simplify),
             (cli.no_inline, prism::CorePass::Inline),
             (cli.no_cse, prism::CorePass::Cse),

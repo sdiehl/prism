@@ -64,6 +64,22 @@ impl EffectStrategy {
         }
     }
 
+    /// Whether the experimental exclusion knob may skip this rung.
+    ///
+    /// Only a middle engine, one strictly between the ladder's two terminals.
+    /// The cheapest ([`CHEAPEST`](Self::CHEAPEST), Pure) is the absence of
+    /// lowering: a program with no effects lands there and has no other rung to
+    /// be forced onto. The costliest ([`COSTLIEST`](Self::COSTLIEST), the
+    /// whole-program free monad) is the only rung legal for every program, so
+    /// nothing sits below it to fall to. Excluding either could not be honored,
+    /// so the knob refuses to record it rather than accept a silent no-op. The
+    /// bounds are read off the ladder's own endpoints, so this cannot drift from
+    /// the cost order.
+    #[must_use]
+    pub const fn is_excludable(self) -> bool {
+        (self as u8) > (Self::CHEAPEST as u8) && (self as u8) < (Self::COSTLIEST as u8)
+    }
+
     /// The next rung up the cost ladder, or `None` at the top.
     ///
     /// The single home of the cost order. [`EFFECT_TIERS`] and

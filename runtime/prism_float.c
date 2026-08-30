@@ -19,6 +19,14 @@
  * aborts rather than silently truncate if that bound is ever exceeded. */
 #define PRISM_DTOA_LIMBS 128 /* margin for fixed precision up to f64's 2^-1074 tail */
 
+/* A DtoaBig magnitude is strictly below 2^(32 * PRISM_DTOA_LIMBS), so its
+ * decimal length is at most ceil(32 * PRISM_DTOA_LIMBS * log10(2)) digits. Since
+ * log10(2) < 5/16 and 32 * (5/16) = 10, the count is bounded by 10 * LIMBS, and
+ * the trailing +1 absorbs the ceiling. Every decimal buffer below carries a
+ * _Static_assert against this bound so a future change to LIMBS that outgrows a
+ * fixed array fails to compile rather than overrunning at run time. */
+#define PRISM_DTOA_MAX_DIGITS (10 * PRISM_DTOA_LIMBS + 1)
+
 typedef struct {
     uint32_t w[PRISM_DTOA_LIMBS]; /* little-endian base-2^32 limbs */
     int n;                        /* used limbs; n == 0 is the value zero */
@@ -245,6 +253,11 @@ static int dtoa_big_to_dec(const DtoaBig *a, char *out) {
     }
     DtoaBig tmp = *a;
     uint32_t chunks[180];
+    /* Each chunk carries PRISM_POW10_CHUNK_EXP decimal digits, so the array must
+     * span the whole worst-case digit count. */
+    _Static_assert((int)(sizeof chunks / sizeof chunks[0]) * PRISM_POW10_CHUNK_EXP >=
+                       PRISM_DTOA_MAX_DIGITS,
+                   "chunks[] too small for the widest DtoaBig");
     int nc = 0;
     while (tmp.n > 0) {
         if (nc >= (int)(sizeof chunks / sizeof chunks[0])) abort();
@@ -615,6 +628,7 @@ long prism_show_float_prec(long f, long digits) {
     }
 
     char dec[1600];
+    _Static_assert(sizeof dec >= PRISM_DTOA_MAX_DIGITS, "dec[] too small for the widest DtoaBig");
     int nd = dtoa_big_to_dec(&q, dec);
     int int_len = nd - scale;
     int o = 0;

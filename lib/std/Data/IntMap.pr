@@ -21,6 +21,11 @@
 -- same bindings in different orders are structurally equal, so `intmap_to_list`,
 -- `intmap_fold`, and the derived `Eq` and `Show` all agree across orders.
 --
+-- In the complexity bounds below, `n` is the number of bindings and `W` is the
+-- trie depth, at most 64 for `I64`. Thus O(W) operations are O(1) with respect
+-- to the collection size, while spelling out `W` makes the bounded traversal
+-- visible.
+--
 -- Opt-in: not in Base.
 
 import Data.List (foldl, map)
@@ -119,6 +124,7 @@ fn im_ins(g, w : U64, key : I64, value : v, t : IntMap(v)) : IntMap(v) =
         IMBranch(p, m, l, im_ins(g, w, key, value, r))
 
 -- | The empty map.
+-- Time complexity: O(1).
 --
 -- ```prism
 -- intmap_is_empty(intmap_empty)
@@ -129,6 +135,7 @@ fn im_ins(g, w : U64, key : I64, value : v, t : IntMap(v)) : IntMap(v) =
 pub let intmap_empty : IntMap(v) = IMEmpty
 
 -- | The map binding `key` to `value` and nothing else.
+-- Time complexity: O(1).
 --
 -- ```prism
 -- intmap_to_list(intmap_singleton(7i64, "a"))
@@ -139,6 +146,7 @@ pub let intmap_empty : IntMap(v) = IMEmpty
 pub fn intmap_singleton(key : I64, value : v) : IntMap(v) = IMLeaf(key, value)
 
 -- | Insert `key` with `value`, overwriting any existing binding.
+-- Time complexity: O(W), with `W <= 64`.
 --
 -- ```prism
 -- intmap_lookup(1i64, intmap_insert(1i64, "a", intmap_empty))
@@ -150,6 +158,7 @@ pub fn intmap_insert(key : I64, value : v, t : IntMap(v)) : IntMap(v) =
   im_ins(\(new, _old) -> new, im_word(key), key, value, t)
 
 -- | Insert `key` with `value`, combining a clash as `f(new, old)`.
+-- Time complexity: O(W), with `W <= 64`, excluding a call to `f`.
 --
 -- ```prism
 -- intmap_to_list(
@@ -163,6 +172,7 @@ pub fn intmap_insert_with(f, key : I64, value : v, t : IntMap(v)) : IntMap(v) =
   im_ins(f, im_word(key), key, value, t)
 
 -- | The value bound to `key` as `Some`, or `None` when absent.
+-- Time complexity: O(W), with `W <= 64`.
 --
 -- ```prism
 -- intmap_lookup(2i64, intmap_from_list([(1i64, "a"), (2i64, "b")]))
@@ -190,6 +200,7 @@ fn im_look(w : U64, key : I64, borrow t : IntMap(v)) : Option(v) =
         im_look(w, key, r)
 
 -- | True when `key` is bound.
+-- Time complexity: O(W), with `W <= 64`.
 --
 -- ```prism
 -- intmap_member(2i64, intmap_from_list([(1i64, "a"), (2i64, "b")]))
@@ -203,6 +214,7 @@ pub fn intmap_member(key : I64, borrow t : IntMap(v)) : Bool =
     Some(_) => true
 
 -- | Remove `key` (a no-op when absent).
+-- Time complexity: O(W), with `W <= 64`.
 --
 -- ```prism
 -- intmap_to_list(intmap_delete(1i64, intmap_from_list([(1i64, "a"), (2i64, "b")])))
@@ -230,6 +242,7 @@ fn im_del(w : U64, key : I64, t : IntMap(v)) : IntMap(v) =
         im_bin(p, m, l, im_del(w, key, r))
 
 -- | The number of bindings.
+-- Time complexity: O(n); sizes are not cached.
 --
 -- ```prism
 -- intmap_size(intmap_from_list([(1i64, "a"), (2i64, "b")]))
@@ -244,6 +257,7 @@ pub fn intmap_size(borrow t : IntMap(v)) : Int =
     IMBranch(_p, _m, l, r) => intmap_size(l) + intmap_size(r)
 
 -- | True when the map has no bindings.
+-- Time complexity: O(1).
 --
 -- ```prism
 -- intmap_is_empty(intmap_empty)
@@ -257,6 +271,7 @@ pub fn intmap_is_empty(borrow t : IntMap(v)) : Bool @ noalloc =
     _ => false
 
 -- | The union of two maps, keeping the left value where a key is in both.
+-- Time complexity: O(n + m) for input sizes `n` and `m`.
 --
 -- ```prism
 -- intmap_to_list(
@@ -277,6 +292,7 @@ pub fn intmap_union(t1 : IntMap(v), t2 : IntMap(v)) : IntMap(v) =
 -- The two branch nodes are walked together: the shallower one is descended into
 -- until the masks meet, so the merge costs the shape of the two tries rather
 -- than a re-insertion of every binding.
+-- Time complexity: O(n + m), excluding calls to `f`.
 --
 -- ```prism
 -- intmap_to_list(
@@ -325,6 +341,7 @@ pub fn intmap_union_with(f, t1 : IntMap(v), t2 : IntMap(v)) : IntMap(v) =
             im_link(p1, t1, p2, t2)
 
 -- | The bindings of `t1` whose key is also in `t2`, with `t1`'s values.
+-- Time complexity: O(nW), where `n` is the size of `t1` and `W <= 64`.
 --
 -- ```prism
 -- intmap_to_list(
@@ -341,6 +358,7 @@ pub fn intmap_intersection(t1 : IntMap(v), t2 : IntMap(w)) : IntMap(v) =
   intmap_filter(\(k, _v) -> intmap_member(k, t2), t1)
 
 -- | The bindings of `t1` whose key is not in `t2`.
+-- Time complexity: O(nW), where `n` is the size of `t1` and `W <= 64`.
 --
 -- ```prism
 -- intmap_to_list(
@@ -361,6 +379,7 @@ pub fn intmap_difference(t1 : IntMap(v), t2 : IntMap(w)) : IntMap(v) =
 -- A surviving branch still splits on the highest bit two of its remaining keys
 -- differ on, because a branch whose child empties collapses, so filtering lands
 -- on the same tree the survivors would have built from scratch.
+-- Time complexity: O(n), excluding calls to `keep`.
 --
 -- ```prism
 -- intmap_to_list(
@@ -385,6 +404,7 @@ pub fn intmap_filter(keep, t : IntMap(v)) : IntMap(v) =
       im_bin(p, m, intmap_filter(keep, l), intmap_filter(keep, r))
 
 -- | Apply `f` to every value, keeping keys and tree shape.
+-- Time complexity: O(n), excluding calls to `f`.
 --
 -- ```prism
 -- intmap_values(
@@ -405,6 +425,7 @@ pub fn intmap_map_values(f, t : IntMap(v)) : IntMap(w) =
 --
 -- The zero subtree of a branch holds the smaller branch words and branch-word
 -- order is key order, so a left-to-right walk is ascending with no sign case.
+-- Time complexity: O(n), excluding calls to `f`.
 --
 -- ```prism
 -- intmap_fold(\(acc, k, _v) -> acc + k, 0i64, intmap_from_list([(1i64, "a"), (2i64, "b")]))
@@ -419,6 +440,7 @@ pub fn intmap_fold(f, z : b, t : IntMap(v)) : b =
     IMBranch(_p, _m, l, r) => intmap_fold(f, intmap_fold(f, z, l), r)
 
 -- | The `(key, value)` pairs in ascending key order, negative keys first.
+-- Time complexity: O(n).
 --
 -- ```prism
 -- intmap_to_list(intmap_from_list([(2i64, "b"), (0i64, "z"), (1i64, "a")]))
@@ -435,6 +457,7 @@ fn im_list(borrow t : IntMap(v), acc : List((I64, v))) : List((I64, v)) =
     IMBranch(_p, _m, l, r) => im_list(l, im_list(r, acc))
 
 -- | The keys in ascending order.
+-- Time complexity: O(n).
 --
 -- ```prism
 -- intmap_keys(intmap_from_list([(2i64, "b"), (1i64, "a")]))
@@ -445,6 +468,7 @@ fn im_list(borrow t : IntMap(v), acc : List((I64, v))) : List((I64, v)) =
 pub fn intmap_keys(borrow t : IntMap(v)) : List(I64) = map(fst, intmap_to_list(t))
 
 -- | The values in ascending key order.
+-- Time complexity: O(n).
 --
 -- ```prism
 -- intmap_values(intmap_from_list([(1i64, "a"), (2i64, "b")]))
@@ -457,6 +481,7 @@ pub fn intmap_values(borrow t : IntMap(v)) : List(v) = map(snd, intmap_to_list(t
 -- | Build a map from `(key, value)` pairs; a later pair overwrites an earlier one
 -- with the same key. The result depends only on the surviving bindings, so any
 -- ordering of the same list of distinct keys builds the identical tree.
+-- Time complexity: O(nW) for `n` input pairs and `W <= 64`.
 --
 -- ```prism
 -- intmap_to_list(intmap_from_list([(2i64, "b"), (1i64, "a")]))

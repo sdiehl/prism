@@ -10,7 +10,7 @@ Functors of two arguments: map both payloads of a two-parameter type at once.
 
 ### `Bifunctor`
 
-```prism,def,h-86e6f2856b293bdf42ebc4f6455c1110c049b460bb6e7268b120bdadeb308c51
+```prism,def,h-3484abbafe7ff02ec6bde79fff9746ffcaba22b4168c9e953e6519fd3943fb4a
 class Bifunctor(p)
   bimap : ((a) -> c ! {| e}, (b) -> d ! {| e}, p(a, b)) -> p(c, d) ! {| e}
 ```

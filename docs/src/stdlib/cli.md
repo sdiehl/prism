@@ -14,7 +14,7 @@ Everything here is pure: a `Parser` reads a `Tokens` structure, and `Tokens` com
 
 ### `CliError`
 
-```prism,def,h-74a0e58db23cf4cbe60568d5bd9cb5f87fabea0af13b27f60968eec81c94c6f6
+```prism,def,h-89d590c7e644f924a2b0f42d2dd6b6b8fd4790d046e28cad40526ba9cda2292b
 type CliError
   = MissingFlag(String)
   | MissingArg(String)
@@ -30,7 +30,7 @@ A parse failure, carrying enough to name the offending token and the form expect
 
 ### `OptSpec`
 
-```prism,def,h-03408321fe6b4079800939754ccb6ced0882bfc42a9f2c7a44c362c328f027c5
+```prism,def,h-d62414d19a75c1d7d37a53b74faa4dce51de3a51173b26fd0f9f02012848cf3a
 type OptSpec = OptSpec {
   long: String,
   short: String,
@@ -44,7 +44,7 @@ The static description of one option, carried by the parser for help and to tell
 
 ### `ArgSpec`
 
-```prism,def,h-b3c3df89883d744ba9fd2beb1ef25ac49c07bd9042c99771d13ce9a93bfdc552
+```prism,def,h-53447f309c244a0b4678ef07ab71e482406dd013dc8c007ec6ad4ea9ed699b10
 type ArgSpec = ArgSpec {
   meta: String,
   help: String,
@@ -56,7 +56,7 @@ The static description of one positional argument.
 
 ### `Tokens`
 
-```prism,def,h-b9e75f3bdea89502d9ad8028aca6108b7309f059cef001746f504e81f3e36cad
+```prism,def,h-efcada2c05567296905897d41552d70d3e947c33c0dcffc53ba0b1e735f89c90
 type Tokens = Tokens {
   opts: List((String, String)),
   pos: List(String)
@@ -67,7 +67,7 @@ argv after lexing: options canonicalized to their long name, and the positionals
 
 ### `Parser`
 
-```prism,def,h-26962c326b19109e004daa8addbd653784406d566742a8169cf9327bdeb269cb
+```prism,def,h-948b88973e311d762536c41640d67a2b993087d8c894d08a95e620dc8f38c960
 type Parser(a) = Parser {
   opts: List(OptSpec),
   args: List(ArgSpec),
@@ -79,7 +79,7 @@ A parser for a value of type `a`: the option and positional specs it accepts (th
 
 ### `SubCmd`
 
-```prism,def,h-0967ae5f5418bc58c58efa609d27efa56b5783f9c625c99f647f3c027bf20b6f
+```prism,def,h-9ff74383ccaca42724d5c989944d75679c600ca5db3a1628c8a942947f32465a
 type SubCmd(a) = SubCmd { key: String, about: String, sub: Parser(a) }
 ```
 
@@ -87,7 +87,7 @@ One named subcommand: its key on the command line, a one-line description, and t
 
 ### `Body`
 
-```prism,def,h-4d0be8ccc26f471770a406c03f960ed3b19bfe2fd4a4422ade8cdee8f3da0be5
+```prism,def,h-f8104f2931e6c009b4de4189c4191dd024bff6537f6cf4f446d86ab1e177c0af
 type Body(a) = Plain(Parser(a)) | Group(List(SubCmd(a)))
 ```
 
@@ -95,7 +95,7 @@ A top-level command is either a single parser or a group of subcommands, all pro
 
 ### `Command`
 
-```prism,def,h-e0ab9ff7e85285e90451d93a01dacaf1dfc884a1aea7f66c86d8d267ca948e8f
+```prism,def,h-bafa06fe008753523fcccb0afda0a74b5c75d3eb44b9fa729c3c0a98d747cd9c
 type Command(a) = Command { name: String, about: String, body: Body(a) }
 ```
 
@@ -103,7 +103,7 @@ A complete command: a program name and one-line description for usage, plus its 
 
 ### `Outcome`
 
-```prism,def,h-31bdcb763fcb9a96acfd20365d7e6d0df577a7c8bd75450ec44e1783e02357a2
+```prism,def,h-90d388704233058633f3092f1fc9309e0c3c6f518efa58a2e9c2f37c39fa5887
 type Outcome(a)
   = Parsed(a)
   | ShowHelp(String)

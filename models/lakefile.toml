@@ -9,6 +9,7 @@ defaultTargets = [
   "Meta",
   "Replay",
   "Certificates",
+  "Tc",
   "oracle",
 ]
 
@@ -41,8 +42,10 @@ name = "Replay"
 [[lean_lib]]
 name = "Certificates"
 
-# Experimental typechecker soundness scaffold. Not in `defaultTargets` because
-# this tree contains explicit `sorry` proof obligations.
+# Typechecker soundness scaffold. The concrete layer (rows, kinding,
+# substitution) is proved; stub-backed theorems are vacuous or `.assumed` by
+# design and documented as such in place. Sorry-free, so it builds under
+# `--wfail` and sits in `defaultTargets`.
 [[lean_lib]]
 name = "Tc"
 

@@ -166,6 +166,12 @@ pub(crate) enum CountKey {
     CcCompileInvocations,
     #[cfg(feature = "native")]
     CcCompileMs,
+    /// How many bitcode modules LLVM lowered to objects inside Prism.
+    #[cfg(feature = "native")]
+    LlvmObjectEmissions,
+    /// Summed in-process LLVM object-lowering time in integer milliseconds.
+    #[cfg(feature = "native")]
+    LlvmObjectMs,
     #[cfg(feature = "native")]
     CcLinkInvocations,
     #[cfg(feature = "native")]
@@ -205,6 +211,10 @@ impl CountKey {
             Self::CcCompileInvocations => "cc_compile_invocations",
             #[cfg(feature = "native")]
             Self::CcCompileMs => "cc_compile_ms",
+            #[cfg(feature = "native")]
+            Self::LlvmObjectEmissions => "llvm_object_emissions",
+            #[cfg(feature = "native")]
+            Self::LlvmObjectMs => "llvm_object_ms",
             #[cfg(feature = "native")]
             Self::CcLinkInvocations => "cc_link_invocations",
             #[cfg(feature = "native")]
@@ -291,6 +301,8 @@ impl RowExtras {
             (CountKey::CcProbeMs, duration_ms(stats.probe_time)),
             (CountKey::CcCompileInvocations, stats.compile_invocations),
             (CountKey::CcCompileMs, duration_ms(stats.compile_time)),
+            (CountKey::LlvmObjectEmissions, stats.llvm_object_emissions),
+            (CountKey::LlvmObjectMs, duration_ms(stats.llvm_object_time)),
             (CountKey::CcLinkInvocations, stats.link_invocations),
             (CountKey::CcLinkMs, duration_ms(stats.link_time)),
             (CountKey::RuntimeObjectHits, stats.runtime_object_hits),

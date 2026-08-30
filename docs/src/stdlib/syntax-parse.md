@@ -10,7 +10,7 @@ The compiler remains the bootstrap oracle, but this module is a complete value-p
 
 ### `ParseFailure`
 
-```prism,def,h-a21155d65a05e15144cd941ca3d463a4d9c3c37d03af7514ac7e7cc0b256f599
+```prism,def,h-2e2c895e7a9c600015b5d72c66e08409dd17dfc5d0986b102e5c6505a4435470
 type ParseFailure
   = ParseLex(LexError)
   | ParseSyntax(Diagnostic)
@@ -23,7 +23,7 @@ A source-level parse failure, preserving whether lexing or parsing refused the i
 
 ### `parse_program_tokens`
 
-```prism,sig,h-27aa47a9ef10b8d40a0315988248a6252d844920942e06036d3ec8a0aba50eb4
+```prism,sig,h-2f7c4a9e69b9727beb930dfbc56368156124afcaa550d2512db61b181c202846
 parse_program_tokens : (List(Syntax.Token.Token), Int) -> Result(List(Syntax.Ast.Item), Syntax.Diagnostic.Diagnostic)
 ```
 
@@ -31,7 +31,7 @@ Parse an already-laid-out whole-program token stream.
 
 ### `parse_source`
 
-```prism,sig,h-033d95216536b980bb2981221fa987ce4bdba3083df207226cd874cf7de074b0
+```prism,sig,h-4cc18e1fa0ef8194fecb94e22add4d75a8dd7a840bb55d3636a4045faae15176
 parse_source : (String) -> Result(List(Syntax.Ast.Item), Syntax.Parse.ParseFailure)
 ```
 
@@ -39,7 +39,7 @@ Lex, lay out, and parse one complete Prism source file.
 
 ### `parse_source_budgeted`
 
-```prism,sig,h-0a23517116dddc2801b864ee24b97406ba1d3a30857fcc33ea83d997c655377a
+```prism,sig,h-8544826772acbf641b502032f63058bc9823a95bb0b73a0f16ea46d0458463e5
 parse_source_budgeted : (Int, String) -> Result(List(Syntax.Ast.Item), Syntax.Parse.ParseFailure)
 ```
 
@@ -47,7 +47,7 @@ parse_source_budgeted : (Int, String) -> Result(List(Syntax.Ast.Item), Syntax.Pa
 
 ### `parse_expr_tokens`
 
-```prism,sig,h-45dcd6397688177109868e924685ed92d7792ae9f9e0fea70507de1803ae237e
+```prism,sig,h-10c94436b10814daa252fdb48c7fade65eae20c1137161b48719e72e0b75b26a
 parse_expr_tokens : (List(Syntax.Token.Token), Int) -> Result(Syntax.Ast.Sp(Syntax.Ast.Expr), Syntax.Diagnostic.Diagnostic)
 ```
 
@@ -55,7 +55,7 @@ Parse one expression from a token cursor and require complete consumption.
 
 ### `parse_expr_source`
 
-```prism,sig,h-9be7d158c1a70794d189932d1686c280c26ab91b62a0c90f56e5e9613160de79
+```prism,sig,h-5c3793a42307eff3b261c4ce6a35aa54cf11ba41959b8929e938dd0db25bb1fc
 parse_expr_source : (String) -> Result(Syntax.Ast.Sp(Syntax.Ast.Expr), Syntax.Parse.ParseFailure)
 ```
 

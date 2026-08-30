@@ -16,7 +16,7 @@ Two operations are deliberately absent because their result length is not expres
 
 ### `Vec`
 
-```prism,def,h-95e1654d1b479ea04852f270f2fb297852df9f7e94ae07dba2d461b6efe8c5c1
+```prism,def,h-9f57c295e7501095fb9793a897c9533cb3454e868c52319be819b91b2735bc8c
 type Vec(a, n : Nat) = MkVec(List(a))
 ```
 
@@ -30,7 +30,7 @@ A vector of `a` with a type-level length `n`.
 vempty : forall a. () -> Data.Vec.Vec(a, 0)
 ```
 
-The empty vector, length `0`.
+The empty vector, length `0`. Time complexity: O(1).
 
 ### `vsingle`
 
@@ -38,7 +38,7 @@ The empty vector, length `0`.
 vsingle : forall a. (a) -> Data.Vec.Vec(a, 1)
 ```
 
-The one-element vector, length `1`.
+The one-element vector, length `1`. Time complexity: O(1).
 
 ```prism,mod=Data.Vec
 vto_list(vsingle(42))
@@ -54,7 +54,7 @@ vto_list(vsingle(42))
 vto_list : forall a b. (Data.Vec.Vec(a, b)) -> List(a)
 ```
 
-The underlying list, forgetting the static length.
+The underlying list, forgetting the static length. Time complexity: O(1); the list spine is shared.
 
 ```prism,mod=Data.Vec
 vto_list(vsingle(7))
@@ -70,7 +70,7 @@ vto_list(vsingle(7))
 vmap : forall a b c. ((a) -> b, Data.Vec.Vec(a, c)) -> Data.Vec.Vec(b, c)
 ```
 
-Apply `f` to every element, preserving the length.
+Apply `f` to every element, preserving the length. Time complexity: O(n), excluding calls to `f`.
 
 ```prism,mod=Data.Vec
 vto_list(vmap(\(x) -> x * 2, vsingle(21)))
@@ -86,7 +86,7 @@ vto_list(vmap(\(x) -> x * 2, vsingle(21)))
 vzip : forall a b c. (Data.Vec.Vec(a, b), Data.Vec.Vec(c, b)) -> Data.Vec.Vec((a, c), b)
 ```
 
-Zip two vectors of the SAME length into a vector of pairs. The shared `n` forces equal lengths; a mismatch is rejected at compile time, naming both.
+Zip two vectors of the SAME length into a vector of pairs. The shared `n` forces equal lengths; a mismatch is rejected at compile time, naming both. Time complexity: O(n).
 
 ```prism,mod=Data.Vec
 vto_list(vzip(vsingle(1), vsingle(2)))
@@ -108,7 +108,7 @@ vzip(vsingle(1), vempty())
 vhead : forall a b. (Data.Vec.Vec(a, b)) -> a ! {Fail}
 ```
 
-The first element. `n` is unconstrained, so the empty vector is not ruled out statically; on an empty vector this raises `Fail`.
+The first element. `n` is unconstrained, so the empty vector is not ruled out statically; on an empty vector this raises `Fail`. Time complexity: O(1).
 
 ```prism,mod=Data.Vec
 vhead(vsingle(42))

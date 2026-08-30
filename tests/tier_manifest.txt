@@ -38,7 +38,7 @@ examples/eff_amb.pr	selective-free-monad
 examples/eff_exn.pr	selective-free-monad
 examples/eff_forward.pr	selective-free-monad
 examples/eff_nontail.pr	selective-free-monad
-examples/eff_poly.pr	selective-free-monad
+examples/eff_poly.pr	evidence
 examples/eff_reader.pr	evidence
 examples/eff_rows.pr	selective-free-monad
 examples/eff_state.pr	state-fusion
@@ -166,7 +166,7 @@ tests/cases/run/comp_guards.pr	selective-free-monad
 tests/cases/run/comp_in_annotated_row.pr	selective-free-monad
 tests/cases/run/comp_map_once.pr	state-fusion
 tests/cases/run/constrained_mutual.pr	evidence
-tests/cases/run/control_effects.pr	evidence
+tests/cases/run/control_effects.pr	selective-free-monad
 tests/cases/run/control_validate.pr	selective-free-monad
 tests/cases/run/curry.pr	pure
 tests/cases/run/curry_effect.pr	evidence
@@ -255,6 +255,7 @@ tests/cases/run/local_mono_escape.pr	whole-program-free-monad
 tests/cases/run/local_mono_nontail_resume.pr	local-partial
 tests/cases/run/local_mono_state_rest.pr	local-partial
 tests/cases/run/local_mono_two_entries.pr	local-partial
+tests/cases/run/local_polymorphic_let.pr	pure
 tests/cases/run/loop_break.pr	pure
 tests/cases/run/loop_control.pr	pure
 tests/cases/run/looptest.pr	pure
@@ -281,7 +282,7 @@ tests/cases/run/open_nontail.pr	selective-free-monad
 tests/cases/run/opt_chain.pr	selective-free-monad
 tests/cases/run/optic_lens.pr	evidence
 tests/cases/run/optic_prism_modify.pr	pure
-tests/cases/run/optic_solver.pr	whole-program-free-monad
+tests/cases/run/optic_solver.pr	evidence
 tests/cases/run/optics_each.pr	pure
 tests/cases/run/optics_index.pr	selective-free-monad
 tests/cases/run/optics_index_effect.pr	selective-free-monad
@@ -319,6 +320,7 @@ tests/cases/run/row_widen_user_effect.pr	whole-program-free-monad
 tests/cases/run/scc_effect_row.pr	evidence
 tests/cases/run/scientific.pr	pure
 tests/cases/run/sequence_pull.pr	pure
+tests/cases/run/sequence_with_handler.pr	evidence
 tests/cases/run/set_ops.pr	pure
 tests/cases/run/shadow_prelude.pr	pure
 tests/cases/run/shadowed_field_binder.pr	pure
@@ -344,6 +346,7 @@ tests/cases/run/teleport.pr	pure
 tests/cases/run/tensor.pr	selective-free-monad
 tests/cases/run/thunk_effect_absorb.pr	whole-program-free-monad
 tests/cases/run/trmc.pr	pure
+tests/cases/run/trmc_under_multishot.pr	selective-free-monad
 tests/cases/run/tuple_eq_ord.pr	selective-free-monad
 tests/cases/run/unboxed_run.pr	pure
 tests/cases/run/unionfind.pr	pure

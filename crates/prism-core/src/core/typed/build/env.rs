@@ -249,7 +249,7 @@ fn hygienic_nested_fn(
         match quantifier {
             CoreQuantifier::Type(name) => {
                 let old = *name;
-                let fresh = Sym::from(format!("{old}$typed_bound{index}"));
+                let fresh = Sym::from(names::typed_bound(old.as_str(), index));
                 params = params
                     .iter()
                     .map(|ty| ty.subst_var(old, &Type::Var(fresh)))
@@ -260,7 +260,7 @@ fn hygienic_nested_fn(
             }
             CoreQuantifier::Row(name) => {
                 let old = *name;
-                let fresh = Sym::from(format!("{old}$typed_bound{index}"));
+                let fresh = Sym::from(names::typed_bound(old.as_str(), index));
                 params = params
                     .iter()
                     .map(|ty| ty.subst_row_var(old, &EffRow::Var(fresh)))

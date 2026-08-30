@@ -6,11 +6,13 @@ A persistent union-find (disjoint-set) over an ordered key type.
 
 A set is named by its canonical root, and `uf_union` always keeps the smaller key (by `Ord`) as the root, so a set's representative is a pure function of its members, never of the order unions ran in. There is no path compression (that needs mutation); `uf_find` walks parent links to the root on each call. A key absent from the map is its own singleton root, so `uf_empty` needs no pre-population. The occurs check an HM unifier layers on top is type-specific and lives with the unifier, not here. Opt-in: not in Base.
 
+In the bounds below, `n` is the number of stored parent links and `h` is the parent-chain length. There is no path compression or rank balancing, so `h` can grow to `n`.
+
 ## Types
 
 ### `UnionFind`
 
-```prism,def,h-e398597bd6ed170baae6f14038c0a4b54210bdbdefdcea7312a8c12844d2a618
+```prism,def,h-f87f3e436abe49164bf8ab7488deea81ee5237494aef6ded89b69a0967599a97
 newtype UnionFind(k) = UnionFind(Map(k, k))
 ```
 
@@ -24,7 +26,7 @@ A forest of parent links. The wrapper is opaque so callers cannot create cycles 
 uf_empty : forall a. Data.UnionFind.UnionFind(a)
 ```
 
-The empty forest: every key is its own singleton root.
+The empty forest: every key is its own singleton root. Time complexity: O(1).
 
 ### `uf_find`
 
@@ -32,7 +34,7 @@ The empty forest: every key is its own singleton root.
 uf_find : forall a. (Data.UnionFind.UnionFind(a), a) -> a given Ord(a)
 ```
 
-The canonical root of `x`'s set.
+The canonical root of `x`'s set. Time complexity: O(h log n) key comparisons.
 
 ```prism,mod=Data.UnionFind
 uf_find(uf_union(uf_union(uf_empty, 3, 2), 2, 1), 3)
@@ -48,7 +50,7 @@ uf_find(uf_union(uf_union(uf_empty, 3, 2), 2, 1), 3)
 uf_union : forall a. (Data.UnionFind.UnionFind(a), a, a) -> Data.UnionFind.UnionFind(a) given Ord(a)
 ```
 
-Merge the sets of `x` and `y`, keeping the smaller root; a no-op when they are already joined.
+Merge the sets of `x` and `y`, keeping the smaller root; a no-op when they are already joined. Time complexity: O((h_x + h_y + 1) log n) key comparisons.
 
 ```prism,mod=Data.UnionFind
 uf_equiv(uf_union(uf_union(uf_empty, 1, 2), 2, 3), 1, 3)
@@ -64,4 +66,4 @@ true
 uf_equiv : forall a. (Data.UnionFind.UnionFind(a), a, a) -> Bool given Ord(a)
 ```
 
-True when `x` and `y` belong to the same set.
+True when `x` and `y` belong to the same set. Time complexity: O((h_x + h_y) log n) key comparisons.

@@ -195,7 +195,13 @@ pub fn prepare(
     // is its own knob position, independent of the cascade floor, so a forced
     // divergence names one of the two rather than both at once.
     let (fns, used_step) = if flags.erasures {
-        let vars_gone = erase_var::erase_local_vars(&fns, grades, &EffectPlan::analyze(&fns), &env);
+        let vars_gone = erase_var::erase_local_vars(
+            &fns,
+            grades,
+            &EffectPlan::analyze(&fns),
+            &env,
+            &DriftLog::new(flags.quiet),
+        );
         // Erase loop-control effects to direct control flow next, so a
         // recognized loop's control ops are gone before the strategy cascade
         // classifies the residual: a pure imperative loop then classifies
@@ -321,7 +327,7 @@ fn cascade(
     let state_analysis = state::StateAnalysis::new(&ops, latent, thunk_flow, env);
     let drift = DriftLog::new(flags.quiet);
     let mut fresh = prism_common::fresh::Fresh::new();
-    if flags.effect_tier.admits(EffectStrategy::Evidence) {
+    if flags.rung_enabled(EffectStrategy::Evidence) {
         if let Some(threaded) =
             evidence::try_lower_ev(&fns, latent, thunk_flow, &ops, env, &drift, &mut fresh)
         {
@@ -337,7 +343,7 @@ fn cascade(
     // comes first, then the value-coincidence the threading runs under. Both
     // fall through to the next rung rather than failing, because a decline here
     // is a program this engine does not fit, not a defect.
-    if flags.effect_tier.admits(EffectStrategy::StateFusion) {
+    if flags.rung_enabled(EffectStrategy::StateFusion) {
         if let Some(plan) = state::fold_uniform(&fns, &state_analysis) {
             if state::threads(&plan, &fns, &state_analysis) {
                 if let Some(threaded) =
@@ -363,7 +369,7 @@ fn cascade(
         ops: &ops,
         plan: &plan,
     };
-    if flags.effect_tier.admits(EffectStrategy::LocalPartial) {
+    if flags.rung_enabled(EffectStrategy::LocalPartial) {
         if let Some(local) = try_local_partial(&fns, env, ctors, &analysis, &drift, &mut fresh)? {
             return Ok(local);
         }
@@ -681,10 +687,14 @@ pub fn monadic_fallback(
     analysis: &LoweringAnalysis<'_>,
     fresh: &mut prism_common::fresh::Fresh,
 ) -> Result<Decision, TypedCoreEffectLoweringFailure> {
-    // A floor above the selective rung widens the plan to the whole program.
-    // That direction is always legal, which is why it is the forceable one:
-    // narrowing a program whose handlers escape would not be a cost decision.
-    let force_whole = !flags.effect_tier.admits(EffectStrategy::SelectiveFreeMonad);
+    // Denying the selective rung widens the plan to the whole program, whether a
+    // floor sits above it or the exclusion knob skips it. That direction is
+    // always legal, which is why it is the forceable one: narrowing a program
+    // whose handlers escape would not be a cost decision. Routing through
+    // `rung_enabled` (not `admits` alone) is what makes excluding the selective
+    // rung honest instead of a silent no-op; the whole-program terminal below it
+    // is the one rung no knob can skip, so nothing here can strand a program.
+    let force_whole = !flags.rung_enabled(EffectStrategy::SelectiveFreeMonad);
     let mut declined = None;
     if !force_whole {
         // A confined region is an optimization, so failing to build one is a
@@ -1012,11 +1022,14 @@ pub fn test_lowered_repr(value: TypedValue, ty: CoreType) -> TypedValue {
 // It must not be a release panic: the erasures run on every rung including the
 // terminal free-monad fallback, and a crash there is maximally observable,
 // exactly the tier-dependence the determinism contract forbids. So on the
-// unreachable failure path we widen to the union of both children's label sets
-// (keeping every effect, never discarding one child's) under the left tail,
-// which is byte-identical to `union_rows` on every valid program because that
-// path is never taken there. The `debug_assert!` keeps the invariant loud in
-// development and tests.
+// unreachable failure path we widen to the multiset union of both children's
+// rows (keeping every effect at its per-label MAX multiplicity, never discarding
+// or collapsing one child's) under the left tail, which is byte-identical to
+// `union_rows` on every valid program because that path is never taken there.
+// The `debug_assert!` keeps the invariant loud in development and tests; the
+// loud release-mode teeth are the verifier's strict `row_included`, which runs
+// in the release cold gate and rejects any row whose multiplicity a producer got
+// wrong, so the honest failure is gate-visible without a tier-observable crash.
 #[must_use]
 pub fn union_effects(left: &EffRow, right: &EffRow) -> EffRow {
     match union_rows(left, right) {
@@ -1034,18 +1047,39 @@ pub fn union_effects(left: &EffRow, right: &EffRow) -> EffRow {
 }
 
 // The total, conservative row widening `union_effects` degrades to when its
-// exact union declines: the union of both label sets (the more-applied label
-// wins a name clash, matching `union_rows`) under the left tail. Never discards
-// an effect; only reachable on already-broken input.
+// exact union declines: the multiset union of both rows (per-label MAX
+// multiplicity, the more-applied label winning an args clash, matching
+// `union_rows`) under the left tail. Never discards an effect and never
+// collapses a repeat; only reachable on already-broken input.
 fn widen_union(left: &EffRow, right: &EffRow) -> EffRow {
-    let mut labels: BTreeMap<Sym, Label> = BTreeMap::new();
-    for label in left.labels().into_iter().chain(right.labels()) {
-        match labels.get(&label.name) {
-            Some(existing) if !existing.args.is_empty() => {}
-            _ => {
-                labels.insert(label.name, label.clone());
+    // Per name: the more-applied label plus each side's occurrence count.
+    let mut names: BTreeMap<Sym, (Label, usize, usize)> = BTreeMap::new();
+    for (label, is_left) in left
+        .labels()
+        .into_iter()
+        .map(|l| (l, true))
+        .chain(right.labels().into_iter().map(|l| (l, false)))
+    {
+        match names.get_mut(&label.name) {
+            Some((existing, cl, cr)) => {
+                if existing.args.is_empty() && !label.args.is_empty() {
+                    existing.args.clone_from(&label.args);
+                }
+                *(if is_left { cl } else { cr }) += 1;
+            }
+            None => {
+                names.insert(
+                    label.name,
+                    (label.clone(), usize::from(is_left), usize::from(!is_left)),
+                );
             }
         }
     }
-    EffRow::canonical(labels.into_values(), left.tail().clone())
+    let mut out: Vec<Label> = Vec::new();
+    for (label, cl, cr) in names.into_values() {
+        for _ in 0..cl.max(cr) {
+            out.push(label.clone());
+        }
+    }
+    EffRow::canonical(out, left.tail().clone())
 }

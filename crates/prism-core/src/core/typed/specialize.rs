@@ -14,14 +14,15 @@ use prism_common::sym::Sym;
 use prism_syntax::error::TypedCoreSpecializationFailure;
 use prism_syntax::names::{self, DICT_PREFIX};
 
+use super::effect_lower::arena::installs_handler;
 use super::specialize_support::{
-    free_comp_vars, freshen, substitute_terms, substitute_witnesses, Rewrite,
+    free_comp_vars, free_value_vars, freshen, substitute_terms, substitute_witnesses, Rewrite,
 };
 use super::verify::{substitute_core_type, substitute_sig};
 use super::{
-    instantiate_fn, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, TypedBinder, TypedComp,
-    TypedCompKind, TypedCore, TypedCoreFn, TypedHandleOp, TypedHandler, TypedPattern, TypedValue,
-    TypedValueKind, UncheckedTypedCore,
+    instantiate_fn, CompSig, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, TypedBinder,
+    TypedComp, TypedCompKind, TypedCore, TypedCoreFn, TypedHandleOp, TypedHandler, TypedPattern,
+    TypedValue, TypedValueKind, UncheckedTypedCore,
 };
 
 /// Rewrite counts for typed dictionary specialization.
@@ -90,6 +91,681 @@ pub fn specialize<P>(
         UncheckedTypedCore::new(functions),
         SpecializeStats { ticks },
     ))
+}
+
+/// Higher-order specialization: clone a function on a constant callable argument
+/// that never varies across the recursion, so the indirect force-and-apply
+/// devirtualizes to a direct call.
+///
+/// Clone names are memoized before descending so recursive calls reuse the
+/// in-progress clone.
+///
+/// # Errors
+/// The first [`TypedCoreSpecializationFailure`] a clone records.
+pub fn ho_specialize<P>(
+    core: TypedCore<P>,
+    report_declines: bool,
+) -> Result<(UncheckedTypedCore<P>, SpecializeStats), TypedCoreSpecializationFailure> {
+    let callable = callable_parameters(&core);
+    if callable.is_empty() {
+        return Ok((core.into_unchecked(), SpecializeStats::default()));
+    }
+    let source_functions = core.into_unchecked().into_functions();
+    let bodies = source_functions
+        .iter()
+        .map(|function| (function.name, function.clone()))
+        .collect();
+    let installer_tainted = installer_tainted(&bodies);
+    let mut pass = HoSpecializer {
+        callable,
+        bodies,
+        installer_tainted,
+        memo: BTreeMap::new(),
+        clones_per_def: BTreeMap::new(),
+        clones: Vec::new(),
+        declines: Vec::new(),
+        counter: 0,
+        reductions: 0,
+        fresh: 0,
+    };
+    let empty = BTreeMap::new();
+    let mut functions: Vec<_> = source_functions
+        .iter()
+        .map(|function| pass.function(function, &empty))
+        .collect();
+    if report_declines {
+        for decline in &pass.declines {
+            eprintln!("ho-specialize decline: {decline}");
+        }
+    }
+    let ticks = pass.counter as u64 + pass.reductions;
+    functions.extend(pass.clones);
+    Ok((
+        UncheckedTypedCore::new(functions),
+        SpecializeStats { ticks },
+    ))
+}
+
+/// Maximum callable specializations per source definition.
+const MAX_CALLABLES_PER_DEFINITION: usize = 16;
+
+/// A closed constant callable flowing through a value parameter: an eta-wrapper
+/// `\p. g(p)` whose wrapped callee `g` is its identity for memoization. The
+/// stored `value` is spliced in whole when the force-and-apply is reduced.
+#[derive(Clone)]
+struct HoCallable {
+    id: Sym,
+    value: TypedValue,
+}
+
+#[derive(Clone)]
+struct HoMemoEntry {
+    clone: Sym,
+    instantiation: Vec<CoreInstantiation>,
+}
+
+// A memo key: the callee plus the identity of each fixed callable argument.
+type HoMemoKey = (Sym, Vec<(usize, Sym)>);
+
+struct HoSpecializer {
+    callable: BTreeMap<Sym, BTreeSet<usize>>,
+    bodies: BTreeMap<Sym, TypedCoreFn>,
+    installer_tainted: BTreeSet<Sym>,
+    // Monomorphized clones are reusable only at the same type/effect instance.
+    memo: BTreeMap<HoMemoKey, Vec<HoMemoEntry>>,
+    clones_per_def: BTreeMap<Sym, usize>,
+    clones: Vec<TypedCoreFn>,
+    declines: Vec<String>,
+    counter: usize,
+    reductions: u64,
+    fresh: u32,
+}
+
+impl HoSpecializer {
+    /// Request (or reuse) a clone of `callee` with the given constant callables
+    /// fixed at their positions, monomorphized at the call's instantiation.
+    fn request(
+        &mut self,
+        callee: Sym,
+        instantiation: &[CoreInstantiation],
+        fixed: &[(usize, HoCallable)],
+    ) -> Option<Sym> {
+        let key = (
+            callee,
+            fixed.iter().map(|(index, c)| (*index, c.id)).collect(),
+        );
+        if let Some(entry) = self
+            .memo
+            .get(&key)
+            .into_iter()
+            .flatten()
+            .find(|entry| entry.instantiation == instantiation)
+        {
+            return Some(entry.clone);
+        }
+        // Cloning a handler installer can inline the thunk that effect lowering
+        // uses to place its frame, making lowering tiers observably disagree.
+        // The structural taint includes callers that forward into an installer.
+        if self.installer_tainted.contains(&callee) {
+            self.declines.push(format!(
+                "{callee}: handler installer, cloning would break effect lowering"
+            ));
+            return None;
+        }
+        // A top-level quantifier-free clone cannot capture a caller's rigid type
+        // or effect-row variable.
+        if let Some(open) = open_clone_variable(instantiation) {
+            self.declines.push(format!(
+                "{callee}: clone would capture free variable {open}"
+            ));
+            return None;
+        }
+        let count = self.clones_per_def.get(&callee).copied().unwrap_or(0);
+        if count >= MAX_CALLABLES_PER_DEFINITION {
+            self.declines
+                .push(format!("{callee}: reached the per-definition callable cap"));
+            return None;
+        }
+        let original = self.bodies.get(&callee)?.clone();
+        let quantifiers = original.sig.quantifiers();
+        self.counter += 1;
+        let clone = Sym::from(&names::ho_specialized_clone(callee.as_str(), self.counter));
+        self.clones_per_def.insert(callee, count + 1);
+        // Record the clone name before descending so a self-recursive call on the
+        // same callable resolves to the in-flight clone, exactly as compatibility
+        // Core does for dictionary clones.
+        self.memo.entry(key).or_default().push(HoMemoEntry {
+            clone,
+            instantiation: instantiation.to_vec(),
+        });
+
+        let params: Vec<_> = original
+            .params
+            .iter()
+            .map(|binder| {
+                TypedBinder::new(
+                    binder.name,
+                    substitute_core_type(&binder.ty, quantifiers, instantiation),
+                )
+            })
+            .collect();
+        let body = substitute_witnesses(&original.body, quantifiers, instantiation);
+        let mut sorted = fixed.to_vec();
+        sorted.sort_by_key(|(index, _)| *index);
+        // Bind each fixed parameter to its constant callable, then descend so every
+        // `force param`-and-apply inside the clone devirtualizes to a direct call.
+        // The recursive self-calls drop the callable argument, so a fully
+        // devirtualized parameter is left with no remaining use.
+        let env: BTreeMap<Sym, HoCallable> = sorted
+            .iter()
+            .map(|(index, callable)| (params[*index].name, callable.clone()))
+            .collect();
+        let mut body = self.comp(&body, &env);
+        // Materialize a fixed callable only when a live use survives devirtualization.
+        // When every use was a force-and-apply the pass rewrote away, the parameter
+        // is dead; emitting its binding would re-allocate the callable on each
+        // recursive entry for nothing, so dropping it keeps the clone allocation-free
+        // (the win the interpreter tier sees too, since it runs before the late DCE).
+        for (index, callable) in sorted.iter().rev() {
+            if !free_comp_vars(&body).contains(&params[*index].name) {
+                continue;
+            }
+            body = TypedComp::new(
+                body.sig.clone(),
+                TypedCompKind::Bind(
+                    Box::new(TypedComp::new(
+                        // Materializing the fixed callable is a pure `Return`, so
+                        // its row is empty regardless of the clone body's effects.
+                        CompSig::new(params[*index].ty.clone(), EffRow::Empty),
+                        TypedCompKind::Return(callable.value.clone()),
+                    )),
+                    params[*index].clone(),
+                    Box::new(body),
+                ),
+            );
+        }
+        let fixed_indices: BTreeSet<_> = fixed.iter().map(|(index, _)| *index).collect();
+        let signature = CoreFnSig::new(
+            Vec::new(),
+            original
+                .sig
+                .params()
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| !fixed_indices.contains(index))
+                .map(|(_, ty)| substitute_core_type(ty, quantifiers, instantiation))
+                .collect(),
+            substitute_sig(original.sig.body(), quantifiers, instantiation),
+        );
+        let clone_params: Vec<_> = params
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !fixed_indices.contains(index))
+            .map(|(_, binder)| binder.clone())
+            .collect();
+        let clone_fn = TypedCoreFn::new(clone, clone_params, body, signature, 0);
+        self.clones.push(clone_fn);
+        Some(clone)
+    }
+
+    fn rewritten_call(
+        &mut self,
+        comp: &TypedComp,
+        callee: Sym,
+        instantiation: &[CoreInstantiation],
+        args: &[TypedValue],
+        env: &BTreeMap<Sym, HoCallable>,
+    ) -> TypedComp {
+        if let Some(positions) = self.callable.get(&callee).cloned() {
+            let fixed: Vec<_> = positions
+                .iter()
+                .filter_map(|&index| match args.get(index).map(|arg| &arg.kind) {
+                    Some(TypedValueKind::Var { name, .. }) => {
+                        env.get(name).map(|callable| (index, callable.clone()))
+                    }
+                    _ => None,
+                })
+                .collect();
+            if !fixed.is_empty() {
+                if let Some(clone) = self.request(callee, instantiation, &fixed) {
+                    let dropped: BTreeSet<_> = fixed.iter().map(|(index, _)| *index).collect();
+                    return TypedComp::new(
+                        comp.sig.clone(),
+                        TypedCompKind::Call {
+                            callee: clone,
+                            instantiation: Vec::new(),
+                            args: args
+                                .iter()
+                                .enumerate()
+                                .filter(|(index, _)| !dropped.contains(index))
+                                .map(|(_, argument)| self.value(argument, env))
+                                .collect(),
+                        },
+                    );
+                }
+            }
+        }
+        TypedComp::new(
+            comp.sig.clone(),
+            TypedCompKind::Call {
+                callee,
+                instantiation: instantiation.to_vec(),
+                args: args
+                    .iter()
+                    .map(|argument| self.value(argument, env))
+                    .collect(),
+            },
+        )
+    }
+
+    /// Reduce `(force v)(args)` to the callable's body with parameters bound to
+    /// the arguments, when `v` is a constant callable in scope.
+    fn try_devirtualize(
+        &mut self,
+        callee: &TypedComp,
+        instantiation: &[CoreInstantiation],
+        args: &[TypedValue],
+        env: &BTreeMap<Sym, HoCallable>,
+    ) -> Option<TypedComp> {
+        if !instantiation.is_empty() {
+            return None;
+        }
+        let TypedCompKind::Force(TypedValue {
+            kind: TypedValueKind::Var { name, .. },
+            ..
+        }) = &callee.kind
+        else {
+            return None;
+        };
+        let callable = env.get(name)?.clone();
+        let TypedValueKind::Thunk(lambda) = &peel_coercions(&callable.value).kind else {
+            return None;
+        };
+        let TypedCompKind::Lam(params, inner) = &lambda.kind else {
+            return None;
+        };
+        if params.len() != args.len() {
+            return None;
+        }
+        let values: Vec<_> = args
+            .iter()
+            .map(|argument| self.value(argument, env))
+            .collect();
+        let substitution: BTreeMap<_, _> = params
+            .iter()
+            .map(|binder| binder.name)
+            .zip(values)
+            .collect();
+        self.reductions += 1;
+        let inner = freshen(inner, &mut self.fresh, names::FRESH_HO_SPECIALIZE);
+        Some(substitute_terms(
+            &inner,
+            &substitution,
+            &mut self.fresh,
+            names::FRESH_HO_SPECIALIZE,
+        ))
+    }
+}
+
+impl Rewrite for HoSpecializer {
+    type Ctx = BTreeMap<Sym, HoCallable>;
+
+    fn comp(&mut self, comp: &TypedComp, env: &Self::Ctx) -> TypedComp {
+        match &comp.kind {
+            TypedCompKind::Bind(first, binder, rest) => {
+                let first = self.comp(first, env);
+                let mut next = env.clone();
+                // A pure `Return` of a constant callable (a closed eta-thunk), or of a
+                // variable already bound to one, aliases the binder to that callable so
+                // its `force`-and-apply uses downstream devirtualize to direct calls.
+                let bound_callable = match &first.kind {
+                    TypedCompKind::Return(value) => {
+                        closed_callable(value).or_else(|| match &value.kind {
+                            TypedValueKind::Var { name, .. } => env.get(name).cloned(),
+                            _ => None,
+                        })
+                    }
+                    _ => None,
+                };
+                match &bound_callable {
+                    Some(callable) => {
+                        next.insert(binder.name, callable.clone());
+                    }
+                    None => {
+                        next.remove(&binder.name);
+                    }
+                }
+                let rest = self.comp(rest, &next);
+                // Once every use of a materialized callable devirtualized away, the
+                // binding is a dead pure `Return`. Dropping it here, rather than
+                // deferring to the late simplifier, keeps the clone allocation-free on
+                // the free-monad tier too, where a surviving per-recursion
+                // materialization would re-allocate the callable on each entry. A pure
+                // `Return` rhs contributes an empty row, so the binder's result and the
+                // rest's row already carry the whole `Bind`'s signature.
+                if bound_callable.is_some() && !free_comp_vars(&rest).contains(&binder.name) {
+                    return rest;
+                }
+                TypedComp::new(
+                    comp.sig.clone(),
+                    TypedCompKind::Bind(Box::new(first), binder.clone(), Box::new(rest)),
+                )
+            }
+            TypedCompKind::Call {
+                callee,
+                instantiation,
+                args,
+            } => self.rewritten_call(comp, *callee, instantiation, args, env),
+            TypedCompKind::App {
+                callee,
+                instantiation,
+                args,
+            } => self
+                .try_devirtualize(callee, instantiation, args, env)
+                .unwrap_or_else(|| self.descend_comp(comp, env)),
+            _ => self.descend_comp(comp, env),
+        }
+    }
+}
+
+/// Peel erasable representation-preserving coercions to reach the value they
+/// wrap. `Reinterpret` is a scalar coercion legacy Core erases, so a callable
+/// behind one is still the same constant callable; the wrapper stays on the
+/// stored value to keep the spliced clone well typed.
+fn peel_coercions(value: &TypedValue) -> &TypedValue {
+    let mut current = value;
+    while let TypedValueKind::Reinterpret(inner) = &current.kind {
+        current = inner;
+    }
+    current
+}
+
+/// Recognize a closed eta-wrapper `\p0 .. pn. g(p0, .., pn)`, returning `g` as
+/// its identity. Non-eta or open callables have no simple identity and are left
+/// for a later, more general pass.
+fn closed_callable(value: &TypedValue) -> Option<HoCallable> {
+    let TypedValueKind::Thunk(lambda) = &peel_coercions(value).kind else {
+        return None;
+    };
+    let TypedCompKind::Lam(params, inner) = &lambda.kind else {
+        return None;
+    };
+    let TypedCompKind::Call {
+        callee,
+        instantiation,
+        args,
+    } = &inner.kind
+    else {
+        return None;
+    };
+    if !instantiation.is_empty() || args.len() != params.len() {
+        return None;
+    }
+    for (argument, param) in args.iter().zip(params) {
+        let TypedValueKind::Var {
+            name,
+            instantiation,
+        } = &argument.kind
+        else {
+            return None;
+        };
+        if !instantiation.is_empty() || *name != param.name {
+            return None;
+        }
+    }
+    if !free_value_vars(value).is_empty() {
+        return None;
+    }
+    Some(HoCallable {
+        id: *callee,
+        value: value.clone(),
+    })
+}
+
+/// Which value parameters of each function reach a force-and-apply, directly or
+/// by being forwarded into another function's callable parameter. Fixpoint,
+/// because forwarding is transitive.
+fn callable_parameters<P>(core: &TypedCore<P>) -> BTreeMap<Sym, BTreeSet<usize>> {
+    let functions = core.functions();
+    let aliases: BTreeMap<_, _> = functions
+        .iter()
+        .map(|function| (function.name, alias_map(function)))
+        .collect();
+    let mut callable: BTreeMap<Sym, BTreeSet<usize>> = BTreeMap::new();
+    loop {
+        let mut changed = false;
+        for function in functions {
+            let mut positions = BTreeSet::new();
+            collect_callable_positions(
+                &function.body,
+                &aliases[&function.name],
+                &callable,
+                &mut positions,
+            );
+            let entry = callable.entry(function.name).or_default();
+            for index in positions {
+                if entry.insert(index) {
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    callable.retain(|_, positions| !positions.is_empty());
+    callable
+}
+
+/// Map each local binder that transparently aliases a parameter (`return p to
+/// b`) to that parameter's index.
+fn alias_map(function: &TypedCoreFn) -> BTreeMap<Sym, usize> {
+    let mut map: BTreeMap<Sym, usize> = function
+        .params
+        .iter()
+        .enumerate()
+        .map(|(index, binder)| (binder.name, index))
+        .collect();
+    let mut pairs = Vec::new();
+    collect_alias_pairs(&function.body, &mut pairs);
+    loop {
+        let mut changed = false;
+        for (bound, source) in &pairs {
+            if let Some(&index) = map.get(source) {
+                if map.insert(*bound, index).is_none() {
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    map
+}
+
+fn collect_alias_pairs(comp: &TypedComp, pairs: &mut Vec<(Sym, Sym)>) {
+    if let TypedCompKind::Bind(first, binder, _) = &comp.kind {
+        if let TypedCompKind::Return(TypedValue {
+            kind: TypedValueKind::Var { name, .. },
+            ..
+        }) = &first.kind
+        {
+            pairs.push((binder.name, *name));
+        }
+    }
+    walk_children(comp, &mut |child| collect_alias_pairs(child, pairs));
+}
+
+fn collect_callable_positions(
+    comp: &TypedComp,
+    aliases: &BTreeMap<Sym, usize>,
+    callable: &BTreeMap<Sym, BTreeSet<usize>>,
+    positions: &mut BTreeSet<usize>,
+) {
+    match &comp.kind {
+        TypedCompKind::App { callee, .. } => {
+            if let TypedCompKind::Force(TypedValue {
+                kind: TypedValueKind::Var { name, .. },
+                ..
+            }) = &callee.kind
+            {
+                if let Some(&index) = aliases.get(name) {
+                    positions.insert(index);
+                }
+            }
+        }
+        TypedCompKind::Call { callee, args, .. } => {
+            if let Some(forwarded) = callable.get(callee) {
+                for &position in forwarded {
+                    if let Some(TypedValueKind::Var { name, .. }) =
+                        args.get(position).map(|arg| &arg.kind)
+                    {
+                        if let Some(&index) = aliases.get(name) {
+                            positions.insert(index);
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    walk_children(comp, &mut |child| {
+        collect_callable_positions(child, aliases, callable, positions);
+    });
+}
+
+/// Apply `visit` to every computation nested directly inside `comp`, including
+/// the bodies of thunks reached through value positions.
+fn walk_children(comp: &TypedComp, visit: &mut dyn FnMut(&TypedComp)) {
+    match &comp.kind {
+        TypedCompKind::Return(value)
+        | TypedCompKind::Force(value)
+        | TypedCompKind::Error(value)
+        | TypedCompKind::FloatBuiltin(_, value)
+        | TypedCompKind::Neg(_, value)
+        | TypedCompKind::UnboxedProject(value, _)
+        | TypedCompKind::Dup(value)
+        | TypedCompKind::Drop(value)
+        | TypedCompKind::RefNew(value)
+        | TypedCompKind::RefGet(value)
+        | TypedCompKind::Reuse(_, value) => walk_value_children(value, visit),
+        TypedCompKind::Prim(_, lhs, rhs)
+        | TypedCompKind::RefSet(lhs, rhs)
+        | TypedCompKind::InitAt(lhs, rhs) => {
+            walk_value_children(lhs, visit);
+            walk_value_children(rhs, visit);
+        }
+        TypedCompKind::Bind(first, _, rest) => {
+            visit(first);
+            visit(rest);
+        }
+        TypedCompKind::Lam(_, body) | TypedCompKind::Mask(_, body) => visit(body),
+        TypedCompKind::App { callee, args, .. } => {
+            visit(callee);
+            for arg in args {
+                walk_value_children(arg, visit);
+            }
+        }
+        TypedCompKind::If(condition, yes, no) => {
+            walk_value_children(condition, visit);
+            visit(yes);
+            visit(no);
+        }
+        TypedCompKind::Call { args, .. }
+        | TypedCompKind::Io(_, args)
+        | TypedCompKind::Do { args, .. }
+        | TypedCompKind::StrBuiltin { args, .. } => {
+            for arg in args {
+                walk_value_children(arg, visit);
+            }
+        }
+        TypedCompKind::Case(scrutinee, arms) => {
+            walk_value_children(scrutinee, visit);
+            for (_, body) in arms {
+                visit(body);
+            }
+        }
+        TypedCompKind::Handle {
+            body,
+            return_body,
+            ops,
+            ..
+        } => {
+            visit(body);
+            if let Some(return_body) = return_body {
+                visit(return_body);
+            }
+            for arm in &ops.arms {
+                visit(&arm.body);
+            }
+        }
+        TypedCompKind::WithReuse { freed, body, .. } => {
+            walk_value_children(freed, visit);
+            visit(body);
+        }
+    }
+}
+
+fn walk_value_children(value: &TypedValue, visit: &mut dyn FnMut(&TypedComp)) {
+    match &value.kind {
+        TypedValueKind::Thunk(body) => visit(body),
+        TypedValueKind::Reinterpret(inner)
+        | TypedValueKind::LoweredRepr { value: inner, .. }
+        | TypedValueKind::NewtypeRepr { value: inner, .. } => walk_value_children(inner, visit),
+        TypedValueKind::Ctor { fields, .. }
+        | TypedValueKind::Tuple(fields)
+        | TypedValueKind::UnboxedTuple(fields) => {
+            for field in fields {
+                walk_value_children(field, visit);
+            }
+        }
+        TypedValueKind::UnboxedRecord(fields) => {
+            for (_, field) in fields {
+                walk_value_children(field, visit);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Every function a computation calls by name, the edges of the call graph the
+/// installer taint propagates along.
+fn direct_callees(comp: &TypedComp, out: &mut BTreeSet<Sym>) {
+    if let TypedCompKind::Call { callee, .. } = &comp.kind {
+        out.insert(*callee);
+    }
+    walk_children(comp, &mut |child| direct_callees(child, out));
+}
+
+/// Functions that install a handler directly or call another tainted function.
+/// Declining this structural call cone keeps handler thunks available to effect
+/// lowering without hard-coding handler names.
+fn installer_tainted(bodies: &BTreeMap<Sym, TypedCoreFn>) -> BTreeSet<Sym> {
+    let mut tainted: BTreeSet<Sym> = bodies
+        .iter()
+        .filter(|(_, function)| installs_handler(function.body()))
+        .map(|(name, _)| *name)
+        .collect();
+    let callees: BTreeMap<Sym, BTreeSet<Sym>> = bodies
+        .iter()
+        .map(|(name, function)| {
+            let mut set = BTreeSet::new();
+            direct_callees(function.body(), &mut set);
+            (*name, set)
+        })
+        .collect();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (name, set) in &callees {
+            if !tainted.contains(name) && set.iter().any(|callee| tainted.contains(callee)) {
+                tainted.insert(*name);
+                changed = true;
+            }
+        }
+    }
+    tainted
 }
 
 #[derive(Clone)]
@@ -1184,6 +1860,35 @@ fn occurs_row(name: Sym, row: &EffRow) -> bool {
         }
     }
     variables.contains(&name)
+}
+
+/// The first rigid type or effect-row variable a monomorphized clone would
+/// capture free under the call's instantiation. A clone carries no quantifiers,
+/// so any variable a substituted argument still names is unbound inside it; the
+/// canonical shape is an effect-polymorphic callee applied under an open ambient
+/// row. `None` means every argument is ground and the clone is closed.
+fn open_clone_variable(instantiation: &[CoreInstantiation]) -> Option<Sym> {
+    let mut variables = BTreeSet::new();
+    for argument in instantiation {
+        match argument {
+            CoreInstantiation::Type(ty) => {
+                ty.free_ty_vars(&mut variables);
+                ty.free_row_vars(&mut variables);
+            }
+            CoreInstantiation::Row(row) => {
+                if let EffRow::Var(tail) = row.tail() {
+                    variables.insert(*tail);
+                }
+                for label in row.labels() {
+                    for argument in &label.args {
+                        argument.free_ty_vars(&mut variables);
+                        argument.free_row_vars(&mut variables);
+                    }
+                }
+            }
+        }
+    }
+    variables.into_iter().next()
 }
 
 #[cfg(test)]

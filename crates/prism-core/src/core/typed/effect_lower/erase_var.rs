@@ -30,8 +30,9 @@ use super::super::specialize_support::Rewrite;
 use super::super::verify::VerifyEnv;
 use super::super::{
     CompSig, CoreInstantiation, CoreType, TypedBinder, TypedComp, TypedCompKind, TypedCoreFn,
-    TypedHandleOp, TypedValue,
+    TypedHandleOp,
 };
+use super::diagnostics::DriftLog;
 use super::plan::EffectPlan;
 use super::subtract::SubtractEffect;
 use super::walk::each_subterm;
@@ -46,8 +47,9 @@ pub(crate) fn erase_local_vars(
     grades: &OpGrades,
     plan: &EffectPlan,
     env: &VerifyEnv,
+    drift: &DriftLog,
 ) -> Vec<TypedCoreFn> {
-    let multishot = multishot_ops(fns, grades);
+    let multishot = multishot_ops(fns, grades, drift);
     // No genuinely multishot handler anywhere: every var is safe to erase.
     let unsafe_fns: BTreeSet<Sym> = if multishot.is_empty() {
         BTreeSet::new()
@@ -98,38 +100,41 @@ pub(crate) fn erase_local_vars(
     rewritten
 }
 
+// The drift marker for a clause whose body classifies as multishot while the
+// op's declared grade promises at most one resumption.
+const GRADE_MULTISHOT: &str = "grade_multishot";
+
 // Ops with a genuinely multishot handler somewhere in the program. The
 // classification is the canonical stored fact `CheckedHandler::new` computes
 // from the clause bodies; erasing a clone of the typed handler recomputes it
-// through that one constructor. An op graded at most `One` can never resume
-// more than once, so it is excluded, and the two facts must agree.
-fn multishot_ops(fns: &[TypedCoreFn], grades: &OpGrades) -> BTreeSet<Sym> {
+// through that one constructor. The classification reads the very tree this
+// pass is about to rewrite, so where a declared grade of at most `One`
+// disagrees with it the classification wins: the op still declines erasure
+// (a cell would share state across the resumptions the clause actually
+// performs) and the disagreement is reported as matcher drift, in release
+// builds as well as debug ones.
+fn multishot_ops(fns: &[TypedCoreFn], grades: &OpGrades, drift: &DriftLog) -> BTreeSet<Sym> {
     let mut out = BTreeSet::new();
     for f in fns {
-        collect_multishot(f.body(), grades, &mut out);
+        collect_multishot(f.body(), grades, drift, &mut out);
     }
     out
 }
 
-fn collect_multishot(c: &TypedComp, grades: &OpGrades, out: &mut BTreeSet<Sym>) {
+fn collect_multishot(c: &TypedComp, grades: &OpGrades, drift: &DriftLog, out: &mut BTreeSet<Sym>) {
     if let TypedCompKind::Handle { ops, .. } = c.kind() {
         let checked = ops.clone().erase();
         for (op, ru) in checked.iter_with_use() {
-            match grades.get(&op.name) {
-                Some(g) if *g <= Grade::Once => debug_assert!(
-                    !ru.multishot,
-                    "op `{}` declared grade {:?} but its clause classifies as multishot; \
-                     the desugar grade check should have rejected it",
-                    op.name, g
-                ),
-                _ if ru.multishot => {
-                    out.insert(op.name);
-                }
-                _ => {}
+            if !ru.multishot {
+                continue;
             }
+            if matches!(grades.get(&op.name), Some(g) if *g <= Grade::Once) {
+                drift.shape_drift(GRADE_MULTISHOT);
+            }
+            out.insert(op.name);
         }
     }
-    each_subterm(c, &mut |sc| collect_multishot(sc, grades, out));
+    each_subterm(c, &mut |sc| collect_multishot(sc, grades, drift, out));
 }
 
 struct Eraser<'a> {
@@ -322,8 +327,3 @@ impl Rewrite for SubtractVar {
         Rewrite::instantiation(&mut self.rows, instantiation, &())
     }
 }
-
-// Suppress an unused-import lint until the erasure integrates with the
-// builder: `TypedValue` participates only through helper signatures.
-#[allow(unused_imports)]
-use TypedValue as _TypedValueUsed;

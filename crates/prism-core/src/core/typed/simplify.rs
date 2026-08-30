@@ -363,6 +363,21 @@ fn const_fold_str_builtin(op: Builtin, args: &[TypedValue]) -> Option<TypedValue
 // original body. `Return(v)` is always effect-`Empty`, so the verified
 // `Bind` sig-construction rule collapses to exactly `out`'s existing sig.
 fn build_arm(binds: Vec<(TypedBinder, TypedValue)>, body: &TypedComp) -> TypedComp {
+    // The bindings are simultaneous (all the fields of one matched value), but
+    // they lower to a chain of `Bind`s, so an earlier binder is in scope for a
+    // later value. That is sound only when no bound value mentions a sibling
+    // binder: every value here is a projection of the already-elaborated
+    // scrutinee, closed over the group's own binders. Enforce the invariant
+    // rather than silently misbind `{a = b, b = a}`. It fails closed in release,
+    // not `debug_assert`, because a violation emits a wrong program, not an ICE.
+    let group: BTreeSet<Sym> = binds.iter().map(|(binder, _)| binder.name).collect();
+    assert!(
+        binds
+            .iter()
+            .all(|(_, value)| free_value_vars(value).is_disjoint(&group)),
+        "build_arm: a simultaneous binding's value references a sibling binder, \
+         which the sequential Bind lowering would misbind"
+    );
     let mut out = body.clone();
     for (binder, value) in binds.into_iter().rev() {
         let ty = value.ty.clone();
@@ -609,7 +624,13 @@ impl Rewrite for Simplifier {
                 }
             }
             TypedCompKind::Case(scrut, arms) => {
-                if let Some(kv) = resolve(scrut, env) {
+                // The same soundness rule `Cont::select` carries: selecting an
+                // arm by scanning in order treats every earlier arm's failed
+                // match as a proof of mismatch, which only a discriminable
+                // head provides. `resolve` returns only such values today; the
+                // guard makes that obligation this rule's own rather than an
+                // invariant inherited from what the env happens to store.
+                if let Some(kv) = resolve(scrut, env).filter(discriminable) {
                     for (pat, body) in arms {
                         if let Some(binds) = pat_match(pat, &kv) {
                             self.ticks += 1; // case-of-known-constructor
@@ -1635,5 +1656,36 @@ mod tests {
         );
         let dynamic = var("s", source(Type::Str));
         assert_eq!(const_fold_str_builtin(Builtin::ByteLen, &[dynamic]), None);
+    }
+
+    // A well-formed arm: sibling values are closed over the group's binders, so
+    // the sequential Bind lowering matches the simultaneous semantics and a body
+    // that mentions every binder builds without complaint.
+    #[test]
+    fn build_arm_accepts_independent_bindings() {
+        let a = TypedBinder::new(sym("a"), source(Type::Int));
+        let b = TypedBinder::new(sym("b"), source(Type::Int));
+        let body = ret(int(0));
+        let arm = build_arm(vec![(a, int(1)), (b, int(2))], &body);
+        assert!(matches!(arm.kind, TypedCompKind::Bind(..)));
+    }
+
+    // The guard the sequential lowering rests on: a bound value that references a
+    // sibling binder would be captured by the earlier `Bind`, silently misbinding
+    // `{a = b, b = a}`. `build_arm` must reject it, in release as in debug.
+    #[test]
+    #[should_panic(expected = "references a sibling binder")]
+    fn build_arm_rejects_cross_referenced_bindings() {
+        let a = TypedBinder::new(sym("a"), source(Type::Int));
+        let b = TypedBinder::new(sym("b"), source(Type::Int));
+        let body = ret(int(0));
+        // b := a and a := b: each value names the other's binder.
+        build_arm(
+            vec![
+                (a, var("b", source(Type::Int))),
+                (b, var("a", source(Type::Int))),
+            ],
+            &body,
+        );
     }
 }

@@ -1,0 +1,46 @@
+-- A shared spine of ordinary cells reached from one arena cell. `spine` is
+-- reached from outside a region as well as inside one, so its cells are never
+-- rewritten onto the region: they are ordinary reference-counted cells, and each
+-- level's two fields point at the same child, so N of them span 2^N root-to-leaf
+-- paths. The scope allocates one `Wrap` around that spine, and escaping promotes
+-- it: the walk copies the single arena cell and, to rewrite any arena-valued
+-- fields buried in what it points at, descends the ordinary spine. The spine
+-- holds none, so the descent finds no work; descending each ordinary cell once
+-- costs N and re-descending once per path costs 2^N. Both produce the identical
+-- value, so only the walk's visit counters can tell them apart.
+--
+-- This is the ordinary-spine companion to arena_promote_shared: there the shared
+-- DAG is arena-owned and the forwarding of copied cells keeps it linear; here the
+-- shared spine is ordinary and the in-place at-most-once descent keeps it linear.
+import Arena (..)
+
+type Shared = Leaf(Int) | Fork(Shared, Shared)
+
+fn base() : Shared = Leaf(1)
+
+fn spine(n : Int, x : Shared) : Shared =
+  if n == 0 then
+    x
+  else
+    spine(n - 1, Fork(x, x))
+
+fn depth(t : Shared) : Int =
+  match t of
+    Leaf(_) => 0
+    Fork(a, _) => 1 + depth(a)
+
+type Wrap = Wrap(Shared, Int)
+
+fn wrapped() : Wrap = Wrap(spine(__N__, base()), 0)
+
+fn go(w : Wrap) : Int =
+  match w of
+    Wrap(s, _) => depth(s)
+
+fn main() =
+  -- One ordinary use of `spine` and `base` outside any region keeps them off the
+  -- arena path, so the spine `wrapped` builds is ordinary rather than region-owned.
+  -- The guard feeds the printed result so it cannot be eliminated before the
+  -- call-graph decides which functions are region-only.
+  let guard = depth(spine(1, base()))
+  println(go(with_arena(wrapped)) + guard)

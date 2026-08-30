@@ -1,0 +1,31 @@
+-- TRMC list building driven through a multishot continuation. `countdown`'s
+-- recursive call sits under `Cons`, the tail-recursion-modulo-cons shape that
+-- lowers to a loop mutating the last cell's tail pointer in place. The handler
+-- resumes `k` twice (with `m` then `m - 1`), so `countdown` runs once per
+-- resumption and each run must produce an independent list: an in-place tail
+-- buffer shared across resumptions would let the second build overwrite the
+-- first, and the append would print a corrupted list instead of
+-- `[3, 2, 1, 2, 1]`. This is the tier-equivalence oracle for that interaction:
+-- every forced rung, from the fused path to the whole-program monad, must agree
+-- on length 5, sum 9, and the exact list.
+effect Amb
+  choose(Int) : Int
+
+fn countdown(n : Int) : List(Int) =
+  if n == 0 then
+    Nil
+  else
+    Cons(n, countdown(n - 1))
+
+fn worker() : List(Int) =
+  let c = choose(3)
+  countdown(c)
+
+fn main() =
+  let res =
+    handle worker() with
+      choose(m) resume k => append(k(m), k(m - 1))
+      return r => r
+  println(length(res))
+  println(sum(res))
+  println(res)

@@ -12,7 +12,7 @@ Failure is explicit and named: resolving an unknown spelling and popping a spell
 
 ### `Scope`
 
-```prism,def,h-154ae73b8f1cdde1e05ad722980a438acdc173a5a0d5736fb6be9e36eff27005
+```prism,def,h-830df2307803a689d92bca7e99cd02d684b2739c9d5c06fad8d0fad5ca0d48c8
 type Scope(space) = Scope { spellings: Map(String, List(Binder(space))) }
 ```
 
@@ -20,7 +20,7 @@ A resolution scope for one namespace: each spelling maps to its stack of active 
 
 ### `ScopeError`
 
-```prism,def,h-6a1efdf32d68c78bf8224a6d575f394b2b5c05fcfc0fbf5d4013663b99f9bd46
+```prism,def,h-8043d781320c6118a26e2b88fa48047610d6b1acaaed72ad36f0fab392bd2cdd
 type ScopeError
   = ScopeUnknown(String)
   | ScopeUnderflow(String)

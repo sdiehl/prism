@@ -26,6 +26,11 @@ pub const NONE: &str = "None";
 // in a datatype field cannot be (the brand is not a parameter of the enclosing
 // type), so the field pins the omitted brand to this concrete default.
 pub const CANONICAL: &str = "Canonical";
+// The built-in 1-parameter boxed container: a heap cell with no surface
+// constructors, manipulated only through the `array_*` builtins and the index
+// sugar. Its element is the one covariant nominal argument in the subtype
+// relation, sound solely under `array_set`'s copy-on-write value semantics.
+pub const ARRAY: &str = "Array";
 // The raw-storage cell types: an opaque byte buffer (the storage under the
 // stdlib `Bytes` type) and its unboxed f64/i64-element siblings, each a
 // 0-parameter built-in with no surface constructors, manipulated only through
@@ -134,32 +139,36 @@ impl EffRow {
         Self::canonical(labels.iter().map(|l| Label::bare(*l)), Self::Empty)
     }
 
-    // A row's canonical form: its labels appear in strictly increasing
-    // `Label::show` order, so no label repeats, terminated by the non-`Extend`
-    // tail. This is exactly the normal form the row display (`show`/`show_row_p`)
-    // reduces every row to, and, through the shown type/row strings, the one the
-    // content hash commits to. Two set-equal rows that are both canonical are
-    // therefore structurally identical. `Var`/`Exist` carry no labels and are
-    // trivially canonical.
+    // A row's canonical form: its labels appear in non-decreasing `Label::show`
+    // order, terminated by the non-`Extend` tail. A row is a *multiset*: a label
+    // may repeat, and two occurrences of the same effect are distinct row members
+    // (this is what makes `mask<E>` a typing rule -- it adds a second `E` that an
+    // extra enclosing handler must discharge). Canonicalisation therefore only
+    // sorts; it never collapses repeats. This is exactly the normal form the row
+    // display (`show`/`show_row_p`) reduces every row to, and, through the shown
+    // type/row strings, the one the content hash commits to. Two multiset-equal
+    // rows that are both canonical are therefore structurally identical.
+    // `Var`/`Exist` carry no labels and are trivially canonical.
     //
     // The type checker does not keep stored rows canonical: substitution can
-    // reintroduce a duplicate label (`apply_row` on `IO | e` with `e := IO | r`)
-    // and effects are absorbed in inference order, so `unify_row` dedups and
-    // matches labels by name rather than by position, and both display paths sort
+    // reorder labels, and effects are absorbed in inference order, so `unify_row`
+    // matches labels by name rather than by position and both display paths sort
     // on the fly. A `debug_assert` on the *input* of unify/display/hash would thus
     // fire on legitimate intermediates; the teeth live in the constructors below,
     // which guarantee their *output* is canonical.
     #[must_use]
     pub fn is_canonical(&self) -> bool {
-        self.labels().windows(2).all(|w| w[0].show() < w[1].show())
+        self.labels().windows(2).all(|w| w[0].show() <= w[1].show())
     }
 
     // Build a canonical row: the effects `labels` over a terminal `tail`
-    // (`Empty`, `Var`, or `Exist`), sorted by `Label::show` with duplicate labels
-    // dropped. The constructor to reach for when the intent is "the row whose
-    // effects are exactly these"; the raw `Extend` variant stays for the
+    // (`Empty`, `Var`, or `Exist`), sorted by `Label::show`. Repeated labels are
+    // *kept* -- a row is a multiset -- so the label count is preserved; only the
+    // order is normalised. The constructor to reach for when the intent is "the
+    // row whose effects are exactly these"; the raw `Extend` variant stays for the
     // structure-preserving passes (substitution, unification rewrites) that must
-    // keep an existing row's shape.
+    // keep an existing row's shape. When a genuine *set* is wanted, deduplicate the
+    // labels before calling (or build from an `Effects` set via `from_set`).
     #[must_use]
     pub fn canonical(labels: impl IntoIterator<Item = Label>, tail: Self) -> Self {
         debug_assert!(
@@ -168,7 +177,6 @@ impl EffRow {
         );
         let mut ls: Vec<Label> = labels.into_iter().collect();
         ls.sort_by_key(Label::show);
-        ls.dedup_by(|a, b| a.show() == b.show());
         let row = ls
             .into_iter()
             .rev()
@@ -299,6 +307,20 @@ impl EffRow {
         v
     }
 
+    // The bare label names with their multiplicities. Rows are multisets:
+    // `mask` raises a label's count above one, and each count records how many
+    // handlers the row still demands for that label.
+    #[must_use]
+    pub fn label_counts(&self) -> BTreeMap<Sym, usize> {
+        let mut v = BTreeMap::new();
+        let mut cur = self;
+        while let Self::Extend(l, r) = cur {
+            *v.entry(l.name).or_default() += 1;
+            cur = r;
+        }
+        v
+    }
+
     #[must_use]
     pub fn tail(&self) -> &Self {
         let mut cur = self;
@@ -318,10 +340,11 @@ impl EffRow {
             Self::Exist(v) => format!("?r{v}"),
             Self::Extend(..) => unreachable!(),
         };
-        // A row is a set, so render its labels in a canonical (name-sorted)
+        // A row is a multiset, so render its labels in a canonical (name-sorted)
         // order rather than the order inference happened to absorb them; the
         // absorb order is not stable across runs (it follows interner state), and
-        // an unstable signature display would make snapshots flaky. The tail row
+        // an unstable signature display would make snapshots flaky. Repeated
+        // labels are kept, not merged: `{E, E}` shows both copies. The tail row
         // variable, if any, stays last.
         let mut parts: Vec<String> = labels.into_iter().map(Label::show).collect();
         parts.sort();
@@ -448,6 +471,36 @@ impl Type {
     #[must_use]
     pub fn fun_eff(params: Vec<Self>, eff: EffRow, ret: Self) -> Self {
         Self::Fun(params, eff, Box::new(ret))
+    }
+
+    /// Rewrite every effect row embedded anywhere in the type with `f`, rebuilding
+    /// the type structurally. Used to normalise rows uniformly (e.g. collapse a
+    /// spurious duplicate label at a perform site) without hand-writing the walk at
+    /// each call site.
+    #[must_use]
+    pub fn map_rows(&self, f: &impl Fn(&EffRow) -> EffRow) -> Self {
+        match self {
+            Self::Forall(n, b) => Self::Forall(*n, Box::new(b.map_rows(f))),
+            Self::RowForall(n, b) => Self::RowForall(*n, Box::new(b.map_rows(f))),
+            Self::Fun(ps, row, r) => Self::Fun(
+                ps.iter().map(|p| p.map_rows(f)).collect(),
+                f(row),
+                Box::new(r.map_rows(f)),
+            ),
+            Self::App(h, a) => Self::App(Box::new(h.map_rows(f)), Box::new(a.map_rows(f))),
+            Self::Con(n, ps) => Self::Con(*n, ps.iter().map(|p| p.map_rows(f)).collect()),
+            Self::Tuple(ts) => Self::Tuple(ts.iter().map(|t| t.map_rows(f)).collect()),
+            Self::UnboxedTuple(ts) => {
+                Self::UnboxedTuple(ts.iter().map(|t| t.map_rows(f)).collect())
+            }
+            Self::UnboxedRecord(fs) => {
+                Self::UnboxedRecord(fs.iter().map(|(n, t)| (*n, t.map_rows(f))).collect())
+            }
+            Self::OrNull(a) => Self::OrNull(Box::new(a.map_rows(f))),
+            Self::Coeffect(a, r) => Self::Coeffect(Box::new(a.map_rows(f)), r.clone()),
+            Self::Row(r) => Self::Row(f(r)),
+            other => other.clone(),
+        }
     }
 
     pub fn free_exist(&self, acc: &mut BTreeSet<u32>) {

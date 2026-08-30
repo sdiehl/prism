@@ -10,7 +10,7 @@ The canonical `Writer(w)` effect: accumulate output on the side.
 
 ### `Writer`
 
-```prism,def,h-29818c7ffa7f477b7c8a06dd4ec6068ff32c2b7ba05d96882e77df7b642c7d17
+```prism,def,h-fc9e812c8fcdfd8a7a079c9e26af0df6e4497e3c277364368533cb75d2c9e698
 effect Writer(w)
   tell(w) : Unit
 ```

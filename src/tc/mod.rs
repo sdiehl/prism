@@ -1,14 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Deref;
 
-use im::OrdMap;
+use im::{OrdMap, OrdSet};
 use marginalia::Span;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{suggest, ErrKind, TypeError};
 pub use crate::error::{HoleBinding, HoleCandidate, HoleReport};
 use crate::hir::{HandlerResidual, NodeFacts};
-use crate::names::{self, parse_var_get, parse_var_set};
+use crate::names;
 use crate::sym::Sym;
 use crate::syntax::ast::{Core, Decl, Expr, Grade, NodeId, Program, S};
 use crate::types::deps;
@@ -39,6 +39,14 @@ const SUMMARY_COUNT_INCREMENT: usize = 1;
 #[derive(Clone, Debug, Default)]
 pub struct Env {
     types: OrdMap<Sym, Type>,
+    // Names bound by a binder inside the declaration currently being checked
+    // (parameters, `let` binders, pattern and handler binders), as opposed to
+    // top-level definitions. The env is cloned per descent, so this is exactly
+    // the set of binders enclosing the current path. `generalize_let` consults
+    // it: a local value referencing one of these names must not generalize,
+    // because elaboration expands a generalized value at each use site and a
+    // re-emitted local reference would resolve in the use site's scope.
+    local_binders: OrdSet<Sym>,
     free_exists: BTreeMap<u32, usize>,
     free_row_exists: BTreeMap<u32, usize>,
     free_type_vars: BTreeMap<Sym, usize>,
@@ -57,6 +65,20 @@ impl Env {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    // Bind a name introduced by a binder during checking, as opposed to a
+    // top-level definition. Every parameter, `let`, lambda, pattern, and
+    // handler binder must come through here rather than `insert`, or
+    // `generalize_let` misreads a local reference as a top-level one and
+    // admits a value expansion that a use-site binder could capture.
+    pub(crate) fn insert_local(&mut self, name: Sym, ty: Type) -> Option<Type> {
+        self.local_binders.insert(name);
+        self.insert(name, ty)
+    }
+
+    pub(crate) fn binds_locally(&self, name: &Sym) -> bool {
+        self.local_binders.contains(name)
     }
 
     pub fn insert(&mut self, name: Sym, ty: Type) -> Option<Type> {
@@ -148,8 +170,7 @@ struct TypeSummary {
 // (`get@x@n`/`set@x@n`), whose pinned existential anchors generalization only
 // while the owning declaration is still being checked.
 fn is_var_op_binding(name: &Sym) -> bool {
-    let name = name.as_str();
-    parse_var_get(name).is_some() || parse_var_set(name).is_some()
+    names::is_var_op(name.as_str())
 }
 
 fn type_summary(ty: &Type) -> TypeSummary {
@@ -883,7 +904,7 @@ pub struct Checked {
     /// instance rather than as a top-level function, so its row was computed,
     /// held to the class signature's declared labels, and dropped. Instances have
     /// no `DeclInfo`, and Core carries no rows, so consumers read this table.
-    pub method_effects: BTreeMap<String, Effects>,
+    pub method_effects: BTreeMap<Sym, Effects>,
     pub constrained: BTreeMap<Sym, (Type, Vec<(Sym, Type)>)>,
     pub seeds: u32,
     pub warnings: Vec<Warning>,
@@ -1039,7 +1060,7 @@ struct Tc<'a> {
     track_tooltips: bool,
     pending_tooltip_rows: Vec<(NodeId, EffRow)>,
     tooltip_rows: BTreeMap<NodeId, String>,
-    method_effects: BTreeMap<String, Effects>,
+    method_effects: BTreeMap<Sym, Effects>,
     touched_tooltip_rows: BTreeSet<u32>,
     tooltip_row_scaffolds: BTreeSet<u32>,
     // Per-declaration principal-body-effect witnesses ([`BodyWitness`]),
@@ -1126,6 +1147,11 @@ struct Tc<'a> {
     // fact. The marker set lets the HIR lint detect a missing or stale fact.
     handler_nodes: BTreeSet<NodeId>,
     handler_residuals: BTreeMap<NodeId, HandlerResidual>,
+    // Local `let` values generalized to a scheme with at least one type
+    // quantifier, keyed by the bound expression's node. Core's `Bind` carries no
+    // scheme, so elaboration expands these at each use instead of binding one
+    // monotype; see `generalize_let`.
+    generalized_lets: BTreeSet<NodeId>,
 }
 
 // A private operation-level refinement of an effect row. Each effect maps to
@@ -1181,6 +1207,13 @@ impl OperationUses {
         }
     }
 
+    // Subtract the operations a handler discharges from this summary. `masked`
+    // are the handled effects that keep a surplus copy on the residual row after
+    // this handler cancelled one (a `mask` inside the body tunnelled a copy past
+    // it): their operations are NOT subtracted, because they still flow to an
+    // enclosing handler. The caller computes this as the live residual effects
+    // intersected with the discharge candidates, so an effect present only
+    // because a `partial` handler never discharged it is not counted as masked.
     fn subtract(
         mut self,
         handled: &BTreeMap<Sym, BTreeSet<Sym>>,
@@ -1232,11 +1265,13 @@ impl OperationUses {
     }
 }
 
-// One active handler while its body is checked: the effects its arms handle,
-// and those a `mask` inside the body has tunnelled past it.
+// One active handler while its body is checked: the effects its arms handle. A
+// `mask` inside the body no longer needs recording here -- it adds a real copy
+// of the effect to the multiset row, which this handler's single-occurrence
+// discharge leaves a surplus of, so the tunnelled effect survives on the row
+// itself rather than in a side channel.
 struct HandlerFrame {
     handled: BTreeSet<Sym>,
-    masked: BTreeSet<Sym>,
 }
 
 // Ambient self-reference state for the body of a named declaration.
@@ -1261,24 +1296,27 @@ struct RowScope {
     expected: EffRow,
 }
 
-// The concrete effects a declaration performs: the labels of its inferred
-// function row (peeling quantifiers). A polymorphic row tail contributes none;
-// a non-function value performs nothing observable in its type.
-fn concrete_effects(ty: &Type) -> Effects {
+// The concrete effects a declaration performs, with multiplicities: the label
+// counts of its inferred function row (peeling quantifiers). Rows are
+// multisets (`mask` raises a label's count above one), so the count is part of
+// the contract an annotation must cover. A polymorphic row tail contributes
+// none; a non-function value performs nothing observable in its type.
+fn concrete_effect_counts(ty: &Type) -> BTreeMap<Sym, usize> {
     let mut t = ty;
     while let Type::Forall(_, b) | Type::RowForall(_, b) = t {
         t = b;
     }
     match t {
-        Type::Fun(_, row, _) => row.label_names(),
-        _ => Effects::new(),
+        Type::Fun(_, row, _) => row.label_counts(),
+        _ => BTreeMap::new(),
     }
 }
 
 // The function's parameter types and inferred effect row, peeling quantifiers.
 // `None` for a non-function type (a plain value binds no row). Shares the
-// quantifier peel with `concrete_effects` but returns the whole signature, so
-// the open-tail case can be distinguished from a closed empty one.
+// quantifier peel with `concrete_effect_counts` but returns the whole
+// signature, so the open-tail case can be distinguished from a closed empty
+// one.
 fn fn_sig(ty: &Type) -> Option<(&[Type], &EffRow, &Type)> {
     let mut t = ty;
     while let Type::Forall(_, b) | Type::RowForall(_, b) = t {
@@ -1330,12 +1368,13 @@ fn finalize_fn(
     witness: &BodyWitness,
     warnings: &mut Vec<Warning>,
 ) -> Result<DeclInfo, TypeError> {
-    // The labels of the inferred row. Effect-row inference is principal: it
-    // discovers every effect on its own (direct performs, applied effect-carrying
-    // callees, builtin rows, `mask`), so the row alone determines inferred effects.
-    // Real under-coverage is caught downstream by `reconcile_effects` (lowered
-    // ops vs the row) and the parity oracle.
-    let inferred = concrete_effects(&ty);
+    // The labels of the inferred row, with multiplicities. Effect-row inference
+    // is principal: it discovers every effect on its own (direct performs,
+    // applied effect-carrying callees, builtin rows, `mask`), so the row alone
+    // determines inferred effects. Real under-coverage is caught downstream by
+    // `reconcile_effects` (lowered ops vs the row) and the parity oracle.
+    let inferred_counts = concrete_effect_counts(&ty);
+    let inferred: Effects = inferred_counts.keys().copied().collect();
     if d.params.iter().any(|p| p.borrow) {
         // The RC calling convention retains ownership of a borrowed argument
         // across the call, so a `borrow`-taking function must be provably pure.
@@ -1363,9 +1402,16 @@ fn finalize_fn(
         }
     }
     if let Some(declared) = &d.eff {
-        let declared_set: BTreeSet<Sym> = declared.iter().map(|l| Sym::from(&l.name)).collect();
-        for eff in &inferred {
-            if !declared_set.contains(eff) {
+        // The annotation is a multiset too: writing a label twice covers the
+        // extra occurrence a `mask` adds, so the check compares counts, not
+        // membership. An inferred count above the declared one means the body
+        // demands a handler the annotation does not promise.
+        let mut declared_counts: BTreeMap<Sym, usize> = BTreeMap::new();
+        for l in declared {
+            *declared_counts.entry(Sym::from(&l.name)).or_default() += 1;
+        }
+        for (eff, demanded) in &inferred_counts {
+            if *demanded > declared_counts.get(eff).copied().unwrap_or_default() {
                 return Err(ErrKind::UndeclaredEffect {
                     name: d.name.clone(),
                     eff: eff.to_string(),
@@ -1375,14 +1421,24 @@ fn finalize_fn(
         }
         // The reverse direction is sound (a pure body satisfies an effectful
         // annotation by subsumption) but the annotation then disagrees with the
-        // inferred row, so warn rather than reject: a declared effect the body
-        // never performs is dead weight.
-        for eff in &declared_set {
-            if !inferred.contains(eff) {
+        // inferred row, so warn rather than reject: a declared effect, or an
+        // extra declared occurrence, the body never performs is dead weight.
+        for (eff, declared_count) in &declared_counts {
+            let performed = inferred_counts.get(eff).copied().unwrap_or_default();
+            if performed == 0 {
                 warnings.push(Warning {
                     span: d.span,
                     msg: format!(
                         "in `{}`: effect `{eff}` declared in the annotation but never performed",
+                        d.name
+                    ),
+                    origin: WarningOrigin::Decl(Sym::from(&d.name)),
+                });
+            } else if performed < *declared_count {
+                warnings.push(Warning {
+                    span: d.span,
+                    msg: format!(
+                        "in `{}`: effect `{eff}` declared {declared_count} times but the body demands only {performed}",
                         d.name
                     ),
                     origin: WarningOrigin::Decl(Sym::from(&d.name)),
@@ -1566,6 +1622,7 @@ fn check_seeded_mode(
     let method_effects;
     let handler_nodes;
     let handler_residuals;
+    let generalized_lets;
     let dicts;
     let constrained_final;
     let mut holes;
@@ -1613,6 +1670,7 @@ fn check_seeded_mode(
             precise_calls: BTreeMap::new(),
             handler_nodes: BTreeSet::new(),
             handler_residuals: BTreeMap::new(),
+            generalized_lets: BTreeSet::new(),
         };
         // Check each strongly-connected component after its callee components, so
         // a forward reference (notably one into a stdlib module merged after the
@@ -1698,6 +1756,7 @@ fn check_seeded_mode(
         method_effects = std::mem::take(&mut tc.method_effects);
         handler_nodes = tc.handler_nodes;
         handler_residuals = tc.handler_residuals;
+        generalized_lets = tc.generalized_lets;
         dicts = tc.dicts;
         constrained_final = tc.constrained;
         holes = tc.holes;
@@ -1728,6 +1787,7 @@ fn check_seeded_mode(
             tooltip_rows,
             handler_nodes,
             handler_residuals,
+            generalized_lets,
         ),
         decls: infos,
         eff_ops,
@@ -1921,6 +1981,7 @@ fn infer_expr_full(
         precise_calls: BTreeMap::new(),
         handler_nodes: BTreeSet::new(),
         handler_residuals: BTreeMap::new(),
+        generalized_lets: BTreeSet::new(),
     };
     let (t, effs) = tc.scoped_effects(|tc| {
         let t = tc.synth(&env, e)?;
@@ -1944,6 +2005,7 @@ fn infer_expr_full(
         tc.tooltip_rows,
         tc.handler_nodes,
         tc.handler_residuals,
+        tc.generalized_lets,
     );
     Ok(CheckedExpr {
         ty: g,
@@ -2004,6 +2066,7 @@ fn query_tc(seed: &TypecheckSeed) -> Tc<'_> {
         precise_calls: BTreeMap::new(),
         handler_nodes: BTreeSet::new(),
         handler_residuals: BTreeMap::new(),
+        generalized_lets: BTreeSet::new(),
     }
 }
 

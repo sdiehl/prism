@@ -354,7 +354,7 @@ fn scc_key(
     for ctor in used_ctors.names {
         field(&mut hasher, ctor.as_str().as_bytes());
         if let Some(info) = ctors.get(ctor.as_str()) {
-            field(&mut hasher, format!("{info:?}").as_bytes());
+            field(&mut hasher, &info.identity_bytes());
         }
     }
     Ok(hasher.finalize().to_hex().to_string())

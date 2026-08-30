@@ -1,0 +1,23 @@
+-- A doubled `mask<E>` adds two extra copies of `E`, so `op` carries three
+-- copies that need three enclosing `E` handlers; only two are in scope (one in
+-- `inner`, one in `main`). `inner` is unannotated, so its handler discharges one
+-- copy and its inferred row keeps the other two; `main`'s handler discharges one
+-- more, and the last copy underflows past `main`'s `{IO}` annotation, so `check`
+-- rejects `main` at compile time (E5004). Because rows are multisets rather than
+-- unify-deduplicated sets, the two masks no longer collapse to one label: the
+-- checker sees all three copies and no checked-clean program aborts at runtime
+-- with `unhandled effect ``op```.
+effect E
+  op(Int) : Int
+
+fn inner() =
+  handle mask<E>(mask<E>(op(1))) with
+    op(x) resume k => k(x)
+    return r => r
+
+fn main() : Unit ! {IO} =
+  let r =
+    handle inner() with
+      op(x) resume k => k(x + 100)
+      return r => r
+  println(r)

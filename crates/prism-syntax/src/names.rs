@@ -702,6 +702,16 @@ pub fn is_var_set(name: &str) -> bool {
     name.starts_with(VAR_SET_PREFIX)
 }
 
+// Whether `name` is either desugared `var`-cell operation, `get@x@n` or
+// `set@x@n`. The classification predicate for a var-cell op binding: a caller
+// asking only *whether* a name is one gets its answer here without running (and
+// discarding) a parse, and the spelling contract stays owned beside its
+// constructors and inverses rather than being re-derived at a use site.
+#[must_use]
+pub fn is_var_op(name: &str) -> bool {
+    is_var_get(name) || is_var_set(name)
+}
+
 // "get@x@n" -> (x, n); the inverse of `var_get`.
 #[must_use]
 pub fn parse_var_get(name: &str) -> Option<(&str, &str)> {
@@ -968,6 +978,14 @@ pub fn lowered(hint: &str, n: u32) -> String {
     format!("{n}@{hint}")
 }
 
+// Parse a name minted by `lowered`; the numeric prefix distinguishes its
+// namespace from source and other synthesized names.
+#[must_use]
+pub fn parse_lowered(name: &str) -> Option<(u32, &str)> {
+    let (counter, hint) = name.split_once('@')?;
+    Some((counter.parse().ok()?, hint))
+}
+
 // Fresh-binder prefixes, one per pass that synthesizes local binders. The `%` lead is unforgeable
 // (no source identifier or other synthesized name contains it), so a freshened
 // binder collides with nothing in its surrounding context; the distinct suffix
@@ -975,6 +993,9 @@ pub fn lowered(hint: &str, n: u32) -> String {
 // binders stay globally unique across the pipeline.
 pub const FRESH_INLINE: &str = "%i";
 pub const FRESH_SPECIALIZE: &str = "%sp";
+/// Fresh binders minted when higher-order specialization beta-reduces a forced
+/// constant callable at its application site.
+pub const FRESH_HO_SPECIALIZE: &str = "%hs";
 /// Typed witness name used to sequence inserted reference-count operations.
 pub const RC_SEQUENCE_BINDER: &str = "%rcs";
 /// Result binders introduced so an owned loan can be dropped after a borrowed call.
@@ -994,9 +1015,26 @@ pub const FRESH_EVIDENCE_ROW: &str = "%evr";
 /// free-monad calling convention. It is witness-only and never reaches
 /// compatibility Core.
 pub const FREE_MONAD_ROW: &str = "%fmr";
+/// The row quantifier of the synthesized `prism_drive` trampoline loop.
+///
+/// The one row-polymorphic function effect lowering emits rather than
+/// rewrites. The trailing `@` is the private separator no source identifier may
+/// contain, so the quantifier can never collide with a user row variable
+/// flowing into a driven computation's type.
+pub const DRIVE_ROW: &str = "rho_drive@";
 /// The accumulator-type quantifier state fusion appends to a producer whose
 /// accumulator no clause observes. Witness-only, like [`FRESH_EVIDENCE_ROW`].
 pub const FRESH_STATE_TYPE: &str = "%stt";
+/// The binder a subtype check renames each pair of aligned function
+/// quantifiers to before comparing their bodies structurally.
+///
+/// Unlike the pass namespaces
+/// above it never reaches Core: it is ephemeral to one comparison and needs no
+/// global counter, only a per-index spelling ([`compare_binder`]) distinct
+/// across the two signatures' quantifiers and disjoint from their free names.
+/// The `%cmp` lead is disjoint from every other `%`-led family, so the rename
+/// cannot capture a witness quantifier already living in either body.
+pub const FRESH_COMPARE: &str = "%cmp";
 
 /// The ambient residual-row quantifier bound *inside* an evidence-carrying
 /// thunk's own type, named by the operations it carries evidence for.
@@ -1014,6 +1052,13 @@ pub fn evidence_row(ids: &[i64]) -> String {
     qualified_by_ops(FRESH_EVIDENCE_ROW, ids)
 }
 
+/// Whether `name` belongs to the witness-only ambient-row namespace used by
+/// [`fresh_binder`] and [`evidence_row`].
+#[must_use]
+pub fn is_evidence_row(name: &str) -> bool {
+    name.starts_with(FRESH_EVIDENCE_ROW)
+}
+
 /// The accumulator-type quantifier a state-fused producer gains when no clause
 /// pins the accumulator to a concrete type, named by the operations fused into
 /// it.
@@ -1027,6 +1072,19 @@ pub fn evidence_row(ids: &[i64]) -> String {
 #[must_use]
 pub fn state_type(ids: &[i64]) -> String {
     qualified_by_ops(FRESH_STATE_TYPE, ids)
+}
+
+/// The rename binder for the `index`th aligned quantifier of the two signatures
+/// a subtype check is comparing (see [`FRESH_COMPARE`]).
+///
+/// A pure function of the index, so both signatures rename their `index`th
+/// quantifier to the same name and distinct indices never alias. This is what
+/// lets the comparison align quantifiers without minting a global fresh symbol,
+/// which would perturb every downstream name and make a read-only check observe
+/// its own call order.
+#[must_use]
+pub fn compare_binder(index: usize) -> String {
+    format!("{FRESH_COMPARE}{PRIVATE_SEP}{index}")
 }
 
 // A witness-only quantifier name derived from the fused operation ids, so that
@@ -1049,6 +1107,16 @@ pub fn specialized_clone(function: &str, n: usize) -> String {
     format!("{function}$sp{n}")
 }
 
+// The top-level clone emitted when higher-order specialization fixes a function's
+// constant callable arguments. A distinct tag from `specialized_clone`'s `$sp`
+// keeps the two specializers' clone names disjoint, since higher-order
+// specialization runs after dictionary specialization and may clone the same base
+// function (including a dictionary clone) a second time.
+#[must_use]
+pub fn ho_specialized_clone(function: &str, n: usize) -> String {
+    format!("{function}$hs{n}")
+}
+
 /// Phase-private clone at one thunk-demand convention.
 ///
 /// Distinct from dictionary `$sp` clones so the independently ordered passes
@@ -1056,6 +1124,27 @@ pub fn specialized_clone(function: &str, n: usize) -> String {
 #[must_use]
 pub fn convention_clone(function: &str, n: usize) -> String {
     format!("{function}$ec{n}")
+}
+
+/// A function quantifier the verifier's substitution renames away from a
+/// collision with a name it just inserted.
+///
+/// `n` is a per-signature probe
+/// counter; the `$typedq` tag is disjoint from every other `$`-led family, so
+/// probing can never land on a clone name.
+#[must_use]
+pub fn typed_quantifier(name: &str, n: usize) -> String {
+    format!("{name}$typedq{n}")
+}
+
+/// A signature quantifier freshened by the typed builder before the
+/// signature is bound.
+///
+/// A pure function of the old name and the quantifier's index, so two
+/// instantiations of one scheme can never alias each other's binders.
+#[must_use]
+pub fn typed_bound(name: &str, index: usize) -> String {
+    format!("{name}$typed_bound{index}")
 }
 
 // The top-level join function stream fusion emits when it ties a driven pipeline's
@@ -1089,28 +1178,39 @@ pub fn local_shadow(n: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        bare_name, exported, is_instance_method, is_synthesized, is_var_get, is_var_runner,
-        is_var_set, lens_getter, lens_setter, lens_value, module_of, named_effect, named_op,
-        parse_named_op, parse_scoped_escape, parse_var_get, parse_var_runner, parse_var_set,
-        plate_helper, plate_rebuilder, private, sort_prim_kind, split_family_member,
-        stable_family_member, stable_route_downgrade, stable_route_upgrade, stable_rung, throw_op,
-        var_effect, var_get, var_runner, var_set, ScopedEscape, ALLOC_EFFECT, ALLOC_OP,
-        ARBITRARY_METHOD, ARENA_MODULE, CAP_WRAPPERS, CHILDREN_METHOD, CONCAT_MAP_FN,
-        DECODE_METHOD, DIV_MOD_METHOD, DIV_QUOT_METHOD, EMIT_OP, ENCODE_METHOD, ENTROPY_EFFECT,
-        EQ_METHOD, FMAP_METHOD, FORCE_FN, FOREVER, FROM_JSON_METHOD, GUARD_FN, HASH_METHOD,
-        INCR_REPLAY_DRIVERS, INPUT_CAPABILITY_EFFECTS, INT_CMP, JSON_FIELD_FN, JSON_OBJ, JSON_STR,
-        LENS_FN, NUM_ADD_METHOD, NUM_FROMINT_METHOD, NUM_MUL_METHOD, NUM_NEG_METHOD,
-        NUM_SUB_METHOD, OPTIC_MK_LENS, ORD_METHOD, POW_METHOD, QC_ARB_GEN, QC_GEN_BIND,
-        QC_GEN_CHOOSE, QC_GEN_CONST, QC_GEN_RESIZE, QC_GEN_RUN, REBUILD_METHOD, REPEAT_WHILE,
-        REPLAY_DRIVERS, RUN_IO, SCOLLECT_FN, SHAPE_DIGEST_METHOD, SHOW_METHOD, SMAP_FN,
-        SORT_BY_ORD_FN, SORT_FN, SORT_PRIM_INSTANCES, STR_ESCAPE_FN, SUCCEEDS_FN, TO_JSON_METHOD,
-        WIRE_CAT, WIRE_DECODE_VALUE_WITH_DIGEST, WIRE_EMPTY, WIRE_ENCODE_VALUE_WITH_DIGEST,
-        WIRE_GET_TAG, WIRE_IS_EMPTY, WIRE_OPEN_VALUE_ANY, WIRE_TAG,
+        bare_name, exported, is_instance_method, is_synthesized, is_var_get, is_var_op,
+        is_var_runner, is_var_set, lens_getter, lens_setter, lens_value, lowered, module_of,
+        named_effect, named_op, parse_lowered, parse_named_op, parse_scoped_escape, parse_var_get,
+        parse_var_runner, parse_var_set, plate_helper, plate_rebuilder, private, sort_prim_kind,
+        split_family_member, stable_family_member, stable_route_downgrade, stable_route_upgrade,
+        stable_rung, throw_op, var_effect, var_get, var_runner, var_set, ScopedEscape,
+        ALLOC_EFFECT, ALLOC_OP, ARBITRARY_METHOD, ARENA_MODULE, CAP_WRAPPERS, CHILDREN_METHOD,
+        CONCAT_MAP_FN, DECODE_METHOD, DIV_MOD_METHOD, DIV_QUOT_METHOD, EMIT_OP, ENCODE_METHOD,
+        ENTROPY_EFFECT, EQ_METHOD, FMAP_METHOD, FORCE_FN, FOREVER, FROM_JSON_METHOD, GUARD_FN,
+        HASH_METHOD, INCR_REPLAY_DRIVERS, INPUT_CAPABILITY_EFFECTS, INT_CMP, JSON_FIELD_FN,
+        JSON_OBJ, JSON_STR, LENS_FN, NUM_ADD_METHOD, NUM_FROMINT_METHOD, NUM_MUL_METHOD,
+        NUM_NEG_METHOD, NUM_SUB_METHOD, OPTIC_MK_LENS, ORD_METHOD, POW_METHOD, QC_ARB_GEN,
+        QC_GEN_BIND, QC_GEN_CHOOSE, QC_GEN_CONST, QC_GEN_RESIZE, QC_GEN_RUN, REBUILD_METHOD,
+        REPEAT_WHILE, REPLAY_DRIVERS, RUN_IO, SCOLLECT_FN, SHAPE_DIGEST_METHOD, SHOW_METHOD,
+        SMAP_FN, SORT_BY_ORD_FN, SORT_FN, SORT_PRIM_INSTANCES, STR_ESCAPE_FN, SUCCEEDS_FN,
+        TO_JSON_METHOD, WIRE_CAT, WIRE_DECODE_VALUE_WITH_DIGEST, WIRE_EMPTY,
+        WIRE_ENCODE_VALUE_WITH_DIGEST, WIRE_GET_TAG, WIRE_IS_EMPTY, WIRE_OPEN_VALUE_ANY, WIRE_TAG,
     };
 
     #[test]
     fn specialization_clone_names_use_the_canonical_scheme() {
         assert_eq!(super::specialized_clone("map", 7), "map$sp7");
+    }
+
+    // Higher-order specialization tags its clones distinctly from dictionary
+    // specialization, so cloning the same base a second time cannot collide.
+    #[test]
+    fn ho_specialization_clone_names_are_disjoint_from_dictionary_clones() {
+        assert_eq!(super::ho_specialized_clone("twalk", 1), "twalk$hs1");
+        assert_ne!(
+            super::ho_specialized_clone("map", 7),
+            super::specialized_clone("map", 7)
+        );
     }
 
     // A shadowed prelude definition must land in the same private namespace an
@@ -1141,6 +1241,20 @@ mod tests {
         assert_ne!(super::state_type(&[3, 12]), super::evidence_row(&[3, 12]));
         assert_ne!(super::state_type(&[3, 12]), super::state_type(&[3, 1, 2]));
         assert!(is_synthesized(&super::state_type(&[3])));
+    }
+
+    // Both ambient-row formats share the namespace; adjacent formats do not.
+    #[test]
+    fn evidence_row_membership_covers_both_formatters_and_nothing_else() {
+        assert!(super::is_evidence_row(&super::evidence_row(&[3, 12])));
+        assert!(super::is_evidence_row(&super::fresh_binder(
+            super::FRESH_EVIDENCE_ROW,
+            7
+        )));
+        assert!(!super::is_evidence_row(&super::state_type(&[3, 12])));
+        assert!(!super::is_evidence_row(super::FREE_MONAD_ROW));
+        assert!(!super::is_evidence_row("evr0"));
+        assert!(!super::is_evidence_row("e"));
     }
 
     // The capability wrappers and Replay drivers are required prelude names
@@ -1371,16 +1485,19 @@ mod tests {
             let ns = n.to_string();
             let g = var_get(x, n);
             assert!(is_var_get(&g) && !is_var_set(&g) && !is_var_runner(&g));
+            assert!(is_var_op(&g));
             assert_eq!(parse_var_get(&g), Some((x, ns.as_str())));
             assert_eq!(parse_var_set(&g), None);
 
             let s = var_set(x, n);
             assert!(is_var_set(&s) && !is_var_get(&s) && !is_var_runner(&s));
+            assert!(is_var_op(&s));
             assert_eq!(parse_var_set(&s), Some((x, ns.as_str())));
             assert_eq!(parse_var_get(&s), None);
 
             let r = var_runner(n);
             assert!(is_var_runner(&r) && !is_var_get(&r) && !is_var_set(&r));
+            assert!(!is_var_op(&r), "a runner is not a cell operation");
             assert_eq!(parse_var_runner(&r), Some(ns.as_str()));
         }
         // Non-matching strings: wrong prefix, and a prefixed name missing the
@@ -1388,8 +1505,22 @@ mod tests {
         assert_eq!(parse_var_get("set@x@1"), None);
         assert_eq!(parse_var_get("get@notail"), None);
         assert_eq!(parse_var_set("plain"), None);
+    }
+
+    // The lowered-name parser is an exact inverse and rejects other namespaces.
+    #[test]
+    fn lowered_names_round_trip() {
+        for (hint, n) in [("handle", 0u32), ("drv", 7), ("cell", u32::MAX)] {
+            assert_eq!(parse_lowered(&lowered(hint, n)), Some((n, hint)));
+        }
+        // These names are outside the lowered namespace.
+        assert_eq!(parse_lowered("handle"), None);
+        assert_eq!(parse_lowered("arg@0"), None);
+        assert_eq!(parse_lowered("t@5"), None);
+        assert_eq!(parse_lowered("7handle"), None);
         assert_eq!(parse_var_runner("nope"), None);
         assert!(!is_var_get("plain") && !is_var_set("plain") && !is_var_runner("plain"));
+        assert!(!is_var_op("plain") && !is_var_op("Var@x@0"));
     }
 
     // `parse_scoped_escape` recovers the origin of a leaked scoped effect so a

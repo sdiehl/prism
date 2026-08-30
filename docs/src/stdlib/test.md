@@ -12,7 +12,7 @@ Wrap an instance back into a `Gen` with `arb_gen` to feed it to `quickcheck`.
 
 ### `Arbitrary`
 
-```prism,def,h-cea7fb587352843bf9c3312d3dc42f1627f3da3432d27658607def5df369862e
+```prism,def,h-b8174e0edc77c1de535e66e7a36e1cf43d2ece66f95c68f9d563dd552f586eb7
 class Arbitrary(a)
   arbitrary : (Int) -> a ! {Random | e}
 ```
@@ -71,13 +71,13 @@ instance arbitraryString : Arbitrary(String)
 
 ### `arbitraryOption`
 
-```prism,def,h-531ad1aa88171b32f1fa678fbc446b5f0fa5abe18b309d6aa55a517e8ee6da32
+```prism,def,h-3850f646aa76abb32d8a6811a76e5469499986550709aeca62770a128a27272b
 instance arbitraryOption : Arbitrary(Option(a))
 ```
 
 ### `arbitraryList`
 
-```prism,def,h-bdd26b06bb1abc2399ee02e59387f885b8d651a64e426cb3dea8af73045b098f
+```prism,def,h-e0c509207fccfacfa69c535408e289fca6eaf51d7a477095a5a2c2574ccbcad6
 instance arbitraryList : Arbitrary(List(a))
 ```
 

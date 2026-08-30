@@ -590,14 +590,17 @@ impl Tc<'_> {
         Ok(())
     }
 
-    // Generalization is unconditional because Prism has no first-class mutable
-    // references. `var` lowers to a private monomorphic State effect, and the
-    // mutable containers are copy-on-write values without shared identity.
+    // Generalization at a declaration is unconditional because Prism has no
+    // first-class mutable references. `var` lowers to a private monomorphic
+    // State effect, and the mutable containers are copy-on-write values without
+    // shared identity.
     //
     // Local schemes do not quantify class constraints. `generalize_local`
     // excludes existentials mentioned by pending obligations, allowing later use
     // sites or an enclosing `given` context to ground them. Ungrounded
-    // obligations produce the standard unresolved-constraint diagnostic.
+    // obligations produce the standard unresolved-constraint diagnostic. A local
+    // `let` bound to a computation instead takes `generalize_local_mono`: it has
+    // no elaboration that could be repeated per use, so its types stay fixed.
     pub(super) fn generalize(&self, env: &Env, ty: &Type) -> Type {
         self.generalize_map(env, ty).0
     }
@@ -609,6 +612,21 @@ impl Tc<'_> {
         let t = self.zonk(ty);
         let obligated = self.obligated_exists();
         self.generalize_zonked(env, &t, true, None, &obligated).0
+    }
+
+    // Generalization for a local `let` bound to a computation rather than a
+    // syntactic value: the value restriction, stated on the type axis. Every
+    // type existential the bound type mentions is excluded, so the binding
+    // keeps one type and a second use site at another type is an ordinary
+    // source error rather than a binder two later phases would have to read
+    // two ways. The effect row still generalizes: a row pins no value that a
+    // use site could observe, and every local lambda is row-generalized as a
+    // matter of course.
+    pub(super) fn generalize_local_mono(&self, env: &Env, ty: &Type) -> Type {
+        let t = self.zonk(ty);
+        let mut mono = BTreeSet::new();
+        t.free_exist(&mut mono);
+        self.generalize_zonked(env, &t, true, None, &mono).0
     }
 
     // Every existential still free in a pending class obligation, through

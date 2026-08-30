@@ -12,7 +12,7 @@ The buffers underneath follow the array's rc==1 in-place / shared-copy disciplin
 
 ### `FlatArray`
 
-```prism,def,h-b26201cbdaaf39c93bff0dbd054180d39e108295b455ebcc1a431c102eeda384
+```prism,def,h-340e6c214f8e3e3eba767b4e681a267a94842f81d1efb001fd0d86a6c08e49f3
 type FlatArray(a) = FloatArr(FloatBuf) | IntArr(IntBuf)
 ```
 
@@ -22,7 +22,7 @@ A dense array of unboxed one-word elements. The payload variant is chosen by the
 
 ### `FlatElem`
 
-```prism,def,h-cfac2908a46f306c9d4a25d2785683bc2e2c71ae8f975ce147866d050d2485c9
+```prism,def,h-c777e02d46573081310b5c13b6956f092169bd27ebbb51946fac645e79323c09
 class FlatElem(a)
   fa_new : (Int, a) -> FlatArray(a)
   fa_get : (FlatArray(a), Int) -> a ! {Fail}
@@ -30,6 +30,8 @@ class FlatElem(a)
 ```
 
 The element contract: how a one-word scalar enters and leaves the flat storage. Instances exist for `Float` and `I64`.
+
+Time complexity: `fa_new(n, x)` is O(n), `fa_get` is O(1), and `fa_set` is O(1) for a uniquely owned buffer or O(n) when a shared buffer must be copied.
 
 ```prism,mod=Data.FlatArray
 fa_get(fa_set(fa_new(3, 0.0), 1, 9.0), 1)
@@ -61,7 +63,7 @@ instance flatI64 : FlatElem(I64)
 fa_len : forall a. (Data.FlatArray.FlatArray(a)) -> Int
 ```
 
-The element count, independent of the element type.
+The element count, independent of the element type. Time complexity: O(1).
 
 ```prism,mod=Data.FlatArray
 fa_len(fa_new(3, 0.0))

@@ -24,7 +24,7 @@ The row variable `e` is the whole story on effects. It is open and it is threade
 
 ### `RwFix`
 
-```prism,def,h-f269ee7e7f6b4b675947c0358924029dec04bee36096578ca48a8ae1b8d0764d
+```prism,def,h-1066b8e4900ba92f9e6fe17ed189cba1be189a42eb3eeb503babfdb4f8e0b71a
 type RwFix(a) = RwFix {
   tree: a,
   steps: Int,

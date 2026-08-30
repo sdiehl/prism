@@ -9,7 +9,7 @@ use std::cmp::Ordering;
 use std::collections::{btree_map, BTreeMap, BTreeSet};
 use std::ptr;
 
-use prism_common::fixpoint::least_fixpoint;
+use prism_common::fixpoint::{least_fixpoint, stabilize};
 use prism_common::sym::Sym;
 use prism_syntax::names::ENTRY_POINT;
 
@@ -440,8 +440,10 @@ pub fn local_region(
         })
         .collect();
 
-    let mut inert: BTreeSet<Sym> = functions.iter().map(TypedCoreFn::name).collect();
-    loop {
+    // Greatest fixpoint by erosion: assume every function inert, then evict
+    // any that applies a closure, touches an operation, or calls an evictee.
+    let all: BTreeSet<Sym> = functions.iter().map(TypedCoreFn::name).collect();
+    let inert = stabilize(all, |inert| {
         let mut changed = false;
         for function in functions {
             if !inert.contains(&function.name()) {
@@ -459,13 +461,10 @@ pub fn local_region(
                 changed = true;
             }
         }
-        if !changed {
-            break;
-        }
-    }
+        changed
+    });
 
-    let mut region = escaping;
-    loop {
+    let region = stabilize(escaping, |region| {
         let mut changed = false;
         for name in region.clone() {
             if let Some(function) = by_name.get(&name) {
@@ -487,10 +486,8 @@ pub fn local_region(
                 changed |= region.insert(function.name());
             }
         }
-        if !changed {
-            break;
-        }
-    }
+        changed
+    });
 
     let entry_point = Sym::new(ENTRY_POINT);
     let region_operations: BTreeSet<Sym> = region
@@ -757,6 +754,20 @@ struct ClosureFlow<'a> {
     operation_param: BTreeMap<Sym, Vec<ClosureShape>>,
 }
 
+impl ClosureFlow<'_> {
+    /// The closure shapes a declaration's body starts from: one entry per
+    /// parameter, carrying what flowed into that slot. The closure-shape
+    /// analogue of [`flow::param_loc`], and like it total on a function the
+    /// flow never seeded (the zip just comes up empty).
+    fn param_loc(&self, f: &TypedCoreFn) -> BTreeMap<Sym, ClosureShape> {
+        f.params()
+            .iter()
+            .map(TypedBinder::name)
+            .zip(self.param.get(&f.name()).into_iter().flatten().cloned())
+            .collect()
+    }
+}
+
 struct ClosureUpdates {
     param: BTreeMap<Sym, Vec<ClosureShape>>,
     thunk_ret: Vec<ClosureShape>,
@@ -807,7 +818,7 @@ fn closure_flow(functions: &[TypedCoreFn]) -> ClosureFlow<'_> {
             _ => Vec::new(),
         })
         .collect();
-    let mut flow = ClosureFlow {
+    let flow = ClosureFlow {
         thunk_ret: vec![ClosureShape::default(); sites.thunks.len()],
         thunk_param,
         handle_ret: vec![ClosureShape::default(); sites.handle_ids.len()],
@@ -836,19 +847,14 @@ fn closure_flow(functions: &[TypedCoreFn]) -> ClosureFlow<'_> {
             })
             .collect(),
     };
-    loop {
-        let mut updates = ClosureUpdates::new(&flow);
+    stabilize(flow, |flow| {
+        let mut updates = ClosureUpdates::new(flow);
         let mut returns = BTreeMap::new();
         for function in functions {
-            let loc = function
-                .params()
-                .iter()
-                .map(TypedBinder::name)
-                .zip(flow.param[&function.name()].iter().cloned())
-                .collect();
+            let loc = flow.param_loc(function);
             returns.insert(
                 function.name(),
-                closure_props(function.body(), &loc, &flow, &mut updates, &mut |_, _| {}),
+                closure_props(function.body(), &loc, flow, &mut updates, &mut |_, _| {}),
             );
         }
         let mut changed = false;
@@ -887,10 +893,8 @@ fn closure_flow(functions: &[TypedCoreFn]) -> ClosureFlow<'_> {
                 changed |= slot.merge(value);
             }
         }
-        if !changed {
-            return flow;
-        }
-    }
+        changed
+    })
 }
 
 fn closure_thunk(
@@ -1196,11 +1200,12 @@ fn closure_props(
             );
             for operation in ops.arms() {
                 let mut extended = loc.clone();
-                for (parameter, shape) in operation
-                    .params()
-                    .iter()
-                    .zip(&flow.operation_param[&operation.name()])
-                {
+                for (parameter, shape) in operation.params().iter().zip(
+                    flow.operation_param
+                        .get(&operation.name())
+                        .into_iter()
+                        .flatten(),
+                ) {
                     extended.insert(parameter.name(), shape.clone());
                 }
                 // Without a site number there is no answer slot to resume into,
@@ -1257,12 +1262,7 @@ fn closure_crosses_boundary(
 ) -> bool {
     let mut updates = ClosureUpdates::new(flow);
     for function in functions {
-        let loc = function
-            .params()
-            .iter()
-            .map(TypedBinder::name)
-            .zip(flow.param[&function.name()].iter().cloned())
-            .collect();
+        let loc = flow.param_loc(function);
         let inside = region.contains(&function.name());
         let mut crosses = false;
         closure_props(

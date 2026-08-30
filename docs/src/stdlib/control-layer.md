@@ -16,7 +16,7 @@ Every query here terminates on a finite tree: each is structurally recursive thr
 
 ### `Layer`
 
-```prism,def,h-373f024888af9b7a33e671f144b840d44f6f44669d819696b142b32f82a9b310
+```prism,def,h-5015ddddae0828f4d1f7f27d7789b25eaf1ad470c7c3f658aba55106fd4a61cb
 type Layer(a) = Layer { kids: (a) -> List(a), rebuild: (a, List(a)) -> a }
 ```
 

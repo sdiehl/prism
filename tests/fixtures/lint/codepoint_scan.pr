@@ -1,0 +1,12 @@
+-- A codepoint-indexed scan. `sum_codes` recurses while reading `char_at(s, i)`
+-- at a computed position, so each call re-walks the UTF-8 encoding from the
+-- start and the whole scan is quadratic in the length of `s`. This is the
+-- L0109 victim the lint rule exists to catch; `byte_at`/`byte_len` are the
+-- constant-time replacement a scanner should reach for.
+fn sum_codes(s : String, i : Int) : Int =
+  if i == str_len(s) then
+    0
+  else
+    char_at(s, i) + sum_codes(s, i + 1)
+
+fn main() = println(sum_codes("HELLO", 0))

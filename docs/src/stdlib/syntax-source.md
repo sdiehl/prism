@@ -10,7 +10,7 @@ Byte offsets are the canonical position vocabulary (line and column are projecti
 
 ### `Span`
 
-```prism,def,h-15a9bbafc1a7da10f31b56dffd8efdcb5f8cddd5549a1231e2119eaa77d77056
+```prism,def,h-3912f3b03415af877d2fd1c1428b84305c58872b3e5517cbcadf4fa6730c0747
 type Span = Span { lo: Int, hi: Int } deriving (Eq, Show)
 ```
 
@@ -26,7 +26,7 @@ span_len(Span { lo = 3, hi = 8 })
 
 ### `SourceFile`
 
-```prism,def,h-ebd32a7e8114ee8f96881286bb6c9c3af577341626f7fcf94173297a0dc0233f
+```prism,def,h-d65dfe4c19b1520bcb2d55ee1251fb322b1af8b4fe006f80db38787c7695249c
 type SourceFile = SourceFile {
   digest: String,
   text: String

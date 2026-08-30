@@ -1,0 +1,16 @@
+-- `g` masks `op`, so its row carries a second `E` that must tunnel past
+-- `main`'s single handler and stay unhandled. Because rows are multisets, the
+-- mask adds a distinct copy the handler cannot discharge, so `check` rejects
+-- `main` at compile time (E5004) rather than letting a checked-clean program
+-- abort at runtime with `unhandled effect ``op```.
+effect E
+  op(Int) : Int
+
+fn g() = mask<E>(op(1))
+
+fn main() : Unit ! {IO} =
+  let r =
+    handle g() with
+      op(x) resume k => k(x)
+      return r => r
+  println(r)

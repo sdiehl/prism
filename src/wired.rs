@@ -9,13 +9,13 @@
 
 use crate::names::bare_name;
 use crate::sym::Sym;
-use crate::types::ty::LIST;
+use crate::types::ty::{ARRAY, LIST};
 use crate::types::Type;
 
 // Container type constructors. The builtin containers (`Array`, `HashMap`) carry
 // bare names; a stdlib container (`Tensor` is `Data.Tensor.Tensor`) is matched on
 // its bare name, so classification is independent of the defining module path.
-const TY_ARRAY: &str = "Array";
+// `Array` lives with the other wired-in nominal names in `types::ty`.
 const TY_HASHMAP: &str = "HashMap";
 const TY_TENSOR: &str = "Tensor";
 
@@ -39,7 +39,7 @@ impl Indexable {
     #[must_use]
     pub(crate) fn classify(ty: &Type) -> Option<Self> {
         match ty {
-            Type::Con(n, args) if bare_name(n.as_str()) == TY_ARRAY && args.len() == 1 => {
+            Type::Con(n, args) if bare_name(n.as_str()) == ARRAY && args.len() == 1 => {
                 Some(Self::Array)
             }
             Type::Con(n, args) if bare_name(n.as_str()) == TY_HASHMAP && args.len() == 1 => {

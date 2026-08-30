@@ -10,7 +10,7 @@ One document per source file: the embedded source identity and every user functi
 
 ### `RNode`
 
-```prism,def,h-837bc7bca3cdeee5319586046795354998283d65039ed502a8da30c91515cdcd
+```prism,def,h-b3d524b5ccdbfad8a066156721750738137a814b63c67415a171c71b8445a9b3
 type RNode = RNode { id: Int, kind: String, span: Span, children: List(RNode) }
 ```
 
@@ -18,7 +18,7 @@ One resolved expression node: its NodeId (the join key), its expression-form kin
 
 ### `RParam`
 
-```prism,def,h-82bba1a8e89773b798d0c892c056489144c0f83cfd24f4e09520a6dd36f01412
+```prism,def,h-871248c99f38bd1d60ba97db62ac0945831dea23cfceeddb56f088b8ba3d72d6
 type RParam = RParam { name: String, is_borrow: Bool } deriving (Eq, Show)
 ```
 
@@ -26,7 +26,7 @@ One parameter of a resolved function: the binder its body's references resolve t
 
 ### `RFunction`
 
-```prism,def,h-b4f203126de3fedc350040f172cb0bb875ca216e8ff9c2d3efcf9f6c51d32016
+```prism,def,h-64f4179a8bfd4abac8eeea94fe8c9834d0c6162e77b9c885effe20d67ec810c2
 type RFunction = RFunction { name: String, params: List(RParam), body: RNode }
 ```
 
@@ -34,7 +34,7 @@ One user function's resolved body tree, with its name and parameters.
 
 ### `ResolvedDoc`
 
-```prism,def,h-17823dd5c8b0dfec69cfe9271e51773aeed646a5eaf98a00f86b3a72c514177a
+```prism,def,h-82ee5ad16b21822a41e497d550b0fa29b1ca64496ebcb1b560df7f200183baf6
 type ResolvedDoc = ResolvedDoc {
   schema: String,
   compiler: String,

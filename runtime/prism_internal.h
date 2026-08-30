@@ -99,6 +99,19 @@ extern void *mi_calloc(size_t, size_t);
  * exponential time and heap while still producing the correct value. */
 #define PRISM_ARENA_FORWARDED (1L << 61)
 
+/* Visited marker set on an ordinary (non-arena) cell during one promotion walk:
+ * this cell's arena-valued fields have already been rewritten in place, so a
+ * second path reaching it must not descend it again. It appears only between the
+ * start and end of prism_promote and, unlike the arena marks above, sits on
+ * cells the region keeps, so the walk records every marked cell and clears the
+ * bit before returning. It is distinct from the arena marks: an ordinary cell is
+ * never copied, only descended, so the tag word stays untouched. Without this
+ * the walk re-descends a shared ordinary spine once per incoming path, costing
+ * exponential time on a diamond while still producing the correct value. The bit
+ * is not in PRISM_RC_INERT, so a count increment on a marked cell still lands;
+ * it stays clear of the low count bits, so clearing it restores the true rc. */
+#define PRISM_PROMOTE_SEEN (1L << 59)
+
 /* Static-cell marker in the refcount word: a cell the compiler baked into the
  * executable image (a string literal), never allocated and never freed. The
  * cell may live in read-only memory, so every path that would write its rc
@@ -190,6 +203,13 @@ static inline int prism_tag_has_payload(long tag) {
 static inline int prism_tag_is_str(long tag) {
     return tag == PRISM_STR_TAG || tag == PRISM_STRVIEW_TAG;
 }
+
+/* The abort text an out-of-bounds buffer index prints before dying. Both the
+ * byte buffer and the typed buffer fault the same way, and the interpreter's
+ * builtin path checks for this exact string, so the words are shared from one
+ * home rather than re-typed at each site; a matching drift guard in the root
+ * crate reads this header and the interpreter const to hold the two in step. */
+#define PRISM_BUFFER_INDEX_ERROR "buffer index out of bounds"
 
 /* Unicode scalar-value bounds. The interpreter's show_char is char::from_u32,
  * which admits U+0000..U+D7FF and U+E000..U+10FFFF, rejecting the UTF-16

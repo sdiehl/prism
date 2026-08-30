@@ -10,7 +10,7 @@ The document is the declaration interface consumed by the Rust checker. Its func
 
 ### `TcImport`
 
-```prism,def,h-e6e8d50d33b2a8f61d31f374e97db52c0de4bc66843018e0d81a1e0e93f15194
+```prism,def,h-4618ad405c1fe305e0c90aee149630327de6a53f9f6f1b17a35ae4b7f4a65b37
 type TcImport = TcImport {
   path: String,
   names: List(String),
@@ -22,7 +22,7 @@ One import the module takes: the module path, the names taken from it, and wheth
 
 ### `TcCtor`
 
-```prism,def,h-112a43cce4b609eef25b102f6f821f1d477c08db10afc20844abf181d980c434
+```prism,def,h-f5a71fce79bfaa393c30daf7266f76374f267a7220b8120a7a022553845b1d5d
 type TcCtor = TcCtor {
   name: String,
   tag: Int,
@@ -35,7 +35,7 @@ One constructor of a data declaration: its name, its discriminant tag, its recor
 
 ### `TcData`
 
-```prism,def,h-a12f5eeeaf13f307a130f54884e3d89df776ff8c7199de71d6b2bc49d375baa4
+```prism,def,h-0d1f94481e39064ab75db5f9d845de0d4948f4fefb798823d42d88f50103984f
 type TcData = TcData {
   name: String,
   params: List(String),
@@ -50,7 +50,7 @@ A data declaration: its name, type parameters, newtype flag, derived class names
 
 ### `TcOp`
 
-```prism,def,h-0662ef03eb89a9e17caf0203a9a05a31dca62d37773c0f05fa9e83fe93e8126a
+```prism,def,h-d91bd95e17edb1c02aa349c3b0378b3d84a22e5c054dc8e0578e0f0f92d80c69
 type TcOp = TcOp {
   name: String,
   grade: String,
@@ -63,7 +63,7 @@ One operation of an effect declaration: its name, its resumption grade, its para
 
 ### `TcEffect`
 
-```prism,def,h-340c03bf5eda59eaed3c0d14bfc619337b7f383fd539059dc66bfa0b0ba148bd
+```prism,def,h-1c6ab50a019e006b9bcb6c55efa483410867eb4787cda994eeb53afb4b98f0ef
 type TcEffect = TcEffect {
   name: String,
   params: List(String),
@@ -76,7 +76,7 @@ An effect declaration: its name, type parameters, operations, and the span of th
 
 ### `TcMethod`
 
-```prism,def,h-3db0fd3fcbc788dcb0cdba82d5e1b3b66556a8d1a10a1aafa5a60cbc67b16062
+```prism,def,h-f111d287c3d8136ac1083d8d5480c572029a5658de86bdd4dc2828f5969ee585
 type TcMethod = TcMethod { name: String, ty: String } deriving (Eq, Show)
 ```
 
@@ -84,7 +84,7 @@ One method signature of a class: its name and its type spelling.
 
 ### `TcClass`
 
-```prism,def,h-34069bb4f449274c6c3263d8cedc940e1f99ca8d77694ee628e43453c3cc75a6
+```prism,def,h-9cba36a20b428a3aef9a7707585b9e5b388e5687122b2e169150642de31b841e
 type TcClass = TcClass {
   name: String,
   param: String,
@@ -98,7 +98,7 @@ A class declaration: its name, its single type parameter, its superclass names, 
 
 ### `TcConstraint`
 
-```prism,def,h-094c800470313cbfe7bddddb3db03404effea78d8332abd5e226a040e2906cfb
+```prism,def,h-45487001cca45b00c87cf78e6239580f44313994dce1e563138b6e7bda3de1ef
 type TcConstraint = TcConstraint { cls: String, ty: String } deriving (Eq, Show)
 ```
 
@@ -106,7 +106,7 @@ One class constraint: the class named and the type it constrains.
 
 ### `TcInstance`
 
-```prism,def,h-c81bdb450e355fc13e7440d15d8b7ed1aea185ba74da88ab492fa3a99eff0219
+```prism,def,h-3be21ea02717d4193c23833b6d4aa7258b3af6ce808d9e5db6c6460ce9e96ced
 type TcInstance = TcInstance {
   cls: String,
   head: String,
@@ -119,7 +119,7 @@ An instance declaration: the class, the head type it instantiates, the module th
 
 ### `TcParam`
 
-```prism,def,h-57863e590b38a005b3211d2800e641e711973f7060250a9b2d4f75347706cc11
+```prism,def,h-983b858995a43f68e83a4aff323d5d1173a8b9205c38bbe3594d11f17a378b33
 type TcParam = TcParam { name: String, is_borrow: Bool } deriving (Eq, Show)
 ```
 
@@ -127,7 +127,7 @@ One function parameter: its binder name and whether it is taken by borrow.
 
 ### `TcFunction`
 
-```prism,def,h-cdc71b54b0a6008b175ec92867d45178253c0442fdb11212f985b54d2d13a5e6
+```prism,def,h-9046b0a2f691b65a288612112a2592ef59833311efe20ef738b19f1f7c7821cf
 type TcFunction = TcFunction {
   name: String,
   params: List(TcParam),
@@ -141,7 +141,7 @@ A function declaration: its name, parameters, constraint spellings, the NodeId o
 
 ### `TcInputDoc`
 
-```prism,def,h-3708877ab3a2001ff3cebf057513a67d11dd2a1b7158dd98196d171031f80e83
+```prism,def,h-88a81ec4191ec9638b0ed3362cbea1cd1ef3402d6b8ce14670f44f95c1603c33
 type TcInputDoc = TcInputDoc {
   schema: String,
   compiler: String,

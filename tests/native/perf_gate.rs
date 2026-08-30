@@ -422,6 +422,7 @@ const PERF_ARENA_REGION_LOOP: &str = include_str!("../cases/perf/arena_region_lo
 const PERF_ARENA_PROMOTE_NONE: &str = include_str!("../cases/perf/arena_promote_none.pr");
 const PERF_ARENA_PROMOTE_LINEAR: &str = include_str!("../cases/perf/arena_promote_linear.pr");
 const PERF_ARENA_PROMOTE_SHARED: &str = include_str!("../cases/perf/arena_promote_shared.pr");
+const PERF_ARENA_PROMOTE_ORDINARY: &str = include_str!("../cases/perf/arena_promote_ordinary.pr");
 
 // Growing the list built under one `with_arena` activation must not grow the
 // runtime allocation count at all. Every `Cons` comes from the region; only the
@@ -643,6 +644,46 @@ fn arena_promotion_copies_a_shared_cell_once() {
          pointing at the child the first field already promoted); region sharing is not \
          surviving promotion",
         lo.shared, hi.shared
+    );
+}
+
+// Promotion must visit a shared ordinary spine once per cell, not once per path.
+// The visit counters distinguish the linear and exponential traversals.
+#[test]
+fn arena_promotion_descends_a_shared_ordinary_spine_once() {
+    require_cc();
+    let (small, big) = (12_i64, 22_i64);
+    let lo = PromoteStats::measure(
+        PERF_ARENA_PROMOTE_ORDINARY,
+        "arena_promote_ordinary_lo",
+        small,
+    );
+    let hi = PromoteStats::measure(
+        PERF_ARENA_PROMOTE_ORDINARY,
+        "arena_promote_ordinary_hi",
+        big,
+    );
+    let span = big - small;
+    let (nodes, edges) = ((hi.nodes - lo.nodes) / span, (hi.edges - lo.edges) / span);
+    assert!(
+        nodes <= 2 && edges <= 4,
+        "promoting a `Wrap` over a shared ordinary spine entered {nodes} nodes and examined \
+         {edges} edges per spine level ({} and {} at depth {small}, {} and {} at depth {big}); \
+         the descent is re-walking the shared spine once per path reaching it rather than once \
+         per cell",
+        lo.nodes,
+        lo.edges,
+        hi.nodes,
+        hi.edges
+    );
+    assert_eq!(
+        (hi.copied, hi.shared),
+        (1, 0),
+        "promoting the ordinary spine copied {} cells and reused {} shared edges (expected the \
+         lone arena `Wrap` copied once, nothing shared: the spine is ordinary, so no region cell \
+         is duplicated or reused)",
+        hi.copied,
+        hi.shared
     );
 }
 
@@ -1237,6 +1278,17 @@ const TIER_MANIFEST_HEADER: &str = r"# Effect-lowering tier manifest. One `<prog
 # with `just tier-accept`. Do not hand-edit.
 ";
 
+// The manifest catches per-program regressions; this separate ratchet bounds the
+// total population on the costliest tier and is reseated downward only.
+const TIER_RATCHET: &str = "tests/tier_ratchet.txt";
+const TIER_RATCHET_HEADER: &str = r"# Aggregate decline ratchet: `<costliest-tier>\t<count>`. The number of corpus
+# programs the cascade floors at the slowest rung. tier_manifest.txt fails one
+# program sliding slower; this fails the sum growing. Pinned by
+# tests/perf_gate.rs::tier_manifest_holds. `just tier-accept` reseats it DOWNWARD
+# only: a fast-path win shrinks it, but a program joining the slowest rung is
+# refused there and must be a reviewed hand-edit. Do not raise it to pass a gate.
+";
+
 // The corpus as `(dir/name.pr label, tier)` rows, sorted by label. The label is
 // the path relative to the crate root, matching the parity oracles' program names.
 fn corpus_tiers() -> Vec<(String, String)> {
@@ -1274,6 +1326,61 @@ fn parse_manifest(text: &str) -> BTreeMap<String, String> {
                 .expect("tier manifest line is `label<TAB>tier`");
             (label.to_string(), tier.to_string())
         })
+        .collect()
+}
+
+// The costliest tier's label, read from the one cost order so the ratchet cannot
+// drift from the ladder's own vocabulary (the same source the `rank` closure and
+// the manifest generator use).
+const fn costliest_tier() -> &'static str {
+    prism::EFFECT_TIERS
+        .last()
+        .expect("the effect-tier cost order is non-empty")
+        .label()
+}
+
+// The labels of the corpus rows floored at the costliest tier.
+fn costliest_programs(rows: &[(String, String)]) -> BTreeSet<&str> {
+    let costliest = costliest_tier();
+    rows.iter()
+        .filter(|(_, tier)| tier == costliest)
+        .map(|(label, _)| label.as_str())
+        .collect()
+}
+
+// The committed baseline count, or `None` when the file is absent or unseeded.
+// Keyed by the costliest-tier label so a ladder rename fails closed (the line
+// stops matching) rather than silently comparing against a stale tier's count.
+fn read_ratchet(path: &Path) -> Option<usize> {
+    let text = fs::read_to_string(path).ok()?;
+    let costliest = costliest_tier();
+    text.lines()
+        .filter(|l| !l.trim_start().starts_with('#') && !l.trim().is_empty())
+        .find_map(|l| {
+            let (label, count) = l.split_once('\t')?;
+            (label == costliest).then(|| count.trim().parse().ok())?
+        })
+}
+
+fn render_ratchet(count: usize) -> String {
+    format!("{TIER_RATCHET_HEADER}{}\t{count}\n", costliest_tier())
+}
+
+// Programs floored at the costliest tier now that were not in the prior manifest
+// (an absent prior means every one is new). Names the arrivals when the accept
+// path refuses to raise the ratchet, so the failure points at the exact programs
+// that joined the slowest rung.
+fn newly_costliest(
+    current: &[(String, String)],
+    prior: Option<&BTreeMap<String, String>>,
+) -> Vec<String> {
+    let costliest = costliest_tier();
+    let was_slow =
+        |label: &str| prior.is_some_and(|m| m.get(label).is_some_and(|tier| tier == costliest));
+    current
+        .iter()
+        .filter(|(label, tier)| tier == costliest && !was_slow(label))
+        .map(|(label, _)| label.clone())
         .collect()
 }
 
@@ -1340,11 +1447,37 @@ fn tier_manifest_holds_on_compiler_stack() {
     if env::var_os(TIER_MANIFEST_ACCEPT).is_some() {
         let prior = fs::read_to_string(&path).map(|t| parse_manifest(&t)).ok();
         guard_accept(root, &current, prior.as_ref());
+
+        // Reseat the aggregate ratchet, downward only. A grown slowest-rung
+        // population is refused here so the manifest regen cannot silently drag
+        // the sum up: raising it must be a reviewed hand-edit of the ratchet
+        // file. Refuse before writing either golden so a rejection leaves both
+        // committed artifacts untouched and internally consistent.
+        let ratchet_path = root.join(TIER_RATCHET);
+        let now = costliest_programs(&current);
+        if let Some(baseline) = read_ratchet(&ratchet_path) {
+            assert!(
+                now.len() <= baseline,
+                "refusing to reseat {TIER_RATCHET}: the {} population grew {baseline} -> {} \
+                 while regenerating {TIER_MANIFEST}. The ratchet reseats downward only. Restore a \
+                 faster tier for the program(s) that joined the slowest rung, or, if this is a \
+                 reviewed and unavoidable addition, raise {TIER_RATCHET} by hand with \
+                 justification first:\n  {}",
+                costliest_tier(),
+                now.len(),
+                newly_costliest(&current, prior.as_ref()).join("\n  ")
+            );
+        }
+
         fs::write(&path, render_manifest(&current)).expect("write tier manifest");
+        fs::write(&ratchet_path, render_ratchet(now.len())).expect("write tier ratchet");
         eprintln!(
-            "tier manifest regenerated: {} programs -> {}",
+            "tier manifest regenerated: {} programs ({} on {}) -> {}, {}",
             current.len(),
-            TIER_MANIFEST
+            now.len(),
+            costliest_tier(),
+            TIER_MANIFEST,
+            TIER_RATCHET
         );
         return;
     }
@@ -1402,5 +1535,20 @@ fn tier_manifest_holds_on_compiler_stack() {
 {}",
         changes.len(),
         changes.join("\n")
+    );
+
+    // The costliest-tier population may not exceed its committed baseline.
+    let baseline = read_ratchet(&root.join(TIER_RATCHET)).unwrap_or_else(|| {
+        panic!("cannot read the aggregate tier ratchet {TIER_RATCHET}; seat it with `just tier-accept`")
+    });
+    let now = costliest_programs(&current);
+    assert!(
+        now.len() <= baseline,
+        r"the {} population is {}, over the ratchet baseline {baseline}: the sum on the slowest rung grew even though no single program regressed. Find the fast path that stopped firing, or, for a reviewed change, regenerate with `just tier-accept` (which reseats the ratchet downward only). Programs on {}:
+  {}",
+        costliest_tier(),
+        now.len(),
+        costliest_tier(),
+        now.into_iter().collect::<Vec<_>>().join("\n  ")
     );
 }

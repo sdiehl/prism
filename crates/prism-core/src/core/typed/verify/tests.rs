@@ -828,8 +828,39 @@ fn reference_count_operations_return_unit() {
 }
 
 #[test]
-fn row_instantiation_recanonicalizes_duplicate_labels() {
+fn row_instantiation_stacks_duplicate_labels() {
+    // An ordinary instantiation row is the demand BEYOND the declared head
+    // (the builder's `subsume_row` consumes matching occurrences one-to-one
+    // and routes only the surplus into the flexible tail), so substituting
+    // `e := {IO}` under a declared `IO` stacks to the two-level `{IO, IO}`.
     let row_parameter = Sym::new("e");
+    let signature = CoreFnSig::new(
+        vec![CoreQuantifier::Row(row_parameter)],
+        Vec::new(),
+        CompSig::new(
+            source(Type::Unit),
+            EffRow::Extend(Label::bare(IO_EFFECT), Box::new(EffRow::Var(row_parameter))),
+        ),
+    );
+    let instantiated = instantiate_fn(
+        &signature,
+        &[CoreInstantiation::Row(EffRow::singleton(IO_EFFECT))],
+    )
+    .unwrap();
+    let stacked = EffRow::Extend(
+        Label::bare(IO_EFFECT),
+        Box::new(EffRow::singleton(IO_EFFECT)),
+    );
+    assert_eq!(instantiated.body().effects(), &stacked);
+}
+
+#[test]
+fn evidence_row_instantiation_merges_duplicate_labels() {
+    // An evidence-row variable is the threading's rewidening artifact: it
+    // stands for the residual ambient row at the SAME handler level as the
+    // declared head, so an overlapping label merges per-label MAX instead of
+    // fabricating a phantom second level.
+    let row_parameter = Sym::from(names::evidence_row(&[1]));
     let signature = CoreFnSig::new(
         vec![CoreQuantifier::Row(row_parameter)],
         Vec::new(),
@@ -1156,7 +1187,7 @@ fn or_null_rebuild_is_not_an_allocation() {
 #[test]
 fn polymorphic_function_subtyping_is_alpha_invariant() {
     let a = Sym::new("a");
-    let renamed = Sym::new("a$typedq0");
+    let renamed = Sym::from(prism_syntax::names::typed_quantifier("a", 0));
     let function = |name| {
         CoreType::Function(Box::new(CoreFnSig::new(
             vec![CoreQuantifier::Type(name)],

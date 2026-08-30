@@ -35,6 +35,7 @@ use prism::types::ty::EffRow;
 use prism::types::CtorInfo;
 use prism::types::Type;
 use prism_common::sym::Sym;
+use prism_syntax::ast::Grade;
 
 fn sym(name: &str) -> Sym {
     Sym::new(name)
@@ -1351,6 +1352,43 @@ fn main() : Int ! {} =
     assert_eq!(out.strategy, recognized);
 }
 
+// The clause classification, not the declared grade, decides multishot
+// membership. A stale `once` grade on a clause that resumes twice must not
+// re-admit var erasure: erasing would share one cell across resumptions the
+// pure semantics keeps independent, and the miscompile would only surface in
+// release builds if the disagreement were guarded by a debug assertion.
+#[test]
+fn a_multishot_clause_outranks_a_stale_once_grade() {
+    let src = "effect Choice
+  flip() : Bool
+
+fn choose() : Int ! {Choice} =
+  var x := 0
+  if flip() then
+    x := 1
+  else
+    x := 2
+  x
+
+fn main() : Int ! {} =
+  handle choose() with {
+    flip() resume k => k(true) + k(false),
+    return x => x
+  }
+";
+    let (typed, env, ctors, mut grades) = typed_from_source(src);
+    grades.insert(sym("flip"), Grade::Once);
+    let flags = DynFlags::default();
+    let recognized = recognized_strategy(typed, &env, &ctors, &flags, &grades)
+        .expect("the typed cascade classifies")
+        .expect("the typed cascade selects a strategy");
+    assert_ne!(
+        recognized,
+        EffectStrategy::Pure,
+        "a twice-resuming clause must block var erasure whatever the grade says"
+    );
+}
+
 // Effects hiding inside thunks and constructor fields are still seen by
 // the raw-effects scan.
 #[test]
@@ -1369,7 +1407,15 @@ fn raw_effects_sees_through_thunks() {
         CoreType::Thunk(Box::new(do_node.sig().clone())),
         TypedValueKind::Thunk(Box::new(do_node)),
     );
-    assert!(raw_effects(&ret(thunk)));
+    assert!(raw_effects(&ret(thunk.clone())));
+    // An unboxed carrier is still a carrier: a thunk hidden in an unboxed
+    // tuple field must not slip past the scan.
+    let field_type = Type::Fun(Vec::new(), EffRow::singleton(effect), Box::new(Type::Int));
+    let unboxed = TypedValue::new(
+        CoreType::Source(Type::UnboxedTuple(vec![field_type])),
+        TypedValueKind::UnboxedTuple(vec![thunk]),
+    );
+    assert!(raw_effects(&ret(unboxed)));
     assert!(!raw_effects(&ret(lit(1))));
     let _ = TypedPattern::Wild;
 }

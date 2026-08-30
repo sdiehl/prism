@@ -12,7 +12,7 @@ Scope of this layer: the fixed-token vocabulary, identifiers, uppercase names, q
 
 ### `LexRaw`
 
-```prism,def,h-10eb3a9712cb93ac887b3ab68fa8b6f6d973d5da5665c17f21ac9443f819f1d8
+```prism,def,h-84273ad3687707d78d6c61a08cd82b11e34f93eeb4300da64e9b87903422e040
 type LexRaw = LexRaw {
   tokens: List(Token),
   trivia: List(Trivia)
@@ -23,7 +23,7 @@ The raw token layer: the semantic token stream and the trivia interleaved betwee
 
 ### `LexError`
 
-```prism,def,h-a6ba90365039f02024810a037c70c1f34ee7e1edcc4bdb8ac2de21a0d1c122bf
+```prism,def,h-aa06b1008fad285f99282204dc442701b5db3702970773b352640866522ee0f7
 type LexError
   = LxInvalid(Int)
   | LxEmptyHole(Int)

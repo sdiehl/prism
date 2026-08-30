@@ -1,4 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
+use std::rc::Rc;
 use std::slice;
 
 use marginalia::Span;
@@ -47,6 +49,10 @@ struct Elab<'a> {
     // Top-level constants, keyed by name. A reference inlines the RHS rather
     // than calling, so a constant pushes no frame.
     consts: BTreeMap<String, &'a S<Expr<CorePhase>>>,
+    // The local analogue of `consts`: type-polymorphic `let` values in scope,
+    // keyed by name. A use of one of these expands the value rather than reading
+    // a binding; see `Expansion`.
+    expansion: ExpansionMap,
     checked: &'a Checked,
     // The checked HIR: the only view of per-node semantic facts. Whole programs
     // use `checked`'s facts; re-inferred REPL expressions supply a complete,
@@ -70,6 +76,27 @@ struct Elab<'a> {
 // Iteration stays name-ordered exactly like the `BTreeMap` it replaced, so the
 // positional shadow sentinels in `local_env` are unchanged.
 type Locals = im::OrdMap<String, Option<Type>>;
+
+// A local `let` whose value the checker generalized over at least one type.
+// Core's `Bind` binds one monotype, so no bind is emitted for such a binding:
+// each use re-elaborates the value instead, in the scope the value was written
+// in, which is what is captured here. Only a locally-closed syntactic value is
+// ever recorded (the checker's admission rule), so the copies duplicate no
+// effect and no identity, differ in nothing but the types checking gave each
+// use, and carry no free reference to an enclosing local that a binder between
+// the `let` and a use could capture: every free variable resolves top-level.
+struct Expansion {
+    value: S<Expr<CorePhase>>,
+    locals: Locals,
+    // The expansion map as it stood at the binding, which excludes this binder:
+    // a same-named outer binding inside the value resolves outward, so
+    // re-elaboration cannot reenter itself.
+    snapshot: ExpansionMap,
+}
+
+// Persistent and reference-counted for the reason `Locals` is persistent: every
+// binder scopes its shadowing by cloning the map.
+type ExpansionMap = im::OrdMap<String, Rc<Expansion>>;
 
 // Red zone / segment size for the elaboration recursion, matching the typed-Core
 // builder's constants (`core/typed/build.rs`).
@@ -809,6 +836,31 @@ impl Elab<'_> {
         Ok(Comp::Bind(Box::new(int_comp), v.into(), Box::new(call)))
     }
 
+    // Run one sub-elaboration under a different set of expandable bindings,
+    // restoring the caller's on the way out.
+    fn with_expansion<R>(&mut self, map: ExpansionMap, under: impl FnOnce(&mut Self) -> R) -> R {
+        let saved = mem::replace(&mut self.expansion, map);
+        let out = under(self);
+        self.expansion = saved;
+        out
+    }
+
+    // Run one sub-elaboration with `names` hidden from the expansion map. Every
+    // binder must go through this: an inner binding of a name a polymorphic
+    // `let` also binds shadows that `let`, and expanding the outer value under
+    // the inner binding would read the wrong variable.
+    fn shadowing<'n, R>(
+        &mut self,
+        names: impl IntoIterator<Item = &'n str>,
+        under: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let mut scoped = self.expansion.clone();
+        for name in names {
+            scoped.remove(name);
+        }
+        self.with_expansion(scoped, under)
+    }
+
     fn elab(&mut self, e: &S<Expr<CorePhase>>, locals: &Locals) -> Result<Comp, Error> {
         // Elaboration recurses per surface node, so a long statement block (a
         // right-nested `Let` chain) is deep recursion; grow stack segments on
@@ -818,6 +870,7 @@ impl Elab<'_> {
         })
     }
 
+    #[allow(clippy::too_many_lines)] // One arm per expression form; splitting hides the total.
     fn elab_inner(&mut self, e: &S<Expr<CorePhase>>, locals: &Locals) -> Result<Comp, Error> {
         Ok(match &e.node {
             Expr::Int(lit) if self.hir.evidence(e.id).is_some() => {
@@ -837,10 +890,20 @@ impl Elab<'_> {
                 Comp::Return(Value::Ctor(x.clone().into(), kw::OR_NULL_TAG, vec![]))
             }
             Expr::Var(x) => {
-                if locals.contains_key(x) {
+                if let Some(bound) = self.expansion.get(x).cloned() {
+                    // A type-polymorphic local `let`: elaborate its value here,
+                    // in the scope and expansion map it was written in, so this
+                    // use gets the type checking chose for this use.
+                    let outer = bound.snapshot.clone();
+                    self.with_expansion(outer, |s| s.elab(&bound.value, &bound.locals))?
+                } else if locals.contains_key(x) {
                     Comp::Return(Value::Var(x.clone().into()))
                 } else if let Some(body) = self.consts.get(x).copied() {
-                    self.elab(body, &Locals::new())?
+                    // A constant's body sees globals only, so it elaborates in
+                    // an empty scope; the expandable bindings empty with it, or
+                    // a polymorphic `let` at the use site would capture the
+                    // constant's reference to a same-named global.
+                    self.with_expansion(ExpansionMap::new(), |s| s.elab(body, &Locals::new()))?
                 } else if self.hir.evidence(e.id).is_some() {
                     self.constrained_value(x, e.id)?
                 } else if self.needs_dict(x) {
@@ -942,6 +1005,25 @@ impl Elab<'_> {
                     Box::new(Comp::If(Value::Var(vc.into()), Box::new(ct), Box::new(ce))),
                 )
             }
+            Expr::Let(x, v, b) if self.hir.poly_let(v.id) => {
+                // The value generalized over types, and a `Bind` would fix one
+                // of them. Emit no bind: record the value with the scope it was
+                // written in, and let each use elaborate it at that use's own
+                // type. The name still enters `locals`, where it shadows a
+                // same-named global and routes call sites through the generic
+                // force-and-apply path; the type slot is empty because the
+                // binding has no one type for it to hold.
+                let bound = Rc::new(Expansion {
+                    value: (**v).clone(),
+                    locals: locals.clone(),
+                    snapshot: self.expansion.clone(),
+                });
+                let mut l2 = locals.clone();
+                l2.insert(x.clone(), None);
+                let mut scoped = self.expansion.clone();
+                scoped.insert(x.clone(), bound);
+                self.with_expansion(scoped, |s| s.elab(b, &l2))?
+            }
             Expr::Let(x, v, b) => {
                 let cv = self.elab(v, locals)?;
                 // HIR-first (`local_ty`): the checker already recorded the
@@ -953,14 +1035,14 @@ impl Elab<'_> {
                 let ty = self.local_ty(v, locals);
                 let mut l2 = locals.clone();
                 l2.insert(x.clone(), ty);
-                let cb = self.elab(b, &l2)?;
+                let cb = self.shadowing([x.as_str()], |s| s.elab(b, &l2))?;
                 Comp::Bind(Box::new(cv), x.clone().into(), Box::new(cb))
             }
             Expr::Lam(ps, body) => {
                 let names: Vec<String> = ps.iter().map(|p| p.name.clone()).collect();
                 let mut l2 = locals.clone();
                 l2.extend(names.iter().map(|n| (n.clone(), None)));
-                let cb = self.elab(body, &l2)?;
+                let cb = self.shadowing(names.iter().map(String::as_str), |s| s.elab(body, &l2))?;
                 Comp::Return(Value::Thunk(Box::new(Comp::Lam(
                     names.into_iter().map(Sym::from).collect(),
                     Box::new(cb),
@@ -1044,13 +1126,19 @@ impl Elab<'_> {
                             let mut l2 = locals.clone();
                             l2.insert(x.clone(), None);
                             return_var = Some(x.clone().into());
-                            return_body = Some(Box::new(self.elab(arm_body, &l2)?));
+                            let compiled =
+                                self.shadowing([x.as_str()], |s| s.elab(arm_body, &l2))?;
+                            return_body = Some(Box::new(compiled));
                         }
                         HandlerArm::Op(name, params, resume_var, arm_body) => {
                             let mut l2 = locals.clone();
                             l2.extend(params.iter().map(|p| (p.clone(), None)));
                             l2.insert(resume_var.clone(), None);
-                            let compiled = self.elab(arm_body, &l2)?;
+                            let bound = params
+                                .iter()
+                                .chain(slice::from_ref(resume_var))
+                                .map(String::as_str);
+                            let compiled = self.shadowing(bound, |s| s.elab(arm_body, &l2))?;
                             ops.push(HandleOp {
                                 name: name.clone().into(),
                                 params: params.iter().map(Sym::from).collect(),
@@ -1589,6 +1677,7 @@ pub fn elaborate_typed(
         ctors: &checked.ctors,
         arity,
         consts,
+        expansion: ExpansionMap::new(),
         checked,
         hir: hir::build(checked),
         route_output,
@@ -1881,6 +1970,7 @@ pub(crate) fn elaborate_expr_defs(
         ctors: &checked.ctors,
         arity: arity.clone(),
         consts: consts.iter().map(|(k, v)| (k.clone(), v)).collect(),
+        expansion: ExpansionMap::new(),
         checked,
         // A re-inferred expression carries its own complete fact artifact under
         // fresh ids; a konst body shares the checked program's facts.

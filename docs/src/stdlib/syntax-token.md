@@ -10,7 +10,7 @@ A fixed token's wire kind is its source spelling, so `TFixed` carries the spelli
 
 ### `TokenKind`
 
-```prism,def,h-c28a647880cea7a8cfdd7d57f4c280057b8a469fdfd7902ffda0c7ead0128d1a
+```prism,def,h-a0f33645ebc987c48f4d755f7573f7d72c163442b88077edf905dec0fa25f9cb
 type TokenKind
   = TFixed(String)
   | TIdent
@@ -33,7 +33,7 @@ A token kind: a fixed token by exact spelling, or one of the special value-carry
 
 ### `Token`
 
-```prism,def,h-4a7d7f923728595b6554ca999086f07d5b86745e5e8f3d803973ecaae285e766
+```prism,def,h-c37b3030b2793c5983b8f34c580477d7fd2b9af218eb5b154dc4cdcbbad4ee32
 type Token = Token {
   kind: TokenKind,
   span: Span,
@@ -45,7 +45,7 @@ One token: its kind, its span in the embedded source, and, for value-carrying ki
 
 ### `Trivia`
 
-```prism,def,h-1990b281448458678ac604c1d933a333c000a1acaca72e265d31a34f0148639b
+```prism,def,h-a462cecccfb3fb869a792df831322a0dd4b5769893b3c90d45f9da85672eec60
 type Trivia
   = TComment(Span)
   | TBlockComment(Span)

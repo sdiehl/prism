@@ -513,7 +513,7 @@ impl Tc<'_> {
         self.clear_obligations()?;
         let mut env2 = env.clone();
         for (p, t) in d.params.iter().zip(&seed.doms) {
-            env2.insert(Sym::from(&p.name), t.clone());
+            env2.insert_local(Sym::from(&p.name), t.clone());
         }
         let self_entry = if d.constraints.is_empty() {
             super::super::env::annotation_scheme(d, self.data)
@@ -715,7 +715,7 @@ impl Tc<'_> {
         // naming exists while its nodes are being rendered. `generalize_decl_map`
         // reads the context without touching it, so pulling it earlier leaves the
         // scheme it returns exactly the one this returned when it ran last.
-        let t = self.apply(&ty);
+        let t = default_open_rows(&self.apply(&ty));
         let (scheme, renames) = self.generalize_decl_map(env, &t);
         self.decl_renames = Some(renames);
         self.flush_spans();
@@ -760,7 +760,7 @@ impl Tc<'_> {
             let declared_labels = exp_row.label_names();
             let mut env2 = env.clone();
             for (p, t) in m.params.iter().zip(doms) {
-                env2.insert(Sym::from(&p.name), t.clone());
+                env2.insert_local(Sym::from(&p.name), t.clone());
             }
             let qual = format!("{}.{}", inst.name, m.name);
             let ((), effs) = self.scoped_effects_expected(exp_row.clone(), |tc| {
@@ -786,7 +786,7 @@ impl Tc<'_> {
             // account of what an instance method performs, since a method is
             // checked from inside its instance and never becomes a `DeclInfo`.
             self.method_effects.insert(
-                crate::names::instance_method(&inst.name, &m.name),
+                Sym::from(crate::names::instance_method(&inst.name, &m.name)),
                 effs.clone(),
             );
             let undeclared: Vec<String> = effs

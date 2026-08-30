@@ -95,10 +95,12 @@ fn look_by(cmp : (k, k) -> Int, key : k, m : Map(k, v, brand)) : Option(v) =
         Some(v2)
 
 -- | The empty map under witness `w`, carrying `w`'s brand.
+-- Time complexity: O(1).
 pub fn ord_empty(_w : OrdWitness(k, brand)) : OrderedMap(k, v, brand) =
   OrderedMap(map_empty)
 
 -- | Insert under witness `w`; the result carries `w`'s brand.
+-- Time complexity: O(log n) comparator calls.
 --
 -- ```prism
 -- with_ordering(\(a, b) -> cmp(a, b), \(w) ->
@@ -119,6 +121,7 @@ pub fn ord_insert(
         OrderedMap(tree) => OrderedMap(ins_by(cmp, key, x, tree))
 
 -- | Look `key` up under witness `w`. Only a map of `w`'s brand type-checks here.
+-- Time complexity: O(log n) comparator calls.
 --
 -- ```prism
 -- with_ordering(\(a, b) -> cmp(a, b), \(w) ->
@@ -138,6 +141,7 @@ pub fn ord_lookup(
         OrderedMap(tree) => look_by(cmp, key, tree)
 
 -- | True when `key` is present under witness `w`.
+-- Time complexity: O(log n) comparator calls.
 --
 -- ```prism
 -- with_ordering(\(a, b) -> cmp(a, b), \(w) ->
@@ -154,6 +158,7 @@ pub fn ord_member(
   is_some(ord_lookup(w, key, m))
 
 -- | The `(key, value)` pairs of a `w`-branded map, in tree (in-order) order.
+-- Time complexity: O(n).
 --
 -- ```prism
 -- with_ordering(\(a, b) -> cmp(a, b), \(w) ->
@@ -170,6 +175,7 @@ pub fn ord_to_list(
     OrderedMap(tree) => map_to_list(tree)
 
 -- | The number of entries in a `w`-branded map.
+-- Time complexity: O(n); sizes are not cached.
 --
 -- ```prism
 -- with_ordering(\(a, b) -> cmp(a, b), \(w) ->

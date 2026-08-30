@@ -33,14 +33,16 @@ use crate::types::Type;
 use prism_common::sym::Sym;
 use prism_syntax::names::{self, FRESH_FUSE};
 
+use super::effect_lower::union_effects;
 use super::inline::calls_in;
 use super::specialize_support::{
     free_comp_vars, next_fresh, substitute_terms, substitute_witnesses, Rewrite,
 };
-use super::verify::{substitute_core_type, union_rows};
+use super::verify::substitute_core_type;
 use super::{
     CompSig, CoreFnSig, CoreInstantiation, CoreType, TypedBinder, TypedComp, TypedCompKind,
     TypedCore, TypedCoreFn, TypedPattern, TypedValue, TypedValueKind, UncheckedTypedCore,
+    CORE_GROW_STACK, CORE_MIN_STACK,
 };
 
 // A seed whose symbolic driving takes more than this many reduction steps aborts
@@ -225,14 +227,6 @@ fn binder_var(binder: &TypedBinder) -> TypedValue {
             instantiation: Vec::new(),
         },
     )
-}
-
-// The verified `Bind`/`If` sig-construction rule unions the children's rows.
-// Everything this pass rebuilds already passed the purity gate, whose rows are
-// closed after instantiation, so the union cannot fail on verifiable input;
-// the fallback merely keeps the pass total.
-fn union_effects(left: &EffRow, right: &EffRow) -> EffRow {
-    union_rows(left, right).unwrap_or_else(|_| right.clone())
 }
 
 // Walk `body`, replacing every recognized seed call with a call to a freshly
@@ -977,7 +971,16 @@ struct PurityWalk {
 }
 
 impl PurityWalk {
+    // Tarjan's SCC walk recurses along call-graph edges, so a deep call chain
+    // could overflow the native stack. Grow it in segments at each recursive
+    // entry, the same discipline the builder and verifier traversals use.
     fn connect(&mut self, name: Sym, cx: &mut Cx) {
+        stacker::maybe_grow(CORE_MIN_STACK, CORE_GROW_STACK, || {
+            self.connect_inner(name, cx);
+        });
+    }
+
+    fn connect_inner(&mut self, name: Sym, cx: &mut Cx) {
         let info = cx.fns.get(&name).map_or(
             BodyInfo {
                 self_bad: true,

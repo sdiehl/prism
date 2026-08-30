@@ -10,7 +10,7 @@ The canonical `State(s)` effect: a threaded piece of mutable-looking state, inte
 
 ### `State`
 
-```prism,def,h-6796da70d1dbbdd5098b18d7300ecf898d55f3b0a0e0a27f115d9ddac139dc91
+```prism,def,h-7502edb965bef3ee0b311787fc72b0fbec8cbf3586dbb3260baf4f13f82e05ed
 effect State(s)
   get() : s
   put(s) : Unit

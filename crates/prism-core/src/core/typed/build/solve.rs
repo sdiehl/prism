@@ -7,6 +7,7 @@ use prism_common::sym::Sym;
 use crate::types::ty::{EffRow, Label};
 use crate::types::Type;
 
+use super::super::verify::union_rows as canonical_union_rows;
 use super::super::violation::{
     MetaKind, MetaVar, RowUnionError, SolveError, SolveRelation, Within,
 };
@@ -21,6 +22,9 @@ pub(super) struct Solver {
     rows: BTreeMap<u32, EffRow>,
     pub(super) int_defaults: BTreeSet<u32>,
     latent_defaults: BTreeSet<u32>,
+    instantiation_rows: BTreeSet<u32>,
+    shield_rows: BTreeSet<u32>,
+    shield_alias: BTreeMap<u32, u32>,
 }
 
 impl Solver {
@@ -87,7 +91,13 @@ impl Solver {
             .iter()
             .map(|quantifier| match quantifier {
                 CoreQuantifier::Type(_) => CoreInstantiation::Type(self.fresh_type()),
-                CoreQuantifier::Row(_) => CoreInstantiation::Row(self.fresh_row()),
+                CoreQuantifier::Row(_) => {
+                    let row = self.fresh_row();
+                    if let EffRow::Exist(id) = row {
+                        self.instantiation_rows.insert(id);
+                    }
+                    CoreInstantiation::Row(row)
+                }
             })
             .collect()
     }
@@ -200,20 +210,62 @@ impl Solver {
     }
 
     pub(super) fn resolve_row(&self, row: &EffRow) -> EffRow {
-        match row {
-            EffRow::Exist(id) if self.rows.contains_key(id) => self.resolve_row(&self.rows[id]),
-            EffRow::Extend(label, rest) => {
-                let rest = self.resolve_row(rest);
-                EffRow::canonical(
-                    std::iter::once(Label {
+        // Collect the concrete head labels as written (resolving each label's
+        // args), preserving their multiplicity: a `mask<E>` puts both of its `E`
+        // copies here, and both must survive. Then resolve the tail variable
+        // once and merge the head into it. The merge depends on what the tail
+        // variable stands for. A quantifier instantiation (minted by
+        // `fresh_instantiation`) sits under a declared head, so its content is
+        // by construction the demand BEYOND that head (`subsume_row` consumes
+        // one-to-one and routes only the surplus there): the head concatenates
+        // onto it, preserving a genuinely stacked handler level. Every other
+        // tail is ambient threading, where a head label merely coincides with
+        // the same label surfaced by resolving the shared variable (a handler
+        // arm's `{IO | outer}` whose outer row also absorbed that IO), so the
+        // head MAX-merges into it (max(1,1) = 1) exactly as `union_rows` would.
+        let mut head: Vec<Label> = Vec::new();
+        let mut cur = row;
+        loop {
+            match cur {
+                EffRow::Exist(id) if self.rows.contains_key(id) => {
+                    let tail = self.resolve_row(&self.rows[id]);
+                    // A shield alias exists precisely to keep a union-built
+                    // row's surface tail ambient-kind. While its content is
+                    // still an unsolved instantiation existential, resolving
+                    // through it would re-expose the raw variable and let a
+                    // later resolve concatenate; keep the alias as the
+                    // terminal until the content is concrete.
+                    if self.shield_rows.contains(id)
+                        && matches!(&tail, EffRow::Exist(raw) if !self.rows.contains_key(raw))
+                    {
+                        return EffRow::canonical(head, EffRow::Exist(*id));
+                    }
+                    if self.instantiation_rows.contains(id) {
+                        return EffRow::canonical(
+                            head.into_iter().chain(tail.labels().into_iter().cloned()),
+                            tail.tail().clone(),
+                        );
+                    }
+                    let head_row = EffRow::canonical(head.iter().cloned(), EffRow::Empty);
+                    // A shared label with clashing non-empty args falls back
+                    // to concatenation, the pre-existing behavior there.
+                    return canonical_union_rows(&head_row, &tail).unwrap_or_else(|_| {
+                        EffRow::canonical(
+                            head.into_iter().chain(tail.labels().into_iter().cloned()),
+                            tail.tail().clone(),
+                        )
+                    });
+                }
+                EffRow::Extend(label, rest) => {
+                    head.push(Label {
                         name: label.name,
                         args: label.args.iter().map(|ty| self.resolve_type(ty)).collect(),
-                    })
-                    .chain(rest.labels().into_iter().cloned()),
-                    rest.tail().clone(),
-                )
+                    });
+                    cur = rest;
+                }
+                // Terminal tail: Empty, an unbound row var, or an unbound Exist.
+                _ => return EffRow::canonical(head, cur.clone()),
             }
-            _ => row.clone(),
         }
     }
 
@@ -366,13 +418,25 @@ impl Solver {
         if matches!(actual, EffRow::Exist(_)) || matches!(expected, EffRow::Exist(_)) {
             return self.unify_row(&actual, &expected);
         }
+        // A row is a multiset: each expected occurrence covers exactly one
+        // actual occurrence, so a demand `mask<E>` raised to two `E`s is
+        // never absorbed by a single expected `E`. The first unconsumed
+        // name-match wins, mirroring the source checker's `rewrite_row`. A
+        // surplus occurrence is treated exactly like a label absent by name:
+        // with a flexible expected tail it grows the variable through
+        // `constrain_row_join` below, so a call-site row instantiation carries
+        // the surplus copy (this is what lets the independent verifier enforce
+        // multiplicity under rigid tails); against a closed or rigid-`Var`
+        // tail it has no absorber and the subrow fails.
+        let expected_labels = expected.labels();
+        let mut consumed = vec![false; expected_labels.len()];
         let mut unmatched = Vec::new();
         for label in actual.labels() {
-            let Some(wanted) = expected
-                .labels()
-                .into_iter()
-                .find(|wanted| wanted.name == label.name)
-            else {
+            let found = expected_labels
+                .iter()
+                .enumerate()
+                .find(|(index, wanted)| !consumed[*index] && wanted.name == label.name);
+            let Some((index, wanted)) = found else {
                 if flexible_expected.is_some() {
                     unmatched.push(label.clone());
                     continue;
@@ -383,6 +447,7 @@ impl Solver {
                     right: expected.clone(),
                 });
             };
+            consumed[index] = true;
             if label.args.len() != wanted.args.len() {
                 return Err(SolveError::LabelNotIncluded {
                     label: label.clone(),
@@ -509,15 +574,27 @@ impl Solver {
         }
         match (&left, &right) {
             (EffRow::Exist(id), other) | (other, EffRow::Exist(id)) => {
+                // A shield alias survives resolution while its content is an
+                // unsolved instantiation existential, so a resolved row can
+                // still surface a solved variable here. Unify through it: the
+                // constraint must land on the underlying unsolved root, never
+                // overwrite the alias link or install a two-step cycle.
+                let id = self.row_root(*id);
+                if let EffRow::Exist(o) = other {
+                    if self.row_root(*o) == id {
+                        return Ok(());
+                    }
+                }
                 let mut occurs = BTreeSet::new();
                 other.free_exist_row(&mut occurs);
-                if occurs.contains(id) {
+                let occurs: BTreeSet<u32> = occurs.into_iter().map(|o| self.row_root(o)).collect();
+                if occurs.contains(&id) {
                     // A resumed handler gives the least fixed-point equation
                     // `r = labels | r`. Effect rows are sets, so its solution is
                     // exactly `labels`; discard only the recursive tail.
-                    if other.tail() == &EffRow::Exist(*id) {
+                    if matches!(other.tail(), EffRow::Exist(t) if self.row_root(*t) == id) {
                         self.rows.insert(
-                            *id,
+                            id,
                             EffRow::canonical(other.labels().into_iter().cloned(), EffRow::Empty),
                         );
                         return Ok(());
@@ -525,7 +602,7 @@ impl Solver {
                     return Err(SolveError::Occurs {
                         meta: MetaVar {
                             kind: MetaKind::Row,
-                            id: *id,
+                            id,
                         },
                         within: Within::Row(other.clone()),
                     });
@@ -535,12 +612,12 @@ impl Solver {
                 // that nothing has demanded the closure yet, and the next
                 // consumer to state a fixed row would have that row copied onto
                 // a closure that performs none of it.
-                if self.latent_defaults.contains(id) {
+                if self.latent_defaults.contains(&id) {
                     if let EffRow::Exist(target) = other {
-                        self.latent_defaults.insert(*target);
+                        self.latent_defaults.insert(self.row_root(*target));
                     }
                 }
-                self.rows.insert(*id, other.clone());
+                self.rows.insert(id, other.clone());
                 Ok(())
             }
             _ => {
@@ -593,6 +670,9 @@ impl Solver {
         }
         let left = self.resolve_row(left);
         let right = self.resolve_row(right);
+        let labelled_open_side = [&left, &right]
+            .into_iter()
+            .any(|row| !row.labels().is_empty() && matches!(row.tail(), EffRow::Exist(_)));
         let tail = match (left.tail(), right.tail()) {
             (a, b) if a == b => a.clone(),
             (EffRow::Empty, other) | (other, EffRow::Empty) => other.clone(),
@@ -608,47 +688,109 @@ impl Solver {
                 .into());
             }
         };
-        let mut labels: BTreeMap<Sym, Label> = BTreeMap::new();
-        for label in left.labels().into_iter().chain(right.labels()) {
-            if let Some(existing) = labels.get(&label.name).cloned() {
-                if existing.args.len() != label.args.len() {
-                    // Generated local-state rows predate explicit typed-Core
-                    // evidence: a checked function row names the effect while
-                    // its operation node carries the recovered cell type.
-                    // Preserve the richer witness when the other occurrence
-                    // is precisely the legacy zero-argument spelling.
-                    if existing.args.is_empty() {
-                        labels.insert(label.name, label.clone());
-                        continue;
+        // If either side already carries a shield alias for the reconciled
+        // tail's root, keep that alias: reconciliation must not re-expose the
+        // raw instantiation variable a previous union deliberately shielded.
+        let tail = match tail {
+            EffRow::Exist(id) if !self.shield_rows.contains(&id) => {
+                let root = self.row_root(id);
+                let side_alias = [left.tail(), right.tail()]
+                    .into_iter()
+                    .find_map(|t| match t {
+                        EffRow::Exist(a)
+                            if self.shield_rows.contains(a) && self.row_root(*a) == root =>
+                        {
+                            Some(*a)
+                        }
+                        _ => None,
+                    });
+                EffRow::Exist(side_alias.unwrap_or(id))
+            }
+            other => other,
+        };
+        // A union-built head is demand at the SAME handler level as the tail's
+        // eventual content, while an instantiation existential's solved content
+        // is demand BEYOND a declared head (which `resolve_row` concatenates).
+        // Placing union labels directly over a bare instantiation tail would
+        // therefore fabricate a stack claim and double the shared labels at
+        // resolve time. Shield the tail behind a fresh ambient-kind alias so
+        // the surface variable's kind matches the row's construction; a tail
+        // inherited from a labelled open side is a scheme-substituted stack
+        // row whose head genuinely sits above the tail, so it stays raw.
+        let tail = match tail {
+            EffRow::Exist(id) if self.instantiation_rows.contains(&id) && !labelled_open_side => {
+                if let Some(alias_id) = self.shield_alias.get(&id) {
+                    EffRow::Exist(*alias_id)
+                } else {
+                    let alias = self.fresh_row();
+                    if let EffRow::Exist(alias_id) = alias {
+                        self.rows.insert(alias_id, EffRow::Exist(id));
+                        self.shield_rows.insert(alias_id);
+                        self.shield_alias.insert(id, alias_id);
                     }
-                    if label.args.is_empty() {
-                        continue;
-                    }
-                    return Err(RowUnionError::Labels {
-                        left: existing.clone(),
-                        right: label.clone(),
-                    }
-                    .into());
+                    alias
                 }
-                for (a, b) in existing.args.iter().zip(&label.args) {
-                    self.unify_type(a, b)?;
-                }
-                labels.insert(
-                    label.name,
-                    Label {
-                        name: label.name,
-                        args: existing
+            }
+            other => other,
+        };
+        // A row is a multiset: a label's multiplicity is the number of enclosing
+        // handlers it demands, and `mask<E>` raises it by one. The union takes the
+        // per-label MAX of the two sides rather than collapsing repeats, so a
+        // masked effect's tunnelled copy survives the join. This mirrors the
+        // checker-side `verify::compat::union_rows`; the two must agree, because
+        // the row this constructs is later re-derived and checked by that one.
+        // Per name: the reconciled label plus each side's occurrence count.
+        let mut names: BTreeMap<Sym, (Label, usize, usize)> = BTreeMap::new();
+        for (label, is_left) in left
+            .labels()
+            .into_iter()
+            .map(|l| (l, true))
+            .chain(right.labels().into_iter().map(|l| (l, false)))
+        {
+            match names.get_mut(&label.name) {
+                Some((existing, cl, cr)) => {
+                    if existing.args.len() == label.args.len() {
+                        for (a, b) in existing.args.iter().zip(&label.args) {
+                            self.unify_type(a, b)?;
+                        }
+                        existing.args = existing
                             .args
                             .iter()
                             .map(|ty| self.resolve_type(ty))
-                            .collect(),
-                    },
-                );
-            } else {
-                labels.insert(label.name, label.clone());
+                            .collect();
+                    } else {
+                        // Generated local-state rows predate explicit typed-Core
+                        // evidence: a checked function row names the effect while
+                        // its operation node carries the recovered cell type.
+                        // Preserve the richer witness when the other occurrence is
+                        // precisely the legacy zero-argument spelling.
+                        if existing.args.is_empty() {
+                            existing.args.clone_from(&label.args);
+                        } else if !label.args.is_empty() {
+                            return Err(RowUnionError::Labels {
+                                left: existing.clone(),
+                                right: label.clone(),
+                            }
+                            .into());
+                        }
+                    }
+                    *(if is_left { cl } else { cr }) += 1;
+                }
+                None => {
+                    names.insert(
+                        label.name,
+                        (label.clone(), usize::from(is_left), usize::from(!is_left)),
+                    );
+                }
             }
         }
-        Ok(EffRow::canonical(labels.into_values(), tail))
+        let mut out: Vec<Label> = Vec::new();
+        for (label, cl, cr) in names.into_values() {
+            for _ in 0..cl.max(cr) {
+                out.push(label.clone());
+            }
+        }
+        Ok(EffRow::canonical(out, tail))
     }
 
     pub(super) fn join_core(
@@ -788,10 +930,35 @@ impl Solver {
             }
             if current != *target {
                 if let EffRow::Exist(tail) = current.tail() {
-                    return self.constrain_row_join(&EffRow::Exist(*tail), &value);
+                    // The target's concrete head already discharges those
+                    // levels: rows are multisets, so forwarding the whole
+                    // value would re-demand the head from the tail and stack
+                    // a duplicate copy onto it. Consume the head one-to-one
+                    // and forward only the remainder.
+                    let head: Vec<Label> = current.labels().into_iter().cloned().collect();
+                    let mut consumed = vec![false; head.len()];
+                    let mut remainder = Vec::new();
+                    for label in value.labels() {
+                        let found = head.iter().enumerate().find(|(index, wanted)| {
+                            !consumed[*index]
+                                && wanted.name == label.name
+                                && wanted.args.len() == label.args.len()
+                        });
+                        let Some((index, wanted)) = found else {
+                            remainder.push(label.clone());
+                            continue;
+                        };
+                        consumed[index] = true;
+                        let wanted = wanted.clone();
+                        for (actual, expected) in label.args.iter().zip(&wanted.args) {
+                            self.unify_type(actual, expected)?;
+                        }
+                    }
+                    let remainder = EffRow::canonical(remainder, value.tail().clone());
+                    return self.constrain_row_join(&EffRow::Exist(*tail), &remainder);
                 }
             }
-            let value = if value.tail() == &EffRow::Exist(*id) {
+            let value = if matches!(value.tail(), EffRow::Exist(t) if self.row_root(*t) == *id) {
                 // Rows denote sets, so `?r = {labels | ?r}` has the least
                 // solution `{labels}`.  Closing only the recursive tail keeps
                 // the concrete lower bound without installing a cyclic

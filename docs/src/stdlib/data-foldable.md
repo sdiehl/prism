@@ -8,6 +8,8 @@ Each function is a constrained free function, not a class default method: it is 
 
 The folds are strict, so the short-circuiting versions (`all`, `any`, `find`, `elem`) still visit every element; for a pure predicate the result is identical to a left-to-right search. Every aggregation rides `fold_l`, which instances implement tail recursively, so a large container folds in constant stack on the native backend; only `to_list` uses `fold_r`, to build in order. `sum` and `product` aggregate through the `Num` class, so they work at any numeric carrier (`Int`, `I64`, `U64`, `Float`); the literal seeds `0` and `1` adapt to the carrier the way any numeric literal does.
 
+In the complexity bounds below, `n` is the number of elements visited. Bounds exclude the cost of supplied functions and type-class operations.
+
 ## Functions and Values
 
 ### `sum`
@@ -16,7 +18,7 @@ The folds are strict, so the short-circuiting versions (`all`, `any`, `find`, `e
 sum : forall a b. (a(b)) -> b given Foldable(a), Num(b)
 ```
 
-The sum of a container of numbers (`0` when empty).
+The sum of a container of numbers (`0` when empty). Time complexity: O(n).
 
 ```prism,mod=Data.Foldable
 (sum([1, 2, 3, 4]), sum([1.5, 2.75]))
@@ -32,7 +34,7 @@ The sum of a container of numbers (`0` when empty).
 product : forall a b. (a(b)) -> b given Foldable(a), Num(b)
 ```
 
-The product of a container of numbers (`1` when empty).
+The product of a container of numbers (`1` when empty). Time complexity: O(n).
 
 ```prism,mod=Data.Foldable
 product([1, 2, 3, 4])
@@ -48,7 +50,7 @@ product([1, 2, 3, 4])
 length : forall a b. (a(b)) -> Int given Foldable(a)
 ```
 
-The number of elements.
+The number of elements. Time complexity: O(n).
 
 ```prism,mod=Data.Foldable
 length([1, 2, 3])
@@ -64,7 +66,7 @@ length([1, 2, 3])
 is_empty : forall a b. (a(b)) -> Bool given Foldable(a)
 ```
 
-True when the container has no elements.
+True when the container has no elements. Time complexity: O(n); the strict fold visits the whole container.
 
 ```prism,mod=Data.Foldable
 is_empty([1, 2, 3])
@@ -80,7 +82,7 @@ false
 all : forall a b. ((a) -> Bool, b(a)) -> Bool given Foldable(b)
 ```
 
-True when every element satisfies `p` (vacuously true when empty).
+True when every element satisfies `p` (vacuously true when empty). Time complexity: O(n); the strict fold does not short-circuit.
 
 ```prism,mod=Data.Foldable
 all(\(x) -> x > 0, [1, 2, 3])
@@ -96,7 +98,7 @@ true
 any : forall a b. ((a) -> Bool, b(a)) -> Bool given Foldable(b)
 ```
 
-True when some element satisfies `p`.
+True when some element satisfies `p`. Time complexity: O(n); the strict fold does not short-circuit.
 
 ```prism,mod=Data.Foldable
 any(\(x) -> x > 2, [1, 2, 3])
@@ -112,7 +114,7 @@ true
 find : forall a b. ((a) -> Bool, b(a)) -> Option(a) given Foldable(b)
 ```
 
-The first element satisfying `p` as `Some` (leftmost match), or `None`.
+The first element satisfying `p` as `Some` (leftmost match), or `None`. Time complexity: O(n); the strict fold does not short-circuit.
 
 ```prism,mod=Data.Foldable
 find(\(x) -> x > 1, [1, 2, 3])
@@ -128,7 +130,7 @@ Some(2)
 elem : forall a b. (a, b(a)) -> Bool given Eq(a), Foldable(b)
 ```
 
-True when `x` is an element (`Eq`).
+True when `x` is an element (`Eq`). Time complexity: O(n) equality tests; the strict fold does not short-circuit.
 
 ```prism,mod=Data.Foldable
 elem(2, [1, 2, 3])
@@ -144,7 +146,7 @@ true
 to_list : forall a b. (a(b)) -> List(b) given Foldable(a)
 ```
 
-The elements as a `List`, in fold order (`Option` yields zero or one).
+The elements as a `List`, in fold order (`Option` yields zero or one). Time complexity: O(n).
 
 ```prism,mod=Data.Foldable
 to_list(Some(5))

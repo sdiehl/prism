@@ -12,7 +12,7 @@ The printer here matches the compiler's export format precisely: two-space inden
 
 ### `CodecError`
 
-```prism,def,h-839228f2d050a9a16de7451e8a40f7adafa020a54cd1c0d82abd2b1d6c0ec71a
+```prism,def,h-757266f1d3f6a31d969b4a961e8522d1503ce1c5362cd3f989df5376ebb819d0
 type CodecError = CodecError {
   path: String,
   reason: String
@@ -23,7 +23,7 @@ A structured decode refusal: the path of the offending value inside the document
 
 ### `TokensDoc`
 
-```prism,def,h-31390e60094e9b1993c8021b50bda8b79edb34aa804d0b272a2842e5b26e3ea1
+```prism,def,h-d4db65ca05bf67aa02ec044da2bbefe2c8545ce0b3decf3a09c5da3b3ba79674
 type TokensDoc = TokensDoc {
   schema: String,
   compiler: String,
@@ -38,7 +38,7 @@ A decoded `prism-syntax-tokens-v1` document: the envelope identity, the embedded
 
 ### `SurfaceDoc`
 
-```prism,def,h-8b5bb4d0830d2273048d3eb8a55ed05d933b80648946843a0e2ec64413e63aa7
+```prism,def,h-984bea95a568c8c3384cf619f42b6e64811919a4edba1f0809224685cd63e84e
 type SurfaceDoc = SurfaceDoc {
   schema: String,
   compiler: String,

@@ -2,13 +2,17 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use inkwell::attributes::{Attribute, AttributeLoc};
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::{Builder, BuilderError};
 use inkwell::context::Context;
 use inkwell::module::{Linkage, Module};
-use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine};
+use inkwell::passes::PassBuilderOptions;
+use inkwell::targets::{
+    CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
+};
 use inkwell::types::FunctionType;
 use inkwell::values::{
     AnyValue, BasicMetadataValueEnum, BasicValueEnum, CallSiteValue, FloatValue, FunctionValue,
@@ -32,6 +36,74 @@ use prism_core::types::CtorInfo;
 
 const LLVM_USED_GLOBAL: &str = "llvm.used";
 const LLVM_METADATA_SECTION: &str = "llvm.metadata";
+
+fn initialize_native_target() -> Result<(), String> {
+    static INITIALIZED: OnceLock<Result<(), String>> = OnceLock::new();
+    INITIALIZED
+        .get_or_init(|| {
+            Target::initialize_native(&InitializationConfig::default())
+                .map_err(|error| format!("initialize native LLVM target: {error}"))
+        })
+        .clone()
+}
+
+/// Optimize one emitted bitcode module and lower it to a native object without
+/// launching an external compiler driver.
+///
+/// The final platform link remains outside LLVM: this is the development-mode
+/// counterpart to `clang -c`, not an in-process linker. Keeping the bitcode input
+/// preserves the existing SCC cache boundary while removing one process and one
+/// `ThinLTO` compilation per shard.
+///
+/// # Errors
+/// Fails when the bitcode cannot be read, the native target is unavailable, the
+/// selected optimization pipeline fails, or LLVM cannot write the object.
+pub fn compile_bitcode_to_object(
+    bitcode: &Path,
+    object: &Path,
+    backend_opt: &str,
+) -> Result<(), String> {
+    initialize_native_target()?;
+
+    let ctx = Context::create();
+    let module = Module::parse_bitcode_from_path(bitcode, &ctx)
+        .map_err(|error| format!("read LLVM bitcode {}: {error}", bitcode.display()))?;
+    let triple = module.get_triple();
+    let target = Target::from_triple(&triple)
+        .map_err(|error| format!("resolve LLVM target for {triple}: {error}"))?;
+    let (level, pipeline) = match backend_opt {
+        "0" => (OptimizationLevel::None, "default<O0>"),
+        "1" => (OptimizationLevel::Less, "default<O1>"),
+        "2" => (OptimizationLevel::Default, "default<O2>"),
+        "3" => (OptimizationLevel::Aggressive, "default<O3>"),
+        "s" => (OptimizationLevel::Default, "default<Os>"),
+        "z" => (OptimizationLevel::Default, "default<Oz>"),
+        other => {
+            return Err(format!(
+                "unsupported LLVM backend optimization level {other:?}"
+            ))
+        }
+    };
+    let machine = target
+        .create_target_machine(
+            &triple,
+            "generic",
+            "",
+            level,
+            RelocMode::PIC,
+            CodeModel::Default,
+        )
+        .ok_or_else(|| format!("LLVM cannot create a target machine for {triple}"))?;
+    module.set_data_layout(&machine.get_target_data().get_data_layout());
+    module
+        .run_passes(pipeline, &machine, PassBuilderOptions::create())
+        .map_err(|error| format!("LLVM {pipeline} failed for {}: {error}", bitcode.display()))?;
+    let bytes = machine
+        .write_to_memory_buffer(&module, FileType::Object)
+        .map_err(|error| format!("emit native object {}: {error}", object.display()))?;
+    std::fs::write(object, bytes.as_slice())
+        .map_err(|error| format!("write native object {}: {error}", object.display()))
+}
 
 #[derive(Clone)]
 struct NativeKontFunction {
@@ -65,7 +137,7 @@ fn nm(s: &str) -> &str {
 impl<'ctx> Inkwell<'ctx> {
     fn new(ctx: &'ctx Context, native_kont_enabled: bool) -> Self {
         let module = ctx.create_module("prism");
-        if Target::initialize_native(&InitializationConfig::default()).is_ok() {
+        if initialize_native_target().is_ok() {
             let triple = TargetMachine::get_default_triple();
             module.set_triple(&triple);
             if let Some(tm) = Target::from_triple(&triple).ok().and_then(|t| {

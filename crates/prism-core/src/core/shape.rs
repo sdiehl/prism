@@ -23,7 +23,7 @@ use prism_syntax::ast::{
     ClassDecl, Ctor, CtorShape, DataDecl, EffLabel, EffOp, EffectDecl, Kind, Row, Ty,
 };
 
-use super::hash::{hex, Digest, HASH_PREFIX_HEX, SCHEME};
+use super::hash::{hex, Digest, HASH_PREFIX_HEX, NUM_END, SCHEME};
 
 /// Map from a declaration name to its structural digest (hex).
 pub type Shapes = BTreeMap<String, Digest>;
@@ -32,14 +32,15 @@ pub type Shapes = BTreeMap<String, Digest>;
 ///
 /// The full shape digest truncated to the committed prefix width the wire frame
 /// and the frozen `stable` goldens carry. Because a shape digest references
-/// other types by name, not by digest
-/// (see the module docstring), the single-declaration digest here is identical to
-/// the whole-program one `shape_digests` produces for the same name. This is the
-/// one home for the value a `stable` rung's generated frame and a `deriving
-/// (Stable)` instance both stamp, so the two can never disagree.
+/// other types by name, not by digest (see the module docstring), encoding the
+/// one declaration directly is identical to the whole-program entry
+/// `shape_digests` produces for the same name, with no map keying (and no
+/// collision-disambiguated key spelling) in between. This is the one home for
+/// the value a `stable` rung's generated frame and a `deriving (Stable)`
+/// instance both stamp, so the two can never disagree.
 #[must_use]
 pub fn contract_digest(data: &DataDecl) -> String {
-    shape_digests(std::slice::from_ref(data), &[])[&data.name][..HASH_PREFIX_HEX].to_string()
+    hex(&encode_data(data))[..HASH_PREFIX_HEX].to_string()
 }
 
 /// Shape-digest every datatype and effect declaration. Keyed by the declaration
@@ -121,11 +122,15 @@ fn encode_data(d: &DataDecl) -> String {
     e.out.push_str(SCHEME);
     e.out.push_str("|data");
     e.tok(&d.name);
-    let _ = write!(e.out, "nt{}", u8::from(d.newtype));
+    // Every bare numeric field closes with the hash encoding's terminator, so
+    // its digits can never run together with a following length prefix; some
+    // sites are safe by their fixed-letter neighbour, but exempting them would
+    // reopen the per-neighbour case analysis the terminator exists to close.
+    let _ = write!(e.out, "nt{}{NUM_END}", u8::from(d.newtype));
     // Commit both parameter arity and kinds: `param_kinds` is legally empty
     // (kinds default to Type), and without the count `data Phantom a` and
     // `data Phantom a b` would encode identically.
-    let _ = write!(e.out, "K{}", d.params.len());
+    let _ = write!(e.out, "K{}{NUM_END}", d.params.len());
     for k in &d.param_kinds {
         e.kind(k);
     }
@@ -258,7 +263,7 @@ impl Enc {
     /// name (a referenced type or a free variable).
     fn name_ref(&mut self, s: &str) {
         if let Some(i) = self.params.iter().position(|p| p == s) {
-            let _ = write!(self.out, "p{i}");
+            let _ = write!(self.out, "p{i}{NUM_END}");
         } else {
             self.out.push('n');
             self.tok(s);
@@ -359,11 +364,11 @@ impl Enc {
             }
             // Desugar-only; never in a surviving annotation, but encode defensively.
             Ty::State(n) => {
-                let _ = write!(self.out, "<S>{n}");
+                let _ = write!(self.out, "<S>{n}{NUM_END}");
             }
             // A type-level natural literal in a dimension position.
             Ty::Nat(n) => {
-                let _ = write!(self.out, "<N>{n}");
+                let _ = write!(self.out, "<N>{n}{NUM_END}");
             }
             // A usage row on the annotated type. Reserved rows are rejected in
             // desugar before any digest is taken, but encode defensively; the

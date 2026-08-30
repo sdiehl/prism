@@ -99,7 +99,7 @@ fn formats_idempotently() {
     let sealed = r#"import Wire (..)
 
 stable Order {
-  V1 = { id: Int, qty: Int, sym: String } frozen "d74ae517ebfe5ba8",
+  V1 = { id: Int, qty: Int, sym: String } frozen "a50f56d8b33fd611",
   V2 = { ..V1, tif: Int = 0 }
 }
 "#;
@@ -110,7 +110,7 @@ stable Order {
         "format must be idempotent:\n{once}\n---\n{twice}"
     );
     assert!(
-        once.contains("frozen \"d74ae517ebfe5ba8\""),
+        once.contains("frozen \"a50f56d8b33fd611\""),
         "the per-rung golden must survive formatting:\n{once}"
     );
 }

@@ -2,6 +2,8 @@
 
 use std::collections::BTreeSet;
 
+use prism_common::sym::Sym;
+
 use crate::types::ty::EffRow;
 use crate::types::Type;
 
@@ -169,6 +171,15 @@ impl<P: TypedCorePhase> Checker<'_, P> {
     }
 
     pub(super) fn check_source_type(&mut self, ty: &Type) {
+        self.check_source_type_in(ty, &mut Vec::new());
+    }
+
+    /// The scoped worker behind [`Self::check_source_type`]. `bound` carries
+    /// the `RowForall` binders crossed inside the type on the way to this
+    /// subterm (the same scoping [`Type::free_row_vars`] applies): a row tail
+    /// or label argument the type itself quantifies is legitimate even though
+    /// no enclosing function quantifier admits it.
+    fn check_source_type_in(&mut self, ty: &Type, bound: &mut Vec<Sym>) {
         let mut existentials = BTreeSet::new();
         ty.free_exist(&mut existentials);
         if !existentials.is_empty() {
@@ -202,6 +213,7 @@ impl<P: TypedCorePhase> Checker<'_, P> {
         ty.free_row_vars(&mut row_variables);
         let unbound_rows: Vec<_> = row_variables
             .difference(&self.allowed_rows)
+            .filter(|name| !bound.contains(name))
             .copied()
             .collect();
         for name in unbound_rows {
@@ -211,10 +223,14 @@ impl<P: TypedCorePhase> Checker<'_, P> {
                 ty: ty.clone(),
             });
         }
-        check_type_rows(ty, &mut |row| self.check_row(row));
+        check_type_rows(ty, bound, &mut |row, bound| self.check_row_in(row, bound));
     }
 
     pub(super) fn check_row(&mut self, row: &EffRow) {
+        self.check_row_in(row, &mut Vec::new());
+    }
+
+    fn check_row_in(&mut self, row: &EffRow, bound: &mut Vec<Sym>) {
         if !row.is_canonical() {
             self.fail(Violation::RowNotCanonical { row: row.clone() });
         }
@@ -224,13 +240,13 @@ impl<P: TypedCorePhase> Checker<'_, P> {
             self.fail(Violation::UnsolvedRowMeta { row: row.clone() });
         }
         if let EffRow::Var(name) = row.tail() {
-            if !self.allowed_rows.contains(name) {
+            if !bound.contains(name) && !self.allowed_rows.contains(name) {
                 self.fail(Violation::UnboundRigidRow { name: *name });
             }
         }
         for label in row.labels() {
             for argument in &label.args {
-                self.check_source_type(argument);
+                self.check_source_type_in(argument, bound);
             }
         }
     }
@@ -281,34 +297,41 @@ impl<P: TypedCorePhase> Checker<'_, P> {
     }
 }
 
-fn check_type_rows(ty: &Type, f: &mut impl FnMut(&EffRow)) {
+fn check_type_rows(ty: &Type, bound: &mut Vec<Sym>, f: &mut impl FnMut(&EffRow, &mut Vec<Sym>)) {
     match ty {
-        Type::Forall(_, body)
-        | Type::RowForall(_, body)
-        | Type::OrNull(body)
-        | Type::Coeffect(body, _) => check_type_rows(body, f),
+        // `RowForall` binds its variable for everything beneath it, exactly
+        // as `Type::walk_row_vars` scopes it; dropping the binder here would
+        // report a legitimately bound tail as an unbound rigid row.
+        Type::RowForall(name, body) => {
+            bound.push(*name);
+            check_type_rows(body, bound, f);
+            bound.pop();
+        }
+        Type::Forall(_, body) | Type::OrNull(body) | Type::Coeffect(body, _) => {
+            check_type_rows(body, bound, f);
+        }
         Type::Fun(params, row, result) => {
             for ty in params {
-                check_type_rows(ty, f);
+                check_type_rows(ty, bound, f);
             }
-            f(row);
-            check_type_rows(result, f);
+            f(row, bound);
+            check_type_rows(result, bound, f);
         }
         Type::Con(_, arguments) | Type::Tuple(arguments) | Type::UnboxedTuple(arguments) => {
             for ty in arguments {
-                check_type_rows(ty, f);
+                check_type_rows(ty, bound, f);
             }
         }
         Type::UnboxedRecord(fields) => {
             for (_, ty) in fields {
-                check_type_rows(ty, f);
+                check_type_rows(ty, bound, f);
             }
         }
         Type::App(head, argument) => {
-            check_type_rows(head, f);
-            check_type_rows(argument, f);
+            check_type_rows(head, bound, f);
+            check_type_rows(argument, bound, f);
         }
-        Type::Row(row) => f(row),
+        Type::Row(row) => f(row, bound),
         Type::Unit
         | Type::Int
         | Type::I64

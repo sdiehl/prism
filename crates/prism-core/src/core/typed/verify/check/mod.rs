@@ -59,6 +59,13 @@ struct Checker<'a, P> {
     // reference from a deeper depth is known to read a closure capture slot.
     locals: BTreeMap<Sym, Vec<(CoreType, usize)>>,
     thunk_depth: usize,
+    // Linear-resource state, tracked by whole-map snapshot on purpose: a
+    // suspension checks its walk against the pre-state to detect a captured
+    // token or freed shell, and a branch join merges the per-arm states, so
+    // the snapshots are compared and merged as values, not merely restored
+    // (which is why this is not the RC inserter's undo-replay scope map).
+    // Entries exist only for reuse tokens live in the enclosing scope, so a
+    // snapshot is almost always a clone of an empty map.
     token_uses: BTreeMap<Sym, Vec<u8>>,
     token_capacities: BTreeMap<Sym, Vec<usize>>,
     reuse_shells: BTreeMap<Sym, Vec<ReuseShell>>,

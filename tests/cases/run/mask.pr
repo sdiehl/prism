@@ -42,8 +42,22 @@ fn escalate() =
     ask() resume k => k(3)
     return r => r
 
+-- the masked ask lives in a named function, so `crosses`'s row carries the
+-- doubled Ask across the call boundary; the inner handler answers the bare ask
+-- (40), the mask tunnels the second copy past it to the outer handler (5)
+fn crosses() = ask() + mask<Ask>(ask())
+
+fn crosses_fn() =
+  handle (handle crosses() with {
+      ask() resume k => k(40),
+      return r => r
+    }) with
+    ask() resume k => k(5)
+    return r => r
+
 fn main() =
   println(two_levels())
   println(three_levels())
   println(reperform())
   println(escalate())
+  println(crosses_fn())

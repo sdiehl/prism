@@ -10,7 +10,7 @@ Where `Result` short-circuits on the first `Err`, `Validation` collects every er
 
 ### `Validation`
 
-```prism,def,h-450c5a4baddbce2009bd9517da0975dc4f0e669facde8b1f9bc077cdfee5ad4c
+```prism,def,h-eb4df79e3fb53a6b6e24c04c24098145d4e49b025f3ad9f6b09f03c2dbb289e7
 type Validation(e, a) = Valid(a) | Invalid(List(e)) deriving (Eq, Show)
 ```
 

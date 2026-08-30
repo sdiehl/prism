@@ -10,7 +10,7 @@ The canonical `Reader(r)` effect: a read-only ambient environment.
 
 ### `Reader`
 
-```prism,def,h-a937eaedebdb41560b00e32856dc99a92ff4c38bcf6917178505392503b6d766
+```prism,def,h-1423f3edc5054ccfcd09ca0346f39b80e2dbd47e751a4d44506fd83a935eb543
 effect Reader(r)
   ask() : r
 ```

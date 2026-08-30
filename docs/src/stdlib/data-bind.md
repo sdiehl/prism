@@ -12,7 +12,7 @@ The two coordinate systems are branded so they cannot be mixed up. An `Index` is
 
 ### `Index`
 
-```prism,def,h-a04524f7128a281f184deb257f1bf15f0980909c8e1f6d7d4c0ee886b34ea2c4
+```prism,def,h-8061eff858bb8c6d6e5365e4cc110763d2023d689bfcbf9c5935c0260af513d1
 newtype Index = MkIndex(Int) deriving (Eq, Ord, Show)
 ```
 
@@ -22,7 +22,7 @@ The constructor is spelled `MkIndex` rather than `Index` on purpose: constructor
 
 ### `Level`
 
-```prism,def,h-812e90b3bb1a97b28909785fbfaa4b3a69b4322958a7148f67b8d51154b0d8d1
+```prism,def,h-c2aaf41ea55d5ef3cf569c31301ccb3e6ce332ad45a69d12c820084c2c3c0bc8
 newtype Level = MkLevel(Int) deriving (Eq, Ord, Show)
 ```
 
@@ -30,7 +30,7 @@ The inward distance from the root to a binder: `bind_level(0)` is the outermost 
 
 ### `BindEnv`
 
-```prism,def,h-b9500a8ae84fac3009b166ef4861465cc080af80ad970d8bb125f9bf4a64a529
+```prism,def,h-11be144a4df1b2cf4e70ce0be66afa2f5bd4aa93db3182fac1851451936e2e5b
 type BindEnv(a) = BindEnv { slots: List((String, a)) }
 ```
 
@@ -40,7 +40,7 @@ Shadowing is by position, not by rewriting: pushing a name that is already in sc
 
 ### `Nameless`
 
-```prism,def,h-6ab7ee0d4278cbc1bbf133bd0958fab3ea4b26e306ef03579e7df35278d226c2
+```prism,def,h-a27bfd65e90893a1a0a2742c974e0f0b0f8b2568b73cf489c888d243489bb4cb
 type Nameless
   = NTok(String)
   | NLit(String)

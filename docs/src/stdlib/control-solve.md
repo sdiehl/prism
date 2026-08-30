@@ -12,7 +12,7 @@ Class keys are minted only by `sv_fresh`, which is what keeps the ops total: `sv
 
 ### `Solve`
 
-```prism,def,h-e87f632e32548ecfdd99df187a7ece176fc0e76116fc18a2a00ad4df515e5246
+```prism,def,h-a64ee52a28f150b4460fbecfa111cad3b0d0929e9a08168f460dc9ee6f444eb5
 effect Solve(d)
   sv_fresh(d) : Int
   sv_find(Int) : Option((Int, d))

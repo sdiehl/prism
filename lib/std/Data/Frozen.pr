@@ -10,8 +10,8 @@
 -- | An immutable array of `a`.
 opaque newtype Frozen(a) = Frz(Array(a))
 
--- | Freeze a growable array, O(1). Value semantics guarantee the frozen view
--- is independent of any later writes to `arr`.
+-- | Freeze a growable array. Value semantics guarantee the frozen view is
+-- independent of any later writes to `arr`. Time complexity: O(1).
 --
 -- ```prism
 -- fz_len(fz_freeze(array_of_list([1, 2, 3])))
@@ -22,6 +22,7 @@ opaque newtype Frozen(a) = Frz(Array(a))
 pub fn fz_freeze(arr : Array(a)) : Frozen(a) @ noalloc = Frz(arr)
 
 -- | Build a frozen array from a list.
+-- Time complexity: amortized O(n).
 --
 -- ```prism
 -- fz_get(fz_of_list([5, 6, 7]), 2)
@@ -33,16 +34,18 @@ pub fn fz_of_list(xs : List(a)) : Frozen(a) = Frz(array_of_list(xs))
 
 -- | A growable array with the frozen contents. The frozen view is unaffected
 -- by writes to the result (a shared array copies on write).
+-- Time complexity: O(1).
 pub fn fz_thaw(xs : Frozen(a)) : Array(a) @ noalloc =
   match xs of
     Frz(arr) => arr
 
--- | The element count.
+-- | The element count. Time complexity: O(1).
 pub fn fz_len(borrow xs : Frozen(a)) : Int =
   match xs of
     Frz(arr) => array_len(arr)
 
 -- | The element at `i`, or `fail()` out of bounds.
+-- Time complexity: O(1).
 --
 -- ```prism
 -- fz_get(fz_of_list([5, 6, 7]), 0)
@@ -55,6 +58,7 @@ pub fn fz_get(xs : Frozen(a), i : Int) : a ! {Fail} =
     Frz(arr) => at_array(arr, i)
 
 -- | Left-fold over the elements in order.
+-- Time complexity: O(n), excluding calls to `f`.
 --
 -- ```prism
 -- fz_foldl(\(acc, x) -> acc + x, 0, fz_of_list([1, 2, 3]))
@@ -67,6 +71,7 @@ pub fn fz_foldl(f, acc, xs) =
     Frz(arr) => array_foldl(f, acc, arr)
 
 -- | The elements as a list, in order.
+-- Time complexity: O(n).
 --
 -- ```prism
 -- fz_to_list(fz_of_list([1, 2, 3]))
@@ -79,6 +84,7 @@ pub fn fz_to_list(xs : Frozen(a)) : List(a) =
     Frz(arr) => array_to_list(arr)
 
 -- | A new frozen array with `f` applied to every element, one pass.
+-- Time complexity: amortized O(n), excluding calls to `f`.
 --
 -- ```prism
 -- fz_to_list(fz_map(\(x) -> x * 2, fz_of_list([1, 2, 3])))

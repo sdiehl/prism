@@ -10,7 +10,7 @@ The support layer of a production parser: the three-way parse outcome, the recur
 
 ### `Parsed`
 
-```prism,def,h-052341a30c49d206f20cb840768e8174cdc05b3a4b872dfd1e91343bf2d9bafc
+```prism,def,h-0a6b7ad013fc8ca9fb397258f84d405188fa82563135c21fa836ab5300445e8d
 type Parsed(a) = PTook(a, Cursor) | PStuck(Cursor) | PFault(Diagnostic)
 ```
 

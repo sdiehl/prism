@@ -75,6 +75,27 @@ fn build_native(file: &Path, bin: &Path, store: &Path) -> Output {
     }
 }
 
+fn build_native_direct(file: &Path, bin: &Path, store: &Path) -> Output {
+    let out = Command::new(env!("CARGO_BIN_EXE_prism"))
+        .arg(file)
+        .arg("-o")
+        .arg(bin)
+        .arg("--direct-object")
+        .arg("--backend-opt")
+        .arg("0")
+        .env("PRISM_TIME_COMPILE", "1")
+        .env("PRISM_COMPILER_CACHE", "0")
+        .env("PRISM_STORE_PATH", store)
+        .stdin(Stdio::null())
+        .output()
+        .expect("spawn direct-object native prism build");
+    assert!(out.status.success(), "direct-object build failed: {out:?}");
+    Output {
+        stdout: out.stdout,
+        stderr: String::from_utf8(out.stderr).expect("stderr utf8"),
+    }
+}
+
 // The timing rows on stderr, split into their tab-separated fields.
 fn phase_rows(stderr: &str) -> Vec<Vec<&str>> {
     stderr
@@ -257,6 +278,39 @@ fn native_link_reports_direct_cc_work_and_reuses_runtime_objects() {
         first_runtime_misses,
         "warm build must materialize every prebuilt runtime object"
     );
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn direct_object_mode_replaces_program_cc_jobs_but_keeps_one_link() {
+    let file = temp_program("native_direct_object");
+    let dir = file.parent().unwrap();
+    let store = dir.join("store");
+    let bin = dir.join("direct-bin");
+    let build = build_native_direct(&file, &bin, &store);
+    let rows = phase_rows(&build.stderr);
+    let link = rows
+        .iter()
+        .find(|row| row[1] == "cc.link")
+        .unwrap_or_else(|| panic!("missing cc.link row:\n{}", build.stderr));
+
+    assert!(
+        count_field(link, "llvm_object_emissions") > 0,
+        "program bitcode must be emitted in-process"
+    );
+    assert_eq!(
+        count_field(link, "cc_link_invocations"),
+        1,
+        "the platform linker remains one cc-driver invocation"
+    );
+    let _ = count_field(link, "llvm_object_ms");
+
+    let run = Command::new(&bin)
+        .output()
+        .expect("run direct-object binary");
+    assert!(run.status.success(), "direct-object binary failed: {run:?}");
+    assert_eq!(run.stdout, b"3\n");
 
     let _ = std::fs::remove_dir_all(dir);
 }

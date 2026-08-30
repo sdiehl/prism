@@ -6,7 +6,7 @@
 
 ### `GeneratedTypeReceipt`
 
-```prism,def,h-d43f2caf4170fd672d4c5ccc8169aafdfc82d8db052987b96dbc9f55b2f196fc
+```prism,def,h-e03119d613c97da1e84070e4da49d6c455655125e78d46edaa8906753e4f020e
 type GeneratedTypeReceipt
   = TRPlain
   | TRNamed
@@ -22,7 +22,7 @@ Exact completed-Type state used by generated delimiters.
 
 ### `GeneratedChild`
 
-```prism,def,h-e20ae4200224acae2d0ac9fdb0f6120e3282d08831be3cd43c3b7f95ed276908
+```prism,def,h-6421ba88598c064094f0a188b4cdbcedc5f60da1c0e0a6d3f63c8e030aaabd05
 type GeneratedChild(a) = TypeDone(a, GeneratedTypeReceipt)
 ```
 
@@ -30,7 +30,7 @@ Child value and the grammar state completed at its right edge. The TypeDone cons
 
 ### `GeneratedDimCompletion`
 
-```prism,def,h-b840cc20d0baebedc8ccb65261e407f49790c2e1fe881ca3c37fe028003d3918
+```prism,def,h-5ebd83780109323dc57ea0f9ba1316ad0563839b1b355b7c6735c16a96d897f3
 type GeneratedDimCompletion = GTCDimensionNatural | GTCDimensionVariable
 ```
 
@@ -38,13 +38,13 @@ Parse the complete frozen DimTerm production. The caller decides whether a follo
 
 ### `GeneratedRowReceipt`
 
-```prism,def,h-264468c39abc4b0c54a0cebe9b21370197c3c96718d2c48763d4d9de0ba80b49
+```prism,def,h-8b1c2b462c35de0393065f33f61abaf1e5d0de3029f205e2ed7904167524227a
 type GeneratedRowReceipt = GRClosedItem | GROptionalArgs
 ```
 
 ### `GeneratedRowItem`
 
-```prism,def,h-62c2896edc0a09e521fd29b20374e06b4135bfc7ae70d224db61989f49cabd3c
+```prism,def,h-6d9a681a8973cab94c984e923b7d6a76a910640cdb8f176cdc805e4145d1c596
 type GeneratedRowItem(a) = GeneratedRowItem(a, GeneratedRowReceipt)
 ```
 
@@ -124,30 +124,30 @@ Injectable TypeArg entry used by the isolated behavior fixture. Like every publi
 
 ### `generated_parse_type`
 
-```prism,sig,h-f4ae7f69f07f534397f3efbe68e00da66f816b6959cdb07779b25dec9b6e26e5
+```prism,sig,h-9087bfad8c2548a7ba6ad867c8c21753fc683e9a781b46c0e1e03d315f10169b
 generated_parse_type : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Parse.GeneratedType.GeneratedChild(Syntax.Ast.Ty))
 ```
 
 ### `generated_parse_type_head`
 
-```prism,sig,h-761b0cf4e305e83502869c1209eda9cfd37697d0ab83943677fef25e06dcaa2a
+```prism,sig,h-ea4e4a30d5e61e06f7965022d2ed78473b080848469170216b57281b184f3576
 generated_parse_type_head : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Parse.GeneratedType.GeneratedChild(Syntax.Ast.Ty))
 ```
 
 ### `generated_parse_type_arg`
 
-```prism,sig,h-41a78f0f5eff6e040d12c07ca5f48ccbc90e0e9b73f3889f85c785ba7ca941af
+```prism,sig,h-8a1cb9e9838f911372f8a577d688e2eb378ec16eec54a8883992301f7a1e73af
 generated_parse_type_arg : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Parse.GeneratedType.GeneratedChild(Syntax.Ast.Ty))
 ```
 
 ### `generated_parse_effect_row`
 
-```prism,sig,h-61ed3f80817dbd1d75ac52d554448c76f2b94330b7275ab5d8a51f8d1683bff8
+```prism,sig,h-a9cd63e9002a30659d672584270e09d1c7a76e55fa3e705d7f72630cca6e8d61
 generated_parse_effect_row : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.Row)
 ```
 
 ### `generated_parse_eff_label`
 
-```prism,sig,h-8f2a63da6739d3cb594e17776c969fd00bb571735edb9e9f3bdcf399663fdac4
+```prism,sig,h-76224be48d4fa9de1a1de4f99071b860f4a687e4344321c8e12cc12e9e8b0811
 generated_parse_eff_label : (Syntax.Cursor.Cursor, Int) -> Syntax.Parse.Support.Parsed(Syntax.Ast.EffLabel)
 ```

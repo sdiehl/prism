@@ -239,6 +239,8 @@ impl<P: TypedCorePhase> Checker<'_, P> {
                 }
             }
             TypedValueKind::Thunk(body) => {
+                // Compare whole-map snapshots to detect captured tokens or
+                // freed reuse shells.
                 let token_state = self.token_uses.clone();
                 let shell_state = self.reuse_shells.clone();
                 let quantifiers = match body.sig().result() {
@@ -770,6 +772,7 @@ impl<P: TypedCorePhase> Checker<'_, P> {
     }
 
     fn check_lambda_comp(&mut self, comp: &TypedComp, params: &[TypedBinder], body: &TypedComp) {
+        // Mirror the suspension-state check used for thunks.
         let token_state = self.token_uses.clone();
         let shell_state = self.reuse_shells.clone();
         let Some(signature) = (match comp.sig().result() {

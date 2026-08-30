@@ -12,10 +12,15 @@
 -- constant-time raw-byte access and are the first choice for a scanner, a
 -- tokenizer, or a hash. Reach for the codepoint family only when the answer
 -- itself must be counted in characters.
+--
+-- In the bounds below, `n` and `m` are byte lengths and `c` is a codepoint
+-- count. Builder bounds assume the accumulator is threaded linearly.
 
 import Data.Char (is_space, to_upper_c, to_lower_c)
 
 -- | Join a list of strings, placing `sep` between adjacent elements.
+-- Time complexity: O(kN) in the worst case for `k` strings and `N` output bytes,
+-- because the immutable suffix is copied repeatedly.
 --
 -- ```prism
 -- str_join(", ", ["a", "b", "c"])
@@ -30,6 +35,7 @@ pub fn str_join(sep, xs) =
     Cons(x, rest) => concat(x, concat(sep, str_join(sep, rest)))
 
 -- | `s` repeated `n` times (the empty string when `n <= 0`).
+-- Time complexity: O(n^2 * |s|), because each immutable suffix is copied again.
 --
 -- ```prism
 -- str_repeat("ab", 3)
@@ -44,6 +50,7 @@ pub fn str_repeat(s, n) =
     concat(s, str_repeat(s, n - 1))
 
 -- | Right-align `s` to width `w` by prepending spaces (unchanged if already wider).
+-- Time complexity: O(|s| + p^2), where `p` is the padding width.
 --
 -- ```prism
 -- pad_left("42", 5)
@@ -59,6 +66,7 @@ pub fn pad_left(s, w) =
     concat(str_repeat(" ", pad), s)
 
 -- | Left-align `s` to width `w` by appending spaces (unchanged if already wider).
+-- Time complexity: O(|s| + p^2), where `p` is the padding width.
 --
 -- ```prism
 -- pad_right("42", 5)
@@ -74,6 +82,7 @@ pub fn pad_right(s, w) =
     concat(s, str_repeat(" ", pad))
 
 -- | Join a list of strings with newlines between them.
+-- Time complexity: the same O(kN) worst-case bound as `str_join`.
 --
 -- ```prism
 -- lines_of(["one", "two"])
@@ -86,6 +95,8 @@ pub fn lines_of(xs) = str_join("\n", xs)
 
 -- | Helper for the substring queries: whether `needle` sits at byte offset `j`
 -- in `s`, comparing from position `k`.
+-- Time complexity: O(m - k) in the worst case, where `m` is `needle`'s byte
+-- length.
 pub fn occurs_at(needle, s, j, k) =
   if k >= byte_len(needle) then
     true
@@ -97,6 +108,7 @@ pub fn occurs_at(needle, s, j, k) =
     false
 
 -- | True when `s` begins with `prefix`.
+-- Time complexity: O(min(n, m)) in the worst case.
 --
 -- ```prism
 -- starts_with("foo", "foobar")
@@ -107,6 +119,7 @@ pub fn occurs_at(needle, s, j, k) =
 pub fn starts_with(prefix : String, s : String) : Bool = occurs_at(prefix, s, 0, 0)
 
 -- | True when `s` ends with `suffix`.
+-- Time complexity: O(m) in the worst case.
 --
 -- ```prism
 -- ends_with("bar", "foobar")
@@ -122,6 +135,7 @@ pub fn ends_with(suffix : String, s : String) : Bool =
     occurs_at(suffix, s, d, 0)
 
 -- | Helper for `index_of`: search for `needle` in `s` from byte offset `j`.
+-- Time complexity: O((n - j)m) in the worst case.
 pub fn index_of_go(needle, s, j) =
   if j + byte_len(needle) > byte_len(s) then
     -1
@@ -131,6 +145,7 @@ pub fn index_of_go(needle, s, j) =
     index_of_go(needle, s, j + 1)
 
 -- | The byte offset of the first occurrence of `needle` in `s`, or `-1` if absent.
+-- Time complexity: O(nm) in the worst case.
 --
 -- ```prism
 -- index_of("bar", "foobar")
@@ -141,6 +156,7 @@ pub fn index_of_go(needle, s, j) =
 pub fn index_of(needle : String, s : String) : Int = index_of_go(needle, s, 0)
 
 -- | True when `needle` occurs anywhere in `s`.
+-- Time complexity: O(nm) in the worst case.
 --
 -- ```prism
 -- contains("oob", "foobar")
@@ -152,6 +168,7 @@ pub fn contains(needle : String, s : String) : Bool = index_of(needle, s) >= 0
 
 -- | Helper for `to_upper`/`to_lower`: fold ASCII case mapping over `s` into a
 -- byte buffer (`up` selects upper- vs lower-casing).
+-- Time complexity: O(n - i).
 pub fn map_case(s, i, buf, up) =
   if i >= byte_len(s) then
     buf
@@ -165,6 +182,7 @@ pub fn map_case(s, i, buf, up) =
       )
 
 -- | ASCII upper-case of `s` (non-letters unchanged).
+-- Time complexity: O(n).
 --
 -- ```prism
 -- to_upper("Hello")
@@ -176,6 +194,7 @@ pub fn to_upper(s : String) : String =
   string_of_buf(map_case(s, 0, buf_empty(), true))
 
 -- | ASCII lower-case of `s` (non-letters unchanged).
+-- Time complexity: O(n).
 --
 -- ```prism
 -- to_lower("Hello")
@@ -187,6 +206,7 @@ pub fn to_lower(s : String) : String =
   string_of_buf(map_case(s, 0, buf_empty(), false))
 
 -- | Helper for `trim`: the first non-whitespace byte index at or after `i`.
+-- Time complexity: O(n - i).
 pub fn ltrim_idx(s, i) =
   if i < byte_len(s) && is_space(byte_at(s, i)) then
     ltrim_idx(s, i + 1)
@@ -194,6 +214,7 @@ pub fn ltrim_idx(s, i) =
     i
 
 -- | Helper for `trim`: the index just past the last non-whitespace byte before `i`.
+-- Time complexity: O(i).
 pub fn rtrim_idx(s, i) =
   if i > 0 && is_space(byte_at(s, i - 1)) then
     rtrim_idx(s, i - 1)
@@ -201,6 +222,7 @@ pub fn rtrim_idx(s, i) =
     i
 
 -- | Helper for `trim`: collect the bytes of `s` in `[lo, hi)` into `buf`.
+-- Time complexity: O(hi - lo).
 pub fn slice_bytes(s, lo, hi, buf) =
   if lo >= hi then
     buf
@@ -220,6 +242,7 @@ pub fn slice_bytes(s, lo, hi, buf) =
 -- The span shares the parent's bytes rather than copying them, and the parent
 -- stays alive for as long as the span does, so slicing costs the same whether
 -- the string is three bytes or three megabytes.
+-- Time complexity: O(1).
 --
 -- ```prism
 -- str_slice("foobar", 3, 6)
@@ -231,6 +254,7 @@ pub fn str_slice(s : String, lo : Int, hi : Int) : String =
   prim_str_slice(s, lo, hi)
 
 -- | Strip leading and trailing ASCII whitespace.
+-- Time complexity: O(n); the returned slice itself is O(1).
 --
 -- ```prism
 -- trim("  hi  ")
@@ -244,8 +268,10 @@ pub fn trim(s : String) : String =
 -- | The index of character `c` in `s` at or after position `i`, or `-1` if absent.
 --
 -- The codepoint index is the answer, so the walk that finds it is the walk this
--- returns a position into: `index_of` is the byte-offset counterpart and is
--- linear. Kept for the caller who needs a character position.
+-- returns a position into. Each `char_at` starts at the beginning, however, so
+-- the repeated walks are quadratic on an ASCII string. `index_of` is the
+-- byte-offset counterpart. Time complexity: O(nc), worst-case O(n^2), for `c`
+-- codepoints examined.
 -- lint: allow(L0109)
 pub fn index_of_from(c, s, i) =
   if i >= str_len(s) then
@@ -260,6 +286,8 @@ pub fn index_of_from(c, s, i) =
 -- Splits at a character, so it addresses the string the way `index_of_from`
 -- answers. A caller splitting a large document wants byte offsets from
 -- `index_of` and slices from `str_slice`.
+-- Time complexity: O(nc), worst-case O(n^2), including the codepoint-indexed
+-- search and substrings.
 -- lint: allow(L0109)
 pub fn split_from(c, s, i) =
   let j = index_of_from(c, s, i)
@@ -269,6 +297,7 @@ pub fn split_from(c, s, i) =
     Cons(substring(s, i, j - i), split_from(c, s, j + 1))
 
 -- | Split `s` into the pieces between each occurrence of character `c`.
+-- Time complexity: O(nc), worst-case O(n^2).
 --
 -- ```prism
 -- split(char_at(",", 0), "a,b,c")
@@ -279,6 +308,7 @@ pub fn split_from(c, s, i) =
 pub fn split(c, s) = split_from(c, s, 0)
 
 -- | The single-character string containing `c`.
+-- Time complexity: O(1); a Unicode scalar encodes to at most four bytes.
 --
 -- ```prism
 -- str_of_char(chr(65))
@@ -293,6 +323,8 @@ pub fn str_of_char(c) = show_char(c)
 -- Decoding every character is what this is for, and each one is asked for by
 -- its character position; a byte-level pass would have to decode the encoding
 -- itself to answer the same question.
+-- Time complexity: O(nc), worst-case O(n^2), because each `char_at` restarts at
+-- the beginning.
 -- lint: allow(L0109)
 pub fn chars_from(s : String, i : Int) : List(Char) =
   if i >= str_len(s) then
@@ -301,6 +333,7 @@ pub fn chars_from(s : String, i : Int) : List(Char) =
     Cons(chr(char_at(s, i)), chars_from(s, i + 1))
 
 -- | The list of characters in `s`.
+-- Time complexity: O(nc), worst-case O(n^2).
 --
 -- ```prism
 -- chars("hi")

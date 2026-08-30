@@ -16,7 +16,7 @@ RFC 3339 formatting and parsing are pure, total, UTC-only string code: no locale
 
 ### `Duration`
 
-```prism,def,h-3d4be728f465afdc653a6c42295b4d8406959b9b20ddef1cbbf0dd7152b2be39
+```prism,def,h-503503ef3556219263cc288093402f8de8d50b47526f04fb718e2eae59ce4792
 newtype Duration = Duration(Int) deriving (Eq, Show)
 ```
 
@@ -24,7 +24,7 @@ A signed span of time, in nanoseconds.
 
 ### `Instant`
 
-```prism,def,h-0252c4bc01b7f95eae5337697c014d72ee30a3b4269bcb3136286aa3e9b605a2
+```prism,def,h-0d7b377400f29ceede3344d52dadcd0971d64738f9e3837e7b999aa6972ac2c3
 newtype Instant = Instant(Int) deriving (Eq, Show)
 ```
 
@@ -32,7 +32,7 @@ A monotonic clock reading, in nanoseconds from an unspecified origin.
 
 ### `Wall`
 
-```prism,def,h-d250ce874393ad83556253dc64da5d5da7bac46b103569e69f5606b76d4598a0
+```prism,def,h-f1d2d96240ebb09b34813d4110527ee573f359ced55f12cc22676a60a912c7d8
 newtype Wall = Wall(Int) deriving (Eq, Show)
 ```
 

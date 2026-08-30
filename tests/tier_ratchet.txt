@@ -1,0 +1,7 @@
+# Aggregate decline ratchet: `<costliest-tier>\t<count>`. The number of corpus
+# programs the cascade floors at the slowest rung. tier_manifest.txt fails one
+# program sliding slower; this fails the sum growing. Pinned by
+# tests/perf_gate.rs::tier_manifest_holds. `just tier-accept` reseats it DOWNWARD
+# only: a fast-path win shrinks it, but a program joining the slowest rung is
+# refused there and must be a reviewed hand-edit. Do not raise it to pass a gate.
+whole-program-free-monad	51

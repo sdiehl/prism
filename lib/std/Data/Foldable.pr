@@ -14,10 +14,14 @@
 -- `sum` and `product` aggregate through the `Num` class, so they work at any
 -- numeric carrier (`Int`, `I64`, `U64`, `Float`); the literal seeds `0` and
 -- `1` adapt to the carrier the way any numeric literal does.
+--
+-- In the complexity bounds below, `n` is the number of elements visited. Bounds
+-- exclude the cost of supplied functions and type-class operations.
 
 import Data.Maybe (is_some)
 
 -- | The sum of a container of numbers (`0` when empty).
+-- Time complexity: O(n).
 --
 -- ```prism
 -- (sum([1, 2, 3, 4]), sum([1.5, 2.75]))
@@ -29,6 +33,7 @@ pub fn sum(t : f(a)) : a given Foldable(f), Num(a) =
   fold_l(\(acc, x) -> plus(acc, x), 0, t)
 
 -- | The product of a container of numbers (`1` when empty).
+-- Time complexity: O(n).
 --
 -- ```prism
 -- product([1, 2, 3, 4])
@@ -40,6 +45,7 @@ pub fn product(t : f(a)) : a given Foldable(f), Num(a) =
   fold_l(\(acc, x) -> times(acc, x), 1, t)
 
 -- | The number of elements.
+-- Time complexity: O(n).
 --
 -- ```prism
 -- length([1, 2, 3])
@@ -51,6 +57,7 @@ pub fn length(t : f(a)) : Int given Foldable(f) =
   fold_l(\(acc, _x) -> acc + 1, 0, t)
 
 -- | True when the container has no elements.
+-- Time complexity: O(n); the strict fold visits the whole container.
 --
 -- ```prism
 -- is_empty([1, 2, 3])
@@ -62,6 +69,7 @@ pub fn is_empty(t : f(a)) : Bool given Foldable(f) =
   fold_l(\(_acc, _x) -> false, true, t)
 
 -- | True when every element satisfies `p` (vacuously true when empty).
+-- Time complexity: O(n); the strict fold does not short-circuit.
 --
 -- ```prism
 -- all(\(x) -> x > 0, [1, 2, 3])
@@ -73,6 +81,7 @@ pub fn all(p : (a) -> Bool, t : f(a)) : Bool given Foldable(f) =
   fold_l(\(acc, x) -> acc && p(x), true, t)
 
 -- | True when some element satisfies `p`.
+-- Time complexity: O(n); the strict fold does not short-circuit.
 --
 -- ```prism
 -- any(\(x) -> x > 2, [1, 2, 3])
@@ -84,6 +93,7 @@ pub fn any(p : (a) -> Bool, t : f(a)) : Bool given Foldable(f) =
   fold_l(\(acc, x) -> acc || p(x), false, t)
 
 -- | The first element satisfying `p` as `Some` (leftmost match), or `None`.
+-- Time complexity: O(n); the strict fold does not short-circuit.
 --
 -- ```prism
 -- find(\(x) -> x > 1, [1, 2, 3])
@@ -99,6 +109,7 @@ pub fn find(p : (a) -> Bool, t : f(a)) : Option(a) given Foldable(f) =
     )
 
 -- | True when `x` is an element (`Eq`).
+-- Time complexity: O(n) equality tests; the strict fold does not short-circuit.
 --
 -- ```prism
 -- elem(2, [1, 2, 3])
@@ -110,6 +121,7 @@ pub fn elem(x : a, t : f(a)) : Bool given Eq(a), Foldable(f) =
   fold_l(\(acc, y) -> acc || x == y, false, t)
 
 -- | The elements as a `List`, in fold order (`Option` yields zero or one).
+-- Time complexity: O(n).
 --
 -- ```prism
 -- to_list(Some(5))

@@ -1033,13 +1033,22 @@ fn low64(v: &Rv) -> Result<u64, String> {
 }
 
 fn probe_enabled(name: &str) -> bool {
-    let Ok(filter) = env::var("PRISM_PROBES") else {
-        return false;
-    };
-    filter
-        .split(',')
-        .map(str::trim)
-        .any(|pat| pat == "*" || pat == name)
+    // Read and split the filter once per process. The native runtime re-reads
+    // getenv per probe, but the environment is immutable mid-run, so caching
+    // is unobservable across tiers.
+    static PROBES: OnceLock<Vec<String>> = OnceLock::new();
+    let patterns = PROBES.get_or_init(|| {
+        env::var("PRISM_PROBES").map_or_else(
+            |_| Vec::new(),
+            |filter| {
+                filter
+                    .split(',')
+                    .map(|pat| pat.trim().to_string())
+                    .collect()
+            },
+        )
+    });
+    patterns.iter().any(|pat| pat == "*" || pat == name)
 }
 
 fn fixed2(a: &Rv, b: &Rv, f: fn(u64, u64) -> u64) -> Result<Rv, String> {
@@ -1062,7 +1071,7 @@ const fn ord(o: Ordering) -> Rv {
 
 #[cfg(test)]
 mod tests {
-    use super::float_of_str;
+    use super::{float_of_str, BUFFER_INDEX_ERROR};
 
     #[test]
     fn strict_float_parser_accepts_only_complete_rust_lexemes() {
@@ -1073,5 +1082,40 @@ mod tests {
         assert!(float_of_str("0x1p4").is_none());
         assert!(float_of_str("nan(payload)").is_none());
         assert!(float_of_str("1.25\0ignored").is_none());
+    }
+
+    // An out-of-bounds buffer index must fault with the same words on both
+    // backends: the interpreter checks BUFFER_INDEX_ERROR, and the C runtime
+    // prints the shared PRISM_BUFFER_INDEX_ERROR macro from prism_internal.h.
+    // Reading the runtime source here holds the two spellings in step, the way
+    // rt.rs proves its prism_* symbols against the same files.
+    const RUNTIME_HEADER: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/runtime/prism_internal.h"
+    ));
+    const BUFFER_C: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/runtime/prism_buffer.c"
+    ));
+    const TBUF_C: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/runtime/prism_tbuf.c"));
+
+    #[test]
+    fn buffer_index_error_text_is_shared_with_the_c_runtime() {
+        let macro_def = format!("#define PRISM_BUFFER_INDEX_ERROR \"{BUFFER_INDEX_ERROR}\"");
+        assert!(
+            RUNTIME_HEADER.contains(&macro_def),
+            "prism_internal.h must define PRISM_BUFFER_INDEX_ERROR as {BUFFER_INDEX_ERROR:?}"
+        );
+        let literal = format!("\"{BUFFER_INDEX_ERROR}");
+        for (name, src) in [("prism_buffer.c", BUFFER_C), ("prism_tbuf.c", TBUF_C)] {
+            assert!(
+                src.contains("PRISM_BUFFER_INDEX_ERROR"),
+                "{name} must fault through the shared PRISM_BUFFER_INDEX_ERROR macro"
+            );
+            assert!(
+                !src.contains(&literal),
+                "{name} still hardcodes the buffer-index error text instead of the macro"
+            );
+        }
     }
 }

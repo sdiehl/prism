@@ -12,7 +12,7 @@ A `Functor` produces `a`s and `fmap` transforms what comes out; a `Contravariant
 
 ### `Predicate`
 
-```prism,def,h-825eaf8a5e5bfba5894211f30c35c3d5dda80144a6ca5aec0d70c5b758bdc45c
+```prism,def,h-fe04f4822ef3962edc21cf946e5dfff4a5e05cf99911b500be6343d331a1e06c
 newtype Predicate(a) = MkPredicate((a) -> Bool)
 ```
 
@@ -20,7 +20,7 @@ A test on a single value.
 
 ### `Comparison`
 
-```prism,def,h-95d560a0181708e94735eb3304835822a8ae905479afa627ef34973f2530ad6d
+```prism,def,h-dda4ca172881bee057d2423e71e3ebd2b5b2aee6c079d255a1470e6a59bdad8d
 newtype Comparison(a) = MkComparison((a, a) -> Int)
 ```
 
@@ -30,7 +30,7 @@ A total ordering as a function: negative, zero, or positive, with the same conve
 
 ### `Contravariant`
 
-```prism,def,h-b6c9d58adf13948c9a75514f1207941387cdd4a54be62334e14d777fec8f2251
+```prism,def,h-26d78271150672f0b0efffba86bbb7147b9dbe819abcf627f2695096e26fbc1d
 class Contravariant(f)
   contramap : ((b) -> a, f(a)) -> f(b)
 ```

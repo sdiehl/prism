@@ -459,7 +459,7 @@ builtins! {
     Hypot "hypot" "Hypot" 71 F01 surface 2 Str "(Float, Float) -> Float";
     Fmod "fmod" "Fmod" 72 F01 surface 2 Str "(Float, Float) -> Float";
     ShowFloatPrec "show_float_prec" "ShowFloatPrec" 12 F0_IMM1 surface 2 Str "(Float, Int) -> String";
-    ProbeEnabled "probe_enabled" "ProbeEnabled" 94 RETAG surface 1 Str "(String) -> Bool";
+    ProbeEnabled "probe_enabled" "ProbeEnabled" 94 RETAG surface 1 Str "(String) -> Bool ! {IO}";
     Getenv "prim_getenv" "Getenv" 13 RAW surface 1 Str "(String) -> String ! {IO}";
     ReadFile "prim_read_file" "ReadFile" 14 RAW surface 1 Str "(String) -> String ! {IO}";
     ReadBytesFile "prim_read_bytes" "ReadBytesFile" 73 RAW surface 1 Str "(String) -> Buf ! {IO}";

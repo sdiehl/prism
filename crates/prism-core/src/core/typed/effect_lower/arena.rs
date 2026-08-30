@@ -190,13 +190,33 @@ fn installers(fns: &[TypedCoreFn]) -> BTreeSet<Sym> {
 }
 
 /// Whether `c` (or a sub-computation) is a `Handle` whose clauses include
-/// `alloc`.
-fn handles_alloc(c: &TypedComp) -> bool {
+/// `alloc`. Shared with higher-order specialization, which declines to clone a
+/// function this recognizes so an installer's callable stays a distinct thunk
+/// argument for [`arena_roots`] to find.
+pub(crate) fn handles_alloc(c: &TypedComp) -> bool {
     if nested_alloc_handler(c) {
         return true;
     }
     let mut found = false;
     each_subcomp(c, &mut |sc| found |= handles_alloc(sc));
+    found
+}
+
+/// Whether `c` (or a sub-computation) installs a handler, i.e. is a `Handle`.
+/// The superset of [`handles_alloc`] over every effect label, not just `alloc`.
+/// Higher-order specialization declines to clone a function this recognizes: a
+/// handler installer's handled computation is a thunk argument, and the
+/// effect-lowering passes recognize the installer by that thunk -- arena routes
+/// region roots through it, and the reified state and evidence lowerings key
+/// their handler frames on it. Splicing a constant callable into the clone
+/// inlines the thunk away, which the erasures fuse over on the fast tiers but
+/// which faults on the reified tier, so the clone would make a tier observable.
+pub(crate) fn installs_handler(c: &TypedComp) -> bool {
+    if matches!(c.kind(), TypedCompKind::Handle { .. }) {
+        return true;
+    }
+    let mut found = false;
+    each_subcomp(c, &mut |sc| found |= installs_handler(sc));
     found
 }
 

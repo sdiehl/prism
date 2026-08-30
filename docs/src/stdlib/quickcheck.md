@@ -14,7 +14,7 @@ Shrinking is intentionally omitted. The seam is the seed and size carried on a f
 
 ### `Gen`
 
-```prism,def,h-ecb58e20c3e28430d72cc207dff81abc783ae9722c85cbed60963a4de2e0ee40
+```prism,def,h-49d915afeb06b433a92099c9dc5a4bdd22a4d9d959595591fa1844bf7211fa12
 newtype Gen(a) = Gen((Int) -> a ! {Random})
 ```
 
@@ -22,7 +22,7 @@ A seeded, sized generator of `a`. Apply it with `gen_run`; build one with the co
 
 ### `Config`
 
-```prism,def,h-995a7b7a3ba5f9c69eb679f9ef3940955626380278e1b2044a0440fa419693df
+```prism,def,h-47ca54f2c65355d3d3206468eba201fdf47968abe9f793819b62a33130644f7b
 type Config = Cfg { seed: U64, count: Int, max_size: Int } deriving (Eq, Show)
 ```
 
@@ -30,7 +30,7 @@ How a property run configures the seeded stream: the base `seed`, the number of 
 
 ### `Outcome`
 
-```prism,def,h-76528ba1767ee92028499788eb2921f84a41a9627abcf5497766e0d19735f420
+```prism,def,h-b5b1849d5839da04af1f1a7fee16fcdfb27da0447377d97f289f2d6d8af9ceae
 type Outcome(a) = Passed(Int) | Failed(a, Int, U64, Int) deriving (Eq, Show)
 ```
 

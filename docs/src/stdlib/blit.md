@@ -12,7 +12,7 @@ Instanced only where a real primitive backs the copy: `String` over the `substri
 
 ### `Blit`
 
-```prism,def,h-96df58fded2751be471ed5f911c5efa9fe254e297863296d22567654cb4b9f50
+```prism,def,h-9577e7a41d30ad91b1f32f2a605023c9812e201ff269ffb40b962c2aefb36511
 class Blit(s)
   blit : (s, Int, Int, s, Int) -> s
 ```
@@ -39,7 +39,7 @@ Splice the source range over the destination range with the string slice primiti
 
 ### `blitArray`
 
-```prism,def,h-12662120fff3a63f46a04ebdde312f65578f5a2196fdaf49f30aa3104310a3a4
+```prism,def,h-47b0d6886e9af70de8dc167ab394f51a306a4b9cb82463c568288867b2d53617
 instance blitArray : Blit(Array(a))
 ```
 

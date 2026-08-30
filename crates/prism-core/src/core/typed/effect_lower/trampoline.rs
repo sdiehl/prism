@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::effect_abi::{BOUNCE_TAG, EBOUNCE, EOP, EPURE, ERESUME};
 use crate::types::ty::EffRow;
+use prism_common::fixpoint::stabilize;
 use prism_common::fresh::Fresh;
 use prism_common::sym::Sym;
 use prism_syntax::names;
@@ -16,7 +17,6 @@ use super::abi;
 
 const DRIVE: &str = "prism_drive";
 const NO_FRAME: usize = usize::MAX;
-const DRIVE_ROW: &str = "rho_drive@";
 
 const fn pure(result: CoreType) -> CompSig {
     CompSig::new(result, EffRow::Empty)
@@ -65,19 +65,19 @@ fn eff_tail(comp: &TypedComp, eff: &BTreeSet<Sym>) -> bool {
 }
 
 fn eff_functions(functions: &[TypedCoreFn]) -> BTreeSet<Sym> {
-    let mut eff: BTreeSet<Sym> = functions.iter().map(TypedCoreFn::name).collect();
-    loop {
+    // Greatest fixpoint by erosion: assume every function ends in an effect
+    // computation, then evict any whose body cannot, until stable.
+    let all: BTreeSet<Sym> = functions.iter().map(TypedCoreFn::name).collect();
+    stabilize(all, |eff| {
         let mut changed = false;
         for function in functions {
-            if eff.contains(&function.name()) && !eff_tail(function.body(), &eff) {
+            if eff.contains(&function.name()) && !eff_tail(function.body(), eff) {
                 eff.remove(&function.name());
                 changed = true;
             }
         }
-        if !changed {
-            return eff;
-        }
-    }
+        changed
+    })
 }
 
 fn bounce(comp: TypedComp) -> Option<TypedComp> {
@@ -120,7 +120,7 @@ fn drive(value: TypedValue, row: EffRow) -> TypedComp {
 /// The row-polymorphic loop that forces one deferred hop at a time.
 #[must_use]
 pub fn prism_drive_fn() -> TypedCoreFn {
-    let row_name = Sym::from(DRIVE_ROW);
+    let row_name = Sym::from(names::DRIVE_ROW);
     let row = EffRow::Var(row_name);
     let current = TypedBinder::new(Sym::from(names::RET), abi::eff(row.clone()));
     let thunk = TypedBinder::new(Sym::from(names::EBIND_FN), abi::bounce(row.clone()));
@@ -249,6 +249,24 @@ impl Tr<'_> {
                     fields
                         .iter()
                         .map(|field| self.value(field))
+                        .collect::<Option<_>>()?,
+                ),
+            ),
+            TypedValueKind::UnboxedTuple(fields) => TypedValue::new(
+                ty,
+                TypedValueKind::UnboxedTuple(
+                    fields
+                        .iter()
+                        .map(|field| self.value(field))
+                        .collect::<Option<_>>()?,
+                ),
+            ),
+            TypedValueKind::UnboxedRecord(fields) => TypedValue::new(
+                ty,
+                TypedValueKind::UnboxedRecord(
+                    fields
+                        .iter()
+                        .map(|(name, field)| Some((*name, self.value(field)?)))
                         .collect::<Option<_>>()?,
                 ),
             ),

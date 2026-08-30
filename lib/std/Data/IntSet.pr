@@ -7,6 +7,10 @@
 --
 -- Elements are `I64` for the reason keys are in `Data.IntMap`: branching is a
 -- bit test on a fixed-width word. Opt-in: not in Base.
+--
+-- In the complexity bounds below, `n` is the number of elements and `W` is the
+-- trie depth, at most 64 for `I64`. Thus O(W) operations are O(1) with respect
+-- to the collection size.
 
 import Data.IntMap (IntMap, intmap_empty, intmap_singleton, intmap_insert, intmap_member, intmap_delete, intmap_size, intmap_is_empty, intmap_union, intmap_intersection, intmap_difference, intmap_filter, intmap_fold, intmap_keys)
 import Data.List (foldl, map)
@@ -15,6 +19,7 @@ import Data.List (foldl, map)
 opaque newtype IntSet = IntSet(IntMap(Unit))
 
 -- | The empty set.
+-- Time complexity: O(1).
 --
 -- ```prism
 -- intset_is_empty(intset_empty)
@@ -25,6 +30,7 @@ opaque newtype IntSet = IntSet(IntMap(Unit))
 pub let intset_empty : IntSet = IntSet(intmap_empty)
 
 -- | The set containing `x` alone.
+-- Time complexity: O(1).
 --
 -- ```prism
 -- intset_to_list(intset_singleton(7i64))
@@ -35,6 +41,7 @@ pub let intset_empty : IntSet = IntSet(intmap_empty)
 pub fn intset_singleton(x : I64) : IntSet = IntSet(intmap_singleton(x, ()))
 
 -- | Add `x` (a no-op when already present).
+-- Time complexity: O(W), with `W <= 64`.
 --
 -- ```prism
 -- intset_to_list(intset_insert(2i64, intset_insert(1i64, intset_empty)))
@@ -47,6 +54,7 @@ pub fn intset_insert(x : I64, s : IntSet) : IntSet =
     IntSet(m) => IntSet(intmap_insert(x, (), m))
 
 -- | True when `x` is a member.
+-- Time complexity: O(W), with `W <= 64`.
 --
 -- ```prism
 -- intset_member(2i64, intset_from_list([1i64, 2i64, 3i64]))
@@ -59,6 +67,7 @@ pub fn intset_member(x : I64, borrow s : IntSet) : Bool =
     IntSet(m) => intmap_member(x, m)
 
 -- | Remove `x` (a no-op when absent).
+-- Time complexity: O(W), with `W <= 64`.
 --
 -- ```prism
 -- intset_to_list(intset_delete(2i64, intset_from_list([1i64, 2i64, 3i64])))
@@ -71,6 +80,7 @@ pub fn intset_delete(x : I64, s : IntSet) : IntSet =
     IntSet(m) => IntSet(intmap_delete(x, m))
 
 -- | The number of elements.
+-- Time complexity: O(n); sizes are not cached.
 --
 -- ```prism
 -- intset_size(intset_from_list([1i64, 2i64, 2i64, 3i64]))
@@ -83,6 +93,7 @@ pub fn intset_size(borrow s : IntSet) : Int =
     IntSet(m) => intmap_size(m)
 
 -- | True when the set has no elements.
+-- Time complexity: O(1).
 --
 -- ```prism
 -- intset_is_empty(intset_empty)
@@ -95,6 +106,7 @@ pub fn intset_is_empty(borrow s : IntSet) : Bool =
     IntSet(m) => intmap_is_empty(m)
 
 -- | The elements in ascending order, negatives first.
+-- Time complexity: O(n).
 --
 -- ```prism
 -- intset_to_list(intset_from_list([3i64, 1i64, 2i64, 1i64]))
@@ -107,6 +119,7 @@ pub fn intset_to_list(borrow s : IntSet) : List(I64) =
     IntSet(m) => intmap_keys(m)
 
 -- | Build a set from a list, dropping duplicates.
+-- Time complexity: O(nW) for `n` input elements and `W <= 64`.
 --
 -- ```prism
 -- intset_to_list(intset_from_list([3i64, 1i64, 2i64, 1i64]))
@@ -118,6 +131,7 @@ pub fn intset_from_list(xs : List(I64)) : IntSet =
   foldl(\(acc, x) -> intset_insert(x, acc), intset_empty, xs)
 
 -- | Every element in either set, merged by walking the two tries together.
+-- Time complexity: O(n + m) for input sizes `n` and `m`.
 --
 -- ```prism
 -- intset_to_list(intset_union(intset_from_list([1i64, 2i64]), intset_from_list([2i64, 3i64])))
@@ -130,6 +144,7 @@ pub fn intset_union(s1 : IntSet, s2 : IntSet) : IntSet =
     (IntSet(a), IntSet(b)) => IntSet(intmap_union(a, b))
 
 -- | The elements in both sets.
+-- Time complexity: O(nW), where `n` is the size of `s1` and `W <= 64`.
 --
 -- ```prism
 -- intset_to_list(
@@ -147,6 +162,7 @@ pub fn intset_intersection(s1 : IntSet, s2 : IntSet) : IntSet =
     (IntSet(a), IntSet(b)) => IntSet(intmap_intersection(a, b))
 
 -- | The elements of `s1` that are not in `s2`.
+-- Time complexity: O(nW), where `n` is the size of `s1` and `W <= 64`.
 --
 -- ```prism
 -- intset_to_list(
@@ -161,6 +177,7 @@ pub fn intset_difference(s1 : IntSet, s2 : IntSet) : IntSet =
     (IntSet(a), IntSet(b)) => IntSet(intmap_difference(a, b))
 
 -- | The elements satisfying `keep`.
+-- Time complexity: O(n), excluding calls to `keep`.
 --
 -- ```prism
 -- intset_to_list(intset_filter(\(x) -> x > 1i64, intset_from_list([1i64, 2i64, 3i64])))
@@ -173,6 +190,7 @@ pub fn intset_filter(keep, s : IntSet) : IntSet =
     IntSet(m) => IntSet(intmap_filter(\(x, _u) -> keep(x), m))
 
 -- | Fold `f(acc, x)` over the elements in ascending order.
+-- Time complexity: O(n), excluding calls to `f`.
 --
 -- ```prism
 -- intset_fold(\(acc, x) -> acc + x, 0i64, intset_from_list([1i64, 2i64, 3i64]))
@@ -185,6 +203,7 @@ pub fn intset_fold(f, z : b, s : IntSet) : b =
     IntSet(m) => intmap_fold(\(acc, k, _u) -> f(acc, k), z, m)
 
 -- | Apply `f` to every element, rebuilding the set (`f` need not be injective).
+-- Time complexity: O(nW), excluding calls to `f`, with `W <= 64`.
 --
 -- ```prism
 -- intset_to_list(intset_map(\(x) -> x * 2i64, intset_from_list([1i64, 2i64, 3i64])))

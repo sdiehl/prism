@@ -6,13 +6,13 @@
 
 ### `GeneratedSeparatedPhase`
 
-```prism,def,h-a489a0e6662614e80d1b426c4170ccb6709e1c5a41dec2cd29488d013be54626
+```prism,def,h-125c62b27b08e4368a960a6bb5c4b93e03075fa561ca63751c5a65d6ae5e6db0
 type GeneratedSeparatedPhase = GSRequiredFirst | GSInitial | GSAfterSeparator
 ```
 
 ### `GeneratedSeparatedDecision`
 
-```prism,def,h-58380f218a8882c160007b562b1d71ca32b40115464759f8c85a8f5ba248b4c0
+```prism,def,h-86b140913b0d5838f81109e7e579cfe3f00598174ce601dca8dbab19b6348608
 type GeneratedSeparatedDecision = GSEnter | GSReject(Cursor)
 ```
 

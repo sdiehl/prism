@@ -10,7 +10,7 @@ A `Frozen(a)` is an `Array(a)` with the write surface removed at the type level:
 
 ### `Frozen`
 
-```prism,def,h-6dd4092d3861d0131ea02c617996aee8e4faf900f9c5c4bec0584d6a5bd5b6a6
+```prism,def,h-6aeab54d096e0ded179927db3a061574bb4b7381f846a05bdaa9ed1313f07acb
 newtype Frozen(a) = Frz(Array(a))
 ```
 
@@ -24,7 +24,7 @@ An immutable array of `a`.
 fz_freeze : forall a. (Array(a)) -> Data.Frozen.Frozen(a)
 ```
 
-Freeze a growable array, O(1). Value semantics guarantee the frozen view is independent of any later writes to `arr`.
+Freeze a growable array. Value semantics guarantee the frozen view is independent of any later writes to `arr`. Time complexity: O(1).
 
 ```prism,mod=Data.Frozen
 fz_len(fz_freeze(array_of_list([1, 2, 3])))
@@ -40,7 +40,7 @@ fz_len(fz_freeze(array_of_list([1, 2, 3])))
 fz_of_list : forall a. (List(a)) -> Data.Frozen.Frozen(a)
 ```
 
-Build a frozen array from a list.
+Build a frozen array from a list. Time complexity: amortized O(n).
 
 ```prism,mod=Data.Frozen
 fz_get(fz_of_list([5, 6, 7]), 2)
@@ -56,7 +56,7 @@ fz_get(fz_of_list([5, 6, 7]), 2)
 fz_thaw : forall a. (Data.Frozen.Frozen(a)) -> Array(a)
 ```
 
-A growable array with the frozen contents. The frozen view is unaffected by writes to the result (a shared array copies on write).
+A growable array with the frozen contents. The frozen view is unaffected by writes to the result (a shared array copies on write). Time complexity: O(1).
 
 ### `fz_len`
 
@@ -64,7 +64,7 @@ A growable array with the frozen contents. The frozen view is unaffected by writ
 fz_len : forall a. (Data.Frozen.Frozen(a)) -> Int
 ```
 
-The element count.
+The element count. Time complexity: O(1).
 
 ### `fz_get`
 
@@ -72,7 +72,7 @@ The element count.
 fz_get : forall a. (Data.Frozen.Frozen(a), Int) -> a ! {Fail}
 ```
 
-The element at `i`, or `fail()` out of bounds.
+The element at `i`, or `fail()` out of bounds. Time complexity: O(1).
 
 ```prism,mod=Data.Frozen
 fz_get(fz_of_list([5, 6, 7]), 0)
@@ -88,7 +88,7 @@ fz_get(fz_of_list([5, 6, 7]), 0)
 fz_foldl : forall e0 a b. ((a, b) -> a ! {e0}, a, Data.Frozen.Frozen(b)) -> a ! {e0}
 ```
 
-Left-fold over the elements in order.
+Left-fold over the elements in order. Time complexity: O(n), excluding calls to `f`.
 
 ```prism,mod=Data.Frozen
 fz_foldl(\(acc, x) -> acc + x, 0, fz_of_list([1, 2, 3]))
@@ -104,7 +104,7 @@ fz_foldl(\(acc, x) -> acc + x, 0, fz_of_list([1, 2, 3]))
 fz_to_list : forall a. (Data.Frozen.Frozen(a)) -> List(a)
 ```
 
-The elements as a list, in order.
+The elements as a list, in order. Time complexity: O(n).
 
 ```prism,mod=Data.Frozen
 fz_to_list(fz_of_list([1, 2, 3]))
@@ -120,7 +120,7 @@ fz_to_list(fz_of_list([1, 2, 3]))
 fz_map : forall e0 a b. ((b) -> a ! {e0}, Data.Frozen.Frozen(b)) -> Data.Frozen.Frozen(a) ! {e0}
 ```
 
-A new frozen array with `f` applied to every element, one pass.
+A new frozen array with `f` applied to every element, one pass. Time complexity: amortized O(n), excluding calls to `f`.
 
 ```prism,mod=Data.Frozen
 fz_to_list(fz_map(\(x) -> x * 2, fz_of_list([1, 2, 3])))

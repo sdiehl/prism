@@ -10,7 +10,7 @@ Constructor prefixes name the family (`I` items, `E` expressions, `P` patterns, 
 
 ### `Sp`
 
-```prism,def,h-37072a4713f6e38989f42883c3b23111737e5cd19775c52737c7742b54516812
+```prism,def,h-aa8986f1c061cf0e6bfdcb2524fa2a6b68019ded0148e266d714cf743320eafb
 type Sp(a) = Sp { node: a, span: Span, synth: Bool }
 ```
 
@@ -18,7 +18,7 @@ A parsed node with its byte span and the parse-sugar bit. Expressions and patter
 
 ### `Suffix`
 
-```prism,def,h-8f5f2f4eabfa06ea87ed53c83ff8be6b66da27ca8c6eab4158e3ebfce4dab6ce
+```prism,def,h-c6be5381822afebcae3ac7bbe17208d8bf7405b1dbc80d52ca3655d66654745f
 type Suffix = SufNone | SufI64 | SufU64
 ```
 
@@ -26,7 +26,7 @@ An integer literal's optional width suffix: `i64`, `u64`, or none.
 
 ### `Kind`
 
-```prism,def,h-a6bae912d311e341b8075c7eaa7a30f10080d3d1dadfa603642698496f8a3e77
+```prism,def,h-624e4244d81900ca6196dc2da027bd133e8a2286ab3031e2174c40157a15fed5
 type Kind
   = KType
   | KRow
@@ -38,7 +38,7 @@ A kind: the classifier of a type parameter. Ground kinds classify types, rows, a
 
 ### `EffLabel`
 
-```prism,def,h-cdd54b3d089984ad9bb81ee78b7af3139dcbf3c7dcfe21bf4dda87308ed89987
+```prism,def,h-6e73853e631348715f3a7b909d5326292a6b831024158048de94f33b6bef8cd4
 type EffLabel = EffLabel { name: String, args: List(Ty) }
 ```
 
@@ -46,7 +46,7 @@ One effect label: an effect name applied to zero or more type arguments, as it a
 
 ### `Row`
 
-```prism,def,h-590c462d7d62532ca431802f40493f944c40bf2b37531bcb1a604b77f3ef0a69
+```prism,def,h-17dabfed861d18e5124521168495cc6347a19a3baab4f7b90e7306ca5f8da635
 type Row = Row { labels: List(EffLabel), tail: Option(String) }
 ```
 
@@ -54,7 +54,7 @@ An effect row: the labels present plus an optional row-variable tail. The empty 
 
 ### `Ty`
 
-```prism,def,h-0b7aa7274a6bc32e45a95b1251601c0f91699485d6f845a019257b57bc1cd4b9
+```prism,def,h-1a41a9c75ef6c411cde58fae9db0cae1aac6653767899ce6e707bd29997335a0
 type Ty
   = TyInt
   | TyI64
@@ -82,7 +82,7 @@ A surface type. Ground types, type variables, applications, function types with 
 
 ### `CField`
 
-```prism,def,h-cdde6d3ece1ea741b80dee8527f0b948ae4ed4b4a48c8c2144fd86136c3904a3
+```prism,def,h-21d12a4db0bb1933d5c71ce932e8574295b9938269fb4edd8eb5c76362d4ed55
 type CField = CField { name: String, ty: Ty }
 ```
 
@@ -90,7 +90,7 @@ A named field carrying a type: a record constructor field or an unboxed record f
 
 ### `NamedExpr`
 
-```prism,def,h-cfc865dc6ac9fe5df8af842dc7aef1a37afbf01d2b7145a4ac6f3454c90bc529
+```prism,def,h-39941716cfb6b1eda0dc79980ef36cc957801af743a528e3c72225592e169fa3
 type NamedExpr = NamedExpr { name: String, value: Sp(Expr) }
 ```
 
@@ -98,7 +98,7 @@ A named field carrying an expression: a record literal field, a record update fi
 
 ### `Expr`
 
-```prism,def,h-7b97d353800edeb08ab9a56fef9361ed41227fe3340af7e53c438dc1c21e33e3
+```prism,def,h-0b23f9941f1d056cfec471456fa1d74046f0bd0124dfc82ed7609ba287176b30
 type Expr
   = EInt(String, Suffix)
   | EFloat(String)
@@ -159,7 +159,7 @@ A surface expression. One constructor per node kind the exporter emits, includin
 
 ### `Arm`
 
-```prism,def,h-3e9ff5c030577f265d996b11465e5e44aa44be177028a23ec012a55124c89430
+```prism,def,h-d9edb990067599843332ae356a50894822c4e636265eb471a71783029153907a
 type Arm = Arm { pat: Sp(Pat), guard: Option(Sp(Expr)), body: Sp(Expr) }
 ```
 
@@ -167,7 +167,7 @@ One match arm: a spanned pattern, an optional boolean guard, and the body taken 
 
 ### `HandlerArm`
 
-```prism,def,h-425f89985ca4de7a611eb6218e991631820af9e40628da1971973586bb88efb2
+```prism,def,h-0b417ec08e212708b76ae0eacdc36c9687d28fbdb7378b29944dbd96fdf20908
 type HandlerArm
   = HReturn(String, Sp(Expr))
   | HOp(String, List(String), String, Sp(Expr))
@@ -180,7 +180,7 @@ One arm of an effect handler: the return clause, a full operation clause binding
 
 ### `CatchArm`
 
-```prism,def,h-547f04400820f15c73814b13bce972125474622981241055eb6e567daf03c206
+```prism,def,h-06c9f32b5c18876f9b4a512ec90282371e81cf1653449485776a3bf59bde8f72
 type CatchArm = CatchArm {
   name: String,
   binders: List(String),
@@ -193,7 +193,7 @@ One catch arm of a try-catch: the error name, the binders for its payload, and t
 
 ### `Qual`
 
-```prism,def,h-33e740331cda79432fae999cec0222c6999c178e9be99da017a0ead48eb20a3e
+```prism,def,h-5f964896b17d8fae701760df0fa0e2e4eea640264a87b5ada954c181b97aa7c7
 type Qual = QGuard(Sp(Expr)) | QBind(String, Sp(Expr))
 ```
 
@@ -201,7 +201,7 @@ One qualifier of a for-loop or comprehension: a boolean guard or a binding gener
 
 ### `PathStep`
 
-```prism,def,h-39e841d129d27a8712c2d296405b2bfa4d49c337d8f2d9a05c55329fe5abf200
+```prism,def,h-eee9fe9c24d53ce8ccd3ea86c0ad3b6a7db607c76b2323a6cb9500064645cac1
 type PathStep
   = PSField(String)
   | PSEach
@@ -214,7 +214,7 @@ One step of an optic path: a field, every element, a case selection, an index, o
 
 ### `PathOp`
 
-```prism,def,h-4cc9f716d96dbeebcacf7d4159437477278978d48bfea0f91aac448e08abb9a6
+```prism,def,h-6d714267dfe14118d2a95a279039896a8c17d1041b9828a56b376575136bd711
 type PathOp = POSet(Sp(Expr)) | POModify(Sp(Expr))
 ```
 
@@ -222,7 +222,7 @@ The write at the end of an optic path: set to a value or modify by a function.
 
 ### `PathUpdate`
 
-```prism,def,h-b8fb9abd47ccaa6da5a85ea159989008d82993e0ce6178415c2aa7db375ed580
+```prism,def,h-69663c881abc6a1d3461a4f96cc652b6d79fabdbaa23c837285032f8dcf460b6
 type PathUpdate = PathUpdate { path: List(PathStep), op: PathOp }
 ```
 
@@ -230,7 +230,7 @@ One update in a path-update expression: the path walked and the write performed 
 
 ### `Pat`
 
-```prism,def,h-439a2d50b0c54c850548545147a16ef185454659bd11f5a3531cbee39f9ffa5d
+```prism,def,h-2b3cc9571ff6797203f89504efba37b46fe1e9786901164b648fb7934be1e31c
 type Pat
   = PWild
   | PVar(String)
@@ -248,7 +248,7 @@ A surface pattern: wildcards, variables, literals, constructor and tuple pattern
 
 ### `PatField`
 
-```prism,def,h-582a3cacb590541f6d34e4da6eff639bd37e845bba79fe62f77b5f322693aca8
+```prism,def,h-9a295bb08f8db461d086f24b88395ea024c656534a00d92be614ee9ff51ab121
 type PatField = PatField { name: String, pat: Sp(Pat) }
 ```
 
@@ -256,7 +256,7 @@ One field of a record pattern: the field name and the pattern bound to it.
 
 ### `Param`
 
-```prism,def,h-066ca17cc13f9286e05b1bbf448271767231d0a93ae7526ccc2bd46dbeb0d785
+```prism,def,h-ffa051a00c677f9d8599a8b87faa2ff08121bc717f4c39635fe958e4a92c8183
 type Param = Param {
   name: String,
   pat: Option(Sp(Pat)),
@@ -270,7 +270,7 @@ A function parameter: its name, the pattern it was written as if it was written 
 
 ### `Constraint`
 
-```prism,def,h-8ddd0340de38ff9381f4c9947f569257fcbaa7de42841f93c2f811844c92e4d9
+```prism,def,h-c814f7500cb0713d62fe81bd971e59b30333d61e9e4928921aba1f2faa2a0faa
 type Constraint = Constraint { cls: String, ty: Ty, span: Span }
 ```
 
@@ -278,7 +278,7 @@ A class constraint on a type: the class name, the constrained type, and its span
 
 ### `Decl`
 
-```prism,def,h-5f9da298502cc5f3b6ec4f4b6dcdb8345a732c607d9e4ac94b2d0322da3c8a17
+```prism,def,h-c503006faf21c6ec576fe96da8e538fd62939d0922ada26a2da5354cac2d9b58
 type Decl = Decl {
   name: String,
   params: List(Param),
@@ -303,7 +303,7 @@ A function, constant, or logic-function declaration, with every optional clause 
 
 ### `Ensure`
 
-```prism,def,h-8628dd62d3e0423ef5fe98d6ff4b0c0171fe09044f91dbba8587485f510fd258
+```prism,def,h-289df04c93ff92a8611e82ce0f00c894764adfa4eef4a19d3af2faf560751b30
 type Ensure = Ensure { binder: String, expr: Sp(Expr) }
 ```
 
@@ -311,7 +311,7 @@ One ensures clause: the binder for the result and the postcondition expression o
 
 ### `CtorShape`
 
-```prism,def,h-7a20630919e52308ffb66efbaef8198201e68c9d16025a45a94e21ccc6ffa2be
+```prism,def,h-a6e3a080ccaadc1489d06a6dbe1b40558e2ed348ed7550163c2ce5ec1e2956bf
 type CtorShape = CPositional(List(Ty)) | CRecord(List(CField))
 ```
 
@@ -319,7 +319,7 @@ The shape of a data constructor: a positional argument list or a named field lis
 
 ### `Ctor`
 
-```prism,def,h-19a2d5503fc506ff57f93d0e723eec742ae3f3d84d7e01667f54619606da182e
+```prism,def,h-4fa705e5b9ad644d581ffe922cc01b2904051e3b9c194101e600cc098ba4229b
 type Ctor = Ctor { name: String, shape: CtorShape }
 ```
 
@@ -327,7 +327,7 @@ One data constructor: its name and its argument shape.
 
 ### `Deriving`
 
-```prism,def,h-acc281989549d05da41650825f301cebb4548f9799d71b39f66c80855cab225d
+```prism,def,h-752ccd18daec7baeec29c082481114784ac33fc97f7dab65e8c03abbf72f68af
 type Deriving = Deriving { name: String, span: Span }
 ```
 
@@ -335,7 +335,7 @@ One derived class on a data declaration: the class name and its span.
 
 ### `Method`
 
-```prism,def,h-2097a85727195e130cdf6dbf033f329b7688bf54a079d47c0f94126778ac68bb
+```prism,def,h-b2d78b7d073b3c8650e7821fddbb7bdacab9688b7f82e6111c70dbb8e6cff5f9
 type Method = Method { name: String, ty: Ty }
 ```
 
@@ -343,7 +343,7 @@ One class method signature: the method name and its declared type.
 
 ### `EffOp`
 
-```prism,def,h-24ea465cabc3aa2db7285eb39aebe25a5faecf512554dd437b56c59086d215a4
+```prism,def,h-dbe6029de843553f67e716260236ea238c09d79f46116c1319f5bb73242537b2
 type EffOp = EffOp {
   name: String,
   params: List(Ty),
@@ -356,7 +356,7 @@ One operation of an effect declaration: its name, parameter types, result type, 
 
 ### `Rung`
 
-```prism,def,h-21211f0e72877becafbc2d6f21cfbbd394a480e0dab26c448e58a47edd98a0ec
+```prism,def,h-89aa5bbc27bde94abe7e55af0c5a0f35bd1f16bc4b0264446efeb09887932bca
 type Rung = Rung {
   name: String,
   base: Option(String),
@@ -370,7 +370,7 @@ One rung of a stable type: the version name, an optional base to inherit from, i
 
 ### `RungField`
 
-```prism,def,h-a99e9ecbf408219e9672d86414c72e49b38ad081c9802434d1ab1bedf6d98244
+```prism,def,h-0ea202f40c78ad006fafe02da3c0a96e0fc8718814ded82cba60e618b97c10ea
 type RungField = RungField { name: String, ty: Ty, dflt: Option(Sp(Expr)) }
 ```
 
@@ -378,7 +378,7 @@ One field of a stable rung: the field name, its type, and an optional default ex
 
 ### `Converter`
 
-```prism,def,h-14c12053ecd0b64c8e5dffbca8c1d7fdce21a9d8b59de9b133aa0fe6d7ac9c1b
+```prism,def,h-272e4ef3531e4a82fd527d2b1de209b1936e19baf9ef0a865abc52c252f1539a
 type Converter = Converter {
   dir: String,
   from: String,
@@ -394,7 +394,7 @@ One converter between stable rungs: the direction, the from and to rung names, t
 
 ### `MigrationRoute`
 
-```prism,def,h-7d37be6efe27b8efcb33af7fdec2e02d729d384c7d519255c714c909d1a72d02
+```prism,def,h-e6d53bd7fca361f4610cec8d740e27ff4ce556a9863ea7336f632ea835a08035
 type MigrationRoute = MAuto | MVersion(MigrationDir, MigrationDir)
 ```
 
@@ -402,7 +402,7 @@ The route of a stable migration: automatic, or an explicit upgrade and downgrade
 
 ### `MigrationDir`
 
-```prism,def,h-1987e3bc877bed60db2e72ccbbd00a2da0483e2ee40b80056fccd11c7c60ca9c
+```prism,def,h-87b900633d07667212b23dcd9d6b15130407d3153b44ec4b3527141040c4de6f
 type MigrationDir = DAuto | DExpr(Sp(Expr))
 ```
 
@@ -410,7 +410,7 @@ One direction of an explicit migration: automatic or a given expression.
 
 ### `Migration`
 
-```prism,def,h-1482433b8ac7afe6c2adbbe2c34b7bb47c87ed8a8952c3519a7c99a9165bd454
+```prism,def,h-cc15463d9136bcacb28c71a06a934d6f5ada37ef0914ccc07a8aeea71bb32fa5
 type Migration = Migration {
   from: String,
   to: String,
@@ -423,7 +423,7 @@ One migration of a stable type: the from and to rung names and its route.
 
 ### `Item`
 
-```prism,def,h-14752db7349bd6e60de87e3c4f0d693c882220be9594b5a12d82d4341831ed67
+```prism,def,h-f1cae1119a298e36261a157a26bc5d06a253b492c8c40e853a11ab8f2f1d1d8a
 type Item
   = IImport { path: List(String), mod_alias: Option(String), names: Option(List(String)), glob: Bool, reexport: Bool, span: Span }
   | IData { nt: Bool, name: String, params: List(String), param_kinds: List(Kind), ctors: List(Ctor), derivs: List(Deriving), span: Span, vis: Option(String), dep: Option(String) }

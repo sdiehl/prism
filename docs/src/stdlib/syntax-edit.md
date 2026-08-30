@@ -14,7 +14,7 @@ The re-lex is a lexical check and nothing more. It catches an edit that unbalanc
 
 ### `Edit`
 
-```prism,def,h-b4eb83007d87481124be61640bb0bd4fb90e1d349ef9bade513114ef28b9e23c
+```prism,def,h-1db6df0a38fb3d2e90abad95f981454a66fe7e2298724c4007ea2da7f62af1e8
 type Edit = Edit { span: Span, text: String } deriving (Eq, Show)
 ```
 
@@ -22,7 +22,7 @@ One edit: the byte span it replaces and the text that replaces it. An insertion 
 
 ### `EditError`
 
-```prism,def,h-a8175b060502718edcb5b67b067a2115ad4a3f7f9043027853ba128163d00992
+```prism,def,h-2d69fdcb88366d8f65cd3a87496d41e6890eb8a77550dbf46e0bc93b8dd3571f
 type EditError
   = EdBadSpan(Span)
   | EdPastEnd(Span, Int)

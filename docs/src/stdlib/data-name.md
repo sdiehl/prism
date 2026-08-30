@@ -14,7 +14,7 @@ This is nominal identity, not a substitution framework. Once binders and referen
 
 ### `Name`
 
-```prism,def,h-7020b9bd0f8f712777d10448cc733e2c3c371c85f396fe9f68adefdf7c18e25e
+```prism,def,h-f86b407b5df1b8e7127f6144597846862dadcb2e215cf526b2c34d8f05152e22
 newtype Name(space) = Name(Int)
 ```
 
@@ -22,7 +22,7 @@ A branded nominal identity: one integer, one phantom namespace.
 
 ### `Binder`
 
-```prism,def,h-0750005080c0e677130d09babebeb8ab7fe12ed482027e1348b2171fd7a9ce0f
+```prism,def,h-d062629a71942a587eb1a025807f39a4ccda0333cbc8d2c2eeffe256570f51aa
 type Binder(space) = Binder { name: Name(space), hint: String }
 ```
 
@@ -32,37 +32,37 @@ A binder: the identity the checker compares, and the source spelling diagnostics
 
 ### `eqName`
 
-```prism,def,h-6439e31dad89fca70613bad20a60adb15568bba166665a8c5333b171c414372f
+```prism,def,h-103750e3f68f0fb3d41923a30aa6a7811d6ca78889dc05a60a0dd2dc01b8a477
 instance eqName : Eq(Name(space))
 ```
 
 ### `ordName`
 
-```prism,def,h-1a23c7081866188579302eae865953ae0e492525da0ae45784a0b6dd807c324a
+```prism,def,h-3593a69d002f1b6684a64933f0db3b0cd4729ed42e10fe144cdb74a03342fcf1
 instance ordName : Ord(Name(space))
 ```
 
 ### `showName`
 
-```prism,def,h-24a897ee39810b9a1a65600cd6e0f9fe8b0d465f892f9fc17fc2afa82c777705
+```prism,def,h-39f093c5c4e20ccf78a28b2eb474716904a4e51fbcdc449f8bce9f68d1574bc1
 instance showName : Show(Name(space))
 ```
 
 ### `eqBinder`
 
-```prism,def,h-49e9307ea8a4e66a924e6687a9617bc872074fdd225567eb3132dea3c42ae27a
+```prism,def,h-6fcbf2461615a5f14956fe7e48e548dafbda8a07c46101edede72315d0d18b3f
 instance eqBinder : Eq(Binder(space))
 ```
 
 ### `ordBinder`
 
-```prism,def,h-18aa123ccc461d742551fbe51d6f9b3a3ad5e7549432988fbdc8ab046fb09eb6
+```prism,def,h-019b5a2333caef13e2a86936a10ca96fa225c1816ef759174ee1c03bd6bddf5e
 instance ordBinder : Ord(Binder(space))
 ```
 
 ### `showBinder`
 
-```prism,def,h-9a6dd53a6b70aef51dae29995e061a508e93e18189655d4b42668e9a247a7165
+```prism,def,h-e46797249e95f933ff1658519abebb83c67bd5218a4ba992c5e1a3ff4e0c982c
 instance showBinder : Show(Binder(space))
 ```
 

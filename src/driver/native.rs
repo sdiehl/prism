@@ -42,6 +42,8 @@ pub(super) struct CcLinkStats {
     pub probe_time: Duration,
     pub compile_invocations: usize,
     pub compile_time: Duration,
+    pub llvm_object_emissions: usize,
+    pub llvm_object_time: Duration,
     pub link_invocations: usize,
     pub link_time: Duration,
     pub runtime_object_hits: usize,
@@ -67,6 +69,10 @@ impl CcLinkStats {
                     self.runtime_object_misses += 1;
                 }
             }
+            ObjectCompileStats::EmittedByLlvm(elapsed) => {
+                self.llvm_object_emissions += 1;
+                self.llvm_object_time += elapsed;
+            }
         }
     }
 }
@@ -75,6 +81,7 @@ impl CcLinkStats {
 enum ObjectCompileStats {
     Hit,
     Invoked(Duration),
+    EmittedByLlvm(Duration),
 }
 
 fn compile_runtime_object(
@@ -113,12 +120,14 @@ pub(super) fn run_native(bin: &Path) -> Result<Vec<u8>, Error> {
 }
 
 fn cc_args(cfg: &Config) -> Vec<String> {
-    let mut args = vec![
-        format!("-O{}", cfg.backend_opt().as_str()),
-        THIN_LTO_FLAG.to_string(),
+    let mut args = vec![format!("-O{}", cfg.backend_opt().as_str())];
+    if !cfg.direct_object() {
+        args.push(THIN_LTO_FLAG.to_string());
+    }
+    args.extend([
         NO_FP_CONTRACT_FLAG.to_string(),
         NO_OVERRIDE_MODULE_WARNING_FLAG.to_string(),
-    ];
+    ]);
     let macos_min = prism_native::rt::macos_deployment_target();
     if !macos_min.is_empty() {
         args.push(format!("-mmacosx-version-min={macos_min}"));
@@ -155,6 +164,29 @@ fn compile_object(
         env::current_dir().map_err(Error::Io)?.join(object)
     };
     let started = Instant::now();
+    if cfg.direct_object()
+        && source
+            .extension()
+            .is_some_and(|extension| extension == "bc")
+    {
+        prism_native::compile_llvm_bitcode_to_object(
+            source,
+            &object_path,
+            cfg.backend_opt().as_str(),
+        )
+        .map_err(Error::CodegenBackend)?;
+        let elapsed = started.elapsed();
+        if let Some(cache) = cache {
+            let output = cache.store_result(object)?;
+            cache.record_decision(
+                cfg,
+                FactOutcome::Write,
+                Some(output),
+                "object input or LLVM configuration changed",
+            );
+        }
+        return Ok(ObjectCompileStats::EmittedByLlvm(elapsed));
+    }
     let output = Command::new(cc)
         .current_dir(source_dir)
         .args(args)

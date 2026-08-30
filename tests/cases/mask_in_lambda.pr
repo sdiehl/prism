@@ -1,0 +1,16 @@
+-- The same `mask<E>` tunnelling, but wrapped in a thunked lambda `f` before it
+-- is handled. The mask adds a second `E` to `f`'s row that stays unhandled
+-- through `main`'s single handler, so `check` rejects the program at compile
+-- time (E5004). The lambda no longer hides the masked copy: the multiset row
+-- carries it across the thunk, so no checked-clean program aborts at runtime
+-- with `unhandled effect ``op```.
+effect E
+  op(Int) : Int
+
+fn main() : Unit ! {IO} =
+  let f = \() -> mask<E>(op(1))
+  let r =
+    handle f() with
+      op(x) resume k => k(x)
+      return r => r
+  println(r)

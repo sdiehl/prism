@@ -16,7 +16,7 @@ use prism_common::sym::Sym;
 use super::super::cbpv::Value;
 
 /// The shapes the token machine can reject at.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TokenFault {
     /// A binding left its scope still holding tokens: the pass under-dropped.
     ScopeExit { var: Sym, tokens: i64 },
@@ -38,6 +38,10 @@ pub enum TokenFault {
     /// A borrowed argument was not a let-bound variable, so there is no binding
     /// for the loan to be held against.
     BorrowedArgNotBound { callee: Sym, arg: Box<Value> },
+    /// A raw effect node reached the simulation. The check only holds on
+    /// lowered Core (a `handle`'s clauses would go unsimulated), so an
+    /// unlowered tree is refused rather than certified.
+    UnloweredEffect { node: &'static str },
 }
 
 impl fmt::Display for TokenFault {
@@ -60,6 +64,10 @@ impl fmt::Display for TokenFault {
                 f,
                 "borrowed argument to {callee} is not a let-bound variable: {arg:?}"
             ),
+            Self::UnloweredEffect { node } => write!(
+                f,
+                "unlowered `{node}` node reached the reuse linearity check; effect lowering must run first"
+            ),
         }
     }
 }
@@ -69,7 +77,7 @@ impl fmt::Display for TokenFault {
 /// The function is optional because the same simulation runs over a thunk body
 /// and over a fixture handed straight to the checker, where there is no
 /// enclosing declaration to name.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Imbalance {
     pub fault: TokenFault,
     pub function: Option<Sym>,

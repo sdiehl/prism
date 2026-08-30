@@ -158,6 +158,14 @@ long prism_kont_splice(long top, long base) {
     while (cur) {
         long *src = (long *)cur;
         long n = src[PRISM_ARITY_W];
+        /* Field 0 is the frame's `next` link, so a kont frame always has at
+         * least one field (arity >= 1) by construction. The write below lands in
+         * field 0; guarding here turns a mis-issued splice into a trap instead of
+         * an out-of-bounds write, like prism_ref_set does for its store. */
+        if (n < 1) {
+            fprintf(stderr, "fatal: kont_splice on a frame with no next field (arity %ld)\n", n);
+            abort();
+        }
         long *cp = prism_alloc(n);
         cp[PRISM_TAG_W] = src[PRISM_TAG_W];
         cp[PRISM_HDR_WORDS] = rev; /* link toward the deepest clone so far */

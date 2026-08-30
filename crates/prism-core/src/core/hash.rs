@@ -49,7 +49,9 @@ pub use prism_common::digest::{Digest, HASH_PREFIX_HEX, SCHEME};
 /// are provably safe without the terminator because a fixed letter or bracket
 /// comes next, but exempting them turns that one sentence back into a case
 /// analysis over neighbours, so every numeric field closes with this character.
-const NUM_END: char = ';';
+/// The shape encoding (`super::shape`) mirrors this convention and shares the
+/// character, exactly as it shares [`SCHEME`].
+pub(crate) const NUM_END: char = ';';
 
 /// Tag for `Value::Unit`, which carries no number. It was once a bare `1`, which
 /// let it be swallowed by whatever digits preceded it; a letter keeps the
@@ -155,6 +157,28 @@ pub fn hash_group(group: &[CoreFn], deps: &Hashes, meta: &BTreeMap<Sym, String>)
         .collect()
 }
 
+/// One refinement round's sort key for an SCC member: the class it held last
+/// round, its structural encoding, and (first round only) its meta. The member
+/// name never appears.
+type ComponentKey = (usize, String, String);
+
+/// Rank each member by its key: equal keys share a class, and because the
+/// previous class leads the key, every round's partition refines the last.
+fn component_classes(members: &[Sym], keys: &BTreeMap<Sym, ComponentKey>) -> BTreeMap<Sym, usize> {
+    let mut distinct: Vec<&ComponentKey> = keys.values().collect();
+    distinct.sort();
+    distinct.dedup();
+    members
+        .iter()
+        .map(|m| {
+            let rank = distinct
+                .binary_search(&&keys[m])
+                .expect("every member's key is in the distinct list");
+            (*m, rank)
+        })
+        .collect()
+}
+
 /// Hash one SCC and write each member's derived hash into `hashes`.
 fn hash_component(
     members: &[Sym],
@@ -165,35 +189,72 @@ fn hash_component(
 ) {
     // Ordering pass: encode each member with intra-component references left as
     // a neutral placeholder, then sort. This gives a name-independent canonical
-    // order for the cycle. The structural encoding decides; the name is only a
-    // tiebreak for two members that are structurally identical (rare).
-    let mut order: Vec<(String, Sym)> = members
+    // order for the cycle. Members left tied (structurally identical up to
+    // their intra-component references) are refined by re-encoding with the
+    // current class indices substituted for those references, until the
+    // partition stabilizes; each non-stationary round adds a class, so at most
+    // one round per member runs. The member name never enters, so a rename
+    // cannot move any hash.
+    //
+    // Members still tied at the stable point share a class, an encoding, and a
+    // hash, and the sharing is sound rather than a collision: stability means
+    // every member of a class has a byte-identical body up to references
+    // landing in equal classes, which is exactly a bisimulation on the
+    // recursive definitions, so tied members are observationally equal and one
+    // content address is the correct identity for both.
+    let member_meta = |m: &Sym| meta.get(m).map_or("", String::as_str);
+    let seed: BTreeMap<Sym, ComponentKey> = members
         .iter()
-        .map(|m| (encode(fnmap[m], member_set, None, hashes), *m))
+        .map(|m| {
+            let key = (
+                0,
+                encode(fnmap[m], member_set, None, hashes),
+                member_meta(m).to_string(),
+            );
+            (*m, key)
+        })
         .collect();
-    order.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.as_str().cmp(b.1.as_str())));
+    let mut idx = component_classes(members, &seed);
+    let mut classes = idx.values().collect::<BTreeSet<_>>().len();
+    while classes < members.len() {
+        let keys: BTreeMap<Sym, ComponentKey> = members
+            .iter()
+            .map(|m| {
+                let key = (
+                    idx[m],
+                    encode(fnmap[m], member_set, Some(&idx), hashes),
+                    String::new(),
+                );
+                (*m, key)
+            })
+            .collect();
+        idx = component_classes(members, &keys);
+        let refined = idx.values().collect::<BTreeSet<_>>().len();
+        if refined == classes {
+            break;
+        }
+        classes = refined;
+    }
 
-    let idx: BTreeMap<Sym, usize> = order
-        .iter()
-        .enumerate()
-        .map(|(i, (_, m))| (*m, i))
-        .collect();
-
-    // Real pass: encode with intra-component indices, fold each member's meta,
-    // and hash the concatenation as the component identity.
+    // Real pass: encode with intra-component class indices, fold each member's
+    // meta, and hash the concatenation as the component identity. Tied members
+    // contribute identical bytes, so their order is immaterial; the multiplicity
+    // still lands in the blob, one chunk per member.
+    let mut ordered: Vec<Sym> = members.to_vec();
+    ordered.sort_by_key(|m| idx[m]);
     let mut blob = String::from(SCHEME);
-    for (_, m) in &order {
+    for m in &ordered {
         // Length-prefix the free-form meta (same `{len}:{payload}` discipline as
         // every other field) so its bytes cannot forge a `|meta:` member boundary
         // and collide two distinct components.
-        let m_str = meta.get(m).map_or("", String::as_str);
+        let m_str = member_meta(m);
         let _ = write!(blob, "|meta{}:{m_str}", m_str.len());
         blob.push_str(&encode(fnmap[m], member_set, Some(&idx), hashes));
     }
     let component = hex(&blob);
 
-    for (i, (_, m)) in order.iter().enumerate() {
-        hashes.insert(*m, hex(&format!("{component}:{i}")));
+    for m in &ordered {
+        hashes.insert(*m, hex(&format!("{component}:{}", idx[m])));
     }
 }
 
@@ -796,6 +857,52 @@ mod tests {
         let deps = BTreeMap::from([(sym("f"), whole[&sym("f")].clone())]);
         let group = super::hash_group(&[g], &deps, &meta);
         assert_eq!(group[&sym("g")], whole[&sym("g")]);
+    }
+
+    // A mutually recursive pair, in both flavors. Renaming an SCC member never
+    // moves a hash: the member name enters neither the encoding nor the class
+    // refinement. And a pair whose bodies are byte-identical up to their
+    // intra-component references is interchangeable, so both members share one
+    // content address.
+    #[test]
+    fn scc_member_rename_moves_no_hash() {
+        let m = BTreeMap::new();
+        let jump = |name: &str, callee: &str| CoreFn {
+            name: sym(name),
+            params: vec![sym("x")],
+            dict_arity: 0,
+            body: Comp::Call(sym(callee), vec![Value::Var(sym("x"))]),
+        };
+        let step = |name: &str, callee: &str| CoreFn {
+            name: sym(name),
+            params: vec![sym("x")],
+            dict_arity: 0,
+            body: Comp::Bind(
+                Box::new(Comp::Return(Value::Var(sym("x")))),
+                sym("t"),
+                Box::new(Comp::Call(sym(callee), vec![Value::Var(sym("t"))])),
+            ),
+        };
+
+        // Distinguishable members: each keeps its hash across the partner's
+        // rename.
+        let core = |b: &str| Core {
+            fns: vec![jump("a", b), step(b, "a")],
+        };
+        let base = hash_program(&core("b"), &m);
+        let renamed = hash_program(&core("z"), &m);
+        assert_ne!(base[&sym("a")], base[&sym("b")]);
+        assert_eq!(base[&sym("a")], renamed[&sym("a")]);
+        assert_eq!(base[&sym("b")], renamed[&sym("z")]);
+
+        // Interchangeable members: one shared hash, still stable under rename.
+        let twins = |b: &str| Core {
+            fns: vec![jump("a", b), jump(b, "a")],
+        };
+        let tied = hash_program(&twins("b"), &m);
+        let tied_renamed = hash_program(&twins("z"), &m);
+        assert_eq!(tied[&sym("a")], tied[&sym("b")]);
+        assert_eq!(tied[&sym("a")], tied_renamed[&sym("a")]);
     }
 
     #[test]

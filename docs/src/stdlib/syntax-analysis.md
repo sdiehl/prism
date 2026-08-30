@@ -10,7 +10,7 @@ Every function here is a few lines over `Control.Layer`'s generic queries at `ex
 
 ### `ExprCensus`
 
-```prism,def,h-39a131290938e1f8c12cda134e85d309ac29f19c830b1650e9abf94f74324b30
+```prism,def,h-c6db779f33e21aa6745dfe1f5e536071270dca517a07c01cb74c08251abd0d86
 type ExprCensus = ExprCensus {
   nodes: Int,
   vars: Int,

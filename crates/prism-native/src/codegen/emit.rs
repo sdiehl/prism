@@ -38,7 +38,7 @@ use prism_core::core::builtins::BUILTINS;
 use prism_core::core::builtins::{builtin, AbiArg, AbiResult, Builtin, BuiltinKind, FloatOp};
 use prism_core::core::effect_abi::{is_free_monad_driver, EOP};
 use prism_core::core::tailrec::{
-    loops_as_tail_call, reassoc, trmc_mode, trmc_shape, TrmcMode, TrmcShape,
+    loops_as_tail_call, reassoc, trmc_mode, trmc_resumption_safe, trmc_shape, TrmcMode, TrmcShape,
 };
 use prism_core::core::{
     fv, reachable_fns, Comp, Core, CoreFn, CoreOp, CorePat, IoOp, LoweredCore, NegLane, Value,
@@ -1204,6 +1204,19 @@ impl<'a, I: Isa> Cg<'a, I> {
         self.current_owner = Some(f.name);
         let body = reassoc(&f.body);
         if let Some(mode) = trmc_mode(f.name.as_str(), f.params.len(), &body) {
+            // The rewrite threads and fills one cell in place, which a second
+            // resumption of the surrounding continuation would corrupt. Effect
+            // lowering reifies every multishot handler before emission, so a
+            // function reaching this rewrite carries no resumable effect node;
+            // assert that precondition here so a future pass reordering trips
+            // rather than silently miscompiling.
+            assert!(
+                trmc_resumption_safe(&body),
+                "TRMC rewrite of `{}` reached a body with a resumable effect node; \
+                 effect lowering must run before emission so the in-place hole cannot \
+                 be observed by a second resumption",
+                f.name.as_str()
+            );
             return self.trmc_function(f, &body, mode);
         }
         self.b.reset();

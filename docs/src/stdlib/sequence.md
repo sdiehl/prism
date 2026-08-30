@@ -38,7 +38,7 @@ A pull pipeline is correct and constant-space per stage. At `-O1`, each transfor
 
 ### `Step`
 
-```prism,def,h-e8383fd5daa5950d061d7e926085d15fb78dfe7b9ef9cef359540d95789cc47a
+```prism,def,h-1cdf5e7c1dfc85fcfe1a2a206d568b85cc34b235bfa895ae36cce89b1afef730
 type Step(a) = SDone | SMore(a, (Unit) -> Step(a))
 ```
 

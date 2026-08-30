@@ -10,6 +10,8 @@ Set algebra stays O(n log n) and preserves iteration order. Base includes this m
 
 Like `Map`, a set's representation depends on the canonical `Ord` instance used to build it. The compiler classifies `Ord` and `Hash` as representation-affecting in `store::coherence::is_representation_affecting`. Set identity does not currently encode that instance, so programs exchanging a set across an assembly boundary must agree on its canonical ordering.
 
+In the complexity bounds below, `n` is the number of elements in a set. A bound stated in comparisons excludes the cost of the `Ord` comparison itself.
+
 ## Functions and Values
 
 ### `set_empty`
@@ -18,7 +20,7 @@ Like `Map`, a set's representation depends on the canonical `Ord` instance used 
 set_empty : forall a b. Map(a, Unit, b)
 ```
 
-The empty set.
+The empty set. Time complexity: O(1).
 
 ### `set_insert`
 
@@ -26,7 +28,7 @@ The empty set.
 set_insert : forall a b. (b, Map(b, Unit, a)) -> Map(b, Unit, a) given Ord(b)
 ```
 
-Add `x` to the set (a no-op if already present).
+Add `x` to the set (a no-op if already present). Time complexity: O(log n) comparisons.
 
 ```prism,mod=Data.Set
 set_to_list(set_insert(2, set_insert(1, set_empty)))
@@ -42,7 +44,7 @@ set_to_list(set_insert(2, set_insert(1, set_empty)))
 set_member : forall a b. (b, Map(b, Unit, a)) -> Bool given Ord(b)
 ```
 
-True when `x` is a member of the set.
+True when `x` is a member of the set. Time complexity: O(log n) comparisons.
 
 ```prism,mod=Data.Set
 set_member(2, set_from_list([1, 2, 3]))
@@ -58,7 +60,7 @@ true
 set_delete : forall a b. (b, Map(b, Unit, a)) -> Map(b, Unit, a) given Ord(b)
 ```
 
-Remove `x` from the set (a no-op if absent).
+Remove `x` from the set (a no-op if absent). Time complexity: O(log n) comparisons.
 
 ```prism,mod=Data.Set
 set_to_list(set_delete(2, set_from_list([1, 2, 3])))
@@ -74,7 +76,7 @@ set_to_list(set_delete(2, set_from_list([1, 2, 3])))
 set_size : forall a b c. (Map(a, b, c)) -> Int
 ```
 
-The number of elements.
+The number of elements. Time complexity: O(n); the underlying map does not cache its size.
 
 ```prism,mod=Data.Set
 set_size(set_from_list([1, 2, 2, 3]))
@@ -90,7 +92,7 @@ set_size(set_from_list([1, 2, 2, 3]))
 set_to_list : forall a b c. (Map(a, b, c)) -> List(a)
 ```
 
-The elements in ascending order.
+The elements in ascending order. Time complexity: O(n).
 
 ```prism,mod=Data.Set
 set_to_list(set_from_list([3, 1, 2, 1]))
@@ -106,7 +108,7 @@ set_to_list(set_from_list([3, 1, 2, 1]))
 set_from_list : forall a b. (List(b)) -> Map(b, Unit, a) given Ord(b)
 ```
 
-Build a set from a list, dropping duplicates.
+Build a set from a list, dropping duplicates. Time complexity: O(n log n) comparisons for an input of `n` elements.
 
 ```prism,mod=Data.Set
 set_to_list(set_from_list([3, 1, 2, 1]))
@@ -122,7 +124,7 @@ set_to_list(set_from_list([3, 1, 2, 1]))
 set_union : forall a b c. (Map(c, Unit, a), Map(c, Unit, b)) -> Map(c, Unit, a) given Ord(c)
 ```
 
-Every element in either set.
+Every element in either set. Time complexity: O(m log(n + m)) comparisons, where `m` is the size of `s2`.
 
 ```prism,mod=Data.Set
 set_to_list(set_union(set_from_list([1, 2]), set_from_list([2, 3])))
@@ -138,7 +140,7 @@ set_to_list(set_union(set_from_list([1, 2]), set_from_list([2, 3])))
 set_intersection : forall a b c d. (Map(d, Unit, a), Map(d, Unit, b)) -> Map(d, Unit, c) given Ord(d)
 ```
 
-The elements in both sets.
+The elements in both sets. Time complexity: O(N log N) comparisons, where `N` is the combined input size.
 
 ```prism,mod=Data.Set
 set_to_list(set_intersection(set_from_list([1, 2, 3]), set_from_list([2, 3, 4])))
@@ -154,7 +156,7 @@ set_to_list(set_intersection(set_from_list([1, 2, 3]), set_from_list([2, 3, 4]))
 set_difference : forall a b c d. (Map(d, Unit, a), Map(d, Unit, b)) -> Map(d, Unit, c) given Ord(d)
 ```
 
-The elements of `s1` that are not in `s2`.
+The elements of `s1` that are not in `s2`. Time complexity: O(N log N) comparisons, where `N` is the combined input size.
 
 ```prism,mod=Data.Set
 set_to_list(set_difference(set_from_list([1, 2, 3]), set_from_list([2, 3])))

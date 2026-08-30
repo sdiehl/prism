@@ -27,8 +27,8 @@ import Wire (..)
 type Calling = Sorcerer | Wizard | Bard deriving (Eq, Show, Serialize, Stable)
 
 stable PlayerManual {
-  V1 = { hero: String, calling: Calling, level: Int } frozen "3afc093c4d16c391",
-  V2 = { ..V1, signature_spell: String = "Magic Missile" } frozen "75bc84eb86ad6925",
+  V1 = { hero: String, calling: Calling, level: Int } frozen "83ec19c79b74ffde",
+  V2 = { ..V1, signature_spell: String = "Magic Missile" } frozen "4629e1366adf6a75",
   V3 = { ..V2, spell_slots: Int = 2, inspiration: Int = 0 },
   migrations {
     V1 -> V2 = auto

@@ -1,0 +1,31 @@
+-- Std `Sequence` declares `Step(a) = SDone | SMore(a, ...)` as source
+-- constructors. The control and state erasures synthesize their own ABI `Step`
+-- carrier with the same `SMore`/`SDone` spelling but a different arity and tag
+-- order. This program forces both families into one compilation: a `Sequence`
+-- pipeline runs inside a resumptive handler, and a `continue` loop forces the
+-- control erasure. The two constructor families must stay disjoint, so every
+-- backend prints the same three lines.
+effect Ask
+  ask() : Int
+
+import Sequence as Seq
+
+fn seq_under_handler() =
+  handle Seq.sum(Seq.take(Seq.iterate(ask(), \(x) -> x + 1), 4)) with
+    ask() resume k => k(10)
+    return r => r
+
+fn loop_sum(limit : Int) : Int =
+  var total := 0
+  var i := 0
+  while i < limit do
+    i += 1
+    if i % 2 == 1 then
+      continue
+    total += i
+  total
+
+fn main() : Unit ! {IO} =
+  println(seq_under_handler())
+  println(loop_sum(6))
+  println(Seq.to_list(Seq.map(Seq.range(1, 5), \(x) -> x * x)))

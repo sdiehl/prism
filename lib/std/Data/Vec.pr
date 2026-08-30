@@ -27,10 +27,11 @@ import Data.List (..)
 -- | A vector of `a` with a type-level length `n`.
 opaque type Vec(a, n : Nat) = MkVec(List(a))
 
--- | The empty vector, length `0`.
+-- | The empty vector, length `0`. Time complexity: O(1).
 pub fn vempty() : Vec(a, 0) = MkVec([])
 
 -- | The one-element vector, length `1`.
+-- Time complexity: O(1).
 --
 -- ```prism
 -- vto_list(vsingle(42))
@@ -41,6 +42,7 @@ pub fn vempty() : Vec(a, 0) = MkVec([])
 pub fn vsingle(x : a) : Vec(a, 1) = MkVec([x])
 
 -- | The underlying list, forgetting the static length.
+-- Time complexity: O(1); the list spine is shared.
 --
 -- ```prism
 -- vto_list(vsingle(7))
@@ -53,6 +55,7 @@ pub fn vto_list(v : Vec(a, n)) : List(a) =
     MkVec(xs) => xs
 
 -- | Apply `f` to every element, preserving the length.
+-- Time complexity: O(n), excluding calls to `f`.
 --
 -- ```prism
 -- vto_list(vmap(\(x) -> x * 2, vsingle(21)))
@@ -66,6 +69,7 @@ pub fn vmap(f : (a) -> b, v : Vec(a, n)) : Vec(b, n) =
 
 -- | Zip two vectors of the SAME length into a vector of pairs. The shared `n`
 -- forces equal lengths; a mismatch is rejected at compile time, naming both.
+-- Time complexity: O(n).
 --
 -- ```prism
 -- vto_list(vzip(vsingle(1), vsingle(2)))
@@ -87,6 +91,7 @@ pub fn vzip(u : Vec(a, n), v : Vec(b, n)) : Vec((a, b), n) =
 
 -- | The first element. `n` is unconstrained, so the empty vector is not ruled
 -- out statically; on an empty vector this raises `Fail`.
+-- Time complexity: O(1).
 --
 -- ```prism
 -- vhead(vsingle(42))

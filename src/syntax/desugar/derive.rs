@@ -157,7 +157,13 @@ pub(super) fn derive_instances(
             // Lens is not a class: it synthesizes plain `<f>_of` / `with_<f>`
             // accessors, so it bypasses the class-existence and instance paths.
             if class == LENS {
-                fns.extend(derive_lens(d, *cspan, mk_lens.as_deref(), &mut accessors)?);
+                fns.extend(derive_lens(
+                    d,
+                    *cspan,
+                    mk_lens.as_deref(),
+                    &mut accessors,
+                    &value_canon,
+                )?);
                 continue;
             }
             let Some(canon) = class_canon.get(class.as_str()) else {
@@ -223,11 +229,20 @@ pub(super) fn derive_instances(
 // the field alone, so two records sharing a field name would define one name
 // twice at two types; the collision is refused here, where both types can be
 // named, rather than surfacing as an unbuildable Core witness.
+//
+// `existing` is every top-level value name already in scope before deriving (the
+// user's own functions, a module's opened names, constructors). A synthesized
+// accessor whose name is already bound there would define that name a second time
+// in the one flat namespace: against a hand-written function that reaches Core as
+// two definitions of one name, against a library name it silently resolves to
+// whichever the merge kept. Both are refused with a named diagnostic so neither
+// an ICE nor an accidental winner can result.
 fn derive_lens(
     d: &DataDecl,
     cspan: Span,
     mk_lens: Option<&str>,
     accessors: &mut BTreeMap<String, String>,
+    existing: &BTreeMap<String, String>,
 ) -> Result<Vec<Decl>, TypeError> {
     let z = Z;
     let [ctor] = d.ctors.as_slice() else {
@@ -275,6 +290,14 @@ fn derive_lens(
         }
         accessors.insert(getter.clone(), d.name.clone());
         accessors.insert(setter.clone(), d.name.clone());
+        // A synthesized accessor may not take a name a pre-existing top-level
+        // value already holds; deriving over the two accessor names alone would
+        // otherwise clobber a hand-written function or lose to a library one.
+        for name in [&getter, &setter] {
+            if existing.contains_key(name) {
+                return Err(shadows_value(d, f, name, cspan));
+            }
+        }
         // Both accessors are built twice over the same receiver expression: once
         // named, once anonymous inside the lens value below.
         let read = |r| sp(Expr::FieldAccess(Box::new(r), f.clone()), z);
@@ -297,6 +320,10 @@ fn derive_lens(
         s.ret = Some(self_ty.clone());
         out.push(s);
         if let Some(mk) = mk_lens {
+            let lv = names::lens_value(&d.name, f);
+            if existing.contains_key(&lv) {
+                return Err(shadows_value(d, f, &lv, cspan));
+            }
             // The lens holds its own copy of the two accessors rather than naming
             // them: the accessor names carry the field but not the type, so two
             // records sharing a field name share their accessors, and a lens that
@@ -310,17 +337,32 @@ fn derive_lens(
             // A top-level value, not a function: it is inlined at each use site,
             // so a lens on a polymorphic record is as general as its fields are
             // without an annotation naming the optic type here.
-            let mut l = mdecl(
-                &names::lens_value(&d.name, f),
-                &[],
-                call(evar(mk, z), vec![read, write], z),
-                z,
-            );
+            let mut l = mdecl(&lv, &[], call(evar(mk, z), vec![read, write], z), z);
             l.konst = true;
             out.push(l);
         }
     }
     Ok(out)
+}
+
+// A derived lens accessor `name` (for `field` of type `d`) collides with a
+// top-level value that already holds that name. The help points at the two ways
+// out that leave the flat namespace with one definition per name.
+fn shadows_value(d: &DataDecl, field: &str, name: &str, cspan: Span) -> TypeError {
+    ErrKind::LensAccessorShadowsValue {
+        ty: d.name.clone(),
+        field: field.to_string(),
+        name: name.to_string(),
+    }
+    .at(cspan)
+    .with_help(format!(
+        "rename `{field}`, or drop `Lens` from the `deriving` clause and write the \
+         accessor by hand under a name of your own"
+    ))
+    .note(
+        "top-level names share one flat namespace that holds one definition per \
+         name, so a synthesized accessor cannot reuse a name already bound",
+    )
 }
 
 fn fvars(pre: &str, n: usize, z: Span) -> Vec<S<Pattern>> {

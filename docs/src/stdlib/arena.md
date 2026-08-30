@@ -12,7 +12,7 @@ The `alloc` operation is compiler-internal: the arena-lowering pass rewrites a c
 
 ### `Cell`
 
-```prism,def,h-e5589f350579f3bdb956488e83ca5d6cc3677c5b79bb0fea418248ce7d22dcb0
+```prism,def,h-3de878d5d92efa0872f5b639b5e8eb1fac36259d9f1d3d2251349d663e6fbe18
 newtype Cell = Cell(Int)
 ```
 
