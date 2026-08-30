@@ -28,7 +28,7 @@ compaction, above it is not.
 | parser           |    2,555 |     1,931 |     7,538 |      6,484 |  3.36 |
 | surface AST      |    1,994 |     1,417 |       354 |        199 |  0.14 |
 | syntax codecs    |     none |      none |     2,902 |      2,382 |   n/a |
-| checker          |   10,589 |     8,410 |     4,233 |      3,386 |  0.40 |
+| checker          |   11,009 |     8,636 |     4,233 |      3,386 |  0.39 |
 
 What each row counts:
 
@@ -89,7 +89,7 @@ What each row counts:
   record. There is no Rust counterpart to divide by because that side is derived
   and occupies no lines, and that asymmetry is exactly the gap.
 - **checker**, threshold ratio 0.50 or lower at full coverage: recorded, not
-  judged, at 0.40. The Prism side checks the subset the bootstrap workbench
+  judged, at 0.39. The Prism side checks the subset the bootstrap workbench
   supports, so the number says what a subset costs, not what the full checker
   will. That subset is no longer the pure first-order one it was: this release
   added written effect rows, parameterized effect labels, shared handler effect
