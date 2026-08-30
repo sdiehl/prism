@@ -14,6 +14,7 @@ use serde_json::Value;
 
 use crate::core::HASH_PREFIX_HEX;
 use crate::error::line_col;
+use crate::lex::highlight::token_spans;
 use crate::resolve::{default_roots, Root};
 use crate::{
     check, example_program, format as fmt_src, interpret, interpret_on, namespace_identity,
@@ -528,7 +529,7 @@ pub fn fmt(src: &str) -> String {
 #[wasm_bindgen]
 #[must_use]
 pub fn tokens(src: &str) -> String {
-    let parts: Vec<String> = crate::lex::highlight::token_spans(src)
+    let parts: Vec<String> = token_spans(src)
         .into_iter()
         .map(|(start, end, class)| format!(r#"{{"s":{start},"e":{end},"c":"{class}"}}"#))
         .collect();

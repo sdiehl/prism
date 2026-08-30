@@ -9,10 +9,13 @@ use crate::syntax::ast::{self, Core, Decl};
 use crate::types::deps;
 use crate::types::ty::{EffRow, Effects, Type};
 
-use super::super::env::Annot;
+use super::super::env::{
+    annotation_scheme, collect_type_vars, demand_var_kinds, for_each_row_tail, signature_ty_vars,
+    Annot,
+};
 use super::super::{
-    ClassInfo, Env, HoleBinding, HoleCandidate, HoleReport, InstInfo, Renames, RowScope, SelfRef,
-    Tc,
+    require_pure_konst, BodyWitness, ClassInfo, Env, HoleBinding, HoleCandidate, HoleReport,
+    InstInfo, Label, OperationUses, Renames, RowScope, SelfRef, Tc,
 };
 
 // The existentials and scaffolding a declaration's body is inferred against: its
@@ -73,8 +76,8 @@ impl Tc<'_> {
     // out of the shared buffers is what keeps a group's members separable: each is
     // rendered under its own naming, and the buffers are refilled by the next body.
     fn defer_spans(&mut self) {
-        let spans = std::mem::take(&mut self.pending);
-        let rows = std::mem::take(&mut self.pending_tooltip_rows);
+        let spans = mem::take(&mut self.pending);
+        let rows = mem::take(&mut self.pending_tooltip_rows);
         self.deferred_spans.push_back((spans, rows));
         self.touched_tooltip_rows.clear();
         self.tooltip_row_scaffolds.clear();
@@ -230,11 +233,7 @@ impl Tc<'_> {
     }
 
     fn show_report_row(row: &EffRow) -> String {
-        let mut labels: Vec<String> = row
-            .labels()
-            .into_iter()
-            .map(super::super::Label::show)
-            .collect();
+        let mut labels: Vec<String> = row.labels().into_iter().map(Label::show).collect();
         labels.sort();
         let tail = match row.tail() {
             EffRow::Empty => None,
@@ -306,7 +305,7 @@ impl Tc<'_> {
             // self-type (shared existentials let a sibling unify structure); a
             // fully annotated function exposes its generalized annotation scheme
             // (a sibling call checks against it, supporting polymorphic recursion).
-            let visible = super::super::env::annotation_scheme(d, self.data)
+            let visible = annotation_scheme(d, self.data)
                 .map_or_else(|| seed.self_ty.clone(), |s| with_latent_row(s, seed.mu));
             env.insert(Sym::from(&d.name), visible);
             seeds.push(seed);
@@ -321,7 +320,7 @@ impl Tc<'_> {
             // the seeded ambient row, so hold it to an empty inferred row.
             if d.konst {
                 let effs = self.apply_row(&EffRow::Exist(seed.mu)).label_names();
-                super::super::require_pure_konst(d, &effs)?;
+                require_pure_konst(d, &effs)?;
             }
         }
         // Generalize every member once against the pre-group environment so the
@@ -348,12 +347,12 @@ impl Tc<'_> {
         for p in &d.params {
             if let Some(ann) = &p.ty {
                 self.check_annot_rows(ann, d.span)?;
-                super::super::env::demand_var_kinds(ann, self.data, &mut var_kinds, d.span)?;
+                demand_var_kinds(ann, self.data, &mut var_kinds, d.span)?;
             }
         }
         if let Some(ann) = &d.ret {
             self.check_annot_rows(ann, d.span)?;
-            super::super::env::demand_var_kinds(ann, self.data, &mut var_kinds, d.span)?;
+            demand_var_kinds(ann, self.data, &mut var_kinds, d.span)?;
         }
         if let Some(ls) = &d.eff {
             self.check_labels(ls, d.span)?;
@@ -374,7 +373,7 @@ impl Tc<'_> {
         // narrow `a` to `Int` is a type error rather than a silent specialization;
         // `finish_decl` re-quantifies these into the exported polymorphic scheme.
         // Row variables stay flexible (effect inference is principal).
-        let rigid_ty = super::super::env::signature_ty_vars(d, self.data);
+        let rigid_ty = signature_ty_vars(d, self.data);
         let no_rigid = BTreeSet::new();
         let mut doms = Vec::new();
         for p in &d.params {
@@ -426,7 +425,7 @@ impl Tc<'_> {
                 if !args.is_empty() {
                     scope.push((Sym::from(&al.name), args.clone()));
                 }
-                expected_labels.push(super::super::Label {
+                expected_labels.push(Label {
                     name: Sym::from(&al.name),
                     args,
                 });
@@ -459,7 +458,7 @@ impl Tc<'_> {
             Some(ann) => {
                 self.check_annot_rows(ann, d.span)?;
                 let mut var_kinds = BTreeMap::new();
-                super::super::env::demand_var_kinds(ann, self.data, &mut var_kinds, d.span)?;
+                demand_var_kinds(ann, self.data, &mut var_kinds, d.span)?;
                 self.convert_annot_fresh(ann)
             }
             None => Type::Exist(self.push_ex()),
@@ -504,7 +503,7 @@ impl Tc<'_> {
         self.num_default.clear();
         self.neg_default.clear();
         self.index_ops.clear();
-        self.operation_uses = super::super::OperationUses::default();
+        self.operation_uses = OperationUses::default();
         self.precise_calls.clear();
         Ok(())
     }
@@ -516,7 +515,7 @@ impl Tc<'_> {
             env2.insert_local(Sym::from(&p.name), t.clone());
         }
         let self_entry = if d.constraints.is_empty() {
-            super::super::env::annotation_scheme(d, self.data)
+            annotation_scheme(d, self.data)
                 .map_or_else(|| seed.self_ty.clone(), |s| with_latent_row(s, seed.mu))
         } else {
             seed.self_ty.clone()
@@ -565,7 +564,7 @@ impl Tc<'_> {
             tail @ (EffRow::Var(_) | EffRow::Exist(_)) => {
                 let mut in_iface = false;
                 let mut scan = |t: &Type| {
-                    super::super::env::for_each_row_tail(t, &mut |other| in_iface |= other == tail);
+                    for_each_row_tail(t, &mut |other| in_iface |= other == tail);
                 };
                 for dom in &seed.doms {
                     scan(&self.apply(dom));
@@ -577,7 +576,7 @@ impl Tc<'_> {
         };
         self.body_witness.insert(
             d.name.clone(),
-            super::super::BodyWitness {
+            BodyWitness {
                 effects: row.label_names(),
                 closed,
             },
@@ -616,7 +615,7 @@ impl Tc<'_> {
                 let mut left = BTreeSet::new();
                 t2.free_exist(&mut left);
                 let mut tvars = BTreeSet::new();
-                super::super::env::collect_type_vars(&t2, &mut tvars);
+                collect_type_vars(&t2, &mut tvars);
                 let stray = !tvars.is_subset(&quantified);
                 if !left.is_empty() || stray {
                     for e in &left {
@@ -700,7 +699,7 @@ impl Tc<'_> {
             let ty = if let Some(ann) = &d.ret {
                 tc.check_annot_rows(ann, d.span)?;
                 let mut var_kinds = BTreeMap::new();
-                super::super::env::demand_var_kinds(ann, tc.data, &mut var_kinds, d.span)?;
+                demand_var_kinds(ann, tc.data, &mut var_kinds, d.span)?;
                 let t = tc.convert_annot_fresh(ann);
                 tc.check(env, &d.body, &t)?;
                 Ok(t)

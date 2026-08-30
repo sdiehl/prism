@@ -10,14 +10,24 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use crate::core::{DepGraph, Digest};
+use crate::core::builtins::{BUILTINS_BY_WIRE, FLOAT_OPS_BY_WIRE};
+use crate::core::{builtin_arities, DepGraph, Digest};
 use crate::driver::{addressable_surface, addressable_surface_in, AddressableSurface, BuildMode};
 use crate::error::Error;
+use crate::kw::{
+    TY_BOOL, TY_CHAR, TY_FLOAT, TY_I64, TY_INT, TY_OR_NULL, TY_STRING, TY_U64, TY_UNIT,
+};
+use crate::lex::highlight::{token_spans, PLAIN_CLASS};
+use crate::lex::{lex_raw, Token};
 use crate::names;
 use crate::resolve::Root;
 use crate::sym::Sym;
-use crate::types::show_effects;
-use crate::Config;
+use crate::syntax::ast::{Core, Program};
+use crate::tc::builtin_sigs;
+use crate::types::{
+    show_effects, DeclInfo, Type, BUF, F32X4, F64X2, FLOAT_BUF, I32X4, I64X2, INT_BUF,
+};
+use crate::{Config, ModuleSource};
 
 use super::{
     edges, occurrences, surface, Def, Envelope, Index, IndexModule, Kind, Primitive, PrimitiveKind,
@@ -30,7 +40,7 @@ pub struct IndexInput<'a> {
     /// The modules to index, in the order a viewer should list them. Reuses the
     /// doc generator's module description so one path resolution
     /// (`cli::docs::resolve_docs_input`) serves both surfaces.
-    pub modules: &'a [crate::ModuleSource],
+    pub modules: &'a [ModuleSource],
     /// The merged program source the addresses are taken over: the entry module
     /// with the prelude prepended, exactly as a build sees it. Imported modules
     /// resolve out of `roots`.
@@ -163,9 +173,9 @@ pub fn build(input: IndexInput<'_>) -> Result<Index, Error> {
 fn builtin_names() -> Vec<Primitive> {
     // The checker's seed table covers every surface builtin, including the ones
     // (print, fatal, ord) whose registry row carries no signature of its own.
-    let sigs: BTreeMap<&str, &str> = crate::tc::builtin_sigs().collect();
+    let sigs: BTreeMap<&str, &str> = builtin_sigs().collect();
     let mut arities = BTreeMap::new();
-    crate::core::builtin_arities(&mut arities);
+    builtin_arities(&mut arities);
     let mut names: BTreeMap<String, Primitive> = arities
         .into_keys()
         .map(|name| {
@@ -181,7 +191,7 @@ fn builtin_names() -> Vec<Primitive> {
             )
         })
         .collect();
-    names.extend(crate::core::builtins::FLOAT_OPS_BY_WIRE.iter().map(|op| {
+    names.extend(FLOAT_OPS_BY_WIRE.iter().map(|op| {
         let name = op.name().to_string();
         (
             name.clone(),
@@ -195,7 +205,7 @@ fn builtin_names() -> Vec<Primitive> {
     }));
     // The enum-backed builtins are the ones that record a surface signature; the
     // table above supplies the rest of the names.
-    for b in crate::core::builtins::BUILTINS_BY_WIRE {
+    for b in BUILTINS_BY_WIRE {
         if let Some(sig) = b.signature() {
             let name = b.name().to_string();
             names.insert(
@@ -209,7 +219,7 @@ fn builtin_names() -> Vec<Primitive> {
             );
         }
     }
-    for scalar in crate::types::Type::SCALARS {
+    for scalar in Type::SCALARS {
         let name = scalar.show();
         names.insert(
             name.clone(),
@@ -222,9 +232,9 @@ fn builtin_names() -> Vec<Primitive> {
         );
     }
     names.insert(
-        crate::kw::TY_OR_NULL.into(),
+        TY_OR_NULL.into(),
         Primitive {
-            name: crate::kw::TY_OR_NULL.into(),
+            name: TY_OR_NULL.into(),
             kind: PrimitiveKind::Type,
             signature: Some("(Type) -> Type".into()),
             doc: Some(
@@ -237,36 +247,36 @@ fn builtin_names() -> Vec<Primitive> {
     // families. Builtin signatures name them, so the index must too.
     for (name, doc) in [
         (
-            crate::types::BUF,
+            BUF,
             "An opaque byte buffer, manipulated through the buf_* builtins; the storage under \
              the stdlib Bytes type.",
         ),
         (
-            crate::types::FLOAT_BUF,
+            FLOAT_BUF,
             "An unboxed buffer of raw 64-bit floats, manipulated through the tbuf_* builtins; \
              the flat storage under the stdlib tensor library.",
         ),
         (
-            crate::types::INT_BUF,
+            INT_BUF,
             "An unboxed buffer of raw 64-bit integers, manipulated through the ibuf_* builtins.",
         ),
         (
-            crate::types::F64X2,
+            F64X2,
             "A 128-bit SIMD vector of two 64-bit float lanes, produced and consumed by the \
              simd_f* builtins.",
         ),
         (
-            crate::types::I64X2,
+            I64X2,
             "A 128-bit SIMD vector of two 64-bit integer lanes, produced and consumed by the \
              simd_i* builtins.",
         ),
         (
-            crate::types::F32X4,
+            F32X4,
             "A 128-bit SIMD vector of four 32-bit float lanes, produced and consumed by the \
              simd_f*4 builtins.",
         ),
         (
-            crate::types::I32X4,
+            I32X4,
             "A 128-bit SIMD vector of four 32-bit integer lanes, produced and consumed by the \
              simd_i*4 builtins.",
         ),
@@ -306,14 +316,14 @@ fn builtin_names() -> Vec<Primitive> {
 
 fn scalar_doc(name: &str) -> Option<&'static str> {
     match name {
-        crate::kw::TY_UNIT => Some("The unit type, whose sole value is ()."),
-        crate::kw::TY_INT => Some("An arbitrary-precision integer."),
-        crate::kw::TY_I64 => Some("A wrapping signed 64-bit integer."),
-        crate::kw::TY_U64 => Some("A wrapping unsigned 64-bit integer."),
-        crate::kw::TY_BOOL => Some("The boolean type, with values true and false."),
-        crate::kw::TY_FLOAT => Some("An IEEE-754 double-precision floating-point number."),
-        crate::kw::TY_CHAR => Some("A Unicode scalar value."),
-        crate::kw::TY_STRING => Some("An immutable UTF-8 string."),
+        TY_UNIT => Some("The unit type, whose sole value is ()."),
+        TY_INT => Some("An arbitrary-precision integer."),
+        TY_I64 => Some("A wrapping signed 64-bit integer."),
+        TY_U64 => Some("A wrapping unsigned 64-bit integer."),
+        TY_BOOL => Some("The boolean type, with values true and false."),
+        TY_FLOAT => Some("An IEEE-754 double-precision floating-point number."),
+        TY_CHAR => Some("A Unicode scalar value."),
+        TY_STRING => Some("An immutable UTF-8 string."),
         _ => None,
     }
 }
@@ -346,10 +356,10 @@ fn attach_tokens(defs: &mut [Def]) -> Vec<String> {
 fn pack_tokens(text: &str, classes: &mut Vec<String>) -> String {
     let mut flat = String::new();
     let mut prev_end = 0usize;
-    for (start, end, class) in crate::lex::highlight::token_spans(text) {
+    for (start, end, class) in token_spans(text) {
         // An ordinary identifier has no colour, so its span is not worth a
         // triple; the gap to the next one absorbs it.
-        if class == crate::lex::highlight::PLAIN_CLASS {
+        if class == PLAIN_CLASS {
             continue;
         }
         let index = classes.iter().position(|c| c == class).unwrap_or_else(|| {
@@ -389,7 +399,7 @@ fn pack_tokens(text: &str, classes: &mut Vec<String>) -> String {
 // token that names several is left as text rather than pointed somewhere plausible.
 fn attach_type_refs(
     defs: &mut [Def],
-    program: &crate::syntax::ast::Program<crate::syntax::ast::Core>,
+    program: &Program<Core>,
     owners: &MemberOwners,
     builtins: &[Primitive],
 ) {
@@ -436,7 +446,7 @@ fn attach_type_refs(
             .or_default()
             .insert(canonical.to_string());
         by_name
-            .entry(crate::names::bare_name(canonical).to_string())
+            .entry(names::bare_name(canonical).to_string())
             .or_default()
             .insert(canonical.to_string());
     }
@@ -451,7 +461,7 @@ fn attach_type_refs(
     // A constructor spelled in a pattern reaches the type that declares it, the
     // same destination its use in an expression already reaches.
     let resolve = |token: &str| -> Option<String> {
-        let bare = crate::names::bare_name(token);
+        let bare = names::bare_name(token);
         if let Some(candidates) = by_name.get(token).or_else(|| by_name.get(bare)) {
             let mut it = candidates.iter();
             if let (Some(only), None) = (it.next(), it.next()) {
@@ -501,7 +511,7 @@ fn named_in(
     resolve: &impl Fn(&str) -> Option<String>,
     taken: &[(usize, usize)],
 ) -> Vec<SourceRef> {
-    let Ok((tokens, _)) = crate::lex::lex_raw(text) else {
+    let Ok((tokens, _)) = lex_raw(text) else {
         // A slice that does not lex on its own (it never should, having come from
         // a parsed program) simply gains no type links.
         return Vec::new();
@@ -509,15 +519,15 @@ fn named_in(
     let mut found: Vec<SourceRef> = Vec::new();
     for (start, token, end) in tokens {
         let name = match &token {
-            crate::lex::Token::UIdent(name) | crate::lex::Token::QualName(name) => name.as_str(),
-            crate::lex::Token::KwInt => crate::kw::TY_INT,
-            crate::lex::Token::KwI64 => crate::kw::TY_I64,
-            crate::lex::Token::KwU64 => crate::kw::TY_U64,
-            crate::lex::Token::KwBool => crate::kw::TY_BOOL,
-            crate::lex::Token::KwFloat => crate::kw::TY_FLOAT,
-            crate::lex::Token::KwChar => crate::kw::TY_CHAR,
-            crate::lex::Token::KwString => crate::kw::TY_STRING,
-            crate::lex::Token::KwUnit => crate::kw::TY_UNIT,
+            Token::UIdent(name) | Token::QualName(name) => name.as_str(),
+            Token::KwInt => TY_INT,
+            Token::KwI64 => TY_I64,
+            Token::KwU64 => TY_U64,
+            Token::KwBool => TY_BOOL,
+            Token::KwFloat => TY_FLOAT,
+            Token::KwChar => TY_CHAR,
+            Token::KwString => TY_STRING,
+            Token::KwUnit => TY_UNIT,
             _ => continue,
         };
         // Never displace a reference the renamer established, or a member's
@@ -544,10 +554,7 @@ fn named_in(
 // actually declares is considered, preferring the `name :` form a method and an
 // operation are declared with, then the first whole token otherwise, which is
 // where a constructor sits in `= Nil | Cons(a, List(a))`.
-fn attach_members(
-    defs: &mut [Def],
-    program: &crate::syntax::ast::Program<crate::syntax::ast::Core>,
-) {
+fn attach_members(defs: &mut [Def], program: &Program<Core>) {
     let mut declared: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for d in &program.types {
         declared.insert(&d.name, d.ctors.iter().map(|c| c.name.as_str()).collect());
@@ -562,7 +569,7 @@ fn attach_members(
         let Some(names) = declared.get(def.id.as_str()) else {
             continue;
         };
-        let Ok((tokens, _)) = crate::lex::lex_raw(&def.source) else {
+        let Ok((tokens, _)) = lex_raw(&def.source) else {
             continue;
         };
         for canonical in names {
@@ -576,17 +583,13 @@ fn attach_members(
                 .filter(|(_, (start, token, end))| {
                     matches!(
                         token,
-                        crate::lex::Token::Ident(t) | crate::lex::Token::UIdent(t) if t == name
+                        Token::Ident(t) | Token::UIdent(t) if t == name
                     ) && def.source.get(*start..*end) == Some(name)
                 })
                 .map(|(i, _)| i)
                 .collect();
-            let is_signature = |i: &&usize| {
-                matches!(
-                    tokens.get(**i + 1).map(|(_, t, _)| t),
-                    Some(crate::lex::Token::Colon)
-                )
-            };
+            let is_signature =
+                |i: &&usize| matches!(tokens.get(**i + 1).map(|(_, t, _)| t), Some(Token::Colon));
             let Some(&at) = hits.iter().find(is_signature).or_else(|| hits.first()) else {
                 continue;
             };
@@ -611,9 +614,7 @@ fn attach_members(
 // leaves operation and method names bare (they are not module binders), so two
 // effects can each declare a `get`. A name owned by more than one declaration
 // identifies nothing, and picking one would fabricate navigation.
-pub(super) fn member_owners(
-    program: &crate::syntax::ast::Program<crate::syntax::ast::Core>,
-) -> MemberOwners {
+pub(super) fn member_owners(program: &Program<Core>) -> MemberOwners {
     let mut candidates: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut claim = |member: &str, owner: &str| {
         candidates
@@ -721,12 +722,12 @@ struct Addresses<'a> {
     // Each term definition's inferred type and effect row, by canonical name.
     // Production first, then the test layer, so a test gets the type and row its
     // own elaboration inferred (production has stripped it).
-    terms: BTreeMap<&'a str, &'a crate::types::DeclInfo>,
+    terms: BTreeMap<&'a str, &'a DeclInfo>,
 }
 
 impl<'a> Addresses<'a> {
     fn of(production: &'a AddressableSurface, test: Option<&'a AddressableSurface>) -> Self {
-        let mut terms: BTreeMap<&'a str, &'a crate::types::DeclInfo> = test
+        let mut terms: BTreeMap<&'a str, &'a DeclInfo> = test
             .into_iter()
             .flat_map(|s| s.checked.decls.iter())
             .map(|d| (d.name.as_str(), d))

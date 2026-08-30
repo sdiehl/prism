@@ -30,7 +30,9 @@ use prism_common::sym::Sym;
 use prism_syntax::names::{self, ENTRY_POINT, FRESH_EVIDENCE_ROW};
 
 use super::super::specialize_support::{free_comp_vars, free_value_vars, substitute_witnesses};
-use super::super::verify::{instantiate_fn, rename_bound_core, row_included, VerifyEnv};
+use super::super::verify::{
+    instantiate_fn, rename_bound_core, representation_preserving, row_included, VerifyEnv,
+};
 use super::super::{
     CompSig, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, TypedBinder, TypedComp,
     TypedCompKind, TypedCoreFn, TypedHandleOp, TypedHandler, TypedValue, TypedValueKind,
@@ -1408,7 +1410,7 @@ fn reinterpret_at(value: TypedValue, expected: CoreType) -> Option<TypedValue> {
     if value.ty() == &expected {
         return Some(value);
     }
-    super::super::verify::representation_preserving(value.ty(), &expected)
+    representation_preserving(value.ty(), &expected)
         .then(|| TypedValue::new(expected, TypedValueKind::Reinterpret(Box::new(value))))
 }
 
@@ -1441,7 +1443,7 @@ fn retarget_call_argument(value: TypedValue, expected: CoreType) -> Option<Typed
     ) {
         return Some(value);
     }
-    super::super::verify::representation_preserving(value.ty(), &expected)
+    representation_preserving(value.ty(), &expected)
         .then(|| TypedValue::new(expected, TypedValueKind::Reinterpret(Box::new(value))))
 }
 

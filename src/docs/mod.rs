@@ -13,10 +13,10 @@
 //! documented through [`project_pages`].
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::core::Digest;
-use crate::driver::{stdlib_driver_src, with_prelude, PRELUDE};
+use crate::driver::{stdlib_driver_src, stdlib_hash, with_prelude, PRELUDE};
 use crate::error::Error;
 use crate::parse::{parse, ParseResult};
 use crate::resolve::{resolve_modules_in, Root};
@@ -200,7 +200,7 @@ pub fn stdlib_expect_files() -> Vec<ExpectFile> {
     stdlib_specs()
         .into_iter()
         .map(|spec| ExpectFile {
-            path: std::path::PathBuf::from(spec.source_path),
+            path: PathBuf::from(spec.source_path),
             source: spec.src,
             module: spec.dotted,
         })
@@ -294,7 +294,7 @@ pub fn stdlib_pages() -> Result<Generated, Error> {
     // One hash of the whole library feeds both surfaces: the full-length root
     // shown on the index page, and the short per-definition badges on the module
     // pages (behavior hashes for functions, shape digests for types/effects).
-    let h = crate::driver::stdlib_hash()?;
+    let h = stdlib_hash()?;
     // Plain CommonMark, no raw HTML or click-to-copy machinery. The `## Merkle
     // root` heading mirrors the `## Modules` heading the index renderer emits, so
     // the two sections read symmetrically.

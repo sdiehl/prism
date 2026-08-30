@@ -12,15 +12,18 @@
 
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
 use std::path::{Path, PathBuf};
 
 use marginalia::Span;
 
 use crate::error::{suggest, Error, TypeError};
+use crate::stdlib::STDLIB;
 use crate::syntax::ast::{
     Constraint, Decl, EffLabel, Expr, HandlerArm, ImportDecl, MigrationDir, MigrationRoute,
     Pattern, PreludeCapture, Program, Qualifier, Row, Sugar, SugarArm, Surface, Ty, S,
 };
+use crate::syntax::desugar::routes_to_current;
 use crate::{kw, names};
 
 mod identity;
@@ -38,10 +41,7 @@ pub use load::{
 /// then the embedded standard library.
 #[must_use]
 pub fn default_roots(base: &Path) -> Vec<Root> {
-    vec![
-        Root::Dir(base.to_path_buf()),
-        Root::Embedded(crate::stdlib::STDLIB),
-    ]
+    vec![Root::Dir(base.to_path_buf()), Root::Embedded(STDLIB)]
 }
 
 /// The search path for a project.
@@ -51,7 +51,7 @@ pub fn default_roots(base: &Path) -> Vec<Root> {
 /// under its own root; the project shadows a name it redefines.
 #[must_use]
 pub fn project_roots(src_dir: &Path, dep_dirs: &[PathBuf]) -> Vec<Root> {
-    project_roots_with_std(src_dir, dep_dirs, Root::Embedded(crate::stdlib::STDLIB))
+    project_roots_with_std(src_dir, dep_dirs, Root::Embedded(STDLIB))
 }
 
 /// The search path for a project with an explicit standard-library source root.
@@ -887,12 +887,7 @@ impl<'a> Rw<'a> {
         self.family_routes = p
             .stable
             .iter()
-            .map(|sd| {
-                (
-                    sd.name.clone(),
-                    crate::syntax::desugar::routes_to_current(sd),
-                )
-            })
+            .map(|sd| (sd.name.clone(), routes_to_current(sd)))
             .collect();
         for d in &mut p.types {
             self.at(d.span);
@@ -1014,7 +1009,7 @@ impl<'a> Rw<'a> {
             }
             for cv in &mut sd.converters {
                 let base = self.locals.len();
-                self.locals.push(crate::names::stable_param(&cv.from));
+                self.locals.push(names::stable_param(&cv.from));
                 self.expr(&mut cv.base);
                 for (_, e) in &mut cv.overrides {
                     self.expr(e);
@@ -1048,7 +1043,7 @@ impl<'a> Rw<'a> {
         // name, so it keeps the owner the instance walk installed, which is the
         // declaration a reader would navigate to.
         let outer = if canon_name {
-            Some(std::mem::replace(&mut self.owner, (d.name.clone(), d.span)))
+            Some(mem::replace(&mut self.owner, (d.name.clone(), d.span)))
         } else {
             None
         };

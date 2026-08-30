@@ -8,9 +8,10 @@
 
 use std::fmt::Write as _;
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use crate::core::{Digest, HASH_PREFIX_HEX};
+use crate::core::{Digest, HASH_PREFIX_HEX, HASH_SCHEME};
 use crate::driver::Config;
 use crate::error::Error;
 use crate::project::{self, DepSource, License, LOCKFILE, MANIFEST};
@@ -18,6 +19,7 @@ use crate::store::disk::{resolve_store_path, Store};
 
 use super::lock::{Lock, LockEntry};
 use super::resolve::{resolve_closure, trace};
+use super::signed_index_pointer;
 use super::transport::DiskTransport;
 use super::writer::{render_source, set_dependency};
 
@@ -221,9 +223,8 @@ fn parse_add_arg(arg: &str) -> Result<(String, DepSource), Error> {
         ));
     }
     Err(Error::ResolvePackage(format!(
-        "`{arg}` is neither a content-hash pin (`{scheme}:<hex>` or a bare hex digest) nor a git \
-         reference (`<url>@<tag>`)",
-        scheme = crate::core::HASH_SCHEME
+        "`{arg}` is neither a content-hash pin (`{HASH_SCHEME}:<hex>` or a bare hex digest) nor a \
+         git reference (`<url>@<tag>`)",
     )))
 }
 
@@ -265,14 +266,13 @@ fn lockable_pin(
 ) -> Result<Option<ResolvedPin>, Error> {
     match source {
         DepSource::Hash(hex) => Ok(Some(ResolvedPin {
-            scheme: crate::core::HASH_SCHEME.to_string(),
+            scheme: HASH_SCHEME.to_string(),
             hash: hex.clone(),
         })),
         DepSource::Path(_) => Ok(None),
         DepSource::Git { url, version } => {
             let store_root = resolve_store_path(cfg.flags.store_path.as_deref());
-            let pointer =
-                crate::pkg::signed_index_pointer(url, name, version, &store_root, &cfg.flags)?;
+            let pointer = signed_index_pointer(url, name, version, &store_root, &cfg.flags)?;
             Ok(Some(ResolvedPin {
                 scheme: pointer.scheme,
                 hash: pointer.root.into_string(),
@@ -321,7 +321,7 @@ fn load_lock(root: &Path) -> Result<Lock, Error> {
             lock.validate_current_scheme()?;
             Ok(lock)
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Lock::default()),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(Lock::default()),
         Err(e) => Err(Error::Io(e)),
     }
 }

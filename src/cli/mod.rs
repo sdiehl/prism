@@ -12,17 +12,18 @@
 )]
 
 use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
+use std::io::{self, ErrorKind};
+use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::driver::stable_lock;
+use crate::driver::{stable_lock, CheckVerdictCache};
 use crate::error::Error;
+use crate::lineage::{BuildLineage, BuildLineageInput, BuildRequest};
 use crate::pkg::lock::Lock;
 use crate::project::{LOCKFILE as PRISM_LOCK, MANIFEST as PRISM_MANIFEST};
 use crate::store::disk::{resolve_store_path, Store};
 use crate::syntax::reflect::parse_unit;
-use crate::verify::run::VerifyOptions;
+use crate::verify::run::{run_with, VerifyOptions};
 
 pub mod bootstrap;
 pub mod check_world;
@@ -675,7 +676,7 @@ fn built_input_observed(
         // inputs, breaking the determinism contract that identical inputs
         // produce identical lineage.
         let artifacts = vec![("native-binary", out.clone())];
-        let lineage = crate::lineage::BuildLineage::collect(crate::lineage::BuildLineageInput {
+        let lineage = BuildLineage::collect(BuildLineageInput {
             request,
             source: &full,
             roots: &roots,
@@ -702,13 +703,13 @@ fn built_input_observed(
     })
 }
 
-fn project_lineage_request(arg: &Path) -> Result<Option<crate::lineage::BuildRequest>, CmdError> {
+fn project_lineage_request(arg: &Path) -> Result<Option<BuildRequest>, CmdError> {
     if !is_project(arg) {
         return Ok(None);
     }
     let project = crate::project::load_project(arg)
         .map_err(|e| (e, String::new(), arg.display().to_string()))?;
-    Ok(Some(crate::lineage::BuildRequest::project(
+    Ok(Some(BuildRequest::project(
         &project.root.join(PRISM_MANIFEST),
         &project.entry,
     )))
@@ -749,7 +750,7 @@ pub fn clean_cmd(path: &Path) -> CmdResult {
     let target = root.join("target");
     match std::fs::remove_dir_all(&target) {
         Ok(()) => println!("removed {}", target.display()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+        Err(e) if e.kind() == ErrorKind::NotFound => {
             println!("nothing to clean ({} absent)", target.display());
         }
         Err(e) => return Err((Error::Io(e), String::new(), target.display().to_string())),
@@ -800,9 +801,8 @@ pub fn check_cmd(file: Option<&Path>, cfg: &crate::Config) -> CmdResult {
     let lock_manifest = (!is_project(&input))
         .then(|| std::fs::read(stable_lock::manifest_path(&input)).ok())
         .flatten();
-    let verdict_cache =
-        crate::driver::CheckVerdictCache::for_check(&full, &roots, lock_manifest.as_deref(), cfg)
-            .map_err(|e| (e, full.clone(), name.clone()))?;
+    let verdict_cache = CheckVerdictCache::for_check(&full, &roots, lock_manifest.as_deref(), cfg)
+        .map_err(|e| (e, full.clone(), name.clone()))?;
     if let Some(cache) = &verdict_cache {
         if cache.hit().map_err(|e| (e, full.clone(), name.clone()))? {
             return Ok(());
@@ -900,7 +900,7 @@ pub fn verify_cmd(
     // cache, so a store that cannot be opened just means no recorded evidence.
     let store_root = resolve_store_path(cfg.flags.store_path.as_deref());
     let store = Store::open_or_create(&store_root).ok();
-    let report = crate::verify::run::run_with(&program, &opts, store.as_ref())
+    let report = run_with(&program, &opts, store.as_ref())
         .map_err(|e| (Error::from(e), full.clone(), name.clone()))?;
     print!("{}", report.render());
     if report.all_clear() {
@@ -1004,7 +1004,7 @@ pub fn glob_pr(root: &Path) -> Vec<PathBuf> {
         .filter(|p| {
             let rel = p.strip_prefix(base).unwrap_or(p.as_path());
             !rel.components().any(|c| match c {
-                std::path::Component::Normal(s) => {
+                Component::Normal(s) => {
                     s == "target" || s.to_str().is_some_and(|n| n.starts_with('.'))
                 }
                 _ => false,

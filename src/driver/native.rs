@@ -3,7 +3,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use crate::error::Error;
@@ -99,7 +99,7 @@ fn compile_runtime_object(
     static RUNTIME_COMPILE_LOCK: Mutex<()> = Mutex::new(());
     let _guard = RUNTIME_COMPILE_LOCK
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+        .unwrap_or_else(PoisonError::into_inner);
     compile_object(cc, args, source, object, cache, cfg)
 }
 
@@ -231,9 +231,7 @@ fn probe_line(cmd: &str, args: &[&str]) -> (Option<String>, Option<Duration>) {
         key.push_str(arg);
     }
     let lines = LINES.get_or_init(|| Mutex::new(BTreeMap::new()));
-    let mut lines = lines
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut lines = lines.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(line) = lines.get(&key) {
         return (line.clone(), None);
     }

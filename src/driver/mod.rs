@@ -9,21 +9,24 @@ use crate::core::typed::{
     prepare_effects, reuse as reuse_typed, Decline, EffectPlan, Prepared, TypedLowering,
 };
 use crate::core::{
-    balanced, fip_annots, hash_program, hash_root, insert_rc, pp_core_pretty, reuse,
+    balanced, fip_annots, hash_program, hash_root, insert_rc, pp_core_pretty, reachable_fns, reuse,
     typed_verification_error, verify_typed_core, Comp, Core, DepGraph, Digest, EffectStrategy,
-    ElaboratedCore, LoweredCore, OpGrades, TypedCore, TypedEffectLowered, TypedElaborated, Value,
-    VerifyEnv, HASH_SCHEME,
+    ElaboratedCore, Hashes, LoweredCore, OpGrades, TypedCore, TypedEffectLowered, TypedElaborated,
+    Value, VerifyEnv, HASH_SCHEME,
 };
-use crate::error::{Error, TypeError};
+use crate::error::{render_warning, Error, SourceMap, TypeError};
+use crate::names::ENTRY_POINT;
 use crate::parse::{parse, ParseResult};
-use crate::resolve::{default_roots, Root};
+use crate::resolve::{default_roots, imported_paths, lint_bindings, resolve, Root};
 use crate::store::coherence::{self, CoherenceError};
 use crate::store::commit_program;
 use crate::store::disk::{self as store, CommitStats, DefMeta};
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Fip, Program, Span};
+use crate::syntax::desugar::desugar;
 use crate::syntax::reflect::parse_unit;
-use crate::types::{show_effects, show_type_with_effects, Checked, CtorInfo};
+use crate::tc::{check_seeded, Warning};
+use crate::types::{show_effects, show_type_with_effects, Checked, CtorInfo, TypecheckSeed};
 
 mod artifact;
 #[cfg(feature = "native")]
@@ -261,7 +264,7 @@ pub fn with_prelude(src: &str) -> String {
 /// Fails when the source does not parse or an import resolves in no root.
 pub fn source_modules(src: &str, roots: &[Root]) -> Result<Vec<String>, Error> {
     let ParseResult { program, .. } = parse(src)?;
-    crate::resolve::imported_paths(&program, roots)
+    imported_paths(&program, roots)
 }
 
 /// Prepend a caller-supplied prelude instead of the built-in one.
@@ -287,14 +290,8 @@ pub fn with_custom_prelude(prelude: &str, src: &str) -> String {
 /// Idempotent: wrapping a wrapped snippet is a no-op.
 #[must_use]
 pub fn example_program(src: &str) -> String {
-    let defines_main = |s: &str| {
-        parse(s).is_ok_and(|pr| {
-            pr.program
-                .fns
-                .iter()
-                .any(|d| d.name == crate::names::ENTRY_POINT)
-        })
-    };
+    let defines_main =
+        |s: &str| parse(s).is_ok_and(|pr| pr.program.fns.iter().any(|d| d.name == ENTRY_POINT));
     if defines_main(src) {
         return src.to_string();
     }
@@ -328,7 +325,7 @@ pub fn example_program(src: &str) -> String {
         .map(|l| format!("  {l}"))
         .collect::<Vec<_>>()
         .join("\n");
-    let wrapped = format!("{imports}fn {}() =\n{body}", crate::names::ENTRY_POINT);
+    let wrapped = format!("{imports}fn {ENTRY_POINT}() =\n{body}");
     if parse(&wrapped).is_ok() {
         wrapped
     } else {
@@ -375,11 +372,11 @@ pub fn check_on(src: &str, roots: &[Root]) -> Result<Checked, Error> {
 ///
 /// # Errors
 /// Fails on parse, resolution, desugaring, or type errors.
-pub fn check_with_seed(src: &str, seed: &crate::types::TypecheckSeed) -> Result<Checked, Error> {
+pub fn check_with_seed(src: &str, seed: &TypecheckSeed) -> Result<Checked, Error> {
     let program = parse_unit(src)?;
-    let program = crate::resolve::resolve(program)?;
-    let program = crate::syntax::desugar::desugar(program)?;
-    Ok(crate::tc::check_seeded(&program, seed)?)
+    let program = resolve(program)?;
+    let program = desugar(program)?;
+    Ok(check_seeded(&program, seed)?)
 }
 
 /// Like [`check_on`], threading an explicit [`Config`] so the CLI can carry a
@@ -445,9 +442,9 @@ pub fn check_validated_on_in(src: &str, roots: &[Root], cfg: &Config) -> Result<
 
 // Unused-binding and shadowed-name lints over the resolved surface program,
 // scoped to the user's own source (the prepended prelude is excluded by offset).
-fn lint_surface(src: &str, prog: &Program) -> Vec<crate::tc::Warning> {
-    let user_start = crate::error::SourceMap::new(src).prelude_len();
-    crate::resolve::lint_bindings(prog, user_start)
+fn lint_surface(src: &str, prog: &Program) -> Vec<Warning> {
+    let user_start = SourceMap::new(src).prelude_len();
+    lint_bindings(prog, user_start)
 }
 
 // Surface non-fatal checker diagnostics (orphan/overlapping instances, unused or
@@ -462,11 +459,8 @@ fn emit_warnings(src: &str, checked: &Checked) {
 // Render one non-fatal diagnostic on stderr, with a source caret when the span
 // points into this source. Shared by the batch emitter and the duplicate-detection
 // pass, which surfaces its findings after elaboration (past the batch emit above).
-fn emit_warning(src: &str, w: &crate::tc::Warning) {
-    eprint!(
-        "{}",
-        crate::error::render_warning(src, "<source>", &w.span, &w.msg, true)
-    );
+fn emit_warning(src: &str, w: &Warning) {
+    eprint!("{}", render_warning(src, "<source>", &w.span, &w.msg, true));
 }
 
 // The full compile path (scheduler retarget, validators, pre-lowering optimizer),
@@ -570,9 +564,7 @@ fn store_commit(
 ///
 /// # Errors
 /// Fails on any front-end error.
-pub fn store_def_inputs(
-    src: &str,
-) -> Result<(Core, crate::core::Hashes, BTreeMap<Sym, String>), Error> {
+pub fn store_def_inputs(src: &str) -> Result<(Core, Hashes, BTreeMap<Sym, String>), Error> {
     let roots = default_roots(Path::new("."));
     let (program, checked, core) = elaborated(src, &roots)?;
     let metas = hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program));
@@ -854,15 +846,7 @@ fn lowered_core_with_identity(
     src: &str,
     roots: &[Root],
     cfg: &Config,
-) -> Result<
-    (
-        Checked,
-        LoweredCore,
-        BTreeMap<String, CtorInfo>,
-        crate::core::Hashes,
-    ),
-    Error,
-> {
+) -> Result<(Checked, LoweredCore, BTreeMap<String, CtorInfo>, Hashes), Error> {
     let (checked, lowered, sigs, hashes) = lowered_spine_with_identity(src, roots, cfg)?;
     let ctors = lowered.ctors.clone();
     let core = finish_lowered(lowered, &sigs, cfg)?;
@@ -879,7 +863,7 @@ fn lowered_spine_with_identity(
     src: &str,
     roots: &[Root],
     cfg: &Config,
-) -> Result<(Checked, LoweredSpine, Sigs, crate::core::Hashes), Error> {
+) -> Result<(Checked, LoweredSpine, Sigs, Hashes), Error> {
     let (program, checked, identity_core, core, typed, verify_env) =
         run_front(src, roots, cfg, FrontRequest::Full)?.into_compilation();
     let declared = borrow_sigs(&program);
@@ -926,20 +910,22 @@ fn emit_lower_warning(src: &str, warning: Option<&str>, verbose: bool) {
     if let Some(msg) = warning {
         eprint!(
             "{}",
-            crate::error::render_warning(src, "<source>", &Span::empty(0), msg, true)
+            render_warning(src, "<source>", &Span::empty(0), msg, true)
         );
     }
 }
 
 #[cfg(test)]
 mod typed_post_route_tests {
+    use crate::core::residual_effects;
+
     use super::*;
     use crate::flags::EffectTier;
 
     fn assert_route(source: &str, cfg: &Config) {
         let (_, core, _, sigs) = reuse_lowered_core(source, &[], cfg).expect("typed route");
         balanced(&core, &sigs).expect("the final typed term is balanced");
-        crate::core::residual_effects(&core).expect("effect nodes do not cross the final boundary");
+        residual_effects(&core).expect("effect nodes do not cross the final boundary");
     }
 
     #[test]
@@ -972,7 +958,7 @@ mod typed_post_route_tests {
         // erasure omits the legacy builder's unreachable `SMore(Unit)` branch,
         // whose Unit witness is invalid at the function's Int answer type. The
         // verified typed tree is the sole effect-lowering result.
-        let src = crate::with_prelude(include_str!("../../examples/imperative.pr"));
+        let src = with_prelude(include_str!("../../examples/imperative.pr"));
         let roots = default_roots(Path::new("."));
         let mut cfg = Config::default();
         cfg.flags.compiler_cache = false;
@@ -992,12 +978,12 @@ mod typed_post_route_tests {
         .expect("typed lowering");
         let final_core = finish_lowered(lowered, &sigs, &cfg).expect("typed final route");
         balanced(&final_core, &sigs).expect("balanced typed final");
-        crate::core::residual_effects(&final_core).expect("no residual effect nodes");
+        residual_effects(&final_core).expect("no residual effect nodes");
     }
 
     #[test]
     fn num_float_ieee_has_no_post_lowering_structural_delta() {
-        let src = crate::with_prelude(include_str!("../../tests/cases/run/num_float_ieee.pr"));
+        let src = with_prelude(include_str!("../../tests/cases/run/num_float_ieee.pr"));
         let roots = default_roots(Path::new("."));
         let mut cfg = Config::default();
         cfg.flags.compiler_cache = false;
@@ -1030,7 +1016,7 @@ mod typed_post_route_tests {
         let src = "type Row = Tip | Node(Int, Row)\n\nfn build(n : Int) : Row =\n  if n == 0 then Tip else Node(n, build(n - 1))\n\nfn len(r : Row) : Int =\n  match r of\n    Tip => 0\n    Node(_, rest) => 1 + len(rest)\n\nfn main() : Int =\n  len(build(2))\n";
         let (_, core, _, sigs) = reuse_lowered_core(src, &[], &cfg).expect("typed route");
         balanced(&core, &sigs).expect("balanced with inferred borrows");
-        crate::core::residual_effects(&core).expect("no residual effect nodes");
+        residual_effects(&core).expect("no residual effect nodes");
         let mask = sigs
             .get(&Sym::new("len"))
             .expect("len earns an inferred loan");
@@ -1042,7 +1028,7 @@ mod typed_post_route_tests {
 
     #[test]
     fn interpreter_preparation_returns_the_unlowered_core() {
-        let src = crate::with_prelude(
+        let src = with_prelude(
             "effect Ask\n  ask() : Int\n\nfn main() : Int =\n  handle ask() with {\n    ask() resume k => k(42),\n    return x => x\n  }\n",
         );
         let roots = default_roots(Path::new("."));
@@ -1059,7 +1045,7 @@ mod typed_post_route_tests {
             "the interpreter must keep evaluating pre-effect-lowering Core"
         );
         assert!(
-            crate::core::residual_effects(&actual).is_err(),
+            residual_effects(&actual).is_err(),
             "the interpreter must retain the source effect nodes"
         );
     }
@@ -1357,7 +1343,7 @@ pub fn off_platform_builtins(full: &str, roots: &[Root]) -> Result<Vec<&'static 
     }
 
     let (_, _, core) = frontend(full, roots, &Config::from_env())?;
-    let reachable = crate::core::reachable_fns(&core);
+    let reachable = reachable_fns(&core);
     let mut out = Vec::new();
     for f in core.fns.iter().filter(|f| reachable.contains(&f.name)) {
         scan_comp(&f.body, &mut out);
@@ -1454,6 +1440,8 @@ mod envelope_tests {
 
     #[cfg(feature = "native")]
     use crate::resolve::{Root, SourceBundleIdentity};
+    #[cfg(feature = "native")]
+    use crate::stdlib::STDLIB;
 
     #[cfg(feature = "native")]
     use super::identity::native_kont_table_for;
@@ -1573,7 +1561,7 @@ mod envelope_tests {
                 bundle_identity,
                 modules,
             ),
-            Root::Embedded(crate::stdlib::STDLIB),
+            Root::Embedded(STDLIB),
         ];
         let out = native_kont_table_for(
             "import StorePkg (answer)\nfn main() : Int = answer() + 1\n",

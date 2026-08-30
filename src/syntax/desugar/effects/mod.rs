@@ -32,6 +32,8 @@ use handlers::{rw_arms, rw_named, wrap_vals};
 use vars::rw_var_decl;
 use views::{check_views, pat_vars, rw_view_match};
 
+const MEBIBYTE: usize = 1024 * 1024;
+
 // Lambda parameters carry no defaults in source (only top-level `fn`s do), so a
 // surface lambda param maps to a core one unchanged but for the dropped slot.
 fn core_param(p: &Param) -> Param<Core> {
@@ -111,8 +113,8 @@ pub(super) fn rw(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, 
 
 // Red zone / segment size for the desugar recursion, matching the typed-Core
 // builder's constants (`core/typed/build.rs`).
-const DESUGAR_MIN_STACK: usize = 4 * 1024 * 1024;
-const DESUGAR_GROW_STACK: usize = 8 * 1024 * 1024;
+const DESUGAR_MIN_STACK: usize = 4 * MEBIBYTE;
+const DESUGAR_GROW_STACK: usize = 8 * MEBIBYTE;
 
 fn rw_inner(e: &S<Expr>, env: &Vars, cx: &mut Cx) -> Result<S<Expr<Core>>, TypeError> {
     let span = e.span;

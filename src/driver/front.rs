@@ -23,9 +23,9 @@ use crate::resolve::{
 use crate::syntax::ast::{Core as CorePhase, Program};
 use crate::syntax::desugar::{desugar, retarget_cooperative};
 use crate::syntax::reflect::parse_unit;
+use crate::tc::{check_tooltips, Warning, WarningOrigin};
 use crate::types::{check as typecheck, check_allow_holes, Checked};
-
-use crate::tc::WarningOrigin;
+use crate::verify::check_program;
 
 use super::downstream::run_typed_opt_queries;
 use super::input::{
@@ -36,7 +36,7 @@ use super::timing::{self, ArtifactKind, CountKey, Phase, RowExtras};
 use super::verify::{fip_check, reconcile_effects, replayable_check};
 use super::{
     core_root_digest, dupes, emit_warning, emit_warnings, lint_surface, stdlib_hash,
-    validated_elaborated_core, Config,
+    validated_elaborated_core, BuildMode, Config,
 };
 
 const RAW_FRONT_QUERY_SCHEMA: &[u8] = b"prism-session-front-v1";
@@ -375,7 +375,7 @@ impl Front {
 
 struct PreparedFront {
     program: Program<CorePhase>,
-    lints: Vec<crate::tc::Warning>,
+    lints: Vec<Warning>,
 }
 
 // The one canonical frontend runner. Every entry point derives its stages from
@@ -490,7 +490,7 @@ fn front_key_for(schema: &[u8], input: &str, cfg: &Config, opts: FrontOpts) -> S
             // artifact fingerprint, so it must split the session cache: a shared
             // session must never serve a test-mode consumer a production front
             // (tests stripped) of the same source, or the reverse.
-            u8::from(cfg.mode == crate::driver::BuildMode::Test),
+            u8::from(cfg.mode == BuildMode::Test),
         ],
     );
     h.finalize().to_hex().to_string()
@@ -598,7 +598,7 @@ fn prepare_resolved_front(
     // against the resolved surface program, before desugar erases them. A
     // malformed contract is a source error; a valid one leaves the runtime path
     // untouched. Solver-free.
-    crate::verify::check_program(&program)?;
+    check_program(&program)?;
     let mut program = timing::timed_res(
         timer,
         Phase::Desugar,
@@ -623,7 +623,7 @@ fn prepare_resolved_front(
 fn apply_prelude_captures(
     cfg: &Config,
     program: &Program,
-    lints: &mut Vec<crate::tc::Warning>,
+    lints: &mut Vec<Warning>,
 ) -> Result<(), Error> {
     match cfg.flags.warn_prelude_capture {
         WarnDupes::Off => {}
@@ -655,7 +655,7 @@ fn finish_front(
         src,
         || {
             if opts.typed_tooltips {
-                crate::tc::check_tooltips(&program)
+                check_tooltips(&program)
             } else if opts.allow_holes {
                 check_allow_holes(&program)
             } else {
@@ -801,7 +801,7 @@ fn apply_dupes(
 fn refresh_warnings(
     program: &Program<CorePhase>,
     checked: &mut Checked,
-    surface_lints: Vec<crate::tc::Warning>,
+    surface_lints: Vec<Warning>,
 ) {
     checked
         .warnings

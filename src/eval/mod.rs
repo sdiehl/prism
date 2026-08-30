@@ -49,6 +49,7 @@ const UNIT_REPR: &str = "()";
 const FUNCTION_REPR: &str = "<function>";
 const CONTINUATION_REPR: &str = "<continuation>";
 const LOCAL_REF_REPR: &str = "<local-ref>";
+const NO_MAIN_FUNCTION: &str = "no main function";
 
 #[derive(Clone, Debug)]
 pub enum Rv {
@@ -1572,7 +1573,7 @@ pub fn run_io_with_args(
     args: Vec<String>,
 ) -> Result<Run, String> {
     let g = globals(core);
-    let main = g.get(&Sym::new(ENTRY_POINT)).ok_or("no main function")?;
+    let main = g.get(&Sym::new(ENTRY_POINT)).ok_or(NO_MAIN_FUNCTION)?;
     let mut m = Machine::new_with_args(&g, out_sink, input, args);
     let value = m.comp(&Env::default(), &main.body)?;
     Ok(Run {
@@ -1643,7 +1644,7 @@ pub fn run_traced_with_args(
     args: Vec<String>,
 ) -> Result<TracedRun, String> {
     let g = globals(core);
-    let main = g.get(&Sym::new(ENTRY_POINT)).ok_or("no main function")?;
+    let main = g.get(&Sym::new(ENTRY_POINT)).ok_or(NO_MAIN_FUNCTION)?;
     let mut m = Machine::new_with_args(&g, out_sink, input, args);
     m.set_tape(tape);
     let value = m.comp(&Env::default(), &main.body)?;
@@ -1712,7 +1713,7 @@ fn run_observed_mode(
 ) -> TracedRun {
     let g = globals(core);
     let Some(main) = g.get(&Sym::new(ENTRY_POINT)) else {
-        let fault = "no main function".to_string();
+        let fault = NO_MAIN_FUNCTION.to_string();
         return TracedRun {
             term: String::new(),
             exit: None,
@@ -1872,7 +1873,7 @@ fn run_suspending_inner(
     input: &mut dyn io::BufRead,
     ruler: bool,
 ) -> Result<(Checkpoint, Vec<StepMark>), String> {
-    let main = g.get(&Sym::new(ENTRY_POINT)).ok_or("no main function")?;
+    let main = g.get(&Sym::new(ENTRY_POINT)).ok_or(NO_MAIN_FUNCTION)?;
     let root = lower(&main.body);
     let mut m = Machine::new(g, out_sink, input);
     m.set_tape(Tape::Record(Vec::new()));
@@ -1945,7 +1946,7 @@ pub fn run_suspending_at_cut(
     input: &mut dyn io::BufRead,
 ) -> Result<(Checkpoint, Vec<StepMark>, Option<CutOutcome>), String> {
     let g = globals(core);
-    let main = g.get(&Sym::new(ENTRY_POINT)).ok_or("no main function")?;
+    let main = g.get(&Sym::new(ENTRY_POINT)).ok_or(NO_MAIN_FUNCTION)?;
     let root = lower(&main.body);
     let mut m = Machine::new(&g, out_sink, input);
     m.set_tape(Tape::Record(Vec::new()));
@@ -1993,7 +1994,7 @@ pub fn run_ruler(
     input: &mut dyn io::BufRead,
 ) -> Result<(Run, Vec<StepMark>), String> {
     let g = globals(core);
-    let main = g.get(&Sym::new(ENTRY_POINT)).ok_or("no main function")?;
+    let main = g.get(&Sym::new(ENTRY_POINT)).ok_or(NO_MAIN_FUNCTION)?;
     let mut m = Machine::new(&g, out_sink, input);
     m.arm_ruler();
     let value = m.comp(&Env::default(), &main.body)?;

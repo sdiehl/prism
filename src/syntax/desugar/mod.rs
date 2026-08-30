@@ -6,6 +6,7 @@
 //! function stays observably pure. (Built in `effects/vars.rs`.)
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
 
 use marginalia::Span;
 
@@ -13,6 +14,7 @@ use super::ast::{
     Arm, BigInt, Constraint, Core, Decl, EffOp, EffectDecl, Expr, Fip, Grade, InstanceDecl, IntLit,
     NodeId, Param, Pattern, Phase, Program, Row, Spanned, Suffix, Total, Ty, S,
 };
+use crate::core::builtins::OUTPUT_BUILTINS;
 use crate::error::{ErrKind, TypeError};
 use crate::kw;
 use crate::names;
@@ -147,7 +149,7 @@ fn inject_return_effect(prog: &mut Program) {
 // `error Name(T, ..)` is a one-op effect whose op never resumes.
 fn lower_errors(prog: &mut Program) -> BTreeSet<String> {
     let mut names_out = BTreeSet::new();
-    for e in std::mem::take(&mut prog.errors) {
+    for e in mem::take(&mut prog.errors) {
         names_out.insert(e.name.clone());
         prog.effects.push(throw_effect(
             e.name.clone(),
@@ -163,7 +165,7 @@ fn lower_errors(prog: &mut Program) -> BTreeSet<String> {
 // `make@P`); the map drives the match and call rewrites below.
 fn lower_patterns(prog: &mut Program, ctors: &BTreeSet<String>) -> Result<PatMap, TypeError> {
     let mut out = PatMap::new();
-    for p in std::mem::take(&mut prog.patterns) {
+    for p in mem::take(&mut prog.patterns) {
         if ctors.contains(&p.name) {
             return Err(ErrKind::PatternClashesCtor {
                 name: p.name.clone(),
@@ -295,8 +297,8 @@ fn fold_wheres(d: &mut Decl) {
     // therefore its tooltip); each `where` binding's expression keeps its own
     // honest parsed span.
     let anchor = Span::empty(span.start);
-    let body = std::mem::replace(&mut d.body, sp(Expr::Unit, span));
-    d.body = std::mem::take(&mut d.wheres)
+    let body = mem::replace(&mut d.body, sp(Expr::Unit, span));
+    d.body = mem::take(&mut d.wheres)
         .into_iter()
         .rev()
         .fold(body, |acc, (n, v)| {
@@ -1107,7 +1109,7 @@ pub fn desugar_with_scope(
         fn_sigs,
     };
     let mut fns = Vec::with_capacity(prog.fns.len());
-    for mut d in std::mem::take(&mut prog.fns) {
+    for mut d in mem::take(&mut prog.fns) {
         fold_wheres(&mut d);
         fns.push(core_decl(d, &mut cx)?);
     }
@@ -1200,18 +1202,16 @@ fn wrap_main_world(fns: &mut [Decl<Core>]) {
             .any(|f| names.contains(*f));
     let reaches_output = uses_replay
         && reachable.iter().any(|n| {
-            edges.get(n).is_some_and(|refs| {
-                crate::core::builtins::OUTPUT_BUILTINS
-                    .iter()
-                    .any(|o| refs.contains(*o))
-            })
+            edges
+                .get(n)
+                .is_some_and(|refs| OUTPUT_BUILTINS.iter().any(|o| refs.contains(*o)))
         });
     if !reaches_cap && !reaches_output {
         return;
     }
     if let Some(d) = fns.iter_mut().find(|d| d.name == names::ENTRY_POINT) {
         let span = d.body.span;
-        let body = std::mem::replace(&mut d.body, sp(Expr::Unit, span));
+        let body = mem::replace(&mut d.body, sp(Expr::Unit, span));
         let action = lam1(names::UNIT_ARG, body, span);
         d.body = call(evar(names::RUN_IO, span), vec![action], span);
     }

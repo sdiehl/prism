@@ -23,6 +23,7 @@ use crate::core::{
 use crate::docs::extract_typespans;
 use crate::error::{Error, SourceMap};
 use crate::hir::{HandlerResidual, NodeRes};
+use crate::index::occurrences::extract as extract_occurrences;
 use crate::lex::lex;
 use crate::names;
 use crate::parse::parse;
@@ -125,7 +126,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
         }
         // Every resolved reference, taken from the renamer rather than a second
         // walk: the goto-definition relation, and reversed, find-references.
-        "occurrences" => crate::index::occurrences::extract(src, roots)?
+        "occurrences" => extract_occurrences(src, roots)?
             .to_json()
             .map_err(|error| Error::CodegenDump(error.to_string())),
         "interface" => {

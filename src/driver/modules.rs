@@ -1,16 +1,22 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
+use std::mem;
+use std::str;
 use std::sync::OnceLock;
 
 use crate::error::Error;
 use crate::hir::NodeFacts;
 use crate::lineage::QueryFact;
+use crate::names::{self, bare_name};
 use crate::parse::parse;
 use crate::resolve::{load, resolve_loaded_module_units, Module, Root};
+use crate::stdlib::STDLIB;
 use crate::store::disk::{resolve_store_path, Store, Written};
+use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Program};
 use crate::syntax::desugar::desugar_with_scope;
 use crate::syntax::reflect::parse_unit;
+use crate::tc::parse_checked_signature;
 use crate::types::{check_seeded, Checked, DeclInfo, TypecheckSeed};
 use serde::{Deserialize, Serialize};
 
@@ -157,7 +163,7 @@ pub fn check_modules_on(
     let mut root_interface_entry = root_entry.clone();
     if src.starts_with(PRELUDE) {
         strip_prelude_declarations(&mut root_resolved);
-        let imports = std::mem::take(&mut root_interface_entry.imports);
+        let imports = mem::take(&mut root_interface_entry.imports);
         strip_prelude_declarations(&mut root_interface_entry);
         root_interface_entry.imports = imports;
     }
@@ -433,7 +439,7 @@ fn injected_typecheck_seed() -> Result<TypecheckSeed, Error> {
     )?;
     let checked = check_seeded(&program, &TypecheckSeed::default())?;
     let mut seed = TypecheckSeed::from_checked(&checked);
-    let name = crate::sym::Sym::from(INJECTED_FOUNDATION_NAME);
+    let name = Sym::from(INJECTED_FOUNDATION_NAME);
     seed.env.remove(&name);
     seed.constrained.remove(&name);
     let _ = CACHE.set(seed.clone());
@@ -500,22 +506,12 @@ fn desugar_scope(seed: &TypecheckSeed) -> (BTreeMap<String, String>, BTreeMap<St
     let classes = seed
         .classes
         .keys()
-        .map(|name| {
-            (
-                crate::names::bare_name(name.as_str()).to_string(),
-                name.to_string(),
-            )
-        })
+        .map(|name| (bare_name(name.as_str()).to_string(), name.to_string()))
         .collect();
     let values = seed
         .env
         .keys()
-        .map(|name| {
-            (
-                crate::names::bare_name(name.as_str()).to_string(),
-                name.to_string(),
-            )
-        })
+        .map(|name| (bare_name(name.as_str()).to_string(), name.to_string()))
         .collect();
     (classes, values)
 }
@@ -559,7 +555,7 @@ fn check_root_job(
 }
 
 fn embedded_std_modules(modules: &[Module]) -> BTreeSet<String> {
-    let embedded = crate::stdlib::STDLIB
+    let embedded = STDLIB
         .iter()
         .map(|(name, source)| (*name, *source))
         .collect::<BTreeMap<_, _>>();
@@ -619,7 +615,7 @@ fn standard_foundation_identity(src: &str) -> String {
     let mut hasher = blake3::Hasher::new();
     field(&mut hasher, STANDARD_FOUNDATION_SCHEMA);
     field(&mut hasher, PRELUDE.as_bytes());
-    for (name, source) in crate::stdlib::STDLIB {
+    for (name, source) in STDLIB {
         field(&mut hasher, name.as_bytes());
         field(&mut hasher, source.as_bytes());
     }
@@ -674,31 +670,31 @@ impl CheckedBody {
         body_entry.exports = program
             .fns
             .iter()
-            .map(|declaration| crate::names::bare_name(&declaration.name).to_string())
+            .map(|declaration| bare_name(&declaration.name).to_string())
             .chain(
                 program
                     .types
                     .iter()
-                    .map(|declaration| crate::names::bare_name(&declaration.name).to_string()),
+                    .map(|declaration| bare_name(&declaration.name).to_string()),
             )
             .chain(
                 program
                     .effects
                     .iter()
-                    .map(|declaration| crate::names::bare_name(&declaration.name).to_string()),
+                    .map(|declaration| bare_name(&declaration.name).to_string()),
             )
             .chain(
                 program
                     .classes
                     .iter()
-                    .map(|declaration| crate::names::bare_name(&declaration.name).to_string()),
+                    .map(|declaration| bare_name(&declaration.name).to_string()),
             )
             .filter(|name| {
-                name != crate::names::FAIL_OP
-                    && name != crate::names::FAIL_EFFECT
-                    && name != crate::names::BREAK_EFFECT
-                    && name != crate::names::CONTINUE_EFFECT
-                    && name != crate::names::RETURN_EFFECT
+                name != names::FAIL_OP
+                    && name != names::FAIL_EFFECT
+                    && name != names::BREAK_EFFECT
+                    && name != names::CONTINUE_EFFECT
+                    && name != names::RETURN_EFFECT
             })
             .collect();
         body_entry.opaques.clear();
@@ -707,7 +703,7 @@ impl CheckedBody {
         let decls = checked
             .decls
             .iter()
-            .filter(|decl| crate::names::bare_name(&decl.name) != crate::names::FAIL_OP)
+            .filter(|decl| bare_name(&decl.name) != names::FAIL_OP)
             .map(|decl| {
                 let mut effects = decl
                     .effects
@@ -788,13 +784,9 @@ impl CheckedBody {
                 Ok(DeclInfo {
                     name: decl.name.clone(),
                     params: decl.params,
-                    ty: crate::tc::parse_checked_signature(&decl.name, &decl.ty)
+                    ty: parse_checked_signature(&decl.name, &decl.ty)
                         .map_err(|error| Error::ResolveModule(error.to_string()))?,
-                    effects: decl
-                        .effects
-                        .into_iter()
-                        .map(crate::sym::Sym::from)
-                        .collect(),
+                    effects: decl.effects.into_iter().map(Sym::from).collect(),
                     // The serialized interface carries no body-effect witness,
                     // so a rehydrated declaration is never provably pure.
                     pure: false,
@@ -876,7 +868,7 @@ impl DurableInterfaceCache {
                 "checked interface object hashes to {actual}, expected {output}"
             )));
         }
-        let text = std::str::from_utf8(&bytes).map_err(|error| {
+        let text = str::from_utf8(&bytes).map_err(|error| {
             Error::ResolveModule(format!("checked interface is not UTF-8: {error}"))
         })?;
         let interface = ModuleInterface::from_json(text).map_err(Error::ResolveModule)?;

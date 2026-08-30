@@ -6,16 +6,21 @@
 //! regime.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Cursor;
+use std::ops::Deref;
 
 use serde::{Deserialize, Serialize};
 
 use crate::core::builtins::Builtin;
 use crate::core::fbip::{borrow_sigs, fip_annots, Fips};
-use crate::core::{hash_program, Comp, Core, DepGraph, Hashes, Value};
-use crate::error::Error;
+use crate::core::{
+    hash_program, reachable_fns, Comp, Core, DepGraph, Hashes, OptLevel, Value, HASH_SCHEME,
+};
+use crate::error::{Error, SourceMap};
 use crate::lineage::provenance::Observation;
 use crate::patch::{
-    extract_term, replace_term, PatchArtifact, PatchArtifactError, PatchTarget, DIGEST_HEX_LEN,
+    extract_term, replace_term, PatchArtifact, PatchArtifactError, PatchTarget, SurfaceTerm,
+    DIGEST_HEX_LEN,
 };
 use crate::resolve::Root;
 use crate::sym::Sym;
@@ -38,6 +43,9 @@ const REFUSAL_ADDRESS_DOMAIN: &[u8] = b"prism-patch-refusal-address-v1";
 const STAGE_ADDRESS_DOMAIN: &[u8] = b"prism-patch-stage-address-v1";
 const BEHAVIOR_CORPUS_ADDRESS_DOMAIN: &[u8] = b"prism-patch-behavior-corpus-address-v1";
 const BEHAVIOR_ADDRESS_DOMAIN: &[u8] = b"prism-patch-behavior-address-v1";
+const DECODE_BEHAVIOR_CORPUS: &str = "decode-behavior-corpus";
+const DETAIL_EXPECTED: &str = "expected";
+const DETAIL_FOUND: &str = "found";
 
 /// One dependency or importer identified by both canonical name and digest.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,7 +62,7 @@ pub struct FetchReport {
     pub target: PatchTarget,
     pub name: String,
     pub rendered: String,
-    pub term: crate::patch::SurfaceTerm,
+    pub term: SurfaceTerm,
     pub core_hash: String,
     pub shape_digest: String,
     pub ty: String,
@@ -182,7 +190,7 @@ pub struct PatchRefusalBody {
     pub details: BTreeMap<String, String>,
 }
 
-impl std::ops::Deref for PatchRefusal {
+impl Deref for PatchRefusal {
     type Target = PatchRefusalBody;
 
     fn deref(&self) -> &Self::Target {
@@ -297,7 +305,7 @@ impl BehaviorCorpus {
         if self.format != PATCH_BEHAVIOR_CORPUS_FORMAT {
             return Err(PatchRefusal::new(
                 "foreign-behavior-corpus",
-                "decode-behavior-corpus",
+                DECODE_BEHAVIOR_CORPUS,
                 format!("unsupported behavior corpus format `{}`", self.format),
             ));
         }
@@ -307,11 +315,11 @@ impl BehaviorCorpus {
         if self.digest != expected {
             return Err(PatchRefusal::new(
                 "behavior-corpus-address-mismatch",
-                "decode-behavior-corpus",
+                DECODE_BEHAVIOR_CORPUS,
                 "behavior corpus bytes do not match their content address",
             )
-            .detail("expected", expected)
-            .detail("found", self.digest.clone()));
+            .detail(DETAIL_EXPECTED, expected)
+            .detail(DETAIL_FOUND, self.digest.clone()));
         }
         Ok(())
     }
@@ -440,8 +448,8 @@ impl StagedPatch {
                 "decode-stage",
                 "staged patch bytes do not match their content address",
             )
-            .detail("expected", expected)
-            .detail("found", self.digest.clone()));
+            .detail(DETAIL_EXPECTED, expected)
+            .detail(DETAIL_FOUND, self.digest.clone()));
         }
         Ok(())
     }
@@ -579,8 +587,8 @@ fn apply_semantic_patch_inner(
             "base-namespace",
             "the semantic namespace moved after the patch was authored",
         )
-        .detail("expected", patch.base_namespace.digest.clone())
-        .detail("found", before.namespace.digest));
+        .detail(DETAIL_EXPECTED, patch.base_namespace.digest.clone())
+        .detail(DETAIL_FOUND, before.namespace.digest));
     }
     let symbol = resolve_selector(&before, &name)?;
     let before_facts = definition_facts(&before, symbol)?;
@@ -590,8 +598,8 @@ fn apply_semantic_patch_inner(
             "target-digest",
             format!("definition `{name}` no longer has the digest pinned by the patch"),
         )
-        .detail("expected", patch.target.digest.clone())
-        .detail("found", before_facts.hash));
+        .detail(DETAIL_EXPECTED, patch.target.digest.clone())
+        .detail(DETAIL_FOUND, before_facts.hash));
     }
     let current_term =
         extract_term(entry_source, &name).map_err(|error| artifact_refusal(&error))?;
@@ -729,13 +737,13 @@ fn verify_semantic_patch_behavior_inner(
     // Behavior receipts use the unoptimized interpreter oracle. Optimization
     // equivalence is a separate gate and cannot influence patch classification.
     let mut oracle_cfg = cfg.clone();
-    oracle_cfg.flags.opt_level = crate::core::OptLevel::O0;
+    oracle_cfg.flags.opt_level = OptLevel::O0;
     oracle_cfg.passes = None;
     let mut cases = Vec::with_capacity(corpus.cases.len());
     let mut first_divergence = None;
     for case in &corpus.cases {
         let mut before_out = Vec::new();
-        let mut before_input = std::io::Cursor::new(case.stdin.as_bytes());
+        let mut before_input = Cursor::new(case.stdin.as_bytes());
         let before_run = observe_run_on(
             full_source,
             roots,
@@ -746,7 +754,7 @@ fn verify_semantic_patch_behavior_inner(
         )
         .map_err(|error| compiler_refusal("behavior-before", &error))?;
         let mut after_out = Vec::new();
-        let mut after_input = std::io::Cursor::new(case.stdin.as_bytes());
+        let mut after_input = Cursor::new(case.stdin.as_bytes());
         let after_run = observe_run_on(
             &result_full,
             roots,
@@ -870,7 +878,7 @@ fn validate_behavior_cases(cases: &[BehaviorCase]) -> Result<(), PatchRefusal> {
     if cases.is_empty() {
         return Err(PatchRefusal::new(
             "empty-behavior-corpus",
-            "decode-behavior-corpus",
+            DECODE_BEHAVIOR_CORPUS,
             "behavior corpus must contain at least one case",
         ));
     }
@@ -879,14 +887,14 @@ fn validate_behavior_cases(cases: &[BehaviorCase]) -> Result<(), PatchRefusal> {
         if case.name.is_empty() {
             return Err(PatchRefusal::new(
                 "empty-behavior-case",
-                "decode-behavior-corpus",
+                DECODE_BEHAVIOR_CORPUS,
                 "behavior case names must not be empty",
             ));
         }
         if !names.insert(&case.name) {
             return Err(PatchRefusal::new(
                 "duplicate-behavior-case",
-                "decode-behavior-corpus",
+                DECODE_BEHAVIOR_CORPUS,
                 format!("duplicate behavior case `{}`", case.name),
             ));
         }
@@ -928,7 +936,7 @@ fn trace_divergence(
 }
 
 fn full_with_entry(full_source: &str, entry_source: &str) -> String {
-    let prefix_len = crate::error::SourceMap::new(full_source).prelude_len();
+    let prefix_len = SourceMap::new(full_source).prelude_len();
     let mut full = String::with_capacity(prefix_len + entry_source.len());
     full.push_str(&full_source[..prefix_len]);
     full.push_str(entry_source);
@@ -970,7 +978,7 @@ fn semantic_state(
 
 fn resolve_selector(state: &SemanticState, selector: &str) -> Result<Sym, PatchRefusal> {
     let digest = selector
-        .strip_prefix(&format!("{}:", crate::core::HASH_SCHEME))
+        .strip_prefix(&format!("{HASH_SCHEME}:"))
         .unwrap_or(selector);
     let digest_match = digest.len() == DIGEST_HEX_LEN
         && digest
@@ -1251,7 +1259,7 @@ fn ambient_builtins(core: &Core) -> Vec<String> {
         }
     }
 
-    let reachable = crate::core::reachable_fns(core);
+    let reachable = reachable_fns(core);
     let mut out = BTreeSet::new();
     for function in core
         .fns
@@ -1344,7 +1352,7 @@ mod tests {
         let full = with_prelude(SOURCE);
         let mut stale = artifact("pub fn inc(x : Int) : Int = x + 2\n");
         stale.target.digest = "0".repeat(64);
-        stale.digest = crate::patch::PatchArtifact::new(
+        stale.digest = PatchArtifact::new(
             stale.base_namespace.clone(),
             stale.target.clone(),
             stale.replacement.clone(),

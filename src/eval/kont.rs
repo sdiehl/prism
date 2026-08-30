@@ -71,7 +71,8 @@ use num_bigint::BigInt;
 // The byte substrate (varints, bounded blobs/strings, table numbering, the
 // hostile-input reader, and the node-table bounds) is shared with the `def` codec;
 // only the `kont` schema below is local.
-use crate::core::{CoreOp, CorePat};
+use crate::core::builtins::{Builtin, FloatOp};
+use crate::core::{CoreOp, CorePat, HASH_SCHEME};
 use crate::driver::WireKind;
 use crate::lineage::provenance::Observation;
 use prism_common::binary::{
@@ -895,7 +896,7 @@ pub fn encode_kont(k: &Kont) -> Result<Vec<u8>, SuspendError> {
     };
 
     let mut out = Vec::new();
-    put_str(&mut out, crate::core::HASH_SCHEME);
+    put_str(&mut out, HASH_SCHEME);
     put_uvarint(&mut out, u64::from(WireKind::Kont.varint()));
     put_str(&mut out, &k.bundle);
 
@@ -986,10 +987,10 @@ enum Raw {
     NPrim(CoreOp, u32, u32),
     NCall(String, Vec<u32>),
     NCase(u32, Vec<(RawPat, u32)>),
-    NFloat(crate::core::builtins::FloatOp, u32),
+    NFloat(FloatOp, u32),
     NNeg(crate::core::NegLane, u32),
     NDo(String, Vec<u32>),
-    NStr(crate::core::builtins::Builtin, Vec<u32>),
+    NStr(Builtin, Vec<u32>),
     NHandle(u32),
     NMask(Vec<String>, u32),
     AVar(String),
@@ -1439,7 +1440,7 @@ fn read_obs(r: &mut Reader<'_>) -> Result<Obs, CodecError> {
 /// Returns a [`CodecError`] describing the first inconsistency found.
 pub fn decode_kont(bytes: &[u8]) -> Result<Kont, CodecError> {
     let mut r = Reader::new(bytes);
-    if r.string()? != crate::core::HASH_SCHEME {
+    if r.string()? != HASH_SCHEME {
         return Err(CodecError::Scheme);
     }
     if r.uvarint()? != u64::from(WireKind::Kont.varint()) {

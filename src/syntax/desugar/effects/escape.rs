@@ -118,10 +118,8 @@ fn taints(e: &S<Expr<Core>>, ops: &BTreeSet<String>, tainted: &BTreeSet<String>)
 
 // Every name referenced anywhere in `e`, for the entry-point world-handler
 // call-graph scan in the parent desugar module.
-pub(in crate::syntax::desugar) fn referenced_names(
-    e: &S<Expr<Core>>,
-) -> std::collections::BTreeSet<String> {
-    let mut out = std::collections::BTreeSet::new();
+pub(in crate::syntax::desugar) fn referenced_names(e: &S<Expr<Core>>) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
     walk(e, &mut |x| {
         if let Expr::Var(n) = &x.node {
             out.insert(n.clone());

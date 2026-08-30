@@ -6,6 +6,8 @@
 //! `prism::rc_balanced`) resolves through the re-export in `mod.rs`, so the split
 //! is invisible to callers.
 
+#[cfg(feature = "native")]
+use std::io::ErrorKind;
 use std::path::Path;
 
 use crate::error::Error;
@@ -116,7 +118,7 @@ pub fn build_at(src: &str, base: &Path, out: &Path) -> Result<(), Error> {
 fn remove_stale_bitcode(out: &Path) -> Result<(), Error> {
     match std::fs::remove_file(out.with_extension("bc")) {
         Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
         Err(e) => Err(Error::Io(e)),
     }
 }

@@ -1,11 +1,20 @@
 //! Package manager and store-publishing command bodies.
 
+use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use crate::cli::check_world::{PACKAGE_USAGE_SUMMARY, USAGE_SUMMARY_PHASE};
 use crate::cli::{out_stem, pkg_report, resolve_input, user_source, CmdError, CmdResult};
 use crate::error::Error;
+use crate::pkg::cmd::{add as pkg_add, init as pkg_init, why as pkg_why};
+use crate::pkg::export::export_cmd;
+use crate::pkg::trust::{audit_cmd, publish_source_cmd};
+use crate::{dump_on, Config};
+
+const AUDIT_COMMAND: &str = "audit";
+const AUDIT_FAILED: &str = "audit failed";
+const PKG_INIT_COMMAND: &str = "pkg init";
 
 pub fn init() -> CmdResult {
     let mut stdout = io::stdout();
@@ -18,38 +27,39 @@ pub fn init() -> CmdResult {
 
     let dir = PathBuf::from(dir.trim());
     pkg_report(
-        crate::pkg::cmd::init(&name, &dir, &version, &author, &maintainer, &license),
-        "pkg init",
+        pkg_init(&name, &dir, &version, &author, &maintainer, &license),
+        PKG_INIT_COMMAND,
     )
 }
 
 fn prompt(stdout: &mut impl Write, field: &str) -> Result<String, CmdError> {
-    write!(stdout, "{field}: ").map_err(|e| (Error::Io(e), String::new(), "pkg init".into()))?;
+    write!(stdout, "{field}: ")
+        .map_err(|e| (Error::Io(e), String::new(), PKG_INIT_COMMAND.into()))?;
     stdout
         .flush()
-        .map_err(|e| (Error::Io(e), String::new(), "pkg init".into()))?;
+        .map_err(|e| (Error::Io(e), String::new(), PKG_INIT_COMMAND.into()))?;
     let mut value = String::new();
     io::stdin()
         .read_line(&mut value)
-        .map_err(|e| (Error::Io(e), String::new(), "pkg init".into()))?;
+        .map_err(|e| (Error::Io(e), String::new(), PKG_INIT_COMMAND.into()))?;
     Ok(value.trim().to_string())
 }
 
-pub fn add(target: &str, cfg: &crate::Config) -> CmdResult {
-    pkg_report(crate::pkg::cmd::add(target, cfg), target)
+pub fn add(target: &str, cfg: &Config) -> CmdResult {
+    pkg_report(pkg_add(target, cfg), target)
 }
 
-pub fn why(target: &str, cfg: &crate::Config) -> CmdResult {
-    pkg_report(crate::pkg::cmd::why(target, cfg), target)
+pub fn why(target: &str, cfg: &Config) -> CmdResult {
+    pkg_report(pkg_why(target, cfg), target)
 }
 
-pub fn export(file: &Path, out: Option<PathBuf>, cfg: &crate::Config) -> CmdResult {
+pub fn export(file: &Path, out: Option<PathBuf>, cfg: &Config) -> CmdResult {
     let (full, roots, _name, default_out) = resolve_input(file, cfg)?;
     let user_src = user_source(file)?;
     let stem = out_stem(&default_out);
     let out_dir = out.unwrap_or_else(|| PathBuf::from("target").join("export"));
     pkg_report(
-        crate::pkg::export::export_cmd(&user_src, &full, &roots, &out_dir, &stem),
+        export_cmd(&user_src, &full, &roots, &out_dir, &stem),
         &file.display().to_string(),
     )
 }
@@ -59,38 +69,30 @@ pub fn publish(
     tag: &str,
     name: Option<String>,
     origin: Option<String>,
-    cfg: &crate::Config,
+    cfg: &Config,
 ) -> CmdResult {
     let (full, roots, _disp, default_out) = resolve_input(file, cfg)?;
     let user_src = user_source(file)?;
     let pkg_name = name.unwrap_or_else(|| out_stem(&default_out));
     let pkg_origin = origin.unwrap_or_else(|| pkg_name.clone());
     pkg_report(
-        crate::pkg::trust::publish_source_cmd(
-            &user_src,
-            &full,
-            &roots,
-            &pkg_origin,
-            &pkg_name,
-            tag,
-            cfg,
-        ),
+        publish_source_cmd(&user_src, &full, &roots, &pkg_origin, &pkg_name, tag, cfg),
         &file.display().to_string(),
     )
 }
 
 // `prism audit`: render the report and set the exit code from its verdict.
-pub fn audit(cfg: &crate::Config, allow_unsigned: bool) -> CmdResult {
-    let report = crate::pkg::trust::audit_cmd(cfg, allow_unsigned)
-        .map_err(|e| (e, String::new(), "audit".to_string()))?;
+pub fn audit(cfg: &Config, allow_unsigned: bool) -> CmdResult {
+    let report = audit_cmd(cfg, allow_unsigned)
+        .map_err(|e| (e, String::new(), AUDIT_COMMAND.to_string()))?;
     print!("{}", report.render());
     if report.ok() {
         Ok(())
     } else {
         Err((
-            Error::ResolvePackage("audit failed".into()),
+            Error::ResolvePackage(AUDIT_FAILED.into()),
             String::new(),
-            "audit".to_string(),
+            AUDIT_COMMAND.to_string(),
         ))
     }
 }
@@ -111,12 +113,12 @@ fn package_root(path: &Path) -> PathBuf {
 // `usage-summary.md`. Creating the file for the first time and refreshing a drifted
 // one are the same operation; the output is byte-stable, so a second accept over an
 // unchanged package rewrites identical bytes.
-pub fn accept_usage(path: &Path, cfg: &crate::Config) -> CmdResult {
+pub fn accept_usage(path: &Path, cfg: &Config) -> CmdResult {
     let (full, roots, name, _) = resolve_input(path, cfg)?;
-    let summary = crate::dump_on(USAGE_SUMMARY_PHASE, &full, &roots, cfg)
-        .map_err(|e| (e, full, name.clone()))?;
+    let summary =
+        dump_on(USAGE_SUMMARY_PHASE, &full, &roots, cfg).map_err(|e| (e, full, name.clone()))?;
     let golden = package_root(path).join(PACKAGE_USAGE_SUMMARY);
-    std::fs::write(&golden, &summary).map_err(|e| (Error::Io(e), String::new(), name))?;
+    fs::write(&golden, &summary).map_err(|e| (Error::Io(e), String::new(), name))?;
     println!("wrote {}", golden.display());
     Ok(())
 }

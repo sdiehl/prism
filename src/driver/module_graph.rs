@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::Error;
 use crate::parse::parse;
 use crate::resolve::{load, Root};
+use crate::syntax::ast::ImportDecl;
 
 use super::input::field;
 use super::ROOT_MODULE_NAME;
@@ -212,11 +213,7 @@ pub fn module_graph(src: &str, roots: &[Root]) -> Result<ModuleGraph, Error> {
     })
 }
 
-fn graph_node(
-    name: &str,
-    source: &str,
-    imports: &[crate::syntax::ast::ImportDecl],
-) -> ModuleGraphNode {
+fn graph_node(name: &str, source: &str, imports: &[ImportDecl]) -> ModuleGraphNode {
     let source_digest = blake3::hash(source.as_bytes()).to_hex().to_string();
     let mut dependencies = imports
         .iter()

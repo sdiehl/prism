@@ -9,9 +9,12 @@
 
 use std::collections::BTreeSet;
 
-use crate::error::TypeError;
+use crate::error::{SourceMap, TypeError};
+use crate::names::{bare_name, ENTRY_POINT};
+use crate::parse::parse;
+use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Program};
-use crate::types::{Checked, Type};
+use crate::types::{Checked, DeclInfo, Type};
 
 /// A validated test function, reduced to what discovery needs: its canonical
 /// name.
@@ -30,8 +33,8 @@ pub(crate) struct TestSignature {
 /// scanned, so a shadowed prelude name is not mistaken for a redefinition.
 #[must_use]
 pub(crate) fn duplicate_test_name(full_src: &str) -> Option<String> {
-    let program = crate::parse::parse(full_src).ok()?.program;
-    let prelude_end = crate::error::SourceMap::new(full_src).prelude_len();
+    let program = parse(full_src).ok()?.program;
+    let prelude_end = SourceMap::new(full_src).prelude_len();
     let mut seen: BTreeSet<String> = BTreeSet::new();
     for decl in program
         .fns
@@ -60,7 +63,7 @@ pub(crate) fn signatures_from(
     let test_names: BTreeSet<&str> = program
         .fns
         .iter()
-        .filter(|d| d.test && crate::names::bare_name(&d.name) == d.name)
+        .filter(|d| d.test && bare_name(&d.name) == d.name)
         .map(|d| d.name.as_str())
         .collect();
     let mut out = Vec::new();
@@ -86,11 +89,11 @@ pub(crate) fn signatures_from(
 // well-formed test generalizes is the ambient effect tail (fine) or an
 // unconstrained result of a never-returning body (`fail()`), which unifies with
 // `Unit`. A parameter type variable would be caught by the zero-parameter rule.
-fn check_signature(decl: &crate::types::DeclInfo) -> Result<(), TypeError> {
-    let short = crate::names::bare_name(&decl.name);
+fn check_signature(decl: &DeclInfo) -> Result<(), TypeError> {
+    let short = bare_name(&decl.name);
     // A test may not be named `main`: the harness synthesizes a `main` entry that
     // calls the test, so a test named `main` would shadow itself and recurse.
-    if short == crate::names::ENTRY_POINT {
+    if short == ENTRY_POINT {
         return Err(fail(
             short,
             "may not be named `main` (the reserved entry point)",
@@ -148,7 +151,7 @@ fn returns_unit(ty: &Type) -> bool {
 
 // The effect labels outside the supported test world, sorted for a deterministic
 // diagnostic.
-fn unsupported_effects(effects: &BTreeSet<crate::sym::Sym>) -> Vec<String> {
+fn unsupported_effects(effects: &BTreeSet<Sym>) -> Vec<String> {
     let allowed: BTreeSet<&str> = super::TEST_WORLD_EFFECTS.iter().copied().collect();
     let mut residual: Vec<String> = effects
         .iter()

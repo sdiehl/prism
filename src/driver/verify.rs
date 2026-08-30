@@ -9,18 +9,22 @@
 //! backends and confirms their output is byte-identical, named by the shared
 //! content hash and cross-checked against any signed package index.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::fbip::borrow_sigs;
 use crate::core::{
-    check_fip, check_fip_linear, fip_annots, insert_rc, newtype_ctors, replayable_annots, reuse,
-    Core,
+    check_fip, check_fip_linear, fip_annots, insert_rc, latent_ops, newtype_ctors,
+    replayable_annots, reuse, Core,
 };
 use crate::error::{Error, TypeError};
+use crate::kw::AT;
+use crate::names::{
+    is_instance_method, EXN_EFFECT, FAIL_EFFECT, INPUT_CAPABILITY_EFFECTS, OUTPUT_EFFECT,
+};
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Fip, Program};
 use crate::types::coeffect::CoeffectFact;
-use crate::types::Checked;
+use crate::types::{Checked, Effects};
 
 #[cfg(feature = "native")]
 use std::fmt::Write as _;
@@ -213,13 +217,13 @@ fn attest_cert_line(root: &str, second_name: &str, cfg: &Config) -> String {
 // Synthesized ops that are not type-level effects are skipped rather than
 // flagged.
 pub(super) fn reconcile_effects(checked: &Checked, core: &Core) -> Result<(), Error> {
-    let latent = crate::core::latent_ops(core);
+    let latent = latent_ops(core);
     let empty = BTreeSet::new();
     // Validate against each function's inferred row (the labels of its checked
     // type), not the set-pass `effects` seed: the seed cannot count the scoped
     // masking that lets a `mask`ed effect tunnel past its handler, so only the
     // inferred row reflects what the function actually leaves unhandled.
-    let inferred_rows: std::collections::BTreeMap<&str, &crate::types::Effects> = checked
+    let inferred_rows: BTreeMap<&str, &Effects> = checked
         .decls
         .iter()
         .map(|d| (d.name.as_str(), &d.effects))
@@ -234,7 +238,7 @@ pub(super) fn reconcile_effects(checked: &Checked, core: &Core) -> Result<(), Er
         // legitimately perform the effects flowing through its row variable. It
         // has no standalone inferred row to reconcile against, so validating it
         // here against an empty row would spuriously flag that permitted effect.
-        if crate::names::is_instance_method(f.name.as_str()) {
+        if is_instance_method(f.name.as_str()) {
             continue;
         }
         let inferred = inferred_rows
@@ -296,7 +300,7 @@ pub(super) fn fip_check(
         // allocation certificate.
         let msg = match owner {
             Some(d) if d.no_alloc && d.fip == Fip::No => {
-                let wa = format!("{} {}", crate::kw::AT, CoeffectFact::Noalloc);
+                let wa = format!("{AT} {}", CoeffectFact::Noalloc);
                 let m = msg.replace("`fbip`", &format!("`{wa}`"));
                 allocation_certificate_message(&wa, Some(&d.name), &m)
             }
@@ -307,7 +311,7 @@ pub(super) fn fip_check(
         Error::Type(TypeError::TypeFailure { span, msg })
     };
     let sigs = borrow_sigs(program);
-    let users: std::collections::BTreeSet<Sym> = core.fns.iter().map(|f| f.name).collect();
+    let users: BTreeSet<Sym> = core.fns.iter().map(|f| f.name).collect();
     let newtypes = newtype_ctors(program);
     check_fip_linear(core, &annots, &checked.decls, &checked.ctors).map_err(to_err)?;
     check_fip(
@@ -367,17 +371,13 @@ pub(super) fn replayable_check(
     if annots.is_empty() {
         return Ok(());
     }
-    let allowed: std::collections::BTreeSet<Sym> = crate::names::INPUT_CAPABILITY_EFFECTS
+    let allowed: BTreeSet<Sym> = INPUT_CAPABILITY_EFFECTS
         .iter()
         .copied()
-        .chain([
-            crate::names::OUTPUT_EFFECT,
-            crate::names::EXN_EFFECT,
-            crate::names::FAIL_EFFECT,
-        ])
+        .chain([OUTPUT_EFFECT, EXN_EFFECT, FAIL_EFFECT])
         .map(Sym::from)
         .collect();
-    let inferred: std::collections::BTreeMap<&str, &crate::types::ty::Effects> = checked
+    let inferred: BTreeMap<&str, &Effects> = checked
         .decls
         .iter()
         .map(|i| (i.name.as_str(), &i.effects))

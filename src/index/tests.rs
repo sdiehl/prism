@@ -7,7 +7,8 @@ use crate::sym::Sym;
 use crate::{default_roots, with_prelude, ModuleSource};
 
 use super::{
-    build, EdgeKind, Index, IndexInput, Kind, PrimitiveKind, TestLayer, Vis, INDEX_FORMAT,
+    build, occurrences::Occurrences, EdgeKind, Index, IndexInput, Kind, PrimitiveKind, TestLayer,
+    Vis, INDEX_FORMAT,
 };
 
 const MODULE: &str = "M";
@@ -410,11 +411,8 @@ fn the_occurrence_document_round_trips_and_is_reproducible() {
     let second = super::occurrences::extract(&full, &roots).expect("extract");
     let json = first.to_json().expect("serialize");
     assert_eq!(json, second.to_json().expect("serialize"));
-    assert_eq!(
-        super::occurrences::Occurrences::from_json(&json).expect("round trip"),
-        first
-    );
-    assert!(super::occurrences::Occurrences::from_json(
+    assert_eq!(Occurrences::from_json(&json).expect("round trip"), first);
+    assert!(Occurrences::from_json(
         &json.replace(super::OCCURRENCES_FORMAT, "prism-occurrences-v0")
     )
     .is_err());

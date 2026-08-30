@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::cli::{file_name, resolve_input, user_entry_path, user_source, CmdError, CmdResult};
-use crate::error::Error;
+use crate::error::{Error, SourceMap};
 use crate::patch::{PatchArtifact, PatchTarget, SurfaceTerm};
 use crate::store::disk::{resolve_store_path, Store};
 use crate::{BehaviorCase, BehaviorCorpus, PatchRefusal, StagedPatch};
@@ -350,7 +350,7 @@ fn commit_value(file: &Path, cfg: &crate::Config) -> Result<Value, PatchRefusal>
 
     // Populate the cache from the already-judged source before publishing the
     // file. A coherence refusal therefore leaves the source untouched.
-    let prefix_len = crate::error::SourceMap::new(&input.full_source).prelude_len();
+    let prefix_len = SourceMap::new(&input.full_source).prelude_len();
     let mut result_full = String::with_capacity(prefix_len + result_source.len());
     result_full.push_str(&input.full_source[..prefix_len]);
     result_full.push_str(&result_source);

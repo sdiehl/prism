@@ -1,5 +1,6 @@
 //! Expected-type, signature, instantiation, and row-join checks.
 
+use crate::types::sig::parse_checked_signature;
 use crate::types::ty::EffRow;
 use crate::types::Type;
 
@@ -24,7 +25,7 @@ impl<P: TypedCorePhase> Checker<'_, P> {
         context: impl Into<Site>,
     ) -> Option<CoreFnSig> {
         let context = context.into();
-        match crate::types::sig::parse_checked_signature("typed-core verifier", text) {
+        match parse_checked_signature("typed-core verifier", text) {
             Ok(ty) => match scheme_to_fn_sig(ty) {
                 Ok(signature) => Some(signature),
                 Err(error) => {

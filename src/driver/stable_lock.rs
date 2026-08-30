@@ -18,6 +18,8 @@
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use marginalia::Span;
@@ -25,6 +27,7 @@ use marginalia::Span;
 use crate::core::fbip::borrow_sigs;
 use crate::core::{fip_annots, hash_program, HASH_PREFIX_HEX};
 use crate::error::{ErrKind, Error};
+use crate::parse::parse;
 use crate::resolve::Root;
 use crate::stable_lock::{first_drift, Drift, LockManifest};
 use crate::syntax::desugar::family_lock;
@@ -61,7 +64,7 @@ fn derive_with_spans(
     full: &str,
     roots: &[Root],
 ) -> Result<(LockManifest, BTreeMap<String, Span>), Error> {
-    let parsed = crate::parse::parse(full)?.program;
+    let parsed = parse(full)?.program;
     let (program, checked, core) = elaborated(full, roots)?;
     let defs = hash_program(
         &core,
@@ -104,11 +107,11 @@ pub fn verify(full: &str, roots: &[Root], committed: &LockManifest) -> Result<()
 /// Fails on a filesystem error or a malformed or foreign-format manifest.
 pub fn read_committed(source: &Path) -> Result<Option<LockManifest>, Error> {
     let path = manifest_path(source);
-    match std::fs::read_to_string(&path) {
+    match fs::read_to_string(&path) {
         Ok(text) => LockManifest::from_text(&text)
             .map(Some)
             .map_err(Error::ResolveCommand),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
         Err(e) => Err(Error::Io(e)),
     }
 }

@@ -19,6 +19,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{ErrKind, TypeError};
+use crate::fmt::decl::fmt_ty;
 use crate::syntax::ast::{BinOp, Decl, Expr, Program, Span, Suffix, Ty, S};
 use crate::verify::logic::{Contract, LogicExpr, LogicSort, VarId};
 use crate::verify::{interface::VerificationInterface, normalize, wf};
@@ -548,7 +549,7 @@ fn unsupported_type(ty: &Ty, span: Span) -> TypeError {
     ErrKind::LogicUnsupported {
         detail: format!(
             "the type `{}` (only Int and Bool are in the first logical fragment)",
-            crate::fmt::decl::fmt_ty(ty)
+            fmt_ty(ty)
         ),
     }
     .at(span)

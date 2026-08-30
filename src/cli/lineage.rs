@@ -9,8 +9,9 @@ use std::fs;
 use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
+use std::str;
 
-use crate::cli::{base_of, resolve_input, CmdResult, PRISM_MANIFEST};
+use crate::cli::{base_of, read, resolve_input, CmdResult, PRISM_MANIFEST};
 use crate::driver::{ModuleCheckReport, SOURCE_EXT};
 use crate::error::Error;
 use crate::lineage::{
@@ -20,17 +21,16 @@ use crate::lineage::{
 use crate::parse::parse;
 use crate::store::cert::CertStatus;
 use crate::store::disk::{resolve_store_path, Store};
+use crate::{
+    check_modules_on, default_roots, replay_run_on, with_custom_prelude, with_prelude, Config, Root,
+};
+use crate::{driver as compiler_driver, lineage as lineage_model, project as project_model};
 use anstyle::{AnsiColor, Color, Style};
 
 // `prism diff` is the project-shaped default: without paths, compare Git HEAD
 // to the working tree of the nearest project. `prism diff OLD NEW` remains the
 // explicit form for source revisions and lineage sidecars.
-pub fn diff_cmd(
-    old: Option<&Path>,
-    new: Option<&Path>,
-    json: bool,
-    cfg: &crate::Config,
-) -> CmdResult {
+pub fn diff_cmd(old: Option<&Path>, new: Option<&Path>, json: bool, cfg: &Config) -> CmdResult {
     match (old, new) {
         (None, None) => git_project_diff_cmd(json, cfg),
         (Some(old), Some(new)) => explicit_diff_cmd(old, new, json, cfg),
@@ -45,14 +45,14 @@ pub fn diff_cmd(
 // `prism diff OLD NEW`: one verb over two revisions or two lineage sidecars. Two
 // `.plineage` sidecars diff by logical key (absorbing the old `lineage --diff`);
 // two source revisions diff by Core hash. Mixing the two is a pointed error.
-fn explicit_diff_cmd(old: &Path, new: &Path, json: bool, cfg: &crate::Config) -> CmdResult {
+fn explicit_diff_cmd(old: &Path, new: &Path, json: bool, cfg: &Config) -> CmdResult {
     match (is_lineage_sidecar(old), is_lineage_sidecar(new)) {
         (true, true) => lineage_diff_cmd(old, new, json),
         (false, false) => {
             let (old_full, old_roots, old_name, _) = resolve_input(old, cfg)?;
             let (new_full, new_roots, new_name, _) = resolve_input(new, cfg)?;
             if json {
-                let d = crate::driver::source_diff_on_roots(
+                let d = compiler_driver::source_diff_on_roots(
                     &old_full, &new_full, &old_roots, &new_roots, cfg,
                 )
                 .map_err(|e| (e, new_full, format!("{old_name} -> {new_name}")))?;
@@ -65,9 +65,10 @@ fn explicit_diff_cmd(old: &Path, new: &Path, json: bool, cfg: &crate::Config) ->
                 })?;
                 println!("{text}");
             } else {
-                let out =
-                    crate::driver::diff_on_roots(&old_full, &new_full, &old_roots, &new_roots, cfg)
-                        .map_err(|e| (e, new_full, format!("{old_name} -> {new_name}")))?;
+                let out = compiler_driver::diff_on_roots(
+                    &old_full, &new_full, &old_roots, &new_roots, cfg,
+                )
+                .map_err(|e| (e, new_full, format!("{old_name} -> {new_name}")))?;
                 print!("{out}");
             }
             Ok(())
@@ -94,11 +95,11 @@ struct GitChange {
 // tree. Git supplies the baseline for changed `.pr` files; all unchanged source
 // files stay in memory from the working tree, which is equivalent and avoids a
 // temporary checkout. Staged changes are included by diffing against HEAD.
-fn git_project_diff_cmd(json: bool, cfg: &crate::Config) -> CmdResult {
+fn git_project_diff_cmd(json: bool, cfg: &Config) -> CmdResult {
     let start = Path::new(".")
         .canonicalize()
         .unwrap_or_else(|_| PathBuf::from("."));
-    let manifest = crate::project::find_manifest(&start).ok_or_else(|| {
+    let manifest = project_model::find_manifest(&start).ok_or_else(|| {
         (
             Error::ResolveLineage(
                 "no prism.toml found: `prism diff` without OLD NEW diffs the enclosing project"
@@ -108,7 +109,7 @@ fn git_project_diff_cmd(json: bool, cfg: &crate::Config) -> CmdResult {
             start.display().to_string(),
         )
     })?;
-    let project = crate::project::load_project(&manifest)
+    let project = project_model::load_project(&manifest)
         .map_err(|e| (e, String::new(), manifest.display().to_string()))?;
     let changes = git_changes(&project.root)
         .map_err(|e| (e, String::new(), project.root.display().to_string()))?;
@@ -119,9 +120,9 @@ fn git_project_diff_cmd(json: bool, cfg: &crate::Config) -> CmdResult {
         Some(path) => {
             let prelude = git_baseline_file(&project.root, path, &changes)
                 .map_err(|e| (e, String::new(), path.display().to_string()))?;
-            crate::with_custom_prelude(&prelude, &old_entry)
+            with_custom_prelude(&prelude, &old_entry)
         }
-        None => crate::with_prelude(&old_entry),
+        None => with_prelude(&old_entry),
     };
     let mut old_roots = new_roots.clone();
     let old_modules = git_baseline_modules(&project, &changes)
@@ -133,15 +134,16 @@ fn git_project_diff_cmd(json: bool, cfg: &crate::Config) -> CmdResult {
             new_name,
         ));
     };
-    *root = crate::Root::source_bundle(
+    *root = Root::source_bundle(
         format!("Git HEAD ({})", project.src_dir.display()),
         old_modules,
     );
 
     if json {
-        let diff =
-            crate::driver::source_diff_on_roots(&old_full, &new_full, &old_roots, &new_roots, cfg)
-                .map_err(|e| (e, new_full, new_name))?;
+        let diff = compiler_driver::source_diff_on_roots(
+            &old_full, &new_full, &old_roots, &new_roots, cfg,
+        )
+        .map_err(|e| (e, new_full, new_name))?;
         let text = serde_json::to_string_pretty(&diff).map_err(|e| {
             (
                 Error::ResolveLineage(e.to_string()),
@@ -151,10 +153,11 @@ fn git_project_diff_cmd(json: bool, cfg: &crate::Config) -> CmdResult {
         })?;
         println!("{text}");
     } else {
-        let diff =
-            crate::driver::source_diff_on_roots(&old_full, &new_full, &old_roots, &new_roots, cfg)
-                .map_err(|e| (e, new_full, new_name))?;
-        print!("{}", crate::driver::render_source_diff(&diff));
+        let diff = compiler_driver::source_diff_on_roots(
+            &old_full, &new_full, &old_roots, &new_roots, cfg,
+        )
+        .map_err(|e| (e, new_full, new_name))?;
+        print!("{}", compiler_driver::render_source_diff(&diff));
         let surface = surface_definition_diff(&project.root, &changes, &diff)
             .map_err(|e| (e, String::new(), project.root.display().to_string()))?;
         if !surface.is_empty() {
@@ -170,7 +173,7 @@ fn git_project_diff_cmd(json: bool, cfg: &crate::Config) -> CmdResult {
 fn surface_definition_diff(
     root: &Path,
     changes: &[GitChange],
-    diff: &crate::driver::SourceDiff,
+    diff: &compiler_driver::SourceDiff,
 ) -> Result<String, Error> {
     let names: BTreeMap<String, String> = diff
         .behavioral
@@ -300,7 +303,7 @@ fn git_changes(root: &Path) -> Result<Vec<GitChange>, Error> {
     let mut changes = Vec::new();
     let mut i = 0;
     while i < fields.len() {
-        let status = std::str::from_utf8(fields[i])
+        let status = str::from_utf8(fields[i])
             .map_err(|_| Error::ResolveLineage("Git returned a non-UTF-8 diff status".into()))?;
         i += 1;
         let renamed = status.starts_with('R') || status.starts_with('C');
@@ -382,7 +385,7 @@ fn git_baseline_file(root: &Path, path: &Path, changes: &[GitChange]) -> Result<
 }
 
 fn git_baseline_modules(
-    project: &crate::project::Project,
+    project: &project_model::Project,
     changes: &[GitChange],
 ) -> Result<BTreeMap<String, String>, Error> {
     let mut modules = project_modules(&project.src_dir)?;
@@ -519,7 +522,7 @@ pub fn is_lineage_sidecar(path: &Path) -> bool {
 // re-derivation (re-running the wasm) is not implemented. A `--certify` path mints a
 // `lineage-verified` certificate over the sidecar digest on a clean rehash.
 pub fn verify_rehash_cmd(file: &Path, certify: Option<&Path>) -> CmdResult {
-    let graph = crate::lineage::read_lineage(file)
+    let graph = lineage_model::read_lineage(file)
         .map_err(|e| (e, String::new(), file.display().to_string()))?;
     if graph.variant == Variant::World {
         if certify.is_some() {
@@ -534,7 +537,7 @@ pub fn verify_rehash_cmd(file: &Path, certify: Option<&Path>) -> CmdResult {
                 file.display().to_string(),
             ));
         }
-        let report = crate::lineage::verify_world(&graph)
+        let report = lineage_model::verify_world(&graph)
             .map_err(|e| (e, String::new(), file.display().to_string()))?;
         println!(
             "world timelines verify structurally (self-certifying ids); \
@@ -546,9 +549,9 @@ pub fn verify_rehash_cmd(file: &Path, certify: Option<&Path>) -> CmdResult {
         );
         return Ok(());
     }
-    let sidecar = crate::lineage::sidecar_of(file);
+    let sidecar = lineage_model::sidecar_of(file);
     let base = sidecar.parent().unwrap_or_else(|| Path::new("."));
-    let report = crate::lineage::verify(&graph, base)
+    let report = lineage_model::verify(&graph, base)
         .map_err(|e| (e, String::new(), file.display().to_string()))?;
     println!(
         "lineage verified: {} file(s) rehash to the recorded digests",
@@ -563,7 +566,7 @@ pub fn verify_rehash_cmd(file: &Path, certify: Option<&Path>) -> CmdResult {
     if let Some(out) = certify {
         let bytes = fs::read(&sidecar)
             .map_err(|e| (Error::Io(e), String::new(), sidecar.display().to_string()))?;
-        let cert = crate::lineage::mint_lineage_cert(&graph, &report, &bytes);
+        let cert = lineage_model::mint_lineage_cert(&graph, &report, &bytes);
         write_certificate(out, &cert)?;
     }
     Ok(())
@@ -572,14 +575,14 @@ pub fn verify_rehash_cmd(file: &Path, certify: Option<&Path>) -> CmdResult {
 // `prism lineage why-recompiled [FILE]`: explain each durable module-query
 // decision from the persisted previous/current fact-graph diff. When the source
 // files are gone, the stored graphs alone still explain the last recording.
-pub fn why_recompiled_cmd(file: Option<&Path>, cfg: &crate::Config) -> CmdResult {
+pub fn why_recompiled_cmd(file: Option<&Path>, cfg: &Config) -> CmdResult {
     let input = if let Some(path) = file {
         path.to_path_buf()
     } else {
         let start = Path::new(".")
             .canonicalize()
             .unwrap_or_else(|_| PathBuf::from("."));
-        crate::project::find_manifest(&start).ok_or_else(|| {
+        project_model::find_manifest(&start).ok_or_else(|| {
             (
                 Error::ResolveCommand(
                     "no prism.toml found: pass a `.pr` file or run inside a project".into(),
@@ -606,7 +609,7 @@ pub fn why_recompiled_cmd(file: Option<&Path>, cfg: &crate::Config) -> CmdResult
     let session = cfg.session.clone().unwrap_or_default();
     let mut explain_cfg = cfg.clone();
     explain_cfg.session = Some(session.clone());
-    let report = crate::check_modules_on(&full, &roots, &explain_cfg)
+    let report = check_modules_on(&full, &roots, &explain_cfg)
         .map_err(|error| (error, full.clone(), name.clone()))?;
     let fact_lines = module_fact_lines(&roots, &report, cfg)
         .map_err(|error| (error, full.clone(), name.clone()))?;
@@ -633,7 +636,7 @@ pub fn why_recompiled_cmd(file: Option<&Path>, cfg: &crate::Config) -> CmdResult
         }
     }
     #[cfg(feature = "native")]
-    crate::driver::explain_downstream_queries(&full, &roots, &explain_cfg)
+    compiler_driver::explain_downstream_queries(&full, &roots, &explain_cfg)
         .map_err(|error| (error, full.clone(), name.clone()))?;
     let downstream = session.decisions();
     if let Some(lines) = downstream_fact_lines(&roots, &downstream, cfg)
@@ -660,7 +663,7 @@ pub fn why_recompiled_cmd(file: Option<&Path>, cfg: &crate::Config) -> CmdResult
 }
 
 // The durable store the fact ledger lives in, when the compiler cache is on.
-fn fact_store(cfg: &crate::Config) -> Result<Option<Store>, Error> {
+fn fact_store(cfg: &Config) -> Result<Option<Store>, Error> {
     if !cfg.flags.compiler_cache || cfg.flags.store {
         return Ok(None);
     }
@@ -688,9 +691,9 @@ fn fact_line(fact: &QueryFact) -> String {
 // Explanation lines for the module queries this command ran, read back from the
 // persisted previous/current fact-graph diff. `None` when no store is enabled.
 fn module_fact_lines(
-    roots: &[crate::Root],
+    roots: &[Root],
     report: &ModuleCheckReport,
-    cfg: &crate::Config,
+    cfg: &Config,
 ) -> Result<Option<Vec<String>>, Error> {
     let Some(store) = fact_store(cfg)? else {
         return Ok(None);
@@ -714,9 +717,9 @@ fn module_fact_lines(
 }
 
 fn downstream_fact_lines(
-    roots: &[crate::Root],
-    decisions: &[crate::driver::QueryDecision],
-    cfg: &crate::Config,
+    roots: &[Root],
+    decisions: &[compiler_driver::QueryDecision],
+    cfg: &Config,
 ) -> Result<Option<Vec<String>>, Error> {
     let Some(store) = fact_store(cfg)? else {
         return Ok(None);
@@ -742,14 +745,14 @@ fn downstream_fact_lines(
 // the input exists (the failure was something else), the input names a project
 // manifest (its roots cannot be reconstructed without it), no store is enabled,
 // or nothing was ever recorded for the scope.
-fn offline_fact_lines(input: &Path, cfg: &crate::Config) -> Result<Option<Vec<String>>, Error> {
+fn offline_fact_lines(input: &Path, cfg: &Config) -> Result<Option<Vec<String>>, Error> {
     if input.exists() || input.file_name().is_some_and(|name| name == PRISM_MANIFEST) {
         return Ok(None);
     }
     let Some(store) = fact_store(cfg)? else {
         return Ok(None);
     };
-    let roots = crate::default_roots(&base_of(input));
+    let roots = default_roots(&base_of(input));
     let ledger = FactLedger::load(&store, &FactScope::of_roots(&roots))?;
     if ledger.current.is_empty() {
         return Ok(None);
@@ -765,7 +768,7 @@ fn offline_fact_lines(input: &Path, cfg: &crate::Config) -> Result<Option<Vec<St
 }
 
 pub fn lineage_cmd(file: &Path, json: bool) -> CmdResult {
-    let graph = crate::lineage::read_lineage(file)
+    let graph = lineage_model::read_lineage(file)
         .map_err(|e| (e, String::new(), file.display().to_string()))?;
     if json {
         let text = graph.to_json_string().map_err(|e| {
@@ -777,7 +780,7 @@ pub fn lineage_cmd(file: &Path, json: bool) -> CmdResult {
         })?;
         println!("{text}");
     } else {
-        print!("{}", crate::lineage::render_human(&graph));
+        print!("{}", lineage_model::render_human(&graph));
     }
     Ok(())
 }
@@ -792,7 +795,7 @@ pub fn why_output_top_cmd(artifact: &Path, output: Option<&str>, json: bool) -> 
     let selector = if let Some(output) = output {
         output.to_string()
     } else {
-        let graph = crate::lineage::read_lineage(artifact)
+        let graph = lineage_model::read_lineage(artifact)
             .map_err(|e| (e, String::new(), artifact.display().to_string()))?;
         if graph.variant == Variant::World {
             return Err((
@@ -803,7 +806,7 @@ pub fn why_output_top_cmd(artifact: &Path, output: Option<&str>, json: bool) -> 
                 artifact.display().to_string(),
             ));
         }
-        crate::lineage::default_output_selector(&graph)
+        lineage_model::default_output_selector(&graph)
             .map_err(|e| (e, String::new(), artifact.display().to_string()))?
     };
     why_output_cmd(artifact, &selector, json)
@@ -812,14 +815,14 @@ pub fn why_output_top_cmd(artifact: &Path, output: Option<&str>, json: bool) -> 
 // `lineage why`: explain one output by walking the sidecar backward. Pure graph
 // work, so it explains an old run even after its source files have moved.
 pub fn why_output_cmd(sidecar: &Path, output: &str, json: bool) -> CmdResult {
-    let graph = crate::lineage::read_lineage(sidecar)
+    let graph = lineage_model::read_lineage(sidecar)
         .map_err(|e| (e, String::new(), sidecar.display().to_string()))?;
     // A world timeline is walked by state hash, not by output selector; the same
     // `why` verb serves both, dispatching on the sidecar's variant.
     if graph.variant == Variant::World {
         return why_world_cmd(sidecar, &graph, output, json);
     }
-    let explanation = crate::lineage::why_output(&graph, output)
+    let explanation = lineage_model::why_output(&graph, output)
         .map_err(|e| (e, String::new(), sidecar.display().to_string()))?;
     if json {
         // The terminal and JSON renderings consume the same answer object, so they
@@ -833,7 +836,7 @@ pub fn why_output_cmd(sidecar: &Path, output: &str, json: bool) -> CmdResult {
         })?;
         println!("{text}");
     } else {
-        print!("{}", crate::lineage::render_explanation(&explanation));
+        print!("{}", lineage_model::render_explanation(&explanation));
     }
     Ok(())
 }
@@ -843,11 +846,11 @@ pub fn why_output_cmd(sidecar: &Path, output: &str, json: bool) -> CmdResult {
 // work over self-certifying ids, so it explains an exported timeline offline.
 fn why_world_cmd(
     sidecar: &Path,
-    graph: &crate::lineage::LineageGraph,
+    graph: &lineage_model::LineageGraph,
     state: &str,
     json: bool,
 ) -> CmdResult {
-    let explanation = crate::lineage::why_world_state(graph, state)
+    let explanation = lineage_model::why_world_state(graph, state)
         .map_err(|e| (e, String::new(), sidecar.display().to_string()))?;
     if json {
         let text = serde_json::to_string_pretty(&explanation).map_err(|e| {
@@ -859,7 +862,7 @@ fn why_world_cmd(
         })?;
         println!("{text}");
     } else {
-        print!("{}", crate::lineage::render_world_explanation(&explanation));
+        print!("{}", lineage_model::render_world_explanation(&explanation));
     }
     Ok(())
 }
@@ -868,11 +871,11 @@ fn why_world_cmd(
 // nonzero when anything moved, was added, or was removed, so it can gate CI; a
 // clean diff exits zero. Either way it prints a one-line verdict first.
 fn lineage_diff_cmd(old: &Path, new: &Path, json: bool) -> CmdResult {
-    let old_graph = crate::lineage::read_lineage(old)
+    let old_graph = lineage_model::read_lineage(old)
         .map_err(|e| (e, String::new(), old.display().to_string()))?;
-    let new_graph = crate::lineage::read_lineage(new)
+    let new_graph = lineage_model::read_lineage(new)
         .map_err(|e| (e, String::new(), new.display().to_string()))?;
-    let diff = crate::lineage::diff(&old_graph, &new_graph);
+    let diff = lineage_model::diff(&old_graph, &new_graph);
     if json {
         let text = serde_json::to_string_pretty(&diff).map_err(|e| {
             (
@@ -883,7 +886,7 @@ fn lineage_diff_cmd(old: &Path, new: &Path, json: bool) -> CmdResult {
         })?;
         println!("{text}");
     } else {
-        print!("{}", crate::lineage::render_diff(&diff));
+        print!("{}", lineage_model::render_diff(&diff));
     }
     if diff.changed() {
         process::exit(1);
@@ -898,23 +901,23 @@ fn lineage_diff_cmd(old: &Path, new: &Path, json: bool) -> CmdResult {
 // the `lineage verify` command and the check-world replay gate.
 pub fn verify_run_sidecar(
     sidecar: &Path,
-    cfg: &crate::Config,
-) -> Result<crate::lineage::RunVerification, (Error, String, String)> {
-    let path = crate::lineage::sidecar_of(sidecar);
-    let graph = crate::lineage::read_lineage(&path)
+    cfg: &Config,
+) -> Result<lineage_model::RunVerification, (Error, String, String)> {
+    let path = lineage_model::sidecar_of(sidecar);
+    let graph = lineage_model::read_lineage(&path)
         .map_err(|e| (e, String::new(), path.display().to_string()))?;
     let base = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-    let entry = crate::lineage::run_entry(&graph)
+    let entry = lineage_model::run_entry(&graph)
         .map_err(|e| (e, String::new(), path.display().to_string()))?;
     let program = base.join(&entry);
     // Resolve the durable trace from the graph's own self-description, verifying its
     // digest; a sidecar that records no replay relation is refused, never guessed at.
-    let trace_path = crate::lineage::resolve_replay_file(&graph, &path, &base)
+    let trace_path = lineage_model::resolve_replay_file(&graph, &path, &base)
         .map_err(|e| (e, String::new(), path.display().to_string()))?;
-    let trace_src = crate::cli::read(&trace_path).map_err(|e| {
+    let trace_src = read(&trace_path).map_err(|e| {
         (
             e,
             String::new(),
@@ -925,18 +928,14 @@ pub fn verify_run_sidecar(
     // Replay into a buffer: verification recomputes digests, it does not reproduce
     // the run's output to the terminal.
     let mut sink: Vec<u8> = Vec::new();
-    let replayed = crate::replay_run_on(&full, &roots, &mut sink, &trace_src, cfg)
-        .map_err(|e| (e, full, name))?;
+    let replayed =
+        replay_run_on(&full, &roots, &mut sink, &trace_src, cfg).map_err(|e| (e, full, name))?;
     let digest = replayed.canonical_trace.trace_digest();
-    crate::lineage::verify_run_replay(&graph, &digest, replayed.term.as_bytes(), &base)
+    lineage_model::verify_run_replay(&graph, &digest, replayed.term.as_bytes(), &base)
         .map_err(|e| (e, String::new(), path.display().to_string()))
 }
 
-pub fn verify_lineage_cmd(
-    sidecar: &Path,
-    certify: Option<&Path>,
-    cfg: &crate::Config,
-) -> CmdResult {
+pub fn verify_lineage_cmd(sidecar: &Path, certify: Option<&Path>, cfg: &Config) -> CmdResult {
     let verified = verify_run_sidecar(sidecar, cfg)?;
     println!(
         "lineage verify: replay matches the sidecar ({} trace event(s), {} stdout byte(s), \
@@ -952,12 +951,12 @@ pub fn verify_lineage_cmd(
     // Only a passed replay reaches here, so a `--certify` path mints a
     // `replay-verified` certificate over the sidecar's own digest.
     if let Some(out) = certify {
-        let path = crate::lineage::sidecar_of(sidecar);
-        let graph = crate::lineage::read_lineage(&path)
+        let path = lineage_model::sidecar_of(sidecar);
+        let graph = lineage_model::read_lineage(&path)
             .map_err(|e| (e, String::new(), path.display().to_string()))?;
         let bytes = fs::read(&path)
             .map_err(|e| (Error::Io(e), String::new(), path.display().to_string()))?;
-        let cert = crate::lineage::mint_replay_cert(&graph, &verified, &bytes)
+        let cert = lineage_model::mint_replay_cert(&graph, &verified, &bytes)
             .map_err(|e| (e, String::new(), path.display().to_string()))?;
         write_certificate(out, &cert)?;
     }
@@ -982,7 +981,7 @@ fn write_certificate(out: &Path, cert: &[u8]) -> CmdResult {
 pub fn check_cert_cmd(cert: &Path, sidecar: &Path) -> CmdResult {
     let cert_bytes =
         fs::read(cert).map_err(|e| (Error::Io(e), String::new(), cert.display().to_string()))?;
-    let sidecar_path = crate::lineage::sidecar_of(sidecar);
+    let sidecar_path = lineage_model::sidecar_of(sidecar);
     let sidecar_bytes = fs::read(&sidecar_path).map_err(|e| {
         (
             Error::Io(e),
@@ -990,7 +989,7 @@ pub fn check_cert_cmd(cert: &Path, sidecar: &Path) -> CmdResult {
             sidecar_path.display().to_string(),
         )
     })?;
-    match crate::lineage::check_cert(&cert_bytes, &sidecar_bytes) {
+    match lineage_model::check_cert(&cert_bytes, &sidecar_bytes) {
         CertStatus::Verified(desc) => {
             println!("certificate ok: {desc}");
             Ok(())

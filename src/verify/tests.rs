@@ -4,6 +4,8 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::store::disk::Store;
+use crate::store::CodecError;
+use crate::syntax::ast::Program;
 use crate::verify::certificate::{
     CertObligation, CertTrust, ClosureStatus, Completeness, SmtCertificate,
 };
@@ -442,7 +444,7 @@ fn query_v1_compat_fixture() {
 
 // -- VC generation -------------------------------------------------------------
 
-fn parse_prog(src: &str) -> crate::syntax::ast::Program {
+fn parse_prog(src: &str) -> Program {
     crate::parse::parse(src)
         .expect("test program parses")
         .program
@@ -837,14 +839,11 @@ fn result_codec_round_trips_and_binds_query_and_solver() {
     // bytes are a length-4 string "nope", which decodes cleanly but is not SCHEMA.
     assert_eq!(
         SmtResult::decode(&[4, b'n', b'o', b'p', b'e']),
-        Err(crate::store::CodecError::Scheme)
+        Err(CodecError::Scheme)
     );
     let mut trailing = r.encode();
     trailing.push(0);
-    assert_eq!(
-        SmtResult::decode(&trailing),
-        Err(crate::store::CodecError::TrailingBytes)
-    );
+    assert_eq!(SmtResult::decode(&trailing), Err(CodecError::TrailingBytes));
 }
 
 #[test]
@@ -900,7 +899,7 @@ fn certificate_codec_round_trips() {
     trailing.push(7);
     assert_eq!(
         SmtCertificate::decode(&trailing),
-        Err(crate::store::CodecError::TrailingBytes)
+        Err(CodecError::TrailingBytes)
     );
 }
 

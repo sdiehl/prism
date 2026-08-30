@@ -28,6 +28,7 @@
 //! caller checks that against what `is_fold` reports for the same clause.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
 
 use crate::core::effect_shape::{
     is_fold, is_id_return, is_id_transformer, is_state_transformer, FoldAKind,
@@ -37,9 +38,13 @@ use crate::types::Type;
 use prism_common::sym::Sym;
 use prism_syntax::names::{self, STATE_ACC};
 
-use super::super::specialize_support::free_comp_vars;
-use super::super::specialize_support::free_value_vars;
-use super::super::verify::VerifyEnv;
+use super::super::build::source_type;
+use super::super::specialize_support::{
+    free_comp_vars, free_value_vars, substitute_terms, substitute_witnesses,
+};
+use super::super::verify::{
+    instantiate_fn, substitute_core_type, substitute_row, union_rows, VerifyEnv,
+};
 use super::super::TypedPattern;
 use super::super::{
     CompSig, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, TypedHandleOp,
@@ -309,7 +314,7 @@ fn accumulator_type(
     // wrap; the callers that need the base (instantiation sites) read it from
     // the returned Step.
     if plan.early.short_circuits() {
-        let source = super::super::build::source_type(&base).ok()?;
+        let source = source_type(&base).ok()?;
         let at = StepAt::new(source.clone(), source);
         Some((at.ty(), state, Some(at)))
     } else {
@@ -388,18 +393,15 @@ fn lexical_instantiation(
                 .into_iter()
                 .map(|inst| match inst {
                     CoreInstantiation::Type(t) => {
-                        let substituted = super::super::verify::substitute_core_type(
-                            &CoreType::Source(t),
-                            quantifiers,
-                            instantiation,
-                        );
-                        super::super::build::source_type(&substituted)
-                            .ok()
-                            .map(CoreInstantiation::Type)
+                        let substituted =
+                            substitute_core_type(&CoreType::Source(t), quantifiers, instantiation);
+                        source_type(&substituted).ok().map(CoreInstantiation::Type)
                     }
-                    CoreInstantiation::Row(row) => Some(CoreInstantiation::Row(
-                        super::super::verify::substitute_row(&row, quantifiers, instantiation),
-                    )),
+                    CoreInstantiation::Row(row) => Some(CoreInstantiation::Row(substitute_row(
+                        &row,
+                        quantifiers,
+                        instantiation,
+                    ))),
                 })
                 .collect::<Option<Vec<_>>>();
         }
@@ -546,7 +548,7 @@ fn clause_type(
     // handler's concrete clause. Where no single instantiation exists, the
     // generic scheme is kept rather than declining a program the executable
     // pass fuses; the ratchet reports what that costs.
-    let (quantifiers, op_params) = super::super::verify::instantiate_fn(
+    let (quantifiers, op_params) = instantiate_fn(
         &CoreFnSig::new(
             sig.quantifiers().to_vec(),
             sig.params().to_vec(),
@@ -1229,7 +1231,7 @@ impl Threader<'_> {
                     // wrap twice.
                     let base = match &self.step {
                         Some(step) => step.done.clone(),
-                        None => super::super::build::source_type(st.ty()).ok()?,
+                        None => source_type(st.ty()).ok()?,
                     };
                     inst.push(CoreInstantiation::Type(base));
                 }
@@ -1296,7 +1298,7 @@ impl Threader<'_> {
                         CoreQuantifier::Type(_) => {
                             let base = match &self.step {
                                 Some(step) => step.done.clone(),
-                                None => super::super::build::source_type(st.ty()).ok()?,
+                                None => source_type(st.ty()).ok()?,
                             };
                             inst.push(CoreInstantiation::Type(base));
                         }
@@ -1402,8 +1404,7 @@ impl Threader<'_> {
                 .filter(|name| loc.contains_key(name))
                 .collect();
             let lexical = lexical_types(&stripped, &candidates)?;
-            let substituted =
-                super::super::specialize_support::substitute_witnesses(&stripped, &from, &to);
+            let substituted = substitute_witnesses(&stripped, &from, &to);
             let effect = self.env.operation(clause.name())?.effect().name;
             let mut bridges: BTreeMap<Sym, TypedValue> = BTreeMap::new();
             for (name, reference) in &lexical {
@@ -1411,9 +1412,8 @@ impl Threader<'_> {
                 // operation removed from its rows: the shadow re-emits into the
                 // outer evidence, so the source clause no longer carries the
                 // label the outer scope has already accounted for.
-                let edge_ty = super::subtract::SubtractEffect { label: effect }.ty(
-                    &super::super::verify::substitute_core_type(reference.ty(), &from, &to),
-                );
+                let edge_ty = super::subtract::SubtractEffect { label: effect }
+                    .ty(&substitute_core_type(reference.ty(), &from, &to));
                 if edge_ty != *reference.ty() {
                     bridges.insert(
                         *name,
@@ -1425,22 +1425,14 @@ impl Threader<'_> {
                 substituted
             } else {
                 let mut counter = 0u32;
-                super::super::specialize_support::substitute_terms(
-                    &substituted,
-                    &bridges,
-                    &mut counter,
-                    "fwb",
-                )
+                substitute_terms(&substituted, &bridges, &mut counter, "fwb")
             }
         };
         let shadow_params: Vec<TypedBinder> = clause
             .params()
             .iter()
             .map(|binder| {
-                TypedBinder::new(
-                    binder.name(),
-                    super::super::verify::substitute_core_type(binder.ty(), &from, &to),
-                )
+                TypedBinder::new(binder.name(), substitute_core_type(binder.ty(), &from, &to))
             })
             .collect();
 
@@ -1499,7 +1491,7 @@ impl Threader<'_> {
             return None;
         };
         let unit = CoreType::Source(Type::Unit);
-        let saved_row = std::mem::replace(&mut self.row, c.sig().effects().clone());
+        let saved_row = mem::replace(&mut self.row, c.sig().effects().clone());
 
         // Evidence: run the clause's side effects, then return the state.
         let mut aliases = BTreeSet::new();
@@ -1631,7 +1623,7 @@ impl Threader<'_> {
         // The handle's residual is the row the whole handle expression carries:
         // what remains once its operations are discharged, which is exactly the
         // row its evidence clauses run under and its producer calls instantiate.
-        let saved_row = std::mem::replace(&mut self.row, c.sig().effects().clone());
+        let saved_row = mem::replace(&mut self.row, c.sig().effects().clone());
         let mut handle_acc: Option<CoreType> = None;
         let mut ev_binds: Vec<(TypedBinder, TypedValue)> = Vec::with_capacity(clauses.arms().len());
         for (index, clause) in clauses.arms().iter().enumerate() {
@@ -1670,7 +1662,7 @@ impl Threader<'_> {
             // `SMore` and forwards `SDone` untouched, so a stake upstream can
             // stop the loop.
             let ev_body = if self.plan.early.short_circuits() {
-                let source = super::super::build::source_type(acc.ty()).ok()?;
+                let source = source_type(acc.ty()).ok()?;
                 let step_at = StepAt::new(source.clone(), source);
                 self.step = Some(step_at.clone());
                 let step = TypedBinder::new(self.mint("step"), step_at.ty());
@@ -1699,7 +1691,7 @@ impl Threader<'_> {
         // loop's final `Step` is unwrapped back to the bare accumulator.
         let acc0 = TypedBinder::new(self.mint("acc"), handle_acc?);
         let g_body = if self.plan.early.short_circuits() {
-            let source = super::super::build::source_type(acc0.ty()).ok()?;
+            let source = source_type(acc0.ty()).ok()?;
             let step_at = StepAt::new(source.clone(), source);
             self.step = Some(step_at.clone());
             let st0 = TypedBinder::new(self.mint("st"), step_at.ty());
@@ -1854,8 +1846,8 @@ impl Threader<'_> {
         // The take's own step: its payload pairs the downstream step with the
         // counter, and both constructors carry the same pair.
         let pair_ty = Type::Tuple(vec![
-            super::super::build::source_type(st.ty()).ok()?,
-            super::super::build::source_type(cnt.ty()).ok()?,
+            source_type(st.ty()).ok()?,
+            source_type(cnt.ty()).ok()?,
         ]);
         let step = StepAt::new(pair_ty.clone(), pair_ty.clone());
         let downstream = self.evidence(evs, op, st.ty())?;
@@ -1910,8 +1902,8 @@ impl Threader<'_> {
         let seedvar = TypedBinder::new(self.mint("st"), step.ty());
         let combined = step.smore(TypedValue::new(
             CoreType::Source(Type::Tuple(vec![
-                super::super::build::source_type(st.ty()).ok()?,
-                super::super::build::source_type(seed.ty()).ok()?,
+                source_type(st.ty()).ok()?,
+                source_type(seed.ty()).ok()?,
             ])),
             TypedValueKind::Tuple(vec![super::binder_var(st), seed.clone()]),
         ));
@@ -1990,8 +1982,8 @@ impl Threader<'_> {
                 let d = TypedBinder::new(self.mint("d"), drop_b.sig().result().clone());
                 let stopped = t.step.sdone(TypedValue::new(
                     CoreType::Source(Type::Tuple(vec![
-                        super::super::build::source_type(dstep.ty()).ok()?,
-                        super::super::build::source_type(cnt.ty()).ok()?,
+                        source_type(dstep.ty()).ok()?,
+                        source_type(cnt.ty()).ok()?,
                     ])),
                     TypedValueKind::Tuple(vec![super::binder_var(dstep), super::binder_var(cnt)]),
                 ));
@@ -2089,7 +2081,7 @@ impl Threader<'_> {
                 } else {
                     instantiation.clone()
                 };
-                let applied = super::super::verify::instantiate_fn(fun, &inst).ok()?;
+                let applied = instantiate_fn(fun, &inst).ok()?;
                 let call = TypedComp::new(
                     applied.body().clone(),
                     TypedCompKind::App {
@@ -2135,8 +2127,8 @@ impl Threader<'_> {
                 }
                 let stepped = t.step.smore(TypedValue::new(
                     CoreType::Source(Type::Tuple(vec![
-                        super::super::build::source_type(dstep.ty()).ok()?,
-                        super::super::build::source_type(next.ty()).ok()?,
+                        source_type(dstep.ty()).ok()?,
+                        source_type(next.ty()).ok()?,
                     ])),
                     TypedValueKind::Tuple(vec![super::binder_var(dstep), next.clone()]),
                 ));
@@ -2181,8 +2173,8 @@ impl Threader<'_> {
         let p = TypedBinder::new(
             self.mint("p"),
             CoreType::Source(Type::Tuple(vec![
-                super::super::build::source_type(a.ty()).ok()?,
-                super::super::build::source_type(b.ty()).ok()?,
+                source_type(a.ty()).ok()?,
+                source_type(b.ty()).ok()?,
             ])),
         );
         let inner = TypedComp::new(
@@ -2368,8 +2360,8 @@ impl Threader<'_> {
                     // call instantiations, the scope's one Step decision) must
                     // agree on that. Both pieces of context are restored even
                     // when the threading declines, so a `?` cannot leak them.
-                    let saved_row = std::mem::replace(&mut self.row, EffRow::Var(ambient));
-                    let saved_step = std::mem::replace(&mut self.step, step);
+                    let saved_row = mem::replace(&mut self.row, EffRow::Var(ambient));
+                    let saved_step = mem::replace(&mut self.step, step);
                     let threaded = self.thread_st(b, &evs2, &loc2, &st);
                     self.row = saved_row;
                     self.step = saved_step;
@@ -2497,7 +2489,7 @@ impl Threader<'_> {
                 let sig = self.signatures.get(callee).map_or_else(
                     || c.sig().clone(),
                     |new_sig| {
-                        super::super::verify::instantiate_fn(new_sig, instantiation)
+                        instantiate_fn(new_sig, instantiation)
                             .unwrap_or_else(|_| new_sig.clone())
                             .body()
                             .clone()
@@ -2532,14 +2524,10 @@ impl Threader<'_> {
                 let CoreType::Function(fun) = callee2.sig().result() else {
                     return None;
                 };
-                let applied = super::super::verify::instantiate_fn(fun, instantiation).ok()?;
+                let applied = instantiate_fn(fun, instantiation).ok()?;
                 // The exact, fallible union: a non-representable union of two
                 // open tails is a State decline, never permission to drop one.
-                let effects = super::super::verify::union_rows(
-                    callee2.sig().effects(),
-                    applied.body().effects(),
-                )
-                .ok()?;
+                let effects = union_rows(callee2.sig().effects(), applied.body().effects()).ok()?;
                 let sig = CompSig::new(applied.body().result().clone(), effects);
                 TypedComp::new(
                     sig,
@@ -2872,8 +2860,7 @@ fn lexical_types(c: &TypedComp, wanted: &BTreeSet<Sym>) -> Option<BTreeMap<Sym, 
 }
 
 /// Every binder a pattern introduces.
-fn pattern_binders(pat: &super::super::TypedPattern, out: &mut BTreeSet<Sym>) {
-    use super::super::TypedPattern;
+fn pattern_binders(pat: &TypedPattern, out: &mut BTreeSet<Sym>) {
     match pat {
         TypedPattern::Var(b) => {
             out.insert(b.name());
@@ -3324,6 +3311,8 @@ fn state_escapes(
 
 #[cfg(test)]
 mod tests {
+    use std::slice;
+
     use crate::types::ty::Label;
     use crate::types::Type;
 
@@ -3502,7 +3491,7 @@ mod tests {
             &plan.ops,
             &plan,
             &ids,
-            std::slice::from_ref(&producer),
+            slice::from_ref(&producer),
             &Latent::new(),
             &env,
         )
@@ -3791,11 +3780,8 @@ mod tests {
             CompSig::new(threaded, EffRow::Empty),
         );
 
-        let applied = super::super::super::verify::instantiate_fn(
-            &top,
-            &[CoreInstantiation::Type(Type::Int)],
-        )
-        .expect("ordinary top-level instantiation is well-kinded");
+        let applied = super::instantiate_fn(&top, &[CoreInstantiation::Type(Type::Int)])
+            .expect("ordinary top-level instantiation is well-kinded");
         let CoreType::Thunk(thunk) = applied.body().result() else {
             panic!("the top-level result remains a thunk");
         };

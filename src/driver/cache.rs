@@ -2,6 +2,8 @@
 use std::collections::BTreeMap;
 #[cfg(feature = "native")]
 use std::fs;
+#[cfg(feature = "native")]
+use std::io::{Error as IoError, ErrorKind};
 #[cfg(all(feature = "native", unix))]
 use std::os::unix::fs::PermissionsExt;
 #[cfg(feature = "native")]
@@ -348,13 +350,13 @@ impl NativeArtifactCache {
         // recompute exactly like an absent binding does above.
         let bytes = match self.store.get(&output_hash) {
             Ok(bytes) => bytes,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(Error::Io(e)),
         };
         let actual = blake3::hash(&bytes).to_hex().to_string();
         if actual != output_hash {
-            return Err(Error::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
+            return Err(Error::Io(IoError::new(
+                ErrorKind::InvalidData,
                 format!("cached artifact hashes to {actual}, expected {output_hash}"),
             )));
         }

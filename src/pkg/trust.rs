@@ -42,6 +42,7 @@ use crate::core::{Digest, HASH_SCHEME};
 use crate::driver::Config;
 use crate::error::Error;
 use crate::flags::{DynFlags, SignMode};
+use crate::lineage::provenance::{sha256_hex, EVENT_HASH_SCHEME};
 use crate::pkg::std_source::encode_source_bundle;
 use crate::pkg::stdlib_baseline;
 use crate::pkg::transport::{pkg_dir, verify_all, DiskTransport, Transport, TransportError};
@@ -64,11 +65,7 @@ const FIELD_SEP: char = '\t';
 // The digest a chained log line carries for its predecessor: the previous
 // line's exact bytes (no newline), in the provenance scheme spelling.
 fn line_digest(line: &str) -> String {
-    format!(
-        "{}:{}",
-        crate::lineage::provenance::EVENT_HASH_SCHEME,
-        crate::lineage::provenance::sha256_hex(line.as_bytes())
-    )
+    format!("{}:{}", EVENT_HASH_SCHEME, sha256_hex(line.as_bytes()))
 }
 
 /// Signed-index kind for a whole-program namespace root.

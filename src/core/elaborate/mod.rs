@@ -100,8 +100,9 @@ type ExpansionMap = im::OrdMap<String, Rc<Expansion>>;
 
 // Red zone / segment size for the elaboration recursion, matching the typed-Core
 // builder's constants (`core/typed/build.rs`).
-const ELAB_MIN_STACK: usize = 4 * 1024 * 1024;
-const ELAB_GROW_STACK: usize = 8 * 1024 * 1024;
+const MEBIBYTE: usize = 1024 * 1024;
+const ELAB_MIN_STACK: usize = 4 * MEBIBYTE;
+const ELAB_GROW_STACK: usize = 8 * MEBIBYTE;
 
 // The pointed error for the not-yet-lowered unboxed-values surface, shared by the
 // elaborator's exhaustive-match backstop. The typechecker rejects these first

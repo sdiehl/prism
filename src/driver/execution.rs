@@ -7,15 +7,20 @@
 //! `prepared_core` front end and pin their code identity to the program's
 //! namespace root.
 
-use std::io::Cursor;
+use std::collections::BTreeMap;
+use std::io::{BufRead, Cursor, Write};
 use std::path::Path;
 
+use crate::core::{hash_root, hash_str, pp_core_pretty};
 use crate::debug::durable::{committed_frames, DurableLog};
-use crate::debug::trace;
+use crate::debug::{run_repl, trace};
 use crate::error::Error;
+use crate::eval::kont::{decode_kont, encode_kont};
 use crate::eval::{
-    run, run_observed_lowered_with_args, run_observed_with_args, run_ruler, run_suspending_at_cut,
-    run_traced, run_traced_with_args, CutPredicate, Run, StepMark, Tape,
+    globals, resume_kont, resume_kont_observed, run, run_io_with_args,
+    run_observed_lowered_with_args, run_observed_with_args, run_ruler, run_suspending_at_cut,
+    run_suspending_in, run_suspending_ruled, run_traced, run_traced_with_args, Checkpoint,
+    CutPredicate, Run, StepMark, Tape,
 };
 use crate::lineage::provenance::{cap_op_label, cap_op_labels, CapEvent, ObservationTrace};
 use crate::resolve::{default_roots, Root};
@@ -46,19 +51,13 @@ const RUNTIME_SEMANTICS_VERSION: &str = "1";
 fn execution_bundle(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Error> {
     let code = namespace_identity(src, roots)?.root;
     let stdlib = stdlib_hash()?.root;
-    let entries = std::collections::BTreeMap::from([
+    let entries = BTreeMap::from([
         ("code".to_string(), code),
         ("stdlib".to_string(), stdlib),
-        (
-            "scheduler".to_string(),
-            crate::core::hash_str(cfg.scheduler().label()),
-        ),
-        (
-            "runtime".to_string(),
-            crate::core::hash_str(RUNTIME_SEMANTICS_VERSION),
-        ),
+        ("scheduler".to_string(), hash_str(cfg.scheduler().label())),
+        ("runtime".to_string(), hash_str(RUNTIME_SEMANTICS_VERSION)),
     ]);
-    Ok(crate::core::hash_root(&entries).into_string())
+    Ok(hash_root(&entries).into_string())
 }
 
 /// # Examples
@@ -119,8 +118,8 @@ pub fn interpret_on(src: &str, roots: &[Root]) -> Result<Run, Error> {
 pub fn interpret_io_at(
     src: &str,
     base: &Path,
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
+    out_sink: &mut dyn Write,
+    input: &mut dyn BufRead,
 ) -> Result<Run, Error> {
     interpret_io_on(
         src,
@@ -139,8 +138,8 @@ pub fn interpret_io_at(
 pub fn interpret_io_on(
     src: &str,
     roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
+    out_sink: &mut dyn Write,
+    input: &mut dyn BufRead,
     cfg: &Config,
 ) -> Result<Run, Error> {
     interpret_io_on_with_args(src, roots, out_sink, input, cfg, Vec::new())
@@ -154,8 +153,8 @@ pub fn interpret_io_on(
 pub fn interpret_io_on_with_args(
     src: &str,
     roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
+    out_sink: &mut dyn Write,
+    input: &mut dyn BufRead,
     cfg: &Config,
     args: Vec<String>,
 ) -> Result<Run, Error> {
@@ -169,8 +168,8 @@ pub fn interpret_io_on_with_args(
 pub fn interpret_io_on_with_args_deferred_holes(
     src: &str,
     roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
+    out_sink: &mut dyn Write,
+    input: &mut dyn BufRead,
     cfg: &Config,
     args: Vec<String>,
 ) -> Result<Run, Error> {
@@ -180,8 +179,8 @@ pub fn interpret_io_on_with_args_deferred_holes(
 fn interpret_io_on_with_args_policy(
     src: &str,
     roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
+    out_sink: &mut dyn Write,
+    input: &mut dyn BufRead,
     cfg: &Config,
     args: Vec<String>,
     defer_holes: bool,
@@ -195,10 +194,7 @@ fn interpret_io_on_with_args_policy(
         cfg.timing.as_ref(),
         timing::Phase::Eval,
         "",
-        || {
-            crate::eval::run_io_with_args(&core, out_sink, input, args)
-                .map_err(Error::RuntimeEvaluation)
-        },
+        || run_io_with_args(&core, out_sink, input, args).map_err(Error::RuntimeEvaluation),
         |_| timing::RowExtras::default(),
     )
 }
@@ -213,8 +209,8 @@ fn interpret_io_on_with_args_policy(
 pub fn record_on(
     src: &str,
     roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
+    out_sink: &mut dyn Write,
+    input: &mut dyn BufRead,
     cfg: &Config,
 ) -> Result<(Option<i32>, String, usize), Error> {
     record_on_with_args(src, roots, out_sink, input, cfg, Vec::new())
@@ -227,15 +223,14 @@ pub fn record_on(
 pub fn record_on_with_args(
     src: &str,
     roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
+    out_sink: &mut dyn Write,
+    input: &mut dyn BufRead,
     cfg: &Config,
     args: Vec<String>,
 ) -> Result<(Option<i32>, String, usize), Error> {
     let core = prepared_core(src, roots, cfg)?;
-    let run =
-        crate::eval::run_traced_with_args(&core, out_sink, input, Tape::Record(Vec::new()), args)
-            .map_err(Error::RuntimeEvaluation)?;
+    let run = run_traced_with_args(&core, out_sink, input, Tape::Record(Vec::new()), args)
+        .map_err(Error::RuntimeEvaluation)?;
     Ok((run.exit, trace::encode(&run.frames), run.frames.len()))
 }
 
@@ -273,8 +268,8 @@ pub struct RecordedRun {
 pub fn record_run_on(
     src: &str,
     roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
+    out_sink: &mut dyn Write,
+    input: &mut dyn BufRead,
     cfg: &Config,
     args: Vec<String>,
 ) -> Result<RecordedRun, Error> {
@@ -302,8 +297,8 @@ pub fn record_run_on(
 pub fn observe_run_on(
     src: &str,
     roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
+    out_sink: &mut dyn Write,
+    input: &mut dyn BufRead,
     cfg: &Config,
     args: Vec<String>,
 ) -> Result<RecordedRun, Error> {
@@ -318,8 +313,8 @@ pub fn observe_run_on(
 pub fn observe_run_on_deferred_holes(
     src: &str,
     roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
+    out_sink: &mut dyn Write,
+    input: &mut dyn BufRead,
     cfg: &Config,
     args: Vec<String>,
 ) -> Result<RecordedRun, Error> {
@@ -345,7 +340,7 @@ pub fn observe_lowered_run_on(
     cfg: &Config,
 ) -> Result<(ObservationTrace, String), Error> {
     let (_, core, _, _) = reuse_lowered_core(src, roots, cfg)?;
-    let lowered = crate::core::pp_core_pretty(&core);
+    let lowered = pp_core_pretty(&core);
     let mut output = Vec::new();
     let mut input = Cursor::new(Vec::new());
     let run = run_observed_lowered_with_args(&core, &mut output, &mut input, Vec::new());
@@ -355,8 +350,8 @@ pub fn observe_lowered_run_on(
 fn observe_run_on_policy(
     src: &str,
     roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
+    out_sink: &mut dyn Write,
+    input: &mut dyn BufRead,
     cfg: &Config,
     args: Vec<String>,
     defer_holes: bool,
@@ -389,13 +384,13 @@ fn observe_run_on_policy(
 pub fn replay_run_on(
     src: &str,
     roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
+    out_sink: &mut dyn Write,
     trace: &str,
     cfg: &Config,
 ) -> Result<RecordedRun, Error> {
     let core = prepared_core(src, roots, cfg)?;
     let frames = trace::decode(trace).map_err(Error::RuntimeReplay)?;
-    let mut empty = std::io::Cursor::new(Vec::new());
+    let mut empty = Cursor::new(Vec::new());
     let run = run_traced(
         &core,
         out_sink,
@@ -429,13 +424,13 @@ pub fn replay_run_on(
 pub fn replay_on(
     src: &str,
     roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
+    out_sink: &mut dyn Write,
     trace: &str,
     cfg: &Config,
 ) -> Result<Option<i32>, Error> {
     let core = prepared_core(src, roots, cfg)?;
     let frames = trace::decode(trace).map_err(Error::RuntimeReplay)?;
-    let mut empty = std::io::Cursor::new(Vec::new());
+    let mut empty = Cursor::new(Vec::new());
     let run = run_traced(
         &core,
         out_sink,
@@ -497,8 +492,8 @@ pub struct DurableRun {
 pub fn durable_run_on(
     src: &str,
     roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
+    out_sink: &mut dyn Write,
+    input: &mut dyn BufRead,
     cfg: &Config,
     args: Vec<String>,
     log_path: &Path,
@@ -538,13 +533,13 @@ pub fn debug_on(
     src: &str,
     roots: &[Root],
     trace: &str,
-    cmds: &mut dyn std::io::BufRead,
-    ui: &mut dyn std::io::Write,
+    cmds: &mut dyn BufRead,
+    ui: &mut dyn Write,
     cfg: &Config,
 ) -> Result<(), Error> {
     let core = prepared_core(src, roots, cfg)?;
     let frames = trace::decode(trace).map_err(Error::RuntimeReplay)?;
-    crate::debug::run_repl(&core, &frames, cmds, ui).map_err(Error::RuntimeDebugger)
+    run_repl(&core, &frames, cmds, ui).map_err(Error::RuntimeDebugger)
 }
 
 /// The versioned format tag heading a step-ruler rendering.
@@ -601,8 +596,8 @@ fn ruler_row(m: StepMark) -> StepRulerRow {
 pub fn step_ruler_on(
     src: &str,
     roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
+    out_sink: &mut dyn Write,
+    input: &mut dyn BufRead,
     cfg: &Config,
 ) -> Result<StepRuler, Error> {
     let core = prepared_core(src, roots, cfg)?;
@@ -656,21 +651,19 @@ pub enum SuspendResult {
 pub fn suspend_on(
     src: &str,
     roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
+    out_sink: &mut dyn Write,
+    input: &mut dyn BufRead,
     budget: usize,
     cfg: &Config,
 ) -> Result<SuspendResult, Error> {
     let bundle = execution_bundle(src, roots, cfg)?;
     let core = prepared_core(src, roots, cfg)?;
-    let (checkpoint, marks) =
-        crate::eval::run_suspending_ruled(&core, bundle, budget, out_sink, input)
-            .map_err(Error::RuntimeEvaluation)?;
+    let (checkpoint, marks) = run_suspending_ruled(&core, bundle, budget, out_sink, input)
+        .map_err(Error::RuntimeEvaluation)?;
     match checkpoint {
-        crate::eval::Checkpoint::Done(run) => Ok(SuspendResult::Done(run.exit)),
-        crate::eval::Checkpoint::Suspended(kont) => {
-            let bytes = crate::eval::kont::encode_kont(&kont)
-                .map_err(|e| Error::RuntimeEvaluation(e.to_string()))?;
+        Checkpoint::Done(run) => Ok(SuspendResult::Done(run.exit)),
+        Checkpoint::Suspended(kont) => {
+            let bytes = encode_kont(&kont).map_err(|e| Error::RuntimeEvaluation(e.to_string()))?;
             let cut = SuspendCut {
                 observations: marks.len(),
                 last: marks.into_iter().next_back().map(ruler_row),
@@ -743,8 +736,8 @@ pub enum SuspendAtCut {
 pub fn suspend_at_cut_on(
     src: &str,
     roots: &[Root],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
+    out_sink: &mut dyn Write,
+    input: &mut dyn BufRead,
     target: &CutTarget,
     cfg: &Config,
 ) -> Result<SuspendAtCut, Error> {
@@ -754,15 +747,14 @@ pub fn suspend_at_cut_on(
     let (checkpoint, marks, outcome) = run_suspending_at_cut(&core, bundle, pred, out_sink, input)
         .map_err(Error::RuntimeEvaluation)?;
     match checkpoint {
-        crate::eval::Checkpoint::Done(run) => Ok(SuspendAtCut::Done(run.exit)),
-        crate::eval::Checkpoint::Suspended(kont) => {
+        Checkpoint::Done(run) => Ok(SuspendAtCut::Done(run.exit)),
+        Checkpoint::Suspended(kont) => {
             let outcome = outcome.ok_or_else(|| {
                 Error::RuntimeEvaluation(
                     "internal: named cut suspended without recording its provenance".into(),
                 )
             })?;
-            let bytes = crate::eval::kont::encode_kont(&kont)
-                .map_err(|e| Error::RuntimeEvaluation(e.to_string()))?;
+            let bytes = encode_kont(&kont).map_err(|e| Error::RuntimeEvaluation(e.to_string()))?;
             let cut = SuspendCut {
                 observations: marks.len(),
                 last: marks.into_iter().next_back().map(ruler_row),
@@ -821,19 +813,18 @@ pub fn suspend_line_cuts(src: &str, roots: &[Root], cfg: &Config) -> Result<Vec<
     let core = prepared_core(src, roots, cfg)?;
     // Build the global table once: it deep-clones every function body, so rebuilding
     // it per budget would make the scan quadratic in that clone.
-    let g = crate::eval::globals(&core);
+    let g = globals(&core);
     let mut cuts: Vec<usize> = Vec::new();
     for budget in 1..=MAX_LINE_CUT_STEPS {
         let mut out: Vec<u8> = Vec::new();
-        let mut input = std::io::Cursor::new(Vec::new());
-        let checkpoint =
-            crate::eval::run_suspending_in(&g, bundle.clone(), budget, &mut out, &mut input)
-                .map_err(Error::RuntimeEvaluation)?;
+        let mut input = Cursor::new(Vec::new());
+        let checkpoint = run_suspending_in(&g, bundle.clone(), budget, &mut out, &mut input)
+            .map_err(Error::RuntimeEvaluation)?;
         let lines = out.iter().fold(0usize, |n, &b| n + usize::from(b == b'\n'));
         while cuts.len() < lines {
             cuts.push(budget);
         }
-        if matches!(checkpoint, crate::eval::Checkpoint::Done(_)) {
+        if matches!(checkpoint, Checkpoint::Done(_)) {
             break;
         }
     }
@@ -858,11 +849,11 @@ pub fn resume_on(
     src: &str,
     roots: &[Root],
     snapshot: &[u8],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
+    out_sink: &mut dyn Write,
+    input: &mut dyn BufRead,
     cfg: &Config,
 ) -> Result<Option<i32>, Error> {
-    let kont = crate::eval::kont::decode_kont(snapshot)
+    let kont = decode_kont(snapshot)
         .map_err(|e| Error::RuntimeReplay(format!("resume: malformed snapshot: {e}")))?;
     let bundle = execution_bundle(src, roots, cfg)?;
     if kont.bundle != bundle {
@@ -874,8 +865,7 @@ pub fn resume_on(
         )));
     }
     let core = prepared_core(src, roots, cfg)?;
-    let run =
-        crate::eval::resume_kont(&core, kont, out_sink, input).map_err(Error::RuntimeReplay)?;
+    let run = resume_kont(&core, kont, out_sink, input).map_err(Error::RuntimeReplay)?;
     Ok(run.exit)
 }
 
@@ -890,11 +880,11 @@ pub fn resume_observed_on(
     src: &str,
     roots: &[Root],
     snapshot: &[u8],
-    out_sink: &mut dyn std::io::Write,
-    input: &mut dyn std::io::BufRead,
+    out_sink: &mut dyn Write,
+    input: &mut dyn BufRead,
     cfg: &Config,
 ) -> Result<RecordedRun, Error> {
-    let kont = crate::eval::kont::decode_kont(snapshot)
+    let kont = decode_kont(snapshot)
         .map_err(|error| Error::RuntimeReplay(format!("resume: malformed snapshot: {error}")))?;
     let bundle = execution_bundle(src, roots, cfg)?;
     if kont.bundle != bundle {
@@ -904,7 +894,7 @@ pub fn resume_observed_on(
         )));
     }
     let core = prepared_core(src, roots, cfg)?;
-    let run = crate::eval::resume_kont_observed(&core, kont, out_sink, input);
+    let run = resume_kont_observed(&core, kont, out_sink, input);
     Ok(RecordedRun {
         exit: run.exit,
         trace: trace::encode(&run.frames),
@@ -921,7 +911,7 @@ pub fn resume_observed_on(
 #[cfg(feature = "native")]
 pub(super) fn interp_transcript(src: &str, roots: &[Root], cfg: &Config) -> Result<Vec<u8>, Error> {
     let mut out: Vec<u8> = Vec::new();
-    let mut input = std::io::Cursor::new(Vec::new());
+    let mut input = Cursor::new(Vec::new());
     interpret_io_on(src, roots, &mut out, &mut input, cfg)?;
     Ok(out)
 }

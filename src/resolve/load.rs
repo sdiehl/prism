@@ -12,6 +12,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::fs;
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -201,12 +202,7 @@ impl Root {
                 p.set_extension(crate::driver::SOURCE_EXT);
                 match fs::read_to_string(&p) {
                     Ok(src) => Ok(Some(src)),
-                    Err(e)
-                        if matches!(
-                            e.kind(),
-                            std::io::ErrorKind::NotFound | std::io::ErrorKind::Unsupported
-                        ) =>
-                    {
+                    Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::Unsupported) => {
                         Ok(None)
                     }
                     Err(e) => Err(Error::ResolveModule(format!(

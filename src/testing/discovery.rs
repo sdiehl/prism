@@ -9,13 +9,19 @@
 //! supplements the production strip removes.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
+use crate::cli::{base_of, glob_pr, read};
 use crate::core::fbip::borrow_sigs;
-use crate::core::{fip_annots, hash_program, Digest};
-use crate::driver::BuildMode;
+use crate::core::{fip_annots, hash_program, hash_root, Digest};
+use crate::driver::{frontend, hash_meta, BuildMode};
 use crate::error::Error;
+use crate::names::{bare_name, private};
+use crate::project::{load_project, Project};
 use crate::resolve::Root;
+use crate::{
+    default_roots, project_roots, with_custom_prelude, with_prelude, CompilerSession, Config,
+};
 
 use super::check::{self, TestSignature};
 
@@ -77,10 +83,10 @@ impl TestPlan {
 ///
 /// # Errors
 /// Front-end errors, an invalid test signature, or a duplicate logical ID.
-pub(crate) fn discover_project(dir: &Path, cfg: &crate::Config) -> Result<TestPlan, Error> {
+pub(crate) fn discover_project(dir: &Path, cfg: &Config) -> Result<TestPlan, Error> {
     let cfg = &test_config(cfg);
-    let project = crate::project::load_project(dir)?;
-    let roots = crate::project_roots(&project.src_dir, &project.dep_src_dirs);
+    let project = load_project(dir)?;
+    let roots = project_roots(&project.src_dir, &project.dep_src_dirs);
     let tests_dir = project.root.join("tests");
     let mut targets = Vec::new();
 
@@ -93,7 +99,7 @@ pub(crate) fn discover_project(dir: &Path, cfg: &crate::Config) -> Result<TestPl
             continue;
         }
         let module = module_name_of(&project.src_dir, &file);
-        let source = crate::cli::read(&file)?;
+        let source = read(&file)?;
         let full = prelude_for(&project, &source)?;
         discover_unit(&full, &roots, &module, &file, cfg, &mut targets)?;
     }
@@ -104,7 +110,7 @@ pub(crate) fn discover_project(dir: &Path, cfg: &crate::Config) -> Result<TestPl
     for file in module_files(&tests_dir) {
         let relative = module_name_of(&tests_dir, &file);
         let module = format!("integration::{relative}");
-        let source = crate::cli::read(&file)?;
+        let source = read(&file)?;
         let full = prelude_for(&project, &source)?;
         discover_unit(&full, &roots, &module, &file, cfg, &mut targets)?;
     }
@@ -116,11 +122,11 @@ pub(crate) fn discover_project(dir: &Path, cfg: &crate::Config) -> Result<TestPl
 ///
 /// # Errors
 /// Front-end errors, an invalid test signature, or a duplicate logical ID.
-pub(crate) fn discover_file(file: &Path, cfg: &crate::Config) -> Result<TestPlan, Error> {
+pub(crate) fn discover_file(file: &Path, cfg: &Config) -> Result<TestPlan, Error> {
     let cfg = &test_config(cfg);
-    let source = crate::cli::read(file)?;
-    let full = crate::with_prelude(&source);
-    let roots = crate::default_roots(&crate::cli::base_of(file));
+    let source = read(file)?;
+    let full = with_prelude(&source);
+    let roots = default_roots(&base_of(file));
     let module = module_stem(file);
     let mut targets = Vec::new();
     discover_unit(&full, &roots, &module, file, cfg, &mut targets)?;
@@ -135,34 +141,34 @@ fn discover_unit(
     roots: &[Root],
     module: &str,
     file: &Path,
-    cfg: &crate::Config,
+    cfg: &Config,
     out: &mut Vec<TestTarget>,
 ) -> Result<(), Error> {
     if let Some(name) = check::duplicate_test_name(full_src) {
         return Err(Error::ResolveCommand(format!(
             "test `{}` is declared more than once in {}",
-            crate::names::bare_name(&name),
+            bare_name(&name),
             file.display()
         )));
     }
-    let (program, checked, core) = crate::driver::frontend(full_src, roots, cfg)?;
+    let (program, checked, core) = frontend(full_src, roots, cfg)?;
     let signatures = check::signatures_from(&program, &checked).map_err(Error::Type)?;
     if signatures.is_empty() {
         return Ok(());
     }
     let hashes = hash_program(
         &core,
-        &crate::driver::hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
+        &hash_meta(&checked, &borrow_sigs(&program), &fip_annots(&program)),
     );
     let digests: BTreeMap<String, Digest> = hashes
         .into_iter()
         .map(|(sym, digest)| (sym.as_str().to_string(), digest))
         .collect();
-    let closure = crate::core::hash_root(&digests).into_string();
+    let closure = hash_root(&digests).into_string();
     let location = file.display().to_string();
     for TestSignature { name } in signatures {
-        let logical_id = format!("{module}::{}", crate::names::bare_name(&name));
-        let definition_id = crate::names::private(module, crate::names::bare_name(&name));
+        let logical_id = format!("{module}::{}", bare_name(&name));
+        let definition_id = private(module, bare_name(&name));
         let test_core_digest = digests
             .get(name.as_str())
             .map(|d| d.as_str().to_string())
@@ -205,23 +211,23 @@ fn finish(mut targets: Vec<TestTarget>) -> Result<TestPlan, Error> {
 /// the prelude and each module compile once and every later per-test harness
 /// compile hits the cache. Built once per command and threaded through discovery
 /// and execution.
-pub(crate) fn test_config(cfg: &crate::Config) -> crate::Config {
+pub(crate) fn test_config(cfg: &Config) -> Config {
     let mut cfg = cfg.clone();
     cfg.mode = BuildMode::Test;
     cfg.flags.quiet = true;
     if cfg.session.is_none() {
-        cfg.session = Some(crate::CompilerSession::new());
+        cfg.session = Some(CompilerSession::new());
     }
     cfg
 }
 
-fn prelude_for(project: &crate::project::Project, source: &str) -> Result<String, Error> {
+fn prelude_for(project: &Project, source: &str) -> Result<String, Error> {
     match &project.prelude {
         Some(path) => {
-            let prelude = crate::cli::read(path)?;
-            Ok(crate::with_custom_prelude(&prelude, source))
+            let prelude = read(path)?;
+            Ok(with_custom_prelude(&prelude, source))
         }
-        None => Ok(crate::with_prelude(source)),
+        None => Ok(with_prelude(source)),
     }
 }
 
@@ -231,7 +237,7 @@ fn module_files(dir: &Path) -> Vec<PathBuf> {
     if !dir.is_dir() {
         return Vec::new();
     }
-    let mut files = crate::cli::glob_pr(dir);
+    let mut files = glob_pr(dir);
     files.sort();
     files
 }
@@ -243,7 +249,7 @@ fn module_name_of(base: &Path, file: &Path) -> String {
     let mut parts: Vec<String> = relative
         .components()
         .filter_map(|c| match c {
-            std::path::Component::Normal(s) => s.to_str().map(ToString::to_string),
+            Component::Normal(s) => s.to_str().map(ToString::to_string),
             _ => None,
         })
         .collect();

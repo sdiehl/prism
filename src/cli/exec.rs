@@ -1,55 +1,60 @@
 //! The execution-control family: reproduce, step, pause, and resume runs.
 
+use std::fs;
+use std::io;
 use std::path::Path;
+use std::process;
 
 use crate::cli::render::{cut_position, cut_provenance, print_step_ruler};
 use crate::cli::{file_name, read, resolve_input, CmdError, CmdResult};
 use crate::driver::CutTarget;
 use crate::error::Error;
+use crate::{
+    debug_on, replay_on, resume_on, step_ruler_on, suspend_at_cut_on, suspend_on, Config,
+    SuspendAtCut, SuspendResult,
+};
 
 // Reproduce a recorded run from a `.replay` trace.
-pub fn replay(file: &Path, trace: &Path, cfg: &crate::Config) -> CmdResult {
+pub fn replay(file: &Path, trace: &Path, cfg: &Config) -> CmdResult {
     let (full, roots, name, _) = resolve_input(file, cfg)?;
     let trace_src = read(trace).map_err(|e| (e, String::new(), file_name(trace)))?;
-    let stdout = std::io::stdout();
+    let stdout = io::stdout();
     let mut out = stdout.lock();
-    let exit =
-        crate::replay_on(&full, &roots, &mut out, &trace_src, cfg).map_err(|e| (e, full, name))?;
+    let exit = replay_on(&full, &roots, &mut out, &trace_src, cfg).map_err(|e| (e, full, name))?;
     drop(out);
     if let Some(code) = exit {
-        std::process::exit(code);
+        process::exit(code);
     }
     Ok(())
 }
 
 // Reverse-step debugger over a `.replay` trace.
-pub fn debug(file: &Path, trace: &Path, cfg: &crate::Config) -> CmdResult {
+pub fn debug(file: &Path, trace: &Path, cfg: &Config) -> CmdResult {
     let (full, roots, name, _) = resolve_input(file, cfg)?;
     let trace_src = read(trace).map_err(|e| (e, String::new(), file_name(trace)))?;
-    let stdin = std::io::stdin();
-    let stdout = std::io::stdout();
+    let stdin = io::stdin();
+    let stdout = io::stdout();
     let mut cmds = stdin.lock();
     let mut ui = stdout.lock();
-    crate::debug_on(&full, &roots, &trace_src, &mut cmds, &mut ui, cfg)
-        .map_err(|e| (e, full, name))?;
+    debug_on(&full, &roots, &trace_src, &mut cmds, &mut ui, cfg).map_err(|e| (e, full, name))?;
     Ok(())
 }
 
 // Run a program and print each observation with the machine step it fired at.
-pub fn steps(file: &Path, json: bool, cfg: &crate::Config) -> CmdResult {
+pub fn steps(file: &Path, json: bool, cfg: &Config) -> CmdResult {
     let (full, roots, name, _) = resolve_input(file, cfg)?;
-    let stdin = std::io::stdin();
+    let stdin = io::stdin();
     let mut input = stdin.lock();
     // Under `--json` the program's own stdout is captured rather than echoed, so
     // the emitted JSON is the whole stream a tool reads; the run still executes in
     // full (previews carry what it printed).
     let ruler = if json {
         let mut sink: Vec<u8> = Vec::new();
-        crate::step_ruler_on(&full, &roots, &mut sink, &mut input, cfg)
+        step_ruler_on(&full, &roots, &mut sink, &mut input, cfg)
     } else {
-        let stdout = std::io::stdout();
+        let stdout = io::stdout();
         let mut sink = stdout.lock();
-        crate::step_ruler_on(&full, &roots, &mut sink, &mut input, cfg)
+        step_ruler_on(&full, &roots, &mut sink, &mut input, cfg)
     }
     .map_err(|e| (e, full.clone(), name.clone()))?;
     drop(input);
@@ -62,7 +67,7 @@ pub fn steps(file: &Path, json: bool, cfg: &crate::Config) -> CmdResult {
         print_step_ruler(&ruler);
     }
     if let Some(code) = ruler.exit {
-        std::process::exit(code);
+        process::exit(code);
     }
     Ok(())
 }
@@ -78,7 +83,7 @@ pub fn suspend(
     at_call: Option<&str>,
     at_op: Option<&str>,
     out: &Path,
-    cfg: &crate::Config,
+    cfg: &Config,
 ) -> CmdResult {
     match (at, at_call, at_op) {
         (Some(n), None, None) => suspend_at_step(file, n, out, cfg),
@@ -97,20 +102,19 @@ pub fn suspend(
 }
 
 // The `--at N` arm: pause after `at` machine steps.
-fn suspend_at_step(file: &Path, at: usize, out: &Path, cfg: &crate::Config) -> CmdResult {
+fn suspend_at_step(file: &Path, at: usize, out: &Path, cfg: &Config) -> CmdResult {
     let (full, roots, name, _) = resolve_input(file, cfg)?;
-    let stdout = std::io::stdout();
-    let stdin = std::io::stdin();
+    let stdout = io::stdout();
+    let stdin = io::stdin();
     let mut sink = stdout.lock();
     let mut input = stdin.lock();
-    let result = crate::suspend_on(&full, &roots, &mut sink, &mut input, at, cfg)
+    let result = suspend_on(&full, &roots, &mut sink, &mut input, at, cfg)
         .map_err(|e| (e, full.clone(), name.clone()))?;
     drop(sink);
     drop(input);
     match result {
-        crate::SuspendResult::Suspended { bytes, cut } => {
-            std::fs::write(out, &bytes)
-                .map_err(|e| (Error::Io(e), full, out.display().to_string()))?;
+        SuspendResult::Suspended { bytes, cut } => {
+            fs::write(out, &bytes).map_err(|e| (Error::Io(e), full, out.display().to_string()))?;
             eprintln!(
                 "suspended after {at} steps to {} ({} bytes); {}",
                 out.display(),
@@ -119,11 +123,11 @@ fn suspend_at_step(file: &Path, at: usize, out: &Path, cfg: &crate::Config) -> C
             );
             Ok(())
         }
-        crate::SuspendResult::Done(exit) => {
+        SuspendResult::Done(exit) => {
             // The budget was past the program's length: it simply ran.
             eprintln!("program completed in fewer than {at} steps; nothing suspended");
             if let Some(code) = exit {
-                std::process::exit(code);
+                process::exit(code);
             }
             Ok(())
         }
@@ -132,20 +136,19 @@ fn suspend_at_step(file: &Path, at: usize, out: &Path, cfg: &crate::Config) -> C
 
 // The `--at-call` / `--at-op` arm: pause at a named program point. The report
 // names the def stack and the equivalent `--at N` that reproduces the snapshot.
-fn suspend_at_named(file: &Path, target: &CutTarget, out: &Path, cfg: &crate::Config) -> CmdResult {
+fn suspend_at_named(file: &Path, target: &CutTarget, out: &Path, cfg: &Config) -> CmdResult {
     let (full, roots, name, _) = resolve_input(file, cfg)?;
-    let stdout = std::io::stdout();
-    let stdin = std::io::stdin();
+    let stdout = io::stdout();
+    let stdin = io::stdin();
     let mut sink = stdout.lock();
     let mut input = stdin.lock();
-    let result = crate::suspend_at_cut_on(&full, &roots, &mut sink, &mut input, target, cfg)
+    let result = suspend_at_cut_on(&full, &roots, &mut sink, &mut input, target, cfg)
         .map_err(|e| (e, full.clone(), name.clone()))?;
     drop(sink);
     drop(input);
     match result {
-        crate::SuspendAtCut::Suspended { bytes, cut, report } => {
-            std::fs::write(out, &bytes)
-                .map_err(|e| (Error::Io(e), full, out.display().to_string()))?;
+        SuspendAtCut::Suspended { bytes, cut, report } => {
+            fs::write(out, &bytes).map_err(|e| (Error::Io(e), full, out.display().to_string()))?;
             eprintln!(
                 "suspended at {} to {} ({} bytes); {}",
                 cut_provenance(report.equiv_at, &report.def_stack),
@@ -156,13 +159,13 @@ fn suspend_at_named(file: &Path, target: &CutTarget, out: &Path, cfg: &crate::Co
             eprintln!("  reproduce with `--at {}`", report.equiv_at);
             Ok(())
         }
-        crate::SuspendAtCut::Done(exit) => {
+        SuspendAtCut::Done(exit) => {
             eprintln!(
                 "program completed before {}; nothing suspended",
                 target.describe()
             );
             if let Some(code) = exit {
-                std::process::exit(code);
+                process::exit(code);
             }
             Ok(())
         }
@@ -203,20 +206,20 @@ fn suspend_arg_error(msg: &str) -> CmdError {
 }
 
 // Resume a program from a `kont` snapshot, running it to completion.
-pub fn resume(file: &Path, snapshot: &Path, cfg: &crate::Config) -> CmdResult {
+pub fn resume(file: &Path, snapshot: &Path, cfg: &Config) -> CmdResult {
     let (full, roots, name, _) = resolve_input(file, cfg)?;
     let bytes =
-        std::fs::read(snapshot).map_err(|e| (Error::Io(e), String::new(), file_name(snapshot)))?;
-    let stdout = std::io::stdout();
-    let stdin = std::io::stdin();
+        fs::read(snapshot).map_err(|e| (Error::Io(e), String::new(), file_name(snapshot)))?;
+    let stdout = io::stdout();
+    let stdin = io::stdin();
     let mut sink = stdout.lock();
     let mut input = stdin.lock();
-    let exit = crate::resume_on(&full, &roots, &bytes, &mut sink, &mut input, cfg)
+    let exit = resume_on(&full, &roots, &bytes, &mut sink, &mut input, cfg)
         .map_err(|e| (e, full, name))?;
     drop(sink);
     drop(input);
     if let Some(code) = exit {
-        std::process::exit(code);
+        process::exit(code);
     }
     Ok(())
 }

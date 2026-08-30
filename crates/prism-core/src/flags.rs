@@ -22,8 +22,10 @@
 //! env-knob audit (`tests/env_knobs.rs`) catalogues all three and fails if any
 //! knob is read from an undocumented site.
 
+use std::env;
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::thread;
 
 use crate::core::{EffectStrategy, OptLevel, EFFECT_TIERS};
 
@@ -41,7 +43,7 @@ const MAX_AUTO_QUERY_THREADS: usize = 8;
 /// byte-identical at any value, which `tests/native/compiler_cache.rs` enforces
 /// by diffing sequential and parallel builds.
 fn default_query_threads() -> usize {
-    std::thread::available_parallelism().map_or(SEQUENTIAL_QUERY_THREADS, |threads| {
+    thread::available_parallelism().map_or(SEQUENTIAL_QUERY_THREADS, |threads| {
         threads.get().min(MAX_AUTO_QUERY_THREADS)
     })
 }
@@ -560,7 +562,7 @@ impl DynFlags {
             core_lint: base.core_lint || env_present("PRISM_CORE_LINT"),
             rt_checks: base.rt_checks || env_present("PRISM_RT_CHECKS"),
             native_kont_frames: base.native_kont_frames || env_present("PRISM_NATIVE_KONT_FRAMES"),
-            dump_core: std::env::var_os("PRISM_DUMP_CORE")
+            dump_core: env::var_os("PRISM_DUMP_CORE")
                 .map_or_else(|| base.dump_core.clone(), dump_sink),
             opt_stats: base.opt_stats || env_present("PRISM_OPT_STATS"),
             compiler_stats: base.compiler_stats || env_present("PRISM_COMPILER_STATS"),
@@ -571,7 +573,7 @@ impl DynFlags {
             quiet: base.quiet || env_present("PRISM_QUIET"),
             verbose: base.verbose || env_present("PRISM_VERBOSE"),
             mdbook_strict: base.mdbook_strict || env_present("PRISM_MDBOOK_STRICT"),
-            opt_level: std::env::var("PRISM_OPT_LEVEL")
+            opt_level: env::var("PRISM_OPT_LEVEL")
                 .ok()
                 .and_then(|s| OptLevel::parse(&s))
                 .unwrap_or(base.opt_level),
@@ -581,34 +583,34 @@ impl DynFlags {
             no_ho_spec: base.no_ho_spec || env_present("PRISM_NO_HO_SPEC"),
             fuse: env_bool("PRISM_FUSE", base.fuse),
             borrow_infer: env_bool("PRISM_BORROW_INFER", base.borrow_infer),
-            scheduler: std::env::var("PRISM_SCHEDULER")
+            scheduler: env::var("PRISM_SCHEDULER")
                 .ok()
                 .and_then(|s| Scheduler::parse(&s))
                 .unwrap_or(base.scheduler),
             effect_tier: effect_tier_from_env(base.effect_tier),
-            effect_exclude: std::env::var("PRISM_EFFECT_EXCLUDE")
+            effect_exclude: env::var("PRISM_EFFECT_EXCLUDE")
                 .map_or(base.effect_exclude, |s| RungExclude::parse(&s)),
             erasures: env_bool("PRISM_ERASURES", base.erasures),
             compiler_cache: env_bool("PRISM_COMPILER_CACHE", base.compiler_cache),
             store: base.store || env_present("PRISM_STORE"),
-            store_path: std::env::var_os("PRISM_STORE_PATH")
+            store_path: env::var_os("PRISM_STORE_PATH")
                 .map(PathBuf::from)
                 .or_else(|| base.store_path.clone()),
-            tool_packages_root: std::env::var_os("PRISM_TOOL_PACKAGES_ROOT")
+            tool_packages_root: env::var_os("PRISM_TOOL_PACKAGES_ROOT")
                 .map(PathBuf::from)
                 .or_else(|| base.tool_packages_root.clone()),
-            solver_timeout_ms: std::env::var("PRISM_SOLVER_TIMEOUT_MS")
+            solver_timeout_ms: env::var("PRISM_SOLVER_TIMEOUT_MS")
                 .ok()
                 .and_then(|s| s.trim().parse().ok())
                 .or(base.solver_timeout_ms),
             sign_mode: sign_mode_from_env(base.sign_mode),
-            sign_key: std::env::var_os("PRISM_SIGN_KEY")
+            sign_key: env::var_os("PRISM_SIGN_KEY")
                 .map(PathBuf::from)
                 .or_else(|| base.sign_key.clone()),
-            sign_identity: std::env::var("PRISM_SIGN_IDENTITY")
+            sign_identity: env::var("PRISM_SIGN_IDENTITY")
                 .ok()
                 .or_else(|| base.sign_identity.clone()),
-            sign_allowed_signers: std::env::var_os("PRISM_SIGN_ALLOWED_SIGNERS")
+            sign_allowed_signers: env::var_os("PRISM_SIGN_ALLOWED_SIGNERS")
                 .map(PathBuf::from)
                 .or_else(|| base.sign_allowed_signers.clone()),
             warn_dupes: warn_dupes_from_env("PRISM_WARN_DUPES", base.warn_dupes),
@@ -722,7 +724,7 @@ fn toml_parsed<T>(
 }
 
 fn query_threads_from_env(base: usize) -> usize {
-    std::env::var("PRISM_QUERY_THREADS").map_or(base, |value| {
+    env::var("PRISM_QUERY_THREADS").map_or(base, |value| {
         value.parse::<usize>().ok().filter(|n| *n > 0).unwrap_or_else(|| {
             eprintln!(
                 "ignoring invalid PRISM_QUERY_THREADS={value:?} (expected a positive integer); using {base}"
@@ -735,7 +737,7 @@ fn query_threads_from_env(base: usize) -> usize {
 // The signing seam from `PRISM_SIGN_MODE`. An unrecognized value is reported once
 // and falls back to `base` rather than silently signing nothing.
 fn sign_mode_from_env(base: SignMode) -> SignMode {
-    std::env::var("PRISM_SIGN_MODE").map_or(base, |s| {
+    env::var("PRISM_SIGN_MODE").map_or(base, |s| {
         SignMode::parse(&s).unwrap_or_else(|| {
             eprintln!(
                 "ignoring invalid PRISM_SIGN_MODE={s:?} (expected ssh, minisign, unsigned); using {}",
@@ -755,7 +757,7 @@ fn spellings(labels: impl IntoIterator<Item = &'static str>) -> String {
 // reported once and falls back to `base` rather than silently forcing (or
 // silently not forcing) a tier.
 fn effect_tier_from_env(base: EffectTier) -> EffectTier {
-    std::env::var("PRISM_EFFECT_TIER").map_or(base, |s| {
+    env::var("PRISM_EFFECT_TIER").map_or(base, |s| {
         EffectTier::parse(&s).unwrap_or_else(|| {
             eprintln!(
                 "ignoring invalid PRISM_EFFECT_TIER={s:?} (expected {}); using {}",
@@ -771,7 +773,7 @@ fn effect_tier_from_env(base: EffectTier) -> EffectTier {
 // levels clang accepts. An out-of-range value is reported once and falls back to
 // `base` rather than reaching `cc`.
 fn backend_opt_from_env(base: BackendOpt) -> BackendOpt {
-    let Ok(s) = std::env::var("PRISM_BACKEND_OPT") else {
+    let Ok(s) = env::var("PRISM_BACKEND_OPT") else {
         return base;
     };
     BackendOpt::parse(&s).unwrap_or_else(|| {
@@ -788,7 +790,7 @@ fn backend_opt_from_env(base: BackendOpt) -> BackendOpt {
 // `PRISM_WARN_STDLIB_DUPES` for stdlib reimplementations). An unrecognized value
 // is reported once and falls back to `base`.
 fn warn_dupes_from_env(var: &str, base: WarnDupes) -> WarnDupes {
-    std::env::var(var).map_or(base, |s| {
+    env::var(var).map_or(base, |s| {
         WarnDupes::parse(&s).unwrap_or_else(|| {
             eprintln!(
                 "ignoring invalid {var}={s:?} (expected off, warn, strict); using {}",
@@ -813,7 +815,7 @@ fn env_off(value: &str) -> bool {
 // An opt-out boolean flag: absent takes `default`; an off spelling is false,
 // anything else true.
 fn env_bool(name: &str, default: bool) -> bool {
-    std::env::var(name).map_or(default, |v| !env_off(&v))
+    env::var(name).map_or(default, |v| !env_off(&v))
 }
 
 // The Core-dump sink from a raw knob value. An off spelling disables the dump
@@ -828,7 +830,7 @@ fn dump_sink(value: OsString) -> Option<OsString> {
 
 // A presence flag: any value (even empty) is true, absent is false.
 fn env_present(name: &str) -> bool {
-    std::env::var_os(name).is_some()
+    env::var_os(name).is_some()
 }
 
 #[cfg(all(test, feature = "native"))]

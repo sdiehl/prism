@@ -12,6 +12,7 @@
 //! specializes a type/effect quantifier.  Unknown values and dynamic calls stay
 //! on the original symbol and therefore retain the conservative fallback.
 
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 
 use prism_common::sym::Sym;
@@ -407,7 +408,7 @@ fn discover(facts: &Facts<'_>, functions: &[TypedCoreFn]) -> Option<BTreeMap<Ins
         }
         let mut changed = false;
         for instance in requested {
-            if let std::collections::btree_map::Entry::Vacant(slot) = returns.entry(instance) {
+            if let Entry::Vacant(slot) = returns.entry(instance) {
                 slot.insert(Demand::pure());
                 changed = true;
             }

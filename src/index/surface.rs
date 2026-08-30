@@ -11,6 +11,7 @@
 //! spans no longer index any single file, and a viewer needs ranges it can slice
 //! out of the source it is displaying.
 
+use crate::docs::extract::{extract, Docs};
 use crate::error::Error;
 use crate::parse::{parse, ParseResult};
 use crate::syntax::ast::{Decl as AstDecl, Fip, Program, Span as AstSpan, Total};
@@ -44,7 +45,7 @@ pub(super) struct Module {
 /// Fails if the module does not parse.
 pub(super) fn walk(source: &str, prelude: bool) -> Result<Module, Error> {
     let ParseResult { program, trivia } = parse(source)?;
-    let docs = crate::docs::extract::extract(&trivia, &starts(&program));
+    let docs = extract(&trivia, &starts(&program));
     let mut decls = Vec::new();
     collect(&program, prelude, &docs, &mut decls);
     // Source order: a viewer renders a module top to bottom, and doc-comment
@@ -84,7 +85,7 @@ fn starts(p: &Program) -> Vec<usize> {
 
 // Collect one record per top-level declaration, in a single flat pass over the
 // `Program`'s per-kind vectors.
-fn collect(p: &Program, prelude: bool, docs: &crate::docs::extract::Docs, out: &mut Vec<Decl>) {
+fn collect(p: &Program, prelude: bool, docs: &Docs, out: &mut Vec<Decl>) {
     // (name, kind, span, claims) for every declaration, gathered first so that
     // building the records below is one uniform step. The shape of this list is
     // the shape of the AST: a new declaration kind shows up here as a missing

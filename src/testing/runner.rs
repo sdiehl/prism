@@ -12,13 +12,15 @@
 // event buffer) and `fmt::Write` (anonymously, to avoid the name clash) so
 // `writeln!` can render the `--list` output into a `String`.
 use std::fmt::Write as _;
-use std::io::Write;
-use std::path::Path;
+use std::io::{self, Cursor, Write};
+use std::path::{Path, PathBuf};
 
 use crate::cli::test::TestOptions;
-use crate::cli::{CmdError, CmdResult};
+use crate::cli::{enclosing_project, is_project, CmdError, CmdResult, TEST_WITHOUT_PATH};
 use crate::error::Error;
-use crate::eval::Rv;
+use crate::eval::{Run, Rv};
+use crate::names::bare_name;
+use crate::{interpret_io_on_with_args, Config};
 
 use super::discovery::{self, TestPlan, TestTarget};
 use super::{events, report, Failure};
@@ -96,7 +98,7 @@ impl Outcome {
 /// A dispatch error on a front-end/discovery failure, or a nonzero-summary error
 /// when compilation succeeded but a selected test failed (or no test matched
 /// under `--fail-if-no-tests`).
-pub(crate) fn run(file: Option<&Path>, options: &TestOptions, cfg: &crate::Config) -> CmdResult {
+pub(crate) fn run(file: Option<&Path>, options: &TestOptions, cfg: &Config) -> CmdResult {
     // One test-mode config with a shared session for the whole command, so the
     // prelude and each module compile once and every per-test harness compile hits
     // the session cache instead of re-elaborating the prelude.
@@ -128,8 +130,8 @@ pub(crate) fn run(file: Option<&Path>, options: &TestOptions, cfg: &crate::Confi
 
 // The resolved test input: a project directory or a single file.
 enum Input {
-    Project(std::path::PathBuf),
-    File(std::path::PathBuf),
+    Project(PathBuf),
+    File(PathBuf),
 }
 
 impl Input {
@@ -142,13 +144,13 @@ impl Input {
 
 fn resolve_input(file: Option<&Path>) -> Result<Input, CmdError> {
     match file {
-        Some(path) if crate::cli::is_project(path) => Ok(Input::Project(path.to_path_buf())),
+        Some(path) if is_project(path) => Ok(Input::Project(path.to_path_buf())),
         Some(path) => Ok(Input::File(path.to_path_buf())),
-        None => crate::cli::enclosing_project(crate::cli::TEST_WITHOUT_PATH).map(Input::Project),
+        None => enclosing_project(TEST_WITHOUT_PATH).map(Input::Project),
     }
 }
 
-fn discover(input: &Input, cfg: &crate::Config) -> Result<TestPlan, Error> {
+fn discover(input: &Input, cfg: &Config) -> Result<TestPlan, Error> {
     match input {
         Input::Project(dir) => discovery::discover_project(dir, cfg),
         Input::File(file) => discovery::discover_file(file, cfg),
@@ -169,7 +171,7 @@ fn select<'a>(plan: &'a TestPlan, options: &TestOptions) -> Vec<&'a TestTarget> 
 }
 
 fn list(selected: &[&TestTarget], options: &TestOptions) {
-    let stdout = std::io::stdout();
+    let stdout = io::stdout();
     let mut out = stdout.lock();
     let _ = out.write_all(render_list(selected, options.json).as_bytes());
 }
@@ -202,7 +204,7 @@ fn render_list(selected: &[&TestTarget], json: bool) -> String {
 pub(crate) fn list_output(
     file: Option<&Path>,
     options: &TestOptions,
-    cfg: &crate::Config,
+    cfg: &Config,
 ) -> Result<String, Error> {
     let cfg = &discovery::test_config(cfg);
     let input = resolve_input(file).map_err(|(e, _, _)| e)?;
@@ -260,8 +262,8 @@ impl Tally {
     }
 }
 
-fn execute(selected: &[&TestTarget], options: &TestOptions, cfg: &crate::Config) -> CmdResult {
-    let stdout = std::io::stdout();
+fn execute(selected: &[&TestTarget], options: &TestOptions, cfg: &Config) -> CmdResult {
+    let stdout = io::stdout();
     let mut out = stdout.lock();
     if options.json {
         let _ = writeln!(out, "{}", events::suite_started(selected.len()));
@@ -331,7 +333,7 @@ pub(crate) const fn public_status(kind: Option<OutcomeKind>) -> super::TestStatu
 pub(crate) fn run_report(
     file: Option<&Path>,
     options: &TestOptions,
-    cfg: &crate::Config,
+    cfg: &Config,
 ) -> Result<Vec<(String, Outcome)>, Error> {
     let cfg = &discovery::test_config(cfg);
     let input = resolve_input(file).map_err(|(e, _, _)| e)?;
@@ -350,7 +352,7 @@ pub(crate) fn run_report(
 pub(crate) fn event_bytes(
     file: Option<&Path>,
     options: &TestOptions,
-    cfg: &crate::Config,
+    cfg: &Config,
 ) -> Result<Vec<u8>, Error> {
     let cfg = &discovery::test_config(cfg);
     let input = resolve_input(file).map_err(|(e, _, _)| e)?;
@@ -378,11 +380,11 @@ pub(crate) fn event_bytes(
 }
 
 // Run one test in a fresh world and classify the outcome.
-fn run_one(target: &TestTarget, cfg: &crate::Config) -> Outcome {
+fn run_one(target: &TestTarget, cfg: &Config) -> Outcome {
     let harness = synthesize(&target.full_src, &target.entry_name);
     let mut sink: Vec<u8> = Vec::new();
-    let mut input = std::io::Cursor::new(Vec::new());
-    let result = crate::interpret_io_on_with_args(
+    let mut input = Cursor::new(Vec::new());
+    let result = interpret_io_on_with_args(
         &harness,
         &target.roots,
         &mut sink,
@@ -418,7 +420,7 @@ fn error_kind(error: &Error) -> OutcomeKind {
 // Map a completed run to an outcome. The harness returns `Int(0)` on pass and
 // `Int(1)` on `fail()`; an explicit `exit` unwinds past the handler's return
 // clause, leaving `Run::exit` set (any code, even zero, is a failure).
-fn classify(run: &crate::eval::Run, output: String) -> Outcome {
+fn classify(run: &Run, output: String) -> Outcome {
     if let Some(code) = run.exit {
         return Outcome::fail(
             OutcomeKind::Exit,
@@ -448,7 +450,7 @@ fn classify(run: &crate::eval::Run, output: String) -> Outcome {
 // the built-in failure; a runtime fault surfaces as an interpreter error and an
 // explicit exit leaves `Run::exit` set, both classified in `classify`.
 fn synthesize(full_src: &str, entry_name: &str) -> String {
-    let short = crate::names::bare_name(entry_name);
+    let short = bare_name(entry_name);
     format!(
         "{full_src}\nfn main() =\n  handle {short}() with\n    never fail() => 1\n    return r => 0\n"
     )

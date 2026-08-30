@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::types::ty::EffRow;
+use crate::types::ty::{EffRow, Label};
 use crate::types::Type;
 use prism_common::sym::Sym;
 use prism_syntax::error::TypedCoreSpecializationFailure;
@@ -1832,7 +1832,7 @@ impl Unifier {
                 }
             }
             EffRow::Extend(label, rest) => EffRow::Extend(
-                crate::types::ty::Label {
+                Label {
                     name: label.name,
                     args: label.args.iter().map(|ty| self.resolve_type(ty)).collect(),
                 },

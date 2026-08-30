@@ -1,12 +1,16 @@
 //! `prism index`: write the whole-codebase index a program viewer reads.
 
 use std::fmt::Write as _;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::cli::docs::resolve_docs_input;
-use crate::cli::{file_name, CmdError, CmdResult};
+use crate::cli::{file_name, resolve_input, user_entry_path, CmdError, CmdResult};
+use crate::driver::stdlib_driver_src;
 use crate::error::Error;
 use crate::index::{build, diff, Index, IndexInput, TestLayer};
+use crate::stdlib::STDLIB;
+use crate::{stdlib_modules, with_prelude, Config, ModuleSource, Root};
 
 // The default artifact name, in `target/` beside the `docs/` the doc generator
 // writes.
@@ -41,12 +45,7 @@ pub enum IndexMode {
 // Indexes the project/dir/file at PATH (or the embedded standard library with
 // `--stdlib`) into one JSON artifact. `--check` verifies a committed copy is
 // current and writes nothing, the `prism docs --check` contract.
-pub fn index_cmd(
-    path: &Path,
-    out: Option<PathBuf>,
-    opts: IndexOpts,
-    cfg: &crate::Config,
-) -> CmdResult {
+pub fn index_cmd(path: &Path, out: Option<PathBuf>, opts: IndexOpts, cfg: &Config) -> CmdResult {
     let (index, default_dir) = if opts.stdlib {
         (build_stdlib(!opts.no_source)?, PathBuf::from("target"))
     } else {
@@ -62,7 +61,7 @@ pub fn index_cmd(
     let file = out.unwrap_or_else(|| default_dir.join(INDEX_FILE));
 
     if opts.mode == IndexMode::Check {
-        if std::fs::read_to_string(&file).unwrap_or_default() == json {
+        if fs::read_to_string(&file).unwrap_or_default() == json {
             return Ok(());
         }
         return Err((
@@ -76,10 +75,10 @@ pub fn index_cmd(
     }
 
     if let Some(dir) = file.parent().filter(|d| !d.as_os_str().is_empty()) {
-        std::fs::create_dir_all(dir)
+        fs::create_dir_all(dir)
             .map_err(|e| (Error::Io(e), String::new(), dir.display().to_string()))?;
     }
-    std::fs::write(&file, &json)
+    fs::write(&file, &json)
         .map_err(|e| (Error::Io(e), String::new(), file.display().to_string()))?;
     report(&index, &file);
     Ok(())
@@ -90,11 +89,11 @@ pub fn index_cmd(
 // prelude's declarations are addressed by bare name, which `is_prelude` already
 // says.
 fn build_stdlib(embed_source: bool) -> Result<Index, CmdError> {
-    let modules = crate::stdlib_modules();
-    let roots = vec![crate::Root::Embedded(crate::stdlib::STDLIB)];
+    let modules = stdlib_modules();
+    let roots = vec![Root::Embedded(STDLIB)];
     build(IndexInput {
         modules: &modules,
-        source: &crate::driver::stdlib_driver_src(),
+        source: &stdlib_driver_src(),
         roots: &roots,
         entry: None,
         title: "Standard Library".into(),
@@ -114,7 +113,7 @@ fn build_project(
     path: &Path,
     embed_source: bool,
     as_library: bool,
-    cfg: &crate::Config,
+    cfg: &Config,
 ) -> Result<(Index, PathBuf), CmdError> {
     let (modules, roots, base, _, title, _) = resolve_docs_input(path)?;
     // Documentation combines several packages in one namespace. Indexing a
@@ -142,7 +141,7 @@ fn build_project(
 pub fn merge_cmd(inputs: &[PathBuf], title: String, out: Option<PathBuf>) -> CmdResult {
     let mut indexes = Vec::new();
     for file in inputs {
-        let text = std::fs::read_to_string(file)
+        let text = fs::read_to_string(file)
             .map_err(|e| (Error::Io(e), String::new(), file.display().to_string()))?;
         indexes.push(Index::from_json(&text).map_err(|e| {
             (
@@ -163,10 +162,10 @@ pub fn merge_cmd(inputs: &[PathBuf], title: String, out: Option<PathBuf>) -> Cmd
     })?;
     let file = out.unwrap_or_else(|| PathBuf::from("target").join(INDEX_FILE));
     if let Some(dir) = file.parent().filter(|d| !d.as_os_str().is_empty()) {
-        std::fs::create_dir_all(dir)
+        fs::create_dir_all(dir)
             .map_err(|e| (Error::Io(e), String::new(), dir.display().to_string()))?;
     }
-    std::fs::write(&file, json)
+    fs::write(&file, json)
         .map_err(|e| (Error::Io(e), String::new(), file.display().to_string()))?;
     report(&index, &file);
     Ok(())
@@ -185,9 +184,9 @@ pub fn merge_cmd(inputs: &[PathBuf], title: String, out: Option<PathBuf>) -> Cmd
 // world handler) rather than as an imported module's would be.
 fn merged_source(
     path: &Path,
-    modules: &[crate::ModuleSource],
+    modules: &[ModuleSource],
     entry: Option<&str>,
-    cfg: &crate::Config,
+    cfg: &Config,
 ) -> Result<String, CmdError> {
     let imports = modules
         .iter()
@@ -198,13 +197,13 @@ fn merged_source(
         });
     match entry {
         Some(_) => {
-            let (full, _, _, _) = crate::cli::resolve_input(path, cfg)?;
+            let (full, _, _, _) = resolve_input(path, cfg)?;
             Ok(format!("{full}\n{imports}"))
         }
         // A plain directory is not a project and has no entry module, so it is
         // indexed through a synthesized driver over its modules alone, the same
         // shape `--stdlib` uses.
-        None => Ok(crate::with_prelude(&imports)),
+        None => Ok(with_prelude(&imports)),
     }
 }
 
@@ -226,8 +225,8 @@ fn importable(dotted: &str) -> bool {
 // definitions unaddressed, so it is matched by resolved path rather than by name:
 // `resolve_docs_input` records each module's path relative to `base`, and the
 // entry is one of them.
-fn entry_dotted(path: &Path, modules: &[crate::ModuleSource], base: &Path) -> Option<String> {
-    let entry = crate::cli::user_entry_path(path).ok()?;
+fn entry_dotted(path: &Path, modules: &[ModuleSource], base: &Path) -> Option<String> {
+    let entry = user_entry_path(path).ok()?;
     let entry = entry.canonicalize().ok()?;
     modules
         .iter()
@@ -243,7 +242,7 @@ fn entry_dotted(path: &Path, modules: &[crate::ModuleSource], base: &Path) -> Op
 // author edited from the ones that merely re-hashed underneath them.
 pub fn diff_cmd(old: &Path, new: &Path, out: Option<PathBuf>) -> CmdResult {
     let read = |p: &Path| -> Result<Index, CmdError> {
-        let text = std::fs::read_to_string(p)
+        let text = fs::read_to_string(p)
             .map_err(|e| (Error::Io(e), String::new(), p.display().to_string()))?;
         Index::from_json(&text).map_err(|e| {
             (
@@ -274,10 +273,10 @@ pub fn diff_cmd(old: &Path, new: &Path, out: Option<PathBuf>) -> CmdResult {
         )
     })?;
     if let Some(dir) = file.parent().filter(|d| !d.as_os_str().is_empty()) {
-        std::fs::create_dir_all(dir)
+        fs::create_dir_all(dir)
             .map_err(|e| (Error::Io(e), String::new(), dir.display().to_string()))?;
     }
-    std::fs::write(&file, &json)
+    fs::write(&file, &json)
         .map_err(|e| (Error::Io(e), String::new(), file.display().to_string()))?;
     println!("wrote {} ({})", file.display(), report.summary());
     Ok(())

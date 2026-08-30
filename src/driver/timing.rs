@@ -29,7 +29,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 #[cfg(feature = "native")]
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use crate::core::work::{self, WorkCounts};
@@ -380,7 +380,7 @@ impl TimingSink {
     pub fn tallies(&self) -> BTreeMap<&'static str, PhaseTally> {
         self.0
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap_or_else(PoisonError::into_inner)
             .tallies
             .clone()
     }
@@ -391,10 +391,7 @@ impl TimingSink {
     fn src_key(&self, src: &str) -> String {
         // Take an owned digest under the lock, then release it before formatting.
         let digest = {
-            let mut inner = self
-                .0
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut inner = self.0.lock().unwrap_or_else(PoisonError::into_inner);
             if inner.src_digest.is_none() && !src.is_empty() {
                 inner.src_digest = Some(blake3::hash(src.as_bytes()).to_hex().to_string());
             }
@@ -417,10 +414,7 @@ impl TimingSink {
         // first prints. A re-elaboration on the same compile repeats phases; the
         // guard is released before any formatting or stderr write.
         let first = {
-            let mut inner = self
-                .0
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut inner = self.0.lock().unwrap_or_else(PoisonError::into_inner);
             inner
                 .tallies
                 .entry(phase.label())

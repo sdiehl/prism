@@ -24,13 +24,16 @@
 //! this pass emits the ladder the codec composes, and
 //! `names::stable_decode_ladder` names its reserved entry point.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
 
 use marginalia::Span;
 
 use super::{call, evar, sp, spat};
 use crate::core::{contract_digest, Hashes};
 use crate::error::{ErrKind, TypeError};
+use crate::fmt::decl::fmt_ty;
+use crate::kw::{DOWNGRADE, UPGRADE};
 use crate::names;
 use crate::names::{
     DECODE_METHOD, FAIL_OP, WIRE_COMPOSE_DOWNGRADE, WIRE_DECODE_VALUE_WITH_DIGEST,
@@ -83,8 +86,8 @@ struct LossRef {
 /// Fails on a malformed block (a mismatched extension base, a type mutation with
 /// no hand-written converter) or a frozen rung whose shape digest drifted.
 pub(super) fn expand_stable(prog: &mut Program) -> Result<(), TypeError> {
-    let blocks = std::mem::take(&mut prog.stable);
-    let in_scope: std::collections::BTreeSet<&str> = prog
+    let blocks = mem::take(&mut prog.stable);
+    let in_scope: BTreeSet<&str> = prog
         .classes
         .iter()
         .map(|c| names::bare_name(&c.name))
@@ -94,7 +97,7 @@ pub(super) fn expand_stable(prog: &mut Program) -> Result<(), TypeError> {
     // canonical name the resolver would have produced (this pass runs after name
     // resolution). The `stable` block's own generated functions never collide with
     // these, so building it once up front is sound. Mirrors `derive.rs`'s `lib`.
-    let wire_canon: std::collections::BTreeMap<String, String> = prog
+    let wire_canon: BTreeMap<String, String> = prog
         .fns
         .iter()
         .map(|f| (names::bare_name(&f.name).to_string(), f.name.clone()))
@@ -102,7 +105,7 @@ pub(super) fn expand_stable(prog: &mut Program) -> Result<(), TypeError> {
     let libf = |n: &str| {
         wire_canon
             .get(n)
-            .map_or_else(|| n.to_string(), std::string::ToString::to_string)
+            .map_or_else(|| n.to_string(), ToString::to_string)
     };
     let bytes_ty = canon_ty(prog, BYTES_TYPE);
     for sd in &blocks {
@@ -241,7 +244,7 @@ fn resolve_rungs(sd: &StableDecl) -> Result<Vec<RungInfo>, TypeError> {
                         ErrKind::RungFieldNeedsDefault {
                             field: f.name.clone(),
                             rung: r.name.clone(),
-                            field_ty: crate::fmt::decl::fmt_ty(&f.ty),
+                            field_ty: fmt_ty(&f.ty),
                         }
                         .at(r.span)
                     })?;
@@ -272,7 +275,7 @@ fn rung_type(sd: &StableDecl, idx: usize, total: usize) -> String {
 
 // The classes a rung derives: the required codec pair plus whichever optional
 // conveniences are in scope.
-fn rung_derives(in_scope: &std::collections::BTreeSet<&str>) -> Vec<String> {
+fn rung_derives(in_scope: &BTreeSet<&str>) -> Vec<String> {
     RUNG_REQUIRED
         .iter()
         .chain(RUNG_OPTIONAL.iter().filter(|c| in_scope.contains(**c)))
@@ -616,8 +619,8 @@ fn find_conv<'a>(
         .find(|c| c.dir == dir && c.from == from && c.to == to)
         .ok_or_else(|| {
             let word = match dir {
-                ConvDir::Upgrade => crate::kw::UPGRADE,
-                ConvDir::Downgrade => crate::kw::DOWNGRADE,
+                ConvDir::Upgrade => UPGRADE,
+                ConvDir::Downgrade => DOWNGRADE,
             };
             ErrKind::RungNeedsConverter {
                 to: to.to_string(),

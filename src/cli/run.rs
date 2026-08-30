@@ -8,7 +8,11 @@ use std::path::{Path, PathBuf};
 use clap::ValueEnum;
 
 use crate::cli::{render_cli_error, resolve_input, CmdError, CmdResult};
+use crate::debug::durable::write_atomic;
 use crate::error::Error;
+use crate::lineage::{
+    replay_relation, BuildRequest, RunLineage, RunLineageInput, BACKEND_INTERPRETER,
+};
 
 const DEFAULT_EXAMPLE_ATTEMPTS: usize = 1;
 const EXAMPLE_ATTEMPTS_KEY: &str = "attempts=";
@@ -100,22 +104,21 @@ pub fn run_file_cmd(
         // and check it from the graph alone. A trace outside the sidecar's directory
         // is refused here, before either file is written, rather than minting a
         // sidecar the verifier would always reject.
-        let replay =
-            crate::lineage::replay_relation(lineage_path, record_path, recorded.trace.as_bytes())
-                .map_err(|e| (e, full.clone(), record_path.display().to_string()))?;
-        crate::debug::durable::write_atomic(record_path, &recorded.trace).map_err(|e| {
+        let replay = replay_relation(lineage_path, record_path, recorded.trace.as_bytes())
+            .map_err(|e| (e, full.clone(), record_path.display().to_string()))?;
+        write_atomic(record_path, &recorded.trace).map_err(|e| {
             (
                 Error::Io(e),
                 full.clone(),
                 record_path.display().to_string(),
             )
         })?;
-        let run_lineage = crate::lineage::RunLineage::collect(crate::lineage::RunLineageInput {
-            request: crate::lineage::BuildRequest::run(file),
+        let run_lineage = RunLineage::collect(RunLineageInput {
+            request: BuildRequest::run(file),
             source: &full,
             roots: &roots,
             cfg,
-            backend: crate::lineage::BACKEND_INTERPRETER,
+            backend: BACKEND_INTERPRETER,
             argv: args,
             events: &recorded.events,
             observations: &recorded.canonical_trace,
@@ -139,8 +142,7 @@ pub fn run_file_cmd(
                 .map_err(|e| (e, full.clone(), name.clone()))?;
         drop(out);
         drop(input);
-        crate::debug::durable::write_atomic(path, &trace)
-            .map_err(|e| (Error::Io(e), full, path.display().to_string()))?;
+        write_atomic(path, &trace).map_err(|e| (Error::Io(e), full, path.display().to_string()))?;
         eprintln!("recorded {n_obs} observations to {}", path.display());
         return Ok(exit);
     }

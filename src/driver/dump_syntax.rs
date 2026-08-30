@@ -30,8 +30,8 @@ use crate::syntax::ast::{
     AliasDecl, Arm, CanonicalDecl, CatchArm, ClassDecl, Constraint, ConvDir, Converter, Ctor,
     CtorShape, DataDecl, Decl, EffLabel, EffOp, EffectDecl, ErrorDecl, Expr, HandlerArm,
     HandlerMode, ImportDecl, InstanceDecl, Kind, Marker, Migration, MigrationDir, MigrationRoute,
-    PathOp, PathStep, Pattern, PatternDecl, Program, Qualifier, Row, Rung, RungField, SExpr, Span,
-    StableDecl, Suffix, Sugar, SugarArm, SynonymDecl, Total, Ty, S,
+    Param, PathOp, PathStep, Pattern, PatternDecl, Program, Qualifier, Row, Rung, RungField, SExpr,
+    Span, StableDecl, Suffix, Sugar, SugarArm, Surface, SynonymDecl, Total, Ty, S,
 };
 
 use super::dump::COMPILER_VERSION;
@@ -631,7 +631,7 @@ fn decl_value(d: &Decl, kind: &str) -> Value {
     Value::Object(m)
 }
 
-fn param_value(p: &crate::syntax::ast::Param) -> Value {
+fn param_value(p: &Param) -> Value {
     let mut m = Map::new();
     put(&mut m, "name", json!(p.name));
     // A pattern parameter's name is synthesized, so the pattern rides alongside
@@ -918,7 +918,7 @@ fn named_exprs(fields: &[(String, SExpr)]) -> Vec<Value> {
 }
 
 #[allow(clippy::too_many_lines)] // one arm per sugar form; splitting would scatter the node vocabulary
-fn sugar_node(s: &Sugar<crate::syntax::ast::Surface>) -> Value {
+fn sugar_node(s: &Sugar<Surface>) -> Value {
     match s {
         Sugar::NamedHandle(name, body, arms) => {
             let mut m = obj("named-handle");

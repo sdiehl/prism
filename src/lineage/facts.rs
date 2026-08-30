@@ -20,7 +20,8 @@
 //! authorizes cache reuse, and losing it only loses explanations.
 
 use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::mem;
+use std::sync::{Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -620,7 +621,7 @@ impl FactRecorder {
     pub fn record(&self, fact: QueryFact) {
         self.facts
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap_or_else(PoisonError::into_inner)
             .insert((fact.kind, fact.identity.clone()), fact);
     }
 
@@ -628,7 +629,7 @@ impl FactRecorder {
     pub fn clear(&self) {
         self.facts
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap_or_else(PoisonError::into_inner)
             .clear();
     }
 
@@ -651,14 +652,9 @@ impl FactRecorder {
         scope: &FactScope,
         retired_kinds: &[QueryKind],
     ) -> Result<(), Error> {
-        let facts = std::mem::take(
-            &mut *self
-                .facts
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        )
-        .into_values()
-        .collect();
+        let facts = mem::take(&mut *self.facts.lock().unwrap_or_else(PoisonError::into_inner))
+            .into_values()
+            .collect();
         record_facts_retiring(store, scope, facts, retired_kinds)
     }
 }

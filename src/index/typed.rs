@@ -16,7 +16,9 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use crate::driver::AddressableSurface;
-use crate::syntax::ast::{Core, Expr, Pattern, S};
+use crate::hir::build;
+use crate::lex::Token;
+use crate::syntax::ast::{Core, Expr, NodeId, Pattern, S};
 use crate::types::Type;
 
 use super::Def;
@@ -35,7 +37,7 @@ type Header<'a> = (Vec<&'a str>, Vec<&'a Type>);
 ///
 /// Types are interned because many occurrences share the same rendering.
 pub(super) fn attach_types(defs: &mut [Def], production: &AddressableSurface) -> Vec<String> {
-    let hir = crate::hir::build(&production.checked);
+    let hir = build(&production.checked);
     let checked: BTreeMap<&str, &Type> = production
         .checked
         .decls
@@ -129,11 +131,7 @@ fn binders(p: &S<Pattern>, hir: &crate::hir::CheckedHir<'_>, out: &mut Vec<Typed
 }
 
 /// The type to show for one node, if the checker left a presentable one.
-fn typed_at(
-    id: crate::syntax::ast::NodeId,
-    span: marginalia::Span,
-    hir: &crate::hir::CheckedHir<'_>,
-) -> Option<Typed> {
+fn typed_at(id: NodeId, span: marginalia::Span, hir: &crate::hir::CheckedHir<'_>) -> Option<Typed> {
     let rendered = hir.tooltip(id).map(ToString::to_string).or_else(|| {
         // A binder reaches only this fallback: the canonical string is built per
         // expression node from its effect row, and a binding site has neither.
@@ -188,12 +186,12 @@ fn header_names(def: &Def, header: Option<&Header<'_>>) -> Vec<Typed> {
     // walk's business, and it has an exact span there.
     let body = tokens
         .iter()
-        .position(|(_, t, _)| matches!(t, crate::lex::Token::Eq))
+        .position(|(_, t, _)| matches!(t, Token::Eq))
         .unwrap_or(tokens.len());
     let mut out = Vec::new();
     for (name, dom) in names.iter().zip(doms) {
         let found = tokens[..body].iter().find(|(start, token, end)| {
-            matches!(token, crate::lex::Token::Ident(t) if t == name)
+            matches!(token, Token::Ident(t) if t == name)
                 && def.source.get(*start..*end) == Some(*name)
         });
         if let Some(&(start, _, end)) = found {

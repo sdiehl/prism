@@ -8,6 +8,9 @@
 
 use crate::error::{ErrorCode, SMT_LOGIC_WELLFORMED};
 use crate::verify::logic::{Contract, FuncDecl, FuncId, LogicExpr, LogicSort, Obligation, VarId};
+use crate::verify::registry::LogicBuiltin::{
+    Add, And, Eq, Ge, Gt, Implies, Ite, Le, Lt, Neg, Not, Or, Sub,
+};
 use crate::verify::registry::{Arity, LogicBuiltin};
 
 /// A well-formedness failure. All variants carry [`SMT_LOGIC_WELLFORMED`].
@@ -172,7 +175,6 @@ const fn check_arity(b: LogicBuiltin, n: usize) -> Result<(), WfError> {
 /// "which arguments must be what sort, and what does the result become"; the
 /// registry owns tags/symbols/arity, this owns sorts.
 fn builtin_sort(env: &Env<'_>, b: LogicBuiltin, args: &[LogicExpr]) -> Result<LogicSort, WfError> {
-    use LogicBuiltin::{Add, And, Eq, Ge, Gt, Implies, Ite, Le, Lt, Neg, Not, Or, Sub};
     check_arity(b, args.len())?;
     match b {
         Not => {

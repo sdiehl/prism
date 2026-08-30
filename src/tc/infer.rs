@@ -10,6 +10,7 @@ use super::{
 };
 use crate::core::builtins::OUTPUT_BUILTINS;
 use crate::error::{suggest, ErrKind, TypeError};
+use crate::hir::HandlerResidual;
 use crate::kw;
 use crate::names;
 use crate::sym::Sym;
@@ -1203,7 +1204,7 @@ impl Tc<'_> {
                     .then_some(*effect)
             })
             .collect();
-        let fact = crate::hir::HandlerResidual::new(
+        let fact = HandlerResidual::new(
             forwarded_operations,
             forwarded_effects,
             residual.operations(),
@@ -1329,7 +1330,7 @@ impl Tc<'_> {
     ) -> Result<Type, TypeError> {
         let recv_ty = self.synth(env, recv)?;
         let recv_ty = self.apply(&recv_ty);
-        let fail = EffRow::singleton(Sym::from(crate::names::FAIL_EFFECT));
+        let fail = EffRow::singleton(Sym::from(names::FAIL_EFFECT));
         self.note_opaque_row(&fail);
         self.absorb_row(&fail).map_err(|e| e.at(span))?;
         if let Some((kty, elem, _)) = index_container(&recv_ty) {

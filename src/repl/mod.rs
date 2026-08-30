@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt::Write as _;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
 use std::time::Instant;
@@ -45,6 +45,7 @@ const COMMANDS: &[&str] = &[
     ":browse", ":core", ":edit", ":explain", ":help", ":info", ":kind", ":load", ":quit",
     ":reload", ":set", ":type",
 ];
+const REPL_SOURCE_NAME: &str = "<repl>";
 
 // Syntax-highlight styles, one per token category, plus the dim style used for
 // inline history hints. anstyle renders the ANSI escapes.
@@ -431,7 +432,7 @@ impl Session {
         // session must resolve modules against the stdlib roots before desugaring,
         // exactly as the batch driver's `frontend` does. Without this, names that
         // live in stdlib modules (e.g. `nth` behind `at_list`) are unbound.
-        let roots = default_roots(std::path::Path::new("."));
+        let roots = default_roots(Path::new("."));
         // The same import scope, captured for resolving interactively typed
         // expressions, which never pass through the program resolver below.
         let imports = import_bindings(&program, &roots)?;
@@ -1067,7 +1068,7 @@ fn step(session: &mut Session, built: &mut Built, line: &str) -> bool {
         let msg = decl_success_message(&line);
         let mut cand = session.segs.clone();
         upsert_decl(&mut cand, line.into_owned());
-        commit_as(session, built, cand, "<repl>", &msg);
+        commit_as(session, built, cand, REPL_SOURCE_NAME, &msg);
         return true;
     }
     if (line.starts_with("let ") || bare_bind(&line).is_some()) && parse_expr(&line).is_err() {
@@ -1081,7 +1082,7 @@ fn step(session: &mut Session, built: &mut Built, line: &str) -> bool {
                     session.lets = probe.lets;
                     show_eval(session.flags, &parts, Instant::now());
                 }
-                Err(e) => report(&e, &probe.chain(&name), "<repl>"),
+                Err(e) => report(&e, &probe.chain(&name), REPL_SOURCE_NAME),
             }
         } else {
             eprintln!("let needs a value: let x = e");
@@ -1097,7 +1098,7 @@ fn step(session: &mut Session, built: &mut Built, line: &str) -> bool {
             // do not accrete text.
             session.it_src = Some(session.chain(&line));
         }
-        Err(e) => report(&e, &session.chain(&line), "<repl>"),
+        Err(e) => report(&e, &session.chain(&line), REPL_SOURCE_NAME),
     }
     true
 }
@@ -1216,7 +1217,7 @@ fn command(session: &mut Session, built: &mut Built, cmd: &str, arg: &str) -> bo
                     Err(e) => {
                         session.flags.holes = holes_before;
                         let src = session.compose().unwrap_or_default();
-                        report(&e, &src, "<repl>");
+                        report(&e, &src, REPL_SOURCE_NAME);
                     }
                 }
             }
@@ -1516,17 +1517,17 @@ const fn on_off(b: bool) -> &'static str {
 fn show_type(session: &Session, built: &Built, rest: &str) {
     let text = session.chain(rest);
     let desugared = match parse_expr(&text) {
-        Err(e) => return report(&e.into(), &text, "<repl>"),
+        Err(e) => return report(&e.into(), &text, REPL_SOURCE_NAME),
         Ok(mut e) => match built.front(&mut e) {
-            Err(e) => return report(&e, &text, "<repl>"),
+            Err(e) => return report(&e, &text, REPL_SOURCE_NAME),
             Ok(()) => desugar_expr(&e),
         },
     };
     match desugared {
-        Err(e) => report(&e.into(), &text, "<repl>"),
+        Err(e) => report(&e.into(), &text, REPL_SOURCE_NAME),
         Ok(e) => match infer_expr(&built.checked, &e) {
             Ok((ty, eff)) => println!("{rest} : {}", show_type_with_effects(&ty, &eff)),
-            Err(e) => report(&e.into(), &text, "<repl>"),
+            Err(e) => report(&e.into(), &text, REPL_SOURCE_NAME),
         },
     }
 }

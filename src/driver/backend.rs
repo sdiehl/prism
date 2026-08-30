@@ -31,8 +31,9 @@ const LLVM_SCC_QUERY_SCHEMA: &[u8] = b"prism-llvm-scc-bitcode-query-v2";
 const LLVM_SCC_OBJECT_FORMAT: &str = "prism-llvm-scc-bitcode-v1";
 const CLOSURE_SUMMARY_QUERY: &str = "llvm-scc-closure-summary";
 const CLOSURE_SUMMARY_FORMAT: &str = "prism-llvm-scc-closure-summary-v1";
-const MAX_LLVM_SCC_BYTES: usize = 64 * 1024 * 1024;
-const MAX_CLOSURE_SUMMARY_BYTES: usize = 1024 * 1024;
+const MEBIBYTE: usize = 1024 * 1024;
+const MAX_LLVM_SCC_BYTES: usize = 64 * MEBIBYTE;
+const MAX_CLOSURE_SUMMARY_BYTES: usize = MEBIBYTE;
 const SCC_MEMBER_UNREACHABLE: u8 = 0;
 const SCC_MEMBER_REACHABLE: u8 = 1;
 

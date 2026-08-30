@@ -18,6 +18,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::core::DepGraph;
 use crate::driver::AddressableSurface;
 use crate::sym::Sym;
+use crate::syntax::ast::{Core, Expr, HandlerArm, Ty, S};
+use crate::types::Type;
 
 use super::{Def, Edge, EdgeKind, Kind};
 
@@ -179,7 +181,7 @@ fn synthetic_owners(sources: &Sources<'_>) -> BTreeMap<String, String> {
         // its unit is merged with this one. The latter need not have a named type
         // head (`ordStr` is an instance for the scalar `String`).
         let destination = if instance.span.start == 0 && instance.span.end == 0 {
-            let crate::syntax::ast::Ty::Con(owner, _) = &instance.head else {
+            let Ty::Con(owner, _) = &instance.head else {
                 continue;
             };
             owner.clone()
@@ -239,7 +241,7 @@ fn types_and_effects(sources: &Sources<'_>, lowered: &Lowered, out: &mut BTreeSe
                 .map(|(name, effects)| (name.as_str(), effects)),
         )
         .collect();
-    let checked: BTreeMap<&str, &crate::types::Type> = sources
+    let checked: BTreeMap<&str, &Type> = sources
         .production
         .checked
         .decls
@@ -309,16 +311,16 @@ fn types_and_effects(sources: &Sources<'_>, lowered: &Lowered, out: &mut BTreeSe
 // Structural rather than textual: `Type::each_child` is the exhaustive statement
 // of what a type contains, so this cannot miss a position (an effect-row argument,
 // a coeffect's inner type) and cannot mistake a type variable for a constructor.
-fn type_cons(ty: &crate::types::Type, out: &mut BTreeSet<Sym>) {
-    if let crate::types::Type::Con(name, _) = ty {
+fn type_cons(ty: &Type, out: &mut BTreeSet<Sym>) {
+    if let Type::Con(name, _) = ty {
         out.insert(*name);
     }
     ty.each_child(&mut |child| type_cons(child, out));
 }
 
 // The same, over a surface type, whose names the renamer has already canonicalized.
-fn surface_cons(ty: &crate::syntax::ast::Ty, out: &mut BTreeSet<String>) {
-    if let crate::syntax::ast::Ty::Con(name, _) = ty {
+fn surface_cons(ty: &Ty, out: &mut BTreeSet<String>) {
+    if let Ty::Con(name, _) = ty {
         out.insert(name.clone());
     }
     ty.each_child(&mut |child| surface_cons(child, out));
@@ -336,7 +338,7 @@ fn surface_cons(ty: &crate::syntax::ast::Ty, out: &mut BTreeSet<String>) {
 fn declared_type_refs(sources: &Sources<'_>) -> BTreeMap<String, BTreeSet<String>> {
     let program = &sources.production.program;
     let mut out: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let mut add = |owner: &str, ty: &crate::syntax::ast::Ty| {
+    let mut add = |owner: &str, ty: &Ty| {
         let mut cons = BTreeSet::new();
         surface_cons(ty, &mut cons);
         out.entry(owner.to_string()).or_default().extend(cons);
@@ -401,11 +403,11 @@ fn handles(sources: &Sources<'_>, out: &mut BTreeSet<Edge>) {
         };
         let mut handled: BTreeSet<&str> = BTreeSet::new();
         walk(&decl.body, &mut |e| {
-            let crate::syntax::ast::Expr::Handle(_, arms, _) = &e.node else {
+            let Expr::Handle(_, arms, _) = &e.node else {
                 return;
             };
             for arm in arms {
-                let crate::syntax::ast::HandlerArm::Op(op, ..) = arm else {
+                let HandlerArm::Op(op, ..) = arm else {
                     continue;
                 };
                 if let Some(effect) = owners.get(op.as_str()) {
@@ -426,10 +428,7 @@ fn handles(sources: &Sources<'_>, out: &mut BTreeSet<Edge>) {
 }
 
 // Every expression in a tree, the node itself first.
-fn walk(
-    e: &crate::syntax::ast::S<crate::syntax::ast::Expr<crate::syntax::ast::Core>>,
-    f: &mut impl FnMut(&crate::syntax::ast::S<crate::syntax::ast::Expr<crate::syntax::ast::Core>>),
-) {
+fn walk(e: &S<Expr<Core>>, f: &mut impl FnMut(&S<Expr<Core>>)) {
     f(e);
     e.node.each_child(&mut |child| walk(child, f));
 }

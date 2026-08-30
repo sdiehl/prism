@@ -18,6 +18,7 @@ use crate::error::TypeError;
 use crate::syntax::ast::Program;
 use crate::verify::check::{subst_var, Checker};
 use crate::verify::logic::{Obligation, VarId};
+use crate::verify::normalize::contract_digest;
 use crate::verify::query::SmtQuery;
 use crate::verify::wf;
 
@@ -53,7 +54,7 @@ pub(crate) fn generate(prog: &Program) -> Result<Vec<FunctionVCs>, TypeError> {
             continue;
         }
         let contract = checker.checked_contract(d)?;
-        let subject = crate::verify::normalize::contract_digest(&contract);
+        let subject = contract_digest(&contract);
         if contract.ensures.is_empty() {
             // A requires-only contract has no standalone goal. Its precondition
             // constrains callers rather than the function body.

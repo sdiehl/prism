@@ -10,7 +10,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use prism_common::sym::Sym;
 
-use super::super::{TypedComp, TypedCompKind, TypedCoreFn, TypedHandler};
+use super::super::{
+    TypedComp, TypedCompKind, TypedCoreFn, TypedHandler, TypedValue, TypedValueKind,
+};
 
 /// Hard ceiling on the mask depth the analysis will track. A real program's
 /// depth is bounded by its syntactic mask nesting along a call path (each
@@ -174,9 +176,9 @@ pub fn handle_escapes(
 
 // The computation under a thunk value, looking through representation
 // wrappers that do not change thunk flow.
-fn thunk_body(v: &super::super::TypedValue) -> Option<&TypedComp> {
+fn thunk_body(v: &TypedValue) -> Option<&TypedComp> {
     match &super::peel(v).kind {
-        super::super::TypedValueKind::Thunk(c) => Some(c),
+        TypedValueKind::Thunk(c) => Some(c),
         _ => None,
     }
 }

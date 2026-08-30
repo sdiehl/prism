@@ -1,16 +1,22 @@
 //! `prism docs` and the mdbook preprocessor: generate Markdown API docs from doc
 //! comments, run doctests, and verify committed docs manifests.
 
-use std::io::Read as _;
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::io::{self, Read as _};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::slice;
 
 use crate::cli::{base_of, file_name, glob_pr, read, resolve_input, CmdResult};
 use crate::error::Error;
+use crate::lineage::{BuildRequest, DocsLineage, DocsLineageInput};
 use crate::stdlib::STDLIB;
-use crate::Root;
+use crate::{ModuleSource, Root};
 
 const DOCS_BACKEND: &str = "docs";
+const MDBOOK_LABEL: &str = "<mdbook>";
+const MDBOOK_SUPPORTS_COMMAND: &str = "supports";
+const STDIN_LABEL: &str = "<stdin>";
 
 // The mdbook preprocessor entry point. `prism mdbook supports <renderer>` exits 0
 // (every renderer is supported); otherwise the `[context, book]` JSON arrives on
@@ -18,15 +24,15 @@ const DOCS_BACKEND: &str = "docs";
 // should type-check but does not) print to stderr, and `strict`
 // (`PRISM_MDBOOK_STRICT`, resolved into `DynFlags`) makes them fail the build.
 pub fn mdbook_cmd(args: &[String], strict: bool) -> CmdResult {
-    if args.first().map(String::as_str) == Some("supports") {
+    if args.first().map(String::as_str) == Some(MDBOOK_SUPPORTS_COMMAND) {
         return Ok(());
     }
     let mut input = String::new();
-    std::io::stdin()
+    io::stdin()
         .read_to_string(&mut input)
-        .map_err(|e| (Error::Io(e), String::new(), "<stdin>".into()))?;
+        .map_err(|e| (Error::Io(e), String::new(), STDIN_LABEL.into()))?;
     let (book, warnings) =
-        crate::preprocess_book(&input).map_err(|e| (e, String::new(), "<mdbook>".into()))?;
+        crate::preprocess_book(&input).map_err(|e| (e, String::new(), MDBOOK_LABEL.into()))?;
     for w in &warnings {
         eprintln!("prism mdbook: {w}");
     }
@@ -48,8 +54,8 @@ pub fn mdbook_cmd(args: &[String], strict: bool) -> CmdResult {
 // doctests from, the default output directory, the index title, and its package
 // description (the generic project blurb for a loose directory or file).
 type DocsInput = (
-    Vec<crate::ModuleSource>,
-    Vec<crate::Root>,
+    Vec<ModuleSource>,
+    Vec<Root>,
     PathBuf,
     PathBuf,
     String,
@@ -135,7 +141,7 @@ pub fn docs_cmd(
         let mut stale = Vec::new();
         for page in &generated.pages {
             let p = dir.join(format!("{}.md", page.slug));
-            if std::fs::read_to_string(&p).unwrap_or_default() != page.markdown {
+            if fs::read_to_string(&p).unwrap_or_default() != page.markdown {
                 stale.push(p.display().to_string());
             }
         }
@@ -152,11 +158,11 @@ pub fn docs_cmd(
         return Ok(());
     }
 
-    std::fs::create_dir_all(&dir)
+    fs::create_dir_all(&dir)
         .map_err(|e| (Error::Io(e), String::new(), dir.display().to_string()))?;
     for page in &generated.pages {
         let p = dir.join(format!("{}.md", page.slug));
-        std::fs::write(&p, &page.markdown)
+        fs::write(&p, &page.markdown)
             .map_err(|e| (Error::Io(e), String::new(), p.display().to_string()))?;
         println!("  {}", p.display());
     }
@@ -196,8 +202,8 @@ fn write_docs_manifest_for(
         .into_iter()
         .map(|(location, output)| crate::lineage::DoctestInput { location, output })
         .collect();
-    let docs = crate::lineage::DocsLineage::collect(crate::lineage::DocsLineageInput {
-        request: crate::lineage::BuildRequest::docs(path, path),
+    let docs = DocsLineage::collect(DocsLineageInput {
+        request: BuildRequest::docs(path, path),
         source: full,
         roots: id_roots,
         cfg,
@@ -311,7 +317,7 @@ pub(crate) fn resolve_docs_input(path: &Path) -> Result<DocsInput, (Error, Strin
         ))
     } else {
         let base = base_of(path);
-        let modules = read_modules(&base, std::slice::from_ref(&path.to_path_buf()), &base)?;
+        let modules = read_modules(&base, slice::from_ref(&path.to_path_buf()), &base)?;
         let roots = crate::default_roots(&base);
         let out = base.join("target").join("docs");
         let title = path.file_stem().map_or_else(
@@ -333,7 +339,7 @@ fn read_modules(
     src_root: &Path,
     files: &[PathBuf],
     provenance_root: &Path,
-) -> Result<Vec<crate::ModuleSource>, (Error, String, String)> {
+) -> Result<Vec<ModuleSource>, (Error, String, String)> {
     let mut mods = Vec::new();
     for f in files {
         let source = read(f).map_err(|e| (e, String::new(), file_name(f)))?;
@@ -343,7 +349,7 @@ fn read_modules(
             .unwrap_or(f)
             .display()
             .to_string();
-        mods.push(crate::ModuleSource {
+        mods.push(ModuleSource {
             dotted: dotted.clone(),
             title: dotted,
             source,
@@ -364,7 +370,7 @@ fn dotted_of(src_root: &Path, file: &Path) -> String {
     let parts: Vec<String> = rel
         .components()
         .filter_map(|c| match c {
-            std::path::Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+            Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
             _ => None,
         })
         .collect();

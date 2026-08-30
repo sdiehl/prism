@@ -5,6 +5,8 @@ use crate::sym::Sym;
 use crate::syntax::ast::{Core, Decl};
 use crate::types::ty::Type;
 
+use super::super::env::fully_annotated;
+
 pub(super) fn forall_ty_binders(ty: &Type, out: &mut BTreeSet<Sym>) {
     match ty {
         Type::Forall(name, body) => {
@@ -17,7 +19,7 @@ pub(super) fn forall_ty_binders(ty: &Type, out: &mut BTreeSet<Sym>) {
 }
 
 pub(super) fn poly_recursion_hint(error: TypeError, decl: &Decl<Core>) -> TypeError {
-    if super::super::env::fully_annotated(decl) {
+    if fully_annotated(decl) {
         return error;
     }
     match error {

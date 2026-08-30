@@ -3,25 +3,29 @@
 //! `prism dump typespans` is the canonical producer. Documentation tooltips use
 //! the same producer-independent browser payload.
 
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
+use std::iter;
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, SourceMap};
-use crate::hir::CheckedHir;
+use crate::hir::{build, CheckedHir};
 use crate::kw;
 use crate::lex::{lex_raw, Token};
 use crate::names;
 use crate::parse::parse;
 use crate::sym::Sym;
 use crate::syntax::ast::{
-    ClassDecl, Core, DataDecl, Decl, Expr, HandlerArm, Pattern, PatternDecl, Program, StableDecl,
-    Sugar, SugarArm, Surface, S,
+    ClassDecl, ConvDir, Core, DataDecl, Decl, Expr, HandlerArm, Pattern, PatternDecl, Program,
+    StableDecl, Sugar, SugarArm, Surface, S,
 };
+use crate::tc::is_builtin_effect;
 use crate::types::coeffect::CoeffectFact;
 use crate::types::ty::Kind;
 use crate::types::{Checked, CtorInfo, EffOpInfo, Type};
+use crate::verify::check::Checker;
 
 /// Schema tag for the shared type-span payload.
 pub const TYPESPANS_FORMAT: &str = "prism-typespans-v1";
@@ -144,8 +148,8 @@ impl TypeSpans {
                 if (prev.start, prev.end) == (span.start, span.end) {
                     return Err(format!("duplicate typespan {}..{}", span.start, span.end));
                 }
-                let ordered = (prev.start, std::cmp::Reverse(prev.end), &prev.rendered)
-                    < (span.start, std::cmp::Reverse(span.end), &span.rendered);
+                let ordered = (prev.start, Reverse(prev.end), &prev.rendered)
+                    < (span.start, Reverse(span.end), &span.rendered);
                 if !ordered {
                     return Err("typespans are not in canonical source order".into());
                 }
@@ -1216,16 +1220,16 @@ fn surface_nodes(src: &str) -> Result<SurfaceNodes, Error> {
         }
         for converter in &decl.converters {
             let generated = match converter.dir {
-                crate::syntax::ast::ConvDir::Upgrade => {
+                ConvDir::Upgrade => {
                     names::stable_upgrade(&decl.name, &converter.from, &converter.to)
                 }
-                crate::syntax::ast::ConvDir::Downgrade => {
+                ConvDir::Downgrade => {
                     names::stable_downgrade(&decl.name, &converter.from, &converter.to)
                 }
             };
             names.insert(generated);
-            for expr in std::iter::once(&converter.base)
-                .chain(converter.overrides.iter().map(|(_, expr)| expr))
+            for expr in
+                iter::once(&converter.base).chain(converter.overrides.iter().map(|(_, expr)| expr))
             {
                 collect_surface_expr(expr, &mut spans);
                 collect_let_binders(expr, &tokens, &mut let_binders);
@@ -1897,11 +1901,7 @@ fn into_document(src: &str, resolved: BTreeMap<ByteRange, (String, Level)>) -> T
         })
         .collect::<Vec<_>>();
     spans.sort_by(|a, b| {
-        (a.start, std::cmp::Reverse(a.end), &a.rendered).cmp(&(
-            b.start,
-            std::cmp::Reverse(b.end),
-            &b.rendered,
-        ))
+        (a.start, Reverse(a.end), &a.rendered).cmp(&(b.start, Reverse(b.end), &b.rendered))
     });
     TypeSpans {
         format: TYPESPANS_FORMAT.to_string(),
@@ -1918,7 +1918,7 @@ pub(crate) fn extract(
     checked: &Checked,
 ) -> Result<TypeSpans, Error> {
     let surface = surface_nodes(src)?;
-    let hir = crate::hir::build(checked);
+    let hir = build(checked);
     let mut found: BTreeMap<(usize, usize), BTreeSet<String>> = BTreeMap::new();
     for decl in &program.fns {
         if surface.root_names.contains(&decl.name) {
@@ -2064,7 +2064,7 @@ pub(crate) fn extract(
     // prefixed by its resumption grade when narrower than the default),
     // recovered by grouping the checked op table by declaring effect.
     let effect_of = |name: &str| {
-        if crate::tc::is_builtin_effect(name)
+        if is_builtin_effect(name)
             && !checked
                 .eff_ops
                 .values()
@@ -2268,7 +2268,7 @@ pub(crate) fn extract(
     // regions disjoint from the runtime body spans, so they never collide with a
     // value span already resolved above.
     if let Ok(parsed) = crate::parse::parse(src) {
-        for (start, end, sort) in crate::verify::check::Checker::logic_typespans(&parsed.program) {
+        for (start, end, sort) in Checker::logic_typespans(&parsed.program) {
             resolved
                 .entry((start, end))
                 .or_insert_with(|| (sort.smtlib().to_string(), Level::Logic));

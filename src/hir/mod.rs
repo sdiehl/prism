@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::sym::Sym;
 use crate::syntax::ast::NodeId;
+use crate::tc::parse_checked_signature;
 use crate::types::{Checked, Dict, DictTable, PathRes, Type};
 
 /// A node's resolution fact: what checking decided this syntactic site means,
@@ -246,7 +247,7 @@ impl NodeFacts {
             let parse = |value: Option<String>| {
                 value
                     .map(|ty| {
-                        crate::tc::parse_checked_signature("checked-body", &ty)
+                        parse_checked_signature("checked-body", &ty)
                             .map_err(|error| error.to_string())
                     })
                     .transpose()
@@ -470,7 +471,7 @@ fn linted(hir: CheckedHir<'_>) -> CheckedHir<'_> {
         "lint_hir: malformed checked HIR (compiler bug):\n{}",
         violations
             .iter()
-            .map(std::string::ToString::to_string)
+            .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join("\n")
     );
