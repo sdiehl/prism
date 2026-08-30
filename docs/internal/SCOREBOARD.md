@@ -28,7 +28,7 @@ compaction, above it is not.
 | parser           |    2,555 |     1,931 |     7,538 |      6,484 |  3.36 |
 | surface AST      |    1,994 |     1,417 |       354 |        199 |  0.14 |
 | syntax codecs    |     none |      none |     2,902 |      2,382 |   n/a |
-| checker          |   11,009 |     8,636 |     4,233 |      3,386 |  0.39 |
+| checker          |   11,011 |     8,637 |     4,233 |      3,386 |  0.39 |
 
 What each row counts:
 
