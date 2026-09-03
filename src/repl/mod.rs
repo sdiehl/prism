@@ -36,7 +36,7 @@ use crate::syntax::reflect::{splice, splice_expr};
 use crate::tc::infer_checked_expr;
 use crate::types::{
     check, check_allow_holes, infer_expr, show_effects, show_type_with_effects, Checked, CtorInfo,
-    Type,
+    Effects, Type,
 };
 
 // Canonical commands. Any unambiguous prefix resolves to one (`:lo` -> :load,
@@ -240,16 +240,22 @@ fn completion_scope(
     import_decls: &[ImportDecl],
 ) -> (CompletionScope, BTreeMap<String, String>) {
     let value_symbols: BTreeSet<String> = checked
+        .interface
         .env
         .keys()
         .map(ToString::to_string)
-        .chain(checked.ctors.keys().cloned())
-        .chain(checked.eff_ops.keys().cloned())
-        .chain(checked.methods.keys().map(ToString::to_string))
+        .chain(checked.defs.ctors.keys().cloned())
+        .chain(checked.defs.eff_ops.keys().cloned())
+        .chain(checked.dispatch.methods.keys().map(ToString::to_string))
         .collect();
-    let mut type_symbols: BTreeSet<String> = checked.data.keys().cloned().collect();
+    let mut type_symbols: BTreeSet<String> = checked.defs.data.keys().cloned().collect();
     type_symbols.extend(Type::SCALARS.iter().map(Type::show));
-    let class_symbols: BTreeSet<String> = checked.classes.keys().map(ToString::to_string).collect();
+    let class_symbols: BTreeSet<String> = checked
+        .dispatch
+        .classes
+        .keys()
+        .map(ToString::to_string)
+        .collect();
     let effect_symbols: BTreeSet<String> = program.effects.iter().map(|e| e.name.clone()).collect();
     let alias_symbols: BTreeSet<String> = program
         .aliases
@@ -353,11 +359,12 @@ enum Seg {
     Text(String),
 }
 
-// `:set` toggles. Types are shown by default (this is a typed REPL). Timing
-// is opt-in.
+// Independent `:set` switches; only type display is enabled by default.
 #[derive(Clone, Copy)]
+#[allow(clippy::struct_excessive_bools)]
 struct Flags {
     types: bool,
+    effects: bool,
     timing: bool,
     holes: bool,
 }
@@ -366,6 +373,7 @@ impl Default for Flags {
     fn default() -> Self {
         Self {
             types: true,
+            effects: false,
             timing: false,
             holes: false,
         }
@@ -452,6 +460,7 @@ impl Session {
             .collect();
         let core = elaborate(&program, &checked)?;
         let mut arity: BTreeMap<String, usize> = checked
+            .defs
             .decls
             .iter()
             .map(|d| (d.name.clone(), d.params.len()))
@@ -505,7 +514,7 @@ impl Session {
         s
     }
 
-    fn eval_chained(&self, built: &Built, expr: &str) -> Result<(String, String, String), Error> {
+    fn eval_chained(&self, built: &Built, expr: &str) -> Result<(String, Type, Effects), Error> {
         let text = self.chain(expr);
         let mut surface = parse_expr(&text)?;
         built.front(&mut surface)?;
@@ -538,19 +547,24 @@ impl Session {
         };
         drop(out);
         drop(input);
-        Ok((
-            v.repr(),
-            inferred.ty.show(),
-            show_effects(&inferred.effects),
-        ))
+        Ok((v.repr(), inferred.ty, inferred.effects))
+    }
+}
+
+// Prompt presentation only: canonical type printers never consult session flags.
+fn render_type(flags: Flags, ty: &Type, eff: &Effects) -> String {
+    if eff.is_empty() && !flags.effects {
+        ty.show()
+    } else {
+        format!("{} ! {}", ty.show(), show_effects(eff))
     }
 }
 
 // Render an evaluated result per the session flags: value alone, or with its
 // type and effects.
-fn show_eval(flags: Flags, (val, ty, eff): &(String, String, String), elapsed: Instant) {
+fn show_eval(flags: Flags, (val, ty, eff): &(String, Type, Effects), elapsed: Instant) {
     if flags.types {
-        println!("{val} : {ty} ! {eff}");
+        println!("{val} : {}", render_type(flags, ty, eff));
     } else {
         println!("{val}");
     }
@@ -982,10 +996,11 @@ pub fn repl(show_banner: bool) {
     // and the later diff never drift apart.
     session.base = built
         .checked
+        .defs
         .decls
         .iter()
         .map(|d| d.name.clone())
-        .chain(built.checked.ctors.keys().cloned())
+        .chain(built.checked.defs.ctors.keys().cloned())
         .collect();
     if show_banner {
         banner(built.arity.len() + built.consts.len());
@@ -1237,7 +1252,7 @@ fn help() {
     println!(":load <file>   load declarations from a file");
     println!(":reload        re-read the active file from disk");
     println!(":edit [file]   open a file (or scratch) in $EDITOR, then load it");
-    println!(":set [+-]tsh   toggle options (bare :set lists them)");
+    println!(":set [+-]tesh  toggle options (bare :set lists them)");
     println!(":quit          quit");
     println!("any unambiguous prefix works, ghci style (:r, :lo, :ed)");
     println!(":{{ ... :}}       enter a multi-line block (also auto-detected)");
@@ -1270,13 +1285,13 @@ fn browse(session: &Session, built: &Built, module: &str) {
     // Bare names only: a dotted/`@` canonical name is reachable qualified, not
     // in scope, so a module imported without `(..)` does not appear here even
     // though its declarations are checked and live in `built.checked`.
-    for d in &built.checked.decls {
+    for d in &built.checked.defs.decls {
         if !d.name.contains(['.', '@']) && !session.base.contains(&d.name) {
             println!("{} : {}", d.name, built.checked.show_sig(d));
             any = true;
         }
     }
-    for (n, c) in &built.checked.ctors {
+    for (n, c) in &built.checked.defs.ctors {
         if !n.contains(['.', '@']) && !session.base.contains(n) {
             println!("{n} : {}", ctor_type(c).show());
             any = true;
@@ -1288,10 +1303,16 @@ fn browse(session: &Session, built: &Built, module: &str) {
         if session.base.contains(name) {
             continue;
         }
-        if let Some(d) = built.checked.decls.iter().find(|d| &d.name == canonical) {
+        if let Some(d) = built
+            .checked
+            .defs
+            .decls
+            .iter()
+            .find(|d| &d.name == canonical)
+        {
             println!("{name} : {}", built.checked.show_sig(d));
             any = true;
-        } else if let Some(c) = built.checked.ctors.get(canonical) {
+        } else if let Some(c) = built.checked.defs.ctors.get(canonical) {
             println!("{name} : {}", ctor_type(c).show());
             any = true;
         }
@@ -1312,7 +1333,7 @@ fn browse_module(built: &Built, module: &str) {
     };
     let prefix = format!("{path}.");
     let mut rows = Vec::new();
-    for decl in &built.checked.decls {
+    for decl in &built.checked.defs.decls {
         if let Some(name) = decl.name.strip_prefix(&prefix) {
             rows.push((
                 name.to_string(),
@@ -1323,7 +1344,7 @@ fn browse_module(built: &Built, module: &str) {
             ));
         }
     }
-    for (canonical, ctor) in &built.checked.ctors {
+    for (canonical, ctor) in &built.checked.defs.ctors {
         if let Some(name) = canonical.strip_prefix(&prefix) {
             rows.push((
                 name.to_string(),
@@ -1331,7 +1352,7 @@ fn browse_module(built: &Built, module: &str) {
             ));
         }
     }
-    for canonical in built.checked.data.keys() {
+    for canonical in built.checked.defs.data.keys() {
         if let Some(name) = canonical.strip_prefix(&prefix) {
             rows.push((name.to_string(), format!("type {name}")));
         }
@@ -1386,13 +1407,13 @@ fn info_lines(session: &Session, built: &Built, query: &str) -> Vec<String> {
     // A bare query (`map`) names a glob-imported binding stored under its
     // canonical symbol (`Data.List.map`); resolve it the way an expression would.
     let name = built.imports.get(query).map_or(query, String::as_str);
-    if let Some(d) = ck.decls.iter().find(|d| d.name == name) {
+    if let Some(d) = ck.defs.decls.iter().find(|d| d.name == name) {
         out.push(format!(
             "{name} : {}",
             show_type_with_effects(&d.ty, &d.effects)
         ));
     }
-    if let Some(c) = ck.ctors.get(name) {
+    if let Some(c) = ck.defs.ctors.get(name) {
         let mut s = format!("constructor of {}: {}", c.type_name, ctor_type(c).show());
         if !c.fields.is_empty() {
             let _ = write!(
@@ -1407,11 +1428,11 @@ fn info_lines(session: &Session, built: &Built, query: &str) -> Vec<String> {
         }
         out.push(s);
     }
-    if let Some(d) = ck.data.get(name) {
+    if let Some(d) = ck.defs.data.get(name) {
         let head = if d.params.is_empty() {
             name.to_string()
         } else {
-            format!("{name}({})", d.params.join(", "))
+            format!("{name}({})", d.param_names().join(", "))
         };
         out.push(format!("type {head} = {}", d.ctors.join(" | ")));
     }
@@ -1427,7 +1448,7 @@ fn kind(built: &Built, name: &str) {
     let arity = if Type::SCALARS.iter().any(|t| t.show() == name) {
         Some(0)
     } else {
-        built.checked.data.get(name).map(|d| d.params.len())
+        built.checked.defs.data.get(name).map(|d| d.params.len())
     };
     match arity {
         Some(n) => {
@@ -1469,6 +1490,9 @@ const TOGGLES: &[Toggle] = &[
     ('t', "types", "show inferred type and effect row", |f| {
         &mut f.types
     }),
+    ('e', "effects", "show empty effect rows explicitly", |f| {
+        &mut f.effects
+    }),
     ('s', "timing", "show evaluation time", |f| &mut f.timing),
     ('h', "holes", "defer typed holes to runtime faults", |f| {
         &mut f.holes
@@ -1481,7 +1505,7 @@ fn set(session: &mut Session, arg: &str) {
         println!("options (:set +x to enable, -x to disable):");
         for (ch, name, desc, get) in TOGGLES {
             let on = *get(&mut session.flags);
-            println!("  +{ch}  {name:<7}{desc:<36}[{}]", on_off(on));
+            println!("  +{ch}  {name:<8}{desc:<36}[{}]", on_off(on));
         }
         return;
     }
@@ -1526,7 +1550,7 @@ fn show_type(session: &Session, built: &Built, rest: &str) {
     match desugared {
         Err(e) => report(&e.into(), &text, REPL_SOURCE_NAME),
         Ok(e) => match infer_expr(&built.checked, &e) {
-            Ok((ty, eff)) => println!("{rest} : {}", show_type_with_effects(&ty, &eff)),
+            Ok((ty, eff)) => println!("{rest} : {}", render_type(session.flags, &ty, &eff)),
             Err(e) => report(&e.into(), &text, REPL_SOURCE_NAME),
         },
     }
@@ -1814,25 +1838,34 @@ mod tests {
         built.front(&mut surface).expect("expression resolves");
         let expression = desugar_expr(&surface).expect("expression desugars");
         let mut session_fields = BTreeMap::new();
-        session_fields.insert(expression.id, ("Point".to_string(), 0, 2));
-        built.checked.facts = crate::hir::NodeFacts::from_tables(
-            session_fields,
-            BTreeMap::new(),
-            BTreeMap::new(),
-            BTreeMap::new(),
-            BTreeMap::new(),
-            BTreeMap::new(),
-            BTreeMap::new(),
-            BTreeSet::new(),
-            BTreeMap::new(),
-            BTreeSet::new(),
+        session_fields.insert(
+            expression.id,
+            crate::types::FieldRef {
+                ctor: "Point".to_string(),
+                index: 0,
+                arity: 2,
+            },
         );
+        built
+            .checked
+            .replace_node_facts_for_test(crate::hir::NodeFacts::from_tables(
+                session_fields,
+                BTreeMap::new(),
+                BTreeMap::new(),
+                BTreeMap::new(),
+                BTreeMap::new(),
+                BTreeMap::new(),
+                BTreeMap::new(),
+                BTreeSet::new(),
+                BTreeMap::new(),
+                BTreeSet::new(),
+            ));
 
         let (value, ty, _) = session
             .eval_chained(&built, "(Point { x = 11, y = 22 }).y")
             .expect("checked prompt facts elaborate independently");
         assert_eq!(value, "22");
-        assert_eq!(ty, "Int");
+        assert_eq!(ty.show(), "Int");
     }
 
     #[test]
@@ -1862,7 +1895,7 @@ mod tests {
                 .eval_chained(&built, expr)
                 .unwrap_or_else(|e| panic!("`{expr}` must evaluate without a fault, got: {e}"));
             assert_eq!(val, "()", "`{expr}` returns unit");
-            assert_eq!(ty, "Unit", "`{expr}` has unit type");
+            assert_eq!(ty.show(), "Unit", "`{expr}` has unit type");
         }
         for (expr, rendered) in [
             ("\"{[1]}\"", "\"[1]\""),
@@ -1874,5 +1907,36 @@ mod tests {
                 .unwrap_or_else(|e| panic!("`{expr}` must evaluate without a fault, got: {e}"));
             assert_eq!(val, rendered, "`{expr}` renders its structural value");
         }
+    }
+
+    #[test]
+    fn empty_effect_row_elision_is_prompt_presentation_only() {
+        let (mut session, mut built) = fresh();
+
+        let (val, ty, eff) = session
+            .eval_chained(&built, "1 + 1")
+            .expect("pure expression evaluates");
+        assert_eq!(val, "2");
+        assert!(eff.is_empty(), "1 + 1 infers a closed empty row");
+        assert_eq!(render_type(session.flags, &ty, &eff), "Int");
+
+        assert!(step(&mut session, &mut built, ":set +e"));
+        assert_eq!(render_type(session.flags, &ty, &eff), "Int ! {}");
+
+        let (_, con_ty, con_eff) = session
+            .eval_chained(&built, "println(1)")
+            .expect("console expression evaluates");
+        let explicit = render_type(session.flags, &con_ty, &con_eff);
+        assert_eq!(explicit, "Unit ! {IO}");
+
+        assert!(step(&mut session, &mut built, ":set -e"));
+        assert_eq!(render_type(session.flags, &con_ty, &con_eff), explicit);
+
+        assert_eq!(ty.show(), "Int");
+        assert_eq!(show_effects(&eff), "{}");
+        assert_eq!(
+            format!("{} ! {}", ty.show(), show_effects(&eff)),
+            "Int ! {}"
+        );
     }
 }

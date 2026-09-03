@@ -25,10 +25,10 @@ compaction, above it is not.
 | component        | Rust raw | Rust code | Prism raw | Prism code | ratio |
 | ---------------- | -------: | --------: | --------: | ---------: | ----: |
 | lexer and layout |    1,546 |     1,230 |     1,684 |      1,234 |  1.00 |
-| parser           |    2,555 |     1,931 |     7,538 |      6,484 |  3.36 |
-| surface AST      |    1,994 |     1,417 |       354 |        199 |  0.14 |
+| parser           |    2,607 |     1,963 |     7,538 |      6,484 |  3.30 |
+| surface AST      |    2,092 |     1,483 |       354 |        199 |  0.13 |
 | syntax codecs    |     none |      none |     2,902 |      2,382 |   n/a |
-| checker          |   11,011 |     8,637 |     4,233 |      3,386 |  0.39 |
+| checker          |   12,241 |     9,685 |     4,233 |      3,386 |  0.35 |
 
 What each row counts:
 
@@ -49,7 +49,8 @@ What each row counts:
 - **syntax codecs**: Rust none; Prism `lib/std/Syntax/Codec.pr`.
 - **checker**: Rust `src/tc/classes.rs`, `src/tc/context.rs`,
   `src/tc/coverage.rs`, `src/tc/env.rs`, `src/tc/infer.rs`, `src/tc/mod.rs`,
-  `src/tc/pat.rs`, `src/tc/subsume.rs`, `src/tc/infer/decl.rs`,
+  `src/tc/pat.rs`, `src/tc/product.rs`, `src/tc/seed.rs`, `src/tc/session.rs`,
+  `src/tc/subsume.rs`, `src/tc/tests.rs`, `src/tc/infer/decl.rs`,
   `src/tc/infer/defaulting.rs`, `src/tc/infer/diagnostics.rs`,
   `src/tc/infer/numeric.rs`, `src/tc/infer/paths.rs`, `src/tc/infer/records.rs`;
   Prism `packages/tc/src/Tc.pr`, `packages/tc/src/Bootstrap.pr`.
@@ -60,7 +61,7 @@ What each row counts:
   at 1.00. The Prism side was deliberately written to track the Rust side token
   for token so the two can be diffed, so what this row measures is that decision
   and not the language.
-- **parser**, threshold ratio 0.50 or lower: FAILED at 3.36. The pre-registered
+- **parser**, threshold ratio 0.50 or lower: FAILED at 3.30. The pre-registered
   bet was that the library floor had absorbed the plumbing. The first judgment
   decomposed the gap into three named causes, and the two that were compiler
   work have landed: the sequencing rewrite and the `let ... else` early-return
@@ -77,7 +78,7 @@ What each row counts:
   tables derive. No further compiler work is pre-registered against this row; it
   stays failed rather than re-excused, and the rise is recorded rather than
   netted against the earlier fall.
-- **surface AST**, threshold not evidence for the claim: not evidence at 0.14.
+- **surface AST**, threshold not evidence for the claim: not evidence at 0.13.
   The Rust file carries derives and hand-written trait impls alongside the
   declarations and the Prism file carries declarations only, so most of the gap
   is a difference in what the two files hold. It becomes a comparison when the
@@ -89,7 +90,7 @@ What each row counts:
   record. There is no Rust counterpart to divide by because that side is derived
   and occupies no lines, and that asymmetry is exactly the gap.
 - **checker**, threshold ratio 0.50 or lower at full coverage: recorded, not
-  judged, at 0.39. The Prism side checks the subset the bootstrap workbench
+  judged, at 0.35. The Prism side checks the subset the bootstrap workbench
   supports, so the number says what a subset costs, not what the full checker
   will. That subset is no longer the pure first-order one it was: this release
   added written effect rows, parameterized effect labels, shared handler effect

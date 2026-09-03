@@ -1,0 +1,16 @@
+# Resource baselines for the optimization fixtures. One
+# `<program>\t<interpreter steps>\t<native cells allocated>\t<cells reused>` line
+# per fixture, sorted. Checked exactly (the counts are deterministic): a decrease
+# is an optimization win the baseline has not recorded yet, an increase is a cost
+# regression no other gate sees. Review the diff, then regenerate with
+# PRISM_ACCEPT_OPTIMIZER_BASELINE=1. Do not hand-edit.
+examples/fixtures/compiler/ctor_cross_call.pr	60	2	0
+examples/fixtures/compiler/deep_immutable.pr	664	16	0
+examples/fixtures/compiler/exact_size_filter.pr	2112	35	1
+examples/fixtures/compiler/exact_size_map.pr	2247	22	20
+examples/fixtures/compiler/ho_once_wrapper.pr	128	0	0
+examples/fixtures/compiler/iter_callback.pr	1391	28	9
+examples/fixtures/compiler/known_closure.pr	66	0	0
+examples/fixtures/compiler/opaque_kill.pr	115	5	0
+examples/fixtures/compiler/unboxed_cross.pr	123	13	0
+examples/fixtures/compiler/vec128_cross.pr	108	16	0

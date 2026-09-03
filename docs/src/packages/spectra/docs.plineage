@@ -113,19 +113,7 @@
       }
     },
     {
-      "id": "prism-core-hash-v2:64d7f538303bfb93f63bdd52b4bced4eb4dea35b9a3af883628b9ea2031f26b3",
-      "kind": "source-root",
-      "payload": {
-        "role": "source",
-        "name": null,
-        "origin": null,
-        "artifact_kind": "namespace",
-        "scheme": "prism-core-hash-v2",
-        "root": "64d7f538303bfb93f63bdd52b4bced4eb4dea35b9a3af883628b9ea2031f26b3"
-      }
-    },
-    {
-      "id": "prism-core-hash-v2:a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851",
+      "id": "prism-core-hash-v2:03d40d70fcd66dc8d8487a77ad63de56379fb23f22f87198f2edcf674eb93c43",
       "kind": "stdlib-root",
       "payload": {
         "role": "stdlib",
@@ -133,7 +121,19 @@
         "origin": null,
         "artifact_kind": "embedded-stdlib",
         "scheme": "prism-core-hash-v2",
-        "root": "a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851"
+        "root": "03d40d70fcd66dc8d8487a77ad63de56379fb23f22f87198f2edcf674eb93c43"
+      }
+    },
+    {
+      "id": "prism-core-hash-v2:d5a6f79f7ff5de6b085559318037ce0eb9db3aaba5ae54e9ba85c117525b6bb2",
+      "kind": "source-root",
+      "payload": {
+        "role": "source",
+        "name": null,
+        "origin": null,
+        "artifact_kind": "namespace",
+        "scheme": "prism-core-hash-v2",
+        "root": "d5a6f79f7ff5de6b085559318037ce0eb9db3aaba5ae54e9ba85c117525b6bb2"
       }
     },
     {
@@ -146,14 +146,32 @@
       }
     },
     {
-      "id": "sha256:182b00c8f58bf797fe149f17a2609c9cfa01fa022f86f7a96d100f151ba33e79",
+      "id": "sha256:628173fe916bf9533788f70a379e621d0b756a51e76e50a2725241b68481d85a",
+      "kind": "doctest",
+      "payload": {
+        "location": "Code (module)",
+        "output_scheme": "sha256",
+        "output_digest": "facbc9beeab8f6547d4ea3feff0e1c1cdcc4af79a2ae7ae9c09728a95dd983b9"
+      }
+    },
+    {
+      "id": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
+      "kind": "request",
+      "payload": {
+        "kind": "docs",
+        "path": "packages/spectra",
+        "entry": "packages/spectra"
+      }
+    },
+    {
+      "id": "sha256:88fbe93b6ebef9f4ee6705877b271177825ad98b6e443464c62617898fd648b7",
       "kind": "compiler-identity",
       "payload": {
-        "fingerprint": "compiler=0.19.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=docs;source-root=prism-core-hash-v2:64d7f538303bfb93f63bdd52b4bced4eb4dea35b9a3af883628b9ea2031f26b3;stdlib-root=prism-core-hash-v2:a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;erasures=true;native-effects=true;trampoline=true;fuse=false;rt-checks=false;native-kont-frames=false;",
+        "fingerprint": "compiler=0.21.0;hash-scheme=prism-core-hash-v2;target=aarch64-apple-darwin;backend=docs;source-root=prism-core-hash-v2:d5a6f79f7ff5de6b085559318037ce0eb9db3aaba5ae54e9ba85c117525b6bb2;stdlib-root=prism-core-hash-v2:03d40d70fcd66dc8d8487a77ad63de56379fb23f22f87198f2edcf674eb93c43;opt=O1;passes=level-default;disabled=none;backend-opt=2;scheduler=cooperative;effect-tier=auto;erasures=true;native-effects=true;trampoline=true;fuse=false;borrow-infer=true;rt-checks=false;native-kont-frames=false;",
         "rows": [
           {
             "key": "compiler",
-            "value": "0.19.0"
+            "value": "0.21.0"
           },
           {
             "key": "hash-scheme",
@@ -169,11 +187,11 @@
           },
           {
             "key": "source-root",
-            "value": "prism-core-hash-v2:64d7f538303bfb93f63bdd52b4bced4eb4dea35b9a3af883628b9ea2031f26b3"
+            "value": "prism-core-hash-v2:d5a6f79f7ff5de6b085559318037ce0eb9db3aaba5ae54e9ba85c117525b6bb2"
           },
           {
             "key": "stdlib-root",
-            "value": "prism-core-hash-v2:a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851"
+            "value": "prism-core-hash-v2:03d40d70fcd66dc8d8487a77ad63de56379fb23f22f87198f2edcf674eb93c43"
           },
           {
             "key": "opt",
@@ -216,6 +234,10 @@
             "value": "false"
           },
           {
+            "key": "borrow-infer",
+            "value": "true"
+          },
+          {
             "key": "rt-checks",
             "value": "false"
           },
@@ -224,24 +246,6 @@
             "value": "false"
           }
         ]
-      }
-    },
-    {
-      "id": "sha256:628173fe916bf9533788f70a379e621d0b756a51e76e50a2725241b68481d85a",
-      "kind": "doctest",
-      "payload": {
-        "location": "Code (module)",
-        "output_scheme": "sha256",
-        "output_digest": "facbc9beeab8f6547d4ea3feff0e1c1cdcc4af79a2ae7ae9c09728a95dd983b9"
-      }
-    },
-    {
-      "id": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
-      "kind": "request",
-      "payload": {
-        "kind": "docs",
-        "path": "packages/spectra",
-        "entry": "packages/spectra"
       }
     },
     {
@@ -350,12 +354,12 @@
     },
     {
       "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
-      "to": "prism-core-hash-v2:64d7f538303bfb93f63bdd52b4bced4eb4dea35b9a3af883628b9ea2031f26b3",
+      "to": "prism-core-hash-v2:03d40d70fcd66dc8d8487a77ad63de56379fb23f22f87198f2edcf674eb93c43",
       "kind": "input"
     },
     {
       "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
-      "to": "prism-core-hash-v2:a684f8cd89f4370b57fbcdfe0e682a064e82d61bc6a1dc5faee19647cf0f2851",
+      "to": "prism-core-hash-v2:d5a6f79f7ff5de6b085559318037ce0eb9db3aaba5ae54e9ba85c117525b6bb2",
       "kind": "input"
     },
     {
@@ -365,13 +369,13 @@
     },
     {
       "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
-      "to": "sha256:182b00c8f58bf797fe149f17a2609c9cfa01fa022f86f7a96d100f151ba33e79",
-      "kind": "identified-by"
+      "to": "sha256:628173fe916bf9533788f70a379e621d0b756a51e76e50a2725241b68481d85a",
+      "kind": "produced"
     },
     {
       "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",
-      "to": "sha256:628173fe916bf9533788f70a379e621d0b756a51e76e50a2725241b68481d85a",
-      "kind": "produced"
+      "to": "sha256:88fbe93b6ebef9f4ee6705877b271177825ad98b6e443464c62617898fd648b7",
+      "kind": "identified-by"
     },
     {
       "from": "sha256:74a1cd777e5655c768c539280cb1b06cdcad6c1b175d1102099623f66ceff337",

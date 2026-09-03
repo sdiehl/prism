@@ -10,9 +10,11 @@ use prism_common::sym::Sym;
 use prism_syntax::kw;
 use prism_syntax::names::reuse_token;
 
+use super::verify::clone_core_type;
 use super::{
-    CoreType, Owned, ReuseLowered, TypedBinder, TypedComp, TypedCompKind, TypedCore, TypedCoreFn,
-    TypedHandleOp, TypedHandler, TypedPattern, TypedValue, TypedValueKind, UncheckedTypedCore,
+    CompSig, CoreInstantiation, CoreType, Owned, ReuseLowered, TypedBinder, TypedComp,
+    TypedCompKind, TypedCore, TypedCoreFn, TypedForward, TypedHandleOp, TypedHandler, TypedPattern,
+    TypedValue, TypedValueKind, UncheckedTypedCore,
 };
 
 /// Pair released constructor shells with fitting allocations without erasing
@@ -27,7 +29,7 @@ pub fn reuse(core: TypedCore<Owned>) -> UncheckedTypedCore<ReuseLowered> {
                 TypedCoreFn::new(
                     function.name,
                     function.params,
-                    reuse_comp(&function.body),
+                    reuse_comp(function.body),
                     function.sig,
                     function.dict_arity,
                 )
@@ -36,250 +38,803 @@ pub fn reuse(core: TypedCore<Owned>) -> UncheckedTypedCore<ReuseLowered> {
     )
 }
 
-fn reuse_comp(comp: &TypedComp) -> TypedComp {
-    let kind = match &comp.kind {
-        TypedCompKind::Bind(first, binder, rest) => TypedCompKind::Bind(
-            Box::new(reuse_comp(first)),
-            binder.clone(),
-            Box::new(reuse_comp(rest)),
-        ),
-        TypedCompKind::If(condition, yes, no) => TypedCompKind::If(
-            condition.clone(),
-            Box::new(reuse_comp(yes)),
-            Box::new(reuse_comp(no)),
-        ),
-        TypedCompKind::Lam(params, body) => {
-            TypedCompKind::Lam(params.clone(), Box::new(reuse_comp(body)))
-        }
-        TypedCompKind::Case(scrutinee, arms) => TypedCompKind::Case(
-            scrutinee.clone(),
-            arms.iter()
-                .map(|(pattern, body)| {
-                    let body = reuse_comp(body);
-                    (pattern.clone(), reuse_arm(scrutinee, pattern, &body))
-                })
-                .collect(),
-        ),
-        TypedCompKind::Handle {
-            body,
-            return_binder,
-            return_body,
-            ops,
-        } => TypedCompKind::Handle {
-            body: Box::new(reuse_comp(body)),
-            return_binder: return_binder.clone(),
-            return_body: return_body.as_deref().map(reuse_comp).map(Box::new),
-            ops: TypedHandler {
-                arms: ops
-                    .arms
-                    .iter()
-                    .map(|arm| TypedHandleOp {
-                        body: reuse_comp(&arm.body),
-                        ..arm.clone()
+fn reuse_comp(comp: TypedComp) -> TypedComp {
+    let mut work = vec![ReuseFrame::Comp(comp)];
+    let mut results = Vec::new();
+    while let Some(frame) = work.pop() {
+        match frame {
+            ReuseFrame::Comp(comp) => {
+                let TypedComp { sig, kind } = comp;
+                match kind {
+                    TypedCompKind::Bind(first, binder, rest) => {
+                        work.push(ReuseFrame::FinishBind { sig, binder });
+                        work.push(ReuseFrame::Comp(*rest));
+                        work.push(ReuseFrame::Comp(*first));
+                    }
+                    TypedCompKind::If(condition, yes, no) => {
+                        work.push(ReuseFrame::FinishIf { sig, condition });
+                        work.push(ReuseFrame::Comp(*no));
+                        work.push(ReuseFrame::Comp(*yes));
+                    }
+                    TypedCompKind::Lam(params, body) => {
+                        work.push(ReuseFrame::FinishLam { sig, params });
+                        work.push(ReuseFrame::Comp(*body));
+                    }
+                    TypedCompKind::Case(scrutinee, arms) => {
+                        let mut patterns = Vec::with_capacity(arms.len());
+                        let mut bodies = Vec::with_capacity(arms.len());
+                        for (pattern, body) in arms {
+                            patterns.push(pattern);
+                            bodies.push(body);
+                        }
+                        work.push(ReuseFrame::FinishCase {
+                            sig,
+                            scrutinee,
+                            patterns,
+                        });
+                        work.extend(bodies.into_iter().rev().map(ReuseFrame::Comp));
+                    }
+                    TypedCompKind::Handle {
+                        body,
+                        return_binder,
+                        return_body,
+                        ops,
+                    } => {
+                        let TypedHandler { arms, forwarded } = ops;
+                        let mut metadata = Vec::with_capacity(arms.len());
+                        let mut bodies = Vec::with_capacity(arms.len());
+                        for arm in arms {
+                            metadata.push(HandleMetadata {
+                                name: arm.name,
+                                instantiation: arm.instantiation,
+                                params: arm.params,
+                                resume: arm.resume,
+                            });
+                            bodies.push(arm.body);
+                        }
+                        let has_return = return_body.is_some();
+                        work.push(ReuseFrame::FinishHandle {
+                            sig,
+                            return_binder,
+                            has_return,
+                            metadata,
+                            forwarded,
+                        });
+                        work.extend(bodies.into_iter().rev().map(ReuseFrame::Comp));
+                        if let Some(return_body) = return_body {
+                            work.push(ReuseFrame::Comp(*return_body));
+                        }
+                        work.push(ReuseFrame::Comp(*body));
+                    }
+                    other => results.push(TypedComp::new(sig, other)),
+                }
+            }
+            ReuseFrame::FinishBind { sig, binder } => {
+                let rest = pop_comp(&mut results);
+                let first = pop_comp(&mut results);
+                results.push(TypedComp::new(
+                    sig,
+                    TypedCompKind::Bind(Box::new(first), binder, Box::new(rest)),
+                ));
+            }
+            ReuseFrame::FinishIf { sig, condition } => {
+                let no = pop_comp(&mut results);
+                let yes = pop_comp(&mut results);
+                results.push(TypedComp::new(
+                    sig,
+                    TypedCompKind::If(condition, Box::new(yes), Box::new(no)),
+                ));
+            }
+            ReuseFrame::FinishLam { sig, params } => {
+                let body = pop_comp(&mut results);
+                results.push(TypedComp::new(
+                    sig,
+                    TypedCompKind::Lam(params, Box::new(body)),
+                ));
+            }
+            ReuseFrame::FinishCase {
+                sig,
+                scrutinee,
+                patterns,
+            } => {
+                let start = results
+                    .len()
+                    .checked_sub(patterns.len())
+                    .expect("each case arm has a rewritten body");
+                let bodies = results.drain(start..);
+                let arms = patterns
+                    .into_iter()
+                    .zip(bodies)
+                    .map(|(pattern, body)| {
+                        let body = reuse_arm(&scrutinee, &pattern, body);
+                        (pattern, body)
                     })
-                    .collect(),
-                forwarded: ops.forwarded.clone(),
-            },
-        },
-        _ => return comp.clone(),
-    };
-    TypedComp::new(comp.sig.clone(), kind)
+                    .collect();
+                results.push(TypedComp::new(sig, TypedCompKind::Case(scrutinee, arms)));
+            }
+            ReuseFrame::FinishHandle {
+                sig,
+                return_binder,
+                has_return,
+                metadata,
+                forwarded,
+            } => {
+                let body_count = 1 + usize::from(has_return) + metadata.len();
+                let start = results
+                    .len()
+                    .checked_sub(body_count)
+                    .expect("each handler clause has a rewritten body");
+                let (body, return_body, arms) = {
+                    let mut bodies = results.drain(start..);
+                    let body = Box::new(bodies.next().expect("a handled body exists"));
+                    let return_body = has_return
+                        .then(|| Box::new(bodies.next().expect("a return-clause body exists")));
+                    let arms = metadata
+                        .into_iter()
+                        .map(|arm| TypedHandleOp {
+                            name: arm.name,
+                            instantiation: arm.instantiation,
+                            params: arm.params,
+                            resume: arm.resume,
+                            body: bodies.next().expect("an operation-clause body exists"),
+                        })
+                        .collect();
+                    let extra_body = bodies.next();
+                    debug_assert!(extra_body.is_none());
+                    (body, return_body, arms)
+                };
+                results.push(TypedComp::new(
+                    sig,
+                    TypedCompKind::Handle {
+                        body,
+                        return_binder,
+                        return_body,
+                        ops: TypedHandler { arms, forwarded },
+                    },
+                ));
+            }
+        }
+    }
+    let result = pop_comp(&mut results);
+    debug_assert!(results.is_empty());
+    result
 }
 
-fn reuse_arm(scrutinee: &TypedValue, pattern: &TypedPattern, body: &TypedComp) -> TypedComp {
+enum ReuseFrame {
+    Comp(TypedComp),
+    FinishBind {
+        sig: CompSig,
+        binder: TypedBinder,
+    },
+    FinishIf {
+        sig: CompSig,
+        condition: TypedValue,
+    },
+    FinishLam {
+        sig: CompSig,
+        params: Vec<TypedBinder>,
+    },
+    FinishCase {
+        sig: CompSig,
+        scrutinee: TypedValue,
+        patterns: Vec<TypedPattern>,
+    },
+    FinishHandle {
+        sig: CompSig,
+        return_binder: Option<TypedBinder>,
+        has_return: bool,
+        metadata: Vec<HandleMetadata>,
+        forwarded: Vec<TypedForward>,
+    },
+}
+
+struct HandleMetadata {
+    name: Sym,
+    instantiation: Vec<CoreInstantiation>,
+    params: Vec<TypedBinder>,
+    resume: TypedBinder,
+}
+
+fn pop_comp(results: &mut Vec<TypedComp>) -> TypedComp {
+    results.pop().expect("a rewritten computation exists")
+}
+
+fn reuse_arm(scrutinee: &TypedValue, pattern: &TypedPattern, body: TypedComp) -> TypedComp {
     let TypedValueKind::Var {
         name: scrutinee_name,
         instantiation: _,
     } = &scrutinee.kind
     else {
-        return body.clone();
+        return body;
     };
     let Some(capacity) = reuse_cell_capacity(pattern, &scrutinee.ty) else {
-        return body.clone();
+        return body;
     };
     let token = TypedBinder::new(
         Sym::from(reuse_token(scrutinee_name.as_str())),
-        CoreType::ReuseToken(Box::new(scrutinee.ty.clone())),
+        CoreType::ReuseToken(Box::new(clone_core_type(scrutinee.ty()))),
     );
     if pattern_binds(pattern, *scrutinee_name) || pattern_binds(pattern, token.name) {
-        return body.clone();
+        return body;
     }
-    try_reuse(body, *scrutinee_name, scrutinee, &token, capacity).unwrap_or_else(|| body.clone())
+    try_reuse(body, *scrutinee_name, &token, capacity)
 }
 
 // Locate the drop that releases the matched cell. Once found, the remainder of
 // that path must spend the resulting token. A branch with no such drop remains
 // untouched; ambiguous conditional placement declines the entire rewrite.
 fn try_reuse(
-    comp: &TypedComp,
+    comp: TypedComp,
     scrutinee_name: Sym,
-    freed: &TypedValue,
     token: &TypedBinder,
     capacity: usize,
-) -> Option<TypedComp> {
-    match &comp.kind {
-        TypedCompKind::Bind(first, binder, rest) => {
-            if let TypedCompKind::Drop(dropped) = &first.kind {
-                if dropped == freed {
-                    let body = consume_alloc(rest, token, capacity)?;
-                    let sig = body.sig.clone();
-                    return Some(TypedComp::new(
-                        sig,
-                        TypedCompKind::WithReuse {
-                            token: token.clone(),
-                            freed: freed.clone(),
-                            body: Box::new(body),
-                        },
-                    ));
-                }
-            }
-            if let Some(first) = try_reuse(first, scrutinee_name, freed, token, capacity) {
-                return Some(TypedComp::new(
-                    comp.sig.clone(),
-                    TypedCompKind::Bind(Box::new(first), binder.clone(), rest.clone()),
-                ));
-            }
-            if binder.name == scrutinee_name || binder.name == token.name {
-                return None;
-            }
-            let rest = try_reuse(rest, scrutinee_name, freed, token, capacity)?;
-            Some(TypedComp::new(
-                comp.sig.clone(),
-                TypedCompKind::Bind(first.clone(), binder.clone(), Box::new(rest)),
-            ))
-        }
-        TypedCompKind::If(condition, yes, no) => {
-            let rewritten_yes = try_reuse(yes, scrutinee_name, freed, token, capacity);
-            let rewritten_no = try_reuse(no, scrutinee_name, freed, token, capacity);
-            match (rewritten_yes, rewritten_no) {
-                (Some(rewritten_yes), None) => Some(TypedComp::new(
-                    comp.sig.clone(),
-                    TypedCompKind::If(condition.clone(), Box::new(rewritten_yes), no.clone()),
-                )),
-                (None, Some(rewritten_no)) => Some(TypedComp::new(
-                    comp.sig.clone(),
-                    TypedCompKind::If(condition.clone(), yes.clone(), Box::new(rewritten_no)),
-                )),
-                (Some(_), Some(_)) | (None, None) => None,
-            }
-        }
-        TypedCompKind::Case(scrutinee, arms) => {
-            let mut hit = false;
-            let arms = arms
-                .iter()
-                .map(|(pattern, body)| {
-                    if pattern_binds(pattern, scrutinee_name) || pattern_binds(pattern, token.name)
-                    {
-                        return (pattern.clone(), body.clone());
-                    }
-                    try_reuse(body, scrutinee_name, freed, token, capacity).map_or_else(
-                        || (pattern.clone(), body.clone()),
-                        |body| {
-                            hit = true;
-                            (pattern.clone(), body)
-                        },
-                    )
-                })
-                .collect();
-            hit.then(|| {
-                TypedComp::new(
-                    comp.sig.clone(),
-                    TypedCompKind::Case(scrutinee.clone(), arms),
-                )
-            })
-        }
-        TypedCompKind::WithReuse {
-            token: inner_token,
-            freed: inner_freed,
-            body,
-        } => {
-            if inner_token.name == scrutinee_name || inner_token.name == token.name {
-                return None;
-            }
-            let body = try_reuse(body, scrutinee_name, freed, token, capacity)?;
-            Some(TypedComp::new(
-                comp.sig.clone(),
-                TypedCompKind::WithReuse {
-                    token: inner_token.clone(),
-                    freed: inner_freed.clone(),
-                    body: Box::new(body),
-                },
-            ))
-        }
-        _ => None,
-    }
+) -> TypedComp {
+    let mut plans = Vec::new();
+    let Some(root) = plan_try_reuse(&comp, scrutinee_name, token.name, capacity, &mut plans) else {
+        return comp;
+    };
+    apply_plan(comp, root, &plans, token)
 }
 
-// Spend one credit at the first fitting allocation on every continuation path.
-// A non-allocating tail or a branch that cannot spend on all paths aborts the
-// enclosing rewrite, leaving the original body unchanged.
-fn consume_alloc(comp: &TypedComp, token: &TypedBinder, capacity: usize) -> Option<TypedComp> {
-    match &comp.kind {
-        TypedCompKind::Bind(first, binder, rest) => {
-            if let Some(first) = consume_alloc(first, token, capacity) {
-                return Some(TypedComp::new(
-                    comp.sig.clone(),
-                    TypedCompKind::Bind(Box::new(first), binder.clone(), rest.clone()),
+fn plan_try_reuse(
+    comp: &TypedComp,
+    scrutinee_name: Sym,
+    token_name: Sym,
+    capacity: usize,
+    plans: &mut Vec<Plan>,
+) -> Option<PlanId> {
+    let mut work = vec![TryFrame::Comp(comp)];
+    let mut results = Vec::new();
+    while let Some(frame) = work.pop() {
+        match frame {
+            TryFrame::Comp(comp) => match comp.kind() {
+                TypedCompKind::Bind(first, binder, rest) => {
+                    if matches!(
+                        first.kind(),
+                        TypedCompKind::Drop(TypedValue {
+                            kind: TypedValueKind::Var { name, .. },
+                            ..
+                        }) if *name == scrutinee_name
+                    ) {
+                        let plan = plan_consume_alloc(rest, token_name, capacity, plans)
+                            .map(|consume| push_plan(plans, Plan::TryDrop { consume }));
+                        results.push(plan);
+                    } else {
+                        work.push(TryFrame::BindFirst {
+                            rest,
+                            shadowed: binder.name == scrutinee_name || binder.name == token_name,
+                        });
+                        work.push(TryFrame::Comp(first));
+                    }
+                }
+                TypedCompKind::If(_, yes, no) => {
+                    work.push(TryFrame::FinishIf);
+                    work.push(TryFrame::Comp(no));
+                    work.push(TryFrame::Comp(yes));
+                }
+                TypedCompKind::Case(_, arms) => {
+                    work.push(TryFrame::FinishCase {
+                        arm_count: arms.len(),
+                    });
+                    work.extend(arms.iter().rev().map(|(pattern, body)| {
+                        if pattern_binds(pattern, scrutinee_name)
+                            || pattern_binds(pattern, token_name)
+                        {
+                            TryFrame::Blocked
+                        } else {
+                            TryFrame::Comp(body)
+                        }
+                    }));
+                }
+                TypedCompKind::WithReuse {
+                    token: inner_token,
+                    body,
+                    ..
+                } if inner_token.name != scrutinee_name && inner_token.name != token_name => {
+                    work.push(TryFrame::FinishWithReuse);
+                    work.push(TryFrame::Comp(body));
+                }
+                _ => results.push(None),
+            },
+            TryFrame::Blocked => results.push(None),
+            TryFrame::BindFirst { rest, shadowed } => {
+                if let Some(child) = pop_plan(&mut results) {
+                    results.push(Some(push_plan(plans, Plan::TryBindFirst { child })));
+                } else if shadowed {
+                    results.push(None);
+                } else {
+                    work.push(TryFrame::BindRest);
+                    work.push(TryFrame::Comp(rest));
+                }
+            }
+            TryFrame::BindRest => {
+                let plan = pop_plan(&mut results)
+                    .map(|child| push_plan(plans, Plan::TryBindRest { child }));
+                results.push(plan);
+            }
+            TryFrame::FinishIf => {
+                let no = pop_plan(&mut results);
+                let yes = pop_plan(&mut results);
+                let plan = match (yes, no) {
+                    (Some(child), None) => Some(push_plan(plans, Plan::TryIfYes { child })),
+                    (None, Some(child)) => Some(push_plan(plans, Plan::TryIfNo { child })),
+                    _ => None,
+                };
+                results.push(plan);
+            }
+            TryFrame::FinishCase { arm_count } => {
+                let start = results
+                    .len()
+                    .checked_sub(arm_count)
+                    .expect("each case arm has a reuse plan");
+                let arms: Vec<_> = results.drain(start..).collect();
+                let hit = arms.iter().any(Option::is_some);
+                results.push(hit.then(|| push_plan(plans, Plan::TryCase { arms })));
+            }
+            TryFrame::FinishWithReuse => {
+                let plan = pop_plan(&mut results)
+                    .map(|child| push_plan(plans, Plan::TryWithReuse { child }));
+                results.push(plan);
+            }
+        }
+    }
+    let result = pop_plan(&mut results);
+    debug_assert!(results.is_empty());
+    result
+}
+
+enum TryFrame<'a> {
+    Comp(&'a TypedComp),
+    Blocked,
+    BindFirst { rest: &'a TypedComp, shadowed: bool },
+    BindRest,
+    FinishIf,
+    FinishCase { arm_count: usize },
+    FinishWithReuse,
+}
+
+// Spend one credit at the first fitting allocation on every path.
+fn plan_consume_alloc(
+    comp: &TypedComp,
+    token_name: Sym,
+    capacity: usize,
+    plans: &mut Vec<Plan>,
+) -> Option<PlanId> {
+    let mut work = vec![ConsumeFrame::Comp(comp)];
+    let mut results = Vec::new();
+    while let Some(frame) = work.pop() {
+        match frame {
+            ConsumeFrame::Comp(comp) => match comp.kind() {
+                TypedCompKind::Bind(first, binder, rest) => {
+                    work.push(ConsumeFrame::BindFirst {
+                        rest,
+                        shadowed: binder.name == token_name,
+                    });
+                    work.push(ConsumeFrame::Comp(first));
+                }
+                TypedCompKind::Return(value)
+                    if rebuild_arity(value).is_some_and(|arity| arity <= capacity) =>
+                {
+                    results.push(Some(push_plan(plans, Plan::ConsumeReturn)));
+                }
+                TypedCompKind::If(_, yes, no) => {
+                    work.push(ConsumeFrame::IfYes { no });
+                    work.push(ConsumeFrame::Comp(yes));
+                }
+                TypedCompKind::Case(_, arms) if arms.is_empty() => {
+                    results.push(Some(push_plan(
+                        plans,
+                        Plan::ConsumeCase { arms: Vec::new() },
+                    )));
+                }
+                TypedCompKind::Case(_, arms) => {
+                    if pattern_binds(&arms[0].0, token_name) {
+                        results.push(None);
+                    } else {
+                        work.push(ConsumeFrame::CaseArm {
+                            arms,
+                            index: 0,
+                            rebuilt: Vec::with_capacity(arms.len()),
+                        });
+                        work.push(ConsumeFrame::Comp(&arms[0].1));
+                    }
+                }
+                TypedCompKind::WithReuse {
+                    token: inner_token,
+                    body,
+                    ..
+                } if inner_token.name != token_name => {
+                    work.push(ConsumeFrame::FinishWithReuse);
+                    work.push(ConsumeFrame::Comp(body));
+                }
+                _ => results.push(None),
+            },
+            ConsumeFrame::BindFirst { rest, shadowed } => {
+                if let Some(child) = pop_plan(&mut results) {
+                    results.push(Some(push_plan(plans, Plan::ConsumeBindFirst { child })));
+                } else if shadowed {
+                    results.push(None);
+                } else {
+                    work.push(ConsumeFrame::BindRest);
+                    work.push(ConsumeFrame::Comp(rest));
+                }
+            }
+            ConsumeFrame::BindRest => {
+                let plan = pop_plan(&mut results)
+                    .map(|child| push_plan(plans, Plan::ConsumeBindRest { child }));
+                results.push(plan);
+            }
+            ConsumeFrame::IfYes { no } => {
+                if let Some(yes) = pop_plan(&mut results) {
+                    work.push(ConsumeFrame::IfNo { yes });
+                    work.push(ConsumeFrame::Comp(no));
+                } else {
+                    results.push(None);
+                }
+            }
+            ConsumeFrame::IfNo { yes } => {
+                let plan =
+                    pop_plan(&mut results).map(|no| push_plan(plans, Plan::ConsumeIf { yes, no }));
+                results.push(plan);
+            }
+            ConsumeFrame::CaseArm {
+                arms,
+                index,
+                mut rebuilt,
+            } => {
+                if let Some(body) = pop_plan(&mut results) {
+                    rebuilt.push(body);
+                    let next = index + 1;
+                    if next == arms.len() {
+                        results.push(Some(push_plan(plans, Plan::ConsumeCase { arms: rebuilt })));
+                    } else if pattern_binds(&arms[next].0, token_name) {
+                        results.push(None);
+                    } else {
+                        work.push(ConsumeFrame::CaseArm {
+                            arms,
+                            index: next,
+                            rebuilt,
+                        });
+                        work.push(ConsumeFrame::Comp(&arms[next].1));
+                    }
+                } else {
+                    results.push(None);
+                }
+            }
+            ConsumeFrame::FinishWithReuse => {
+                let plan = pop_plan(&mut results)
+                    .map(|child| push_plan(plans, Plan::ConsumeWithReuse { child }));
+                results.push(plan);
+            }
+        }
+    }
+    let result = pop_plan(&mut results);
+    debug_assert!(results.is_empty());
+    result
+}
+
+enum ConsumeFrame<'a> {
+    Comp(&'a TypedComp),
+    BindFirst {
+        rest: &'a TypedComp,
+        shadowed: bool,
+    },
+    BindRest,
+    IfYes {
+        no: &'a TypedComp,
+    },
+    IfNo {
+        yes: PlanId,
+    },
+    CaseArm {
+        arms: &'a [(TypedPattern, TypedComp)],
+        index: usize,
+        rebuilt: Vec<PlanId>,
+    },
+    FinishWithReuse,
+}
+
+type PlanId = usize;
+
+enum Plan {
+    TryDrop { consume: PlanId },
+    TryBindFirst { child: PlanId },
+    TryBindRest { child: PlanId },
+    TryIfYes { child: PlanId },
+    TryIfNo { child: PlanId },
+    TryCase { arms: Vec<Option<PlanId>> },
+    TryWithReuse { child: PlanId },
+    ConsumeReturn,
+    ConsumeBindFirst { child: PlanId },
+    ConsumeBindRest { child: PlanId },
+    ConsumeIf { yes: PlanId, no: PlanId },
+    ConsumeCase { arms: Vec<PlanId> },
+    ConsumeWithReuse { child: PlanId },
+}
+
+fn push_plan(plans: &mut Vec<Plan>, plan: Plan) -> PlanId {
+    let id = plans.len();
+    plans.push(plan);
+    id
+}
+
+fn pop_plan(results: &mut Vec<Option<PlanId>>) -> Option<PlanId> {
+    results.pop().expect("a child reuse plan exists")
+}
+
+fn apply_plan(comp: TypedComp, root: PlanId, plans: &[Plan], token: &TypedBinder) -> TypedComp {
+    let mut work = vec![ApplyFrame::Comp(comp, root)];
+    let mut results = Vec::new();
+    while let Some(frame) = work.pop() {
+        match frame {
+            ApplyFrame::Comp(comp, id) => {
+                let TypedComp { sig, kind } = comp;
+                match &plans[id] {
+                    Plan::TryDrop { consume } => {
+                        let TypedCompKind::Bind(drop, _, rest) = kind else {
+                            unreachable!("a drop plan applies to a bind");
+                        };
+                        let TypedCompKind::Drop(freed) = drop.kind else {
+                            unreachable!("a drop plan applies to a drop computation");
+                        };
+                        work.push(ApplyFrame::FinishDrop { sig, freed });
+                        work.push(ApplyFrame::Comp(*rest, *consume));
+                    }
+                    Plan::TryBindFirst { child } | Plan::ConsumeBindFirst { child } => {
+                        let TypedCompKind::Bind(first, binder, rest) = kind else {
+                            unreachable!("a first-child plan applies to a bind");
+                        };
+                        work.push(ApplyFrame::FinishBindFirst { sig, binder, rest });
+                        work.push(ApplyFrame::Comp(*first, *child));
+                    }
+                    Plan::TryBindRest { child } | Plan::ConsumeBindRest { child } => {
+                        let TypedCompKind::Bind(first, binder, rest) = kind else {
+                            unreachable!("a continuation plan applies to a bind");
+                        };
+                        work.push(ApplyFrame::FinishBindRest { sig, first, binder });
+                        work.push(ApplyFrame::Comp(*rest, *child));
+                    }
+                    Plan::TryIfYes { child } => {
+                        let TypedCompKind::If(condition, yes, no) = kind else {
+                            unreachable!("a then-branch plan applies to an if");
+                        };
+                        work.push(ApplyFrame::FinishIfYes { sig, condition, no });
+                        work.push(ApplyFrame::Comp(*yes, *child));
+                    }
+                    Plan::TryIfNo { child } => {
+                        let TypedCompKind::If(condition, yes, no) = kind else {
+                            unreachable!("an else-branch plan applies to an if");
+                        };
+                        work.push(ApplyFrame::FinishIfNo {
+                            sig,
+                            condition,
+                            yes,
+                        });
+                        work.push(ApplyFrame::Comp(*no, *child));
+                    }
+                    Plan::TryCase { arms } => {
+                        let TypedCompKind::Case(scrutinee, source_arms) = kind else {
+                            unreachable!("an arm plan applies to a case");
+                        };
+                        push_case_apply(&mut work, sig, scrutinee, source_arms, arms);
+                    }
+                    Plan::TryWithReuse { child } | Plan::ConsumeWithReuse { child } => {
+                        let TypedCompKind::WithReuse { token, freed, body } = kind else {
+                            unreachable!("a nested reuse plan applies to WithReuse");
+                        };
+                        work.push(ApplyFrame::FinishWithReuse { sig, token, freed });
+                        work.push(ApplyFrame::Comp(*body, *child));
+                    }
+                    Plan::ConsumeReturn => {
+                        let TypedCompKind::Return(value) = kind else {
+                            unreachable!("an allocation plan applies to a return");
+                        };
+                        results.push(TypedComp::new(
+                            sig,
+                            TypedCompKind::Reuse(clone_binder(token), value),
+                        ));
+                    }
+                    Plan::ConsumeIf { yes, no } => {
+                        let TypedCompKind::If(condition, yes_comp, no_comp) = kind else {
+                            unreachable!("a branch allocation plan applies to an if");
+                        };
+                        work.push(ApplyFrame::FinishIfBoth { sig, condition });
+                        work.push(ApplyFrame::Comp(*no_comp, *no));
+                        work.push(ApplyFrame::Comp(*yes_comp, *yes));
+                    }
+                    Plan::ConsumeCase { arms } => {
+                        let TypedCompKind::Case(scrutinee, source_arms) = kind else {
+                            unreachable!("an allocation arm plan applies to a case");
+                        };
+                        let arms: Vec<_> = arms.iter().copied().map(Some).collect();
+                        push_case_apply(&mut work, sig, scrutinee, source_arms, &arms);
+                    }
+                }
+            }
+            ApplyFrame::FinishDrop { sig, freed } => {
+                let body = pop_comp(&mut results);
+                results.push(TypedComp::new(
+                    sig,
+                    TypedCompKind::WithReuse {
+                        token: clone_binder(token),
+                        freed,
+                        body: Box::new(body),
+                    },
                 ));
             }
-            if binder.name == token.name {
-                return None;
+            ApplyFrame::FinishBindFirst { sig, binder, rest } => {
+                let first = pop_comp(&mut results);
+                results.push(TypedComp::new(
+                    sig,
+                    TypedCompKind::Bind(Box::new(first), binder, rest),
+                ));
             }
-            let rest = consume_alloc(rest, token, capacity)?;
-            Some(TypedComp::new(
-                comp.sig.clone(),
-                TypedCompKind::Bind(first.clone(), binder.clone(), Box::new(rest)),
-            ))
-        }
-        TypedCompKind::Return(value)
-            if rebuild_arity(value).is_some_and(|arity| arity <= capacity) =>
-        {
-            Some(TypedComp::new(
-                comp.sig.clone(),
-                TypedCompKind::Reuse(token.clone(), value.clone()),
-            ))
-        }
-        TypedCompKind::If(condition, yes, no) => Some(TypedComp::new(
-            comp.sig.clone(),
-            TypedCompKind::If(
-                condition.clone(),
-                Box::new(consume_alloc(yes, token, capacity)?),
-                Box::new(consume_alloc(no, token, capacity)?),
-            ),
-        )),
-        TypedCompKind::Case(scrutinee, arms) => Some(TypedComp::new(
-            comp.sig.clone(),
-            TypedCompKind::Case(
-                scrutinee.clone(),
-                arms.iter()
-                    .map(|(pattern, body)| {
-                        if pattern_binds(pattern, token.name) {
-                            return None;
-                        }
-                        Some((pattern.clone(), consume_alloc(body, token, capacity)?))
-                    })
-                    .collect::<Option<Vec<_>>>()?,
-            ),
-        )),
-        TypedCompKind::WithReuse {
-            token: inner_token,
-            freed,
-            body,
-        } => {
-            if inner_token.name == token.name {
-                return None;
+            ApplyFrame::FinishBindRest { sig, first, binder } => {
+                let rest = pop_comp(&mut results);
+                results.push(TypedComp::new(
+                    sig,
+                    TypedCompKind::Bind(first, binder, Box::new(rest)),
+                ));
             }
-            Some(TypedComp::new(
-                comp.sig.clone(),
-                TypedCompKind::WithReuse {
-                    token: inner_token.clone(),
-                    freed: freed.clone(),
-                    body: Box::new(consume_alloc(body, token, capacity)?),
-                },
-            ))
+            ApplyFrame::FinishIfYes { sig, condition, no } => {
+                let yes = pop_comp(&mut results);
+                results.push(TypedComp::new(
+                    sig,
+                    TypedCompKind::If(condition, Box::new(yes), no),
+                ));
+            }
+            ApplyFrame::FinishIfNo {
+                sig,
+                condition,
+                yes,
+            } => {
+                let no = pop_comp(&mut results);
+                results.push(TypedComp::new(
+                    sig,
+                    TypedCompKind::If(condition, yes, Box::new(no)),
+                ));
+            }
+            ApplyFrame::FinishIfBoth { sig, condition } => {
+                let no = pop_comp(&mut results);
+                let yes = pop_comp(&mut results);
+                results.push(TypedComp::new(
+                    sig,
+                    TypedCompKind::If(condition, Box::new(yes), Box::new(no)),
+                ));
+            }
+            ApplyFrame::FinishCase {
+                sig,
+                scrutinee,
+                arms,
+                rewritten,
+            } => {
+                let start = results
+                    .len()
+                    .checked_sub(rewritten)
+                    .expect("each selected arm has a rewritten body");
+                let arms = {
+                    let mut bodies = results.drain(start..);
+                    let arms = arms
+                        .into_iter()
+                        .map(|arm| {
+                            let body = arm
+                                .body
+                                .unwrap_or_else(|| bodies.next().expect("a rewritten arm exists"));
+                            (arm.pattern, body)
+                        })
+                        .collect();
+                    let extra_body = bodies.next();
+                    debug_assert!(extra_body.is_none());
+                    arms
+                };
+                results.push(TypedComp::new(sig, TypedCompKind::Case(scrutinee, arms)));
+            }
+            ApplyFrame::FinishWithReuse { sig, token, freed } => {
+                let body = pop_comp(&mut results);
+                results.push(TypedComp::new(
+                    sig,
+                    TypedCompKind::WithReuse {
+                        token,
+                        freed,
+                        body: Box::new(body),
+                    },
+                ));
+            }
         }
-        _ => None,
     }
+    let result = pop_comp(&mut results);
+    debug_assert!(results.is_empty());
+    result
+}
+
+fn push_case_apply(
+    work: &mut Vec<ApplyFrame>,
+    sig: CompSig,
+    scrutinee: TypedValue,
+    source_arms: Vec<(TypedPattern, TypedComp)>,
+    plans: &[Option<PlanId>],
+) {
+    debug_assert_eq!(source_arms.len(), plans.len());
+    let mut selected = Vec::new();
+    let mut arms = Vec::with_capacity(source_arms.len());
+    for ((pattern, body), plan) in source_arms.into_iter().zip(plans.iter().copied()) {
+        if let Some(plan) = plan {
+            arms.push(ArmSlot {
+                pattern,
+                body: None,
+            });
+            selected.push((body, plan));
+        } else {
+            arms.push(ArmSlot {
+                pattern,
+                body: Some(body),
+            });
+        }
+    }
+    work.push(ApplyFrame::FinishCase {
+        sig,
+        scrutinee,
+        arms,
+        rewritten: selected.len(),
+    });
+    work.extend(
+        selected
+            .into_iter()
+            .rev()
+            .map(|(body, plan)| ApplyFrame::Comp(body, plan)),
+    );
+}
+
+fn clone_binder(binder: &TypedBinder) -> TypedBinder {
+    TypedBinder::new(binder.name, clone_core_type(&binder.ty))
+}
+
+struct ArmSlot {
+    pattern: TypedPattern,
+    body: Option<TypedComp>,
+}
+
+enum ApplyFrame {
+    Comp(TypedComp, PlanId),
+    FinishDrop {
+        sig: CompSig,
+        freed: TypedValue,
+    },
+    FinishBindFirst {
+        sig: CompSig,
+        binder: TypedBinder,
+        rest: Box<TypedComp>,
+    },
+    FinishBindRest {
+        sig: CompSig,
+        first: Box<TypedComp>,
+        binder: TypedBinder,
+    },
+    FinishIfYes {
+        sig: CompSig,
+        condition: TypedValue,
+        no: Box<TypedComp>,
+    },
+    FinishIfNo {
+        sig: CompSig,
+        condition: TypedValue,
+        yes: Box<TypedComp>,
+    },
+    FinishIfBoth {
+        sig: CompSig,
+        condition: TypedValue,
+    },
+    FinishCase {
+        sig: CompSig,
+        scrutinee: TypedValue,
+        arms: Vec<ArmSlot>,
+        rewritten: usize,
+    },
+    FinishWithReuse {
+        sig: CompSig,
+        token: TypedBinder,
+        freed: TypedValue,
+    },
 }
 
 fn pattern_binds(pattern: &TypedPattern, name: Sym) -> bool {
@@ -340,6 +895,8 @@ pub(crate) fn rebuild_arity(value: &TypedValue) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    use std::{mem, thread};
+
     use crate::core::fbip::{balanced, reuse as legacy_reuse, Sigs};
     use crate::core::{Comp, Core, CoreFn, Value};
     use crate::types::ty::EffRow;
@@ -348,6 +905,9 @@ mod tests {
     use super::super::violation::{ArityBound, ReuseFault, Violation};
     use super::super::{verify, CompSig, CoreFnSig, TypedValueKind};
     use super::*;
+
+    const DEEP_REUSE_DEPTH: usize = 20_000;
+    const ORDINARY_TEST_STACK: usize = 2 * 1024 * 1024;
 
     fn sym(name: &str) -> Sym {
         Sym::new(name)
@@ -937,5 +1497,85 @@ mod tests {
             &lowered.fns[0].body,
             Comp::Case(_, arms) if matches!(&arms[0].1, Comp::WithReuse { .. })
         ));
+    }
+
+    #[test]
+    fn reuse_handles_deep_successful_control_and_values_on_an_ordinary_stack() {
+        thread::Builder::new()
+            .name("deep-typed-reuse".into())
+            .stack_size(ORDINARY_TEST_STACK)
+            .spawn(|| {
+                let shape = source(Type::Con(sym("Shape"), Vec::new()));
+                let mut field = int(0);
+                for _ in 0..DEEP_REUSE_DEPTH {
+                    field = TypedValue::new(
+                        source(Type::Int),
+                        TypedValueKind::Reinterpret(Box::new(field)),
+                    );
+                }
+                let mut body = ret(ctor("Narrow", 1, shape.clone(), vec![field]));
+                for depth in 0..DEEP_REUSE_DEPTH {
+                    body = if depth % 2 == 0 {
+                        bind(
+                            ret(int(0)),
+                            TypedBinder::new(sym("_"), source(Type::Int)),
+                            body,
+                        )
+                    } else {
+                        TypedComp::new(
+                            pure(shape.clone()),
+                            TypedCompKind::If(
+                                bool_(true),
+                                Box::new(body),
+                                Box::new(ret(ctor("Narrow", 1, shape.clone(), vec![int(0)]))),
+                            ),
+                        )
+                    };
+                }
+                let body = case(
+                    var("cell", shape.clone()),
+                    pattern("Wide", 2),
+                    after_drop("cell", shape, body),
+                );
+                // Semantic fixtures above exercise the verified public phase
+                // transition. This hostile-depth fixture isolates its owned
+                // term worklist from the verifier's independent traversal.
+                let output = reuse_comp(body);
+
+                let TypedCompKind::Case(_, arms) = output.kind() else {
+                    panic!("reuse changed the enclosing case");
+                };
+                let TypedCompKind::WithReuse { token, body, .. } = arms[0].1.kind() else {
+                    panic!("the deep path did not reuse its freed shell");
+                };
+                let mut cursor = body.as_ref();
+                for depth in (0..DEEP_REUSE_DEPTH).rev() {
+                    if depth % 2 == 0 {
+                        let TypedCompKind::Bind(first, binder, rest) = cursor.kind() else {
+                            panic!("reuse changed the deep bind spine");
+                        };
+                        assert!(matches!(first.kind(), TypedCompKind::Return(_)));
+                        assert_eq!(binder.name.as_str(), "_");
+                        cursor = rest;
+                    } else {
+                        let TypedCompKind::If(_, yes, no) = cursor.kind() else {
+                            panic!("reuse changed the deep control spine");
+                        };
+                        assert!(matches!(
+                            no.kind(),
+                            TypedCompKind::Reuse(spent, _) if spent.name == token.name
+                        ));
+                        cursor = yes;
+                    }
+                }
+                assert!(matches!(
+                    cursor.kind(),
+                    TypedCompKind::Reuse(spent, _) if spent.name == token.name
+                ));
+                mem::forget(output);
+            })
+            .expect("spawn deep typed reuse test")
+            .join()
+            .expect("deep typed reuse test panicked");
     }
 }

@@ -30,6 +30,7 @@ use prism_common::sym::Sym;
 use prism_syntax::names::{self, ENTRY_POINT, FRESH_EVIDENCE_ROW};
 
 use super::super::specialize_support::{free_comp_vars, free_value_vars, substitute_witnesses};
+use super::super::traverse::Visit;
 use super::super::verify::{
     instantiate_fn, rename_bound_core, representation_preserving, row_included, VerifyEnv,
 };
@@ -329,14 +330,25 @@ fn thunk_evidence_type(
 // handler arm's operation. These are the labels this function's own handles
 // discharge, so a thunk parameter forced under them need not carry them.
 fn handled_effects(c: &TypedComp, env: &VerifyEnv, out: &mut BTreeSet<Sym>) {
-    if let TypedCompKind::Handle { ops, .. } = c.kind() {
-        for arm in ops.arms() {
-            if let Some(operation) = env.operation(arm.name()) {
-                out.insert(operation.effect().name);
+    struct HandledEffects<'a> {
+        env: &'a VerifyEnv,
+        out: &'a mut BTreeSet<Sym>,
+    }
+
+    impl Visit for HandledEffects<'_> {
+        fn comp(&mut self, comp: &TypedComp) -> bool {
+            if let TypedCompKind::Handle { ops, .. } = comp.kind() {
+                for arm in ops.arms() {
+                    if let Some(operation) = self.env.operation(arm.name()) {
+                        self.out.insert(operation.effect().name);
+                    }
+                }
             }
+            true
         }
     }
-    super::walk::each_subterm(c, &mut |sub| handled_effects(sub, env, out));
+
+    HandledEffects { env, out }.walk_comp(c);
 }
 
 // A thunk-of-function witness with `handled` effects removed from its result
@@ -1629,7 +1641,7 @@ pub fn fusion_handles<'a>(
     latent: &Latent,
     flow: &ThunkFlow,
 ) -> Option<Vec<&'a TypedComp>> {
-    if fns.iter().any(|f| contains_mask(f.body())) {
+    if fns.iter().any(|f| super::walk::contains_mask(f.body())) {
         return None;
     }
     if super::flow::escapes(fns, latent, flow) {
@@ -1648,20 +1660,18 @@ pub fn fusion_handles<'a>(
     (!handles.is_empty()).then_some(handles)
 }
 
-fn contains_mask(c: &TypedComp) -> bool {
-    if matches!(c.kind(), TypedCompKind::Mask(..)) {
-        return true;
-    }
-    let mut found = false;
-    super::walk::each_subterm(c, &mut |sc| found |= contains_mask(sc));
-    found
-}
-
 fn find_handles<'a>(c: &'a TypedComp, out: &mut Vec<&'a TypedComp>) {
-    if matches!(c.kind(), TypedCompKind::Handle { .. }) {
-        out.push(c);
+    // `Visit` hooks cannot retain node borrows, so this query uses an explicit
+    // worklist while it returns the original handle nodes to its callers.
+    let mut pending = vec![c];
+    while let Some(comp) = pending.pop() {
+        if matches!(comp.kind(), TypedCompKind::Handle { .. }) {
+            out.push(comp);
+        }
+        let start = pending.len();
+        super::walk::each_subterm(comp, &mut |child| pending.push(child));
+        pending[start..].reverse();
     }
-    super::walk::each_subterm(c, &mut |sc| find_handles(sc, out));
 }
 
 /// Lower the whole program by evidence passing, or report ineligibility by

@@ -167,4 +167,4 @@ pub use resolve::{
 };
 pub use stable::wire_fmt::format_wire_accept;
 pub use sym::Sym;
-pub use types::{show_effects, TypecheckSeed};
+pub use types::{show_effects, TypecheckSeed, TypecheckSeedError};

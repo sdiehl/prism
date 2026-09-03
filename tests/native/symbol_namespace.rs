@@ -49,13 +49,21 @@ const DISPATCHER: &str = "prismap_1";
 
 // Recursion keeps the definition alive through the inliner; routing it through a
 // closure that `twice` applies at an unknown arity forces codegen to emit its own
-// dispatcher alongside. `twice(g, 19)` is `g(g(19))`, and `g` adds one, so every
-// case prints 21.
+// dispatcher alongside. A closure bound by a plain `let` is a known callee the
+// specializer devirtualizes, so the applied closure is instead fetched from an
+// array cell at an index only recursion can produce: the optimizer tracks no
+// facts through mutable cells, so the callee stays unknown and the dispatcher
+// stays in the IR. `{name}(0)` is 0, so `g` is fetched, `twice(g, 19)` is
+// `g(g(19))`, and `g` adds one, so every case prints 21.
 fn program(name: &str) -> String {
     prism::with_prelude(&format!(
         "fn {name}(n : Int) : Int =\n  if n <= 0 then 0 else 1 + {name}(n - 1)\n\n\
          fn twice(f : Int -> Int, x : Int) : Int = f(f(x))\n\n\
-         fn main() =\n  let g = \\(k : Int) -> {name}(k) + 1\n  println(twice(g, 19))\n"
+         fn main() =\n  \
+         let g = \\(k : Int) -> {name}(k) + 1\n  \
+         let far = \\(k : Int) -> {name}(k) + 2\n  \
+         let arr = array_of_list(Cons(g, Cons(far, Nil)))\n  \
+         println(twice(array_get(arr, {name}(0)), 19))\n"
     ))
 }
 
@@ -87,7 +95,7 @@ fn check(name: &str) -> Result<(), String> {
     let mut cfg = prism::Config::from_env();
     // This gate must inspect and link code emitted by the compiler under test,
     // never satisfy itself from a previously linked artifact.
-    cfg.flags.compiler_cache = false;
+    cfg.update_flags(|flags| flags.compiler_cache = false);
 
     let ir = prism::dump_on("llvm", &full, &roots, &cfg)
         .map_err(|e| format!("{name}: llvm dump failed: {e}"))?;

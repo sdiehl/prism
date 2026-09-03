@@ -408,7 +408,7 @@ fn patch_input(file: &Path, cfg: &crate::Config) -> Result<PatchInput, PatchRefu
 }
 
 fn patch_store(cfg: &crate::Config) -> Result<Store, PatchRefusal> {
-    Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))
+    Store::open_or_create(resolve_store_path(cfg.flags().store_path.as_deref()))
         .map_err(|error| io_refusal(&error))
 }
 

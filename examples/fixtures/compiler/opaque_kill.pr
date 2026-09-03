@@ -1,0 +1,24 @@
+-- Compiler fixture for fact invalidation at effects and mutation. The binding
+-- `n` starts as a known constant, but an effect operation and an in-place
+-- array write stand between its definition and its uses: a speculative
+-- optimizer must forget everything it knew across the `bump()` perform (the
+-- handler chooses the value) and across `array_set` (the cell it read from
+-- may have changed). Keeping either fact would change the printed result;
+-- losing both keeps it a pure function of the source.
+
+effect Bump
+  bump(Int) : Int
+
+fn observed(seed : Int) : Int ! {Bump} =
+  let arr = array_of_list(Cons(seed, Nil))
+  let before = array_get(arr, 0)
+  let shifted = bump(before)
+  let arr2 = array_set(arr, 0, shifted)
+  array_get(arr2, 0) + before
+
+fn main() : Unit ! {IO} =
+  let r =
+    handle observed(7) with
+      bump(v) resume k => k(v * 10)
+      return x => x
+  println(r)

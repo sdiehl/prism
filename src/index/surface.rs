@@ -183,14 +183,20 @@ fn claims_of(d: &AstDecl) -> Vec<Claim> {
     }
     match d.fip {
         Fip::No => {}
-        Fip::Fbip => claims.push(Claim::Fbip),
-        Fip::Fip => claims.push(Claim::Fip),
+        Fip::Fbip(_) => claims.push(Claim::Fbip),
+        Fip::Fip(_) => claims.push(Claim::Fip),
     }
     if d.replayable {
         claims.push(Claim::Replayable);
     }
     if d.no_alloc {
         claims.push(Claim::NoAlloc);
+    }
+    if d.bounded_stack {
+        claims.push(Claim::BoundedStack);
+    }
+    if d.linear {
+        claims.push(Claim::Linear);
     }
     if !d.requires.is_empty() || !d.ensures.is_empty() {
         claims.push(Claim::Contract);

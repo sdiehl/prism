@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt::Write;
 use std::fs;
+use std::io::ErrorKind;
 use std::sync::OnceLock;
 
 #[cfg(feature = "native")]
@@ -32,6 +33,7 @@ use crate::resolve::Root;
 #[cfg(feature = "native")]
 use crate::resolve::SourceBundleKind;
 use crate::stdlib::STDLIB;
+use crate::store::disk::Written;
 use crate::sym::Sym;
 use crate::syntax::ast::{Core as CorePhase, Fip, Program};
 #[cfg(feature = "native")]
@@ -39,13 +41,124 @@ use crate::syntax::reflect::parse_unit;
 use crate::tc::parse_checked_signature;
 use crate::types::{Checked, Env, Type, TypecheckSeed};
 
+use super::downstream::cache_enabled;
 use super::front::{run_front, Front, FrontRequest};
-use super::{
-    elaborated, hash_meta, stage_validation_error, with_prelude, Config, WireKind,
-    NAMESPACE_ARTIFACT_KIND,
-};
+use super::input::field;
+use super::{elaborated, hash_meta, stage_validation_error, with_prelude, Config};
 #[cfg(feature = "native")]
 use super::{ArtifactField, ArtifactIdentity};
+
+/// Artifact kind for a whole-program namespace root.
+pub const NAMESPACE_ARTIFACT_KIND: &str = "namespace";
+
+/// Layout version of the `dump namespace` export envelope. The export records it
+/// so a reader can tell which layout it is decoding and dispatch on it; a
+/// layout-breaking change to the envelope bumps this. It is independent of the
+/// hash scheme tag, which versions the hashing itself, not the export around it.
+pub(crate) const NAMESPACE_FORMAT: u32 = 1;
+
+/// The wire envelope's kind tag: the five things every serialized envelope can
+/// name.
+///
+/// One header shape, `[scheme tag][kind][contract digest][body?]`, read five ways
+/// rather than five formats. This enum is the single home of the family; the `dump namespace`
+/// export and (later) the binary codec name their kind from here rather than
+/// re-typing the strings. When the `lib/std/Wire.pr` codec needs the same
+/// strings, they cross the phase boundary as a pinned hook (the `names.rs`
+/// pattern: one canonical home with tested inverses), never a re-typed literal.
+///
+/// The textual name is what the human-facing header spells; the varint tag is
+/// reserved for the compact binary body and is pinned here so the two encodings
+/// agree on the family and its ordering before that body exists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WireKind {
+    /// A value at a frozen layout: contract digest names the type's `Stable.Vn`.
+    Value,
+    /// A definition: contract digest is the scheme identity, body is anonymous Core.
+    Def,
+    /// An effect signature: contract digest is the signature's shape digest.
+    Protocol,
+    /// A reified continuation: a `value` over `def` digests.
+    Kont,
+    /// A certificate: an attestation braided with the replay log.
+    Cert,
+}
+
+impl WireKind {
+    /// The textual header name, the stable string every text reader dispatches on.
+    #[must_use]
+    pub const fn tag(self) -> &'static str {
+        match self {
+            Self::Value => "value",
+            Self::Def => "def",
+            Self::Protocol => "protocol",
+            Self::Kont => "kont",
+            Self::Cert => "cert",
+        }
+    }
+
+    /// The varint discriminant reserved for the compact binary codec. Not emitted
+    /// in the text envelope; pinned alongside `tag` so both encodings share one
+    /// family ordering even though the text envelope does not emit it.
+    #[must_use]
+    pub const fn varint(self) -> u8 {
+        match self {
+            Self::Value => 0,
+            Self::Def => 1,
+            Self::Protocol => 2,
+            Self::Kont => 3,
+            Self::Cert => 4,
+        }
+    }
+
+    /// Recover a kind from its textual tag, rejecting anything outside the family.
+    #[must_use]
+    pub fn parse(tag: &str) -> Option<Self> {
+        [
+            Self::Value,
+            Self::Def,
+            Self::Protocol,
+            Self::Kont,
+            Self::Cert,
+        ]
+        .into_iter()
+        .find(|k| k.tag() == tag)
+    }
+}
+
+/// The envelope header recovered from a `dump namespace` export: enough to
+/// dispatch a reader before it touches the body.
+///
+/// [`parse`](Self::parse) rejects a
+/// scheme it does not recognize and a kind outside the family, so a stale or
+/// foreign frame is caught on the header, not three fields into the body:
+/// the contract is checked before the body, always.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvelopeHeader {
+    /// Which of the five envelope kinds this frame carries.
+    pub kind: WireKind,
+    /// The contract digest the reader checks before touching the body.
+    pub contract: String,
+    /// The export layout version (`NAMESPACE_FORMAT`).
+    pub format: u32,
+}
+
+impl EnvelopeHeader {
+    /// Parse the `envelope` object of a serialized export. Returns `None` on a
+    /// foreign scheme, an unknown kind, or a missing/ill-typed field.
+    #[must_use]
+    pub fn parse(doc: &serde_json::Value) -> Option<Self> {
+        let env = doc.get("envelope")?;
+        if env.get("scheme")?.as_str()? != HASH_SCHEME {
+            return None;
+        }
+        Some(Self {
+            kind: WireKind::parse(env.get("kind")?.as_str()?)?,
+            contract: env.get("contract")?.as_str()?.to_string(),
+            format: u32::try_from(env.get("format")?.as_u64()?).ok()?,
+        })
+    }
+}
 
 /// Fingerprint of the executable that is executing compiler queries.
 ///
@@ -489,9 +602,12 @@ impl BuildRoot {
 /// re-derives the discrimination.
 ///
 /// # Errors
-/// Fails only if the embedded-stdlib fingerprint cannot be computed.
+/// Fails only if the embedded-stdlib fingerprint cannot be computed or read.
 #[cfg(feature = "native")]
-pub(crate) fn walk_roots(roots: &[Root]) -> Result<(Option<BuildRoot>, Vec<BuildRoot>), Error> {
+pub(crate) fn walk_roots(
+    roots: &[Root],
+    cfg: &Config,
+) -> Result<(Option<BuildRoot>, Vec<BuildRoot>), Error> {
     let mut stdlib = None;
     let mut packages = Vec::new();
     let mut saw_embedded_std = false;
@@ -530,7 +646,7 @@ pub(crate) fn walk_roots(roots: &[Root]) -> Result<(Option<BuildRoot>, Vec<Build
         stdlib = Some(BuildRoot {
             artifact_kind: EMBEDDED_STDLIB_KIND.to_string(),
             scheme: HASH_SCHEME.to_string(),
-            root: stdlib_hash()?.root,
+            root: stdlib_layers(cfg)?.root,
             package: None,
         });
     }
@@ -567,7 +683,7 @@ impl BuildIdentity {
         cfg: &Config,
         backend: &str,
     ) -> Result<Self, Error> {
-        let (stdlib, packages) = walk_roots(roots)?;
+        let (stdlib, packages) = walk_roots(roots, cfg)?;
         let mut artifact = cfg
             .artifact_identity_for(backend)
             .with_source_root(source.root.clone())
@@ -840,7 +956,7 @@ pub(crate) fn module_interface_from_checked(
     let classes = class_digests(&program.classes);
     let mut entries = Vec::new();
 
-    for decl in &checked.decls {
+    for decl in &checked.defs.decls {
         let kind = if exports.contains(&decl.name) {
             "value"
         } else {
@@ -858,7 +974,7 @@ pub(crate) fn module_interface_from_checked(
     // row, so an all-owned undisciplined function adds none.
     let borrows = borrow_sigs(program);
     let fips = fip_annots(program);
-    for decl in &checked.decls {
+    for decl in &checked.defs.decls {
         if !exports.contains(&decl.name) {
             continue;
         }
@@ -866,12 +982,12 @@ pub(crate) fn module_interface_from_checked(
         let mask: String = borrows.get(&sym).map_or_else(String::new, |bs| {
             bs.iter().map(|b| if *b { 'b' } else { '.' }).collect()
         });
-        let fip = fips.get(&sym).copied().and_then(Fip::keyword);
+        let fip = fips.get(&sym).copied().and_then(Fip::render);
         if mask.contains('b') || fip.is_some() {
             entries.push(interface_entry(
                 "usage",
                 &decl.name,
-                format!("borrow={mask}|fip={}", fip.unwrap_or("")),
+                format!("borrow={mask}|fip={}", fip.unwrap_or_default()),
             ));
         }
     }
@@ -900,7 +1016,7 @@ pub(crate) fn module_interface_from_checked(
         .iter()
         .map(|instance| instance.name.as_str())
         .collect::<BTreeSet<_>>();
-    for (name, instance) in &checked.instances {
+    for (name, instance) in &checked.dispatch.instances {
         let exported_head = matches!(
             &instance.head,
             Type::Con(head, _) if exports.contains(head.as_str())
@@ -918,7 +1034,11 @@ pub(crate) fn module_interface_from_checked(
             .map(|(class, ty)| format!("{}({})", class.as_str(), ty.show()))
             .collect::<Vec<_>>()
             .join(",");
-        let canonical = checked.canonical.values().any(|selected| selected == name);
+        let canonical = checked
+            .dispatch
+            .canonical
+            .values()
+            .any(|selected| selected == name);
         let signature = format!(
             "{}({})|context={context}|canonical={canonical}",
             instance.class.as_str(),
@@ -965,7 +1085,8 @@ pub(crate) fn stdlib_typecheck_seed() -> Result<TypecheckSeed, Error> {
     }
     let src = stdlib_driver_src();
     let (_, checked, _) = elaborated(&src, &[Root::Embedded(STDLIB)])?;
-    let seed = TypecheckSeed::from_checked(&checked);
+    let seed = TypecheckSeed::try_from_checked(&checked)
+        .map_err(|error| Error::ResolveModule(error.to_string()))?;
     let _ = CACHE.set(seed.clone());
     Ok(CACHE.get().cloned().unwrap_or(seed))
 }
@@ -985,7 +1106,7 @@ pub(crate) fn stdlib_value_schemes() -> Result<Vec<(String, String, Type)>, Erro
     let mut rows = BTreeMap::<String, (String, Type)>::new();
 
     // The unqualified foundation is the always-on Base interface.
-    for (name, ty) in seed.env.iter() {
+    for (name, ty) in seed.environment().iter() {
         if !name.as_str().contains('.') && !name.as_str().contains('@') {
             rows.insert(name.to_string(), ("Base".to_string(), ty.clone()));
         }
@@ -995,27 +1116,27 @@ pub(crate) fn stdlib_value_schemes() -> Result<Vec<(String, String, Type)>, Erro
         let entry = parse_unit(source)?;
         let exports = super::interface::exported_names(&entry, Some(module));
         for export in &exports {
-            if let Some(ty) = seed.env.get(&Sym::from(export.as_str())) {
+            if let Some(ty) = seed.environment().get(&Sym::from(export.as_str())) {
                 rows.insert(export.clone(), ((*module).to_string(), ty.clone()));
             }
-            if let Some(data) = seed.data.get(export) {
+            if let Some(data) = seed.data_types().get(export) {
                 for constructor in &data.ctors {
-                    if let Some(ty) = seed.env.get(&Sym::from(constructor.as_str())) {
+                    if let Some(ty) = seed.environment().get(&Sym::from(constructor.as_str())) {
                         rows.insert(constructor.clone(), ((*module).to_string(), ty.clone()));
                     }
                 }
             }
-            if let Some(class) = seed.classes.get(&Sym::from(export.as_str())) {
+            if let Some(class) = seed.classes().get(&Sym::from(export.as_str())) {
                 for (method, _ty) in &class.methods {
-                    if let Some(ty) = seed.env.get(method) {
+                    if let Some(ty) = seed.environment().get(method) {
                         rows.insert(method.to_string(), ((*module).to_string(), ty.clone()));
                     }
                 }
             }
         }
-        for (operation, info) in &seed.eff_ops {
+        for (operation, info) in seed.effect_operations() {
             if exports.contains(info.effect_name.as_str()) {
-                if let Some(ty) = seed.env.get(&Sym::from(operation.as_str())) {
+                if let Some(ty) = seed.environment().get(&Sym::from(operation.as_str())) {
                     rows.insert(operation.clone(), ((*module).to_string(), ty.clone()));
                 }
             }
@@ -1067,4 +1188,227 @@ fn stdlib_hash_uncached() -> Result<StdlibHash, Error> {
     // The standard library goes through the shared layer computation, so its root
     // and a package/namespace contract cannot drift apart.
     namespace_layers(&stdlib_driver_src(), &[Root::Embedded(STDLIB)])
+}
+
+// Store query kind and schema tag for the durable fingerprint table.
+const STDLIB_LAYERS_QUERY: &str = "stdlib-layers";
+const STDLIB_LAYERS_SCHEMA: &str = "stdlib-layers.v1";
+
+// Line tags of the durable fingerprint encoding.
+const LAYER_SCHEME: &str = "scheme";
+const LAYER_VERSION: &str = "version";
+const LAYER_ROOT: &str = "root";
+const LAYER_DEF: &str = "def";
+const LAYER_SHAPE: &str = "shape";
+const LAYER_CLASS: &str = "class";
+const LAYER_INSTANCE: &str = "instance";
+
+/// The standard-library fingerprint, memoized process-wide and durably in the
+/// store. See [`StdlibHash`].
+///
+/// The fingerprint is a pure function of the compiler binary (the stdlib is
+/// embedded in it), yet computing it elaborates the whole stdlib, and a build
+/// reads it on every front miss (the lineage sidecar, the continuation table,
+/// and the artifact identity fold in its root; the clone warnings compare
+/// against its definition layer). So the durable key is the binary fingerprint
+/// under a schema tag, gated like every other durable query. A malformed or
+/// swept stored table is a miss, never an error.
+///
+/// # Errors
+/// Fails on a store open or write failure, or if the embedded stdlib does not
+/// elaborate (a compiler bug).
+pub(super) fn stdlib_layers(cfg: &Config) -> Result<StdlibHash, Error> {
+    static CACHE: OnceLock<StdlibHash> = OnceLock::new();
+    if let Some(cached) = CACHE.get() {
+        return Ok(cached.clone());
+    }
+    let durable = if cache_enabled(cfg) {
+        let mut h = blake3::Hasher::new();
+        field(&mut h, STDLIB_LAYERS_SCHEMA.as_bytes());
+        field(&mut h, compiler_binary_fingerprint()?.as_bytes());
+        Some((cfg.open_store()?, h.finalize().to_hex().to_string()))
+    } else {
+        None
+    };
+    let stored = match &durable {
+        Some((store, key)) => match store.get_query(STDLIB_LAYERS_QUERY, key)? {
+            Some(hash) => match store.get(&hash) {
+                Ok(bytes) => decode_layers(&bytes),
+                Err(e) if e.kind() == ErrorKind::NotFound => None,
+                Err(e) => return Err(Error::Io(e)),
+            },
+            None => None,
+        },
+        None => None,
+    };
+    let layers = if let Some(layers) = stored {
+        layers
+    } else {
+        let layers = stdlib_hash()?;
+        if let Some((store, key)) = &durable {
+            let bytes = encode_layers(&layers);
+            let hash = blake3::hash(&bytes).to_hex().to_string();
+            match store.put(&hash, &bytes)? {
+                Written::New | Written::Hit => {}
+            }
+            store.put_query(STDLIB_LAYERS_QUERY, key, &hash)?;
+        }
+        layers
+    };
+    let _ = CACHE.set(layers.clone());
+    Ok(layers)
+}
+
+// One tab-separated line per entry: the three header fields, then every layer
+// entry as `<layer> <name> <digest>` in name order.
+//
+// The encoding is content-addressed, so it must be a function of the layers
+// alone. The definition table is keyed by `Sym`, whose order is the interner's
+// allocation order and so differs between processes that interned different
+// names first; emitting it in that order gave one stdlib several encodings and
+// tripped the store's injectivity check. Sort by the spelled name instead.
+fn encode_layers(layers: &StdlibHash) -> Vec<u8> {
+    let mut out = String::new();
+    let mut line = |tag: &str, name: &str, digest: &str| {
+        out.push_str(tag);
+        out.push('\t');
+        out.push_str(name);
+        out.push('\t');
+        out.push_str(digest);
+        out.push('\n');
+    };
+    line(LAYER_SCHEME, layers.scheme, "");
+    line(LAYER_VERSION, layers.version, "");
+    line(LAYER_ROOT, layers.root.as_str(), "");
+    let defs: BTreeMap<&str, &Digest> = layers
+        .defs
+        .iter()
+        .map(|(name, digest)| (name.as_str(), digest))
+        .collect();
+    for (name, digest) in defs {
+        line(LAYER_DEF, name, digest.as_str());
+    }
+    for (name, digest) in &layers.shapes {
+        line(LAYER_SHAPE, name, digest.as_str());
+    }
+    for (name, digest) in &layers.classes {
+        line(LAYER_CLASS, name, digest.as_str());
+    }
+    for (name, digest) in &layers.instances {
+        line(LAYER_INSTANCE, name, digest.as_str());
+    }
+    out.into_bytes()
+}
+
+// The inverse of `encode_layers`. The scheme and version lines must name this
+// binary's constants: the two are static strings, so a table from any other
+// producer is a miss rather than a value with a foreign tag.
+fn decode_layers(bytes: &[u8]) -> Option<StdlibHash> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let mut lines = text.lines();
+    let header = |tag: &str, line: Option<&str>| -> Option<String> {
+        let (t, rest) = line?.split_once('\t')?;
+        let (value, empty) = rest.split_once('\t')?;
+        (t == tag && empty.is_empty() && !value.is_empty()).then(|| value.to_string())
+    };
+    let scheme = header(LAYER_SCHEME, lines.next())?;
+    let version = header(LAYER_VERSION, lines.next())?;
+    let root = header(LAYER_ROOT, lines.next())?;
+    if scheme != HASH_SCHEME || version != env!("CARGO_PKG_VERSION") {
+        return None;
+    }
+    let mut layers = StdlibHash {
+        root: Digest::from(root),
+        scheme: HASH_SCHEME,
+        version: env!("CARGO_PKG_VERSION"),
+        defs: Hashes::new(),
+        shapes: BTreeMap::new(),
+        classes: BTreeMap::new(),
+        instances: BTreeMap::new(),
+    };
+    for line in lines {
+        let (tag, rest) = line.split_once('\t')?;
+        let (name, digest) = rest.split_once('\t')?;
+        if name.is_empty() || digest.is_empty() {
+            return None;
+        }
+        let table = match tag {
+            LAYER_DEF => {
+                layers.defs.insert(Sym::new(name), Digest::from(digest));
+                continue;
+            }
+            LAYER_SHAPE => &mut layers.shapes,
+            LAYER_CLASS => &mut layers.classes,
+            LAYER_INSTANCE => &mut layers.instances,
+            _ => return None,
+        };
+        table.insert(name.to_string(), Digest::from(digest));
+    }
+    Some(layers)
+}
+
+#[cfg(test)]
+mod stdlib_layer_codec_tests {
+    use std::collections::BTreeMap;
+
+    use super::{decode_layers, encode_layers, StdlibHash};
+    use crate::core::{Digest, Hashes, HASH_SCHEME};
+    use crate::sym::Sym;
+
+    fn sample() -> StdlibHash {
+        StdlibHash {
+            root: Digest::from("r00t"),
+            scheme: HASH_SCHEME,
+            version: env!("CARGO_PKG_VERSION"),
+            defs: Hashes::from([
+                (Sym::new("Data.Map@helper"), Digest::from("d1")),
+                (Sym::new("map"), Digest::from("d2")),
+            ]),
+            shapes: BTreeMap::from([("Option".to_string(), Digest::from("s1"))]),
+            classes: BTreeMap::from([("Show".to_string(), Digest::from("c1"))]),
+            instances: BTreeMap::from([("Show@Int".to_string(), Digest::from("i1"))]),
+        }
+    }
+
+    #[test]
+    fn layers_round_trip_through_the_store_encoding() {
+        let layers = sample();
+        let decoded = decode_layers(&encode_layers(&layers)).expect("decodes");
+        assert_eq!(decoded.root, layers.root);
+        assert_eq!(decoded.defs, layers.defs);
+        assert_eq!(decoded.shapes, layers.shapes);
+        assert_eq!(decoded.classes, layers.classes);
+        assert_eq!(decoded.instances, layers.instances);
+    }
+
+    #[test]
+    fn the_encoding_is_independent_of_interning_order() {
+        // `Sym` orders by interner id, so interning the later name first puts
+        // it first in the definition table. The bytes are a content address
+        // every process sharing a store must agree on, so they follow the
+        // spelled name, not the id.
+        let later = Sym::new("zz_layer_probe");
+        let earlier = Sym::new("aa_layer_probe");
+        assert!(later < earlier, "the probe relies on interning order");
+        let mut layers = sample();
+        layers.defs = Hashes::from([(later, Digest::from("d3")), (earlier, Digest::from("d4"))]);
+        let text = String::from_utf8(encode_layers(&layers)).expect("utf8");
+        let earlier_at = text.find("def\taa_layer_probe\t").expect("earlier line");
+        let later_at = text.find("def\tzz_layer_probe\t").expect("later line");
+        assert!(
+            earlier_at < later_at,
+            "definitions are emitted in name order:\n{text}"
+        );
+    }
+
+    #[test]
+    fn a_foreign_or_damaged_table_is_a_miss() {
+        let mut foreign = sample();
+        foreign.version = "0.0.0";
+        assert!(decode_layers(&encode_layers(&foreign)).is_none());
+        let mut bytes = encode_layers(&sample());
+        bytes.truncate(bytes.len() - 3);
+        assert!(decode_layers(&bytes).is_none());
+        assert!(decode_layers(b"def\tmap\n").is_none());
+    }
 }

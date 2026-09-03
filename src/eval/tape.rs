@@ -10,8 +10,9 @@ use crate::debug::durable::DurableLog;
 use crate::lineage::provenance::{
     CapOp, EventValue, OP_CLOCK_MONO_NOW, OP_CLOCK_WALL_NOW, OP_ENTROPY_READ, OP_ENV_ARG,
     OP_ENV_ARGS_COUNT, OP_ENV_GETENV, OP_FS_APPEND_FILE, OP_FS_FILE_EXISTS, OP_FS_READ_FILE,
-    OP_FS_READ_FILE_BYTES, OP_FS_REMOVE_FILE, OP_FS_WRITE_BYTES, OP_FS_WRITE_FILE,
-    OP_PROCESS_SYSTEM,
+    OP_FS_READ_FILE_BYTES, OP_FS_REMOVE_FILE, OP_FS_WRITE_BYTES, OP_FS_WRITE_FILE, OP_NET_ACCEPT,
+    OP_NET_CLOSE, OP_NET_CONNECT, OP_NET_LISTEN, OP_NET_LOCAL_ADDR, OP_NET_PEER_ADDR, OP_NET_RECV,
+    OP_NET_SEND, OP_PROCESS_SYSTEM,
 };
 
 use super::Rv;
@@ -214,6 +215,44 @@ pub(super) const fn write_obs(b: Builtin) -> Option<CapOp> {
         Builtin::AppendFile => Some(OP_FS_APPEND_FILE),
         Builtin::RemoveFile => Some(OP_FS_REMOVE_FILE),
         _ => None,
+    }
+}
+
+// The provenance operation label a stream-socket builtin emits, or `None` for a
+// builtin that touches no socket. Like a write, a socket operation is an output
+// observation and never a `.replay` tape frame: a read cannot be answered from a
+// trace without the peer that produced it, so `Net` stays out of the replayable
+// capability set and a durable function performing it is rejected by the row
+// check rather than reaching a live socket on resume. Recording it anyway is what
+// lets a later transport handler consume the frames without a protocol break.
+pub(super) const fn net_obs(b: Builtin) -> Option<CapOp> {
+    match b {
+        Builtin::NetListen => Some(OP_NET_LISTEN),
+        Builtin::NetAccept => Some(OP_NET_ACCEPT),
+        Builtin::NetConnect => Some(OP_NET_CONNECT),
+        Builtin::NetRecv => Some(OP_NET_RECV),
+        Builtin::NetSend => Some(OP_NET_SEND),
+        Builtin::NetClose => Some(OP_NET_CLOSE),
+        Builtin::NetLocalAddr => Some(OP_NET_LOCAL_ADDR),
+        Builtin::NetPeerAddr => Some(OP_NET_PEER_ADDR),
+        _ => None,
+    }
+}
+
+// The outcome half of a `Net` frame, split into the side it took and that side's
+// payload. Every socket operation answers a `Result`, and `CapEvent` has one
+// result slot, so the side rides at the end of the argument list and the slot
+// carries the payload: the value produced on success (a logical handle, a byte
+// count, an address, the bytes read) or the `NetError` classification code on
+// failure. Splitting them keeps the two apart without an encoding trick, so a
+// zero-byte send and the `Other` code stay distinguishable.
+pub(super) fn net_outcome(v: &Rv) -> (bool, EventValue) {
+    match v {
+        Rv::Data(tag, fields) => (
+            tag.as_str() == "Ok",
+            fields.first().map_or(EventValue::Unit, event_value_of_rv),
+        ),
+        _ => (false, EventValue::Unit),
     }
 }
 

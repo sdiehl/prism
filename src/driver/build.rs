@@ -17,8 +17,7 @@ use crate::resolve::default_roots;
 
 #[cfg(feature = "native")]
 use super::{
-    finish_lowered, lowered_core_with_identity, lowered_spine_with_identity, on_typed_lower_stack,
-    validated_lowered_core,
+    finish_lowered, lowered_core_with_identity, lowered_spine_with_identity, validated_lowered_core,
 };
 use super::{reuse_lowered_core, Config};
 
@@ -73,8 +72,9 @@ use super::{commit_to_store, timing};
 
 #[cfg(feature = "native")]
 fn commit_session_decisions(roots: &[Root], cfg: &Config) -> Result<(), Error> {
-    if let Some(session) = &cfg.session {
+    if let Some(session) = cfg.session() {
         session.commit_decisions(roots, cfg)?;
+        session.commit_store_transaction().map_err(Error::Io)?;
     }
     Ok(())
 }
@@ -125,7 +125,7 @@ fn remove_stale_bitcode(out: &Path) -> Result<(), Error> {
 
 #[cfg(feature = "native")]
 fn require_main(checked: &Checked) -> Result<(), Error> {
-    if checked.decls.iter().any(|d| d.name == ENTRY_POINT) {
+    if checked.defs.decls.iter().any(|d| d.name == ENTRY_POINT) {
         Ok(())
     } else {
         Err(Error::CodegenBackend("no main function to build".into()))
@@ -196,16 +196,27 @@ pub fn build_on_report(
     out: &Path,
     cfg: &Config,
 ) -> Result<NativeBuildReport, Error> {
+    let cfg = cfg.with_store_transaction().map_err(Error::Io)?;
+    build_on_report_transactional(src, roots, out, &cfg)
+}
+
+#[cfg(feature = "native")]
+fn build_on_report_transactional(
+    src: &str,
+    roots: &[Root],
+    out: &Path,
+    cfg: &Config,
+) -> Result<NativeBuildReport, Error> {
     let artifact_cache = NativeArtifactCache::for_build(src, roots, cfg)?;
     if let Some(cache) = &artifact_cache {
         if let Some(output_hash) = cache.materialize(out)? {
             remove_stale_bitcode(out)?;
-            if let Some(session) = &cfg.session {
+            if let Some(session) = cfg.session() {
                 session.record_hit();
             }
             cache.record_decision(cfg, FactOutcome::Hit, Some(output_hash.clone()), "");
             timing::cache_hit(
-                cfg.timing.as_ref(),
+                cfg.timing(),
                 timing::Phase::CcLink,
                 src,
                 timing::ArtifactKind::Native,
@@ -219,7 +230,7 @@ pub fn build_on_report(
                 definition_hashes: None,
             });
         }
-        if let Some(session) = &cfg.session {
+        if let Some(session) = cfg.session() {
             session.record_miss();
         }
     }
@@ -230,18 +241,17 @@ pub fn build_on_report(
     // The semantic key is taken before reference-count insertion, so a hit
     // returns below without ever running the ownership passes; the erased
     // clone exists only to give the key a stable content encoding.
-    let ctors = spine.ctors.clone();
     let semantic_cache = NativeArtifactCache::for_semantic_build(
-        || on_typed_lower_stack(|| validated_lowered_core(spine.core.clone().erase())),
+        || validated_lowered_core(spine.core().clone().erase()),
         &sigs,
-        &ctors,
+        spine.constructors(),
         &native_kont_table,
         cfg,
     )?;
     if let Some(cache) = &semantic_cache {
         if let Some(output_hash) = cache.materialize(out)? {
             remove_stale_bitcode(out)?;
-            if let Some(session) = &cfg.session {
+            if let Some(session) = cfg.session() {
                 session.record_hit();
             }
             cache.record_decision(cfg, FactOutcome::Hit, Some(output_hash.clone()), "");
@@ -253,12 +263,12 @@ pub fn build_on_report(
                     Some(output_hash.clone()),
                     "raw source identity resolved to an existing semantic artifact",
                 );
-                if let Some(session) = &cfg.session {
+                if let Some(session) = cfg.session() {
                     session.record_write();
                 }
             }
             timing::cache_hit(
-                cfg.timing.as_ref(),
+                cfg.timing(),
                 timing::Phase::CcLink,
                 src,
                 timing::ArtifactKind::Native,
@@ -272,29 +282,30 @@ pub fn build_on_report(
                 definition_hashes: Some(hashes),
             });
         }
-        if let Some(session) = &cfg.session {
+        if let Some(session) = cfg.session() {
             session.record_miss();
         }
     }
-    let core = finish_lowered(spine, &sigs, cfg)?;
+    let finished = finish_lowered(spine, &sigs, cfg)?;
+    let (core, ctors) = finished.into_core_and_constructors();
     residual_effects(&core).map_err(Error::InternalInvariant)?;
     let bc = out.with_extension("bc");
     let bitcode_cache = NativeArtifactCache::for_bitcode(&core, &ctors, &native_kont_table, cfg)?;
     let bitcode_hit = if let Some(cache) = &bitcode_cache {
         cache.materialize_file(&bc, false)?.map_or_else(
             || {
-                if let Some(session) = &cfg.session {
+                if let Some(session) = cfg.session() {
                     session.record_miss();
                 }
                 false
             },
             |output_hash| {
-                if let Some(session) = &cfg.session {
+                if let Some(session) = cfg.session() {
                     session.record_hit();
                 }
                 cache.record_decision(cfg, FactOutcome::Hit, Some(output_hash.clone()), "");
                 timing::cache_hit(
-                    cfg.timing.as_ref(),
+                    cfg.timing(),
                     timing::Phase::EmitLlvm,
                     src,
                     timing::ArtifactKind::Llvm,
@@ -316,7 +327,7 @@ pub fn build_on_report(
         None
     } else {
         timing::timed_res_status(
-            cfg.timing.as_ref(),
+            cfg.timing(),
             timing::Phase::EmitLlvm,
             "",
             emit_status,
@@ -330,7 +341,7 @@ pub fn build_on_report(
     };
     if !bitcode_hit && scc_bitcode.is_none() {
         timing::timed_res_status(
-            cfg.timing.as_ref(),
+            cfg.timing(),
             timing::Phase::EmitLlvm,
             "",
             emit_status,
@@ -339,7 +350,7 @@ pub fn build_on_report(
                     &core,
                     &ctors,
                     &native_kont_table,
-                    cfg.flags.native_kont_frames,
+                    cfg.flags().native_kont_frames,
                     &bc,
                 )
                 .map_err(Error::CodegenBackend)
@@ -354,7 +365,7 @@ pub fn build_on_report(
                 Some(output),
                 "whole-program bitcode inputs changed",
             );
-            if let Some(session) = &cfg.session {
+            if let Some(session) = cfg.session() {
                 session.record_write();
             }
         }
@@ -375,7 +386,7 @@ pub fn build_on_report(
         timing::CacheStatus::Cold
     };
     let link_result = timing::timed_res_status(
-        cfg.timing.as_ref(),
+        cfg.timing(),
         timing::Phase::CcLink,
         "",
         link_status,
@@ -393,7 +404,7 @@ pub fn build_on_report(
     // is cheap relative to codegen and only happens under the opt-in flag; the
     // store is a cache, so a failure here would not invalidate the build (but is
     // surfaced rather than swallowed).
-    let store = if cfg.flags.store {
+    let store = if cfg.flags().store {
         Some(commit_to_store(src, roots, cfg)?)
     } else {
         None
@@ -406,7 +417,7 @@ pub fn build_on_report(
             Some(output_hash.clone()),
             "source, compiler, runtime, or link inputs changed",
         );
-        if let Some(session) = &cfg.session {
+        if let Some(session) = cfg.session() {
             session.record_write();
         }
         if let Some(semantic) = semantic_cache {
@@ -417,7 +428,7 @@ pub fn build_on_report(
                 Some(output_hash),
                 "semantic program or link inputs changed",
             );
-            if let Some(session) = &cfg.session {
+            if let Some(session) = cfg.session() {
                 session.record_write();
             }
         }
@@ -488,6 +499,16 @@ pub(crate) fn explain_downstream_queries(
     roots: &[Root],
     cfg: &Config,
 ) -> Result<(), Error> {
+    let cfg = cfg.with_store_transaction().map_err(Error::Io)?;
+    explain_downstream_queries_transactional(src, roots, &cfg)
+}
+
+#[cfg(feature = "native")]
+fn explain_downstream_queries_transactional(
+    src: &str,
+    roots: &[Root],
+    cfg: &Config,
+) -> Result<(), Error> {
     let (_, core, ctors, hashes) = compiled(src, roots, cfg)?;
     let native_kont_table =
         native_kont_table_of(&hashes, roots, cfg, NativeKontIdentityRows::Full)?;
@@ -512,7 +533,7 @@ pub fn emit_ir(src: &str) -> Result<String, Error> {
         &core,
         &ctors,
         &native_kont_table,
-        cfg.flags.native_kont_frames,
+        cfg.flags().native_kont_frames,
     )
     .map_err(Error::CodegenBackend)
 }

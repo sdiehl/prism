@@ -1,6 +1,6 @@
 {
   "schema": "prism-syntax-diagnostics-v1",
-  "compiler": "0.21.0",
+  "compiler": "<version>",
   "source": {
     "digest": "f34b567df8b88104214207b5384b9d23c70713c6d6bf4f088ccfd7584909d6a4",
     "text": "-- A misplaced digit separator: the lexer refuses this file at the `_`, the\n-- compiler's `LexError::NumberSeparator` (E7004). A `_` must sit between two\n-- digits, so a trailing one is malformed.\nfn main() = println(show_int(1_))\n"

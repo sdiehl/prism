@@ -12,10 +12,10 @@ use super::breaks::{block_trailing_call, forces_break};
 use super::pat::fmt_pat_inline;
 use super::{text_width, tuple_parens, Fmt, Mode, INDENT, LINE_WIDTH};
 use crate::ast::{
-    ClassDecl, Constraint, Ctor, DataDecl, Decl, EffLabel, EffectDecl, Expr, Fip, ImportDecl,
+    ClassDecl, Constraint, Ctor, DataDecl, Decl, EffLabel, EffectDecl, Expr, ImportDecl,
     InstanceDecl, Kind, Param, PatternDecl, Row, Total, Ty, S,
 };
-use crate::coeffect::CoeffectFact;
+use crate::coeffect::CoeffectRow;
 use crate::kw;
 // The empty-effect-row switch lives with the type printer it also governs; the
 // source formatter reuses that one global rather than declaring a second.
@@ -446,23 +446,25 @@ impl Fmt<'_> {
             };
         }
         let params: Vec<String> = d.params.iter().map(|p| self.fmt_param(p)).collect();
+        // The lifted declaration claims (`@ noalloc`, `@ bounded_stack`,
+        // `@ linear`, or their composition), restored through the one
+        // canonical row spelling.
+        let claims = CoeffectRow::decl_claims(d.no_alloc, d.bounded_stack, d.linear);
         // A certified declaration re-parenthesizes a function return type: the
-        // `@ noalloc` appended below must re-parse at the annotation's root, and
+        // claim row appended below must re-parse at the annotation's root, and
         // an unparenthesized arrow would capture the row on its codomain atom.
         let ret_ty = |t: &Ty| match t {
-            t @ (Ty::Fun(..) | Ty::Forall(..)) if d.no_alloc => format!("({})", fmt_ty(t)),
+            t @ (Ty::Fun(..) | Ty::Forall(..)) if claims.is_some() => format!("({})", fmt_ty(t)),
             t => fmt_ty(t),
         };
-        // The allocation certificate `@ noalloc` is a postfix on the result type,
-        // ahead of any declaration effect, so it re-parses at the annotation root
-        // (`: T @ noalloc ! {E}`). It is folded into `ret_ann` here rather than
-        // appended after the result annotation.
+        // A claim row is a postfix on the result type, ahead of any declaration
+        // effect, so it re-parses at the annotation root (`: T @ noalloc ! {E}`).
+        // It is folded into `ret_ann` here rather than appended after the result
+        // annotation.
         let ty_ann = |t: &Ty| {
-            if d.no_alloc {
-                format!("{} {} {}", ret_ty(t), kw::AT, CoeffectFact::Noalloc)
-            } else {
-                ret_ty(t)
-            }
+            claims
+                .as_ref()
+                .map_or_else(|| ret_ty(t), |row| format!("{} {row}", ret_ty(t)))
         };
         // The declaration effect prints result-first: `: Result ! {Effects}`,
         // matching a function type's own `-> cod ! {row}`. An empty explicit row
@@ -497,11 +499,10 @@ impl Fmt<'_> {
         } else {
             fmt_constraints(&d.constraints)
         };
-        let fip_key = match d.fip {
-            Fip::No => kw::FN.to_string(),
-            Fip::Fbip => format!("{} {}", kw::FBIP, kw::FN),
-            Fip::Fip => format!("{} {}", kw::FIP, kw::FN),
-        };
+        let fip_key = d
+            .fip
+            .render()
+            .map_or_else(|| kw::FN.to_string(), |word| format!("{word} {}", kw::FN));
         let rep_key = if d.replayable {
             format!("{} {fip_key}", kw::REPLAYABLE)
         } else {

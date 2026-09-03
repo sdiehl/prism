@@ -34,10 +34,9 @@
 // Live-versus-live cannot pass that way, and it stays true across a stdlib edit
 // without a reseat, since the question is whether the two exporters agree now.
 //
-// What the goldens still owe is their declared compiler version, checked below.
-// A golden that outlives a release is a decoder oracle for bytes this compiler
-// no longer emits, which is exactly when a silently added field would go
-// unnoticed. Reseat them with `PRISM_ACCEPT_RESOLVED_FIXTURES=1`.
+// What the goldens still owe is their shape, checked below with the build stamp
+// and the node numbering punched out, since neither belongs to the document.
+// Reseat with `PRISM_ACCEPT_RESOLVED_FIXTURES=1`.
 
 use std::collections::HashSet;
 use std::env;
@@ -226,34 +225,44 @@ stem_tests! {
     resolved_roundtrip_stable, resolved_traversal_stable, resolved_join_stable => "stable",
 }
 
-// Every positive golden was emitted by this compiler. The round trip and the
-// traversal read the golden and never the compiler, so without this a golden
-// outlives the exporter that wrote it and keeps proving the decoder handles
-// bytes nothing emits any more. Checking the declared version is the cheap
-// half of that: it catches the release bump, which is when the drift starts.
-// Regenerate with the accept env, reviewing the diff like a snapshot.
+// Every positive golden is a shape this compiler still writes. The round trip
+// and the traversal read the golden and never the compiler, so without this a
+// golden outlives its exporter and keeps proving the decoder handles bytes
+// nothing emits any more, which is exactly when a silently added field would go
+// unnoticed. Regenerate with the accept env, reviewing the diff like a snapshot.
 #[test]
-fn resolved_goldens_come_from_this_compiler() {
+fn resolved_goldens_match_this_compiler() {
     let accept = env::var(ACCEPT).is_ok();
     let mut stale = Vec::new();
     for stem in STEMS {
+        // Only the stamp comes out of the bytes that get written: a committed
+        // golden keeps its node numbering, because the decoder oracles
+        // re-encode it byte for byte and walk the ids it carries. The
+        // comparison below erases that numbering as well, through
+        // `comparable`, since the numbering is not the document's to own.
+        let dump = format!("{}\n", super::seam::json(&dump_stem(stem, ARTIFACT)));
         if accept {
-            let dump = dump_stem(stem, ARTIFACT);
-            fs::write(golden_path(stem), format!("{dump}\n")).expect("rewrite golden");
+            fs::write(golden_path(stem), &dump).expect("rewrite golden");
             continue;
         }
-        let doc: Value = serde_json::from_str(&read_golden(stem)).expect("golden JSON");
-        let found = doc["compiler"].as_str().unwrap_or_default().to_owned();
-        if found != env!("CARGO_PKG_VERSION") {
-            stale.push(format!("{stem}: {found}"));
+        if comparable(&read_golden(stem)) != comparable(&dump) {
+            stale.push(stem);
         }
     }
     assert!(
         stale.is_empty(),
-        "resolved-syntax goldens predate this compiler ({}); regenerate with {ACCEPT}=1: {}",
-        env!("CARGO_PKG_VERSION"),
+        "resolved-syntax goldens no longer match this compiler's export \
+         (review as a resolved-seam change; regenerate with {ACCEPT}=1): {}",
         stale.join(", ")
     );
+}
+
+// The shape a golden owes the live exporter: every structural field, with the
+// build stamp and the node numbering punched out. Both belong to the
+// compilation rather than the document, and both move for reasons the document
+// cannot see (a release cut, an edit anywhere in the standard library).
+fn comparable(doc: &str) -> String {
+    super::seam::erase_node_ids(&super::seam::json(doc))
 }
 
 // The static stem list matches the fixture directory exactly, so adding a

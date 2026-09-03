@@ -1,0 +1,6 @@
+-- The composed row is checked by the same drives as zero-budget `fip`: a
+-- fresh constructor fails its `noalloc` fact with the same witness a `fip`
+-- claim would draw, differing only in the claim the diagnostic names.
+type Box = Box(Int)
+
+fn wrap(x : Int) : Box @ {bounded_stack, linear, noalloc} = Box(x)

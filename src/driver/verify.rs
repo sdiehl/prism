@@ -13,10 +13,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::fbip::borrow_sigs;
 use crate::core::{
-    check_fip, check_fip_linear, fip_annots, insert_rc, latent_ops, newtype_ctors,
-    replayable_annots, reuse, Core,
+    bounded_stack_annots, callable_requirements, check_alloc, check_bounded_stack,
+    check_callable_flow, check_linear, fip_annots, insert_rc, latent_ops, linear_annots,
+    newtype_ctors, replayable_annots, reuse, ClaimError, ClaimErrorKind, ClaimOrigin, Core,
+    TypedCore, TypedElaborated,
 };
-use crate::error::{Error, TypeError};
+use crate::error::{ErrKind, Error, TypeError};
 use crate::kw::AT;
 use crate::names::{
     is_instance_method, EXN_EFFECT, FAIL_EFFECT, INPUT_CAPABILITY_EFFECTS, OUTPUT_EFFECT,
@@ -59,7 +61,7 @@ use super::{build_on, namespace_identity, Config};
 // matching pointer is present. Read-only against the package index.
 #[cfg(feature = "native")]
 fn attest_index_line(root: &str, cfg: &Config) -> String {
-    let store_root = store::resolve_store_path(cfg.flags.store_path.as_deref());
+    let store_root = store::resolve_store_path(cfg.flags().store_path.as_deref());
     let Ok(dst) = DiskTransport::open(&store_root) else {
         return String::new();
     };
@@ -70,7 +72,7 @@ fn attest_index_line(root: &str, cfg: &Config) -> String {
     let Some(row) = rows.iter().find(|r| r.root.as_str() == root) else {
         return String::new();
     };
-    let sig = match verify_signature(&artifact, &cfg.flags) {
+    let sig = match verify_signature(&artifact, cfg.flags()) {
         Verdict::Valid { identity: Some(id) } => format!("valid ({id})"),
         Verdict::Valid { identity: None } => "valid".to_string(),
         Verdict::Unsigned => "unsigned (dev mode)".to_string(),
@@ -185,7 +187,7 @@ pub fn attest_on(src: &str, roots: &[Root], cfg: &Config) -> Result<String, Erro
 // byte-identity check already established.
 #[cfg(feature = "native")]
 fn attest_cert_line(root: &str, second_name: &str, cfg: &Config) -> String {
-    let store_root = store::resolve_store_path(cfg.flags.store_path.as_deref());
+    let store_root = store::resolve_store_path(cfg.flags().store_path.as_deref());
     let Ok(store) = store::Store::open_or_create(&store_root) else {
         return String::new();
     };
@@ -224,6 +226,7 @@ pub(super) fn reconcile_effects(checked: &Checked, core: &Core) -> Result<(), Er
     // masking that lets a `mask`ed effect tunnel past its handler, so only the
     // inferred row reflects what the function actually leaves unhandled.
     let inferred_rows: BTreeMap<&str, &Effects> = checked
+        .defs
         .decls
         .iter()
         .map(|d| (d.name.as_str(), &d.effects))
@@ -247,7 +250,7 @@ pub(super) fn reconcile_effects(checked: &Checked, core: &Core) -> Result<(), Er
             .unwrap_or(&empty);
         let extra: Vec<&str> = ops
             .iter()
-            .filter_map(|op| checked.eff_ops.get(op.as_str()))
+            .filter_map(|op| checked.defs.eff_ops.get(op.as_str()))
             .map(|info| info.effect_name)
             .filter(|e| !inferred.contains(e))
             .collect::<BTreeSet<_>>()
@@ -266,93 +269,158 @@ pub(super) fn reconcile_effects(checked: &Checked, core: &Core) -> Result<(), Er
     Ok(())
 }
 
-// Check the FP^2 discipline of every `fip`/`fbip`-annotated function. Linearity
-// is a property of the SOURCE term, so it is checked on the raw elaborated core
-// (`check_fip_linear`), using the typechecker's param/field types to exempt
-// scalars (a `dup` on an immediate is a runtime no-op). Zero-allocation, the
-// callee closure, and bounded stack are properties of the COMPILED term, so they
-// are checked on the reuse-lowered core (`check_fip`). Runs on every
-// check/build/interpret (shared `frontend`); pure annotated functions are
-// unaffected by effect lowering, so this un-effect-lowered core matches
+// Check every usage claim: the row facts (`@ noalloc`, `@ linear`,
+// `@ bounded_stack`) and the `fip`/`fbip` keywords, which are those same facts
+// bundled (`fbip` the allocation fact alone, `fip` all three), so each drive
+// covers keyword-annotated and row-claimed functions together. Linearity is a
+// property of the SOURCE term, so it is checked on the raw elaborated core
+// (`check_linear`), using the typechecker's param/field types to exempt
+// scalars (a `dup` on an immediate is a runtime no-op). The allocation budget
+// and bounded stack are properties of the COMPILED term, so they are checked
+// on the reuse-lowered core (`check_alloc` / `check_bounded_stack`). Runs on
+// every check/build/interpret (shared `frontend`); pure annotated functions
+// are unaffected by effect lowering, so this un-effect-lowered core matches
 // `dump fbip`.
 pub(super) fn fip_check(
     program: &Program<CorePhase>,
     checked: &Checked,
     core: &Core,
+    typed: &TypedCore<TypedElaborated>,
 ) -> Result<(), Error> {
     let annots = fip_annots(program);
-    if annots.is_empty() {
+    let stack_claims = bounded_stack_annots(program);
+    let linear_claims = linear_annots(program);
+    let callable = callable_requirements(program);
+    if annots.is_empty()
+        && stack_claims.is_empty()
+        && linear_claims.is_empty()
+        && callable.is_empty()
+    {
         return Ok(());
     }
-    let to_err = |msg: String| {
-        // Point the diagnostic at the offending annotated function: its name
-        // appears backtick-quoted in the message, so the first annotated decl
-        // whose name occurs there owns the span.
-        let owner = program
-            .fns
-            .iter()
-            .filter(|d| annots.contains_key(&Sym::from(&d.name)))
-            .find(|d| msg.contains(&format!("`{}`", d.name)));
+    let to_err = |e: ClaimError| {
+        // The rejection names its owner directly, so the span lookup and the
+        // family framing key on data, never on message text.
+        let owner = program.fns.iter().find(|d| d.name == e.fname.as_str());
         let span = owner.map_or_else(marginalia::Span::default, |d| d.span);
-        // An `@ noalloc` function checks with `fbip` semantics, so the shared
-        // checker phrases its message with `fbip`. Normalize the user-facing
-        // family here: `fip`/`fbip` are usage checks, while `@ noalloc` is an
-        // allocation certificate.
-        let msg = match owner {
-            Some(d) if d.no_alloc && d.fip == Fip::No => {
-                let wa = format!("{AT} {}", CoeffectFact::Noalloc);
-                let m = msg.replace("`fbip`", &format!("`{wa}`"));
-                allocation_certificate_message(&wa, Some(&d.name), &m)
-            }
-            Some(d) if d.fip == Fip::Fip => usage_check_message("fip", &d.name, &msg),
-            Some(d) if d.fip == Fip::Fbip => usage_check_message("fbip", &d.name, &msg),
-            _ => msg,
+        let name = e.fname.to_string();
+        // The claim the diagnostic names. A standalone row fact passes through
+        // verbatim (`@ linear`, `@ bounded_stack`); the keyword vocabulary is
+        // re-rendered from the declaration, so a graded `fip(2)` names its
+        // budget, and a bare `@ noalloc` (which runs the shared drive under
+        // `fbip` semantics) keeps its allocation-certificate spelling.
+        let noalloc_claim = owner.is_some_and(|d| d.no_alloc && d.fip == Fip::No);
+        let claim = match e.origin {
+            ClaimOrigin::RowClaim => e.spelled.clone(),
+            ClaimOrigin::Keyword if noalloc_claim => format!("{AT} {}", CoeffectFact::Noalloc),
+            ClaimOrigin::Keyword => owner
+                .and_then(|d| d.fip.render())
+                .unwrap_or_else(|| e.spelled.clone()),
         };
-        Error::Type(TypeError::TypeFailure { span, msg })
+        let detail = e.kind.detail();
+        // One catalogue code per failing rule; `@ noalloc` alone takes the
+        // allocation-certificate framing, every other spelling is a usage check.
+        let kind = match e.kind.as_ref() {
+            ClaimErrorKind::AllocBudgetExceeded { .. } if noalloc_claim => {
+                ErrKind::AllocationCertificateFailed {
+                    claim,
+                    name,
+                    detail,
+                }
+            }
+            ClaimErrorKind::AllocBudgetExceeded { .. } => ErrKind::ClaimAllocBudgetExceeded {
+                claim,
+                name,
+                detail,
+            },
+            ClaimErrorKind::BorrowedParam => ErrKind::ClaimBorrowedParam {
+                claim,
+                name,
+                detail,
+            },
+            ClaimErrorKind::DuplicatesValue => ErrKind::ClaimDuplicatesValue {
+                claim,
+                name,
+                detail,
+            },
+            ClaimErrorKind::LinearityNotClosed { .. } => ErrKind::ClaimLinearityNotClosed {
+                claim,
+                name,
+                detail,
+            },
+            ClaimErrorKind::NonTailRecursion { .. } => ErrKind::ClaimNonTailRecursion {
+                claim,
+                name,
+                detail,
+            },
+            ClaimErrorKind::TrmcShapesMixed { .. } => ErrKind::ClaimTrmcShapesMixed {
+                claim,
+                name,
+                detail,
+            },
+            ClaimErrorKind::TrmcWithMutualCall { .. } => ErrKind::ClaimTrmcWithMutualCall {
+                claim,
+                name,
+                detail,
+            },
+            ClaimErrorKind::SccMemberUncertified { .. } => ErrKind::ClaimSccMemberUncertified {
+                claim,
+                name,
+                detail,
+            },
+            ClaimErrorKind::StackNotClosed { .. } => ErrKind::ClaimStackNotClosed {
+                claim,
+                name,
+                detail,
+            },
+            // The callable-certificate rejections carry their own framing: the
+            // demand sits on a parameter's function type, not on the walked
+            // function's own claim, so `claim` is unused here by design.
+            ClaimErrorKind::CallableUncertified { .. } => {
+                ErrKind::CallableCertificateMissing { name, detail }
+            }
+            ClaimErrorKind::CallableOpaque { .. } => {
+                ErrKind::CallableCertificateOpaque { name, detail }
+            }
+        };
+        let err = kind.at(span);
+        match e.kind.note() {
+            Some(note) => Error::Type(err.note(note)),
+            None => Error::Type(err),
+        }
     };
     let sigs = borrow_sigs(program);
     let users: BTreeSet<Sym> = core.fns.iter().map(|f| f.name).collect();
     let newtypes = newtype_ctors(program);
-    check_fip_linear(core, &annots, &checked.decls, &checked.ctors).map_err(to_err)?;
-    check_fip(
-        &reuse(&insert_rc(core, &sigs)),
+    // The linearity drive shares the source-term core: it runs pre-RC, so the
+    // dup/drop the RC pass inserts to realize linear consumption are never
+    // counted against a claiming function.
+    check_linear(
+        core,
+        &linear_claims,
         &annots,
         &sigs,
+        &checked.defs.decls,
+        &checked.defs.ctors,
+        &users,
+    )
+    .map_err(to_err)?;
+    let lowered = reuse(&insert_rc(core, &sigs));
+    check_alloc(
+        &lowered,
+        &annots,
         &users,
         &newtypes,
+        &callable.certified_params(),
     )
-    .map_err(to_err)
-}
-
-fn allocation_certificate_message(kind: &str, name: Option<&str>, msg: &str) -> String {
-    let rest = name.map_or_else(
-        || {
-            msg.strip_prefix(&format!("the `{kind}` block "))
-                .unwrap_or_else(|| strip_sentence_prefix(msg))
-        },
-        |name| strip_marked_prefix(msg, name, kind),
-    );
-    name.map_or_else(
-        || format!("allocation certificate `{kind}` failed for block: {rest}"),
-        |name| format!("allocation certificate `{kind}` failed for function `{name}`: {rest}"),
-    )
-}
-
-fn usage_check_message(kind: &str, name: &str, msg: &str) -> String {
-    let rest = strip_marked_prefix(msg, name, kind);
-    format!("usage check `{kind}` failed for function `{name}`: {rest}")
-}
-
-fn strip_marked_prefix<'a>(msg: &'a str, name: &str, kind: &str) -> &'a str {
-    msg.strip_prefix(&format!("function `{name}` is marked `{kind}` but "))
-        .or_else(|| msg.strip_prefix(&format!("a `{kind}` function ")))
-        .unwrap_or_else(|| strip_sentence_prefix(msg))
-}
-
-fn strip_sentence_prefix(msg: &str) -> &str {
-    msg.strip_prefix("function ")
-        .or_else(|| msg.strip_prefix("a "))
-        .unwrap_or(msg)
+    .map_err(to_err)?;
+    // The bounded-stack drive shares the compiled-term core: its recursion
+    // rules must agree byte-for-byte with what codegen loops.
+    check_bounded_stack(&lowered, &stack_claims, &annots, &users).map_err(to_err)?;
+    // The callable-certificate drive runs on the pre-optimizer typed core: a
+    // value flowing into a `@ noalloc` function-typed parameter must prove its
+    // whole call tree allocation-free, tier- and optimizer-invariantly.
+    check_callable_flow(typed.functions(), &callable, &annots).map_err(to_err)
 }
 
 // Check every `replayable`-annotated function. The certificate is on the inferred
@@ -378,6 +446,7 @@ pub(super) fn replayable_check(
         .map(Sym::from)
         .collect();
     let inferred: BTreeMap<&str, &Effects> = checked
+        .defs
         .decls
         .iter()
         .map(|i| (i.name.as_str(), &i.effects))

@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use prism_common::sym::Sym;
 
 use super::super::specialize_support::binder_occurrence;
+use super::super::traverse::{clone_reference, discard_reference};
 use super::super::{TypedBinder, TypedValue};
 
 pub(super) type Scope = BTreeMap<Sym, TypedValue>;
@@ -21,9 +22,12 @@ pub(super) type Scope = BTreeMap<Sym, TypedValue>;
 // scope exactly, including a shadowed global or outer local of the same name.
 pub(super) type ScopeUndo = Vec<(Sym, Option<TypedValue>)>;
 
-pub(super) fn bind_scope(scope: &mut Scope, binders: &[TypedBinder]) -> ScopeUndo {
+pub(super) fn bind_scope<'a>(
+    scope: &mut Scope,
+    binders: impl IntoIterator<Item = &'a TypedBinder>,
+) -> ScopeUndo {
     binders
-        .iter()
+        .into_iter()
         .map(|binder| {
             (
                 binder.name,
@@ -37,10 +41,15 @@ pub(super) fn unbind_scope(scope: &mut Scope, undo: ScopeUndo) {
     for (name, displaced) in undo.into_iter().rev() {
         match displaced {
             Some(value) => {
-                scope.insert(name, value);
+                let current = scope
+                    .insert(name, value)
+                    .expect("scope undo replaces the current binding");
+                discard_reference(current);
             }
             None => {
-                scope.remove(&name);
+                if let Some(current) = scope.remove(&name) {
+                    discard_reference(current);
+                }
             }
         }
     }
@@ -61,8 +70,9 @@ pub(super) fn unbind_scope(scope: &mut Scope, undo: ScopeUndo) {
 // silent decline; it is unreachable on verified input, which the typed
 // verifier guarantees before RC ever runs.
 pub(super) fn operand(scope: &Scope, name: Sym) -> TypedValue {
-    scope
-        .get(&name)
-        .unwrap_or_else(|| panic!("verified RC operand {name} is out of scope"))
-        .clone()
+    clone_reference(
+        scope
+            .get(&name)
+            .unwrap_or_else(|| panic!("verified RC operand {name} is out of scope")),
+    )
 }

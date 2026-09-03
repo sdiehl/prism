@@ -1,0 +1,28 @@
+-- Which handle numbers a run has issued, read back through the numeric seam.
+--
+-- The socket table belongs to one run: the counter starts at 1 and every socket
+-- a run left open is closed when it ends. That is what makes handle numbering a
+-- property of the program rather than of whatever ran on the thread before it,
+-- and it is why running this twice in one process prints the same map both
+-- times. The second listener here is opened through the raw operation and never
+-- closed, so it is the case that would shift the numbering if a run inherited
+-- the last one's table.
+
+import Net (Listener, Net, net_listen, net_local_addr, run_net, with_tcp_listener)
+
+fn liveness(h : Int) : String ! {Net | e} =
+  match net_local_addr(h) of
+    Err(_x) => "-"
+    Ok(_a) => "live"
+
+fn report(_l : Listener) : Unit ! {Net, IO | e} =
+  let _abandoned = net_listen("127.0.0.1", 0, 1)
+  let _a = println(concat("h1 ", liveness(1)))
+  let _b = println(concat("h2 ", liveness(2)))
+  println(concat("h3 ", liveness(3)))
+
+fn go() : Unit ! {Net, IO | e} =
+  let _done = with_tcp_listener("127.0.0.1:0", 1, report)
+  ()
+
+fn main() : Unit ! {IO} = run_net(go)

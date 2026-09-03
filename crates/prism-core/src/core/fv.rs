@@ -14,14 +14,14 @@ pub type Set = BTreeSet<Sym>;
 #[must_use]
 pub fn comp(c: &Comp) -> Set {
     let mut f = Fv::default();
-    f.visit_comp(c);
+    f.walk_comp(c);
     f.free
 }
 
 #[must_use]
 pub fn value(v: &Value) -> Set {
     let mut f = Fv::default();
-    f.visit_value(v);
+    f.walk_value(v);
     f.free
 }
 
@@ -31,6 +31,55 @@ pub fn comp_without<'a, I: IntoIterator<Item = &'a Sym>>(c: &Comp, binders: I) -
         s.remove(b);
     }
     s
+}
+
+/// Collect every name bound anywhere inside `c`, regardless of scope.
+///
+/// This includes let and lambda binders, case patterns, reuse tokens, and
+/// handler binders. A caller can conservatively retain an outer-binder fact
+/// only when the name does not occur in this set.
+#[must_use]
+pub fn rebound(c: &Comp) -> Set {
+    let mut r = Rebound::default();
+    r.walk_comp(c);
+    r.bound
+}
+
+// Collects binder names without scoping: the caller wants the union of every
+// binding site, so shadow nesting is irrelevant here.
+#[derive(Default)]
+struct Rebound {
+    bound: Set,
+}
+
+impl Visit for Rebound {
+    fn comp(&mut self, c: &Comp) -> bool {
+        match c {
+            Comp::Bind(_, x, _) => {
+                self.bound.insert(*x);
+            }
+            Comp::Lam(ps, _) => self.bound.extend(ps.iter().copied()),
+            Comp::Case(_, arms) => {
+                for (p, _) in arms {
+                    pat_vars(p, &mut self.bound);
+                }
+            }
+            Comp::WithReuse { token, .. } => {
+                self.bound.insert(*token);
+            }
+            Comp::Handle {
+                return_var, ops, ..
+            } => {
+                self.bound.extend(return_var.iter().copied());
+                for op in ops {
+                    self.bound.extend(op.params.iter().copied());
+                    self.bound.insert(op.resume);
+                }
+            }
+            _ => {}
+        }
+        true
+    }
 }
 
 pub fn pat_vars(p: &CorePat, out: &mut Set) {
@@ -54,72 +103,31 @@ struct Fv {
     bound: Vec<Sym>,
 }
 
-impl Fv {
-    fn under(&mut self, names: &[Sym], body: &Comp) {
-        self.bound.extend_from_slice(names);
-        self.visit_comp(body);
-        self.bound.truncate(self.bound.len() - names.len());
-    }
-}
-
 impl Visit for Fv {
-    fn visit_value(&mut self, v: &Value) {
+    fn enter_scope(&mut self, binders: &[Sym]) {
+        self.bound.extend_from_slice(binders);
+    }
+
+    fn exit_scope(&mut self, binders: &[Sym]) {
+        self.bound.truncate(self.bound.len() - binders.len());
+    }
+
+    fn value(&mut self, v: &Value) -> bool {
         if let Value::Var(x) = v {
             if !self.bound.contains(x) {
                 self.free.insert(*x);
             }
-        } else {
-            self.descend_value(v);
         }
+        true
     }
 
-    fn visit_comp(&mut self, c: &Comp) {
-        match c {
-            Comp::Bind(m, x, n) => {
-                self.visit_comp(m);
-                self.under(&[*x], n);
+    fn comp(&mut self, c: &Comp) -> bool {
+        if let Comp::Reuse(token, _) = c {
+            if !self.bound.contains(token) {
+                self.free.insert(*token);
             }
-            Comp::Lam(ps, b) => self.under(ps, b),
-            Comp::Case(v, arms) => {
-                self.visit_value(v);
-                for (p, body) in arms {
-                    let mut pv = Set::new();
-                    pat_vars(p, &mut pv);
-                    self.under(&pv.into_iter().collect::<Vec<_>>(), body);
-                }
-            }
-            // `token` is bound over `body`; the freed cell is named in the
-            // enclosing scope, so it stays free here.
-            Comp::WithReuse { token, freed, body } => {
-                self.visit_value(freed);
-                self.under(&[*token], body);
-            }
-            // The token is a free reference resolved to the `WithReuse` binder
-            // (unless one is in scope, e.g. nested reuse).
-            Comp::Reuse(tok, v) => {
-                if !self.bound.contains(tok) {
-                    self.free.insert(*tok);
-                }
-                self.visit_value(v);
-            }
-            Comp::Handle {
-                body,
-                return_var,
-                return_body,
-                ops,
-            } => {
-                self.visit_comp(body);
-                if let Some(rb) = return_body {
-                    self.under(&return_var.iter().copied().collect::<Vec<_>>(), rb);
-                }
-                for op in ops {
-                    let mut names = op.params.clone();
-                    names.push(op.resume);
-                    self.under(&names, &op.body);
-                }
-            }
-            _ => self.descend_comp(c),
         }
+        true
     }
 }
 
@@ -128,6 +136,9 @@ mod tests {
     use super::{comp, value, Set};
     use crate::core::cbpv::{CheckedHandler, Comp, CoreOp, CorePat, HandleOp, Value};
     use prism_common::sym::Sym;
+
+    const DEEP_FREE_VARIABLE_DEPTH: usize = 20_000;
+    const ORDINARY_TEST_STACK: usize = 2 * 1024 * 1024;
 
     fn s(name: &str) -> Sym {
         Sym::new(name)
@@ -207,5 +218,29 @@ mod tests {
             ops: CheckedHandler::new(vec![op]).unwrap(),
         };
         assert_eq!(comp(&c), set(&["bd", "ro", "of"]));
+    }
+
+    #[test]
+    fn free_variables_handle_deep_binds_on_an_ordinary_stack() {
+        let result = std::thread::Builder::new()
+            .name("deep-raw-free-variables".into())
+            .stack_size(ORDINARY_TEST_STACK)
+            .spawn(|| {
+                let mut body = Comp::Return(var("outside"));
+                for _ in 0..DEEP_FREE_VARIABLE_DEPTH {
+                    body = Comp::Bind(
+                        Box::new(Comp::Return(Value::Int(0))),
+                        s("shadow"),
+                        Box::new(body),
+                    );
+                }
+                assert_eq!(comp(&body), set(&["outside"]));
+                std::mem::forget(body);
+            })
+            .expect("spawning deep raw free-variable test")
+            .join();
+        if let Err(payload) = result {
+            std::panic::resume_unwind(payload);
+        }
     }
 }

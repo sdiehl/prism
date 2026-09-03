@@ -5,9 +5,9 @@
 //
 // The legal chain, in canonical order, is
 // `[pub] [test] [total | assume total] [replayable] [fip | fbip] fn`, with the
-// `@ noalloc` allocation certificate carried on the return type. `test`, `total`,
-// and `assume` are contextual: modifiers only in the leading run before `fn`,
-// ordinary identifiers everywhere else.
+// usage-claim row (`@ noalloc` / `@ bounded_stack` / `@ linear`) carried on the
+// return type. `test`, `total`, and `assume` are contextual: modifiers only in
+// the leading run before `fn`, ordinary identifiers everywhere else.
 
 fn fmt(src: &str) -> String {
     let once = prism::format(src).expect("case must parse");
@@ -28,6 +28,11 @@ fn each_modifier_alone_round_trips() {
         "fip fn f(x : Int) : Int = x\n",
         "fbip fn f(x : Int) : Int = x\n",
         "fn f(x : Int) : Int @ noalloc = x\n",
+        "fn f(x : Int) : Int @ bounded_stack = x\n",
+        "fn f(x : Int) : Int @ linear = x\n",
+        "fn f(x : Int) : Int @ {bounded_stack, noalloc} = x\n",
+        "fn f(x : Int) : Int @ {linear, noalloc} = x\n",
+        "fn f(x : Int) : Int @ {bounded_stack, linear, noalloc} = x\n",
     ] {
         assert_eq!(
             fmt(src),
@@ -54,7 +59,10 @@ fn every_modifier_combination_round_trips() {
     let totals = ["", "total ", "assume total "];
     let replays = ["", "replayable "];
     let fips = ["", "fip ", "fbip "];
-    let allocs = ["", " @ noalloc"];
+    // Composed claim rows are covered by their own pins elsewhere: under the
+    // full modifier stack they exceed the line width, so their canonical form
+    // breaks the body and cannot equal the one-line input.
+    let allocs = ["", " @ noalloc", " @ bounded_stack", " @ linear"];
     let mut n = 0;
     for &p in &pubs {
         for &t in &tests {
@@ -73,8 +81,22 @@ fn every_modifier_combination_round_trips() {
     }
     assert_eq!(
         n,
-        2 * 2 * 3 * 2 * 3 * 2,
+        2 * 2 * 3 * 2 * 3 * 4,
         "expected every combination covered"
+    );
+}
+
+// A claim row written out of order canonicalizes: the facts sort, so the two
+// spellings parse to the same declaration and format to the sorted row.
+#[test]
+fn claim_row_order_canonicalizes() {
+    assert_eq!(
+        fmt("fn f(x : Int) : Int @ {noalloc, bounded_stack} = x\n"),
+        "fn f(x : Int) : Int @ {bounded_stack, noalloc} = x\n"
+    );
+    assert_eq!(
+        fmt("fn f(x : Int) : Int @ {noalloc, linear, bounded_stack} = x\n"),
+        "fn f(x : Int) : Int @ {bounded_stack, linear, noalloc} = x\n"
     );
 }
 

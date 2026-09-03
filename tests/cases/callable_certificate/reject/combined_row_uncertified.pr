@@ -1,0 +1,7 @@
+type Box = Box(Int)
+
+fn boxit(x : Int) : Box = Box(x)
+
+fn iterate(f : ((Int) -> Box) @ {many, noalloc}, x : Int) : Box = f(x)
+
+fn drive(x : Int) : Box = iterate(boxit, x)

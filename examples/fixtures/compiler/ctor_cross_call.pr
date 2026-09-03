@@ -1,0 +1,17 @@
+-- Compiler fixture for a constructor/projection relation that crosses a
+-- non-inlined direct call. `mk` builds the pair and `first` projects it; both
+-- have two call sites, so the bounded single-call-site inliner leaves them
+-- alone and the constructor cell is really allocated at every call today. An
+-- optimizer that carries the input-to-result relation across the call boundary
+-- can cancel each `mk`/`first` pair without inlining either body; the printed
+-- sum must be byte-identical either way.
+
+type Pair = MkPair(Int, Int)
+
+fn mk(a : Int, b : Int) : Pair = MkPair(a, b)
+
+fn first(p : Pair) : Int =
+  match p of
+    MkPair(a, _) => a
+
+fn main() : Unit ! {IO} = println(first(mk(1, 2)) + first(mk(3, 4)))

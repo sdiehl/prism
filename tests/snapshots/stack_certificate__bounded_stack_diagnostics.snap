@@ -1,0 +1,18 @@
+---
+source: tests/compiler/stack_certificate.rs
+expression: out
+---
+=== composed row nontail ===
+usage check `@ bounded_stack` failed for function `shrink`: recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or drop the `@ bounded_stack` claim
+=== fbip callee ===
+usage check `@ bounded_stack` failed for function `top`: its call tree is not certified: call to `helper`, which carries no bounded-stack certificate; certify `helper` (`@ bounded_stack` or `fip`)
+=== indirect call ===
+usage check `@ bounded_stack` failed for function `apply`: its call tree is not certified: an indirect call through a first-class function value, which has no callee certificate
+=== misplaced row ===
+`@ bounded_stack` certifies a function declaration: write it after a `fn`'s return type
+=== mutual partial ===
+usage check `@ bounded_stack` failed for function `even`: is mutually recursive with `odd`, which carries no bounded-stack certificate; every member of the recursion must be certified (`@ bounded_stack` or `fip`)
+=== nontail recursion ===
+usage check `@ bounded_stack` failed for function `count`: recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or drop the `@ bounded_stack` claim
+=== uncertified callee ===
+usage check `@ bounded_stack` failed for function `top`: its call tree is not certified: call to `helper`, which carries no bounded-stack certificate; certify `helper` (`@ bounded_stack` or `fip`)

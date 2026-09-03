@@ -1,0 +1,246 @@
+-- One bundle, two operating-system processes, one computation.
+--
+-- The program counts from 1 to 10. Run as `whole` it does that in one process.
+-- Run as `send` it counts to 5 and then reaches `teleport`, which seals the rest
+-- of the count into an envelope and hands it to whatever transport is installed;
+-- here that is a TCP connection to the address the receiver reports. Run as
+-- `receive` it never counts at all: it binds a loopback port, reads one
+-- length-framed envelope, leaves the network scope, and lands what arrived.
+--
+-- The proof is in the numbering. The sender prints steps 1 through 5 and stops;
+-- the receiver prints 6 through 10, which is a number it was never told and
+-- could not have restarted its way to, because 6 travelled inside the envelope
+-- as the sealed closure's captured argument. Concatenate the two runs' standard
+-- output and it is the `whole` run, byte for byte.
+--
+-- Two details are load-bearing rather than incidental. The envelope leaves the
+-- `Net` scope before it is landed, so no socket can be live while the landed
+-- suffix runs; and the transport is chosen by installing `to_tcp` around the
+-- scene rather than by passing an address to `teleport`, so the same `scene`
+-- source is what `run_here` would land in this process.
+--
+-- The receiver binds loopback, and that is part of the program rather than a
+-- convenience. Landing an envelope runs the computation whoever sent it chose,
+-- and the frame's digests establish that the bytes are intact and belong to this
+-- bundle, never that the sender was entitled to place work here. A receiver open
+-- to a network it does not trust is a receiver that will run what that network
+-- sends it.
+--
+-- The `slow` argument caps every read and every write at a single byte. That is
+-- not a different protocol, only a smaller bound on the same loops, which is how
+-- the partial-read and partial-write paths get exercised on a loopback socket
+-- fast enough to never fragment on its own.
+
+import Data.Bytes (string_to_bytes)
+import Net (Bytes, Chunk, Closed, End, Invalid, Limit, Listener, Net, NetError, Stream, listener_address, receive, run_net, send_some, with_tcp_accept, with_tcp_connection, with_tcp_listener)
+import Teleport (MoveError, Placement, Undelivered, land, place, teleport)
+import Wire (bytes_at, bytes_of_list, bytes_window, wire_cat, wire_len)
+
+let last_step : Int = 10
+
+let cut_after : Int = 5
+
+-- A frame is a four-byte big-endian length and that many bytes. Fixed width
+-- rather than a varint because the reader must know how much header to wait for
+-- before it has read any of it.
+let frame_header_len : Int = 4
+
+-- The largest envelope this program will read. A length prefix is a promise from
+-- the far side, and a reader that allocates on one it has not bounded is a
+-- reader the far side controls.
+let frame_max : Int = 1048576
+
+let whole_chunk : Int = 65536
+
+let byte_at_a_time : Int = 1
+
+-- The computation, and the only thing either process prints to standard output.
+fn tick(i : Int, last : Int) : Unit ! {IO} =
+  if i > last then
+    ()
+  else
+    println("step {i}")
+    tick(i + 1, last)
+
+-- | The uninterrupted run, for the comparison the two-process run has to meet.
+fn whole() : Unit ! {IO} = tick(1, last_step)
+
+-- | The suffix, as the landing side runs it. `from` is an ordinary portable
+-- parameter, which is what makes it sealable: a local binding could not travel.
+fn rest(from : Int) : Unit ! {IO} = tick(from, last_step)
+
+-- The cut. `teleport` does not call `rest`; it seals `rest` applied to `from`
+-- and hands the bytes to the installed transport, so what happens next is that
+-- handler's business and not this function's.
+fn cut(from : Int) : Result(Unit, MoveError) ! {Placement, IO | e} =
+  teleport(\() -> rest(from))
+
+-- | Count to the cut, then leave. Nothing here names a transport or an address.
+fn scene() : Result(Unit, MoveError) ! {Placement, IO | e} =
+  tick(1, cut_after)
+  cut(cut_after + 1)
+
+fn put_frame_len(n : Int) : Bytes =
+  bytes_of_list([n / 16777216 % 256, n / 65536 % 256, n / 256 % 256, n % 256])
+
+fn get_frame_len(bs : Bytes) : Int =
+  bytes_at(bs, 0) * 16777216
+    + bytes_at(bs, 1) * 65536
+    + bytes_at(bs, 2) * 256
+    + bytes_at(bs, 3)
+
+-- Write the whole frame, at most `chunk` bytes per call. `send_some` reports
+-- what the kernel took rather than what it was offered, so the loop advances by
+-- that and never by the amount it asked for. No progress on a non-empty
+-- remainder cannot become progress later, so it is a closed socket.
+fn write_go(
+  s : Stream,
+  bs : Bytes,
+  off : Int,
+  len : Int,
+  chunk : Int
+) : Result(Unit, NetError) ! {Net | e} =
+  if off >= len then
+    Ok(())
+  else
+    match (send_some(s, bytes_window(bs, off, min(chunk, len - off)), 0)) of
+      Err(x) => Err(x)
+      Ok(n) =>
+        if n <= 0 then
+          Err(Closed)
+        else
+          write_go(s, bs, off + n, len, chunk)
+
+fn write_frame(
+  s : Stream,
+  envelope : Bytes,
+  chunk : Int
+) : Result(Unit, NetError) ! {Net | e} =
+  let framed = wire_cat(put_frame_len(wire_len(envelope)), envelope)
+  write_go(s, framed, 0, wire_len(framed), chunk)
+
+-- Read until `need` bytes have arrived, learning `need` from the header once the
+-- header itself is complete. A stream delivers what has arrived rather than what
+-- was asked for, so this is a loop and not a read.
+fn read_go(
+  s : Stream,
+  acc : Bytes,
+  need : Int,
+  chunk : Int
+) : Result(Bytes, NetError) ! {Net | e} =
+  if wire_len(acc) < need then
+    match receive(s, chunk) of
+      Err(x) => Err(x)
+      -- The peer closed with the frame unfinished: a truncated envelope, not an
+      -- envelope of the length it claimed.
+      Ok(End) => Err(Closed)
+      Ok(Chunk(bs)) => read_go(s, wire_cat(acc, bs), need, chunk)
+  elif need == frame_header_len then
+    let len = get_frame_len(acc)
+    if len <= 0 then
+      Err(Invalid)
+    elif len > frame_max then
+      Err(Limit)
+    else
+      read_go(s, acc, frame_header_len + len, chunk)
+  else
+    Ok(bytes_window(acc, frame_header_len, need - frame_header_len))
+
+fn read_frame(s : Stream, chunk : Int) : Result(Bytes, NetError) ! {Net | e} =
+  read_go(s, string_to_bytes(""), frame_header_len, chunk)
+
+fn accept_one(l : Listener, chunk : Int) : Result(Bytes, NetError) ! {Net | e} =
+  match with_tcp_accept(l, \(s) -> read_frame(s, chunk)) of
+    Err(x) => Err(x)
+    Ok(r) => r
+
+-- The address goes to standard error, because standard output is the program's
+-- own numbered result and the whole point is that it concatenates.
+fn announce(
+  l : Listener,
+  chunk : Int
+) : Result(Bytes, NetError) ! {Net, IO | e} =
+  match listener_address(l) of
+    Err(x) => Err(x)
+    Ok(address) =>
+      eprintln("address {address}")
+      accept_one(l, chunk)
+
+fn take_envelope(chunk : Int) : Result(Bytes, NetError) ! {Net, IO | e} =
+  match (with_tcp_listener("127.0.0.1:0", 1, \(l) -> announce(l, chunk))) of
+    Err(x) => Err(x)
+    Ok(r) => r
+
+-- | Bind, accept one connection, read one frame, close everything, and only then
+-- land what arrived. The envelope is inert bytes by the time `run_net` returns,
+-- so there is no socket alive to be captured by the computation that resumes.
+fn receiver(chunk : Int) : Unit ! {IO} =
+  match run_net(\() -> take_envelope(chunk)) of
+    Err(x) => eprintln("receive {show(x)}")
+    Ok(envelope) =>
+      match land(envelope) of
+        Err(x) => eprintln("land {show(x)}")
+        Ok(_landed) => eprintln("land ok")
+
+-- The transport's own failures are reported here, in its vocabulary, and
+-- answered to the mobility boundary as `Undelivered`: what `place` promises is
+-- delivery, and a `NetError` is not a fact about the computation.
+fn deliver(
+  address : String,
+  chunk : Int,
+  envelope : Bytes
+) : Result(Unit, MoveError) ! {Net, IO | e} =
+  match (with_tcp_connection(address, \(s) -> write_frame(s, envelope, chunk))) of
+    Err(x) =>
+      eprintln("connect {show(x)}")
+      Err(Undelivered)
+    Ok(written) =>
+      match written of
+        Err(x) =>
+          eprintln("send {show(x)}")
+          Err(Undelivered)
+        Ok(_sent) => Ok(())
+
+-- | Place envelopes on a TCP connection to `address`. This is the whole of the
+-- endpoint choice: `scene` is written without one.
+fn to_tcp(
+  address : String,
+  chunk : Int,
+  action : () -> a ! {Placement, Net, IO | e}
+) : a ! {Net, IO | e} =
+  handle action() with
+    place(envelope) resume k => k(deliver(address, chunk, envelope))
+    return r => r
+
+fn sender(address : String, chunk : Int) : Unit ! {IO} =
+  let placed = run_net(\() -> to_tcp(address, chunk, scene))
+  eprintln("place {show(placed)}")
+
+fn chunk_of(rest : List(String)) : Int =
+  match rest of
+    Nil => whole_chunk
+    Cons(flag, _) =>
+      if flag == "slow" then
+        byte_at_a_time
+      else
+        whole_chunk
+
+fn usage() : Unit ! {IO} =
+  eprintln("usage: whole | receive [slow] | send ADDRESS [slow]")
+
+fn dispatch(argv : List(String)) : Unit ! {IO} =
+  match argv of
+    Nil => usage()
+    Cons(role, rest) =>
+      if role == "whole" then
+        whole()
+      elif role == "receive" then
+        receiver(chunk_of(rest))
+      elif role == "send" then
+        match rest of
+          Nil => usage()
+          Cons(address, more) => sender(address, chunk_of(more))
+      else
+        usage()
+
+fn main() : Unit ! {IO} = dispatch(args())

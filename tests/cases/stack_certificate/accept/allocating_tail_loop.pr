@@ -1,0 +1,10 @@
+-- `@ bounded_stack` constrains stack alone: a tail-recursive loop that
+-- allocates a fresh cell every iteration still certifies, which is exactly
+-- what `@ noalloc` and `fbip` would reject.
+type List = Nil | Cons(Int, List)
+
+fn build(n : Int, acc : List) : List @ bounded_stack =
+  if n == 0 then
+    acc
+  else
+    build(n - 1, Cons(n, acc))

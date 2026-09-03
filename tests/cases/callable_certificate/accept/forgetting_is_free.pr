@@ -1,0 +1,5 @@
+fip fn inc(x) = x + 1
+
+fn apply_any(f : (Int) -> Int, x : Int) : Int = f(x)
+
+fn drive(x : Int) : Int = apply_any(inc, x)

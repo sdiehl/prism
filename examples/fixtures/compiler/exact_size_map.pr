@@ -1,0 +1,12 @@
+-- Compiler fixture for exact-size destination construction. The frozen array
+-- is built from a literal-bounded range through `map`, so its cardinality is
+-- exact at compile time: a size-tracking optimizer may allocate the
+-- destination once instead of growing it. Cardinality is a cost fact only;
+-- the elements, their order, and the printed sum are identical either way.
+
+import Data.List (..)
+import Data.Frozen (..)
+
+fn main() : Unit ! {IO} =
+  let squares = fz_of_list(map(\(n : Int) -> n * n, range(1, 20)))
+  println(fz_foldl(\(acc : Int, v : Int) -> acc + v, 0, squares))

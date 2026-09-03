@@ -1,0 +1,4 @@
+-- The claim certifies a declaration, not a parameter type: a `@ linear` row
+-- anywhere but the root of a `fn` return annotation is misplaced, and the
+-- diagnostic names the row that was written.
+fn f(x : Int @ linear) : Int = x

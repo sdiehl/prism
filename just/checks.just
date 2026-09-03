@@ -1,9 +1,9 @@
 # The cap keeps one red test from cancelling the rest of an hour-long suite,
-# while still stopping a wholesale break early. Core lint needs the larger stack.
+# while still stopping a wholesale break early.
 # Run nextest and doctests.
 [group('tests')]
 test:
-    RUST_MIN_STACK=33554432 PRISM_COMPILER_CACHE=0 cargo nextest run --all --max-fail 10
+    PRISM_COMPILER_CACHE=0 cargo nextest run --all --max-fail 10
     PRISM_COMPILER_CACHE=0 cargo test --workspace --doc
 
 # Run the native parity tests.
@@ -85,10 +85,10 @@ gate:
 gate-debug:
     @just _gate
 
-# Run the cached release gate; use gate after cache-fingerprint changes.
+# Run the cached release gate on the sentinel corpus; use gate for the full matrix.
 [group('gates')]
 gate-fast:
-    @PRISM_GATE_CACHE=1 just _gate --release
+    @PRISM_GATE_CACHE=1 PRISM_SENTINEL_CORPUS=1 just _gate --release
 
 # Run the fast development subset of the correctness gate.
 [group('gates')]

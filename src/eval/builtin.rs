@@ -21,7 +21,7 @@ use crate::types::{CONS, NIL};
 use Builtin as B;
 use FloatOp as F;
 
-use super::{owned_math, Rv};
+use super::{net, owned_math, Rv};
 
 // The C runtime's `prism_show_float_prec` formats `%.*f` into a 64-byte buffer,
 // so it can emit at most 63 characters. The interpreter mirrors that cap to stay
@@ -529,6 +529,19 @@ pub(super) fn str_builtin(b: Builtin, vals: &[Rv], args: &[String]) -> Result<Rv
         (B::StoreHas, [Rv::Str(root), Rv::Str(key)]) => {
             Ok(Rv::Bool(bridge::has(Path::new(root), key)))
         }
+        // The stream-socket boundary. Each of these mirrors an entry point in
+        // `runtime/prism_net.c` and answers the same `Result` shape: a logical
+        // handle or a byte count on the left, a classification code on the right.
+        (B::NetListen, [Rv::Str(host), Rv::Int(port), Rv::Int(backlog)]) => {
+            Ok(net::listen(host, *port, *backlog))
+        }
+        (B::NetAccept, [Rv::Int(h)]) => Ok(net::accept(*h)),
+        (B::NetConnect, [Rv::Str(host), Rv::Int(port)]) => Ok(net::connect(host, *port)),
+        (B::NetRecv, [Rv::Int(h), Rv::Int(max)]) => Ok(net::recv(*h, *max)),
+        (B::NetSend, [Rv::Int(h), Rv::Buf(b), Rv::Int(off)]) => Ok(net::send(*h, b, *off)),
+        (B::NetClose, [Rv::Int(h)]) => Ok(net::close(*h)),
+        (B::NetLocalAddr, [Rv::Int(h)]) => Ok(net::local_addr(*h)),
+        (B::NetPeerAddr, [Rv::Int(h)]) => Ok(net::peer_addr(*h)),
         // `exit` is intercepted in `step` (it sets the machine's exit status
         // and unwinds), so it never reaches the value-returning builtin path.
         (B::Exit, _) => Err("exit: unexpected argument".into()),

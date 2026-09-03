@@ -28,7 +28,9 @@ pub use effect_analysis::latent_ops;
 pub use effect_check::residual_effects;
 pub use effects::{EffectStrategy, OpGrades, EFFECT_TIERS};
 pub use fbip::{
-    balanced, check_fip, check_fip_linear, fip_annots, insert_rc, replayable_annots, reuse, Fips,
+    balanced, bounded_stack_annots, callable_requirements, check_alloc, check_bounded_stack,
+    check_callable_flow, check_linear, fip_annots, insert_rc, linear_annots, replayable_annots,
+    reuse, CallableRequirements, ClaimError, ClaimErrorKind, ClaimOrigin, Fips,
 };
 pub use graph::DepGraph;
 pub use hash::hex as hash_str;
@@ -39,8 +41,9 @@ pub use hash::{
 pub use identity_json::{core_identity_json, IDENTITY_SCHEMA};
 pub use json::core_to_json;
 pub use opt::{
-    effective_passes, lint as lint_core, newtype_ctors, pass_fingerprint, CorePass, OptLevel,
-    PassSpec, PassStage, PassStats,
+    effective_passes, lint as lint_core, newtype_ctors, optimization_fingerprint, pass_fingerprint,
+    CorePass, OptLevel, OptimizationPlan, OptimizerOptions, PassPipeline, PassSet, PassSpec,
+    PassStage, PassStats,
 };
 pub use pretty::{pp_comp, pp_core, pp_core_pretty, pp_value};
 pub use shape::{class_digests, contract_digest, instance_digest, shape_digests};

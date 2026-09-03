@@ -1,4 +1,4 @@
-# Sized to the largest functions in the crate: the class-resolution builder
-# `tc::classes::build_classes` and the expression synthesizer `tc::infer::synth_node`
-# (both 313 lines). Do not raise casually.
-too-many-lines-threshold = 313
+# Function-size ratchet: lowered stepwise as oversized functions are split.
+# The four exhaustive Core/Expr walkers above this carry reviewed
+# function-local allows. Do not raise; lower when the band below clears.
+too-many-lines-threshold = 285

@@ -1,0 +1,403 @@
+-- | Net: TCP stream sockets, as an ordinary algebraic effect.
+--
+-- The capability is `Net` and `run_net` is its default Unix handler: each
+-- operation is served by a `prim_net_*` builtin that reaches the runtime's
+-- socket boundary. Nothing about `Net` is privileged in the compiler, so a test
+-- or a transport can install its own handler over the same operations (a pair of
+-- in-memory queues, a recording proxy, a fault injector) and the program under
+-- it is unchanged. That is the reason the transport is an effect and not a set
+-- of special primitives: there is one IO path, and who serves it is a choice
+-- made at the handler rather than in the language.
+--
+-- A socket is reached only through a bracket. `with_tcp_listener`,
+-- `with_tcp_accept`, and `with_tcp_connection` each open one socket, pass it to
+-- a body, and close it when the body returns. There is no public `close` and no
+-- way to name a socket that was not handed to you, so the lifetime is the
+-- bracket's rather than the caller's bookkeeping. Each body takes its socket
+-- `@ noescape`, so a body that returns its socket, stores it in returned data,
+-- or captures it under another closure is rejected before it runs. Written with
+-- `with`, a bracket reads as a sequence rather than as nesting:
+--
+-- ```prism,no_run
+-- run_net(\() -> with_tcp_connection("127.0.0.1:8080", \(s) -> receive(s, 1024)))
+-- ```
+--
+-- Reads answer `Chunk(Bytes)` or `End`: a chunk is whatever has arrived, up to
+-- the size asked for, and `End` is the peer's orderly close. Writes report how
+-- many bytes the kernel took, because a short write is an ordinary outcome and
+-- not a failure; `send_all` is the loop over that. Every operation answers a
+-- `Result` whose error side is the small closed `NetError` below, never a
+-- platform `errno`: the same failure has to be the same Prism value on every
+-- host, so a program that branches on an error is branching on what happened
+-- rather than on which libc it was built against.
+--
+-- Ownership is lexical, not collected. The bracket closes when the body returns,
+-- whether it returns `Ok` or `Err`. A body that leaves some other way, by
+-- performing `fail()` or by being cancelled, abandons the continuation, so the
+-- close does not run and the socket is released at process exit; put the bracket
+-- inside `Concurrent.on_cancel` when a cancelled fiber has to close promptly.
+-- Closing unconditionally would mean intercepting those effects here, which puts
+-- them in the row of every program that touches the network to serve one rare
+-- shape.
+--
+-- A handle outliving its bracket is not a hazard even where the escape check
+-- cannot see it, only a mistake with a deterministic answer: closing retires the
+-- handle for good and the counter never reissues it, so a stale `Stream` reports
+-- `Closed` rather than reaching whatever socket the OS opened next. An operation
+-- offered a live handle of the wrong kind (accepting on a stream, reading from a
+-- listener) reports `Closed` for the same reason, in both tiers.
+
+import Data.Char (is_digit)
+import Data.String (index_of, starts_with, str_slice)
+import Wire (bytes_buf, bytes_of_buf, wire_len)
+-- Re-export the byte-string type so a caller who imports `Net` can name what
+-- `receive` returns and what `send_all` takes without also reaching into `Wire`.
+pub import Wire (Bytes)
+
+-- | Why a network operation did not happen. A closed, platform-independent
+-- classification: the runtime maps its host's `errno` (or, interpreting, its
+-- `io::ErrorKind`) onto exactly these, so the same failure is the same value
+-- everywhere. `Other` deliberately carries no payload, because anything it could
+-- carry would be a number that means something different on the next host.
+--
+-- `Invalid` is an argument the boundary cannot use: a malformed address, a port
+-- outside the 16-bit range, a read size that is not positive, an offset past the
+-- end of the bytes offered. `Closed` is a handle that is not open, or is open as
+-- the other kind of socket.
+pub type NetError
+  = Refused
+  | Unreachable
+  | TimedOut
+  | Reset
+  | AddressInUse
+  | Invalid
+  | Closed
+  | Denied
+  | Limit
+  | Other
+  deriving (Eq, Show)
+
+-- | What a read found: some bytes, or the peer's orderly close. `End` is not an
+-- error; it is the stream ending, and a reader loop stops on it.
+-- A chunk is a `Bytes` window, which has no equality or printed form of its own,
+-- so a read result is inspected through `Wire` rather than compared or shown.
+-- lint: allow(L0203)
+pub type Received = Chunk(Bytes) | End
+
+-- The wire between `runtime/prism_net.c`, the interpreter's socket table, and
+-- the table in `net_codes` below. These are named rather than written inline
+-- because they are a cross-language contract: the three lists change together or
+-- not at all.
+let net_code_refused : Int = 1
+
+let net_code_unreachable : Int = 2
+
+let net_code_timed_out : Int = 3
+
+let net_code_reset : Int = 4
+
+let net_code_in_use : Int = 5
+
+let net_code_invalid : Int = 6
+
+let net_code_closed : Int = 7
+
+let net_code_denied : Int = 8
+
+let net_code_limit : Int = 9
+
+-- | The stream-socket transport. The operations speak in plain integer handles
+-- rather than in the `Listener` and `Stream` types below, and that is
+-- deliberate: those types are opaque, so a handler written outside this module
+-- could not build one to resume with. Keeping the seam numeric is what makes the
+-- capability genuinely re-handleable, and the brackets below are the only place
+-- a number becomes a socket.
+--
+-- The error side is already a `NetError`, so a foreign handler answers in the
+-- vocabulary of the language instead of reproducing the runtime's code table.
+pub effect Net
+  net_listen(String, Int, Int) : Result(Int, NetError)
+  net_accept(Int) : Result(Int, NetError)
+  net_connect(String, Int) : Result(Int, NetError)
+  net_recv(Int, Int) : Result(Bytes, NetError)
+  net_send(Int, Bytes, Int) : Result(Int, NetError)
+  net_close(Int) : Result(Unit, NetError)
+  net_local_addr(Int) : Result(String, NetError)
+  net_peer_addr(Int) : Result(String, NetError)
+
+-- | A bound, listening socket. Opened by `with_tcp_listener` and valid only
+-- inside it.
+opaque newtype Listener = Listener(Int)
+
+-- | A connected socket. Opened by `with_tcp_accept` or `with_tcp_connection` and
+-- valid only inside it.
+opaque newtype Stream = Stream(Int)
+
+-- The runtime's code table as a value, read in one direction only. The
+-- runtime's `0` has no row: it is `Other`, the answer for every code the table
+-- does not know, so a newer runtime that classifies more finely is still
+-- readable by older Prism.
+let net_codes : List((Int, NetError)) =
+  [
+      (net_code_refused, Refused),
+      (net_code_unreachable, Unreachable),
+      (net_code_timed_out, TimedOut),
+      (net_code_reset, Reset),
+      (net_code_in_use, AddressInUse),
+      (net_code_invalid, Invalid),
+      (net_code_closed, Closed),
+      (net_code_denied, Denied),
+      (net_code_limit, Limit),
+    ]
+
+-- The one place a runtime classification code becomes a `NetError`.
+fn net_error(code : Int) : NetError = net_error_in(code, net_codes)
+
+fn net_error_in(code : Int, rows : List((Int, NetError))) : NetError =
+  match rows of
+    Nil => Other
+    Cons((c, e), rest) =>
+      if c == code then
+        e
+      else
+        net_error_in(code, rest)
+
+fn net_classify(r : Result(a, Int)) : Result(a, NetError) =
+  match r of
+    Ok(v) => Ok(v)
+    Err(code) => Err(net_error(code))
+
+fn net_received(r : Result(Buf, Int)) : Result(Bytes, NetError) =
+  match r of
+    Ok(b) => Ok(bytes_of_buf(b))
+    Err(code) => Err(net_error(code))
+
+-- | Run `action` against the host's TCP stack. This is the default handler: each
+-- operation forwards to the matching runtime builtin and the reply is classified
+-- once, here, so the code table has exactly one reader.
+--
+-- Every operation is a recorded capability observation, but not a replayable
+-- one: a socket read has no answer in a trace without the peer that produced it,
+-- so `Net` stays outside the replayable set and a `replayable` function that
+-- performs it is rejected rather than reaching a live socket on resume.
+--
+-- ```prism,no_run
+-- run_net(\() -> with_tcp_connection("127.0.0.1:8080", \(s) -> receive(s, 1024)))
+-- ```
+pub fn run_net(action : () -> a ! {Net | e}) : a =
+  handle action() with
+    net_listen(host, port, backlog) resume k =>
+      k(net_classify(prim_net_listen(host, port, backlog)))
+    net_accept(h) resume k => k(net_classify(prim_net_accept(h)))
+    net_connect(host, port) resume k =>
+      k(net_classify(prim_net_connect(host, port)))
+    net_recv(h, max) resume k => k(net_received(prim_net_recv(h, max)))
+    net_send(h, bs, off) resume k =>
+      k(net_classify(prim_net_send(h, bytes_buf(bs), off)))
+    net_close(h) resume k => k(net_classify(prim_net_close(h)))
+    net_local_addr(h) resume k => k(net_classify(prim_net_local_addr(h)))
+    net_peer_addr(h) resume k => k(net_classify(prim_net_peer_addr(h)))
+    return r => r
+
+let net_ascii_zero : Int = 48
+
+let net_decimal_radix : Int = 10
+
+let net_port_max : Int = 65535
+
+-- Digits only, no sign and no leading space, bounded by the port range. Walking
+-- an address by codepoint is safe where walking a payload is not: the string is
+-- one endpoint, five digits at most, so the scan cannot become the program's
+-- shape.
+-- lint: allow(L0109)
+fn net_port_go(s : String, i : Int, acc : Int) : Option(Int) =
+  if i >= str_len(s) then
+    if acc > net_port_max then
+      None
+    else
+      Some(acc)
+  elif is_digit(char_at(s, i)) && acc <= net_port_max then
+    net_port_go(
+        s,
+        i + 1,
+        acc * net_decimal_radix + char_at(s, i) - net_ascii_zero,
+      )
+  else
+    None
+
+fn net_port_of(s : String) : Option(Int) =
+  if str_len(s) == 0 then
+    None
+  else
+    net_port_go(s, 0, 0)
+
+-- `rest` is the ":port" tail with its colon, so the bracketed and bare spellings
+-- share one check.
+fn net_endpoint(
+  host : String,
+  rest : String
+) : Result((String, Int), NetError) =
+  if str_len(host) == 0 || not(starts_with(":", rest)) then
+    Err(Invalid)
+  else
+    match net_port_of(str_slice(rest, 1, str_len(rest))) of
+      None => Err(Invalid)
+      Some(port) => Ok((host, port))
+
+-- | Split an address into its host and port. The spelling is the one every
+-- address query answers in: `"127.0.0.1:8080"`, or an IPv6 host in brackets as
+-- `"[::1]:8080"`. Brackets are required for IPv6 rather than optional, because
+-- `"::1:8080"` is itself a valid IPv6 address and no rule can read both.
+pub fn split_address(address : String) : Result((String, Int), NetError) =
+  if starts_with("[", address) then
+    let close = index_of("]", address)
+    if close < 0 then
+      Err(Invalid)
+    else
+      net_endpoint(
+          str_slice(address, 1, close),
+          str_slice(address, close + 1, str_len(address)),
+        )
+  else
+    let colon = index_of(":", address)
+    if colon < 0 then
+      Err(Invalid)
+    else
+      net_endpoint(
+          str_slice(address, 0, colon),
+          str_slice(address, colon, str_len(address)),
+        )
+
+-- | Bind `address`, listen with the given accept-queue depth, and run `body`
+-- with the listener; close it when `body` returns. The result is `body`'s
+-- answer, or the reason the socket could not be opened.
+--
+-- `backlog` is a request, not a guarantee: the host clamps it into the range it
+-- supports and may pick another depth entirely. Nothing a program can observe
+-- depends on it, since which connections are accepted and in what order is the
+-- same however deep the queue behind them was.
+--
+-- The host half is required, even for a listener: `"127.0.0.1:0"` is loopback
+-- only, `"0.0.0.0:0"` every IPv4 interface, `"[::]:0"` every IPv6 one. Leaving
+-- it to be inferred would let the two tiers pick different address families for
+-- the same program. Port `0` asks the OS to assign one, and
+-- `listener_address` reports which it chose.
+--
+-- ```prism,no_run
+-- run_net(\() -> with_tcp_listener("127.0.0.1:0", 16, listener_address))
+-- ```
+pub fn with_tcp_listener(
+  address : String,
+  backlog : Int,
+  body : (Listener @ noescape) -> a ! {Net | e}
+) : Result(a, NetError) ! {Net | e} =
+  match split_address(address) of
+    Err(x) => Err(x)
+    Ok((host, port)) =>
+      match net_listen(host, port, backlog) of
+        Err(x) => Err(x)
+        Ok(h) =>
+          let r = body(Listener(h))
+          let _closed = net_close(h)
+          Ok(r)
+
+-- | Wait for the next connection on `l` and run `body` with it, closing it when
+-- `body` returns. One connection: call it again for the next, which leaves the
+-- accept loop the caller's to write and to bound.
+pub fn with_tcp_accept(
+  l : Listener,
+  body : (Stream @ noescape) -> a ! {Net | e}
+) : Result(a, NetError) ! {Net | e} =
+  match l of
+    Listener(lh) =>
+      match net_accept(lh) of
+        Err(x) => Err(x)
+        Ok(h) =>
+          let r = body(Stream(h))
+          let _closed = net_close(h)
+          Ok(r)
+
+-- | Connect to `address` and run `body` with the connection, closing it when
+-- `body` returns.
+pub fn with_tcp_connection(
+  address : String,
+  body : (Stream @ noescape) -> a ! {Net | e}
+) : Result(a, NetError) ! {Net | e} =
+  match split_address(address) of
+    Err(x) => Err(x)
+    Ok((host, port)) =>
+      match net_connect(host, port) of
+        Err(x) => Err(x)
+        Ok(h) =>
+          let r = body(Stream(h))
+          let _closed = net_close(h)
+          Ok(r)
+
+-- | Read at most `max` bytes, blocking until at least one arrives. A stream
+-- delivers what it has rather than what was asked for, so a reader loops on
+-- `Chunk` until `End`. `max` must be positive: a read that was never allowed to
+-- return bytes would otherwise answer `End` for a peer that is still there.
+pub fn receive(s : Stream, max : Int) : Result(Received, NetError) ! {Net | e} =
+  match s of
+    Stream(h) =>
+      match net_recv(h, max) of
+        Err(x) => Err(x)
+        Ok(bs) =>
+          if wire_len(bs) == 0 then
+            Ok(End)
+          else
+            Ok(Chunk(bs))
+
+-- | Write the bytes of `bs` from `off` onward and report how many the kernel
+-- took, which may be fewer than were offered. Taking an offset rather than a
+-- narrowed slice is what keeps `send_all` linear: the loop holds one `Bytes` and
+-- advances an integer, where re-slicing would copy the unsent remainder on every
+-- partial write.
+pub fn send_some(
+  s : Stream,
+  bs : Bytes,
+  off : Int
+) : Result(Int, NetError) ! {Net | e} =
+  match s of
+    Stream(h) => net_send(h, bs, off)
+
+-- | Write all of `bs`, looping over partial writes. A write that reports no
+-- progress on a non-empty remainder cannot make any later either, so it is
+-- reported as `Closed` rather than spun on.
+pub fn send_all(s : Stream, bs : Bytes) : Result(Unit, NetError) ! {Net | e} =
+  net_send_all_go(s, bs, 0, wire_len(bs))
+
+fn net_send_all_go(
+  s : Stream,
+  bs : Bytes,
+  off : Int,
+  len : Int
+) : Result(Unit, NetError) ! {Net | e} =
+  if off >= len then
+    Ok(())
+  else
+    match send_some(s, bs, off) of
+      Err(x) => Err(x)
+      Ok(n) =>
+        if n <= 0 then
+          Err(Closed)
+        else
+          net_send_all_go(s, bs, off + n, len)
+
+-- | The address this end of `s` is bound to, in the spelling the brackets take:
+-- "host:port", with an IPv6 host in brackets as "[::1]:8080".
+pub fn local_address(s : Stream) : Result(String, NetError) ! {Net | e} =
+  match s of
+    Stream(h) => net_local_addr(h)
+
+-- | The address of the peer `s` is connected to, in the same spelling.
+pub fn peer_address(s : Stream) : Result(String, NetError) ! {Net | e} =
+  match s of
+    Stream(h) => net_peer_addr(h)
+
+-- | The address `l` is bound to. This is how a listener opened on port `0` finds
+-- out which port it was given, which is what a test binds when it must not
+-- collide with whatever else is running on the machine.
+pub fn listener_address(l : Listener) : Result(String, NetError) ! {Net | e} =
+  match l of
+    Listener(h) => net_local_addr(h)

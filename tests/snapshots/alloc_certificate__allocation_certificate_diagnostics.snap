@@ -6,10 +6,12 @@ expression: out
 allocation certificate `@ noalloc` failed for function `grab`: in `grab`, `alloc` carves a fresh cell from an arena, which is cheaper but not free
 === closure value ===
 allocation certificate `@ noalloc` failed for function `make`: in `make`, a lambda is materialized as a fresh closure cell
+=== composed row fresh ===
+allocation certificate `@ noalloc` failed for function `wrap`: in `wrap`, constructor `Box` is built fresh outside `reuse`
 === explicit fbip allocation ===
 usage check `fbip` failed for function `fresh`: in `fresh`, constructor `Box` is built fresh outside `reuse`
 === fip calls fbip ===
-usage check `fip` failed for function `use_it`: in `use_it`, call to `helper` is not certified `fip`, so bounded stack and zero allocation cannot be proven
+usage check `fip` failed for function `use_it`: linearity is not closed over its call tree: call to `helper` receives an owned value but `helper` carries no linearity certificate; certify `helper` (`@ linear` or `fip`)
 === fresh constructor ===
 allocation certificate `@ noalloc` failed for function `fresh`: in `fresh`, constructor `Box` is built fresh outside `reuse`
 === fresh tuple ===

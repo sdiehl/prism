@@ -992,19 +992,55 @@ fn parse_node(
     Ok(node)
 }
 
+/// How deep a decoded term may nest before the decoder refuses the frame.
+///
+/// The expansion budget bounds how many nodes reconstruction may build, but a
+/// hostile frame can spend a small count on one pathologically deep spine. The
+/// builder's own recursion grows stack segments per node (the same discipline
+/// as the checker and desugar), so the depth this bound protects is what the
+/// guard cannot reach: the reconstructed tree's recursive `Drop`, which runs
+/// on whatever ordinary thread stack the caller holds. The bound is calibrated
+/// so a just-under-budget tree destructs on a 2 MiB stack in a debug build,
+/// and it sits orders of magnitude above the spine depth of realistic stored
+/// bodies (one definition's ANF chain, a statement per link). The encoder
+/// recurses only on compiler-built trees, never on wire input, which is why
+/// the bound guards decoding alone.
+const MAX_DECODE_DEPTH: usize = 2048;
+
+// Red zone / segment size for the builder's per-node recursion, matching the
+// checker and desugar guards.
+const MEBIBYTE: usize = 1024 * 1024;
+const DECODE_MIN_STACK: usize = 4 * MEBIBYTE;
+const DECODE_GROW_STACK: usize = 8 * MEBIBYTE;
+
 // Reconstruction state: the parsed table, the fresh symbols the dependencies and
-// the sole member are called through, and the expansion budget that bounds a
-// shared-DAG blow-up.
+// the sole member are called through, the expansion budget that bounds a
+// shared-DAG blow-up, and the depth watermark that bounds one spine.
 struct Builder<'a> {
     nodes: &'a [Node],
     dep_syms: &'a [Sym],
     member_syms: &'a [Sym],
     budget: usize,
+    depth: usize,
 }
 
 impl Builder<'_> {
     fn spend(&mut self) -> Result<(), CodecError> {
         self.budget = self.budget.checked_sub(1).ok_or(CodecError::DepthLimit)?;
+        Ok(())
+    }
+
+    // Entry accounting for `value`/`comp`: one budget node and one depth level.
+    // `budget` bounds total nodes (a wide DAG), this bounds one spine (a deep
+    // chain); a hostile frame needs both. The matching depth decrement sits on
+    // their success paths only; an error abandons the whole decode, so the
+    // counter need not survive it.
+    fn descend(&mut self) -> Result<(), CodecError> {
+        self.spend()?;
+        self.depth += 1;
+        if self.depth > MAX_DECODE_DEPTH {
+            return Err(CodecError::DepthLimit);
+        }
         Ok(())
     }
 
@@ -1045,33 +1081,39 @@ impl Builder<'_> {
     }
 
     fn value(&mut self, i: u32, binders: &mut Vec<Sym>) -> Result<Value, CodecError> {
-        self.spend()?;
-        let v = match self.node(i)?.clone() {
-            Node::Var(r) => Value::Var(self.resolve(&r, binders)?),
-            Node::Int(n) => Value::Int(n),
-            Node::I64(n) => Value::I64(n),
-            Node::U64(n) => Value::U64(n),
-            Node::Float(f) => Value::Float(f),
-            Node::Bool(b) => Value::Bool(b),
-            Node::Unit => Value::Unit,
-            Node::Str(s) => Value::Str(s),
-            Node::Thunk(c) => Value::Thunk(Box::new(self.comp(c, binders)?)),
-            Node::Ctor(n, t, args) => Value::Ctor(
-                Sym::new(&n),
-                usize::try_from(t).map_err(|_| CodecError::Malformed)?,
-                self.values(&args, binders)?,
-            ),
-            Node::Tuple(args) => Value::Tuple(self.values(&args, binders)?),
-            Node::UnboxedTuple(args) => Value::UnboxedTuple(self.values(&args, binders)?),
-            Node::UnboxedRecord(fields) => {
-                let mut out = Vec::with_capacity(fields.len());
-                for (name, i) in fields {
-                    out.push((Sym::new(&name), self.value(i, binders)?));
+        self.descend()?;
+        // Reconstruction recurses per node, so a deep stored spine (an ANF
+        // chain, a statement per link) is deep recursion; grow stack segments
+        // inside it, same discipline as the checker and desugar.
+        let v = stacker::maybe_grow(DECODE_MIN_STACK, DECODE_GROW_STACK, || {
+            Ok(match self.node(i)?.clone() {
+                Node::Var(r) => Value::Var(self.resolve(&r, binders)?),
+                Node::Int(n) => Value::Int(n),
+                Node::I64(n) => Value::I64(n),
+                Node::U64(n) => Value::U64(n),
+                Node::Float(f) => Value::Float(f),
+                Node::Bool(b) => Value::Bool(b),
+                Node::Unit => Value::Unit,
+                Node::Str(s) => Value::Str(s),
+                Node::Thunk(c) => Value::Thunk(Box::new(self.comp(c, binders)?)),
+                Node::Ctor(n, t, args) => Value::Ctor(
+                    Sym::new(&n),
+                    usize::try_from(t).map_err(|_| CodecError::Malformed)?,
+                    self.values(&args, binders)?,
+                ),
+                Node::Tuple(args) => Value::Tuple(self.values(&args, binders)?),
+                Node::UnboxedTuple(args) => Value::UnboxedTuple(self.values(&args, binders)?),
+                Node::UnboxedRecord(fields) => {
+                    let mut out = Vec::with_capacity(fields.len());
+                    for (name, i) in fields {
+                        out.push((Sym::new(&name), self.value(i, binders)?));
+                    }
+                    Value::UnboxedRecord(out)
                 }
-                Value::UnboxedRecord(out)
-            }
-            _ => return Err(CodecError::Malformed),
-        };
+                _ => return Err(CodecError::Malformed),
+            })
+        })?;
+        self.depth -= 1;
         Ok(v)
     }
 
@@ -1127,121 +1169,128 @@ impl Builder<'_> {
     }
 
     fn comp(&mut self, i: u32, binders: &mut Vec<Sym>) -> Result<Comp, CodecError> {
-        self.spend()?;
-        let c = match self.node(i)?.clone() {
-            Node::Return(v) => Comp::Return(self.value(v, binders)?),
-            Node::Force(v) => Comp::Force(self.value(v, binders)?),
-            Node::Error(v) => Comp::Error(self.value(v, binders)?),
-            Node::Dup(v) => Comp::Dup(self.value(v, binders)?),
-            Node::Drop(v) => Comp::Drop(self.value(v, binders)?),
-            Node::RefNew(v) => Comp::RefNew(self.value(v, binders)?),
-            Node::RefGet(v) => Comp::RefGet(self.value(v, binders)?),
-            Node::RefSet(a, b) => Comp::RefSet(self.value(a, binders)?, self.value(b, binders)?),
-            Node::Bind(m, n) => {
-                let mc = self.comp(m, binders)?;
-                let (nc, fresh) = self.scoped(binders, 1, |s, b| s.comp(n, b))?;
-                Comp::Bind(Box::new(mc), fresh[0], Box::new(nc))
-            }
-            Node::Lam(nparams, body) => {
-                let nparams = self.binder_count(nparams)?;
-                let (bc, fresh) = self.scoped(binders, nparams, |s, b| s.comp(body, b))?;
-                Comp::Lam(fresh, Box::new(bc))
-            }
-            Node::App(f, args) => Comp::App(
-                Box::new(self.comp(f, binders)?),
-                self.values(&args, binders)?,
-            ),
-            Node::If(v, t, e) => Comp::If(
-                self.value(v, binders)?,
-                Box::new(self.comp(t, binders)?),
-                Box::new(self.comp(e, binders)?),
-            ),
-            Node::Prim(op, a, b) => {
-                Comp::Prim(op, self.value(a, binders)?, self.value(b, binders)?)
-            }
-            Node::Call(head, args) => {
-                Comp::Call(self.resolve(&head, binders)?, self.values(&args, binders)?)
-            }
-            Node::Io(op, args) => Comp::Io(op, self.values(&args, binders)?),
-            Node::FloatOp(op, v) => Comp::FloatBuiltin(op, self.value(v, binders)?),
-            Node::Neg(lane, v) => Comp::Neg(lane, self.value(v, binders)?),
-            Node::UnboxedProject(v, field) => {
-                Comp::UnboxedProject(self.value(v, binders)?, Sym::new(&field))
-            }
-            Node::Do(op, args) => Comp::Do(Sym::new(&op), self.values(&args, binders)?),
-            Node::StrOp(b, args) => Comp::StrBuiltin(b, self.values(&args, binders)?),
-            Node::Case(scrut, arms) => {
-                let sv = self.value(scrut, binders)?;
-                let arms = arms
-                    .iter()
-                    .map(|(rp, body)| {
-                        let (pat, pbinders) = Self::build_pat(rp);
-                        binders.extend_from_slice(&pbinders);
-                        let body = self.comp(*body, binders);
-                        binders.truncate(binders.len() - pbinders.len());
-                        Ok((pat, body?))
-                    })
-                    .collect::<Result<Vec<_>, CodecError>>()?;
-                Comp::Case(sv, arms)
-            }
-            Node::Handle {
-                body,
-                ret_var,
-                ret_body,
-                ops,
-            } => {
-                let bc = self.comp(body, binders)?;
-                let n_ret = usize::from(ret_var);
-                let (rb, ret_fresh) = self.scoped(binders, n_ret, |s, b| match ret_body {
-                    Some(idx) => Ok(Some(s.comp(idx, b)?)),
-                    None => Ok(None),
-                })?;
-                let handle_ops = ops
-                    .iter()
-                    .map(|(name, nparams, obody)| {
-                        let nbinders_u64 = nparams.checked_add(1).ok_or(CodecError::Malformed)?;
-                        let nbinders = self.binder_count(nbinders_u64)?;
-                        let nparams =
-                            usize::try_from(*nparams).map_err(|_| CodecError::TooLarge)?;
-                        let (oc, fresh) =
-                            self.scoped(binders, nbinders, |s, b| s.comp(*obody, b))?;
-                        let (params, resume) = fresh.split_at(nparams);
-                        Ok(HandleOp {
-                            name: Sym::new(name),
-                            params: params.to_vec(),
-                            resume: resume[0],
-                            body: oc,
+        self.descend()?;
+        // See `value`: the same per-node recursion depth applies here.
+        let c = stacker::maybe_grow(DECODE_MIN_STACK, DECODE_GROW_STACK, || {
+            Ok(match self.node(i)?.clone() {
+                Node::Return(v) => Comp::Return(self.value(v, binders)?),
+                Node::Force(v) => Comp::Force(self.value(v, binders)?),
+                Node::Error(v) => Comp::Error(self.value(v, binders)?),
+                Node::Dup(v) => Comp::Dup(self.value(v, binders)?),
+                Node::Drop(v) => Comp::Drop(self.value(v, binders)?),
+                Node::RefNew(v) => Comp::RefNew(self.value(v, binders)?),
+                Node::RefGet(v) => Comp::RefGet(self.value(v, binders)?),
+                Node::RefSet(a, b) => {
+                    Comp::RefSet(self.value(a, binders)?, self.value(b, binders)?)
+                }
+                Node::Bind(m, n) => {
+                    let mc = self.comp(m, binders)?;
+                    let (nc, fresh) = self.scoped(binders, 1, |s, b| s.comp(n, b))?;
+                    Comp::Bind(Box::new(mc), fresh[0], Box::new(nc))
+                }
+                Node::Lam(nparams, body) => {
+                    let nparams = self.binder_count(nparams)?;
+                    let (bc, fresh) = self.scoped(binders, nparams, |s, b| s.comp(body, b))?;
+                    Comp::Lam(fresh, Box::new(bc))
+                }
+                Node::App(f, args) => Comp::App(
+                    Box::new(self.comp(f, binders)?),
+                    self.values(&args, binders)?,
+                ),
+                Node::If(v, t, e) => Comp::If(
+                    self.value(v, binders)?,
+                    Box::new(self.comp(t, binders)?),
+                    Box::new(self.comp(e, binders)?),
+                ),
+                Node::Prim(op, a, b) => {
+                    Comp::Prim(op, self.value(a, binders)?, self.value(b, binders)?)
+                }
+                Node::Call(head, args) => {
+                    Comp::Call(self.resolve(&head, binders)?, self.values(&args, binders)?)
+                }
+                Node::Io(op, args) => Comp::Io(op, self.values(&args, binders)?),
+                Node::FloatOp(op, v) => Comp::FloatBuiltin(op, self.value(v, binders)?),
+                Node::Neg(lane, v) => Comp::Neg(lane, self.value(v, binders)?),
+                Node::UnboxedProject(v, field) => {
+                    Comp::UnboxedProject(self.value(v, binders)?, Sym::new(&field))
+                }
+                Node::Do(op, args) => Comp::Do(Sym::new(&op), self.values(&args, binders)?),
+                Node::StrOp(b, args) => Comp::StrBuiltin(b, self.values(&args, binders)?),
+                Node::Case(scrut, arms) => {
+                    let sv = self.value(scrut, binders)?;
+                    let arms = arms
+                        .iter()
+                        .map(|(rp, body)| {
+                            let (pat, pbinders) = Self::build_pat(rp);
+                            binders.extend_from_slice(&pbinders);
+                            let body = self.comp(*body, binders);
+                            binders.truncate(binders.len() - pbinders.len());
+                            Ok((pat, body?))
                         })
-                    })
-                    .collect::<Result<Vec<_>, CodecError>>()?;
-                Comp::Handle {
-                    body: Box::new(bc),
-                    return_var: ret_fresh.first().copied(),
-                    return_body: rb.map(Box::new),
-                    // A stored handler was validated at commit, but decode still
-                    // enforces uniqueness so a corrupt frame cannot reconstruct a
-                    // handler with duplicate operation clauses.
-                    ops: CheckedHandler::new(handle_ops).map_err(|_| CodecError::Malformed)?,
+                        .collect::<Result<Vec<_>, CodecError>>()?;
+                    Comp::Case(sv, arms)
                 }
-            }
-            Node::Mask(names, b) => Comp::Mask(
-                names.iter().map(|n| Sym::new(n)).collect(),
-                Box::new(self.comp(b, binders)?),
-            ),
-            Node::WithReuse(freed, body) => {
-                let fv = self.value(freed, binders)?;
-                let (bc, fresh) = self.scoped(binders, 1, |s, b| s.comp(body, b))?;
-                Comp::WithReuse {
-                    token: fresh[0],
-                    freed: fv,
-                    body: Box::new(bc),
+                Node::Handle {
+                    body,
+                    ret_var,
+                    ret_body,
+                    ops,
+                } => {
+                    let bc = self.comp(body, binders)?;
+                    let n_ret = usize::from(ret_var);
+                    let (rb, ret_fresh) = self.scoped(binders, n_ret, |s, b| match ret_body {
+                        Some(idx) => Ok(Some(s.comp(idx, b)?)),
+                        None => Ok(None),
+                    })?;
+                    let handle_ops = ops
+                        .iter()
+                        .map(|(name, nparams, obody)| {
+                            let nbinders_u64 =
+                                nparams.checked_add(1).ok_or(CodecError::Malformed)?;
+                            let nbinders = self.binder_count(nbinders_u64)?;
+                            let nparams =
+                                usize::try_from(*nparams).map_err(|_| CodecError::TooLarge)?;
+                            let (oc, fresh) =
+                                self.scoped(binders, nbinders, |s, b| s.comp(*obody, b))?;
+                            let (params, resume) = fresh.split_at(nparams);
+                            Ok(HandleOp {
+                                name: Sym::new(name),
+                                params: params.to_vec(),
+                                resume: resume[0],
+                                body: oc,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, CodecError>>()?;
+                    Comp::Handle {
+                        body: Box::new(bc),
+                        return_var: ret_fresh.first().copied(),
+                        return_body: rb.map(Box::new),
+                        // A stored handler was validated at commit, but decode still
+                        // enforces uniqueness so a corrupt frame cannot reconstruct a
+                        // handler with duplicate operation clauses.
+                        ops: CheckedHandler::new(handle_ops).map_err(|_| CodecError::Malformed)?,
+                    }
                 }
-            }
-            Node::Reuse(token, v) => {
-                Comp::Reuse(self.resolve(&token, binders)?, self.value(v, binders)?)
-            }
-            _ => return Err(CodecError::Malformed),
-        };
+                Node::Mask(names, b) => Comp::Mask(
+                    names.iter().map(|n| Sym::new(n)).collect(),
+                    Box::new(self.comp(b, binders)?),
+                ),
+                Node::WithReuse(freed, body) => {
+                    let fv = self.value(freed, binders)?;
+                    let (bc, fresh) = self.scoped(binders, 1, |s, b| s.comp(body, b))?;
+                    Comp::WithReuse {
+                        token: fresh[0],
+                        freed: fv,
+                        body: Box::new(bc),
+                    }
+                }
+                Node::Reuse(token, v) => {
+                    Comp::Reuse(self.resolve(&token, binders)?, self.value(v, binders)?)
+                }
+                _ => return Err(CodecError::Malformed),
+            })
+        })?;
+        self.depth -= 1;
         Ok(c)
     }
 }
@@ -1339,6 +1388,7 @@ pub fn decode_def(bytes: &[u8]) -> Result<Decoded, CodecError> {
         dep_syms: &dep_syms,
         member_syms: &member_syms,
         budget: MAX_EXPANSION,
+        depth: 0,
     };
 
     let mut group = Vec::with_capacity(member_count);
@@ -1376,7 +1426,8 @@ pub fn decode_def(bytes: &[u8]) -> Result<Decoded, CodecError> {
 #[cfg(test)]
 mod table_tests {
     use super::{
-        decode_def, put_str, put_tag, put_uvarint, to_wire, Tag, BUILTINS, FLOAT_OPS, MAX_EXPANSION,
+        decode_def, put_str, put_tag, put_uvarint, to_wire, Tag, BUILTINS, FLOAT_OPS,
+        MAX_DECODE_DEPTH, MAX_EXPANSION,
     };
     use crate::core::builtins::{Builtin, FloatOp};
     use crate::driver::WireKind;
@@ -1478,6 +1529,58 @@ mod table_tests {
             decode_def(&def_frame([unit_node(), ret, handle_node(u64::MAX)], 2)).unwrap_err(),
             crate::store::CodecError::Malformed,
         );
+    }
+
+    // A frame whose sole member is `masks` nested `mask` computations around
+    // `return ()`: node 0 is unit, node 1 returns it, and every further node
+    // wraps its predecessor. Decoding it recurses once per mask, so the frame
+    // reaches builder depth `masks + 2`.
+    fn mask_chain_frame(masks: usize) -> Vec<u8> {
+        let mut nodes = vec![unit_node()];
+        let mut ret = Vec::new();
+        put_tag(&mut ret, Tag::CReturn);
+        put_uvarint(&mut ret, 0);
+        nodes.push(ret);
+        for prev in 1..=masks {
+            let mut mask = Vec::new();
+            put_tag(&mut mask, Tag::CMask);
+            put_uvarint(&mut mask, 0);
+            put_uvarint(&mut mask, prev as u64);
+            nodes.push(mask);
+        }
+        let root = u32::try_from(masks + 1).unwrap();
+        def_frame(nodes, root)
+    }
+
+    // A cheap node count spent on one pathological spine must be refused by the
+    // depth watermark, not left to overflow the native stack: the expansion
+    // budget alone would admit this frame with millions of levels to spare.
+    #[test]
+    fn hostile_nesting_depth_is_refused() {
+        assert_eq!(
+            decode_def(&mask_chain_frame(MAX_DECODE_DEPTH + 1)).unwrap_err(),
+            crate::store::CodecError::DepthLimit,
+        );
+    }
+
+    // Calibration for `MAX_DECODE_DEPTH`: a frame just under the budget must
+    // decode (the builder grows stack segments per node) and, with no guard
+    // available to `Drop`, its reconstructed tree must destruct on an ordinary
+    // 2 MiB thread stack in a debug build. If destruction overflows here,
+    // lower the budget; the refusal above is only safe because everything it
+    // admits can also be torn down.
+    #[test]
+    fn nesting_under_the_depth_budget_decodes_on_an_ordinary_stack() {
+        let frame = mask_chain_frame(MAX_DECODE_DEPTH - 2);
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || {
+                let decoded = decode_def(&frame).expect("a frame inside the budget decodes");
+                drop(decoded);
+            })
+            .expect("spawn calibration thread")
+            .join()
+            .expect("decode and destruction stay inside an ordinary stack");
     }
 }
 

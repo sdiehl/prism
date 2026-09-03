@@ -1,0 +1,13 @@
+-- Mutual recursion is fine when every member of the cycle carries the claim
+-- and every recursive edge is a real tail call.
+fn even(n : Int) : Bool @ bounded_stack =
+  if n == 0 then
+    true
+  else
+    odd(n - 1)
+
+fn odd(n : Int) : Bool @ bounded_stack =
+  if n == 0 then
+    false
+  else
+    even(n - 1)

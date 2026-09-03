@@ -1,0 +1,5 @@
+fn double(x : Int) : Int = x + x
+
+fn apply(f : ((Int) -> Int) @ noalloc, x : Int) : Int = f(x)
+
+fn drive(x : Int) : Int = apply(double, x)

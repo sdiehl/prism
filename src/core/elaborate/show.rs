@@ -263,6 +263,7 @@ impl Elab<'_> {
         }
         let ctor_names = self
             .checked
+            .defs
             .data
             .get(name)
             .map(|d| d.ctors.clone())

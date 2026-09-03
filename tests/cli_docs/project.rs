@@ -508,7 +508,7 @@ fn main() =
     let project = load_project(&dir).expect("manifest loads");
     let roots = prism::project_roots(&project.src_dir, &project.dep_src_dirs);
     let mut cfg = prism::Config::default();
-    cfg.flags.compiler_cache = false;
+    cfg.update_flags(|flags| flags.compiler_cache = false);
     let full = with_prelude(&fs::read_to_string(&project.entry).expect("entry reads"));
     prism::check_modules_on(&full, &roots, &cfg)
         .expect("a local operation sharing an unimported stdlib operation's name checks");
@@ -534,7 +534,7 @@ fn project_handler_clause_names_an_imported_library_operation() {
     let project = load_project(libeffect()).expect("manifest loads");
     let roots = prism::project_roots(&project.src_dir, &project.dep_src_dirs);
     let mut cfg = prism::Config::default();
-    cfg.flags.compiler_cache = false;
+    cfg.update_flags(|flags| flags.compiler_cache = false);
     let full = with_prelude(&fs::read_to_string(&project.entry).expect("entry reads"));
     prism::check_modules_on(&full, &roots, &cfg)
         .expect("a clause handling an imported library operation checks");

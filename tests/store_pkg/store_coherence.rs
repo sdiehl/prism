@@ -15,8 +15,8 @@ use crate::support::TempDir;
 // A config that commits to `root` instead of the real cache.
 fn cfg_at(root: PathBuf) -> Config {
     let mut cfg = Config::default();
-    cfg.flags.store = true;
-    cfg.flags.store_path = Some(root);
+    cfg.update_flags(|flags| flags.store = true);
+    cfg.update_flags(|flags| flags.store_path = Some(root));
     cfg
 }
 

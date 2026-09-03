@@ -521,11 +521,11 @@ pub fn is_lineage_sidecar(path: &Path) -> bool {
 // content hashes, so verification is the structural graph invariants, and
 // re-derivation (re-running the wasm) is not implemented. A `--certify` path mints a
 // `lineage-verified` certificate over the sidecar digest on a clean rehash.
-pub fn verify_rehash_cmd(file: &Path, certify: Option<&Path>) -> CmdResult {
+pub fn verify_rehash_cmd(file: &Path, cert_path: Option<&Path>) -> CmdResult {
     let graph = lineage_model::read_lineage(file)
         .map_err(|e| (e, String::new(), file.display().to_string()))?;
     if graph.variant == Variant::World {
-        if certify.is_some() {
+        if cert_path.is_some() {
             return Err((
                 Error::ResolveLineage(
                     "lineage verify --certify: a world timeline verifies structurally \
@@ -563,7 +563,7 @@ pub fn verify_rehash_cmd(file: &Path, certify: Option<&Path>) -> CmdResult {
             report.skipped
         );
     }
-    if let Some(out) = certify {
+    if let Some(out) = cert_path {
         let bytes = fs::read(&sidecar)
             .map_err(|e| (Error::Io(e), String::new(), sidecar.display().to_string()))?;
         let cert = lineage_model::mint_lineage_cert(&graph, &report, &bytes);
@@ -606,9 +606,9 @@ pub fn why_recompiled_cmd(file: Option<&Path>, cfg: &Config) -> CmdResult {
             return Ok(());
         }
     };
-    let session = cfg.session.clone().unwrap_or_default();
+    let session = cfg.session().cloned().unwrap_or_default();
     let mut explain_cfg = cfg.clone();
-    explain_cfg.session = Some(session.clone());
+    explain_cfg.set_session(Some(session.clone()));
     let report = check_modules_on(&full, &roots, &explain_cfg)
         .map_err(|error| (error, full.clone(), name.clone()))?;
     let fact_lines = module_fact_lines(&roots, &report, cfg)
@@ -664,10 +664,10 @@ pub fn why_recompiled_cmd(file: Option<&Path>, cfg: &Config) -> CmdResult {
 
 // The durable store the fact ledger lives in, when the compiler cache is on.
 fn fact_store(cfg: &Config) -> Result<Option<Store>, Error> {
-    if !cfg.flags.compiler_cache || cfg.flags.store {
+    if !cfg.flags().compiler_cache || cfg.flags().store {
         return Ok(None);
     }
-    Store::open_or_create(resolve_store_path(cfg.flags.store_path.as_deref()))
+    Store::open_or_create(resolve_store_path(cfg.flags().store_path.as_deref()))
         .map(Some)
         .map_err(Error::Io)
 }
@@ -935,7 +935,7 @@ pub fn verify_run_sidecar(
         .map_err(|e| (e, String::new(), path.display().to_string()))
 }
 
-pub fn verify_lineage_cmd(sidecar: &Path, certify: Option<&Path>, cfg: &Config) -> CmdResult {
+pub fn verify_lineage_cmd(sidecar: &Path, cert_path: Option<&Path>, cfg: &Config) -> CmdResult {
     let verified = verify_run_sidecar(sidecar, cfg)?;
     println!(
         "lineage verify: replay matches the sidecar ({} trace event(s), {} stdout byte(s), \
@@ -950,7 +950,7 @@ pub fn verify_lineage_cmd(sidecar: &Path, certify: Option<&Path>, cfg: &Config) 
     }
     // Only a passed replay reaches here, so a `--certify` path mints a
     // `replay-verified` certificate over the sidecar's own digest.
-    if let Some(out) = certify {
+    if let Some(out) = cert_path {
         let path = lineage_model::sidecar_of(sidecar);
         let graph = lineage_model::read_lineage(&path)
             .map_err(|e| (e, String::new(), path.display().to_string()))?;

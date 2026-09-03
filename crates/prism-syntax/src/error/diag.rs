@@ -781,8 +781,10 @@ pub enum ErrKind {
     ReflectUnknownTarget { decl: String, name: String },
     #[error("usage fact `{fact}` is reserved but not implemented")]
     CoeffectFactUnimplemented { fact: String },
-    #[error("`@ noalloc` certifies a function declaration: write it after a `fn`'s return type")]
-    CoeffectRowMisplaced,
+    #[error("`{row}` certifies a function declaration: write it after a `fn`'s return type")]
+    CoeffectRowMisplaced { row: String },
+    #[error("usage row `{row}` constrains how a closure is used, so it attaches to a function type; this type has no closure boundary for it")]
+    CoeffectUsageRowMisplaced { row: String },
     #[error("parameter `{param}` is marked `@ once` but may be used more than once in `{fn_name}`; a `@ once` closure must be called or passed at most once, and only directly (not aliased, captured, or reused)")]
     OnceUsedMoreThanOnce { fn_name: String, param: String },
     #[error("a `@ portable` closure cannot capture `{subject}`: only top-level functions, constructors, and portable-typed parameters may be captured, so the closure can move to a fresh runtime")]
@@ -791,6 +793,81 @@ pub enum ErrKind {
     NoescapeTokenEscapes { token: String, callee: String },
     #[error("the `@ noescape` parameter of `{callee}` needs a closure literal or a top-level function, so the no-escape promise can be checked")]
     NoescapeUncheckable { callee: String },
+    // Usage-claim rejections. One variant (and one stable code) per failing
+    // rule of the claim drives (allocation budget, linearity, bounded stack),
+    // shared by the `fip`/`fbip` keywords and the standalone row claims:
+    // `claim` names the spelling the user wrote, and `detail` is the drive's
+    // rendered reason, produced once by the checker so the text has a single
+    // home. The `@ noalloc` claim keeps its allocation-certificate framing.
+    #[error("usage check `{claim}` failed for function `{name}`: {detail}")]
+    ClaimAllocBudgetExceeded {
+        claim: String,
+        name: String,
+        detail: String,
+    },
+    #[error("allocation certificate `{claim}` failed for function `{name}`: {detail}")]
+    AllocationCertificateFailed {
+        claim: String,
+        name: String,
+        detail: String,
+    },
+    #[error("usage check `{claim}` failed for function `{name}`: {detail}")]
+    ClaimBorrowedParam {
+        claim: String,
+        name: String,
+        detail: String,
+    },
+    #[error("usage check `{claim}` failed for function `{name}`: {detail}")]
+    ClaimDuplicatesValue {
+        claim: String,
+        name: String,
+        detail: String,
+    },
+    #[error("usage check `{claim}` failed for function `{name}`: {detail}")]
+    ClaimLinearityNotClosed {
+        claim: String,
+        name: String,
+        detail: String,
+    },
+    #[error("usage check `{claim}` failed for function `{name}`: {detail}")]
+    ClaimNonTailRecursion {
+        claim: String,
+        name: String,
+        detail: String,
+    },
+    #[error("usage check `{claim}` failed for function `{name}`: {detail}")]
+    ClaimTrmcShapesMixed {
+        claim: String,
+        name: String,
+        detail: String,
+    },
+    #[error("usage check `{claim}` failed for function `{name}`: {detail}")]
+    ClaimTrmcWithMutualCall {
+        claim: String,
+        name: String,
+        detail: String,
+    },
+    #[error("usage check `{claim}` failed for function `{name}`: {detail}")]
+    ClaimSccMemberUncertified {
+        claim: String,
+        name: String,
+        detail: String,
+    },
+    #[error("usage check `{claim}` failed for function `{name}`: {detail}")]
+    ClaimStackNotClosed {
+        claim: String,
+        name: String,
+        detail: String,
+    },
+    // Callable-certificate rejections at a call boundary: a parameter whose
+    // function type carries `@ noalloc` accepts only values whose whole call
+    // tree is proven allocation-free. `name` is the function supplying the
+    // value; `detail` names the demanding callee, the slot, and why the proof
+    // is missing, rendered once by the checker.
+    #[error("callable certificate `@ noalloc` not met in `{name}`: {detail}")]
+    CallableCertificateMissing { name: String, detail: String },
+    #[error("callable certificate `@ noalloc` unavailable in `{name}`: {detail}")]
+    CallableCertificateOpaque { name: String, detail: String },
     #[error("`{fn_name}` has no parameter `{param}`")]
     NoParameter { fn_name: String, param: String },
     #[error("argument `{param}` to `{fn_name}` given more than once")]
@@ -990,10 +1067,23 @@ impl ErrKind {
             Self::ReflectUnknownTarget { .. } => "E6071",
             Self::CoeffectFactUnimplemented { .. } => "E6052",
             Self::CoeffectRowMisplaced { .. } => "E6053",
+            Self::CoeffectUsageRowMisplaced { .. } => "E6085",
             Self::OnceUsedMoreThanOnce { .. } => "E6059",
             Self::PortableCapturesNonportable { .. } => "E6060",
             Self::NoescapeTokenEscapes { .. } => "E6061",
             Self::NoescapeUncheckable { .. } => "E6062",
+            Self::ClaimAllocBudgetExceeded { .. } => "E6075",
+            Self::AllocationCertificateFailed { .. } => "E6076",
+            Self::ClaimBorrowedParam { .. } => "E6077",
+            Self::ClaimDuplicatesValue { .. } => "E6078",
+            Self::ClaimLinearityNotClosed { .. } => "E6079",
+            Self::ClaimNonTailRecursion { .. } => "E6080",
+            Self::ClaimTrmcShapesMixed { .. } => "E6081",
+            Self::ClaimTrmcWithMutualCall { .. } => "E6082",
+            Self::ClaimSccMemberUncertified { .. } => "E6083",
+            Self::ClaimStackNotClosed { .. } => "E6084",
+            Self::CallableCertificateMissing { .. } => "E6086",
+            Self::CallableCertificateOpaque { .. } => "E6087",
             Self::NoParameter { .. } => "E6054",
             Self::ArgGivenTwice { .. } => "E6055",
             Self::PositionalAfterNamed { .. } => "E6056",
@@ -1172,6 +1262,7 @@ mod tests {
     /// structurally, read each one's real code, and assert every code maps to
     /// exactly one error kind.
     #[test]
+    #[allow(clippy::too_many_lines)] // One entry per variant; splitting hides the total.
     fn errkind_codes_are_unique() {
         let kinds: Vec<ErrKind> = every_errkind![
             NotIndexable { ty },
@@ -1419,11 +1510,64 @@ mod tests {
             InvalidProbeName,
             ReflectUnknownTarget { decl, name },
             CoeffectFactUnimplemented { fact },
-            CoeffectRowMisplaced,
+            CoeffectRowMisplaced { row },
+            CoeffectUsageRowMisplaced { row },
             OnceUsedMoreThanOnce { fn_name, param },
             PortableCapturesNonportable { subject },
             NoescapeTokenEscapes { token, callee },
             NoescapeUncheckable { callee },
+            ClaimAllocBudgetExceeded {
+                claim,
+                name,
+                detail
+            },
+            AllocationCertificateFailed {
+                claim,
+                name,
+                detail
+            },
+            ClaimBorrowedParam {
+                claim,
+                name,
+                detail
+            },
+            ClaimDuplicatesValue {
+                claim,
+                name,
+                detail
+            },
+            ClaimLinearityNotClosed {
+                claim,
+                name,
+                detail
+            },
+            ClaimNonTailRecursion {
+                claim,
+                name,
+                detail
+            },
+            ClaimTrmcShapesMixed {
+                claim,
+                name,
+                detail
+            },
+            ClaimTrmcWithMutualCall {
+                claim,
+                name,
+                detail
+            },
+            ClaimSccMemberUncertified {
+                claim,
+                name,
+                detail
+            },
+            ClaimStackNotClosed {
+                claim,
+                name,
+                detail
+            },
+            CallableCertificateMissing { name, detail },
+            CallableCertificateOpaque { name, detail },
             NoParameter { fn_name, param },
             ArgGivenTwice { param, fn_name },
             PositionalAfterNamed { fn_name },

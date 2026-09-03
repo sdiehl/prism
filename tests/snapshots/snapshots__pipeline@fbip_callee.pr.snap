@@ -85,7 +85,9 @@ Program {
                 span: 320..328,
             },
             wheres: [],
-            fip: Fbip,
+            fip: Fbip(
+                0,
+            ),
             span: 300..328,
         },
     ],
@@ -105,7 +107,7 @@ fn caller(x) =
   plain(t@2)
 
 == fip ==
-[E1998] Type Error: usage check `fbip` failed for function `caller`: in `caller`, call to `plain` may allocate (`plain` has no zero-allocation certificate)
+[E6075] Type Error: usage check `fbip` failed for function `caller`: in `caller`, call to `plain` may allocate (`plain` has no zero-allocation certificate)
    ╭─[ <source>:7:1 ]
    │
  7 │ fbip fn caller(x) = plain(x)

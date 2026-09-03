@@ -1,7 +1,7 @@
 use marginalia::Span;
 use thiserror::Error;
 
-use super::code::{PARSE_EOF, PARSE_SYNTAX};
+use super::code::{PARSE_DEPTH, PARSE_EOF, PARSE_SYNTAX};
 
 /// The payload of a parse failure: the primary span (a caret, `lo == hi`, for
 /// an end-of-input fault), the rendered message, and the canonical expectation
@@ -35,6 +35,13 @@ pub enum ParseError {
     /// when its position is past the last token it was given.
     #[error("{}", .0.msg)]
     UnexpectedEof(Box<SyntaxFault>),
+    /// Nesting in the token stream ran past the parser's depth budget: a
+    /// structured refusal at the token that crossed the line, issued before
+    /// any tree is built, so hostile depth allocates nothing that then needs
+    /// deep destruction. The same budget and code (`E7102`) govern the stdlib
+    /// parser's `descend` in `Syntax.Parse.Support`.
+    #[error("{}", .0.msg)]
+    Depth(Box<SyntaxFault>),
 }
 
 impl ParseError {
@@ -58,11 +65,23 @@ impl ParseError {
         }))
     }
 
+    /// A depth-budget refusal (`E7102`), the message shared with the stdlib
+    /// parser's refusal so both spell the fault identically.
+    #[must_use]
+    pub fn depth(span: Span) -> Self {
+        Self::Depth(Box::new(SyntaxFault {
+            span,
+            msg: "nesting exceeds the parser's depth budget".into(),
+            expected: Vec::new(),
+        }))
+    }
+
     #[must_use]
     pub const fn code(&self) -> &'static str {
         match self {
             Self::Syntax(_) => PARSE_SYNTAX,
             Self::UnexpectedEof(_) => PARSE_EOF,
+            Self::Depth(_) => PARSE_DEPTH,
         }
     }
 
@@ -82,7 +101,7 @@ impl ParseError {
     #[must_use]
     pub fn fault(&self) -> &SyntaxFault {
         match self {
-            Self::Syntax(f) | Self::UnexpectedEof(f) => f,
+            Self::Syntax(f) | Self::UnexpectedEof(f) | Self::Depth(f) => f,
         }
     }
 }

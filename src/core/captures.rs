@@ -155,7 +155,7 @@ pub fn facts(
             site: 0,
             out: &mut out,
         };
-        walk.visit_comp(&f.body);
+        walk.walk_comp(&f.body);
     }
     out.sort_by(|a, b| {
         (a.def.as_str(), a.site, a.name.as_str(), a.kind.label()).cmp(&(
@@ -343,14 +343,14 @@ impl Walk<'_> {
 }
 
 impl Visit for Walk<'_> {
-    fn visit_comp(&mut self, c: &Comp) {
+    fn comp(&mut self, c: &Comp) -> bool {
         if let Comp::Lam(ps, body) = c {
             self.record(ClosureForm::Lam, ps, body);
         }
-        self.descend_comp(c);
+        true
     }
 
-    fn visit_value(&mut self, v: &Value) {
+    fn value(&mut self, v: &Value) -> bool {
         // A source lambda elaborates to a thunk wrapping a `Lam`; record it once,
         // at the inner `Lam` (reached by the descent below), so the two layers of
         // one closure are not reported twice. A thunk of a non-lambda computation
@@ -360,7 +360,7 @@ impl Visit for Walk<'_> {
                 self.record(ClosureForm::Thunk, &[], body);
             }
         }
-        self.descend_value(v);
+        true
     }
 }
 

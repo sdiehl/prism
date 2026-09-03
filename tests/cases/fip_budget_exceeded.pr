@@ -1,0 +1,12 @@
+-- The budgeted rejection: `pair` builds one fresh `Pair` cell and charges
+-- `box`'s declared budget at each of two call sites, so its inferred budget is
+-- 3 against a declared 2. The diagnostic reports the inferred floor against
+-- the declaration and names both kinds of contributing site (the fresh
+-- constructor and the budgeted callee charges).
+type Box = Box(Int)
+
+type Pair = Pair(Box, Box)
+
+fip(1) fn box(x) = Box(x)
+
+fip(2) fn pair(x, y) = Pair(box(x), box(y))

@@ -49,8 +49,8 @@ const CORPUS_SHARDED_ENV: &str = "PRISM_CORPUS_SHARDED";
 // `flags.quiet` set, resolving imports from `.` exactly as those do.
 fn quiet_cfg() -> Config {
     let mut cfg = Config::from_env();
-    cfg.flags.quiet = true;
-    cfg.flags.compiler_cache = false;
+    cfg.update_flags(|flags| flags.quiet = true);
+    cfg.update_flags(|flags| flags.compiler_cache = false);
     cfg
 }
 

@@ -136,10 +136,8 @@ pub fn lint_cmd(paths: &[PathBuf], json: bool, advisory: bool, cfg: &Config) -> 
     // The rules are an interpreter oracle over already-parsed syntax; Core
     // optimization cannot improve their judgment and is disproportionately
     // expensive for a lint pass.
-    let mut shadow_cfg = cfg.clone();
-    shadow_cfg.flags.opt_level = OptLevel::O0;
-    shadow_cfg.passes = None;
-    shadow_cfg.timing = None;
+    let mut shadow_cfg = cfg.clone().use_level(OptLevel::O0);
+    shadow_cfg.set_timing(None);
     let mut output = Vec::new();
     interpret_io_on_with_args(
         &with_prelude(&rules),

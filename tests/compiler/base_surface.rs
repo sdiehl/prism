@@ -26,29 +26,30 @@ fn base_export_surface() {
     // (`names::dict_ctor`); those are elaboration representation, not user-facing
     // surface, so a change to the dictionary encoding must not read as Base growth.
     let dict_ctors: std::collections::BTreeSet<String> = checked
+        .dispatch
         .classes
         .keys()
         .map(|c| prism::names::dict_ctor(c.as_str()))
         .collect();
 
     let mut lines: Vec<String> = Vec::new();
-    for d in &checked.decls {
+    for d in &checked.defs.decls {
         lines.push(format!("value {}", d.name));
     }
-    for name in checked.data.keys() {
+    for name in checked.defs.data.keys() {
         if !dict_ctors.contains(name) {
             lines.push(format!("type  {name}"));
         }
     }
-    for name in checked.ctors.keys() {
+    for name in checked.defs.ctors.keys() {
         if !dict_ctors.contains(name) {
             lines.push(format!("ctor  {name}"));
         }
     }
-    for sym in checked.classes.keys() {
+    for sym in checked.dispatch.classes.keys() {
         lines.push(format!("class {}", sym.as_str()));
     }
-    for name in checked.eff_ops.keys() {
+    for name in checked.defs.eff_ops.keys() {
         lines.push(format!("effop {name}"));
     }
     lines.sort();

@@ -1,0 +1,7 @@
+fip fn inc(x) = x + 1
+
+fn twice(f : ((Int) -> Int) @ noalloc, x : Int) : Int = f(f(x))
+
+fn wrap(g : ((Int) -> Int) @ noalloc, x : Int) : Int = twice(g, x)
+
+fn drive(x : Int) : Int = wrap(inc, x)

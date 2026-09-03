@@ -1,17 +1,18 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, rc::Rc};
 
 use prism_common::fresh::Fresh;
 use prism_common::sym::Sym;
 use prism_syntax::names;
 
-use super::super::cbpv::{Comp, Core, CoreFn, CorePat, HandleOp, Value};
-use super::super::fv::{comp as freev, pat_vars};
-use super::super::traverse::Rewrite;
-use super::{borrow_mask, borrowed_at, borrowed_call_vars, count_val, Set, Sigs};
+use crate::core::cbpv::{CheckedHandler, Comp, Core, CoreFn, CorePat, HandleOp, Value};
+use crate::core::fv::{comp as freev, pat_vars};
+use crate::core::traverse::{Rewrite, RewriteControl};
+
+use super::{borrow_mask, borrowed_at, count_val, scalar_without_cell, Set, Sigs};
 
 #[must_use]
 pub fn insert_rc(core: &Core, sigs: &Sigs) -> Core {
-    let mut fresh = Fresh::new();
+    let mut inserter = RcInserter::new(sigs);
     Core {
         fns: core
             .fns
@@ -36,7 +37,7 @@ pub fn insert_rc(core: &Core, sigs: &Sigs) -> Core {
                     name: f.name,
                     params: f.params.clone(),
                     dict_arity: f.dict_arity,
-                    body: rc(&f.body, &owned, &borrowed, sigs, &mut fresh),
+                    body: inserter.rewrite_comp(&f.body, owned, borrowed),
                 }
             })
             .collect(),
@@ -77,255 +78,580 @@ fn after_borrowed_call(call: Comp, deferred: &[Sym], fresh: &mut Fresh) -> Comp 
     Comp::Bind(Box::new(call), result, Box::new(post))
 }
 
-fn rc(c: &Comp, owned: &Set, borrowed: &Set, sigs: &Sigs, fresh: &mut Fresh) -> Comp {
-    match c {
-        Comp::Bind(m, x, n) => {
-            let fm = freev(m);
-            let mut fnn = freev(n);
-            fnn.remove(x);
-            // A bind that merely renames a loaned reference extends the loan:
-            // the binder reads the same cell the loan already keeps live, so
-            // it takes no reference of its own and joins the borrowed set for
-            // the rest of the chain. The token simulation in `balanced` keys
-            // on the identical syntactic shape.
-            let alias = x.as_str() != "_"
-                && matches!(&**m, Comp::Return(Value::Var(v)) if borrowed.contains(v));
-            let owned_m: Set = owned.intersection(&fm).copied().collect();
-            let owned_n: Set = owned.intersection(&fnn).copied().collect();
-            let shared = by_name(owned_m.intersection(&owned_n).copied());
-            let dead = by_name(
-                owned
-                    .iter()
-                    .filter(|v| !fm.contains(*v) && !fnn.contains(*v))
-                    .copied(),
-            );
-            let borrowed_m: Set = borrowed.intersection(&fm).copied().collect();
-            let borrowed_n: Set = borrowed.intersection(&fnn).copied().collect();
-            let m2 = if alias {
-                (**m).clone()
-            } else {
-                rc(m, &owned_m, &borrowed_m, sigs, fresh)
-            };
-            let mut owned_n2 = owned_n;
-            let mut borrowed_n2 = borrowed_n;
-            if alias {
-                borrowed_n2.insert(*x);
-            } else {
-                owned_n2.insert(*x);
-            }
-            let n2 = rc(n, &owned_n2, &borrowed_n2, sigs, fresh);
-            let mut out = Comp::Bind(Box::new(m2), *x, Box::new(n2));
-            for v in shared {
-                out = dup(v, out);
-            }
-            for v in dead {
-                out = drop_(v, out);
-            }
-            out
+type Renames = BTreeMap<Sym, Sym>;
+type SharedSet = Rc<Set>;
+type SharedRenames = Rc<Renames>;
+
+// Case alpha-renames remain a scope context until reconstruction, avoiding a
+// second deep owned tree that would immediately be discarded after RC insertion.
+struct ArmInput<'a> {
+    pattern: &'a CorePat,
+    body: &'a Comp,
+    owned: SharedSet,
+    borrowed: SharedSet,
+    tracked: SharedSet,
+    renames: SharedRenames,
+    loaned: bool,
+}
+
+enum Built {
+    Comp(Comp),
+    Value(Value),
+    Arm(CorePat, Comp),
+}
+
+enum RcFrame<'a> {
+    Comp {
+        source: &'a Comp,
+        owned: SharedSet,
+        borrowed: SharedSet,
+        renames: SharedRenames,
+    },
+    Value {
+        source: &'a Value,
+        renames: SharedRenames,
+    },
+    ThunkComp {
+        source: &'a Comp,
+        renames: SharedRenames,
+    },
+    Arm(ArmInput<'a>),
+    FinishBind {
+        binder: Sym,
+        shared: Vec<Sym>,
+        dead: Vec<Sym>,
+    },
+    FinishIf {
+        condition: Value,
+    },
+    FinishCase {
+        scrutinee: Value,
+        arm_count: usize,
+    },
+    FinishArm {
+        pattern: CorePat,
+        dead: Vec<Sym>,
+        live: Vec<Sym>,
+        loaned: bool,
+    },
+    FinishLam {
+        params: Vec<Sym>,
+    },
+    FinishMask {
+        effects: Vec<Sym>,
+    },
+    FinishHandle {
+        return_var: Option<Sym>,
+        has_return_body: bool,
+        ops: &'a CheckedHandler,
+    },
+    FinishLeaf {
+        counts: BTreeMap<Sym, usize>,
+        borrowed_uses: Set,
+        deferred: Vec<Sym>,
+        owned: Vec<Sym>,
+        borrowed: Vec<Sym>,
+    },
+    FinishValue(&'a Value),
+    FinishThunkComp(&'a Comp),
+}
+
+struct RcInserter<'a> {
+    sigs: &'a Sigs,
+    fresh: Fresh,
+    frames: Vec<RcFrame<'a>>,
+    built: Vec<Built>,
+}
+
+impl<'a> RcInserter<'a> {
+    const fn new(sigs: &'a Sigs) -> Self {
+        Self {
+            sigs,
+            fresh: Fresh::new(),
+            frames: Vec::new(),
+            built: Vec::new(),
         }
-        Comp::If(v, t, e) => Comp::If(
-            v.clone(),
-            Box::new(rc(t, owned, borrowed, sigs, fresh)),
-            Box::new(rc(e, owned, borrowed, sigs, fresh)),
-        ),
-        Comp::Case(scrut, arms) => {
-            // Matching on a loaned cell reads it without taking a reference:
-            // no arm drops the cell (it is not owned here), and the pattern
-            // binders become loans on its fields, kept live by whatever keeps
-            // the parent live. Consuming uses of a field still dup first via
-            // the borrowed leaf rule below.
-            let loaned = matches!(scrut, Value::Var(v) if borrowed.contains(v));
-            let tracked: Set = owned.union(borrowed).copied().collect();
-            Comp::Case(
-                scrut.clone(),
-                arms.iter()
-                    .map(|(p, body)| {
-                        let unshadowed = unshadow_arm(p, body, &tracked, fresh);
-                        let (p, body) =
-                            unshadowed.as_ref().map_or((p, body), |(p, body)| (p, body));
-                        (
-                            p.clone(),
-                            rc_arm(p, body, owned, borrowed, sigs, fresh, loaned),
-                        )
-                    })
-                    .collect(),
-            )
+    }
+
+    fn rewrite_comp(&mut self, source: &'a Comp, owned: Set, borrowed: Set) -> Comp {
+        debug_assert!(self.frames.is_empty());
+        debug_assert!(self.built.is_empty());
+        self.frames.push(RcFrame::Comp {
+            source,
+            owned: Rc::new(owned),
+            borrowed: Rc::new(borrowed),
+            renames: Rc::new(Renames::new()),
+        });
+        while let Some(frame) = self.frames.pop() {
+            self.step(frame);
         }
-        Comp::Lam(ps, body) => {
-            let ps_set: Set = ps.iter().copied().collect();
-            let caps: Set = freev(body).difference(&ps_set).copied().collect();
-            Comp::Lam(ps.clone(), Box::new(rc(body, &ps_set, &caps, sigs, fresh)))
-        }
-        // Reachable only via the pre-lowering `dump fbip` display path,
-        // compiled pipelines always lower handles first.
-        Comp::Mask(ops, b) => {
-            Comp::Mask(ops.clone(), Box::new(rc(b, owned, borrowed, sigs, fresh)))
-        }
-        Comp::Handle {
-            body,
-            return_var,
-            return_body,
-            ops,
-        } => Comp::Handle {
-            body: Box::new(rc(body, &Set::new(), &Set::new(), sigs, fresh)),
-            return_var: *return_var,
-            return_body: return_body.as_deref().map(|rb| {
-                let o = return_var.iter().copied().collect();
-                Box::new(rc(rb, &o, &Set::new(), sigs, fresh))
-            }),
-            ops: ops.rebuild(|op| {
-                let o = op.params.iter().copied().collect();
-                HandleOp {
-                    name: op.name,
-                    params: op.params.clone(),
-                    resume: op.resume,
-                    body: rc(&op.body, &o, &Set::new(), sigs, fresh),
+        debug_assert_eq!(self.built.len(), 1);
+        pop_comp(&mut self.built)
+    }
+
+    fn step(&mut self, frame: RcFrame<'a>) {
+        match frame {
+            RcFrame::Comp {
+                source,
+                owned,
+                borrowed,
+                renames,
+            } => self.comp(source, owned, borrowed, renames),
+            RcFrame::Value { source, renames } => self.value(source, renames),
+            RcFrame::ThunkComp { source, renames } => self.thunk_comp(source, renames),
+            RcFrame::Arm(arm) => self.arm(&arm),
+            RcFrame::FinishBind {
+                binder,
+                shared,
+                dead,
+            } => {
+                let rest = pop_comp(&mut self.built);
+                let first = pop_comp(&mut self.built);
+                let mut out = Comp::Bind(Box::new(first), binder, Box::new(rest));
+                for var in shared {
+                    out = dup(var, out);
                 }
-            }),
-        },
-        leaf => {
-            let mut counts = BTreeMap::new();
-            leaf_counts(leaf, &mut counts, sigs);
-            let borrowed_uses = match leaf {
-                Comp::Call(name, args) => borrowed_call_vars(*name, args, sigs)
-                    .unwrap_or_else(|error| panic!("invalid RC input: {error}")),
-                _ => Set::new(),
-            };
-            let deferred = by_name(owned.intersection(&borrowed_uses).copied());
-            let mut out = rc_thunks(leaf, sigs, fresh);
-            out = after_borrowed_call(out, &deferred, fresh);
-            for v in by_name(owned.iter().copied()) {
-                let count = counts.get(&v).copied().unwrap_or(0);
-                if borrowed_uses.contains(&v) {
-                    for _ in 0..count {
-                        out = dup(v, out);
+                for var in dead {
+                    out = drop_(var, out);
+                }
+                self.built.push(Built::Comp(out));
+            }
+            RcFrame::FinishIf { condition } => {
+                let alternative = pop_comp(&mut self.built);
+                let consequent = pop_comp(&mut self.built);
+                self.built.push(Built::Comp(Comp::If(
+                    condition,
+                    Box::new(consequent),
+                    Box::new(alternative),
+                )));
+            }
+            RcFrame::FinishCase {
+                scrutinee,
+                arm_count,
+            } => {
+                let arms = take_arms(&mut self.built, arm_count);
+                self.built.push(Built::Comp(Comp::Case(scrutinee, arms)));
+            }
+            RcFrame::FinishArm {
+                pattern,
+                dead,
+                live,
+                loaned,
+            } => {
+                let mut body = pop_comp(&mut self.built);
+                for var in dead {
+                    body = drop_(var, body);
+                }
+                if !loaned {
+                    for var in live.into_iter().rev() {
+                        body = dup(var, body);
                     }
-                } else {
-                    match count {
-                        0 => out = drop_(v, out),
-                        k => {
-                            for _ in 1..k {
-                                out = dup(v, out);
+                }
+                self.built.push(Built::Arm(pattern, body));
+            }
+            RcFrame::FinishLam { params } => {
+                let body = pop_comp(&mut self.built);
+                self.built
+                    .push(Built::Comp(Comp::Lam(params, Box::new(body))));
+            }
+            RcFrame::FinishMask { effects } => {
+                let body = pop_comp(&mut self.built);
+                self.built
+                    .push(Built::Comp(Comp::Mask(effects, Box::new(body))));
+            }
+            RcFrame::FinishHandle {
+                return_var,
+                has_return_body,
+                ops,
+            } => self.finish_handle(return_var, has_return_body, ops),
+            RcFrame::FinishLeaf {
+                counts,
+                borrowed_uses,
+                deferred,
+                owned,
+                borrowed,
+            } => {
+                let mut out = pop_comp(&mut self.built);
+                out = after_borrowed_call(out, &deferred, &mut self.fresh);
+                for var in owned {
+                    let count = counts.get(&var).copied().unwrap_or(0);
+                    if borrowed_uses.contains(&var) {
+                        for _ in 0..count {
+                            out = dup(var, out);
+                        }
+                    } else {
+                        match count {
+                            0 => out = drop_(var, out),
+                            count => {
+                                for _ in 1..count {
+                                    out = dup(var, out);
+                                }
                             }
                         }
                     }
                 }
+                for var in borrowed {
+                    for _ in 0..counts.get(&var).copied().unwrap_or(0) {
+                        out = dup(var, out);
+                    }
+                }
+                self.built.push(Built::Comp(out));
             }
-            for v in by_name(borrowed.iter().copied()) {
-                for _ in 0..counts.get(&v).copied().unwrap_or(0) {
-                    out = dup(v, out);
+            RcFrame::FinishValue(source) => {
+                let value = rebuild_value(source, &mut self.built);
+                self.built.push(Built::Value(value));
+            }
+            RcFrame::FinishThunkComp(source) => {
+                let comp = rebuild_thunk_comp(source, &mut self.built);
+                self.built.push(Built::Comp(comp));
+            }
+        }
+    }
+
+    fn comp(
+        &mut self,
+        source: &'a Comp,
+        owned: SharedSet,
+        borrowed: SharedSet,
+        renames: SharedRenames,
+    ) {
+        match source {
+            Comp::Bind(first, binder, rest) => {
+                let rest_renames = scoped_renames(&renames, &[*binder]);
+                let first_free = renamed_freev(first, &renames);
+                let mut rest_free = renamed_freev(rest, &rest_renames);
+                rest_free.remove(binder);
+                let alias = binder.as_str() != "_"
+                    && matches!(&**first, Comp::Return(Value::Var(var))
+                        if borrowed.contains(&renamed(*var, &renames)));
+                let owned_first: Set = owned.intersection(&first_free).copied().collect();
+                let owned_rest: Set = owned.intersection(&rest_free).copied().collect();
+                let shared = by_name(owned_first.intersection(&owned_rest).copied());
+                let dead = by_name(
+                    owned
+                        .iter()
+                        .filter(|var| !first_free.contains(*var) && !rest_free.contains(*var))
+                        .copied(),
+                );
+                let borrowed_first = borrowed.intersection(&first_free).copied().collect();
+                let mut borrowed_rest: Set = borrowed.intersection(&rest_free).copied().collect();
+                let mut owned_rest = owned_rest;
+                if alias {
+                    borrowed_rest.insert(*binder);
+                } else {
+                    owned_rest.insert(*binder);
+                }
+                self.frames.push(RcFrame::FinishBind {
+                    binder: *binder,
+                    shared,
+                    dead,
+                });
+                self.frames.push(RcFrame::Comp {
+                    source: rest,
+                    owned: Rc::new(owned_rest),
+                    borrowed: Rc::new(borrowed_rest),
+                    renames: rest_renames,
+                });
+                if alias {
+                    self.built.push(Built::Comp(clone_comp(first, &renames)));
+                } else {
+                    self.frames.push(RcFrame::Comp {
+                        source: first,
+                        owned: Rc::new(owned_first),
+                        borrowed: Rc::new(borrowed_first),
+                        renames,
+                    });
                 }
             }
-            out
+            Comp::If(condition, consequent, alternative) => {
+                let condition = clone_value(condition, &renames);
+                self.frames.push(RcFrame::FinishIf { condition });
+                self.frames.push(RcFrame::Comp {
+                    source: alternative,
+                    owned: Rc::clone(&owned),
+                    borrowed: Rc::clone(&borrowed),
+                    renames: Rc::clone(&renames),
+                });
+                self.frames.push(RcFrame::Comp {
+                    source: consequent,
+                    owned,
+                    borrowed,
+                    renames,
+                });
+            }
+            Comp::Case(scrutinee, arms) => {
+                let scrutinee = clone_value(scrutinee, &renames);
+                let loaned = matches!(scrutinee, Value::Var(var) if borrowed.contains(&var));
+                let tracked = Rc::new(owned.union(&borrowed).copied().collect());
+                self.frames.push(RcFrame::FinishCase {
+                    scrutinee,
+                    arm_count: arms.len(),
+                });
+                for (pattern, body) in arms.iter().rev() {
+                    self.frames.push(RcFrame::Arm(ArmInput {
+                        pattern,
+                        body,
+                        owned: Rc::clone(&owned),
+                        borrowed: Rc::clone(&borrowed),
+                        tracked: Rc::clone(&tracked),
+                        renames: Rc::clone(&renames),
+                        loaned,
+                    }));
+                }
+            }
+            Comp::Lam(params, body) => {
+                let params_set: Set = params.iter().copied().collect();
+                let body_renames = scoped_renames(&renames, params);
+                let captures = renamed_freev(body, &body_renames)
+                    .difference(&params_set)
+                    .copied()
+                    .collect();
+                self.frames.push(RcFrame::FinishLam {
+                    params: params.clone(),
+                });
+                self.frames.push(RcFrame::Comp {
+                    source: body,
+                    owned: Rc::new(params_set),
+                    borrowed: Rc::new(captures),
+                    renames: body_renames,
+                });
+            }
+            Comp::Mask(effects, body) => {
+                self.frames.push(RcFrame::FinishMask {
+                    effects: effects.clone(),
+                });
+                self.frames.push(RcFrame::Comp {
+                    source: body,
+                    owned,
+                    borrowed,
+                    renames,
+                });
+            }
+            Comp::Handle {
+                body,
+                return_var,
+                return_body,
+                ops,
+            } => {
+                self.frames.push(RcFrame::FinishHandle {
+                    return_var: *return_var,
+                    has_return_body: return_body.is_some(),
+                    ops,
+                });
+                for op in ops.iter().rev() {
+                    let mut binders = op.params.clone();
+                    binders.push(op.resume);
+                    self.frames.push(RcFrame::Comp {
+                        source: &op.body,
+                        owned: Rc::new(op.params.iter().copied().collect()),
+                        borrowed: Rc::new(Set::new()),
+                        renames: scoped_renames(&renames, &binders),
+                    });
+                }
+                if let Some(return_body) = return_body {
+                    let binders: Vec<Sym> = return_var.iter().copied().collect();
+                    self.frames.push(RcFrame::Comp {
+                        source: return_body,
+                        owned: Rc::new(binders.iter().copied().collect()),
+                        borrowed: Rc::new(Set::new()),
+                        renames: scoped_renames(&renames, &binders),
+                    });
+                }
+                self.frames.push(RcFrame::Comp {
+                    source: body,
+                    owned: Rc::new(Set::new()),
+                    borrowed: Rc::new(Set::new()),
+                    renames,
+                });
+            }
+            leaf => self.leaf(leaf, &owned, &borrowed, renames),
         }
     }
-}
 
-// A thunk is a closure: its free vars are captured by the cell and borrowed
-// inside the body (the cell owns them, a consuming use dups first, the body never
-// drops them). rc never descends into values, so without this the body of every
-// `\..` passed as an argument would keep its raw elaborated form and consume a
-// borrowed capture with no dup, freeing a shared spine out from under the caller.
-// A Lam recomputes its own params/captures; a bare suspended computation borrows
-// all of its free vars.
-fn rc_value(v: &Value, sigs: &Sigs, fresh: &mut Fresh) -> Value {
-    match v {
-        Value::Thunk(c) => Value::Thunk(Box::new(rc(c, &Set::new(), &freev(c), sigs, fresh))),
-        Value::Ctor(t, i, fs) => Value::Ctor(
-            *t,
-            *i,
-            fs.iter().map(|f| rc_value(f, sigs, fresh)).collect(),
-        ),
-        Value::Tuple(fs) => Value::Tuple(fs.iter().map(|f| rc_value(f, sigs, fresh)).collect()),
-        Value::UnboxedTuple(fs) => {
-            Value::UnboxedTuple(fs.iter().map(|f| rc_value(f, sigs, fresh)).collect())
-        }
-        Value::UnboxedRecord(fs) => Value::UnboxedRecord(
-            fs.iter()
-                .map(|(name, field)| (*name, rc_value(field, sigs, fresh)))
-                .collect(),
-        ),
-        other => other.clone(),
+    fn leaf(
+        &mut self,
+        source: &'a Comp,
+        owned: &SharedSet,
+        borrowed: &SharedSet,
+        renames: SharedRenames,
+    ) {
+        let mut counts = BTreeMap::new();
+        leaf_counts(source, &mut counts, self.sigs, &renames);
+        let borrowed_uses = match source {
+            Comp::Call(name, args) => borrowed_uses(*name, args, self.sigs, &renames),
+            _ => Set::new(),
+        };
+        self.frames.push(RcFrame::FinishLeaf {
+            deferred: by_name(owned.intersection(&borrowed_uses).copied()),
+            owned: by_name(owned.iter().copied()),
+            borrowed: by_name(borrowed.iter().copied()),
+            counts,
+            borrowed_uses,
+        });
+        self.frames.push(RcFrame::ThunkComp { source, renames });
     }
-}
 
-fn rc_thunks(c: &Comp, sigs: &Sigs, fresh: &mut Fresh) -> Comp {
-    match c {
-        Comp::Return(v) => Comp::Return(rc_value(v, sigs, fresh)),
-        Comp::Force(v) => Comp::Force(rc_value(v, sigs, fresh)),
-        Comp::Error(v) => Comp::Error(rc_value(v, sigs, fresh)),
-        Comp::Io(op, args) => {
-            Comp::Io(*op, args.iter().map(|v| rc_value(v, sigs, fresh)).collect())
+    fn value(&mut self, source: &'a Value, renames: SharedRenames) {
+        match source {
+            Value::Thunk(body) => {
+                self.frames.push(RcFrame::FinishValue(source));
+                self.frames.push(RcFrame::Comp {
+                    source: body,
+                    owned: Rc::new(Set::new()),
+                    borrowed: Rc::new(renamed_freev(body, &renames)),
+                    renames,
+                });
+            }
+            Value::Ctor(_, _, fields) | Value::Tuple(fields) | Value::UnboxedTuple(fields) => {
+                self.frames.push(RcFrame::FinishValue(source));
+                for field in fields.iter().rev() {
+                    self.frames.push(RcFrame::Value {
+                        source: field,
+                        renames: Rc::clone(&renames),
+                    });
+                }
+            }
+            Value::UnboxedRecord(fields) => {
+                self.frames.push(RcFrame::FinishValue(source));
+                for (_, field) in fields.iter().rev() {
+                    self.frames.push(RcFrame::Value {
+                        source: field,
+                        renames: Rc::clone(&renames),
+                    });
+                }
+            }
+            _ => self.built.push(Built::Value(clone_value(source, &renames))),
         }
-        Comp::FloatBuiltin(op, v) => Comp::FloatBuiltin(*op, rc_value(v, sigs, fresh)),
-        Comp::Neg(l, v) => Comp::Neg(*l, rc_value(v, sigs, fresh)),
-        Comp::Prim(op, a, b) => {
-            let a = rc_value(a, sigs, fresh);
-            let b = rc_value(b, sigs, fresh);
-            Comp::Prim(*op, a, b)
-        }
-        Comp::Call(n, args) => {
-            Comp::Call(*n, args.iter().map(|v| rc_value(v, sigs, fresh)).collect())
-        }
-        Comp::Do(n, args) => Comp::Do(*n, args.iter().map(|v| rc_value(v, sigs, fresh)).collect()),
-        Comp::StrBuiltin(b, args) => {
-            Comp::StrBuiltin(*b, args.iter().map(|v| rc_value(v, sigs, fresh)).collect())
-        }
-        Comp::App(f, args) => {
-            let callee = rc_thunks(f, sigs, fresh);
-            Comp::App(
-                Box::new(callee),
-                args.iter().map(|v| rc_value(v, sigs, fresh)).collect(),
-            )
-        }
-        Comp::RefNew(v) => Comp::RefNew(rc_value(v, sigs, fresh)),
-        Comp::RefGet(v) => Comp::RefGet(rc_value(v, sigs, fresh)),
-        Comp::RefSet(c, v) => {
-            let c = rc_value(c, sigs, fresh);
-            let v = rc_value(v, sigs, fresh);
-            Comp::RefSet(c, v)
-        }
-        Comp::InitAt(cell, ctor) => {
-            let cell = rc_value(cell, sigs, fresh);
-            let ctor = rc_value(ctor, sigs, fresh);
-            Comp::InitAt(cell, ctor)
-        }
-        other => other.clone(),
     }
-}
 
-/// Rebind pattern binders that reuse a name the match site still tracks.
-///
-/// A field binder spelled like a reference the site owns or borrows hides that
-/// reference for the whole arm: every occurrence in the body denotes the field,
-/// and the outer reference has none left there. Free variables are names, so
-/// the liveness test in [`rc_arm`] would read those field occurrences as uses
-/// of the outer reference, judge it live, and emit no release for it. Nor could
-/// the release be recovered inside the arm, where a `drop` of that name would
-/// name the field instead. Renaming the binder restores the arm to the shape it
-/// would have had without the collision. `Comp::Bind` needs no such treatment:
-/// its release is emitted outside the binder's scope, where the name still
-/// denotes the outer cell.
-fn unshadow_arm(
-    p: &CorePat,
-    body: &Comp,
-    tracked: &Set,
-    fresh: &mut Fresh,
-) -> Option<(CorePat, Comp)> {
-    let mut fields = Set::new();
-    pat_vars(p, &mut fields);
-    let shadowing = by_name(fields.intersection(tracked).copied());
-    if shadowing.is_empty() {
-        return None;
+    fn thunk_comp(&mut self, source: &'a Comp, renames: SharedRenames) {
+        match source {
+            Comp::Return(value)
+            | Comp::Force(value)
+            | Comp::Error(value)
+            | Comp::FloatBuiltin(_, value)
+            | Comp::Neg(_, value)
+            | Comp::RefNew(value)
+            | Comp::RefGet(value) => {
+                self.frames.push(RcFrame::FinishThunkComp(source));
+                self.frames.push(RcFrame::Value {
+                    source: value,
+                    renames,
+                });
+            }
+            Comp::RefSet(left, right) | Comp::Prim(_, left, right) | Comp::InitAt(left, right) => {
+                self.frames.push(RcFrame::FinishThunkComp(source));
+                self.frames.push(RcFrame::Value {
+                    source: right,
+                    renames: Rc::clone(&renames),
+                });
+                self.frames.push(RcFrame::Value {
+                    source: left,
+                    renames,
+                });
+            }
+            Comp::Call(_, args)
+            | Comp::Do(_, args)
+            | Comp::StrBuiltin(_, args)
+            | Comp::Io(_, args) => {
+                self.frames.push(RcFrame::FinishThunkComp(source));
+                for argument in args.iter().rev() {
+                    self.frames.push(RcFrame::Value {
+                        source: argument,
+                        renames: Rc::clone(&renames),
+                    });
+                }
+            }
+            Comp::App(callee, args) => {
+                self.frames.push(RcFrame::FinishThunkComp(source));
+                for argument in args.iter().rev() {
+                    self.frames.push(RcFrame::Value {
+                        source: argument,
+                        renames: Rc::clone(&renames),
+                    });
+                }
+                self.frames.push(RcFrame::ThunkComp {
+                    source: callee,
+                    renames,
+                });
+            }
+            _ => self.built.push(Built::Comp(clone_comp(source, &renames))),
+        }
     }
-    let mut p = p.clone();
-    let mut body = body.clone();
-    for from in shadowing {
-        let to = Sym::from(names::fresh_binder(names::FRESH_RC, fresh.bump()).as_str());
-        p = rename_pat(&p, from, to);
-        body = RenameFree { from, to }.comp(&body, &true);
+
+    fn arm(&mut self, arm: &ArmInput<'a>) {
+        let mut fields = Set::new();
+        pat_vars(arm.pattern, &mut fields);
+        let mut arm_renames =
+            (*scoped_renames(&arm.renames, &by_name(fields.iter().copied()))).clone();
+        let shadowing = by_name(fields.intersection(&arm.tracked).copied());
+        let mut pattern = arm.pattern.clone();
+        for from in shadowing {
+            let to = Sym::from(names::fresh_binder(names::FRESH_RC, self.fresh.bump()).as_str());
+            pattern = rename_pat(&pattern, from, to);
+            arm_renames.insert(from, to);
+        }
+        let renames = Rc::new(arm_renames);
+        let body_free = renamed_freev(arm.body, &renames);
+        let mut output_fields = Set::new();
+        pat_vars(&pattern, &mut output_fields);
+        let live = by_name(output_fields.intersection(&body_free).copied());
+        let dead = by_name(
+            arm.owned
+                .iter()
+                .filter(|var| !body_free.contains(*var))
+                .copied(),
+        );
+        let mut body_owned: Set = arm.owned.intersection(&body_free).copied().collect();
+        let mut body_borrowed: Set = arm.borrowed.intersection(&body_free).copied().collect();
+        if arm.loaned {
+            body_borrowed.extend(live.iter().copied());
+        } else {
+            body_owned.extend(live.iter().copied());
+        }
+        self.frames.push(RcFrame::FinishArm {
+            pattern,
+            dead,
+            live,
+            loaned: arm.loaned,
+        });
+        self.frames.push(RcFrame::Comp {
+            source: arm.body,
+            owned: Rc::new(body_owned),
+            borrowed: Rc::new(body_borrowed),
+            renames,
+        });
     }
-    Some((p, body))
+
+    fn finish_handle(
+        &mut self,
+        return_var: Option<Sym>,
+        has_return_body: bool,
+        ops: &'a CheckedHandler,
+    ) {
+        let mut bodies = take_comps(
+            &mut self.built,
+            1 + usize::from(has_return_body) + ops.len(),
+        )
+        .into_iter();
+        let body = Box::new(bodies.next().expect("a handler body was rebuilt"));
+        let return_body =
+            has_return_body.then(|| Box::new(bodies.next().expect("a return clause was rebuilt")));
+        let ops = ops.rebuild(|op| HandleOp {
+            name: op.name,
+            params: op.params.clone(),
+            resume: op.resume,
+            body: bodies.next().expect("an operation clause was rebuilt"),
+        });
+        let extra_body = bodies.next();
+        debug_assert!(extra_body.is_none());
+        self.built.push(Built::Comp(Comp::Handle {
+            body,
+            return_var,
+            return_body,
+            ops,
+        }));
+    }
 }
 
 fn rename_pat(p: &CorePat, from: Sym, to: Sym) -> CorePat {
@@ -344,130 +670,205 @@ fn rename_pat(p: &CorePat, from: Sym, to: Sym) -> CorePat {
     }
 }
 
-/// Rename free occurrences of one local, stopping where a binder rebinds it.
-///
-/// The context is whether the renamed name is still the one this subterm's
-/// occurrences denote. No capture check is needed in the other direction: the
-/// replacement is an unforgeable fresh name, so nothing here can bind it.
-struct RenameFree {
-    from: Sym,
-    to: Sym,
+fn renamed(name: Sym, renames: &Renames) -> Sym {
+    renames.get(&name).copied().unwrap_or(name)
 }
 
-impl RenameFree {
-    fn visible_under(&self, binders: impl IntoIterator<Item = Sym>) -> bool {
-        !binders.into_iter().any(|binder| binder == self.from)
+fn scoped_renames(renames: &SharedRenames, binders: &[Sym]) -> SharedRenames {
+    if !binders.iter().any(|binder| renames.contains_key(binder)) {
+        return Rc::clone(renames);
     }
+    let mut scoped = (**renames).clone();
+    for binder in binders {
+        scoped.remove(binder);
+    }
+    Rc::new(scoped)
 }
+
+fn renamed_freev(comp: &Comp, renames: &Renames) -> Set {
+    freev(comp)
+        .into_iter()
+        .map(|name| renamed(name, renames))
+        .collect()
+}
+
+/// Rename free occurrences of locals, stopping each mapping where its source is
+/// rebound.
+///
+/// Replacements are unforgeable fresh names, so no binder can capture one.
+struct RenameFree;
 
 impl Rewrite for RenameFree {
-    type Ctx = bool;
+    type Ctx = BTreeMap<Sym, Sym>;
 
-    fn comp(&mut self, c: &Comp, visible: &bool) -> Comp {
-        if !*visible {
-            return c.clone();
+    fn under_scope(&mut self, binders: &[Sym], renames: &Self::Ctx) -> Self::Ctx {
+        let mut visible = renames.clone();
+        for binder in binders {
+            visible.remove(binder);
         }
-        match c {
-            Comp::Bind(m, x, n) => {
-                let under = self.visible_under([*x]);
-                Comp::Bind(
-                    Box::new(self.comp(m, visible)),
-                    *x,
-                    Box::new(self.comp(n, &under)),
-                )
-            }
-            Comp::Lam(params, body) => {
-                let under = self.visible_under(params.iter().copied());
-                Comp::Lam(params.clone(), Box::new(self.comp(body, &under)))
-            }
-            Comp::Case(scrut, arms) => Comp::Case(
-                self.value(scrut, visible),
-                arms.iter()
-                    .map(|(p, body)| {
-                        let mut fields = Set::new();
-                        pat_vars(p, &mut fields);
-                        let under = self.visible_under(fields);
-                        (p.clone(), self.comp(body, &under))
-                    })
+        visible
+    }
+
+    fn enter_value(&mut self, value: &Value, renames: &Self::Ctx) -> RewriteControl<Value> {
+        match value {
+            Value::Var(name) => renames
+                .get(name)
+                .map_or(RewriteControl::Descend, |replacement| {
+                    RewriteControl::Replace(Value::Var(*replacement))
+                }),
+            _ => RewriteControl::Descend,
+        }
+    }
+}
+
+fn clone_comp(comp: &Comp, renames: &Renames) -> Comp {
+    RenameFree.rewrite_comp(comp, renames)
+}
+
+fn clone_value(value: &Value, renames: &Renames) -> Value {
+    RenameFree.rewrite_value(value, renames)
+}
+
+fn pop_comp(built: &mut Vec<Built>) -> Comp {
+    match built.pop().expect("a rebuilt computation exists") {
+        Built::Comp(comp) => comp,
+        Built::Value(_) | Built::Arm(..) => panic!("expected a rebuilt computation"),
+    }
+}
+
+fn pop_value(built: &mut Vec<Built>) -> Value {
+    match built.pop().expect("a rebuilt value exists") {
+        Built::Value(value) => value,
+        Built::Comp(_) | Built::Arm(..) => panic!("expected a rebuilt value"),
+    }
+}
+
+fn take_comps(built: &mut Vec<Built>, count: usize) -> Vec<Comp> {
+    let start = built
+        .len()
+        .checked_sub(count)
+        .expect("enough rebuilt computations exist");
+    built
+        .drain(start..)
+        .map(|node| match node {
+            Built::Comp(comp) => comp,
+            Built::Value(_) | Built::Arm(..) => panic!("expected rebuilt computations"),
+        })
+        .collect()
+}
+
+fn take_values(built: &mut Vec<Built>, count: usize) -> Vec<Value> {
+    let start = built
+        .len()
+        .checked_sub(count)
+        .expect("enough rebuilt values exist");
+    built
+        .drain(start..)
+        .map(|node| match node {
+            Built::Value(value) => value,
+            Built::Comp(_) | Built::Arm(..) => panic!("expected rebuilt values"),
+        })
+        .collect()
+}
+
+fn take_arms(built: &mut Vec<Built>, count: usize) -> Vec<(CorePat, Comp)> {
+    let start = built
+        .len()
+        .checked_sub(count)
+        .expect("enough rebuilt case arms exist");
+    built
+        .drain(start..)
+        .map(|node| match node {
+            Built::Arm(pattern, body) => (pattern, body),
+            Built::Comp(_) | Built::Value(_) => panic!("expected rebuilt case arms"),
+        })
+        .collect()
+}
+
+fn rebuild_value(source: &Value, built: &mut Vec<Built>) -> Value {
+    match source {
+        Value::Thunk(_) => Value::Thunk(Box::new(pop_comp(built))),
+        Value::Ctor(name, tag, fields) => {
+            Value::Ctor(*name, *tag, take_values(built, fields.len()))
+        }
+        Value::Tuple(fields) => Value::Tuple(take_values(built, fields.len())),
+        Value::UnboxedTuple(fields) => Value::UnboxedTuple(take_values(built, fields.len())),
+        Value::UnboxedRecord(fields) => {
+            let values = take_values(built, fields.len());
+            Value::UnboxedRecord(
+                fields
+                    .iter()
+                    .zip(values)
+                    .map(|((name, _), value)| (*name, value))
                     .collect(),
-            ),
-            Comp::WithReuse { token, freed, body } => {
-                let under = self.visible_under([*token]);
-                Comp::WithReuse {
-                    token: *token,
-                    freed: self.value(freed, visible),
-                    body: Box::new(self.comp(body, &under)),
-                }
+            )
+        }
+        _ => unreachable!("only composite values receive a reconstruction frame"),
+    }
+}
+
+fn rebuild_thunk_comp(source: &Comp, built: &mut Vec<Built>) -> Comp {
+    match source {
+        Comp::Return(_) => Comp::Return(pop_value(built)),
+        Comp::Force(_) => Comp::Force(pop_value(built)),
+        Comp::Error(_) => Comp::Error(pop_value(built)),
+        Comp::Io(op, args) => Comp::Io(*op, take_values(built, args.len())),
+        Comp::FloatBuiltin(op, _) => Comp::FloatBuiltin(*op, pop_value(built)),
+        Comp::Neg(lane, _) => Comp::Neg(*lane, pop_value(built)),
+        Comp::Prim(op, _, _) => {
+            let right = pop_value(built);
+            Comp::Prim(*op, pop_value(built), right)
+        }
+        Comp::Call(name, args) => Comp::Call(*name, take_values(built, args.len())),
+        Comp::Do(name, args) => Comp::Do(*name, take_values(built, args.len())),
+        Comp::StrBuiltin(op, args) => Comp::StrBuiltin(*op, take_values(built, args.len())),
+        Comp::App(_, args) => {
+            let args = take_values(built, args.len());
+            Comp::App(Box::new(pop_comp(built)), args)
+        }
+        Comp::RefNew(_) => Comp::RefNew(pop_value(built)),
+        Comp::RefGet(_) => Comp::RefGet(pop_value(built)),
+        Comp::RefSet(_, _) => {
+            let value = pop_value(built);
+            Comp::RefSet(pop_value(built), value)
+        }
+        Comp::InitAt(_, _) => {
+            let value = pop_value(built);
+            Comp::InitAt(pop_value(built), value)
+        }
+        _ => unreachable!("only thunk-bearing leaves receive a reconstruction frame"),
+    }
+}
+
+fn borrowed_uses(name: Sym, args: &[Value], sigs: &Sigs, renames: &Renames) -> Set {
+    let mask = borrow_mask(name, sigs);
+    let mut borrowed = Set::new();
+    for (index, argument) in args.iter().enumerate() {
+        if !borrowed_at(mask, index) {
+            continue;
+        }
+        match argument {
+            Value::Var(var) => {
+                borrowed.insert(renamed(*var, renames));
             }
-            Comp::Handle {
-                body,
-                return_var,
-                return_body,
-                ops,
-            } => Comp::Handle {
-                body: Box::new(self.comp(body, visible)),
-                return_var: *return_var,
-                return_body: return_body.as_ref().map(|rb| {
-                    let under = self.visible_under(return_var.iter().copied());
-                    Box::new(self.comp(rb, &under))
-                }),
-                ops: ops.rebuild(|op| HandleOp {
-                    name: op.name,
-                    params: op.params.clone(),
-                    resume: op.resume,
-                    body: {
-                        let binders = op.params.iter().copied().chain([op.resume]);
-                        let under = self.visible_under(binders);
-                        self.comp(&op.body, &under)
-                    },
-                }),
-            },
-            _ => self.descend_comp(c, visible),
+            value if scalar_without_cell(value) => {}
+            value => panic!(
+                "invalid RC input: borrowed argument to {name} is not a let-bound variable: {value:?}"
+            ),
         }
     }
+    borrowed
+}
 
-    fn value(&mut self, v: &Value, visible: &bool) -> Value {
-        match v {
-            Value::Var(name) if *visible && *name == self.from => Value::Var(self.to),
-            _ => self.descend_value(v, visible),
-        }
+fn count_value(value: &Value, out: &mut BTreeMap<Sym, usize>, renames: &Renames) {
+    let mut raw = BTreeMap::new();
+    count_val(value, &mut raw);
+    for (name, count) in raw {
+        *out.entry(renamed(name, renames)).or_default() += count;
     }
 }
 
-fn rc_arm(
-    p: &CorePat,
-    body: &Comp,
-    owned: &Set,
-    borrowed: &Set,
-    sigs: &Sigs,
-    fresh: &mut Fresh,
-    loaned: bool,
-) -> Comp {
-    let fb = freev(body);
-    let mut fields = Set::new();
-    pat_vars(p, &mut fields);
-    let live = by_name(fields.intersection(&fb).copied());
-    let dead = by_name(owned.iter().filter(|v| !fb.contains(*v)).copied());
-    let mut owned_b: Set = owned.intersection(&fb).copied().collect();
-    let mut borrowed_b: Set = borrowed.intersection(&fb).copied().collect();
-    if loaned {
-        borrowed_b.extend(live.iter().copied());
-    } else {
-        owned_b.extend(live.iter().copied());
-    }
-    let mut out = rc(body, &owned_b, &borrowed_b, sigs, fresh);
-    for v in &dead {
-        out = drop_(*v, out);
-    }
-    if !loaned {
-        for v in live.iter().rev() {
-            out = dup(*v, out);
-        }
-    }
-    out
-}
-
-fn leaf_counts(c: &Comp, out: &mut BTreeMap<Sym, usize>, sigs: &Sigs) {
+fn leaf_counts(c: &Comp, out: &mut BTreeMap<Sym, usize>, sigs: &Sigs, renames: &Renames) {
     match c {
         Comp::Return(v)
         | Comp::Force(v)
@@ -479,42 +880,42 @@ fn leaf_counts(c: &Comp, out: &mut BTreeMap<Sym, usize>, sigs: &Sigs) {
         // overwrites the cell in place. So a Ref op counts its cell and value like
         // any other consuming leaf.
         | Comp::RefNew(v)
-        | Comp::RefGet(v) => count_val(v, out),
+        | Comp::RefGet(v) => count_value(v, out, renames),
         Comp::RefSet(c, v) => {
-            count_val(c, out);
-            count_val(v, out);
+            count_value(c, out, renames);
+            count_value(v, out, renames);
         }
         // `InitAt` consumes its cell (moved into the result) and every
         // constructor field (moved into the cell), exactly like the `Return(Ctor)`
         // it replaced consumes its fields. Missing this would drop a field the
         // cell now owns, a double free.
         Comp::InitAt(cell, ctor) => {
-            count_val(cell, out);
-            count_val(ctor, out);
+            count_value(cell, out, renames);
+            count_value(ctor, out, renames);
         }
         Comp::App(f, args) => {
-            for x in freev(f) {
+            for x in renamed_freev(f, renames) {
                 *out.entry(x).or_default() += 1;
             }
             for a in args {
-                count_val(a, out);
+                count_value(a, out, renames);
             }
         }
         Comp::Prim(_, a, b) => {
-            count_val(a, out);
-            count_val(b, out);
+            count_value(a, out, renames);
+            count_value(b, out, renames);
         }
         Comp::Call(g, args) => {
             let mask = borrow_mask(*g, sigs);
             for (i, a) in args.iter().enumerate() {
                 if !borrowed_at(mask, i) {
-                    count_val(a, out);
+                    count_value(a, out, renames);
                 }
             }
         }
         Comp::Do(_, args) | Comp::StrBuiltin(_, args) | Comp::Io(_, args) => {
             for a in args {
-                count_val(a, out);
+                count_value(a, out, renames);
             }
         }
         _ => {}
@@ -523,8 +924,53 @@ fn leaf_counts(c: &Comp, out: &mut BTreeMap<Sym, usize>, sigs: &Sigs) {
 
 #[cfg(test)]
 mod tests {
+    use std::{mem, thread};
+
     use super::super::balanced;
     use super::*;
+    use crate::core::CheckedHandler;
+
+    const DEEP_RC_DEPTH: usize = 20_000;
+    const ORDINARY_TEST_STACK: usize = 2 * 1024 * 1024;
+
+    #[test]
+    fn insertion_handles_deep_computations_and_values_on_an_ordinary_stack() {
+        thread::Builder::new()
+            .name("deep-rc-insertion".into())
+            .stack_size(ORDINARY_TEST_STACK)
+            .spawn(|| {
+                let shadowed = Sym::new("shadowed");
+                let mut value = Value::Thunk(Box::new(Comp::Return(Value::Var(shadowed))));
+                for _ in 0..DEEP_RC_DEPTH {
+                    value = Value::Tuple(vec![value]);
+                }
+                let mut body = Comp::Return(value);
+                for _ in 0..DEEP_RC_DEPTH {
+                    body = Comp::If(
+                        Value::Bool(true),
+                        Box::new(body),
+                        Box::new(Comp::Return(Value::Int(0))),
+                    );
+                }
+                let body = Comp::Case(Value::Var(shadowed), vec![(CorePat::Var(shadowed), body)]);
+                let input = Core {
+                    fns: vec![function("deep_rc_insertion", &["shadowed"], body)],
+                };
+                let output = insert_rc(&input, &Sigs::new());
+
+                assert!(matches!(
+                    &output.fns[0].body,
+                    Comp::Case(_, arms)
+                        if matches!(arms[0].0, CorePat::Var(name) if name.as_str() == "%rc0")
+                ));
+                assert_eq!(balanced(&output, &Sigs::new()), Ok(()));
+                mem::forget(output);
+                mem::forget(input);
+            })
+            .expect("spawn deep RC insertion test")
+            .join()
+            .expect("deep RC insertion test panicked");
+    }
 
     fn sym(name: &str) -> Sym {
         Sym::new(name)
@@ -537,6 +983,83 @@ mod tests {
             body,
             dict_arity: 0,
         }
+    }
+
+    fn rename_free(comp: &Comp, from: Sym, to: Sym) -> Comp {
+        RenameFree.rewrite_comp(comp, &BTreeMap::from([(from, to)]))
+    }
+
+    #[test]
+    fn rename_free_respects_raw_core_scopes() {
+        let from = sym("from");
+        let to = sym("to");
+        let op = HandleOp {
+            name: sym("op"),
+            params: vec![from],
+            resume: sym("resume"),
+            body: Comp::Return(Value::Var(from)),
+        };
+        let handler = Comp::Handle {
+            body: Box::new(Comp::Return(Value::Var(from))),
+            return_var: Some(from),
+            return_body: Some(Box::new(Comp::Return(Value::Var(from)))),
+            ops: CheckedHandler::new(vec![op]).unwrap(),
+        };
+        let renamed = rename_free(&handler, from, to);
+        let Comp::Handle {
+            body,
+            return_body,
+            ops,
+            ..
+        } = renamed
+        else {
+            panic!("rewriting a handler preserves its shape");
+        };
+        assert!(matches!(*body, Comp::Return(Value::Var(name)) if name == to));
+        assert!(matches!(
+            return_body.as_deref(),
+            Some(Comp::Return(Value::Var(name))) if *name == from
+        ));
+        assert!(matches!(ops[0].body, Comp::Return(Value::Var(name)) if name == from));
+
+        let bind = Comp::Bind(
+            Box::new(Comp::Return(Value::Var(from))),
+            from,
+            Box::new(Comp::Return(Value::Var(from))),
+        );
+        assert!(matches!(
+            rename_free(&bind, from, to),
+            Comp::Bind(first, _, rest)
+                if matches!(*first, Comp::Return(Value::Var(name)) if name == to)
+                    && matches!(*rest, Comp::Return(Value::Var(name)) if name == from)
+        ));
+
+        let case = Comp::Case(
+            Value::Var(from),
+            vec![(CorePat::Var(from), Comp::Return(Value::Var(from)))],
+        );
+        assert!(matches!(
+            rename_free(&case, from, to),
+            Comp::Case(Value::Var(scrutinee), arms)
+                if scrutinee == to
+                    && matches!(arms[0].1, Comp::Return(Value::Var(name)) if name == from)
+        ));
+
+        let reuse = Comp::WithReuse {
+            token: from,
+            freed: Value::Var(from),
+            body: Box::new(Comp::Reuse(from, Value::Var(from))),
+        };
+        assert!(matches!(
+            rename_free(&reuse, from, to),
+            Comp::WithReuse {
+                freed: Value::Var(freed),
+                body,
+                ..
+            } if freed == to
+                && matches!(*body, Comp::Reuse(token, Value::Var(value))
+                    if token == from && value == from)
+        ));
     }
 
     #[test]

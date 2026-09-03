@@ -187,6 +187,11 @@ pub enum Claim {
     Replayable,
     /// `@ noalloc`: the whole call tree allocates no fresh heap cell.
     NoAlloc,
+    /// `@ bounded_stack`: the whole certified call tree runs in bounded stack.
+    BoundedStack,
+    /// `@ linear`: owned binders are consumed at most once per path, closed
+    /// through direct calls.
+    Linear,
     /// Carries SMT contract clauses (`requires`/`ensures`).
     Contract,
 }

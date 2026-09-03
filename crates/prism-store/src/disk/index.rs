@@ -36,7 +36,7 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use rustix::fs::{flock, FlockOperation};
 
-use super::{atomic_write, StoreHash, FIELD_SEP, INDEX_DIR, LIST_SEP, LOCK_FILE};
+use super::{atomic_write_now, StoreHash, FIELD_SEP, INDEX_DIR, LIST_SEP, LOCK_FILE};
 
 fn checked_hash(hash: &str) -> io::Result<String> {
     StoreHash::new(hash)?;
@@ -154,7 +154,7 @@ fn write_names(root: &Path, map: &BTreeMap<String, String>) -> io::Result<()> {
     for (name, hash) in map {
         let _ = writeln!(body, "{name}{FIELD_SEP}{hash}");
     }
-    atomic_write(&index_dir(root).join(NAMES_FILE), body.as_bytes())
+    atomic_write_now(&index_dir(root).join(NAMES_FILE), body.as_bytes())
 }
 
 pub(super) fn bind_names(root: &Path, bindings: &BTreeMap<String, String>) -> io::Result<()> {
@@ -190,7 +190,7 @@ fn write_deps(root: &Path, map: &BTreeMap<String, BTreeSet<String>>) -> io::Resu
             list.join(&LIST_SEP.to_string())
         );
     }
-    atomic_write(&index_dir(root).join(DEPS_FILE), body.as_bytes())
+    atomic_write_now(&index_dir(root).join(DEPS_FILE), body.as_bytes())
 }
 
 pub(super) fn add_dependents(
@@ -225,7 +225,7 @@ fn write_canonical(root: &Path, map: &BTreeMap<(String, String), String>) -> io:
     for ((class, head), hash) in map {
         let _ = writeln!(body, "{class}{FIELD_SEP}{head}{FIELD_SEP}{hash}");
     }
-    atomic_write(&index_dir(root).join(CANONICAL_FILE), body.as_bytes())
+    atomic_write_now(&index_dir(root).join(CANONICAL_FILE), body.as_bytes())
 }
 
 pub(super) fn set_canonical(
@@ -291,7 +291,7 @@ fn write_refs(root: &Path, map: &BTreeMap<String, String>) -> io::Result<()> {
     for (name, hash) in map {
         let _ = writeln!(body, "{name}{FIELD_SEP}{hash}");
     }
-    atomic_write(&index_dir(root).join(REFS_FILE), body.as_bytes())
+    atomic_write_now(&index_dir(root).join(REFS_FILE), body.as_bytes())
 }
 
 pub(super) fn set_ref(root: &Path, name: &str, hash: &str) -> io::Result<()> {

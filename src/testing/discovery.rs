@@ -213,10 +213,10 @@ fn finish(mut targets: Vec<TestTarget>) -> Result<TestPlan, Error> {
 /// and execution.
 pub(crate) fn test_config(cfg: &Config) -> Config {
     let mut cfg = cfg.clone();
-    cfg.mode = BuildMode::Test;
-    cfg.flags.quiet = true;
-    if cfg.session.is_none() {
-        cfg.session = Some(CompilerSession::new());
+    cfg.set_mode(BuildMode::Test);
+    cfg.update_flags(|flags| flags.quiet = true);
+    if cfg.session().is_none() {
+        cfg.set_session(Some(CompilerSession::new()));
     }
     cfg
 }

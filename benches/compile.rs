@@ -50,10 +50,7 @@ fn compile(c: &mut Criterion) {
 }
 
 fn session_config() -> prism::Config {
-    prism::Config {
-        session: Some(prism::CompilerSession::new()),
-        ..prism::Config::default()
-    }
+    prism::Config::default().with_session(prism::CompilerSession::new())
 }
 
 fn query_compile(c: &mut Criterion) {

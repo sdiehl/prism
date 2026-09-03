@@ -1,0 +1,8 @@
+-- A closure owns each captured value exactly once: the capture counts as one
+-- consumption in the enclosing frame, so a body that uses the capture twice
+-- would duplicate the cell when the closure is forced.
+type List = Nil | Cons(Int, List)
+
+type Pair = Pair(List, List)
+
+fn bad(xs : List) : (() -> Pair) @ linear = \() -> Pair(xs, xs)

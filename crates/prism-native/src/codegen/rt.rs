@@ -56,6 +56,10 @@ const PRISM_KONT_H: &str = "prism_kont.h";
 const PRISM_KONT_C: &str = "prism_kont.c";
 const PRISM_IO_H: &str = "prism_io.h";
 const PRISM_IO_C: &str = "prism_io.c";
+const PRISM_NET_H: &str = "prism_net.h";
+const PRISM_NET_C: &str = "prism_net.c";
+const PRISM_MOBILITY_H: &str = "prism_mobility.h";
+const PRISM_MOBILITY_C: &str = "prism_mobility.c";
 
 const BASE_RUNTIME_MODULES: &[RuntimeModule] = &[
     RuntimeModule::Memory,
@@ -85,6 +89,8 @@ const NATIVE_RUNTIME_MODULES: &[RuntimeModule] = &[
     RuntimeModule::Simd,
     RuntimeModule::NativeKont,
     RuntimeModule::Io,
+    RuntimeModule::Net,
+    RuntimeModule::Mobility,
 ];
 
 /// Runtime profile requested by a caller.
@@ -112,6 +118,8 @@ enum RuntimeModule {
     Simd,
     NativeKont,
     Io,
+    Net,
+    Mobility,
 }
 
 impl RuntimeProfile {
@@ -147,6 +155,8 @@ impl RuntimeModule {
             Self::Simd => &[PRISM_SIMD_H, PRISM_SIMD_C],
             Self::NativeKont => &[PRISM_KONT_H, PRISM_KONT_C],
             Self::Io => &[PRISM_IO_H, PRISM_IO_C],
+            Self::Net => &[PRISM_NET_H, PRISM_NET_C],
+            Self::Mobility => &[PRISM_MOBILITY_H, PRISM_MOBILITY_C],
         }
     }
 }

@@ -21,10 +21,11 @@ use std::collections::BTreeMap;
 use crate::core::CoreOp;
 use prism_common::sym::Sym;
 
+use super::facts::peel;
 use super::specialize_support::Rewrite;
 use super::{
-    TypedBinder, TypedComp, TypedCompKind, TypedCoreFn, TypedHandleOp, TypedHandler, TypedPattern,
-    TypedValue, TypedValueKind, UncheckedTypedCore,
+    on_core_stack, TypedBinder, TypedComp, TypedCompKind, TypedCoreFn, TypedHandleOp, TypedHandler,
+    TypedPattern, TypedValue, TypedValueKind, UncheckedTypedCore,
 };
 
 /// Rewrite counts for typed common subexpression elimination.
@@ -43,6 +44,10 @@ impl CseStats {
 /// Eliminate repeated pure scalar subexpressions, preserving every witness.
 #[must_use]
 pub fn cse<P>(core: UncheckedTypedCore<P>) -> (UncheckedTypedCore<P>, CseStats) {
+    on_core_stack(|| cse_on_core_stack(core))
+}
+
+fn cse_on_core_stack<P>(core: UncheckedTypedCore<P>) -> (UncheckedTypedCore<P>, CseStats) {
     let mut eliminator = Cse { ticks: 0 };
     let fns = core
         .into_functions()
@@ -64,20 +69,6 @@ pub fn cse<P>(core: UncheckedTypedCore<P>) -> (UncheckedTypedCore<P>, CseStats) 
             ticks: eliminator.ticks,
         },
     )
-}
-
-// A value looked through any Reinterpret/NewtypeRepr wrapper, since those
-// erase away transparently and must key exactly as their erased form does.
-fn peel(value: &TypedValue) -> &TypedValue {
-    match &value.kind {
-        TypedValueKind::Reinterpret(inner)
-        | TypedValueKind::LoweredRepr {
-            value: inner,
-            proof: _,
-        }
-        | TypedValueKind::NewtypeRepr { value: inner, .. } => peel(inner),
-        _ => value,
-    }
 }
 
 // A key for a value usable as a `Prim` operand. `Float` keys on the bit
@@ -175,7 +166,10 @@ impl Rewrite for Cse {
     type Ctx = Avail;
 
     fn comp(&mut self, comp: &TypedComp, avail: &Avail) -> TypedComp {
-        match &comp.kind {
+        // Bind spines recurse per node ahead of the shared descent; grow
+        // stack segments inside the recursion, same discipline as
+        // `descend_comp`.
+        on_core_stack(|| match &comp.kind {
             TypedCompKind::Bind(rhs, binder, body) => {
                 let rhs2 = self.comp(rhs, avail);
                 if let Some(key) = shareable(&rhs2) {
@@ -294,7 +288,7 @@ impl Rewrite for Cse {
                 )
             }
             _ => self.descend_comp(comp, avail),
-        }
+        })
     }
 }
 
@@ -310,7 +304,7 @@ mod tests {
     use super::super::effect_lower::lower_effects;
     use super::super::verify::{OperationSig, VerifyEnv};
     use super::super::{
-        verify, CompSig, CoreFnSig, CoreType, EffectLowered, Elaborated, TypedCore, TypedLowering,
+        verify, CompSig, CoreFnSig, CoreType, EffectLowered, Elaborated, TypedCore,
         UncheckedTypedCore,
     };
     use super::*;
@@ -390,18 +384,13 @@ mod tests {
             quiet: true,
             ..DynFlags::default()
         };
-        let TypedLowering {
-            core: lowered,
-            env,
-            ctors,
-            warning: _,
-            strategy,
-            confined_decline: _,
-        } = lower_effects(input, &env, &BTreeMap::new(), &flags, &OpGrades::new())
+        let lowering = lower_effects(input, &env, &BTreeMap::new(), &flags, &OpGrades::new())
             .expect("fixture lowers through the production effect ABI");
-        assert_eq!(strategy, EffectStrategy::SelectiveFreeMonad);
-        assert!(ctors.contains_key("EPure"));
-        assert!(ctors.contains_key("EOp"));
+        assert_eq!(lowering.strategy(), EffectStrategy::SelectiveFreeMonad);
+        assert!(lowering.constructors().contains_key("EPure"));
+        assert!(lowering.constructors().contains_key("EOp"));
+        let env = lowering.env().clone();
+        let lowered = lowering.core().clone();
 
         let mul = || {
             prim(

@@ -19,12 +19,17 @@ fn fixture_stems(dir: &Path, suffix: &str, excluded_prefix: &str) -> Vec<String>
     stems
 }
 
+#[path = "support/seam.rs"]
+mod seam;
+
 #[path = "compiler/alloc_certificate.rs"]
 mod alloc_certificate;
 #[path = "compiler/arena.rs"]
 mod arena;
 #[path = "compiler/base_surface.rs"]
 mod base_surface;
+#[path = "compiler/callable_certificate.rs"]
+mod callable_certificate;
 #[path = "compiler/convention_split.rs"]
 mod convention_split;
 #[path = "compiler/core_identity.rs"]
@@ -47,6 +52,8 @@ mod hir_fixture;
 mod identity;
 #[path = "compiler/incr.rs"]
 mod incr;
+#[path = "compiler/linear_certificate.rs"]
+mod linear_certificate;
 #[path = "compiler/module_graph.rs"]
 mod module_graph;
 #[path = "compiler/module_interface.rs"]
@@ -55,6 +62,8 @@ mod module_interface;
 mod module_queries;
 #[path = "compiler/opt.rs"]
 mod opt;
+#[path = "compiler/optimizer_facts.rs"]
+mod optimizer_facts;
 #[path = "compiler/parser_compaction_corpus.rs"]
 mod parser_compaction_corpus;
 #[path = "compiler/parser_parity.rs"]
@@ -67,6 +76,8 @@ mod resolved_syntax;
 mod session_cache;
 #[path = "compiler/source_identity.rs"]
 mod source_identity;
+#[path = "compiler/stack_certificate.rs"]
+mod stack_certificate;
 #[path = "compiler/stdlib.rs"]
 mod stdlib;
 #[path = "compiler/store_codec.rs"]

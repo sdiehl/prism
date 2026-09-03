@@ -48,6 +48,7 @@ __pycache__
 # The scoreboard itself is committed: scripts/scoreboard.py --check pins it in CI.
 /docs/internal/PARSER_COMPACTION_BASELINE.md
 /docs/internal/PARSER_COMPACTION_CORPUS.md
-/docs/internal/PARSER_GENERATOR_SEMANTICS.md
 /docs/internal/PARSER_PERFORMANCE_PROTOCOL.md
-/docs/internal/PARSER_PRODUCTION_MANIFEST.md
+AGENTS.md
+CLAUDE.md
+HACKING.md

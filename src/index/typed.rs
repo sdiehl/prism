@@ -40,6 +40,7 @@ pub(super) fn attach_types(defs: &mut [Def], production: &AddressableSurface) ->
     let hir = build(&production.checked);
     let checked: BTreeMap<&str, &Type> = production
         .checked
+        .defs
         .decls
         .iter()
         .map(|d| (d.name.as_str(), &d.ty))

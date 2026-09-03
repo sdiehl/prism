@@ -57,9 +57,13 @@ pub fn convert_data_rp(t: &ast::Ty, rp: &BTreeSet<Sym>) -> Type {
         // A `var` state cell reuses the pinned existential id it was desugared to;
         // see the canonical note on `ast::Ty::State`.
         ast::Ty::State(n) => Type::Exist(*n),
-        // Usage rows are rejected in desugar before any annotation reaches
-        // conversion; convert through the underlying type defensively.
-        ast::Ty::Coeffect(inner, _) => convert_data_rp(inner, rp),
+        // A closure-usage row (`@ once`, `@ many`) survives desugar on function
+        // types and is part of the checked signature, so a reparse must keep it:
+        // dropping it here would erase the contract from every interface
+        // round trip. The row carries no variables, so `rp` does not apply.
+        ast::Ty::Coeffect(inner, row) => {
+            Type::Coeffect(Box::new(convert_data_rp(inner, rp)), row.clone())
+        }
         ast::Ty::Forall(names, body) => wrap_forall(
             &names.iter().map(Sym::from).collect::<Vec<_>>(),
             convert_data_rp(body, rp),

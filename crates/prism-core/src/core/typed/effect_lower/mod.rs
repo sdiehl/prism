@@ -16,6 +16,7 @@
 #[cfg(any(test, feature = "test-hooks"))]
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::convert::Infallible;
 
 pub mod abi;
 pub mod analysis;
@@ -43,8 +44,8 @@ pub mod walk;
 use crate::core::effect_abi::{
     add_synthetic_ctor, EBIND, EBOUNCE, EOP, EPURE, ERESUME, QAPPLY, SDONE, SMORE, TQCONS, TQNIL,
 };
-use crate::core::{EffectStrategy, OpGrades};
-use crate::flags::DynFlags;
+use crate::core::{EffectStrategy, LoweredCore, OpGrades};
+use crate::flags::{DynFlags, EffectLowerOptions};
 use crate::types::ty::{EffRow, Label};
 use crate::types::{CtorInfo, Type};
 use prism_common::sym::Sym;
@@ -53,11 +54,13 @@ use prism_syntax::names::ENTRY_POINT;
 
 use super::inline::calls_in;
 use super::specialize_support::{free_comp_vars, Rewrite};
+use super::traverse::Visit;
 use super::verify::{instantiate_fn, union_rows, VerifyEnv};
 use super::{
-    verify, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, EffectLowered, Elaborated,
-    TypedBinder, TypedComp, TypedCompKind, TypedCore, TypedCoreFn, TypedPattern, TypedValue,
-    TypedValueKind, UncheckedTypedCore,
+    audit, on_core_stack, verify, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType,
+    CoreViolation, EffectLowered, Elaborated, ReuseLowered, TypedBinder, TypedComp, TypedCompKind,
+    TypedCore, TypedCoreFn, TypedCorePhase, TypedPattern, TypedValue, TypedValueKind,
+    UncheckedTypedCore,
 };
 use decline::Decline;
 use diagnostics::DriftLog;
@@ -71,15 +74,339 @@ pub use plan::{raw_effects, EffectPlan};
 /// the cascade decided.
 #[derive(Debug)]
 pub struct TypedLowering {
-    pub core: TypedCore<EffectLowered>,
-    pub env: VerifyEnv,
-    pub ctors: BTreeMap<String, CtorInfo>,
-    pub warning: Option<String>,
-    pub strategy: EffectStrategy,
+    core: TypedCore<EffectLowered>,
+    env: VerifyEnv,
+    ctors: BTreeMap<String, CtorInfo>,
+    warning: Option<String>,
+    strategy: EffectStrategy,
     /// Why a confined region was refused before this strategy was taken, when
     /// one was attempted and refused. The plan artifact renders it, so a tier
     /// nobody expected can be read back to the shape that caused it.
-    pub confined_decline: Option<Decline>,
+    confined_decline: Option<Decline>,
+}
+
+#[derive(Debug)]
+struct LoweringFacts {
+    env: VerifyEnv,
+    ctors: BTreeMap<String, CtorInfo>,
+    warning: Option<String>,
+    strategy: EffectStrategy,
+    confined_decline: Option<Decline>,
+}
+
+/// A downstream pass failed, or its output did not verify under the lowering's
+/// retained authority.
+#[derive(Debug)]
+pub enum TypedLoweringTransitionError<E> {
+    /// The downstream pass returned its own failure.
+    Pass(E),
+    /// The pass returned a value incompatible with the retained environment or
+    /// final structural stage.
+    Invariant(TypedCoreEffectLoweringFailure),
+}
+
+/// A fully consumed typed lowering and the decision metadata that belongs to it.
+///
+/// The driver creates this through [`TypedLowering::try_erase_core`] or
+/// [`TypedLowering::try_finish_core`]. Both transitions recheck the typed value
+/// under its retained environment and perform the final structural validation.
+#[derive(Debug)]
+pub struct FinishedLowering {
+    core: LoweredCore,
+    ctors: BTreeMap<String, CtorInfo>,
+    warning: Option<String>,
+    strategy: EffectStrategy,
+    confined_decline: Option<Decline>,
+}
+
+impl FinishedLowering {
+    /// The validated erased program at the final lowering stage.
+    #[must_use]
+    pub const fn core(&self) -> &LoweredCore {
+        &self.core
+    }
+
+    /// The constructor table paired with the final program.
+    #[must_use]
+    pub const fn constructors(&self) -> &BTreeMap<String, CtorInfo> {
+        &self.ctors
+    }
+
+    /// The fallback warning selected by the lowering cascade, when any.
+    #[must_use]
+    pub fn warning(&self) -> Option<&str> {
+        self.warning.as_deref()
+    }
+
+    /// The strategy selected by the lowering cascade.
+    #[must_use]
+    pub const fn strategy(&self) -> EffectStrategy {
+        self.strategy
+    }
+
+    /// The confined-region refusal that caused the cascade to widen, when any.
+    #[must_use]
+    pub const fn confined_decline(&self) -> Option<&Decline> {
+        self.confined_decline.as_ref()
+    }
+
+    /// Consume the artifact at the explicit backend boundary.
+    #[must_use]
+    pub fn into_core(self) -> LoweredCore {
+        self.core
+    }
+
+    /// Consume the final artifact for a backend that owns both products.
+    #[must_use]
+    pub fn into_core_and_constructors(self) -> (LoweredCore, BTreeMap<String, CtorInfo>) {
+        (self.core, self.ctors)
+    }
+}
+
+impl TypedLowering {
+    fn into_core_and_facts(self) -> (TypedCore<EffectLowered>, LoweringFacts) {
+        (
+            self.core,
+            LoweringFacts {
+                env: self.env,
+                ctors: self.ctors,
+                warning: self.warning,
+                strategy: self.strategy,
+                confined_decline: self.confined_decline,
+            },
+        )
+    }
+
+    /// The verified effect-lowered program produced by the selected strategy.
+    #[must_use]
+    pub const fn core(&self) -> &TypedCore<EffectLowered> {
+        &self.core
+    }
+
+    /// The verifier environment paired with [`Self::core`].
+    #[must_use]
+    pub const fn env(&self) -> &VerifyEnv {
+        &self.env
+    }
+
+    /// The constructor table paired with [`Self::core`], including synthetics.
+    #[must_use]
+    pub const fn constructors(&self) -> &BTreeMap<String, CtorInfo> {
+        &self.ctors
+    }
+
+    /// The fallback warning selected by the production cascade, when any.
+    #[must_use]
+    pub fn warning(&self) -> Option<&str> {
+        self.warning.as_deref()
+    }
+
+    /// The strategy selected by the production cascade.
+    #[must_use]
+    pub const fn strategy(&self) -> EffectStrategy {
+        self.strategy
+    }
+
+    /// The confined-region refusal that caused the cascade to widen, when any.
+    #[must_use]
+    pub const fn confined_decline(&self) -> Option<&Decline> {
+        self.confined_decline.as_ref()
+    }
+
+    /// Rewrite the program while keeping it paired with the verifier context
+    /// and lowering decision that produced it.
+    ///
+    /// The callback cannot replace the environment, constructors, warning, or
+    /// strategy independently, so downstream passes do not need to dismantle
+    /// this artifact merely to transform its Core program.
+    ///
+    /// # Errors
+    /// Returns the callback's error, or an invariant failure when the rewritten
+    /// tree does not verify under the retained environment.
+    pub fn try_map_core<E>(
+        self,
+        rewrite: impl FnOnce(
+            TypedCore<EffectLowered>,
+            &VerifyEnv,
+        ) -> Result<TypedCore<EffectLowered>, E>,
+    ) -> Result<Self, TypedLoweringTransitionError<E>> {
+        let (core, facts) = self.into_core_and_facts();
+        let core = rewrite(core, &facts.env).map_err(TypedLoweringTransitionError::Pass)?;
+        audit(&core, &facts.env)
+            .map_err(|violations| verification_failure(&violations))
+            .map_err(TypedLoweringTransitionError::Invariant)?;
+        Ok(facts.with_core(core))
+    }
+
+    /// Consume the verified effect-lowered tree through canonical erasure.
+    ///
+    /// # Errors
+    /// Returns an invariant failure if the retained typed authority or the
+    /// erased structural stage no longer validates.
+    pub fn try_erase_core(
+        self,
+    ) -> Result<FinishedLowering, TypedLoweringTransitionError<Infallible>> {
+        let (core, facts) = self.into_core_and_facts();
+        facts.finish(core)
+    }
+
+    /// Consume the program and its verifier authority in one final transition.
+    ///
+    /// The callback performs ownership and reuse lowering but returns the final
+    /// typed stage. This method rechecks that stage under the retained
+    /// environment, erases it, and validates the structural boundary.
+    ///
+    /// # Errors
+    /// Returns the callback's error, or an invariant failure when its typed or
+    /// erased output does not validate under the retained authority.
+    pub fn try_finish_core<E>(
+        self,
+        finish: impl FnOnce(TypedCore<EffectLowered>, &VerifyEnv) -> Result<TypedCore<ReuseLowered>, E>,
+    ) -> Result<FinishedLowering, TypedLoweringTransitionError<E>> {
+        let (core, facts) = self.into_core_and_facts();
+        let core = finish(core, &facts.env).map_err(TypedLoweringTransitionError::Pass)?;
+        facts.finish(core)
+    }
+}
+
+impl LoweringFacts {
+    fn with_core(self, core: TypedCore<EffectLowered>) -> TypedLowering {
+        TypedLowering {
+            core,
+            env: self.env,
+            ctors: self.ctors,
+            warning: self.warning,
+            strategy: self.strategy,
+            confined_decline: self.confined_decline,
+        }
+    }
+
+    fn finish<P: TypedCorePhase, E>(
+        self,
+        core: TypedCore<P>,
+    ) -> Result<FinishedLowering, TypedLoweringTransitionError<E>> {
+        audit(&core, &self.env)
+            .map_err(|violations| verification_failure(&violations))
+            .map_err(TypedLoweringTransitionError::Invariant)?;
+        let core = LoweredCore::validate(core.erase()).map_err(|violations| {
+            TypedLoweringTransitionError::Invariant(TypedCoreEffectLoweringFailure::Internal {
+                msg: format!(
+                    "final lowered Core failed structural validation:\n{}",
+                    violations.join("\n")
+                ),
+            })
+        })?;
+        Ok(FinishedLowering {
+            core,
+            ctors: self.ctors,
+            warning: self.warning,
+            strategy: self.strategy,
+            confined_decline: self.confined_decline,
+        })
+    }
+}
+
+fn verification_failure(violations: &[CoreViolation]) -> TypedCoreEffectLoweringFailure {
+    TypedCoreEffectLoweringFailure::Verification {
+        first: violations
+            .first()
+            .map_or_else(String::new, ToString::to_string),
+        count: violations.len(),
+    }
+}
+
+#[cfg(test)]
+mod transition_tests {
+    use std::collections::BTreeMap;
+
+    use prism_common::sym::Sym;
+    use prism_syntax::error::TypedCoreEffectLoweringFailure;
+    use prism_syntax::names::ENTRY_POINT;
+
+    use crate::core::EffectStrategy;
+    use crate::types::ty::EffRow;
+    use crate::types::Type;
+
+    use super::super::{
+        verify, CompSig, ConstructorSig, CoreFnSig, CoreType, EffectLowered, ReuseLowered,
+        TypedComp, TypedCompKind, TypedCore, TypedCoreFn, TypedCorePhase, TypedValue,
+        TypedValueKind, UncheckedTypedCore, VerifyEnv,
+    };
+    use super::{TypedLowering, TypedLoweringTransitionError};
+
+    fn foreign_core<P: TypedCorePhase>(env: &VerifyEnv) -> TypedCore<P> {
+        let result = CoreType::Source(Type::Con(Sym::new("Foreign"), Vec::new()));
+        let value = TypedValue::new(
+            result.clone(),
+            TypedValueKind::Ctor {
+                name: Sym::new("Foreign"),
+                tag: 0,
+                instantiation: Vec::new(),
+                fields: Vec::new(),
+            },
+        );
+        let body = TypedComp::new(
+            CompSig::new(result, EffRow::Empty),
+            TypedCompKind::Return(value),
+        );
+        let function = TypedCoreFn::new(
+            Sym::new(ENTRY_POINT),
+            Vec::new(),
+            body.clone(),
+            CoreFnSig::new(Vec::new(), Vec::new(), body.sig().clone()),
+            0,
+        );
+        verify(UncheckedTypedCore::new(vec![function]), env).expect("foreign Core verifies")
+    }
+
+    fn foreign_env() -> VerifyEnv {
+        let mut env = VerifyEnv::new();
+        let result = CoreType::Source(Type::Con(Sym::new("Foreign"), Vec::new()));
+        env.insert_constructor(
+            Sym::new("Foreign"),
+            ConstructorSig::new(Vec::new(), 0, Vec::new(), result),
+        );
+        env
+    }
+
+    fn empty_lowering() -> TypedLowering {
+        let env = VerifyEnv::new();
+        let core = verify(UncheckedTypedCore::new(Vec::new()), &env).expect("empty Core verifies");
+        TypedLowering {
+            core,
+            env,
+            ctors: BTreeMap::new(),
+            warning: None,
+            strategy: EffectStrategy::Pure,
+            confined_decline: None,
+        }
+    }
+
+    #[test]
+    fn transitions_reject_core_verified_under_an_unrelated_environment() {
+        let env = foreign_env();
+        let rewritten = foreign_core::<EffectLowered>(&env);
+        let error = empty_lowering()
+            .try_map_core(|_, _| Ok::<_, ()>(rewritten))
+            .expect_err("map must retain its original verifier environment");
+        assert!(matches!(
+            error,
+            TypedLoweringTransitionError::Invariant(
+                TypedCoreEffectLoweringFailure::Verification { .. }
+            )
+        ));
+
+        let finished = foreign_core::<ReuseLowered>(&env);
+        let error = empty_lowering()
+            .try_finish_core(|_, _| Ok::<_, ()>(finished))
+            .expect_err("finish must retain its original verifier environment");
+        assert!(matches!(
+            error,
+            TypedLoweringTransitionError::Invariant(
+                TypedCoreEffectLoweringFailure::Verification { .. }
+            )
+        ));
+    }
 }
 
 /// One monadification attempt: the lowering it produced, or the refusal that
@@ -107,9 +434,27 @@ pub fn lower_effects(
     flags: &DynFlags,
     grades: &OpGrades,
 ) -> Result<TypedLowering, TypedCoreEffectLoweringFailure> {
-    match cascade(core, env, ctors, flags, grades)? {
+    lower_effects_with_options(core, env, ctors, &EffectLowerOptions::from(flags), grades)
+}
+
+/// Lower with the normalized, responsibility-specific option value.
+///
+/// This is the compiler route; [`lower_effects`] remains a compatibility seam
+/// for embeddings that still construct `DynFlags` directly.
+///
+/// # Errors
+/// Returns a typed-lowering failure when preparation, rewriting, or verification
+/// cannot preserve the Core invariants.
+pub fn lower_effects_with_options(
+    core: TypedCore<Elaborated>,
+    env: &VerifyEnv,
+    ctors: &BTreeMap<String, CtorInfo>,
+    options: &EffectLowerOptions,
+    grades: &OpGrades,
+) -> Result<TypedLowering, TypedCoreEffectLoweringFailure> {
+    on_core_stack(|| match cascade(core, env, ctors, options, grades)? {
         Decision::Lowered(lowering) => Ok(*lowering),
-    }
+    })
 }
 
 /// The strategy the cascade recognizes for `core`, or `None` when it declines
@@ -128,7 +473,8 @@ pub fn recognized_strategy(
     flags: &DynFlags,
     grades: &OpGrades,
 ) -> Result<Option<EffectStrategy>, TypedCoreEffectLoweringFailure> {
-    Ok(match cascade(core, env, ctors, flags, grades)? {
+    let options = EffectLowerOptions::from(flags);
+    Ok(match cascade(core, env, ctors, &options, grades)? {
         Decision::Lowered(lowering) => Some(lowering.strategy),
     })
 }
@@ -143,9 +489,29 @@ pub fn recognized_strategy(
 /// different answer.
 #[derive(Debug)]
 pub struct Prepared {
-    pub fns: Vec<TypedCoreFn>,
-    pub env: VerifyEnv,
-    pub ctors: BTreeMap<String, CtorInfo>,
+    fns: Vec<TypedCoreFn>,
+    env: VerifyEnv,
+    ctors: BTreeMap<String, CtorInfo>,
+}
+
+impl Prepared {
+    /// Reachable functions after the preparation steps shared by every tier.
+    #[must_use]
+    pub fn functions(&self) -> &[TypedCoreFn] {
+        &self.fns
+    }
+
+    /// The verifier environment paired with [`Self::functions`].
+    #[must_use]
+    pub const fn env(&self) -> &VerifyEnv {
+        &self.env
+    }
+
+    /// The constructor table paired with [`Self::functions`].
+    #[must_use]
+    pub const fn constructors(&self) -> &BTreeMap<String, CtorInfo> {
+        &self.ctors
+    }
 }
 
 /// Narrow an elaborated program to what effect lowering must see: the
@@ -159,6 +525,31 @@ pub fn prepare(
     env: &VerifyEnv,
     ctors: &BTreeMap<String, CtorInfo>,
     flags: &DynFlags,
+    grades: &OpGrades,
+) -> Result<Prepared, TypedCoreEffectLoweringFailure> {
+    prepare_with_options(core, env, ctors, &EffectLowerOptions::from(flags), grades)
+}
+
+/// Prepare effect lowering from its narrow normalized option value.
+///
+/// # Errors
+/// Returns a typed-lowering failure when preparation cannot preserve the Core
+/// invariants.
+pub fn prepare_with_options(
+    core: TypedCore<Elaborated>,
+    env: &VerifyEnv,
+    ctors: &BTreeMap<String, CtorInfo>,
+    options: &EffectLowerOptions,
+    grades: &OpGrades,
+) -> Result<Prepared, TypedCoreEffectLoweringFailure> {
+    on_core_stack(|| prepare_on_core_stack(core, env, ctors, options, grades))
+}
+
+fn prepare_on_core_stack(
+    core: TypedCore<Elaborated>,
+    env: &VerifyEnv,
+    ctors: &BTreeMap<String, CtorInfo>,
+    options: &EffectLowerOptions,
     grades: &OpGrades,
 ) -> Result<Prepared, TypedCoreEffectLoweringFailure> {
     // Dead prelude code must not flip the program into monadic mode, so only
@@ -194,13 +585,13 @@ pub fn prepare(
     // control handlers do not leave raw effect nodes. Turning the erasures off
     // is its own knob position, independent of the cascade floor, so a forced
     // divergence names one of the two rather than both at once.
-    let (fns, used_step) = if flags.erasures {
+    let (fns, used_step) = if options.erasures() {
         let vars_gone = erase_var::erase_local_vars(
             &fns,
             grades,
             &EffectPlan::analyze(&fns),
             &env,
-            &DriftLog::new(flags.quiet),
+            &DriftLog::new(options.quiet()),
         );
         // Erase loop-control effects to direct control flow next, so a
         // recognized loop's control ops are gone before the strategy cascade
@@ -262,7 +653,8 @@ pub fn threaded_state_typed(
     flags: &DynFlags,
     grades: &OpGrades,
 ) -> Result<Option<(TypedCore<EffectLowered>, VerifyEnv)>, TypedCoreEffectLoweringFailure> {
-    let prepared = prepare(core, env, ctors, flags, grades)?;
+    let options = EffectLowerOptions::from(flags);
+    let prepared = prepare_with_options(core, env, ctors, &options, grades)?;
     let ops = operation_ids(&prepared.fns)?;
     let latent = latent::latent_map(&prepared.fns);
     let thunk_flow = flow::analyze(&prepared.fns, &latent);
@@ -285,29 +677,24 @@ pub fn threaded_state_typed(
         &prepared.fns,
         &plan,
         &analysis,
-        &DriftLog::new(flags.quiet),
+        &DriftLog::new(options.quiet()),
         &mut fresh,
     ) else {
         return Ok(None);
     };
     verify(UncheckedTypedCore::<EffectLowered>::new(fns), &env)
         .map(|core| Some((core, env)))
-        .map_err(|violations| TypedCoreEffectLoweringFailure::Verification {
-            first: violations
-                .first()
-                .map_or_else(String::new, ToString::to_string),
-            count: violations.len(),
-        })
+        .map_err(|violations| verification_failure(&violations))
 }
 
 fn cascade(
     core: TypedCore<Elaborated>,
     env: &VerifyEnv,
     ctors: &BTreeMap<String, CtorInfo>,
-    flags: &DynFlags,
+    options: &EffectLowerOptions,
     grades: &OpGrades,
 ) -> Result<Decision, TypedCoreEffectLoweringFailure> {
-    let prepared = prepare(core, env, ctors, flags, grades)?;
+    let prepared = prepare_with_options(core, env, ctors, options, grades)?;
     let fns = prepared.fns;
     let env = &prepared.env;
     let ctors = &prepared.ctors;
@@ -325,9 +712,9 @@ fn cascade(
     let plan = EffectPlan::from_parts(&fns, latent, thunk_flow);
     let (latent, thunk_flow) = (plan.latent(), plan.flow());
     let state_analysis = state::StateAnalysis::new(&ops, latent, thunk_flow, env);
-    let drift = DriftLog::new(flags.quiet);
+    let drift = DriftLog::new(options.quiet());
     let mut fresh = prism_common::fresh::Fresh::new();
-    if flags.rung_enabled(EffectStrategy::Evidence) {
+    if options.rung_enabled(EffectStrategy::Evidence) {
         if let Some(threaded) =
             evidence::try_lower_ev(&fns, latent, thunk_flow, &ops, env, &drift, &mut fresh)
         {
@@ -343,7 +730,7 @@ fn cascade(
     // comes first, then the value-coincidence the threading runs under. Both
     // fall through to the next rung rather than failing, because a decline here
     // is a program this engine does not fit, not a defect.
-    if flags.rung_enabled(EffectStrategy::StateFusion) {
+    if options.rung_enabled(EffectStrategy::StateFusion) {
         if let Some(plan) = state::fold_uniform(&fns, &state_analysis) {
             if state::threads(&plan, &fns, &state_analysis) {
                 if let Some(threaded) =
@@ -369,7 +756,7 @@ fn cascade(
         ops: &ops,
         plan: &plan,
     };
-    if flags.rung_enabled(EffectStrategy::LocalPartial) {
+    if options.rung_enabled(EffectStrategy::LocalPartial) {
         if let Some(local) = try_local_partial(&fns, env, ctors, &analysis, &drift, &mut fresh)? {
             return Ok(local);
         }
@@ -379,7 +766,7 @@ fn cascade(
     // selective/whole free-monad fallback. The one cascade-owned fresh supply
     // retains every name consumed by that attempt, matching the executable
     // pass's late-decline behavior.
-    monadic_fallback(&fns, env, ctors, flags, &analysis, &mut fresh)
+    monadic_fallback_with_options(&fns, env, ctors, options, &analysis, &mut fresh)
 }
 
 /// What every rung below the evidence engine reads: the operation numbering the
@@ -687,6 +1074,24 @@ pub fn monadic_fallback(
     analysis: &LoweringAnalysis<'_>,
     fresh: &mut prism_common::fresh::Fresh,
 ) -> Result<Decision, TypedCoreEffectLoweringFailure> {
+    monadic_fallback_with_options(
+        fns,
+        env,
+        ctors,
+        &EffectLowerOptions::from(flags),
+        analysis,
+        fresh,
+    )
+}
+
+fn monadic_fallback_with_options(
+    fns: &[TypedCoreFn],
+    env: &VerifyEnv,
+    ctors: &BTreeMap<String, CtorInfo>,
+    options: &EffectLowerOptions,
+    analysis: &LoweringAnalysis<'_>,
+    fresh: &mut prism_common::fresh::Fresh,
+) -> Result<Decision, TypedCoreEffectLoweringFailure> {
     // Denying the selective rung widens the plan to the whole program, whether a
     // floor sits above it or the exclusion knob skips it. That direction is
     // always legal, which is why it is the forceable one: narrowing a program
@@ -694,7 +1099,7 @@ pub fn monadic_fallback(
     // `rung_enabled` (not `admits` alone) is what makes excluding the selective
     // rung honest instead of a silent no-op; the whole-program terminal below it
     // is the one rung no knob can skip, so nothing here can strand a program.
-    let force_whole = !flags.rung_enabled(EffectStrategy::SelectiveFreeMonad);
+    let force_whole = !options.rung_enabled(EffectStrategy::SelectiveFreeMonad);
     let mut declined = None;
     if !force_whole {
         // A confined region is an optimization, so failing to build one is a
@@ -705,12 +1110,12 @@ pub fn monadic_fallback(
         // widened plan is the correct answer for it. The refusal is carried
         // into the widened attempt so the artifact and the warning can say
         // which shape cost the program its confined region.
-        match attempt_monadic(fns, env, ctors, flags, analysis, fresh, false, None)? {
+        match attempt_monadic(fns, env, ctors, options, analysis, fresh, false, None)? {
             Ok(decision) => return Ok(decision),
             Err(refusal) => declined = Some(refusal),
         }
     }
-    attempt_monadic(fns, env, ctors, flags, analysis, fresh, true, declined)?.map_err(|refusal| {
+    attempt_monadic(fns, env, ctors, options, analysis, fresh, true, declined)?.map_err(|refusal| {
         TypedCoreEffectLoweringFailure::Internal {
             msg: format!("typed free-monad builder declined at whole-program scope: {refusal}"),
         }
@@ -728,7 +1133,7 @@ fn attempt_monadic(
     fns: &[TypedCoreFn],
     env: &VerifyEnv,
     ctors: &BTreeMap<String, CtorInfo>,
-    flags: &DynFlags,
+    options: &EffectLowerOptions,
     analysis: &LoweringAnalysis<'_>,
     fresh: &mut prism_common::fresh::Fresh,
     force_whole: bool,
@@ -756,7 +1161,7 @@ fn attempt_monadic(
                 plan: &plan,
                 latent: analysis.latent(),
                 flow: analysis.flow(),
-                native_enabled: flags.native_effects,
+                native_enabled: options.native_effects(),
             },
         ),
         analysis::MonadicScope::WholeProgram => {
@@ -799,7 +1204,7 @@ fn attempt_monadic(
         });
     }
 
-    if flags.trampoline && whole {
+    if options.trampoline() && whole {
         output = trampoline::trampolinize(&output, fresh).ok_or_else(|| {
             TypedCoreEffectLoweringFailure::Internal {
                 msg: "typed trampoline declined after free-monad boundary verification".into(),
@@ -809,7 +1214,7 @@ fn attempt_monadic(
     }
 
     let (lowered_env, lowered_ctors) =
-        install_monadic_runtime(&output, env, ctors, flags.trampoline && whole);
+        install_monadic_runtime(&output, env, ctors, options.trampoline() && whole);
     lowered(
         output,
         &lowered_env,
@@ -868,53 +1273,40 @@ fn install_step_runtime(
 
 #[must_use]
 pub fn functions_use_constructor(functions: &[TypedCoreFn], wanted: &str) -> bool {
-    functions
-        .iter()
-        .any(|function| comp_uses_constructor(function.body(), wanted))
-}
-
-fn comp_uses_constructor(comp: &TypedComp, wanted: &str) -> bool {
-    let mut found = false;
-    walk::each_value(comp, &mut |value| {
-        found |= value_uses_constructor(value, wanted);
-    });
-    if let TypedCompKind::Case(_, arms) = comp.kind() {
-        found |= arms.iter().any(|(pattern, _)| {
-            matches!(pattern, TypedPattern::Ctor { name, .. } if name.as_str() == wanted)
-        });
-    }
-    walk::each_subcomp(comp, &mut |child| {
-        found |= comp_uses_constructor(child, wanted);
-    });
-    found
-}
-
-fn value_uses_constructor(value: &TypedValue, wanted: &str) -> bool {
-    match &value.kind {
-        TypedValueKind::Ctor { name, fields, .. } => {
-            name.as_str() == wanted
-                || fields
-                    .iter()
-                    .any(|field| value_uses_constructor(field, wanted))
+    let mut scan = ConstructorUse {
+        wanted,
+        found: false,
+    };
+    for function in functions {
+        scan.walk_comp(function.body());
+        if scan.found {
+            break;
         }
-        TypedValueKind::Thunk(body) => comp_uses_constructor(body, wanted),
-        TypedValueKind::Reinterpret(inner)
-        | TypedValueKind::LoweredRepr { value: inner, .. }
-        | TypedValueKind::NewtypeRepr { value: inner, .. } => value_uses_constructor(inner, wanted),
-        TypedValueKind::Tuple(fields) | TypedValueKind::UnboxedTuple(fields) => fields
-            .iter()
-            .any(|field| value_uses_constructor(field, wanted)),
-        TypedValueKind::UnboxedRecord(fields) => fields
-            .iter()
-            .any(|(_, field)| value_uses_constructor(field, wanted)),
-        TypedValueKind::Var { .. }
-        | TypedValueKind::Unit
-        | TypedValueKind::Int(_)
-        | TypedValueKind::I64(_)
-        | TypedValueKind::U64(_)
-        | TypedValueKind::Bool(_)
-        | TypedValueKind::Float(_)
-        | TypedValueKind::Str(_) => false,
+    }
+    scan.found
+}
+
+struct ConstructorUse<'a> {
+    wanted: &'a str,
+    found: bool,
+}
+
+impl Visit for ConstructorUse<'_> {
+    fn comp(&mut self, _comp: &TypedComp) -> bool {
+        !self.found
+    }
+
+    fn value(&mut self, value: &TypedValue) -> bool {
+        if let TypedValueKind::Ctor { name, .. } = value.kind() {
+            self.found = name.as_str() == self.wanted;
+        }
+        !self.found
+    }
+
+    fn pattern(&mut self, pattern: &TypedPattern) {
+        if let TypedPattern::Ctor { name, .. } = pattern {
+            self.found = name.as_str() == self.wanted;
+        }
     }
 }
 
@@ -928,14 +1320,8 @@ fn lowered(
     strategy: EffectStrategy,
     confined_decline: Option<Decline>,
 ) -> Result<Decision, TypedCoreEffectLoweringFailure> {
-    let out = verify(UncheckedTypedCore::<EffectLowered>::new(fns), env).map_err(|violations| {
-        TypedCoreEffectLoweringFailure::Verification {
-            first: violations
-                .first()
-                .map_or_else(String::new, ToString::to_string),
-            count: violations.len(),
-        }
-    })?;
+    let out = verify(UncheckedTypedCore::<EffectLowered>::new(fns), env)
+        .map_err(|violations| verification_failure(&violations))?;
     Ok(Decision::Lowered(Box::new(TypedLowering {
         core: out,
         env: env.clone(),
@@ -972,12 +1358,13 @@ fn reachable(fns: &[TypedCoreFn]) -> BTreeSet<Sym> {
 // A value looked through any Reinterpret/NewtypeRepr wrapper. Rewrites keep the
 // original wrapped value.
 #[must_use]
-pub fn peel(value: &TypedValue) -> &TypedValue {
-    match &value.kind {
-        TypedValueKind::Reinterpret(inner) | TypedValueKind::NewtypeRepr { value: inner, .. } => {
-            peel(inner)
+pub fn peel(mut value: &TypedValue) -> &TypedValue {
+    loop {
+        match &value.kind {
+            TypedValueKind::Reinterpret(inner)
+            | TypedValueKind::NewtypeRepr { value: inner, .. } => value = inner,
+            _ => return value,
         }
-        _ => value,
     }
 }
 

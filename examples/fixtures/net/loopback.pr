@@ -1,0 +1,111 @@
+-- A TCP round trip inside a single process and a single thread. The listener
+-- binds port zero, the client connects to the address the OS chose, and the
+-- handshake completes into the accept queue with no accept outstanding, so both
+-- ends of the conversation belong to one program with no concurrency in it.
+--
+-- Everything here goes through the public bracket vocabulary: no handle number
+-- is ever named, and every socket is closed by the bracket that opened it. The
+-- reader asks for one byte at a time on purpose, so the short-read loop is
+-- exercised rather than assumed, and it accumulates bytes rather than text,
+-- because a chunk boundary is free to fall inside a character.
+
+import Data.Bytes (bytes_concat, bytes_to_string, string_to_bytes)
+import Data.String (starts_with)
+import Net (Bytes, Chunk, End, Listener, Net, NetError, Stream, listener_address, local_address, peer_address, receive, run_net, send_all, with_tcp_accept, with_tcp_connection, with_tcp_listener)
+import Wire (wire_len)
+
+let message : String = "hello, prism"
+
+fn as_text(bs : Bytes) : String =
+  match bytes_to_string(bs) of
+    None => "?"
+    Some(s) => s
+
+-- Read exactly `want` bytes, one at a time. A stream delivers what has arrived
+-- rather than what was asked for, so the only correct reader is a loop.
+fn read_n(
+  s : Stream,
+  acc : Bytes,
+  want : Int
+) : Result(Bytes, NetError) ! {Net | e} =
+  if want <= 0 then
+    Ok(acc)
+  else
+    match receive(s, 1) of
+      Err(x) => Err(x)
+      Ok(End) => Ok(acc)
+      Ok(Chunk(bs)) => read_n(s, bytes_concat(acc, bs), want - wire_len(bs))
+
+-- Read until the peer closes. This is what proves `End` is reachable: the
+-- accepted socket is closed by its own bracket while this end is still open.
+fn read_rest(s : Stream, acc : Bytes) : Result(Bytes, NetError) ! {Net | e} =
+  match receive(s, 32) of
+    Err(x) => Err(x)
+    Ok(End) => Ok(acc)
+    Ok(Chunk(bs)) => read_rest(s, bytes_concat(acc, bs))
+
+-- The accepted socket is bound to the same address the listener is, and its
+-- peer is the loopback interface the client dialled out of. Both are reported
+-- by shape rather than verbatim, since the port the OS picked differs per run.
+fn describe(s : Stream, bound : String) : Unit ! {Net, IO | e} =
+  let here =
+    match local_address(s) of
+      Err(x) => show(x)
+      Ok(a) =>
+        if a == bound then
+          "same"
+        else
+          a
+  let there =
+    match peer_address(s) of
+      Err(x) => show(x)
+      Ok(a) =>
+        if starts_with("127.0.0.1:", a) then
+          "loopback"
+        else
+          a
+  let _l = println(concat("local ", here))
+  println(concat("peer ", there))
+
+-- The server half: read the whole message, answer with its length, and return,
+-- at which point the bracket closes this socket and the client sees the end of
+-- the stream.
+fn serve(s : Stream, bound : String) : String ! {Net, IO | e} =
+  let _d = describe(s, bound)
+  match read_n(s, string_to_bytes(""), str_len(message)) of
+    Err(x) => show(x)
+    Ok(got) =>
+      let _sent = send_all(s, string_to_bytes(show(wire_len(got))))
+      as_text(got)
+
+-- The client half: write the message, hand the connection to the server, then
+-- drain the reply to end of stream.
+fn exchange(l : Listener, bound : String, c : Stream) : String ! {Net, IO | e} =
+  match send_all(c, string_to_bytes(message)) of
+    Err(x) => show(x)
+    Ok(_written) =>
+      let served =
+        match with_tcp_accept(l, \(s) -> serve(s, bound)) of
+          Err(x) => show(x)
+          Ok(got) => got
+      let _g = println(concat("recv ", served))
+      match read_rest(c, string_to_bytes("")) of
+        Err(x) => show(x)
+        Ok(reply) => as_text(reply)
+
+fn talk(l : Listener) : String ! {Net, IO | e} =
+  match listener_address(l) of
+    Err(x) => show(x)
+    Ok(bound) =>
+      match with_tcp_connection(bound, \(c) -> exchange(l, bound, c)) of
+        Err(x) => show(x)
+        Ok(reply) => reply
+
+fn go() : String ! {Net, IO | e} =
+  match with_tcp_listener("127.0.0.1:0", 4, talk) of
+    Err(x) => show(x)
+    Ok(reply) => reply
+
+fn main() : Unit ! {IO} =
+  let reply = run_net(go)
+  println(concat("reply ", reply))

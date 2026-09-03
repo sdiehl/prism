@@ -1,0 +1,4 @@
+-- An indirect call has no callee certificate: nothing proves the function
+-- value consumes what it receives linearly, so the claim conservatively
+-- fails until callable types carry the corresponding contract.
+fn apply(f : (Int) -> Int, x : Int) : Int @ linear = f(x)

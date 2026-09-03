@@ -14,8 +14,9 @@ use super::super::env::{
     Annot,
 };
 use super::super::{
-    require_pure_konst, BodyWitness, ClassInfo, Env, HoleBinding, HoleCandidate, HoleReport,
-    InstInfo, Label, OperationUses, Renames, RowScope, SelfRef, Tc,
+    require_pure_konst, BodyWitness, ClassConstraint, ClassInfo, ConstrainedScheme, Env,
+    HoleBinding, HoleCandidate, HoleReport, InstInfo, Label, OperationUses, Renames, RowScope,
+    SelfRef, Tc,
 };
 
 // The existentials and scaffolding a declaration's body is inferred against: its
@@ -628,10 +629,18 @@ impl Tc<'_> {
                     }
                     .at(c.span));
                 }
-                final_cs.push((Sym::from(class), t2));
+                final_cs.push(ClassConstraint {
+                    class: Sym::from(class),
+                    head: t2,
+                });
             }
-            self.constrained
-                .insert(Sym::from(&d.name), (g.clone(), final_cs));
+            self.constrained.insert(
+                Sym::from(&d.name),
+                ConstrainedScheme {
+                    scheme: g.clone(),
+                    constraints: final_cs,
+                },
+            );
         }
         Ok(g)
     }

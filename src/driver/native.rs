@@ -1,9 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use crate::error::Error;
@@ -12,7 +12,14 @@ use prism_native::rt::{cc, cc_flags, write_libm_archive, write_runtime_for, Runt
 
 use super::cache::NativeArtifactCache;
 use super::scheduler::QueryScheduler;
-use super::{Config, NATIVE_KONT_FRAME_FLAGS};
+use super::Config;
+
+const NATIVE_KONT_FRAME_FLAGS: [&str; 4] = [
+    "-DPRISM_NATIVE_KONT_FRAMES",
+    "-fno-omit-frame-pointer",
+    "-funwind-tables",
+    "-fno-optimize-sibling-calls",
+];
 
 const THIN_LTO_FLAG: &str = "-flto=thin";
 const NO_FP_CONTRACT_FLAG: &str = "-ffp-contract=off";
@@ -93,14 +100,24 @@ fn compile_runtime_object(
     cfg: &Config,
 ) -> Result<ObjectCompileStats, Error> {
     // Parallel corpus workers commonly reach the same cold runtime key at once.
-    // Serialize only that first materialize/compile/store critical section so
-    // one worker prebuilds each invariant object and every sibling gets a hit.
-    // Program objects and final links remain fully parallel.
-    static RUNTIME_COMPILE_LOCK: Mutex<()> = Mutex::new(());
-    let _guard = RUNTIME_COMPILE_LOCK
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
-    compile_object(cc, args, source, object, cache, cfg)
+    // Serialize only each key's first materialize/compile/store critical
+    // section so one worker prebuilds that invariant object and every sibling
+    // gets a hit; distinct runtime objects (and all program objects and final
+    // links) compile fully in parallel.
+    static RUNTIME_KEY_LOCKS: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+    let Some(cache) = cache else {
+        // No cache means no shared key to race on; compile directly.
+        return compile_object(cc, args, source, object, None, cfg);
+    };
+    let lock = {
+        let mut locks = RUNTIME_KEY_LOCKS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        Arc::clone(locks.entry(cache.key().to_string()).or_default())
+    };
+    let _guard = lock.lock().unwrap_or_else(PoisonError::into_inner);
+    compile_object(cc, args, source, object, Some(cache), cfg)
 }
 
 pub(super) fn run_native(bin: &Path) -> Result<Vec<u8>, Error> {
@@ -132,10 +149,10 @@ fn cc_args(cfg: &Config) -> Vec<String> {
     if !macos_min.is_empty() {
         args.push(format!("-mmacosx-version-min={macos_min}"));
     }
-    if cfg.flags.rt_checks {
+    if cfg.flags().rt_checks {
         args.push("-DPRISM_RT_DEBUG".to_string());
     }
-    if cfg.flags.native_kont_frames {
+    if cfg.flags().native_kont_frames {
         args.extend(NATIVE_KONT_FRAME_FLAGS.iter().map(ToString::to_string));
     }
     args.extend(cc_flags().split_whitespace().map(ToString::to_string));
@@ -416,7 +433,7 @@ pub(super) fn cc_link_many(
     // objects, so they run under the bounded scheduler; results fold back in
     // input order, keeping stats and error selection deterministic.
     let shard_jobs: Vec<(usize, &PathBuf)> = ir.iter().enumerate().collect();
-    let shard_results = QueryScheduler::new(cfg.flags.query_threads).map_ordered(
+    let shard_results = QueryScheduler::new(cfg.flags().query_threads).map_ordered(
         &shard_jobs,
         |(index, input)| -> Result<(PathBuf, ObjectCompileStats), Error> {
             let name = format!("program-{index}");
@@ -426,7 +443,7 @@ pub(super) fn cc_link_many(
             let object_stats = compile_object(cc, &args, input, &object, cache.as_ref(), cfg)?;
             Ok((object, object_stats))
         },
-    );
+    )?;
     let mut program_objects = Vec::with_capacity(ir.len());
     for result in shard_results {
         let (object, object_stats) = result?;
@@ -434,22 +451,34 @@ pub(super) fn cc_link_many(
         program_objects.push(object);
     }
 
+    // Runtime translation units are as independent as program shards; only a
+    // shared cold cache key serializes (inside compile_runtime_object), so the
+    // invariant C runtime builds in parallel on a cold store.
+    let runtime_jobs: Vec<(usize, &PathBuf)> = sources.iter().enumerate().collect();
+    let runtime_results = QueryScheduler::new(cfg.flags().query_threads).map_ordered(
+        &runtime_jobs,
+        |(index, source)| -> Result<(PathBuf, ObjectCompileStats), Error> {
+            let object = rt_dir.join(format!("runtime-{index}.o"));
+            let bytes = fs::read(source)?;
+            let name = source
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("runtime");
+            let cache = NativeArtifactCache::for_runtime_object(
+                name,
+                &bytes,
+                runtime_profile,
+                &runtime_toolchain,
+                cfg,
+            )?;
+            let object_stats =
+                compile_runtime_object(cc, &args, source, &object, cache.as_ref(), cfg)?;
+            Ok((object, object_stats))
+        },
+    )?;
     let mut runtime_objects = Vec::with_capacity(sources.len());
-    for (index, source) in sources.iter().enumerate() {
-        let object = rt_dir.join(format!("runtime-{index}.o"));
-        let bytes = fs::read(source)?;
-        let name = source
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("runtime");
-        let cache = NativeArtifactCache::for_runtime_object(
-            name,
-            &bytes,
-            runtime_profile,
-            &runtime_toolchain,
-            cfg,
-        )?;
-        let object_stats = compile_runtime_object(cc, &args, source, &object, cache.as_ref(), cfg)?;
+    for result in runtime_results {
+        let (object, object_stats) = result?;
         stats.record_object(object_stats, true);
         runtime_objects.push(object);
     }

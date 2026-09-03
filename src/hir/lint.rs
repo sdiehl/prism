@@ -15,7 +15,7 @@ use std::fmt;
 
 use super::{CheckedHir, NodeRes};
 use crate::sym::Sym;
-use crate::types::{Checked, Dict};
+use crate::types::{Checked, Dict, FieldRef};
 
 /// One lint violation: a stored fact that does not check against the
 /// environment. Always a compiler bug, never a user error.
@@ -51,7 +51,7 @@ fn check_dict(checked: &Checked, node: usize, d: &Dict, out: &mut Vec<HirViolati
     match d {
         Dict::Param(_) => {}
         Dict::Global(name, ctx) => {
-            if !checked.instances.contains_key(&Sym::from(name)) {
+            if !checked.dispatch.instances.contains_key(&Sym::from(name)) {
                 push(
                     out,
                     node,
@@ -63,7 +63,7 @@ fn check_dict(checked: &Checked, node: usize, d: &Dict, out: &mut Vec<HirViolati
             }
         }
         Dict::Super(inner, class, idx) => {
-            match checked.classes.get(&Sym::from(class)) {
+            match checked.dispatch.classes.get(&Sym::from(class)) {
                 None => push(
                     out,
                     node,
@@ -101,9 +101,9 @@ fn check_dict(checked: &Checked, node: usize, d: &Dict, out: &mut Vec<HirViolati
 #[must_use]
 pub fn lint_hir(hir: &CheckedHir<'_>) -> Vec<HirViolation> {
     let mut out = Vec::new();
-    let check_step = |step: &(String, usize, usize)| -> Option<String> {
-        let (ctor, idx, arity) = step;
-        let Some(info) = hir.checked.ctors.get(ctor) else {
+    let check_step = |step: &FieldRef| -> Option<String> {
+        let FieldRef { ctor, index, arity } = step;
+        let Some(info) = hir.checked().defs.ctors.get(ctor) else {
             return Some(format!("resolution names unknown constructor `{ctor}`"));
         };
         if info.args.len() != *arity {
@@ -112,9 +112,9 @@ pub fn lint_hir(hir: &CheckedHir<'_>) -> Vec<HirViolation> {
                 info.args.len()
             ));
         }
-        if idx >= arity {
+        if index >= arity {
             return Some(format!(
-                "field index {idx} out of bounds for `{ctor}` (arity {arity})"
+                "field index {index} out of bounds for `{ctor}` (arity {arity})"
             ));
         }
         None
@@ -122,8 +122,8 @@ pub fn lint_hir(hir: &CheckedHir<'_>) -> Vec<HirViolation> {
     for (i, fact) in hir.facts.res.iter().enumerate() {
         match fact {
             None => {}
-            Some(NodeRes::Field(ctor, idx, arity)) => {
-                if let Some(msg) = check_step(&(ctor.clone(), *idx, *arity)) {
+            Some(NodeRes::Field(field)) => {
+                if let Some(msg) = check_step(field) {
                     push(&mut out, i, msg);
                 }
             }
@@ -163,7 +163,7 @@ pub fn lint_hir(hir: &CheckedHir<'_>) -> Vec<HirViolation> {
     for (i, fact) in hir.facts.evidence.iter().enumerate() {
         if let Some(dicts) = fact {
             for d in dicts {
-                check_dict(hir.checked, i, d, &mut out);
+                check_dict(hir.checked(), i, d, &mut out);
             }
         }
     }
@@ -206,7 +206,9 @@ pub fn lint_hir(hir: &CheckedHir<'_>) -> Vec<HirViolation> {
                     }
                     operations
                         .iter()
-                        .find(|operation| !hir.checked.eff_ops.contains_key(operation.as_str()))
+                        .find(|operation| {
+                            !hir.checked().defs.eff_ops.contains_key(operation.as_str())
+                        })
                         .map(|operation| {
                             format!("handler {kind} names unknown operation `{operation}`")
                         })
@@ -229,7 +231,8 @@ pub fn lint_hir(hir: &CheckedHir<'_>) -> Vec<HirViolation> {
                     effects
                         .iter()
                         .find(|effect| {
-                            !hir.checked
+                            !hir.checked()
+                                .defs
                                 .eff_ops
                                 .values()
                                 .any(|info| info.effect_name == **effect)
@@ -248,7 +251,8 @@ pub fn lint_hir(hir: &CheckedHir<'_>) -> Vec<HirViolation> {
                         return false;
                     }
                     let effect = hir
-                        .checked
+                        .checked()
+                        .defs
                         .eff_ops
                         .get(operation.as_str())
                         .map(|info| info.effect_name);

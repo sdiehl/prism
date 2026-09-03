@@ -1,0 +1,4 @@
+-- A borrowed parameter is retained by the caller and dup'd before use, which
+-- is non-linear; rejecting it keeps the standalone claim in agreement with
+-- the `fip` keyword's bundled linearity fact.
+fn keep(borrow s : String) : String @ linear = s

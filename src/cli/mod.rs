@@ -118,7 +118,7 @@ pub(crate) fn tool_package_source(
     embedded: &'static str,
     cfg: &crate::Config,
 ) -> Result<String, Error> {
-    let Some(root) = cfg.flags.tool_packages_root.as_ref() else {
+    let Some(root) = cfg.flags().tool_packages_root.as_ref() else {
         return Ok(embedded.to_owned());
     };
     let mut path = root.join(package).join(TOOL_PACKAGE_SRC_DIR);
@@ -187,10 +187,14 @@ pub fn resolve_input(arg: &Path, cfg: &crate::Config) -> Result<Resolved, CmdErr
         let out = project.root.join("target").join(&project.name);
         let lock =
             read_lock(&project.root).map_err(|e| (e, full.clone(), file_name(&project.entry)))?;
-        let store_root = resolve_store_path(cfg.flags.store_path.as_deref());
-        let package_roots =
-            crate::pkg::package_source_roots(&lock, &project.dependencies, &store_root, &cfg.flags)
-                .map_err(|e| (e, full.clone(), file_name(&project.entry)))?;
+        let store_root = resolve_store_path(cfg.flags().store_path.as_deref());
+        let package_roots = crate::pkg::package_source_roots(
+            &lock,
+            &project.dependencies,
+            &store_root,
+            cfg.flags(),
+        )
+        .map_err(|e| (e, full.clone(), file_name(&project.entry)))?;
         let std_root = crate::pkg::stdlib_source_root(&lock, &store_root)
             .map_err(|e| (e, full.clone(), file_name(&project.entry)))?;
         let roots = crate::project_roots_with_packages_and_std(
@@ -285,7 +289,7 @@ pub fn watch_build_input(
     watch_loop(arg, cfg, WATCH_REBUILD, || {
         report_watch_build(
             watch_build_once(arg, out, mlir, cfg),
-            cfg.flags.verbose,
+            cfg.flags().verbose,
             &mut history,
         );
     })
@@ -325,8 +329,8 @@ fn watch_build_once(
     // many compiles in one process, so each rebuild needs a fresh sink while the
     // compiler session itself remains shared and resident.
     let mut rebuild_cfg = cfg.clone();
-    if cfg.timing.is_some() {
-        rebuild_cfg.timing = Some(crate::TimingSink::new());
+    if cfg.timing().is_some() {
+        rebuild_cfg.set_timing(Some(crate::TimingSink::new()));
     }
     let started = Instant::now();
     let result = built_input_observed(arg, out.map(Path::to_path_buf), mlir, &rebuild_cfg, true);
@@ -652,14 +656,14 @@ fn built_input_observed(
     let module_time = module_started.elapsed();
     // Building this graph requires another parse/load walk, so it is strictly
     // verbose-watch instrumentation rather than overhead on ordinary builds.
-    let graph = (observe_watch && project && cfg.flags.verbose)
+    let graph = (observe_watch && project && cfg.flags().verbose)
         .then(|| crate::module_graph(&full, &roots).ok())
         .flatten();
     let pipeline_started = Instant::now();
     let report = build_dispatch(mlir, &full, &roots, &out, cfg)
         .map_err(|e| (e, full.clone(), name.clone()))?;
     let pipeline_time = pipeline_started.elapsed();
-    if cfg.flags.explain_cache {
+    if cfg.flags().explain_cache {
         eprintln!(
             "compiler cache: linked={} bitcode={} reason={}",
             report.cache.label(),
@@ -819,7 +823,7 @@ pub fn check_cmd(file: Option<&Path>, cfg: &crate::Config) -> CmdResult {
     // available to `dump` / `report` / snapshots via `check_on_in`.
     let checked =
         crate::check_validated_on_in(&full, &roots, cfg).map_err(|e| (e, full.clone(), name))?;
-    if checked.warnings.is_empty() {
+    if checked.reports.warnings.is_empty() {
         if let Some(cache) = &verdict_cache {
             // Best-effort: a failed record leaves the check's verdict untouched.
             let _ = cache.record();
@@ -894,11 +898,11 @@ pub fn verify_cmd(
     let opts = VerifyOptions {
         solvers: solver_list,
         require_agreement,
-        timeout: cfg.flags.solver_timeout_ms.map(Duration::from_millis),
+        timeout: cfg.flags().solver_timeout_ms.map(Duration::from_millis),
     };
     // Evidence rides the same content-addressed store the compiler uses; it is a
     // cache, so a store that cannot be opened just means no recorded evidence.
-    let store_root = resolve_store_path(cfg.flags.store_path.as_deref());
+    let store_root = resolve_store_path(cfg.flags().store_path.as_deref());
     let store = Store::open_or_create(&store_root).ok();
     let report = run_with(&program, &opts, store.as_ref())
         .map_err(|e| (Error::from(e), full.clone(), name.clone()))?;

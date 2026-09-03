@@ -12,15 +12,18 @@
 
 use crate::core::opt::PassStage;
 use crate::core::{
-    elaborate_typed, newtype_ctors, Core, ElaboratedCore, TypedCore, TypedElaborated, VerifyEnv,
+    elaborate_typed, newtype_ctors, reachable_fns, Core, ElaboratedCore, Hashes, TypedCore,
+    TypedElaborated, VerifyEnv,
 };
 use crate::error::Error;
 use crate::flags::WarnDupes;
+use crate::names::ENTRY_POINT;
 use crate::resolve::{
     lint_prelude_captures, prelude_capture, resolve_loaded_modules, resolve_modules_in, Module,
     Root,
 };
-use crate::syntax::ast::{Core as CorePhase, Program};
+use crate::sym::Sym;
+use crate::syntax::ast::{self, Core as CorePhase, Program};
 use crate::syntax::desugar::{desugar, retarget_cooperative};
 use crate::syntax::reflect::parse_unit;
 use crate::tc::{check_tooltips, Warning, WarningOrigin};
@@ -28,15 +31,17 @@ use crate::types::{check as typecheck, check_allow_holes, Checked};
 use crate::verify::check_program;
 
 use super::downstream::run_typed_opt_queries;
+use super::identity::stdlib_layers;
 use super::input::{
     field, load_front_inputs, semantic_inputs_digest, semantic_loaded_inputs_digest,
     source_inputs_digest,
 };
+use super::prune::entry_closure;
 use super::timing::{self, ArtifactKind, CountKey, Phase, RowExtras};
 use super::verify::{fip_check, reconcile_effects, replayable_check};
 use super::{
-    core_root_digest, dupes, emit_warning, emit_warnings, lint_surface, stdlib_hash,
-    validated_elaborated_core, BuildMode, Config,
+    core_root_digest, dupes, emit_warning, emit_warnings, lint_surface, validated_elaborated_core,
+    BuildMode, Config,
 };
 
 const RAW_FRONT_QUERY_SCHEMA: &[u8] = b"prism-session-front-v1";
@@ -63,6 +68,12 @@ pub(super) enum FrontRequest {
     /// Type-check only, retaining typed holes as reports instead of raising
     /// them: the hole query surface (`check --at-hole`).
     CheckHoles,
+    /// The documentation harness's verdict: hole-tolerant like `CheckHoles`,
+    /// but elaborated and semantically validated like `CheckValidated`, and
+    /// quiet, so a doc example is judged the way `prism check` judges a
+    /// program (fip / noalloc / replayable claims included) without warning
+    /// spew per block.
+    CheckHolesValidated,
     /// The public validity verdict (`prism check`): elaborate and run every
     /// semantic validator, but stop before retarget/opt/lowering/codegen.
     CheckValidated,
@@ -97,6 +108,7 @@ impl FrontRequest {
         match self {
             Self::Check => FrontOpts::CHECK,
             Self::CheckHoles => FrontOpts::CHECK_HOLES,
+            Self::CheckHolesValidated => FrontOpts::CHECK_HOLES_VALIDATED,
             Self::CheckValidated => FrontOpts::CHECK_VALIDATED,
             Self::Full => FrontOpts::FULL,
             Self::FullDeferredHoles => FrontOpts::FULL_DEFERRED_HOLES,
@@ -142,6 +154,11 @@ struct FrontOpts {
     // Collect exact per-node type/effect strings for the read-only typespans
     // dump. Off everywhere else so presentation metadata cannot affect builds.
     typed_tooltips: bool,
+    // Elaborate only the entry point's closure: after the whole program is
+    // checked, drop the imported and prelude definitions `main` cannot reach.
+    // On for the executable presets only; every identity, check, and report
+    // surface keeps the whole namespace it is asked about.
+    entry_closure: bool,
 }
 
 impl FrontOpts {
@@ -154,6 +171,7 @@ impl FrontOpts {
         pre_opt: false,
         allow_holes: false,
         typed_tooltips: false,
+        entry_closure: false,
     };
     // The hole query surface: the `CHECK` policy with typed holes retained as
     // reports rather than raised. An ordinary type error still fails exactly as
@@ -167,6 +185,22 @@ impl FrontOpts {
         pre_opt: false,
         allow_holes: true,
         typed_tooltips: false,
+        entry_closure: false,
+    };
+    // The documentation harness: the `CHECK_HOLES` tolerance with the
+    // `CHECK_VALIDATED` depth, minus its diagnostics. Elaboration runs so the
+    // semantic validators can judge each example the way `prism check` would;
+    // lints and warning emission stay off because doc blocks are library-like
+    // source and the harness reports through its own channel.
+    const CHECK_HOLES_VALIDATED: Self = Self {
+        stop: FrontStop::Elaborated,
+        diagnostics: false,
+        scheduler_retarget: false,
+        validate: true,
+        pre_opt: false,
+        allow_holes: true,
+        typed_tooltips: false,
+        entry_closure: false,
     };
     // The full compile path: scheduler retarget, validators, and the pre-lowering
     // optimizer, feeding lowering and codegen.
@@ -178,6 +212,7 @@ impl FrontOpts {
         pre_opt: true,
         allow_holes: false,
         typed_tooltips: false,
+        entry_closure: true,
     };
     // The full interpreter path with typed holes elaborated to deterministic
     // faults. Kept distinct from `FULL` so native and wasm cannot inherit it.
@@ -189,6 +224,7 @@ impl FrontOpts {
         pre_opt: true,
         allow_holes: true,
         typed_tooltips: false,
+        entry_closure: true,
     };
     // The public validity verdict (`prism check`): elaborate and run every
     // semantic validator (fip / replayable / effect reconciliation), but stop
@@ -205,6 +241,7 @@ impl FrontOpts {
         pre_opt: false,
         allow_holes: false,
         typed_tooltips: false,
+        entry_closure: false,
     };
     // The content-addressed identity surface, additionally validated: the store
     // and package paths commit only programs that pass every semantic validator,
@@ -219,6 +256,7 @@ impl FrontOpts {
         pre_opt: false,
         allow_holes: false,
         typed_tooltips: false,
+        entry_closure: false,
     };
     // The content-addressed identity surface: pre-optimizer Core with no scheduler
     // retarget, no validators, and no diagnostics, so a hash depends on the source
@@ -231,6 +269,7 @@ impl FrontOpts {
         pre_opt: false,
         allow_holes: false,
         typed_tooltips: false,
+        entry_closure: false,
     };
     // The identity surface with the per-node type strings the code index carries.
     // Identical to `IDENTITY` but for the side tables: presentation metadata still
@@ -243,6 +282,7 @@ impl FrontOpts {
         pre_opt: false,
         allow_holes: false,
         typed_tooltips: true,
+        entry_closure: false,
     };
     // Typecheck-only analysis for `dump typespans` and static documentation
     // tooltips. It shares every ordinary check policy except the extra facts.
@@ -254,6 +294,7 @@ impl FrontOpts {
         pre_opt: false,
         allow_holes: false,
         typed_tooltips: true,
+        entry_closure: false,
     };
     // The rendered-pipeline inspection surface (`report`): quiet type-check stop,
     // no scheduler retarget and no optimizer, so the report shows the plain
@@ -270,26 +311,36 @@ impl FrontOpts {
         pre_opt: false,
         allow_holes: false,
         typed_tooltips: false,
+        entry_closure: false,
     };
 }
 
-// The staged frontend results, held as one value so every entry point reads the
-// stage it needs from a common runner rather than re-deriving a prefix of the
-// pipeline with its own subtly different stops and policies.
+// The staged frontend result. The variant is the stage: there is no checked-only
+// value carrying empty Core slots and no elaborated value missing one of its
+// witnesses.
 #[derive(Clone, Debug)]
-pub(super) struct Front {
+pub(super) enum Front {
+    Checked(CheckedFront),
+    Elaborated(ElaboratedFront),
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct CheckedFront {
     program: Program<CorePhase>,
     checked: Checked,
-    // The verified typed artifact after the complete configured pre-lowering
-    // pass sequence. Raw Core remains a compatibility and presentation shadow.
-    typed_pre: Option<TypedFront>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct ElaboratedFront {
+    checked: CheckedFront,
     // The Core selected for this consumer (pre-optimizer for identity/check,
-    // optimized for the full compile path).
-    core: Option<ElaboratedCore>,
+    // optimized for the full compile path), paired with its typed authority.
+    typed_pre: TypedFront,
+    core: ElaboratedCore,
     // The pre-optimizer identity Core, retained on the full path so hashing and
     // native metadata never re-run the frontend merely to recover it.
     #[cfg(feature = "native")]
-    identity_core: Option<ElaboratedCore>,
+    identity_core: ElaboratedCore,
 }
 
 #[derive(Clone, Debug)]
@@ -299,13 +350,34 @@ struct TypedFront {
 }
 
 impl Front {
+    const fn checked_front(&self) -> &CheckedFront {
+        match self {
+            Self::Checked(front) => front,
+            Self::Elaborated(front) => &front.checked,
+        }
+    }
+
+    const fn checked_front_mut(&mut self) -> &mut CheckedFront {
+        match self {
+            Self::Checked(front) => front,
+            Self::Elaborated(front) => &mut front.checked,
+        }
+    }
+
     // The checked program, for a `FrontStop::Checked` consumer.
     pub(super) fn into_checked(self) -> Checked {
-        self.checked
+        match self {
+            Self::Checked(front) => front.checked,
+            Self::Elaborated(front) => front.checked.checked,
+        }
     }
 
     pub(super) fn into_program_checked(self) -> (Program<CorePhase>, Checked) {
-        (self.program, self.checked)
+        let checked = match self {
+            Self::Checked(front) => front,
+            Self::Elaborated(front) => front.checked,
+        };
+        (checked.program, checked.checked)
     }
 
     // The verified artifact after the complete pre-lowering optimizer. The raw
@@ -319,18 +391,15 @@ impl Front {
         TypedCore<TypedElaborated>,
         VerifyEnv,
     ) {
-        let core = self
-            .core
-            .expect("Front::into_typed_pre on a type-only front");
-        let typed = self
-            .typed_pre
-            .expect("Front::into_typed_pre on a type-only front");
+        let Self::Elaborated(front) = self else {
+            panic!("Front::into_typed_pre requires an elaborated request");
+        };
         (
-            self.program,
-            self.checked,
-            core,
-            typed.core,
-            typed.verify_env,
+            front.checked.program,
+            front.checked.checked,
+            front.core,
+            front.typed_pre.core,
+            front.typed_pre.verify_env,
         )
     }
 
@@ -353,22 +422,16 @@ impl Front {
         TypedCore<TypedElaborated>,
         VerifyEnv,
     ) {
-        let identity = self
-            .identity_core
-            .expect("Front::into_compilation without identity Core");
-        let core = self
-            .core
-            .expect("Front::into_compilation on a type-only front");
-        let typed = self
-            .typed_pre
-            .expect("Front::into_compilation on a type-only front");
+        let Self::Elaborated(front) = self else {
+            panic!("Front::into_compilation requires an elaborated request");
+        };
         (
-            self.program,
-            self.checked,
-            identity,
-            core,
-            typed.core,
-            typed.verify_env,
+            front.checked.program,
+            front.checked.checked,
+            front.identity_core,
+            front.core,
+            front.typed_pre.core,
+            front.typed_pre.verify_env,
         )
     }
 }
@@ -388,11 +451,11 @@ pub(super) fn run_front(
     request: FrontRequest,
 ) -> Result<Front, Error> {
     let opts = request.policy();
-    let Some(session) = &cfg.session else {
+    let Some(session) = cfg.session() else {
         return run_front_uncached(src, roots, cfg, opts);
     };
-    let loaded = if cfg.timing.is_none() {
-        Some(load_front_inputs(src, roots, cfg.flags.query_threads)?)
+    let loaded = if cfg.timing().is_none() {
+        Some(load_front_inputs(src, roots, cfg.flags().query_threads)?)
     } else {
         None
     };
@@ -403,14 +466,14 @@ pub(super) fn run_front(
     };
     if let Some(front) = session.lookup(&raw_key) {
         session.record_hit();
-        if opts.diagnostics && !cfg.flags.quiet {
-            emit_warnings(src, &front.checked);
+        if opts.diagnostics && !cfg.flags().quiet {
+            emit_warnings(src, &front.checked_front().checked);
         }
         return Ok(front);
     }
     let (semantic_key, prepared) = if let Some(inputs) = loaded {
         let semantic =
-            semantic_loaded_inputs_digest(src, &inputs.modules, roots, cfg.flags.query_threads)?;
+            semantic_loaded_inputs_digest(src, &inputs.modules, roots, cfg.flags().query_threads)?;
         let key = front_key_for(SEMANTIC_FRONT_QUERY_SCHEMA, &semantic, cfg, opts);
         let prepared = prepare_loaded_front(src, cfg, opts, inputs.root, inputs.modules)?;
         (key, prepared)
@@ -422,10 +485,11 @@ pub(super) fn run_front(
     };
     if let Some(mut front) = session.lookup(&semantic_key) {
         session.record_hit();
-        front.program = prepared.program;
-        refresh_warnings(&front.program, &mut front.checked, prepared.lints);
-        if opts.diagnostics && !cfg.flags.quiet {
-            emit_warnings(src, &front.checked);
+        let checked = front.checked_front_mut();
+        checked.program = prepared.program;
+        refresh_warnings(&checked.program, &mut checked.checked, prepared.lints);
+        if opts.diagnostics && !cfg.flags().quiet {
+            emit_warnings(src, &front.checked_front().checked);
         }
         session.insert_aliases([raw_key], &front);
         return Ok(front);
@@ -437,7 +501,7 @@ pub(super) fn run_front(
 }
 
 fn front_key(src: &str, roots: &[Root], cfg: &Config, opts: FrontOpts) -> Result<String, Error> {
-    let input = source_inputs_digest(src, roots, cfg.flags.query_threads)?;
+    let input = source_inputs_digest(src, roots, cfg.flags().query_threads)?;
     Ok(front_key_for(RAW_FRONT_QUERY_SCHEMA, &input, cfg, opts))
 }
 
@@ -447,7 +511,7 @@ fn semantic_front_key(
     cfg: &Config,
     opts: FrontOpts,
 ) -> Result<String, Error> {
-    let input = semantic_inputs_digest(src, roots, cfg.flags.query_threads)?;
+    let input = semantic_inputs_digest(src, roots, cfg.flags().query_threads)?;
     Ok(front_key_for(
         SEMANTIC_FRONT_QUERY_SCHEMA,
         &input,
@@ -476,21 +540,22 @@ fn front_key_for(schema: &[u8], input: &str, cfg: &Config, opts: FrontOpts) -> S
             u8::from(opts.pre_opt),
             u8::from(opts.allow_holes),
             u8::from(opts.typed_tooltips),
+            u8::from(opts.entry_closure),
             // Redundant-definition detection is diagnostics-only and never touches
             // a content hash, so it is absent from the artifact fingerprint; it must
             // still split the cache, or a warn/strict run could be served a front
             // computed (and stored warning-free) under a different mode. All three
             // knobs (own clones, stdlib reimplementations, prelude captures) split
             // it.
-            cfg.flags.warn_dupes as u8,
-            cfg.flags.warn_stdlib_dupes as u8,
-            cfg.flags.warn_prelude_capture as u8,
+            cfg.flags().warn_dupes as u8,
+            cfg.flags().warn_stdlib_dupes as u8,
+            cfg.flags().warn_prelude_capture as u8,
             // The build mode changes which declarations the front retains
             // (production strips `test fn`; test keeps them) without entering the
             // artifact fingerprint, so it must split the session cache: a shared
             // session must never serve a test-mode consumer a production front
             // (tests stripped) of the same source, or the reverse.
-            u8::from(cfg.mode == BuildMode::Test),
+            u8::from(cfg.mode() == BuildMode::Test),
         ],
     );
     h.finalize().to_hex().to_string()
@@ -540,13 +605,15 @@ fn prepare_front(
     cfg: &Config,
     opts: FrontOpts,
 ) -> Result<PreparedFront, Error> {
-    let timer = cfg.timing.as_ref();
+    let timer = cfg.timing();
     let program = timing::timed_res(
         timer,
         Phase::Parse,
         src,
         || parse_unit(src),
-        |_| RowExtras::default(),
+        |program: &Program| {
+            RowExtras::default().count(CountKey::AstDepth, ast::program_depth(program))
+        },
     )?;
     let program = timing::timed_res(
         timer,
@@ -565,7 +632,7 @@ fn prepare_loaded_front(
     root: Program,
     modules: Vec<Module>,
 ) -> Result<PreparedFront, Error> {
-    debug_assert!(cfg.timing.is_none());
+    debug_assert!(cfg.timing().is_none());
     let program = resolve_loaded_modules(root, modules)?;
     prepare_resolved_front(src, cfg, opts, program)
 }
@@ -576,7 +643,7 @@ fn prepare_resolved_front(
     opts: FrontOpts,
     mut program: Program,
 ) -> Result<PreparedFront, Error> {
-    let timer = cfg.timing.as_ref();
+    let timer = cfg.timing();
     // Production neutrality: `test fn` declarations are removed here, before any
     // linting, desugar, typecheck, elaboration, hashing, or backend reachability,
     // so a production compile is byte-identical whether or not tests are present.
@@ -585,7 +652,7 @@ fn prepare_resolved_front(
     // production identity path (`elaborated`, `namespace_root`, the `core-hash`
     // dump, the store commit) flows through; it shares the strip with the project
     // module check via `strip_tests_for_mode`.
-    super::modules::strip_tests_for_mode(cfg.mode, &mut program);
+    super::modules::strip_tests_for_mode(cfg.mode(), &mut program);
     let mut lints = if opts.diagnostics {
         lint_surface(src, &program)
     } else {
@@ -604,7 +671,9 @@ fn prepare_resolved_front(
         Phase::Desugar,
         src,
         || desugar(program),
-        |_| RowExtras::default(),
+        |program: &Program<CorePhase>| {
+            RowExtras::default().count(CountKey::AstDepth, ast::program_depth(program))
+        },
     )?;
     if opts.scheduler_retarget {
         if let Some(target) = cfg.scheduler().retarget() {
@@ -625,7 +694,7 @@ fn apply_prelude_captures(
     program: &Program,
     lints: &mut Vec<Warning>,
 ) -> Result<(), Error> {
-    match cfg.flags.warn_prelude_capture {
+    match cfg.flags().warn_prelude_capture {
         WarnDupes::Off => {}
         WarnDupes::Warn => lints.extend(lint_prelude_captures(program)),
         WarnDupes::Strict => {
@@ -647,7 +716,7 @@ fn finish_front(
     opts: FrontOpts,
     prepared: PreparedFront,
 ) -> Result<Front, Error> {
-    let timer = cfg.timing.as_ref();
+    let timer = cfg.timing();
     let PreparedFront { program, lints } = prepared;
     let mut checked = timing::timed_res(
         timer,
@@ -662,23 +731,16 @@ fn finish_front(
                 typecheck(&program)
             }
         },
-        |c: &Checked| RowExtras::default().count(CountKey::Defs, c.decls.len()),
+        |c: &Checked| RowExtras::default().count(CountKey::Defs, c.defs.decls.len()),
     )?;
     if opts.diagnostics {
-        checked.warnings.extend(lints);
-        if !cfg.flags.quiet {
+        checked.extend_warnings(lints);
+        if !cfg.flags().quiet {
             emit_warnings(src, &checked);
         }
     }
     if opts.stop == FrontStop::Checked {
-        return Ok(Front {
-            program,
-            checked,
-            typed_pre: None,
-            core: None,
-            #[cfg(feature = "native")]
-            identity_core: None,
-        });
+        return Ok(Front::Checked(CheckedFront { program, checked }));
     }
     // The instrumented tooltip checker delimits a fresh effect row around every
     // node, so its zonked schemes can be alpha-variants of the plain judgment's
@@ -688,10 +750,18 @@ fn finish_front(
     // plainly and only the per-node tooltip strings are kept.
     let mut checked = if opts.typed_tooltips {
         let mut canonical = typecheck(&program)?;
-        canonical.facts.adopt_tooltips(checked.facts);
+        canonical.adopt_tooltips_from(checked);
         canonical
     } else {
         checked
+    };
+    // The whole program has been judged above; the executable presets now
+    // narrow to the entry point's closure so elaboration and everything after
+    // it pay only for definitions that can run.
+    let program = if opts.entry_closure {
+        entry_closure(program, &checked)
+    } else {
+        program
     };
     let elaboration = timing::timed_res(
         timer,
@@ -699,15 +769,17 @@ fn finish_front(
         src,
         || elaborate_typed(&program, &checked),
         |elaboration| {
-            RowExtras::default().out(
-                ArtifactKind::Core,
-                core_root_digest(&program, &checked, elaboration.compatibility()),
-            )
+            RowExtras::default()
+                .count(CountKey::Defs, program.fns.len())
+                .out(
+                    ArtifactKind::Core,
+                    core_root_digest(&program, &checked, elaboration.compatibility()),
+                )
         },
     )?;
     let (core, typed, verify_env) = elaboration.into_parts();
     if opts.validate {
-        fip_check(&program, &checked, &core)?;
+        fip_check(&program, &checked, &core, &typed)?;
         replayable_check(&program, &checked)?;
         reconcile_effects(&checked, &core)?;
     }
@@ -718,7 +790,7 @@ fn finish_front(
     // stdlib-reimplementation half is on by default; the own-clone half is opt-in.
     if opts.diagnostics
         && opts.validate
-        && (cfg.flags.warn_dupes.enabled() || cfg.flags.warn_stdlib_dupes.enabled())
+        && (cfg.flags().warn_dupes.enabled() || cfg.flags().warn_stdlib_dupes.enabled())
     {
         apply_dupes(src, cfg, &program, &mut checked, &core)?;
     }
@@ -731,6 +803,7 @@ fn finish_front(
     // unless an explicit `--passes` spec overrides it with its pre-stage list.
     #[cfg(feature = "native")]
     let identity_core = core.clone();
+    let core = core.into_core();
     let (core, typed) = if opts.pre_opt {
         timing::timed_res(
             timer,
@@ -738,6 +811,19 @@ fn finish_front(
             src,
             || -> Result<(Core, TypedCore<TypedElaborated>), Error> {
                 let nt = newtype_ctors(&program);
+                // Optimize only the semantic closure of the entry point.
+                // Lowering and emission already restrict themselves to
+                // `reachable_fns`, so a definition outside it can never be
+                // observed and optimizing it is pure waste; the set is
+                // over-approximate (call heads plus free variables) and taken
+                // on unoptimized Core, so anything downstream can reach was
+                // optimized. A program with no entry point (a bare library
+                // dump) defines no root and keeps every definition.
+                let typed = if core.fns.iter().any(|f| f.name == Sym::new(ENTRY_POINT)) {
+                    typed.retain_reachable(&reachable_fns(&core))
+                } else {
+                    typed
+                };
                 let typed =
                     run_typed_opt_queries(typed, &verify_env, &nt, PassStage::PreLowering, cfg)?;
                 Ok((typed.clone().erase(), typed))
@@ -747,17 +833,16 @@ fn finish_front(
     } else {
         (core, typed)
     };
-    Ok(Front {
-        program,
-        checked,
-        typed_pre: Some(TypedFront {
+    Ok(Front::Elaborated(ElaboratedFront {
+        checked: CheckedFront { program, checked },
+        typed_pre: TypedFront {
             core: typed,
             verify_env,
-        }),
-        core: Some(validated_elaborated_core(core)?),
+        },
+        core: validated_elaborated_core(core)?,
         #[cfg(feature = "native")]
-        identity_core: Some(validated_elaborated_core(identity_core)?),
-    })
+        identity_core,
+    }))
 }
 
 // Run duplicate detection and surface each finding per the knob that governs it:
@@ -765,8 +850,9 @@ fn finish_front(
 // `warn_stdlib_dupes`. A finding under a `Strict` knob aborts the compile with its
 // declaration-family E-code (the earliest such wins, findings being source-sorted);
 // a finding under `Warn` is recorded on `checked` (so a non-quiet semantic cache
-// hit re-emits it) and emitted immediately unless quiet. The stdlib fingerprint is
-// memoized, so this pays a fold only on the first call in a process.
+// hit re-emits it) and emitted immediately unless quiet. The stdlib definition
+// table is memoized in the process and in the store, so a cold process pays one
+// fold per compiler binary rather than one per compile.
 fn apply_dupes(
     src: &str,
     cfg: &Config,
@@ -774,26 +860,32 @@ fn apply_dupes(
     checked: &mut Checked,
     core: &Core,
 ) -> Result<(), Error> {
-    let stdlib = stdlib_hash()?;
     let want = dupes::Want {
-        clone: cfg.flags.warn_dupes.enabled(),
-        stdlib: cfg.flags.warn_stdlib_dupes.enabled(),
+        clone: cfg.flags().warn_dupes.enabled(),
+        stdlib: cfg.flags().warn_stdlib_dupes.enabled(),
     };
-    let found = dupes::findings(src, program, checked, core, &stdlib.defs, want);
+    // Only the stdlib comparison reads the fingerprint; the clone check alone
+    // never pays for it.
+    let stdlib_defs = if want.stdlib {
+        stdlib_layers(cfg)?.defs
+    } else {
+        Hashes::default()
+    };
+    let found = dupes::findings(src, program, checked, core, &stdlib_defs, want);
     for finding in found {
         let mode = if finding.is_stdlib() {
-            cfg.flags.warn_stdlib_dupes
+            cfg.flags().warn_stdlib_dupes
         } else {
-            cfg.flags.warn_dupes
+            cfg.flags().warn_dupes
         };
         if mode == WarnDupes::Strict {
             return Err(finding.into_error());
         }
         let warning = finding.warning();
-        if !cfg.flags.quiet {
+        if !cfg.flags().quiet {
             emit_warning(src, &warning);
         }
-        checked.warnings.push(warning);
+        checked.push_warning(warning);
     }
     Ok(())
 }
@@ -803,46 +895,34 @@ fn refresh_warnings(
     checked: &mut Checked,
     surface_lints: Vec<Warning>,
 ) {
-    checked
-        .warnings
-        .retain(|warning| !matches!(warning.origin, WarningOrigin::Surface));
-    for warning in &mut checked.warnings {
-        match warning.origin {
-            WarningOrigin::Decl(name) => {
-                if let Some(decl) = program.fns.iter().find(|decl| decl.name == name.as_str()) {
-                    warning.span = decl.span;
-                }
-            }
-            WarningOrigin::RootInstance(name) => {
-                if let Some(instance) = program
-                    .instances
-                    .iter()
-                    .find(|instance| instance.module.is_empty() && instance.name == name.as_str())
-                {
-                    warning.span = instance.span;
-                }
-            }
-            WarningOrigin::Imported | WarningOrigin::Surface => {}
-        }
-    }
-    checked.warnings.extend(surface_lints);
+    checked.refresh_surface_warnings(surface_lints, |origin| match origin {
+        WarningOrigin::Decl(name) => program
+            .fns
+            .iter()
+            .find(|decl| decl.name == name.as_str())
+            .map(|decl| decl.span),
+        WarningOrigin::RootInstance(name) => program
+            .instances
+            .iter()
+            .find(|instance| instance.module.is_empty() && instance.name == name.as_str())
+            .map(|instance| instance.span),
+        WarningOrigin::Imported | WarningOrigin::Surface => None,
+    });
 }
 
 #[cfg(test)]
 mod typed_pass_route_tests {
     use super::*;
     use crate::core::OptLevel;
-    use crate::lineage::{FactOutcome, QueryKind};
+    use crate::lineage::QueryKind;
     use crate::CompilerSession;
 
     #[test]
     fn front_retains_the_verified_full_typed_pre_result_across_session_clones() {
         let session = CompilerSession::new();
-        let cfg = Config {
-            session: Some(session.clone()),
-            ..Config::default()
-        }
-        .with_opt(OptLevel::O2);
+        let cfg = Config::default()
+            .with_session(session.clone())
+            .with_opt(OptLevel::O2);
         let source = concat!(
             "newtype Wrap = Wrap(Int)\n",
             "fn unwrap(w : Wrap) : Int = match w of { Wrap(n) => n }\n",
@@ -869,19 +949,19 @@ mod typed_pass_route_tests {
     }
 
     #[test]
-    fn typed_pre_route_preserves_erase_query_observations_without_inventing_specialize_queries() {
+    fn typed_pass_route_publishes_no_optimizer_queries() {
         let store =
             std::env::temp_dir().join(format!("prism-typed-newtype-query-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&store);
 
         let session = CompilerSession::new();
-        let mut cfg = Config {
-            session: Some(session.clone()),
-            ..Config::default()
-        }
-        .with_opt(OptLevel::O1);
-        cfg.flags.compiler_cache = true;
-        cfg.flags.store_path = Some(store.clone());
+        let mut cfg = Config::default()
+            .with_session(session.clone())
+            .with_opt(OptLevel::O1);
+        cfg.update_flags(|flags| {
+            flags.compiler_cache = true;
+            flags.store_path = Some(store.clone());
+        });
         let source = concat!(
             "newtype Wrap = Wrap(Int)\n",
             "fn unwrap(w : Wrap) : Int = match w of { Wrap(n) => n }\n",
@@ -890,30 +970,12 @@ mod typed_pass_route_tests {
         );
 
         run_front(source, &[], &cfg, FrontRequest::Full).expect("cold typed frontend");
-        let cold = session.decisions();
-        assert!(cold.iter().any(|decision| {
-            decision.kind == QueryKind::Optimizer
-                && decision.identity.contains(":EraseNewtypes:")
-                && decision.outcome == FactOutcome::Write
-        }));
         assert!(
-            cold.iter()
-                .all(|decision| !decision.identity.contains(":Specialize:")),
-            "whole-program Specialize never had an optimizer-query boundary"
-        );
-
-        session.clear();
-        run_front(source, &[], &cfg, FrontRequest::Full).expect("warm typed frontend");
-        let warm = session.decisions();
-        assert!(warm.iter().any(|decision| {
-            decision.kind == QueryKind::Optimizer
-                && decision.identity.contains(":EraseNewtypes:")
-                && decision.outcome == FactOutcome::Hit
-        }));
-        assert!(
-            warm.iter()
-                .all(|decision| !decision.identity.contains(":Specialize:")),
-            "whole-program Specialize must not invent a cache/session query"
+            session
+                .decisions()
+                .iter()
+                .all(|decision| decision.kind != QueryKind::Optimizer),
+            "the mid-end runs in-process and records no optimizer query decisions"
         );
 
         let _ = std::fs::remove_dir_all(store);

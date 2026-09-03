@@ -31,5 +31,7 @@ mod pendulum_scrubber;
 mod showcase;
 #[path = "runtime/stable_block.rs"]
 mod stable_block;
+#[path = "runtime/teleport_tcp.rs"]
+mod teleport_tcp;
 #[path = "runtime/time_json.rs"]
 mod time_json;

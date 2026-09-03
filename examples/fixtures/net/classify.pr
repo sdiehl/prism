@@ -1,0 +1,129 @@
+-- Every classified refusal the socket boundary can answer, driven through the
+-- effect's numeric operations rather than through the brackets above them.
+--
+-- That seam is public on purpose: the operations speak in handle numbers so a
+-- foreign handler can serve them, which also means a program can name a handle
+-- the typed vocabulary would never hand it. The answers below are the contract
+-- for doing so, and they are the same in both tiers because the classification,
+-- not the host's errno, is what crosses the boundary.
+--
+-- Handle numbers are a property of the program: the counter starts at 1 and the
+-- nth socket a run opens is handle n whatever descriptor the OS chose, so the
+-- listener, the client, and the accepted socket below are 1, 2, and 3.
+
+import Data.Bytes (string_to_bytes)
+import Net (Bytes, Listener, Net, NetError, Stream, listener_address, net_accept, net_close, net_peer_addr, net_recv, net_send, run_net, with_tcp_accept, with_tcp_connection, with_tcp_listener)
+import Wire (wire_len)
+
+-- Larger than any address space a host offers, so the allocation behind the read
+-- fails rather than the read. `Limit` is the answer in both tiers: a failed
+-- `malloc` natively, a failed reservation interpreting.
+let unmeetable : Int = 1125899906842624
+
+let listener_handle : Int = 1
+
+let client_handle : Int = 2
+
+let accepted_handle : Int = 3
+
+fn payload() : Bytes = string_to_bytes("four")
+
+fn word(r : Result(a, NetError)) : String =
+  match r of
+    Err(x) => show(x)
+    Ok(_v) => "ok"
+
+fn progress(r : Result(Int, NetError)) : String =
+  match r of
+    Err(x) => show(x)
+    Ok(n) => show(n)
+
+fn say(name : String, answer : String) : Unit ! {IO} =
+  println(concat(name, concat(" ", answer)))
+
+-- A live handle of the kind the operation cannot act on is `Closed`, not a
+-- syscall on the wrong descriptor: both tiers carry the listener/stream
+-- distinction in the table and refuse before reaching the host.
+fn wrong_kind() : Unit ! {Net, IO | e} =
+  let _a = say("recv-on-listener", word(net_recv(listener_handle, 16)))
+  let _b = say("accept-on-stream", word(net_accept(accepted_handle)))
+  say("peer-of-listener", word(net_peer_addr(listener_handle)))
+
+-- A read that was never allowed to return bytes would be indistinguishable from
+-- the peer's orderly close, so a non-positive size is refused instead.
+fn read_sizes() : Unit ! {Net, IO | e} =
+  let _a = say("recv-zero", word(net_recv(accepted_handle, 0)))
+  let _b = say("recv-negative", word(net_recv(accepted_handle, -1)))
+  say("recv-unmeetable", word(net_recv(accepted_handle, unmeetable)))
+
+-- An offset at the end of the bytes offered has nothing left to write and says
+-- so with a count of zero; one past the end is an argument the boundary cannot
+-- use, and is refused rather than clamped.
+fn write_offsets() : Unit ! {Net, IO | e} =
+  let bs = payload()
+  let _a =
+    say("send-at-end", progress(net_send(client_handle, bs, wire_len(bs))))
+  let _b = say(
+      "send-past-end",
+      progress(net_send(client_handle, bs, wire_len(bs) + 1)),
+    )
+  say("send-negative", progress(net_send(client_handle, bs, -1)))
+
+fn probes(_s : Stream) : Unit ! {Net, IO | e} =
+  let _a = wrong_kind()
+  let _b = read_sizes()
+  write_offsets()
+
+fn connected(l : Listener, _c : Stream) : Unit ! {Net, IO | e} =
+  let _accepted = with_tcp_accept(l, probes)
+  ()
+
+fn live(l : Listener) : Unit ! {Net, IO | e} =
+  match listener_address(l) of
+    Err(x) => say("listener", show(x))
+    Ok(bound) =>
+      let _done = with_tcp_connection(bound, \(c) -> connected(l, c))
+      ()
+
+-- Closing retires a handle for good and the counter never reissues it, so a
+-- handle that outlived its bracket reaches nothing.
+fn stale() : Unit ! {Net, IO | e} =
+  let _a = say("stale-listener", word(net_close(listener_handle)))
+  let _b = say("stale-stream", word(net_recv(accepted_handle, 16)))
+  say("never-issued", word(net_close(0)))
+
+-- The address a listener was given back, connected to after that listener has
+-- closed: nothing is bound there any more, and the connect is refused.
+fn vacant_address() : String ! {Net | e} =
+  match with_tcp_listener("127.0.0.1:0", 1, listener_address) of
+    Err(_x) => ""
+    Ok(inner) =>
+      match inner of
+        Err(_x) => ""
+        Ok(bound) => bound
+
+fn refused() : Unit ! {Net, IO | e} =
+  let bound = vacant_address()
+  if bound == "" then
+    say("refused", "no-address")
+  else
+    say("refused", word(with_tcp_connection(bound, \(_s) -> ())))
+
+-- Addresses the brackets reject before any socket is opened. The host half is
+-- required even for a listener, and the port must fit the 16-bit field.
+fn addresses() : Unit ! {Net, IO | e} =
+  let _a = say("no-port", word(with_tcp_connection("127.0.0.1", \(_s) -> ())))
+  let _b = say(
+      "port-too-large",
+      word(with_tcp_connection("127.0.0.1:70000", \(_s) -> ())),
+    )
+  let _c = say("no-host", word(with_tcp_connection(":8080", \(_s) -> ())))
+  say("unbracketed-v6", word(with_tcp_connection("::1:8080", \(_s) -> ())))
+
+fn go() : Unit ! {Net, IO | e} =
+  let _live = with_tcp_listener("127.0.0.1:0", 4, live)
+  let _stale = stale()
+  let _refused = refused()
+  addresses()
+
+fn main() : Unit ! {IO} = run_net(go)

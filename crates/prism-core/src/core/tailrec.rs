@@ -11,10 +11,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::cbpv::{Comp, Core, CoreOp, Value};
-use super::fv;
-use super::traverse::Visit;
 use prism_common::sym::Sym;
+
+use crate::core::cbpv::{Comp, Core, CoreOp, Value};
+use crate::core::fv;
+use crate::core::traverse::{Rewrite, RewriteControl, Visit};
 
 // A heap tag / field index as `i64`. Mirrors `emit::idx64`: a count that large
 // needs an >8-exabyte program on an LP64 host, so saturate rather than panic.
@@ -45,12 +46,30 @@ pub enum TrmcShape<'a> {
 }
 
 fn occurs(v: &Value, x: &str) -> usize {
-    match v {
-        Value::Var(y) => usize::from(y.as_str() == x),
-        Value::Ctor(_, _, fs) | Value::Tuple(fs) => fs.iter().map(|f| occurs(f, x)).sum(),
-        Value::Thunk(c) => 2 * usize::from(fv::comp(c).iter().any(|s| s.as_str() == x)),
-        _ => 0,
+    let mut work = vec![v];
+    let mut count = 0;
+    while let Some(value) = work.pop() {
+        match value {
+            Value::Var(y) => count += usize::from(y.as_str() == x),
+            Value::Ctor(_, _, fields) | Value::Tuple(fields) | Value::UnboxedTuple(fields) => {
+                work.extend(fields.iter().rev());
+            }
+            Value::UnboxedRecord(fields) => {
+                work.extend(fields.iter().rev().map(|(_, field)| field));
+            }
+            Value::Thunk(body) => {
+                count += 2 * usize::from(fv::comp(body).iter().any(|name| name.as_str() == x));
+            }
+            Value::Int(_)
+            | Value::I64(_)
+            | Value::U64(_)
+            | Value::Float(_)
+            | Value::Bool(_)
+            | Value::Unit
+            | Value::Str(_) => {}
+        }
     }
+    count
 }
 
 fn ctor_shape<'a>(v: &'a Value, x: &str, token: Option<&'a Sym>) -> Option<TrmcShape<'a>> {
@@ -89,32 +108,37 @@ pub fn trmc_shape<'a>(k: &'a Comp, x: &str) -> Option<TrmcShape<'a>> {
 }
 
 fn scan_trmc(c: &Comp, name: &str, arity: usize, ctor: &mut bool, acc: &mut bool) {
-    match c {
-        Comp::Bind(m, x, n) => {
-            if let Comp::Call(g, args) = m.as_ref() {
-                if g.as_str() == name && args.len() == arity {
-                    match trmc_shape(n, x.as_str()) {
-                        Some(TrmcShape::Ctor { .. }) => return *ctor = true,
-                        Some(TrmcShape::Acc(_)) => return *acc = true,
-                        None => {}
+    let mut work = vec![c];
+    while let Some(comp) = work.pop() {
+        match comp {
+            Comp::Bind(first, binder, rest) => {
+                if let Comp::Call(callee, args) = first.as_ref() {
+                    if callee.as_str() == name && args.len() == arity {
+                        match trmc_shape(rest, binder.as_str()) {
+                            Some(TrmcShape::Ctor { .. }) => {
+                                *ctor = true;
+                                continue;
+                            }
+                            Some(TrmcShape::Acc(_)) => {
+                                *acc = true;
+                                continue;
+                            }
+                            None => {}
+                        }
                     }
                 }
+                work.push(rest);
             }
-            scan_trmc(n, name, arity, ctor, acc);
-        }
-        Comp::If(_, t, e) => {
-            scan_trmc(t, name, arity, ctor, acc);
-            scan_trmc(e, name, arity, ctor, acc);
-        }
-        Comp::Case(_, arms) => {
-            for (_, b) in arms {
-                scan_trmc(b, name, arity, ctor, acc);
+            Comp::If(_, yes, no) => {
+                work.push(no);
+                work.push(yes);
             }
+            Comp::Case(_, arms) => {
+                work.extend(arms.iter().rev().map(|(_, body)| body));
+            }
+            Comp::WithReuse { body, .. } => work.push(body),
+            _ => {}
         }
-        // A reuse scope is transparent to TRMC: its body holds the recursive
-        // tail (the freed cell is what the `Reuse` constructor spends).
-        Comp::WithReuse { body, .. } => scan_trmc(body, name, arity, ctor, acc),
-        _ => {}
     }
 }
 
@@ -151,15 +175,13 @@ pub fn trmc_mode(name: &str, arity: usize, body: &Comp) -> Option<TrmcMode> {
 pub fn trmc_resumption_safe(body: &Comp) -> bool {
     struct Scan(bool);
     impl Visit for Scan {
-        fn visit_comp(&mut self, c: &Comp) {
-            match c {
-                Comp::Do(..) | Comp::Handle { .. } | Comp::Mask(..) => self.0 = false,
-                _ => self.descend_comp(c),
-            }
+        fn comp(&mut self, c: &Comp) -> bool {
+            self.0 &= !matches!(c, Comp::Do(..) | Comp::Handle { .. } | Comp::Mask(..));
+            self.0
         }
     }
     let mut scan = Scan(true);
-    Visit::visit_comp(&mut scan, body);
+    scan.walk_comp(body);
     scan.0
 }
 
@@ -170,29 +192,76 @@ pub fn trmc_resumption_safe(body: &Comp) -> bool {
 // classification must see the same shape the backend lowers.
 #[must_use]
 pub fn reassoc(c: &Comp) -> Comp {
-    match c {
-        Comp::Bind(m, x, n) => rebind(reassoc(m), *x, reassoc(n)),
-        Comp::If(v, t, e) => Comp::If(v.clone(), Box::new(reassoc(t)), Box::new(reassoc(e))),
-        Comp::Case(v, arms) => Comp::Case(
-            v.clone(),
-            arms.iter().map(|(p, b)| (p.clone(), reassoc(b))).collect(),
-        ),
-        // Flatten inside the reuse scope too, so its TRMC tail is exposed.
-        Comp::WithReuse { token, freed, body } => Comp::WithReuse {
-            token: *token,
-            freed: freed.clone(),
-            body: Box::new(reassoc(body)),
-        },
-        other => other.clone(),
+    Reassociate.rewrite_comp(c, &())
+}
+
+struct Reassociate;
+
+impl Rewrite for Reassociate {
+    type Ctx = ();
+
+    fn enter_comp(&mut self, comp: &Comp, _cx: &Self::Ctx) -> RewriteControl<Comp> {
+        match comp {
+            Comp::Bind(..) | Comp::If(..) | Comp::Case(..) | Comp::WithReuse { .. } => {
+                RewriteControl::Descend
+            }
+            _ => RewriteControl::Replace(clone_comp(comp)),
+        }
+    }
+
+    fn enter_value(&mut self, value: &Value, _cx: &Self::Ctx) -> RewriteControl<Value> {
+        RewriteControl::Replace(clone_value(value))
+    }
+
+    fn leave_comp(&mut self, source: &Comp, rewritten: Comp, _cx: &Self::Ctx) -> Comp {
+        if !matches!(source, Comp::Bind(..)) {
+            return rewritten;
+        }
+        let Comp::Bind(first, binder, rest) = rewritten else {
+            unreachable!("a bind rebuild remains a bind");
+        };
+        rebind(*first, binder, *rest)
     }
 }
 
+struct CoreClone;
+
+impl Rewrite for CoreClone {
+    type Ctx = ();
+}
+
+fn clone_comp(comp: &Comp) -> Comp {
+    CoreClone.rewrite_comp(comp, &())
+}
+
+fn clone_value(value: &Value) -> Value {
+    CoreClone.rewrite_value(value, &())
+}
+
 fn rebind(m: Comp, x: Sym, n: Comp) -> Comp {
-    match m {
-        Comp::Bind(a, y, b) if y.as_str() == "_" || (y != x && !fv::comp(&n).contains(&y)) => {
-            Comp::Bind(a, y, Box::new(rebind(*b, x, n)))
+    let mut head = m;
+    let mut prefix = Vec::new();
+    let mut free_in_rest = None;
+    loop {
+        match head {
+            Comp::Bind(first, binder, rest)
+                if binder.as_str() == "_"
+                    || (binder != x
+                        && !free_in_rest
+                            .get_or_insert_with(|| fv::comp(&n))
+                            .contains(&binder)) =>
+            {
+                prefix.push((first, binder));
+                head = *rest;
+            }
+            other => {
+                let mut result = Comp::Bind(Box::new(other), x, Box::new(n));
+                for (first, binder) in prefix.into_iter().rev() {
+                    result = Comp::Bind(first, binder, Box::new(result));
+                }
+                return result;
+            }
         }
-        other => Comp::Bind(Box::new(other), x, Box::new(n)),
     }
 }
 
@@ -237,87 +306,288 @@ pub fn recursive_calls(
     self_arity: usize,
     group: &BTreeSet<Sym>,
 ) -> Vec<(Sym, TailClass)> {
+    let (nodes, root) = normalized_view(body);
     let mut out = Vec::new();
-    walk(&reassoc(body), self_name, self_arity, group, true, &mut out);
+    let mut work = vec![CallFrame::Normalized(root, true)];
+    while let Some(frame) = work.pop() {
+        match frame {
+            CallFrame::Normalized(id, tail) => match &nodes[id] {
+                Normalized::Source(comp) => {
+                    scan_raw_calls(
+                        comp, tail, self_name, self_arity, group, &mut work, &mut out,
+                    );
+                }
+                Normalized::Bind {
+                    first,
+                    binder,
+                    rest,
+                } => {
+                    if tail {
+                        if let (Some((callee, args)), Some(rest_comp)) =
+                            (source_call(&nodes, *first), source_comp(&nodes, *rest))
+                        {
+                            if callee == self_name && args == self_arity {
+                                if let Some(shape) = trmc_shape(rest_comp, binder.as_str()) {
+                                    out.push((callee, tail_class(&shape)));
+                                    work.push(CallFrame::Normalized(*rest, false));
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                    work.push(CallFrame::Normalized(*rest, tail));
+                    work.push(CallFrame::Normalized(*first, false));
+                }
+                Normalized::If { yes, no } => {
+                    work.push(CallFrame::Normalized(*no, tail));
+                    work.push(CallFrame::Normalized(*yes, tail));
+                }
+                Normalized::Case(arms) => {
+                    work.extend(
+                        arms.iter()
+                            .rev()
+                            .map(|arm| CallFrame::Normalized(*arm, tail)),
+                    );
+                }
+                Normalized::WithReuse(body) => {
+                    work.push(CallFrame::Normalized(*body, tail));
+                }
+            },
+            CallFrame::Raw(comp, tail) => {
+                scan_raw_calls(
+                    comp, tail, self_name, self_arity, group, &mut work, &mut out,
+                );
+            }
+            CallFrame::References(names) => {
+                out.extend(names.into_iter().map(|name| (name, TailClass::NonTail)));
+            }
+        }
+    }
     out
 }
 
-fn walk(
-    c: &Comp,
+fn scan_raw_calls<'a>(
+    comp: &'a Comp,
+    tail: bool,
     self_name: Sym,
     self_arity: usize,
     group: &BTreeSet<Sym>,
-    tail: bool,
+    work: &mut Vec<CallFrame<'a>>,
     out: &mut Vec<(Sym, TailClass)>,
 ) {
-    let recur = |c, tail, out: &mut _| walk(c, self_name, self_arity, group, tail, out);
-    match c {
-        Comp::Bind(m, x, n) => {
-            // A tail-position bind whose head is a self-call feeding a single
-            // constructor field / one addend of `+` in the continuation is the
-            // TRMC tail the backend turns into a loop.
+    match comp {
+        Comp::Bind(first, binder, rest) => {
             if tail {
-                if let Comp::Call(g, args) = m.as_ref() {
-                    if *g == self_name && args.len() == self_arity {
-                        if let Some(shape) = trmc_shape(n, x.as_str()) {
-                            out.push((
-                                *g,
-                                match shape {
-                                    TrmcShape::Ctor { .. } => TailClass::TrmcCons,
-                                    TrmcShape::Acc(_) => TailClass::TrmcAdd,
-                                },
-                            ));
-                            // The continuation only assembles the cons/acc; any
-                            // further recursive call in it is a real frame.
-                            recur(n, false, out);
+                if let Comp::Call(callee, args) = first.as_ref() {
+                    if *callee == self_name && args.len() == self_arity {
+                        if let Some(shape) = trmc_shape(rest, binder.as_str()) {
+                            out.push((*callee, tail_class(&shape)));
+                            work.push(CallFrame::Raw(rest, false));
                             return;
                         }
                     }
                 }
             }
-            // The bound head never runs in tail position; the continuation
-            // inherits this site's tail-ness.
-            recur(m, false, out);
-            recur(n, tail, out);
+            work.push(CallFrame::Raw(rest, tail));
+            work.push(CallFrame::Raw(first, false));
         }
-        Comp::If(_, t, e) => {
-            recur(t, tail, out);
-            recur(e, tail, out);
+        Comp::If(_, yes, no) => {
+            work.push(CallFrame::Raw(no, tail));
+            work.push(CallFrame::Raw(yes, tail));
         }
         Comp::Case(_, arms) => {
-            for (_, b) in arms {
-                recur(b, tail, out);
-            }
+            work.extend(
+                arms.iter()
+                    .rev()
+                    .map(|(_, body)| CallFrame::Raw(body, tail)),
+            );
         }
-        Comp::Call(g, args) if group.contains(g) => {
-            // A bare tail call loops via musttail only when its arity matches
-            // the current frame's (self-call, or a same-arity mutual tail).
+        Comp::Call(callee, args) if group.contains(callee) => {
             let cls = if tail && args.len() == self_arity {
                 TailClass::Tail
             } else {
                 TailClass::NonTail
             };
-            out.push((*g, cls));
+            out.push((*callee, cls));
         }
-        // The reuse scope's body inherits this site's tail-ness: its result is
-        // the scope's result.
-        Comp::WithReuse { body, .. } => recur(body, tail, out),
-        // A first-class application `f args`: the callee computation `f` runs in
-        // this frame (its result is then applied), so it is never in tail
-        // position -- descend non-tail to catch any direct in-group `Call` hidden
-        // under it. An in-group function that instead flows into `f` as a value
-        // (a first-class reference `fv` keeps, but drops for direct call heads) is
-        // applied indirectly, which the backend never loops; count it as a NonTail
-        // frame so a stack-growing `fip` cannot slip through by recursing through
-        // an applied value rather than a bare `Call`.
-        Comp::App(f, _) => {
-            recur(f, false, out);
-            for g in fv::comp(f).into_iter().filter(|g| group.contains(g)) {
-                out.push((g, TailClass::NonTail));
-            }
+        Comp::WithReuse { body, .. } => work.push(CallFrame::Raw(body, tail)),
+        Comp::App(callee, _) => {
+            let references = fv::comp(callee)
+                .into_iter()
+                .filter(|name| group.contains(name))
+                .collect();
+            work.push(CallFrame::References(references));
+            work.push(CallFrame::Raw(callee, false));
         }
         _ => {}
     }
+}
+
+const fn tail_class(shape: &TrmcShape<'_>) -> TailClass {
+    match shape {
+        TrmcShape::Ctor { .. } => TailClass::TrmcCons,
+        TrmcShape::Acc(_) => TailClass::TrmcAdd,
+    }
+}
+
+type NormalizedId = usize;
+
+enum Normalized<'a> {
+    Source(&'a Comp),
+    Bind {
+        first: NormalizedId,
+        binder: Sym,
+        rest: NormalizedId,
+    },
+    If {
+        yes: NormalizedId,
+        no: NormalizedId,
+    },
+    Case(Vec<NormalizedId>),
+    WithReuse(NormalizedId),
+}
+
+enum NormalizeFrame<'a> {
+    Comp(&'a Comp),
+    FinishBind { binder: Sym, rest: &'a Comp },
+    FinishIf,
+    FinishCase { arm_count: usize },
+    FinishWithReuse,
+}
+
+fn normalized_view(body: &Comp) -> (Vec<Normalized<'_>>, NormalizedId) {
+    let mut nodes = Vec::new();
+    let mut results = Vec::new();
+    let mut work = vec![NormalizeFrame::Comp(body)];
+    while let Some(frame) = work.pop() {
+        match frame {
+            NormalizeFrame::Comp(comp) => match comp {
+                Comp::Bind(first, binder, rest) => {
+                    work.push(NormalizeFrame::FinishBind {
+                        binder: *binder,
+                        rest,
+                    });
+                    work.push(NormalizeFrame::Comp(rest));
+                    work.push(NormalizeFrame::Comp(first));
+                }
+                Comp::If(_, yes, no) => {
+                    work.push(NormalizeFrame::FinishIf);
+                    work.push(NormalizeFrame::Comp(no));
+                    work.push(NormalizeFrame::Comp(yes));
+                }
+                Comp::Case(_, arms) => {
+                    work.push(NormalizeFrame::FinishCase {
+                        arm_count: arms.len(),
+                    });
+                    work.extend(arms.iter().rev().map(|(_, arm)| NormalizeFrame::Comp(arm)));
+                }
+                Comp::WithReuse { body, .. } => {
+                    work.push(NormalizeFrame::FinishWithReuse);
+                    work.push(NormalizeFrame::Comp(body));
+                }
+                _ => results.push(push_normalized(&mut nodes, Normalized::Source(comp))),
+            },
+            NormalizeFrame::FinishBind { binder, rest } => {
+                let rest_id = results.pop().expect("a normalized continuation exists");
+                let first = results
+                    .pop()
+                    .expect("a normalized bound computation exists");
+                results.push(rebind_view(first, binder, rest_id, rest, &mut nodes));
+            }
+            NormalizeFrame::FinishIf => {
+                let no = results.pop().expect("a normalized else branch exists");
+                let yes = results.pop().expect("a normalized then branch exists");
+                results.push(push_normalized(&mut nodes, Normalized::If { yes, no }));
+            }
+            NormalizeFrame::FinishCase { arm_count } => {
+                let start = results
+                    .len()
+                    .checked_sub(arm_count)
+                    .expect("each case arm has a normalized body");
+                let arms = results.drain(start..).collect();
+                results.push(push_normalized(&mut nodes, Normalized::Case(arms)));
+            }
+            NormalizeFrame::FinishWithReuse => {
+                let body = results.pop().expect("a normalized reuse body exists");
+                results.push(push_normalized(&mut nodes, Normalized::WithReuse(body)));
+            }
+        }
+    }
+    let root = results.pop().expect("the root has a normalized view");
+    debug_assert!(results.is_empty());
+    (nodes, root)
+}
+
+fn rebind_view(
+    mut first: NormalizedId,
+    binder: Sym,
+    rest: NormalizedId,
+    rest_source: &Comp,
+    nodes: &mut Vec<Normalized<'_>>,
+) -> NormalizedId {
+    let mut prefix = Vec::new();
+    let mut free_in_rest = None;
+    while let Normalized::Bind {
+        first: inner,
+        binder: inner_binder,
+        rest: inner_rest,
+    } = &nodes[first]
+    {
+        let (inner, inner_binder, inner_rest) = (*inner, *inner_binder, *inner_rest);
+        let safe = inner_binder.as_str() == "_"
+            || (inner_binder != binder
+                && !free_in_rest
+                    .get_or_insert_with(|| fv::comp(rest_source))
+                    .contains(&inner_binder));
+        if !safe {
+            break;
+        }
+        prefix.push((first, inner, inner_binder));
+        first = inner_rest;
+    }
+    let mut result = push_normalized(
+        nodes,
+        Normalized::Bind {
+            first,
+            binder,
+            rest,
+        },
+    );
+    for (id, first, binder) in prefix.into_iter().rev() {
+        nodes[id] = Normalized::Bind {
+            first,
+            binder,
+            rest: result,
+        };
+        result = id;
+    }
+    result
+}
+
+fn push_normalized<'a>(nodes: &mut Vec<Normalized<'a>>, node: Normalized<'a>) -> NormalizedId {
+    let id = nodes.len();
+    nodes.push(node);
+    id
+}
+
+fn source_comp<'a>(nodes: &'a [Normalized<'a>], id: NormalizedId) -> Option<&'a Comp> {
+    match nodes[id] {
+        Normalized::Source(comp) => Some(comp),
+        _ => None,
+    }
+}
+
+fn source_call(nodes: &[Normalized<'_>], id: NormalizedId) -> Option<(Sym, usize)> {
+    match source_comp(nodes, id)? {
+        Comp::Call(callee, args) => Some((*callee, args.len())),
+        _ => None,
+    }
+}
+
+enum CallFrame<'a> {
+    Normalized(NormalizedId, bool),
+    Raw(&'a Comp, bool),
+    References(Vec<Sym>),
 }
 
 // The call graph over user functions. An edge is a direct call head (`calls_in`,
@@ -394,8 +664,106 @@ fn scc_in(adj: &BTreeMap<Sym, BTreeSet<Sym>>, f: Sym) -> BTreeSet<Sym> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::cbpv::{CoreFn, CorePat};
+    use std::{mem, thread};
+
     use super::*;
+    use crate::core::cbpv::{CoreFn, CorePat};
+
+    const DEEP_BIND_COUNT: usize = 20_000;
+    const DEEP_VALUE_COUNT: usize = 20_000;
+    const ORDINARY_TEST_STACK: usize = 2 * 1024 * 1024;
+
+    #[test]
+    fn tail_classification_handles_deep_bind_chains_on_an_ordinary_stack() {
+        thread::Builder::new()
+            .name("deep-tail-classification".into())
+            .stack_size(ORDINARY_TEST_STACK)
+            .spawn(|| {
+                let function = Sym::new("deep_tail");
+                let mut head = Comp::Return(Value::Int(0));
+                for _ in 0..DEEP_BIND_COUNT {
+                    head = Comp::Bind(
+                        Box::new(Comp::Return(Value::Int(0))),
+                        Sym::new("_"),
+                        Box::new(head),
+                    );
+                }
+                // The outer bind forces `rebind` to move the complete left
+                // computation into the continuation without recursive rebuilds.
+                let body = Comp::Bind(
+                    Box::new(head),
+                    Sym::new("result"),
+                    Box::new(Comp::Return(Value::Int(0))),
+                );
+
+                assert!(trmc_mode(function.as_str(), 0, &body).is_none());
+                assert!(
+                    recursive_calls(&body, function, 0, &BTreeSet::from([function])).is_empty()
+                );
+                let reassociated = reassoc(&body);
+                let mut cursor = &reassociated;
+                for _ in 0..=DEEP_BIND_COUNT {
+                    let Comp::Bind(_, _, rest) = cursor else {
+                        panic!("reassociation shortened the deep bind spine");
+                    };
+                    cursor = rest;
+                }
+                assert!(matches!(cursor, Comp::Return(Value::Int(0))));
+                mem::forget(reassociated);
+                mem::forget(body);
+            })
+            .expect("spawn deep tail-classification test")
+            .join()
+            .expect("deep tail-classification test panicked");
+    }
+
+    #[test]
+    fn trmc_shape_handles_deep_constructor_values_on_an_ordinary_stack() {
+        thread::Builder::new()
+            .name("deep-trmc-shape".into())
+            .stack_size(ORDINARY_TEST_STACK)
+            .spawn(|| {
+                let mut value = Value::Int(0);
+                for _ in 0..DEEP_VALUE_COUNT {
+                    value = Value::Tuple(vec![value]);
+                }
+                let continuation =
+                    Comp::Return(Value::Tuple(vec![Value::Var(Sym::new("hole")), value]));
+
+                assert!(matches!(
+                    trmc_shape(&continuation, "hole"),
+                    Some(TrmcShape::Ctor { hole: 0, .. })
+                ));
+                mem::forget(continuation);
+            })
+            .expect("spawn deep TRMC-shape test")
+            .join()
+            .expect("deep TRMC-shape test panicked");
+    }
+
+    #[test]
+    fn trmc_shape_counts_occurrences_inside_unboxed_products() {
+        let hole = Sym::new("hole");
+        let tuple = Comp::Return(Value::Ctor(
+            Sym::new("Box"),
+            0,
+            vec![
+                Value::Var(hole),
+                Value::UnboxedTuple(vec![Value::Var(hole)]),
+            ],
+        ));
+        assert!(trmc_shape(&tuple, hole.as_str()).is_none());
+
+        let record = Comp::Return(Value::Ctor(
+            Sym::new("Box"),
+            0,
+            vec![
+                Value::Var(hole),
+                Value::UnboxedRecord(vec![(Sym::new("field"), Value::Var(hole))]),
+            ],
+        ));
+        assert!(trmc_shape(&record, hole.as_str()).is_none());
+    }
 
     fn group(names: &[&str]) -> BTreeSet<Sym> {
         names.iter().map(|n| Sym::from(*n)).collect()
@@ -459,6 +827,44 @@ mod tests {
     }
 
     #[test]
+    fn reassociation_exposes_a_recursive_call_in_a_left_nested_bind() {
+        let head = Comp::Bind(
+            Box::new(Comp::Return(Value::Unit)),
+            "prefix".into(),
+            Box::new(Comp::Call("f".into(), vec![Value::Var("x".into())])),
+        );
+        let body = Comp::Bind(
+            Box::new(head),
+            "t".into(),
+            Box::new(Comp::Return(Value::Ctor(
+                "Cons".into(),
+                1,
+                vec![Value::Var("h".into()), Value::Var("t".into())],
+            ))),
+        );
+        assert_eq!(classes(&body, 1), [TailClass::TrmcCons]);
+    }
+
+    #[test]
+    fn reassociation_does_not_capture_a_left_bind() {
+        let head = Comp::Bind(
+            Box::new(Comp::Return(Value::Unit)),
+            "captured".into(),
+            Box::new(Comp::Call("f".into(), vec![Value::Var("x".into())])),
+        );
+        let body = Comp::Bind(
+            Box::new(head),
+            "t".into(),
+            Box::new(Comp::Return(Value::Ctor(
+                "Cons".into(),
+                1,
+                vec![Value::Var("captured".into()), Value::Var("t".into())],
+            ))),
+        );
+        assert_eq!(classes(&body, 1), [TailClass::NonTail]);
+    }
+
+    #[test]
     fn reuse_token_ctor_tail_is_trmc_cons() {
         // The reuse-lowered form `reuse tok as Cons(h, f(x))` is still a cons tail.
         let body = bind_call(
@@ -517,8 +923,7 @@ mod tests {
             Comp::Prim(CoreOp::Add, Value::Int(1), Value::Var("t".into())),
         );
         let body = Comp::If(Value::Bool(true), Box::new(then), Box::new(els));
-        let got = classes(&body, 1);
-        assert!(got.contains(&TailClass::TrmcCons) && got.contains(&TailClass::TrmcAdd));
+        assert_eq!(classes(&body, 1), [TailClass::TrmcCons, TailClass::TrmcAdd]);
     }
 
     #[test]

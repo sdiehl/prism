@@ -1,10 +1,16 @@
 //! Bounded inliner for typed Core (late pass).
 //!
-//! Inlines a top-level function called exactly once (a single `Call` head, and
-//! never referenced first-class) so its body moves rather than duplicates, with
-//! its parameters let-bound to the evaluated arguments and every binder alpha-
-//! renamed to a fresh `%i{n}` name from a per-compilation counter. Typed Core
-//! adds scheme instantiation: a typed `Call` carries the callee's explicit
+//! Two admission rules share one splicing mechanism. A top-level function
+//! called exactly once (a single `Call` head, and never referenced
+//! first-class) is inlined so its body moves rather than duplicates. A
+//! multi-site function is inlined at every site only when its interprocedural
+//! summary proves substitution exposes a cheaper result and duplication is
+//! free: the result is a constant or a forwarded parameter, the body
+//! allocates nothing, invokes no callbacks, builds no closures, performs no
+//! effects, and stays under a small node budget. Either way the parameters
+//! are let-bound to the evaluated arguments and every binder alpha-renamed to
+//! a fresh `%i{n}` name from a per-compilation counter. Typed Core adds
+//! scheme instantiation: a typed `Call` carries the callee's explicit
 //! type/row instantiation, which must be substituted through the callee's body
 //! *before* freshening and binding its parameters, so every witness in the
 //! spliced term already reflects the call's monomorphic instance. `Inline` is
@@ -18,15 +24,22 @@ use prism_common::scc::tarjan_scc;
 use prism_common::sym::Sym;
 use prism_syntax::names::{self, ENTRY_POINT};
 
-use super::effect_lower::walk;
 use super::specialize_support::{
     free_comp_vars, freshen_with, next_fresh, substitute_witnesses, Rewrite,
 };
+use super::summary::{summarize, AllocBound, CaptureState, FunctionSummary, ResultShape};
+use super::traverse::Visit;
 use super::verify::{representation_preserving_stable, substitute_core_type};
 use super::{
-    CompSig, CoreInstantiation, TypedBinder, TypedComp, TypedCompKind, TypedCore, TypedCoreFn,
-    TypedValue, TypedValueKind, UncheckedTypedCore,
+    on_core_stack, CompSig, CoreInstantiation, TypedBinder, TypedComp, TypedCompKind, TypedCore,
+    TypedCoreFn, TypedValue, TypedValueKind, UncheckedTypedCore,
 };
+
+// The node budget for summary-admitted multi-site bodies. Splicing duplicates
+// the body once per call site, so only a body whose whole tree is smaller than
+// the call machinery it replaces may be pasted everywhere; anything larger
+// keeps the single-call-site rule as its only way in.
+const INLINE_CHEAP_BODY_MAX: usize = 16;
 
 /// Rewrite counts for typed inlining.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -44,6 +57,10 @@ impl InlineStats {
 /// Inline single-call-site non-recursive functions, preserving every witness.
 #[must_use]
 pub fn inline<P>(core: TypedCore<P>) -> (UncheckedTypedCore<P>, InlineStats) {
+    on_core_stack(|| inline_on_core_stack(core))
+}
+
+fn inline_on_core_stack<P>(core: TypedCore<P>) -> (UncheckedTypedCore<P>, InlineStats) {
     let names: BTreeSet<Sym> = core
         .functions()
         .iter()
@@ -66,17 +83,24 @@ pub fn inline<P>(core: TypedCore<P>) -> (UncheckedTypedCore<P>, InlineStats) {
     }
 
     let recursive = recursive_set(&core, &names);
+    let summaries = summarize(core.functions());
     let entry = Sym::new(ENTRY_POINT);
-    let inlinable: BTreeSet<Sym> = names
-        .iter()
-        .copied()
-        .filter(|name| {
-            *name != entry
-                && !recursive.contains(name)
-                && !first_class.contains(name)
-                && call_count.get(name).copied() == Some(1)
-        })
-        .collect();
+    let mut inlinable: BTreeSet<Sym> = BTreeSet::new();
+    let mut multi_site: BTreeSet<Sym> = BTreeSet::new();
+    for function in core.functions() {
+        if function.name == entry
+            || recursive.contains(&function.name)
+            || first_class.contains(&function.name)
+        {
+            continue;
+        }
+        if call_count.get(&function.name).copied() == Some(1) {
+            inlinable.insert(function.name);
+        } else if cheap_at_every_site(function, &summaries) {
+            inlinable.insert(function.name);
+            multi_site.insert(function.name);
+        }
+    }
     if inlinable.is_empty() {
         return (core.into_unchecked(), InlineStats::default());
     }
@@ -88,6 +112,7 @@ pub fn inline<P>(core: TypedCore<P>) -> (UncheckedTypedCore<P>, InlineStats) {
             .map(|function| (function.name, function.clone()))
             .collect(),
         inlinable,
+        multi_site,
         ticks: 0,
         counter: 0,
     };
@@ -109,6 +134,51 @@ pub fn inline<P>(core: TypedCore<P>) -> (UncheckedTypedCore<P>, InlineStats) {
             ticks: inliner.ticks,
         },
     )
+}
+
+// Whether every call site profits from splicing this body even without a
+// single-site guarantee. The summary is the oracle that substitution exposes a
+// cheaper result: the tail is already resolved to a constant or a forwarded
+// parameter, and the body it drags along is free to duplicate because it
+// allocates nothing, invokes no callback, builds no closure, performs no
+// effects, and fits the node budget. Every clause fails closed: a missing
+// summary, an open or effectful row, or an unknown shape keeps the function
+// on the single-call-site rule alone.
+fn cheap_at_every_site(function: &TypedCoreFn, summaries: &BTreeMap<Sym, FunctionSummary>) -> bool {
+    let Some(summary) = summaries.get(&function.name) else {
+        return false;
+    };
+    matches!(
+        summary.result,
+        ResultShape::Constant | ResultShape::Param(_)
+    ) && summary.allocation == AllocBound::Zero
+        && summary.callbacks.is_empty()
+        && summary.capture == CaptureState::NoClosures
+        && summary.effects == EffRow::Empty
+        && body_size(&function.body) <= INLINE_CHEAP_BODY_MAX
+}
+
+// Total computation-node count of a body, the budget `cheap_at_every_site`
+// charges against. Thunked computations do not need visiting: the closure
+// gate already rejects any body that builds one.
+fn body_size(comp: &TypedComp) -> usize {
+    #[derive(Default)]
+    struct CompCounter(usize);
+
+    impl Visit for CompCounter {
+        fn comp(&mut self, _comp: &TypedComp) -> bool {
+            self.0 += 1;
+            true
+        }
+
+        fn value(&mut self, _value: &TypedValue) -> bool {
+            false
+        }
+    }
+
+    let mut counter = CompCounter::default();
+    counter.walk_comp(comp);
+    counter.0
 }
 
 // The functions that (transitively) call themselves. Never inlined: it would
@@ -143,125 +213,35 @@ fn recursive_set<P>(core: &TypedCore<P>, names: &BTreeSet<Sym>) -> BTreeSet<Sym>
 // thunked values, in occurrence order. A bare function name flowing as a
 // first-class value (not a call head) is not counted here.
 pub(crate) fn calls_in(comp: &TypedComp) -> Vec<Sym> {
-    let mut heads = Vec::new();
-    collect_calls_comp(comp, &mut heads);
-    heads
+    let mut collector = CallCollector::default();
+    collector.walk_comp(comp);
+    collector.heads
 }
 
-fn collect_calls_comp(comp: &TypedComp, heads: &mut Vec<Sym>) {
-    match &comp.kind {
-        TypedCompKind::Call { callee, args, .. } => {
-            heads.push(*callee);
-            for arg in args {
-                collect_calls_value(arg, heads);
-            }
-        }
-        TypedCompKind::Return(value)
-        | TypedCompKind::Force(value)
-        | TypedCompKind::Error(value)
-        | TypedCompKind::FloatBuiltin(_, value)
-        | TypedCompKind::Neg(_, value)
-        | TypedCompKind::UnboxedProject(value, _)
-        | TypedCompKind::Dup(value)
-        | TypedCompKind::Drop(value)
-        | TypedCompKind::Reuse(_, value)
-        | TypedCompKind::RefNew(value)
-        | TypedCompKind::RefGet(value) => collect_calls_value(value, heads),
-        TypedCompKind::Prim(_, lhs, rhs)
-        | TypedCompKind::RefSet(lhs, rhs)
-        | TypedCompKind::InitAt(lhs, rhs) => {
-            collect_calls_value(lhs, heads);
-            collect_calls_value(rhs, heads);
-        }
-        TypedCompKind::Bind(first, _, rest) => {
-            collect_calls_comp(first, heads);
-            collect_calls_comp(rest, heads);
-        }
-        TypedCompKind::Lam(_, body) | TypedCompKind::Mask(_, body) => {
-            collect_calls_comp(body, heads);
-        }
-        TypedCompKind::App { callee, args, .. } => {
-            collect_calls_comp(callee, heads);
-            for arg in args {
-                collect_calls_value(arg, heads);
-            }
-        }
-        TypedCompKind::If(condition, yes, no) => {
-            collect_calls_value(condition, heads);
-            collect_calls_comp(yes, heads);
-            collect_calls_comp(no, heads);
-        }
-        TypedCompKind::Io(_, args)
-        | TypedCompKind::Do { args, .. }
-        | TypedCompKind::StrBuiltin { args, .. } => {
-            for arg in args {
-                collect_calls_value(arg, heads);
-            }
-        }
-        TypedCompKind::Case(scrutinee, arms) => {
-            collect_calls_value(scrutinee, heads);
-            for (_, body) in arms {
-                collect_calls_comp(body, heads);
-            }
-        }
-        TypedCompKind::Handle {
-            body,
-            return_body,
-            ops,
-            ..
-        } => {
-            collect_calls_comp(body, heads);
-            if let Some(return_body) = return_body {
-                collect_calls_comp(return_body, heads);
-            }
-            for arm in &ops.arms {
-                collect_calls_comp(&arm.body, heads);
-            }
-        }
-        TypedCompKind::WithReuse { freed, body, .. } => {
-            collect_calls_value(freed, heads);
-            collect_calls_comp(body, heads);
-        }
-    }
+#[derive(Default)]
+struct CallCollector {
+    heads: Vec<Sym>,
 }
 
-fn collect_calls_value(value: &TypedValue, heads: &mut Vec<Sym>) {
-    match &value.kind {
-        TypedValueKind::Reinterpret(inner)
-        | TypedValueKind::LoweredRepr {
-            value: inner,
-            proof: _,
+impl Visit for CallCollector {
+    fn comp(&mut self, comp: &TypedComp) -> bool {
+        if let TypedCompKind::Call { callee, .. } = comp.kind() {
+            self.heads.push(*callee);
         }
-        | TypedValueKind::NewtypeRepr { value: inner, .. } => {
-            collect_calls_value(inner, heads);
-        }
-        TypedValueKind::Thunk(body) => collect_calls_comp(body, heads),
-        TypedValueKind::Ctor { fields, .. }
-        | TypedValueKind::Tuple(fields)
-        | TypedValueKind::UnboxedTuple(fields) => {
-            for field in fields {
-                collect_calls_value(field, heads);
-            }
-        }
-        TypedValueKind::UnboxedRecord(fields) => {
-            for (_, field) in fields {
-                collect_calls_value(field, heads);
-            }
-        }
-        TypedValueKind::Var { .. }
-        | TypedValueKind::Int(_)
-        | TypedValueKind::I64(_)
-        | TypedValueKind::U64(_)
-        | TypedValueKind::Float(_)
-        | TypedValueKind::Bool(_)
-        | TypedValueKind::Unit
-        | TypedValueKind::Str(_) => {}
+        true
     }
 }
 
 struct Inliner {
     fns: BTreeMap<Sym, TypedCoreFn>,
     inlinable: BTreeSet<Sym>,
+    // Summary-admitted names with more than one call site. Their splice must
+    // be row-neutral: the callee's row is empty, so it only replaces a call
+    // node stamped with that same empty row. A site the lowering stamped
+    // with a wider row keeps the call, because splicing a narrower tree
+    // there would shift the computed rows out from under every enclosing
+    // stored sig the verifier already checked.
+    multi_site: BTreeSet<Sym>,
     ticks: u64,
     // Per-compilation freshening counter, threaded across every inlined site so
     // each freshened binder gets a distinct deterministic `%i{n}` name.
@@ -272,41 +252,47 @@ impl Rewrite for Inliner {
     type Ctx = ();
 
     fn comp(&mut self, comp: &TypedComp, cx: &()) -> TypedComp {
-        if let TypedCompKind::Call {
-            callee,
-            instantiation,
-            args,
-        } = &comp.kind
-        {
-            if self.inlinable.contains(callee) {
-                let function = self.fns[callee].clone();
-                if function.params.len() == args.len() {
-                    let args: Vec<TypedValue> =
-                        args.iter().map(|arg| self.value(arg, cx)).collect();
-                    if arguments_admissible(&function, instantiation, &args) {
-                        if let Some(spliced) =
-                            inline_call(&function, instantiation, &args, &mut self.counter)
-                        {
-                            self.ticks += 1;
-                            // Recurse into the spliced body: a single-call-site
-                            // callee it in turn calls is still single-site (its
-                            // one site just moved here), so one sweep inlines
-                            // the whole chain.
-                            return self.comp(&spliced, cx);
+        // Spliced-chain inlining recurses per call site; grow stack segments
+        // inside the recursion, same discipline as `descend_comp`.
+        on_core_stack(|| {
+            if let TypedCompKind::Call {
+                callee,
+                instantiation,
+                args,
+            } = &comp.kind
+            {
+                if self.inlinable.contains(callee) {
+                    let function = self.fns[callee].clone();
+                    let row_neutral =
+                        !self.multi_site.contains(callee) || comp.sig.effects() == &EffRow::Empty;
+                    if function.params.len() == args.len() {
+                        let args: Vec<TypedValue> =
+                            args.iter().map(|arg| self.value(arg, cx)).collect();
+                        if row_neutral && arguments_admissible(&function, instantiation, &args) {
+                            if let Some(spliced) =
+                                inline_call(&function, instantiation, &args, &mut self.counter)
+                            {
+                                self.ticks += 1;
+                                // Recurse into the spliced body: a single-call-site
+                                // callee it in turn calls is still single-site (its
+                                // one site just moved here), so one sweep inlines
+                                // the whole chain.
+                                return self.comp(&spliced, cx);
+                            }
                         }
+                        return TypedComp::new(
+                            comp.sig.clone(),
+                            TypedCompKind::Call {
+                                callee: *callee,
+                                instantiation: instantiation.clone(),
+                                args,
+                            },
+                        );
                     }
-                    return TypedComp::new(
-                        comp.sig.clone(),
-                        TypedCompKind::Call {
-                            callee: *callee,
-                            instantiation: instantiation.clone(),
-                            args,
-                        },
-                    );
                 }
             }
-        }
-        self.descend_comp(comp, cx)
+            self.descend_comp(comp, cx)
+        })
     }
 }
 
@@ -355,34 +341,24 @@ fn arguments_admissible(
 /// splice would hide an effectful thunk behind the open tail. Declining the
 /// inline instead is a pure cost decision.
 fn casts_verify(c: &TypedComp) -> bool {
-    fn value_ok(v: &TypedValue) -> bool {
-        match &v.kind {
-            TypedValueKind::Reinterpret(inner) => {
-                representation_preserving_stable(inner.ty(), v.ty()) && value_ok(inner)
+    struct StableCastCheck(bool);
+
+    impl Visit for StableCastCheck {
+        fn comp(&mut self, _comp: &TypedComp) -> bool {
+            self.0
+        }
+
+        fn value(&mut self, value: &TypedValue) -> bool {
+            if let TypedValueKind::Reinterpret(inner) = value.kind() {
+                self.0 &= representation_preserving_stable(inner.ty(), value.ty());
             }
-            TypedValueKind::LoweredRepr { value: inner, .. }
-            | TypedValueKind::NewtypeRepr { value: inner, .. } => value_ok(inner),
-            TypedValueKind::Thunk(body) => casts_verify(body),
-            TypedValueKind::Ctor { fields, .. }
-            | TypedValueKind::Tuple(fields)
-            | TypedValueKind::UnboxedTuple(fields) => fields.iter().all(value_ok),
-            TypedValueKind::UnboxedRecord(fields) => {
-                fields.iter().all(|(_, field)| value_ok(field))
-            }
-            TypedValueKind::Var { .. }
-            | TypedValueKind::Int(_)
-            | TypedValueKind::I64(_)
-            | TypedValueKind::U64(_)
-            | TypedValueKind::Float(_)
-            | TypedValueKind::Bool(_)
-            | TypedValueKind::Unit
-            | TypedValueKind::Str(_) => true,
+            self.0
         }
     }
-    let mut ok = true;
-    walk::each_value(c, &mut |v| ok &= value_ok(v));
-    walk::each_subcomp(c, &mut |sc| ok &= casts_verify(sc));
-    ok
+
+    let mut check = StableCastCheck(true);
+    check.walk_comp(c);
+    check.0
 }
 
 fn inline_call(
@@ -429,19 +405,20 @@ fn inline_call(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, mem, thread};
 
-    use crate::core::{EffectStrategy, OpGrades};
+    use crate::core::{CoreOp, EffectStrategy, OpGrades};
     use crate::flags::{DynFlags, EffectTier};
     use crate::types::ty::Label;
     use crate::types::Type;
 
     use super::super::effect_lower::lower_effects;
     use super::super::verify::{OperationSig, VerifyEnv};
-    use super::super::{
-        verify, CoreFnSig, CoreQuantifier, CoreType, EffectLowered, Elaborated, TypedLowering,
-    };
+    use super::super::{verify, CoreFnSig, CoreQuantifier, CoreType, EffectLowered, Elaborated};
     use super::*;
+
+    const DEEP_INLINE_QUERY_NODE_COUNT: usize = 50_000;
+    const ORDINARY_TEST_STACK: usize = 2 * 1024 * 1024;
 
     fn sym(name: &str) -> Sym {
         Sym::new(name)
@@ -467,6 +444,36 @@ mod tests {
 
     fn ret(value: TypedValue) -> TypedComp {
         TypedComp::new(pure(value.ty.clone()), TypedCompKind::Return(value))
+    }
+
+    #[test]
+    fn inline_queries_handle_deep_terms_on_an_ordinary_stack() {
+        thread::Builder::new()
+            .name("deep-inline-queries".into())
+            .stack_size(ORDINARY_TEST_STACK)
+            .spawn(|| {
+                let mut value = TypedValue::new(source(Type::Int), TypedValueKind::Int(0));
+                for index in 0..DEEP_INLINE_QUERY_NODE_COUNT {
+                    let ty = if index % 2 == 0 {
+                        source(Type::Char)
+                    } else {
+                        source(Type::Int)
+                    };
+                    value = TypedValue::new(ty, TypedValueKind::Reinterpret(Box::new(value)));
+                }
+                let mut body = ret(value);
+                for _ in 0..DEEP_INLINE_QUERY_NODE_COUNT {
+                    let sig = body.sig().clone();
+                    body = TypedComp::new(sig, TypedCompKind::Mask(Vec::new(), Box::new(body)));
+                }
+
+                assert_eq!(body_size(&body), DEEP_INLINE_QUERY_NODE_COUNT + 1);
+                assert!(casts_verify(&body));
+                mem::forget(body);
+            })
+            .expect("spawn deep inline-query test")
+            .join()
+            .expect("deep inline-query test panicked");
     }
 
     // `g(z) = z`, an Int -> Int leaf callee referenced by several fixtures below.
@@ -509,7 +516,7 @@ mod tests {
             TypedComp::new(
                 pure(source(Type::Int)),
                 TypedCompKind::Prim(
-                    crate::core::CoreOp::Add,
+                    CoreOp::Add,
                     var("n", source(Type::Int)),
                     TypedValue::new(source(Type::Int), TypedValueKind::Int(1)),
                 ),
@@ -579,18 +586,13 @@ mod tests {
             quiet: true,
             ..DynFlags::default()
         };
-        let TypedLowering {
-            core: lowered,
-            env,
-            ctors,
-            warning: _,
-            strategy,
-            confined_decline: _,
-        } = lower_effects(input, &env, &BTreeMap::new(), &flags, &OpGrades::new())
+        let lowering = lower_effects(input, &env, &BTreeMap::new(), &flags, &OpGrades::new())
             .expect("fixture lowers through the production effect ABI");
-        assert_eq!(strategy, EffectStrategy::SelectiveFreeMonad);
-        assert!(ctors.contains_key("EPure"));
-        assert!(ctors.contains_key("EOp"));
+        assert_eq!(lowering.strategy(), EffectStrategy::SelectiveFreeMonad);
+        assert!(lowering.constructors().contains_key("EPure"));
+        assert!(lowering.constructors().contains_key("EOp"));
+        let env = lowering.env().clone();
+        let lowered = lowering.core().clone();
         let lowered_main = lowered
             .functions()
             .iter()
@@ -860,6 +862,173 @@ mod tests {
             }
             other => panic!("expected inlined identity body, got {other:?}"),
         }
+    }
+
+    // A multi-site callee admitted by its summary: `two` returns a constant,
+    // allocates nothing, builds no closures, and is tiny, so both call sites
+    // splice it and no call to it remains anywhere.
+    #[test]
+    fn cheap_constant_function_inlines_at_every_site() {
+        let env = VerifyEnv::new();
+        let two = TypedCoreFn::new(
+            sym("two"),
+            Vec::new(),
+            ret(TypedValue::new(source(Type::Int), TypedValueKind::Int(2))),
+            CoreFnSig::new(Vec::new(), Vec::new(), pure(source(Type::Int))),
+            0,
+        );
+        let call_two = || {
+            TypedComp::new(
+                pure(source(Type::Int)),
+                TypedCompKind::Call {
+                    callee: sym("two"),
+                    instantiation: Vec::new(),
+                    args: Vec::new(),
+                },
+            )
+        };
+        let sum = TypedComp::new(
+            pure(source(Type::Int)),
+            TypedCompKind::Prim(
+                CoreOp::Add,
+                var("a", source(Type::Int)),
+                var("b", source(Type::Int)),
+            ),
+        );
+        let main_body = TypedComp::new(
+            pure(source(Type::Int)),
+            TypedCompKind::Bind(
+                Box::new(call_two()),
+                TypedBinder::new(sym("a"), source(Type::Int)),
+                Box::new(TypedComp::new(
+                    pure(source(Type::Int)),
+                    TypedCompKind::Bind(
+                        Box::new(call_two()),
+                        TypedBinder::new(sym("b"), source(Type::Int)),
+                        Box::new(sum),
+                    ),
+                )),
+            ),
+        );
+        let main = TypedCoreFn::new(
+            sym("main"),
+            Vec::new(),
+            main_body,
+            CoreFnSig::new(Vec::new(), Vec::new(), pure(source(Type::Int))),
+            0,
+        );
+        let (actual, ticks) = run_inline(vec![main, two], &env);
+        assert_eq!(ticks, 2, "both sites of the cheap constant must splice");
+        let main = actual
+            .functions()
+            .iter()
+            .find(|function| function.name() == sym("main"))
+            .unwrap();
+        assert!(calls_in(main.body()).is_empty());
+    }
+
+    // A multi-site callee that allocates its result is never
+    // summary-admitted: splicing would duplicate the allocation decision at
+    // every site, so with two call sites it must stay a call.
+    #[test]
+    fn allocating_multi_site_function_stays_a_call() {
+        let env = VerifyEnv::new();
+        let pair_ty = source(Type::Tuple(vec![Type::Int, Type::Int]));
+        let pair = TypedCoreFn::new(
+            sym("pair"),
+            vec![TypedBinder::new(sym("p"), source(Type::Int))],
+            ret(TypedValue::new(
+                pair_ty.clone(),
+                TypedValueKind::Tuple(vec![
+                    var("p", source(Type::Int)),
+                    var("p", source(Type::Int)),
+                ]),
+            )),
+            CoreFnSig::new(Vec::new(), vec![source(Type::Int)], pure(pair_ty.clone())),
+            0,
+        );
+        let call_pair = |n: i64| {
+            TypedComp::new(
+                pure(pair_ty.clone()),
+                TypedCompKind::Call {
+                    callee: sym("pair"),
+                    instantiation: Vec::new(),
+                    args: vec![TypedValue::new(source(Type::Int), TypedValueKind::Int(n))],
+                },
+            )
+        };
+        let main_body = TypedComp::new(
+            pure(pair_ty.clone()),
+            TypedCompKind::Bind(
+                Box::new(call_pair(1)),
+                TypedBinder::new(sym("first_pair"), pair_ty.clone()),
+                Box::new(call_pair(2)),
+            ),
+        );
+        let main = TypedCoreFn::new(
+            sym("main"),
+            Vec::new(),
+            main_body,
+            CoreFnSig::new(Vec::new(), Vec::new(), pure(pair_ty)),
+            0,
+        );
+        let (_, ticks) = run_inline(vec![main, pair], &env);
+        assert_eq!(ticks, 0, "an allocating body must not be pasted per site");
+    }
+
+    // The node budget is a hard clause: a multi-site body that forwards its
+    // parameter and allocates nothing is still declined once its tree exceeds
+    // the budget, so code growth stays bounded by construction.
+    #[test]
+    fn oversized_multi_site_function_stays_a_call() {
+        let env = VerifyEnv::new();
+        // A chain of rebinds of `x`: harmless, non-allocating, and past the
+        // node budget by construction.
+        let mut body = ret(var("x", source(Type::Int)));
+        for step in 0..INLINE_CHEAP_BODY_MAX {
+            body = TypedComp::new(
+                pure(source(Type::Int)),
+                TypedCompKind::Bind(
+                    Box::new(ret(var("x", source(Type::Int)))),
+                    TypedBinder::new(sym(&format!("step{step}")), source(Type::Int)),
+                    Box::new(body),
+                ),
+            );
+        }
+        let big = TypedCoreFn::new(
+            sym("big"),
+            vec![TypedBinder::new(sym("x"), source(Type::Int))],
+            body,
+            CoreFnSig::new(Vec::new(), vec![source(Type::Int)], pure(source(Type::Int))),
+            0,
+        );
+        let call_big = |n: i64| {
+            TypedComp::new(
+                pure(source(Type::Int)),
+                TypedCompKind::Call {
+                    callee: sym("big"),
+                    instantiation: Vec::new(),
+                    args: vec![TypedValue::new(source(Type::Int), TypedValueKind::Int(n))],
+                },
+            )
+        };
+        let main_body = TypedComp::new(
+            pure(source(Type::Int)),
+            TypedCompKind::Bind(
+                Box::new(call_big(1)),
+                TypedBinder::new(sym("ignored"), source(Type::Int)),
+                Box::new(call_big(2)),
+            ),
+        );
+        let main = TypedCoreFn::new(
+            sym("main"),
+            Vec::new(),
+            main_body,
+            CoreFnSig::new(Vec::new(), Vec::new(), pure(source(Type::Int))),
+            0,
+        );
+        let (_, ticks) = run_inline(vec![main, big], &env);
+        assert_eq!(ticks, 0, "an oversized body must not be pasted per site");
     }
 
     // A chain of two single-call-site wrappers inlines fully in one sweep: the

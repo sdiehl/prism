@@ -1,0 +1,3 @@
+fn apply(f : ((Int) -> Int) @ noalloc, x : Int) : Int = f(x)
+
+fn drive(x : Int) : Int = apply(\(y) -> y + x, x)

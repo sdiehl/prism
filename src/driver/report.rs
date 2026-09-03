@@ -6,9 +6,7 @@
 //! `prism::report_on`, `prism::shape_digests_of`) resolves through the re-export
 //! in `mod.rs`, so the split is invisible to callers.
 
-use std::collections::BTreeMap;
-use std::fmt::Write as _;
-use std::path::Path;
+use std::{collections::BTreeMap, fmt::Write as _, path::Path};
 
 use crate::core::{elaborate_typed, insert_rc, pp_core_pretty, reuse, Digest};
 use crate::error::Error;
@@ -20,6 +18,8 @@ use crate::types::Checked;
 
 #[cfg(feature = "native")]
 use crate::core::fbip::borrow_sigs;
+#[cfg(feature = "native")]
+use crate::core::typed::effect_lower::FinishedLowering;
 #[cfg(feature = "native")]
 use crate::core::{fip_annots, hash_program};
 #[cfg(feature = "native")]
@@ -36,11 +36,11 @@ use super::verify::{fip_check, replayable_check};
 use super::{finish_lowered, hash_meta, lower_opt};
 // The rendered `fbip (rc)` section is not native-gated, so its borrow masks are
 // needed on every target.
-use super::{frontend, rc_borrow_sigs, validated_elaborated_core, Config};
+use super::{frontend, rc_borrow_sigs, Config};
 
 pub(super) fn types_section(checked: &Checked) -> String {
     let mut s = String::new();
-    for d in &checked.decls {
+    for d in &checked.defs.decls {
         writeln!(s, "{} : {}", d.name, checked.show_sig(d)).unwrap();
     }
     s
@@ -106,16 +106,9 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
         }
     };
     let (core, typed, verify_env) = elaboration.into_parts();
-    let core = match validated_elaborated_core(core) {
-        Ok(core) => core,
-        Err(error) => {
-            section(&mut out, "core (cbpv)", &render(error));
-            return out;
-        }
-    };
     section(&mut out, "core (cbpv)", pp_core_pretty(&core).trim_end());
 
-    if let Err(e) = fip_check(&program, &checked, &core) {
+    if let Err(e) = fip_check(&program, &checked, &core, &typed) {
         section(&mut out, "fip", &render(e));
         return out;
     }
@@ -136,13 +129,12 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
     match lower_opt(
         typed,
         &verify_env,
-        &checked.ctors,
+        &checked.defs.ctors,
         &checked.op_grades(),
         cfg,
     )
     .and_then(|lowered| {
-        let ctors = lowered.ctors.clone();
-        finish_lowered(lowered, &sigs, cfg).map(|core| (core, ctors))
+        finish_lowered(lowered, &sigs, cfg).map(FinishedLowering::into_core_and_constructors)
     }) {
         Ok((lowered, ctors)) => {
             // Identity reads the declared masks; the augmented `sigs` above are
@@ -157,7 +149,7 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
                         &lowered,
                         &ctors,
                         &native_kont_table,
-                        cfg.flags.native_kont_frames,
+                        cfg.flags().native_kont_frames,
                     )
                     .map_err(Error::CodegenBackend)
                 }) {
@@ -168,7 +160,8 @@ pub fn report_on(src: &str, roots: &[Root], cfg: &Config) -> String {
         Err(e) => section(&mut out, "llvm", &format!("(skipped: {e})")),
     }
 
-    match run(&core) {
+    let identity = super::execution::identity_of(src, roots, cfg);
+    match run(&core, Some(&identity)) {
         Ok(r) => {
             let outs: Vec<String> = r.out.iter().map(Rv::show).collect();
             section(

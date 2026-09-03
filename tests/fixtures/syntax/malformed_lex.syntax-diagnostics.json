@@ -1,6 +1,6 @@
 {
   "schema": "prism-syntax-diagnostics-v1",
-  "compiler": "0.21.0",
+  "compiler": "<version>",
   "source": {
     "digest": "41358ee7e6ea6932261367885e0bb97e10b5ae0d0f9d51d621e376736953fae9",
     "text": "-- An unterminated string literal: the lexer refuses this file.\nfn main() = println(\"oops\n"

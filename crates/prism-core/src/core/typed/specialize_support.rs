@@ -10,315 +10,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use prism_common::sym::Sym;
 use prism_syntax::names;
 
-use crate::core::work;
-
 use super::verify::{
     substitute_core_type, substitute_fn_sig, substitute_label, substitute_row, substitute_sig,
     substitute_type,
 };
 use super::{
     CompSig, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, TypedBinder, TypedComp,
-    TypedCompKind, TypedCoreFn, TypedForward, TypedHandleOp, TypedHandler, TypedPattern,
-    TypedValue, TypedValueKind,
+    TypedCompKind, TypedForward, TypedHandleOp, TypedHandler, TypedPattern, TypedValue,
+    TypedValueKind,
 };
 
-/// One structural typed-Core rewrite.
-///
-/// The default descent is the exhaustive node inventory for private typed
-/// passes. Implementors override only the nodes or witness leaves they change.
-/// Binder-sensitive rewrites override the corresponding computation forms so
-/// their context extension stays explicit.
-pub(crate) trait Rewrite {
-    type Ctx;
-
-    fn core_type(&mut self, ty: &CoreType, _cx: &Self::Ctx) -> CoreType {
-        ty.clone()
-    }
-
-    fn comp_sig(&mut self, sig: &CompSig, _cx: &Self::Ctx) -> CompSig {
-        sig.clone()
-    }
-
-    fn fn_sig(&mut self, sig: &CoreFnSig, _cx: &Self::Ctx) -> CoreFnSig {
-        sig.clone()
-    }
-
-    fn instantiation(
-        &mut self,
-        instantiation: &CoreInstantiation,
-        _cx: &Self::Ctx,
-    ) -> CoreInstantiation {
-        instantiation.clone()
-    }
-
-    fn forward(&mut self, forward: &TypedForward, _cx: &Self::Ctx) -> TypedForward {
-        forward.clone()
-    }
-
-    fn binder(&mut self, binder: &TypedBinder, cx: &Self::Ctx) -> TypedBinder {
-        TypedBinder::new(binder.name, self.core_type(&binder.ty, cx))
-    }
-
-    fn pattern(&mut self, pattern: &TypedPattern, cx: &Self::Ctx) -> TypedPattern {
-        match pattern {
-            TypedPattern::Wild => TypedPattern::Wild,
-            TypedPattern::Var(binder) => TypedPattern::Var(self.binder(binder, cx)),
-            TypedPattern::Ctor {
-                name,
-                instantiation,
-                fields,
-            } => TypedPattern::Ctor {
-                name: *name,
-                instantiation: self.instantiations(instantiation, cx),
-                fields: fields
-                    .iter()
-                    .map(|binder| binder.as_ref().map(|binder| self.binder(binder, cx)))
-                    .collect(),
-            },
-            TypedPattern::Tuple(fields) => TypedPattern::Tuple(
-                fields
-                    .iter()
-                    .map(|binder| binder.as_ref().map(|binder| self.binder(binder, cx)))
-                    .collect(),
-            ),
-        }
-    }
-
-    fn value(&mut self, value: &TypedValue, cx: &Self::Ctx) -> TypedValue {
-        self.descend_value(value, cx)
-    }
-
-    fn comp(&mut self, comp: &TypedComp, cx: &Self::Ctx) -> TypedComp {
-        self.descend_comp(comp, cx)
-    }
-
-    fn function(&mut self, function: &TypedCoreFn, cx: &Self::Ctx) -> TypedCoreFn {
-        TypedCoreFn::new(
-            function.name,
-            function
-                .params
-                .iter()
-                .map(|binder| self.binder(binder, cx))
-                .collect(),
-            self.comp(&function.body, cx),
-            self.fn_sig(&function.sig, cx),
-            function.dict_arity,
-        )
-    }
-
-    fn instantiations(
-        &mut self,
-        instantiations: &[CoreInstantiation],
-        cx: &Self::Ctx,
-    ) -> Vec<CoreInstantiation> {
-        instantiations
-            .iter()
-            .map(|instantiation| self.instantiation(instantiation, cx))
-            .collect()
-    }
-
-    #[allow(clippy::too_many_lines)]
-    fn descend_value(&mut self, value: &TypedValue, cx: &Self::Ctx) -> TypedValue {
-        let _frame = work::frame();
-        work::rebuild();
-        let kind = match &value.kind {
-            TypedValueKind::Var {
-                name,
-                instantiation,
-            } => TypedValueKind::Var {
-                name: *name,
-                instantiation: self.instantiations(instantiation, cx),
-            },
-            TypedValueKind::Int(value) => TypedValueKind::Int(*value),
-            TypedValueKind::I64(value) => TypedValueKind::I64(*value),
-            TypedValueKind::U64(value) => TypedValueKind::U64(*value),
-            TypedValueKind::Float(value) => TypedValueKind::Float(*value),
-            TypedValueKind::Bool(value) => TypedValueKind::Bool(*value),
-            TypedValueKind::Unit => TypedValueKind::Unit,
-            TypedValueKind::Str(value) => TypedValueKind::Str(value.clone()),
-            TypedValueKind::Reinterpret(value) => {
-                TypedValueKind::Reinterpret(Box::new(self.value(value, cx)))
-            }
-            TypedValueKind::LoweredRepr { value, proof } => TypedValueKind::LoweredRepr {
-                value: Box::new(self.value(value, cx)),
-                proof: proof.clone(),
-            },
-            TypedValueKind::NewtypeRepr {
-                constructor,
-                instantiation,
-                value,
-            } => TypedValueKind::NewtypeRepr {
-                constructor: *constructor,
-                instantiation: self.instantiations(instantiation, cx),
-                value: Box::new(self.value(value, cx)),
-            },
-            TypedValueKind::Thunk(body) => TypedValueKind::Thunk(Box::new(self.comp(body, cx))),
-            TypedValueKind::Ctor {
-                name,
-                tag,
-                instantiation,
-                fields,
-            } => TypedValueKind::Ctor {
-                name: *name,
-                tag: *tag,
-                instantiation: self.instantiations(instantiation, cx),
-                fields: fields.iter().map(|field| self.value(field, cx)).collect(),
-            },
-            TypedValueKind::Tuple(fields) => {
-                TypedValueKind::Tuple(fields.iter().map(|field| self.value(field, cx)).collect())
-            }
-            TypedValueKind::UnboxedTuple(fields) => TypedValueKind::UnboxedTuple(
-                fields.iter().map(|field| self.value(field, cx)).collect(),
-            ),
-            TypedValueKind::UnboxedRecord(fields) => TypedValueKind::UnboxedRecord(
-                fields
-                    .iter()
-                    .map(|(name, field)| (*name, self.value(field, cx)))
-                    .collect(),
-            ),
-        };
-        TypedValue::new(self.core_type(&value.ty, cx), kind)
-    }
-
-    #[allow(clippy::too_many_lines)]
-    fn descend_comp(&mut self, comp: &TypedComp, cx: &Self::Ctx) -> TypedComp {
-        let _frame = work::frame();
-        work::rebuild();
-        let kind = match &comp.kind {
-            TypedCompKind::Return(value) => TypedCompKind::Return(self.value(value, cx)),
-            TypedCompKind::Bind(first, binder, rest) => TypedCompKind::Bind(
-                Box::new(self.comp(first, cx)),
-                self.binder(binder, cx),
-                Box::new(self.comp(rest, cx)),
-            ),
-            TypedCompKind::Force(value) => TypedCompKind::Force(self.value(value, cx)),
-            TypedCompKind::Lam(params, body) => TypedCompKind::Lam(
-                params
-                    .iter()
-                    .map(|binder| self.binder(binder, cx))
-                    .collect(),
-                Box::new(self.comp(body, cx)),
-            ),
-            TypedCompKind::App {
-                callee,
-                instantiation,
-                args,
-            } => TypedCompKind::App {
-                callee: Box::new(self.comp(callee, cx)),
-                instantiation: self.instantiations(instantiation, cx),
-                args: args.iter().map(|arg| self.value(arg, cx)).collect(),
-            },
-            TypedCompKind::If(condition, yes, no) => TypedCompKind::If(
-                self.value(condition, cx),
-                Box::new(self.comp(yes, cx)),
-                Box::new(self.comp(no, cx)),
-            ),
-            TypedCompKind::Prim(op, lhs, rhs) => {
-                TypedCompKind::Prim(*op, self.value(lhs, cx), self.value(rhs, cx))
-            }
-            TypedCompKind::Call {
-                callee,
-                instantiation,
-                args,
-            } => TypedCompKind::Call {
-                callee: *callee,
-                instantiation: self.instantiations(instantiation, cx),
-                args: args.iter().map(|arg| self.value(arg, cx)).collect(),
-            },
-            TypedCompKind::Io(op, args) => {
-                TypedCompKind::Io(*op, args.iter().map(|arg| self.value(arg, cx)).collect())
-            }
-            TypedCompKind::Error(value) => TypedCompKind::Error(self.value(value, cx)),
-            TypedCompKind::Case(scrutinee, arms) => TypedCompKind::Case(
-                self.value(scrutinee, cx),
-                arms.iter()
-                    .map(|(pattern, body)| (self.pattern(pattern, cx), self.comp(body, cx)))
-                    .collect(),
-            ),
-            TypedCompKind::FloatBuiltin(op, value) => {
-                TypedCompKind::FloatBuiltin(*op, self.value(value, cx))
-            }
-            TypedCompKind::Neg(lane, value) => TypedCompKind::Neg(*lane, self.value(value, cx)),
-            TypedCompKind::UnboxedProject(value, field) => {
-                TypedCompKind::UnboxedProject(self.value(value, cx), *field)
-            }
-            TypedCompKind::Do {
-                operation,
-                instantiation,
-                args,
-            } => TypedCompKind::Do {
-                operation: *operation,
-                instantiation: self.instantiations(instantiation, cx),
-                args: args.iter().map(|arg| self.value(arg, cx)).collect(),
-            },
-            TypedCompKind::Handle {
-                body,
-                return_binder,
-                return_body,
-                ops,
-            } => TypedCompKind::Handle {
-                body: Box::new(self.comp(body, cx)),
-                return_binder: return_binder.as_ref().map(|binder| self.binder(binder, cx)),
-                return_body: return_body
-                    .as_ref()
-                    .map(|body| Box::new(self.comp(body, cx))),
-                ops: TypedHandler {
-                    arms: ops
-                        .arms
-                        .iter()
-                        .map(|arm| TypedHandleOp {
-                            name: arm.name,
-                            instantiation: self.instantiations(&arm.instantiation, cx),
-                            params: arm
-                                .params
-                                .iter()
-                                .map(|binder| self.binder(binder, cx))
-                                .collect(),
-                            resume: self.binder(&arm.resume, cx),
-                            body: self.comp(&arm.body, cx),
-                        })
-                        .collect(),
-                    forwarded: ops
-                        .forwarded
-                        .iter()
-                        .map(|forward| self.forward(forward, cx))
-                        .collect(),
-                },
-            },
-            TypedCompKind::Mask(effects, body) => {
-                TypedCompKind::Mask(effects.clone(), Box::new(self.comp(body, cx)))
-            }
-            TypedCompKind::StrBuiltin {
-                op,
-                instantiation,
-                args,
-            } => TypedCompKind::StrBuiltin {
-                op: *op,
-                instantiation: self.instantiations(instantiation, cx),
-                args: args.iter().map(|arg| self.value(arg, cx)).collect(),
-            },
-            TypedCompKind::Dup(value) => TypedCompKind::Dup(self.value(value, cx)),
-            TypedCompKind::Drop(value) => TypedCompKind::Drop(self.value(value, cx)),
-            TypedCompKind::WithReuse { token, freed, body } => TypedCompKind::WithReuse {
-                token: self.binder(token, cx),
-                freed: self.value(freed, cx),
-                body: Box::new(self.comp(body, cx)),
-            },
-            TypedCompKind::Reuse(token, value) => {
-                TypedCompKind::Reuse(self.binder(token, cx), self.value(value, cx))
-            }
-            TypedCompKind::RefNew(value) => TypedCompKind::RefNew(self.value(value, cx)),
-            TypedCompKind::RefGet(value) => TypedCompKind::RefGet(self.value(value, cx)),
-            TypedCompKind::RefSet(cell, value) => {
-                TypedCompKind::RefSet(self.value(cell, cx), self.value(value, cx))
-            }
-            TypedCompKind::InitAt(cell, ctor) => {
-                TypedCompKind::InitAt(self.value(cell, cx), self.value(ctor, cx))
-            }
-        };
-        TypedComp::new(self.comp_sig(&comp.sig, cx), kind)
-    }
-}
+pub(crate) use super::traverse::Rewrite;
 
 /// Substitute any supplied prefix of a quantifier list through every typed-Core
 /// witness. Unmatched quantifiers remain rigid, which lets specialization apply
@@ -366,6 +68,10 @@ struct TypeSubstitution<'a> {
 
 impl Rewrite for TypeSubstitution<'_> {
     type Ctx = ();
+
+    fn comp(&mut self, comp: &TypedComp, cx: &Self::Ctx) -> TypedComp {
+        self.rewrite_comp_from_hooks(comp, cx)
+    }
 
     fn core_type(&mut self, ty: &CoreType, _cx: &Self::Ctx) -> CoreType {
         substitute_core_type(ty, self.quantifiers, self.arguments)
@@ -656,317 +362,11 @@ impl Rewrite for TermSubstitution<'_> {
     }
 }
 
-/// What the traversal hands a sink for one free reference.
-///
-/// Almost every reference is a value occurrence, which is the term the name was
-/// read through and therefore the only witness that records its instantiation. A
-/// reuse token is the exception: it names a binder directly with no value around
-/// it, so its witness is the binder itself.
-pub(crate) enum FreeRef<'a> {
-    Occurrence(&'a TypedValue),
-    Token(&'a TypedBinder),
-}
-
-/// Where a free-variable walk sends the references it finds.
-///
-/// The traversal carries no policy: a caller that wants names alone collects
-/// into a set, and a caller that has to justify a later rewrite collects the
-/// witnesses too, both from this one walk. Reference counting needs the second
-/// and must not pay for a second traversal to get it.
-pub(crate) trait FreeRefs {
-    fn see(&mut self, name: Sym, reference: &FreeRef<'_>);
-}
-
-impl FreeRefs for BTreeSet<Sym> {
-    fn see(&mut self, name: Sym, _: &FreeRef<'_>) {
-        self.insert(name);
-    }
-}
-
-/// The value a binder denotes where it is in scope.
-///
-/// A binder is monomorphic at its own binding site, so its occurrence carries an
-/// empty instantiation by construction.
-pub(crate) fn binder_occurrence(binder: &TypedBinder) -> TypedValue {
-    TypedValue::new(
-        binder.ty.clone(),
-        TypedValueKind::Var {
-            name: binder.name,
-            instantiation: Vec::new(),
-        },
-    )
-}
-
-/// First witness per free name in a typed computation.
-///
-/// "First" is in traversal order, which makes the map deterministic, and every
-/// entry is a reference live somewhere inside `comp`. That is the property a
-/// consumer needs: a witness taken from this map justifies an operation emitted
-/// against this subtree, unlike one taken from a whole-program index.
-pub(crate) fn free_comp_var_witnesses(comp: &TypedComp) -> BTreeMap<Sym, TypedValue> {
-    struct First(BTreeMap<Sym, TypedValue>);
-    impl FreeRefs for First {
-        fn see(&mut self, name: Sym, reference: &FreeRef<'_>) {
-            self.0.entry(name).or_insert_with(|| match reference {
-                FreeRef::Occurrence(value) => (*value).clone(),
-                FreeRef::Token(binder) => binder_occurrence(binder),
-            });
-        }
-    }
-    let mut sink = First(BTreeMap::new());
-    collect_comp_vars(comp, &mut BoundStack::new(), &mut sink);
-    sink.0
-}
-
-/// Free local/global term references in a typed computation.
-pub(crate) fn free_comp_vars(comp: &TypedComp) -> BTreeSet<Sym> {
-    let mut free = BTreeSet::new();
-    collect_comp_vars(comp, &mut BoundStack::new(), &mut free);
-    free
-}
-
-/// Free local/global term references in a typed value, including thunk bodies.
-pub(crate) fn free_value_vars(value: &TypedValue) -> BTreeSet<Sym> {
-    let mut free = BTreeSet::new();
-    collect_value_vars(value, &mut BoundStack::new(), &mut free);
-    free
-}
-
-// Count computation nodes visited by free-variable collection in a single
-// unit-test thread. This is structural instrumentation, not a wall-clock
-// benchmark: RC's bind-spine regression can therefore pin linear work without
-// becoming sensitive to CI load. `None` keeps unrelated tests uncounted.
 #[cfg(test)]
-thread_local! {
-    static FREE_COMP_VAR_VISITS: std::cell::Cell<Option<usize>> = const {
-        std::cell::Cell::new(None)
-    };
-}
-
-#[cfg(test)]
-pub(crate) fn count_free_comp_var_visits<T>(f: impl FnOnce() -> T) -> (T, usize) {
-    FREE_COMP_VAR_VISITS.with(|visits| {
-        assert!(
-            visits.replace(Some(0)).is_none(),
-            "free-variable visit counters cannot be nested"
-        );
-    });
-    let result = f();
-    let count = FREE_COMP_VAR_VISITS.with(|visits| {
-        visits
-            .replace(None)
-            .expect("free-variable visit counter is active")
-    });
-    (result, count)
-}
-
-/// A lexical binder stack with sublinear membership.
-///
-/// The stack preserves push order for scoped save/restore while a count map
-/// answers membership without scanning the frames, so free-variable collection
-/// over a deep binder chain stays linear. Counting (rather than a set) keeps a
-/// shadowed name bound until every frame introducing it has been popped.
-pub(crate) struct BoundStack {
-    stack: Vec<Sym>,
-    counts: BTreeMap<Sym, u32>,
-}
-
-impl BoundStack {
-    pub(crate) const fn new() -> Self {
-        Self {
-            stack: Vec::new(),
-            counts: BTreeMap::new(),
-        }
-    }
-
-    pub(crate) const fn mark(&self) -> usize {
-        self.stack.len()
-    }
-
-    pub(crate) fn push(&mut self, name: Sym) {
-        self.stack.push(name);
-        *self.counts.entry(name).or_insert(0) += 1;
-    }
-
-    pub(crate) fn push_all(&mut self, names: impl IntoIterator<Item = Sym>) {
-        for name in names {
-            self.push(name);
-        }
-    }
-
-    pub(crate) fn pop_to(&mut self, mark: usize) {
-        while self.stack.len() > mark {
-            let name = self.stack.pop().expect("stack is longer than the mark");
-            match self.counts.get_mut(&name) {
-                Some(count) if *count > 1 => *count -= 1,
-                _ => {
-                    self.counts.remove(&name);
-                }
-            }
-        }
-    }
-
-    pub(crate) fn contains(&self, name: Sym) -> bool {
-        self.counts.contains_key(&name)
-    }
-}
-
-fn collect_ref<S: FreeRefs>(name: Sym, reference: &FreeRef<'_>, bound: &BoundStack, free: &mut S) {
-    if !bound.contains(name) {
-        free.see(name, reference);
-    }
-}
-
-fn under<S: FreeRefs>(
-    bound: &mut BoundStack,
-    names: impl IntoIterator<Item = Sym>,
-    body: &TypedComp,
-    free: &mut S,
-) {
-    let mark = bound.mark();
-    bound.push_all(names);
-    collect_comp_vars(body, bound, free);
-    bound.pop_to(mark);
-}
-
-fn collect_value_vars<S: FreeRefs>(value: &TypedValue, bound: &mut BoundStack, free: &mut S) {
-    match &value.kind {
-        TypedValueKind::Var { name, .. } => {
-            collect_ref(*name, &FreeRef::Occurrence(value), bound, free);
-        }
-        TypedValueKind::Reinterpret(value)
-        | TypedValueKind::LoweredRepr { value, proof: _ }
-        | TypedValueKind::NewtypeRepr { value, .. } => {
-            collect_value_vars(value, bound, free);
-        }
-        TypedValueKind::Thunk(body) => collect_comp_vars(body, bound, free),
-        TypedValueKind::Ctor { fields, .. }
-        | TypedValueKind::Tuple(fields)
-        | TypedValueKind::UnboxedTuple(fields) => {
-            for field in fields {
-                collect_value_vars(field, bound, free);
-            }
-        }
-        TypedValueKind::UnboxedRecord(fields) => {
-            for (_, field) in fields {
-                collect_value_vars(field, bound, free);
-            }
-        }
-        TypedValueKind::Int(_)
-        | TypedValueKind::I64(_)
-        | TypedValueKind::U64(_)
-        | TypedValueKind::Float(_)
-        | TypedValueKind::Bool(_)
-        | TypedValueKind::Unit
-        | TypedValueKind::Str(_) => {}
-    }
-}
-
-#[allow(clippy::too_many_lines)]
-fn collect_comp_vars<S: FreeRefs>(comp: &TypedComp, bound: &mut BoundStack, free: &mut S) {
-    #[cfg(test)]
-    FREE_COMP_VAR_VISITS.with(|visits| {
-        if let Some(count) = visits.get() {
-            visits.set(Some(count + 1));
-        }
-    });
-    match &comp.kind {
-        TypedCompKind::Return(value)
-        | TypedCompKind::Force(value)
-        | TypedCompKind::Error(value)
-        | TypedCompKind::FloatBuiltin(_, value)
-        | TypedCompKind::Neg(_, value)
-        | TypedCompKind::UnboxedProject(value, _)
-        | TypedCompKind::Dup(value)
-        | TypedCompKind::Drop(value)
-        | TypedCompKind::RefNew(value)
-        | TypedCompKind::RefGet(value) => collect_value_vars(value, bound, free),
-        TypedCompKind::Reuse(token, value) => {
-            collect_ref(token.name, &FreeRef::Token(token), bound, free);
-            collect_value_vars(value, bound, free);
-        }
-        TypedCompKind::Prim(_, lhs, rhs)
-        | TypedCompKind::RefSet(lhs, rhs)
-        | TypedCompKind::InitAt(lhs, rhs) => {
-            collect_value_vars(lhs, bound, free);
-            collect_value_vars(rhs, bound, free);
-        }
-        TypedCompKind::Bind(first, binder, rest) => {
-            collect_comp_vars(first, bound, free);
-            under(bound, [binder.name], rest, free);
-        }
-        TypedCompKind::Lam(params, body) => {
-            under(bound, params.iter().map(|binder| binder.name), body, free);
-        }
-        TypedCompKind::App { callee, args, .. } => {
-            collect_comp_vars(callee, bound, free);
-            for arg in args {
-                collect_value_vars(arg, bound, free);
-            }
-        }
-        TypedCompKind::If(condition, yes, no) => {
-            collect_value_vars(condition, bound, free);
-            collect_comp_vars(yes, bound, free);
-            collect_comp_vars(no, bound, free);
-        }
-        TypedCompKind::Call { args, .. }
-        | TypedCompKind::Io(_, args)
-        | TypedCompKind::Do { args, .. }
-        | TypedCompKind::StrBuiltin { args, .. } => {
-            for arg in args {
-                collect_value_vars(arg, bound, free);
-            }
-        }
-        TypedCompKind::Case(scrutinee, arms) => {
-            collect_value_vars(scrutinee, bound, free);
-            for (pattern, body) in arms {
-                under(bound, pattern_binders(pattern), body, free);
-            }
-        }
-        TypedCompKind::Handle {
-            body,
-            return_binder,
-            return_body,
-            ops,
-        } => {
-            collect_comp_vars(body, bound, free);
-            if let Some(return_body) = return_body {
-                under(
-                    bound,
-                    return_binder.iter().map(|binder| binder.name),
-                    return_body,
-                    free,
-                );
-            }
-            for arm in &ops.arms {
-                under(
-                    bound,
-                    arm.params
-                        .iter()
-                        .map(|binder| binder.name)
-                        .chain([arm.resume.name]),
-                    &arm.body,
-                    free,
-                );
-            }
-        }
-        TypedCompKind::Mask(_, body) => collect_comp_vars(body, bound, free),
-        TypedCompKind::WithReuse { token, freed, body } => {
-            collect_value_vars(freed, bound, free);
-            under(bound, [token.name], body, free);
-        }
-    }
-}
-
-fn pattern_binders(pattern: &TypedPattern) -> Vec<Sym> {
-    match pattern {
-        TypedPattern::Wild => Vec::new(),
-        TypedPattern::Var(binder) => vec![binder.name],
-        TypedPattern::Ctor { fields, .. } | TypedPattern::Tuple(fields) => {
-            fields.iter().flatten().map(|binder| binder.name).collect()
-        }
-    }
-}
+pub(crate) use super::traverse::count_free_comp_var_visits;
+pub(crate) use super::traverse::{
+    binder_occurrence, free_comp_var_witnesses, free_comp_vars, free_value_vars,
+};
 
 fn pattern_typed_binders(pattern: &TypedPattern) -> Vec<(Sym, CoreType)> {
     match pattern {
@@ -1199,14 +599,18 @@ impl Rewrite for Freshen<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, iter, mem, thread};
 
     use crate::core::fv;
+    use crate::core::typed::TypedCoreFn;
     use crate::types::ty::{EffRow, Label};
     use crate::types::Type;
     use prism_syntax::names::FRESH_SPECIALIZE;
 
     use super::*;
+
+    const DEEP_REWRITE_LAYER_COUNT: usize = 5_000;
+    const ORDINARY_TEST_STACK: usize = 2 * 1024 * 1024;
 
     fn sym(name: &str) -> Sym {
         Sym::new(name)
@@ -1276,12 +680,18 @@ mod tests {
                 ops: TypedHandler {
                     arms: vec![TypedHandleOp {
                         name: sym("ask"),
-                        instantiation: Vec::new(),
+                        instantiation: vec![CoreInstantiation::Type(Type::Int)],
                         params: vec![binder("op_param")],
                         resume: binder("resume"),
                         body: op_body,
                     }],
-                    forwarded: Vec::new(),
+                    forwarded: vec![TypedForward::new(
+                        sym("forwarded"),
+                        Label {
+                            name: sym("Forwarded"),
+                            args: vec![Type::Int],
+                        },
+                    )],
                 },
             },
         );
@@ -1295,13 +705,67 @@ mod tests {
         )
     }
 
+    #[derive(Default)]
+    struct HookTrace(Vec<&'static str>);
+
+    impl Rewrite for HookTrace {
+        type Ctx = ();
+
+        fn core_type(&mut self, ty: &CoreType, (): &()) -> CoreType {
+            self.0.push("type");
+            ty.clone()
+        }
+
+        fn comp_sig(&mut self, sig: &CompSig, (): &()) -> CompSig {
+            self.0.push("comp_sig");
+            sig.clone()
+        }
+
+        fn fn_sig(&mut self, sig: &CoreFnSig, (): &()) -> CoreFnSig {
+            self.0.push("fn_sig");
+            sig.clone()
+        }
+
+        fn instantiation(
+            &mut self,
+            instantiation: &CoreInstantiation,
+            (): &(),
+        ) -> CoreInstantiation {
+            self.0.push("instantiation");
+            instantiation.clone()
+        }
+
+        fn forward(&mut self, forward: &TypedForward, (): &()) -> TypedForward {
+            self.0.push("forward");
+            forward.clone()
+        }
+    }
+
+    #[test]
+    fn iterative_rewrite_preserves_legacy_hook_order() {
+        let function = TypedCoreFn::new(
+            sym("traversal"),
+            vec![binder("parameter")],
+            traversal_fixture(),
+            CoreFnSig::new(Vec::new(), vec![int_type()], sig(int_type())),
+            0,
+        );
+        let mut legacy = HookTrace::default();
+        let legacy_output = legacy.function(&function, &());
+        let mut iterative = HookTrace::default();
+        let iterative_output = iterative.rewrite_function_from_hooks(&function, &());
+
+        assert_eq!(iterative.0, legacy.0);
+        assert_eq!(iterative_output, legacy_output);
+    }
+
     #[test]
     fn freshening_renames_binders_and_preserves_free_variables() {
         let fixture = traversal_fixture();
         // The only free reference in the fixture is the outer `Bind` producer.
         assert_eq!(
             free_comp_vars(&fixture),
-            std::iter::once(sym("outside")).collect()
+            iter::once(sym("outside")).collect()
         );
 
         let mut counter = 0;
@@ -1322,6 +786,221 @@ mod tests {
     fn free_variables_match_legacy_across_all_binder_families() {
         let typed = traversal_fixture();
         assert_eq!(free_comp_vars(&typed), fv::comp(&typed.clone().erase()));
+    }
+
+    #[test]
+    fn typed_visit_handles_deep_bind_chain_on_the_normal_stack() {
+        const DEPTH: usize = 20_000;
+        let mut typed = ret(var("outside"));
+        for _ in 0..DEPTH {
+            typed = TypedComp::new(
+                sig(int_type()),
+                TypedCompKind::Bind(
+                    Box::new(ret(TypedValue::new(int_type(), TypedValueKind::Int(0)))),
+                    binder("shadow"),
+                    Box::new(typed),
+                ),
+            );
+        }
+        assert_eq!(free_comp_vars(&typed), iter::once(sym("outside")).collect());
+        // Recursive destruction of this deliberately adversarial fixture is
+        // unrelated to the traversal property under test.
+        mem::forget(typed);
+    }
+
+    #[test]
+    fn typed_rewrite_handles_deep_mixed_terms_on_an_ordinary_stack() {
+        thread::Builder::new()
+            .name("deep-typed-rewrite".into())
+            .stack_size(ORDINARY_TEST_STACK)
+            .spawn(|| {
+                let type_variable = sym("a");
+                let row_variable = sym("e");
+                let quantifiers = [
+                    CoreQuantifier::Type(type_variable),
+                    CoreQuantifier::Row(row_variable),
+                ];
+                let arguments = [
+                    CoreInstantiation::Type(Type::Int),
+                    CoreInstantiation::Row(EffRow::singleton("IO")),
+                ];
+                let variable_type = source(Type::Var(type_variable));
+                let variable_sig = CompSig::new(variable_type.clone(), EffRow::Var(row_variable));
+                let instantiation = vec![
+                    CoreInstantiation::Type(Type::Var(type_variable)),
+                    CoreInstantiation::Row(EffRow::Var(row_variable)),
+                ];
+                let polymorphic_value = || {
+                    TypedValue::new(
+                        variable_type.clone(),
+                        TypedValueKind::Var {
+                            name: sym("value"),
+                            instantiation: instantiation.clone(),
+                        },
+                    )
+                };
+                let mut typed = TypedComp::new(
+                    variable_sig.clone(),
+                    TypedCompKind::Return(polymorphic_value()),
+                );
+                for _ in 0..DEEP_REWRITE_LAYER_COUNT {
+                    let wrapped = TypedValue::new(
+                        variable_type.clone(),
+                        TypedValueKind::NewtypeRepr {
+                            constructor: sym("Box"),
+                            instantiation: instantiation.clone(),
+                            value: Box::new(TypedValue::new(
+                                variable_type.clone(),
+                                TypedValueKind::Reinterpret(Box::new(polymorphic_value())),
+                            )),
+                        },
+                    );
+                    let first =
+                        TypedComp::new(variable_sig.clone(), TypedCompKind::Return(wrapped));
+                    typed = TypedComp::new(
+                        variable_sig.clone(),
+                        TypedCompKind::Bind(
+                            Box::new(first),
+                            TypedBinder::new(sym("bound"), variable_type.clone()),
+                            Box::new(typed),
+                        ),
+                    );
+                    typed = TypedComp::new(
+                        variable_sig.clone(),
+                        TypedCompKind::If(
+                            TypedValue::new(source(Type::Bool), TypedValueKind::Bool(true)),
+                            Box::new(typed),
+                            Box::new(TypedComp::new(
+                                variable_sig.clone(),
+                                TypedCompKind::Return(polymorphic_value()),
+                            )),
+                        ),
+                    );
+                    typed = TypedComp::new(
+                        variable_sig.clone(),
+                        TypedCompKind::Mask(vec![sym("masked")], Box::new(typed)),
+                    );
+                }
+
+                let rewritten = substitute_witnesses(&typed, &quantifiers, &arguments);
+                let expected_sig = CompSig::new(source(Type::Int), EffRow::singleton("IO"));
+                let expected_instantiation = vec![
+                    CoreInstantiation::Type(Type::Int),
+                    CoreInstantiation::Row(EffRow::singleton("IO")),
+                ];
+                let mut cursor = &rewritten;
+                for _ in 0..DEEP_REWRITE_LAYER_COUNT {
+                    assert_eq!(cursor.sig(), &expected_sig);
+                    let TypedCompKind::Mask(_, masked) = cursor.kind() else {
+                        panic!("expected mask")
+                    };
+                    let TypedCompKind::If(_, yes, _) = masked.kind() else {
+                        panic!("expected conditional")
+                    };
+                    let TypedCompKind::Bind(first, binder, rest) = yes.kind() else {
+                        panic!("expected bind")
+                    };
+                    assert_eq!(binder.ty(), expected_sig.result());
+                    let TypedCompKind::Return(wrapped) = first.kind() else {
+                        panic!("expected wrapped return")
+                    };
+                    let TypedValueKind::NewtypeRepr {
+                        instantiation,
+                        value,
+                        ..
+                    } = wrapped.kind()
+                    else {
+                        panic!("expected newtype wrapper")
+                    };
+                    assert_eq!(instantiation, &expected_instantiation);
+                    let TypedValueKind::Reinterpret(value) = value.kind() else {
+                        panic!("expected representation wrapper")
+                    };
+                    let TypedValueKind::Var { instantiation, .. } = value.kind() else {
+                        panic!("expected polymorphic value")
+                    };
+                    assert_eq!(instantiation, &expected_instantiation);
+                    cursor = rest;
+                }
+                assert_eq!(cursor.sig(), &expected_sig);
+                let TypedCompKind::Return(value) = cursor.kind() else {
+                    panic!("expected tail return")
+                };
+                let TypedValueKind::Var { instantiation, .. } = value.kind() else {
+                    panic!("expected tail value")
+                };
+                assert_eq!(instantiation, &expected_instantiation);
+
+                mem::forget(typed);
+                mem::forget(rewritten);
+            })
+            .expect("spawn deep typed-rewrite test")
+            .join()
+            .expect("deep typed-rewrite test panicked");
+    }
+
+    #[test]
+    fn typed_pass_pipeline_handles_deep_spines_on_an_ordinary_stack() {
+        use crate::core::typed::{cse, simplify, Elaborated, UncheckedTypedCore};
+
+        thread::Builder::new()
+            .name("deep-typed-passes".into())
+            .stack_size(ORDINARY_TEST_STACK)
+            .spawn(|| {
+                // Each layer scrutinizes its own condition: a shared variable
+                // would let branch refinement constant-fold every nested If,
+                // and the fold's whole-subtree clone (recursive derived
+                // Clone) is a data operation the construction-time depth
+                // budget bounds, not the walks under test here.
+                let condition = |layer: usize| {
+                    TypedValue::new(
+                        source(Type::Bool),
+                        TypedValueKind::Var {
+                            name: sym(&format!("condition_{layer}")),
+                            instantiation: Vec::new(),
+                        },
+                    )
+                };
+                let mut typed = ret(var("input"));
+                for layer in 0..DEEP_REWRITE_LAYER_COUNT {
+                    typed = TypedComp::new(
+                        sig(int_type()),
+                        TypedCompKind::Bind(
+                            Box::new(ret(var("input"))),
+                            binder("bound"),
+                            Box::new(typed),
+                        ),
+                    );
+                    typed = TypedComp::new(
+                        sig(int_type()),
+                        TypedCompKind::If(
+                            condition(layer),
+                            Box::new(typed),
+                            Box::new(ret(var("input"))),
+                        ),
+                    );
+                }
+                let mut params = vec![binder("input")];
+                params.extend((0..DEEP_REWRITE_LAYER_COUNT).map(|layer| {
+                    TypedBinder::new(sym(&format!("condition_{layer}")), source(Type::Bool))
+                }));
+                let signature = CoreFnSig::new(
+                    Vec::new(),
+                    params.iter().map(|binder| binder.ty.clone()).collect(),
+                    typed.sig.clone(),
+                );
+                let function = TypedCoreFn::new(sym("main"), params, typed, signature, 0);
+                let core = UncheckedTypedCore::<Elaborated>::new(vec![function]);
+                let (core, _) = simplify(core).expect("the deep spine converges");
+                let (core, _) = cse(core);
+                // Recursive destruction of the adversarial fixture is a
+                // separate concern; the property under test is the passes'
+                // control-sensitive walks.
+                mem::forget(core);
+            })
+            .expect("spawn deep-typed-passes test")
+            .join()
+            .expect("deep pass pipeline panicked on an ordinary stack");
     }
 
     #[test]
@@ -1382,7 +1061,7 @@ mod tests {
         // The lambda bound `capture`, so substituting `replace -> capture` must
         // alpha-rename the binder; the freed `capture` therefore stays free.
         let typed = typed.erase();
-        assert_eq!(fv::comp(&typed), std::iter::once(sym("capture")).collect());
+        assert_eq!(fv::comp(&typed), iter::once(sym("capture")).collect());
     }
 
     #[test]

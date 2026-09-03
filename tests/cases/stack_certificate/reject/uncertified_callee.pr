@@ -1,0 +1,5 @@
+-- A claimed function may call only certified callees; a plain helper carries
+-- no bounded-stack certificate, so the diagnostic names it and the fix.
+fn helper(x : Int) : Int = x + 1
+
+fn top(x : Int) : Int @ bounded_stack = helper(x)

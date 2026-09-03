@@ -5,8 +5,8 @@ use marginalia::Span;
 
 use super::env::{collect_type_vars, demand_var_kinds};
 use super::{
-    EffectOperationUses, Entry, Env, HandlerFrame, HoleSite, IndexOp, OperationUses, RowScope, Tc,
-    Wanted,
+    ConstrainedScheme, EffectOperationUses, Entry, Env, FieldRef, HandlerFrame, HoleSite, IndexOp,
+    OperationUses, RowScope, Tc, Wanted,
 };
 use crate::core::builtins::OUTPUT_BUILTINS;
 use crate::error::{suggest, ErrKind, TypeError};
@@ -669,6 +669,7 @@ impl Tc<'_> {
         })
     }
 
+    #[allow(clippy::too_many_lines)] // One arm per expression form; the exhaustive match is the point.
     fn synth_node_inner(
         &mut self,
         env: &Env,
@@ -718,7 +719,11 @@ impl Tc<'_> {
                         suggest::suggestion(x, env.keys().map(|k| names::bare_name(k.as_str()))),
                     )
                 })?;
-                if let Some((scheme, cs)) = self.constrained.get(&Sym::from(x)).cloned() {
+                if let Some(ConstrainedScheme {
+                    scheme,
+                    constraints: cs,
+                }) = self.constrained.get(&Sym::from(x)).cloned()
+                {
                     if same_modulo_latent_row(&t, &scheme) && !cs.is_empty() {
                         // For a mutually-recursive constrained sibling the env-visible
                         // scheme `t` carries the recursion group's shared row
@@ -985,7 +990,18 @@ impl Tc<'_> {
                 };
                 let (cname, field_ty, fi, arity) =
                     self.find_field_projection(span, ctor_name.as_str(), field, &te)?;
-                if self.field_res.insert(id, (cname, fi, arity)).is_some() {
+                if self
+                    .field_res
+                    .insert(
+                        id,
+                        FieldRef {
+                            ctor: cname,
+                            index: fi,
+                            arity,
+                        },
+                    )
+                    .is_some()
+                {
                     return Err(TypeError::InternalInvariant {
                         msg: format!("field node {} produced duplicate resolution facts", id.0),
                     });
@@ -1041,7 +1057,10 @@ impl Tc<'_> {
                 ))
         })?;
         match self.constrained.get(&Sym::from(x)).cloned() {
-            Some((scheme, cs)) if t == scheme && !cs.is_empty() => {
+            Some(ConstrainedScheme {
+                scheme,
+                constraints: cs,
+            }) if t == scheme && !cs.is_empty() => {
                 if names.len() != cs.len() {
                     return Err(ErrKind::ConstraintArgCountMismatch {
                         name: x.clone(),

@@ -4,8 +4,9 @@ use marginalia::Span;
 
 use super::env::{collect_row_vars, collect_type_vars, convert_data, wrap_forall};
 use super::{
-    Canon, ClassInfo, CtorInfo, DataInfo, Dict, Env, HeadKey, InstInfo, InstKeys, NominalRepr, Tc,
-    TypecheckSeed, Wanted, Warning, WarningOrigin,
+    Canon, ClassConstraint, ClassInfo, ConstrainedScheme, CtorInfo, DataInfo, Dict, Env, HeadKey,
+    InstInfo, InstKeys, MethodRef, NominalRepr, Tc, TypeParameter, TypecheckSeed, Wanted, Warning,
+    WarningOrigin,
 };
 use crate::error::suggest;
 use crate::error::{ErrKind, TypeError};
@@ -25,7 +26,7 @@ impl Tc<'_> {
     pub(super) fn instantiate_constrained(
         &mut self,
         scheme: &Type,
-        cs: &[(Sym, Type)],
+        cs: &[ClassConstraint],
         id: NodeId,
         span: Span,
         explicit: Option<&[String]>,
@@ -60,12 +61,12 @@ impl Tc<'_> {
         let items: Vec<_> = cs
             .iter()
             .enumerate()
-            .map(|(i, (class, cty))| {
-                let mut ct = cty.clone();
+            .map(|(i, c)| {
+                let mut ct = c.head.clone();
                 for (n, t) in &subs {
                     ct = ct.subst_var(*n, t);
                 }
-                (class.to_string(), ct, explicit.map(|ns| ns[i].clone()))
+                (c.class.to_string(), ct, explicit.map(|ns| ns[i].clone()))
             })
             .collect();
         if !items.is_empty() {
@@ -400,15 +401,15 @@ impl Tc<'_> {
     }
 }
 
-type BuildClassResult = (
-    BTreeMap<Sym, ClassInfo>,
-    BTreeMap<Sym, InstInfo>,
-    InstKeys,
-    Canon,
-    BTreeMap<Sym, (Sym, usize)>,
-    BTreeMap<Sym, (Type, Vec<(Sym, Type)>)>,
-    Vec<Warning>,
-);
+pub(super) struct ClassBuild {
+    pub(super) classes: BTreeMap<Sym, ClassInfo>,
+    pub(super) instances: BTreeMap<Sym, InstInfo>,
+    pub(super) inst_keys: InstKeys,
+    pub(super) canonical: Canon,
+    pub(super) methods: BTreeMap<Sym, MethodRef>,
+    pub(super) constrained: super::ConstrainedSchemes,
+    pub(super) warnings: Vec<Warning>,
+}
 
 pub(super) const fn head_name(t: &Type) -> Option<HeadKey> {
     match t {
@@ -498,14 +499,14 @@ pub(super) fn build_classes(
     ctors: &mut BTreeMap<String, CtorInfo>,
     env: &mut Env,
     seed: &TypecheckSeed,
-) -> Result<BuildClassResult, TypeError> {
+) -> Result<ClassBuild, TypeError> {
     let fn_names: BTreeSet<&str> = prog.fns.iter().map(|d| d.name.as_str()).collect();
-    let mut classes = seed.classes.clone();
-    let mut instances = seed.instances.clone();
-    let mut inst_keys = seed.inst_keys.clone();
+    let mut classes = seed.classes().clone();
+    let mut instances = seed.instances().clone();
+    let mut inst_keys = seed.instance_keys().clone();
     let mut warnings: Vec<Warning> = Vec::new();
-    let mut methods = seed.methods.clone();
-    let mut constrained = seed.constrained.clone();
+    let mut methods = seed.methods().clone();
+    let mut constrained = seed.constrained().clone();
     for c in &prog.classes {
         if classes.contains_key(&Sym::from(&c.name)) {
             return Err(ErrKind::DuplicateClass {
@@ -543,13 +544,22 @@ pub(super) fn build_classes(
             let sorted: Vec<Sym> = vars.into_iter().collect();
             let scheme = quantify(&t, &sorted);
             env.insert(Sym::from(mname), scheme.clone());
-            methods.insert(Sym::from(mname), (Sym::from(&c.name), idx));
+            methods.insert(
+                Sym::from(mname),
+                MethodRef {
+                    class: Sym::from(&c.name),
+                    index: idx,
+                },
+            );
             constrained.insert(
                 Sym::from(mname),
-                (
+                ConstrainedScheme {
                     scheme,
-                    vec![(Sym::from(&c.name), Type::Var(Sym::from(&c.param)))],
-                ),
+                    constraints: vec![ClassConstraint {
+                        class: Sym::from(&c.name),
+                        head: Type::Var(Sym::from(&c.param)),
+                    }],
+                },
             );
             infos.push((Sym::from(mname), t));
         }
@@ -575,8 +585,10 @@ pub(super) fn build_classes(
         data.insert(
             dname.clone(),
             DataInfo {
-                params: vec![c.param.clone()],
-                param_kinds: vec![Kind::Type],
+                params: vec![TypeParameter {
+                    name: c.param.clone(),
+                    kind: Kind::Type,
+                }],
                 ctors: vec![dname.clone()],
                 repr: NominalRepr::BoxedCell,
             },
@@ -659,8 +671,8 @@ pub(super) fn build_classes(
             },
         );
     }
-    let canonical = build_canonical(prog, &inst_keys, &instances, &seed.canonical)?;
-    Ok((
+    let canonical = build_canonical(prog, &inst_keys, &instances, seed.canonical_instances())?;
+    Ok(ClassBuild {
         classes,
         instances,
         inst_keys,
@@ -668,7 +680,7 @@ pub(super) fn build_classes(
         methods,
         constrained,
         warnings,
-    ))
+    })
 }
 
 // An instance head must be a primitive or a data-type constructor applied to

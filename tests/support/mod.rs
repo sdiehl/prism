@@ -9,6 +9,7 @@
 // spelling, and we side with plain `pub`.
 #![allow(dead_code, unreachable_pub)]
 
+use std::collections::BTreeSet;
 use std::mem::size_of;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -29,6 +30,8 @@ pub mod fuzzgen;
 pub const CHECK_LEAKS: &str = "PRISM_CHECK_LEAKS";
 /// The env var that turns on the runtime's cumulative cell-allocation report.
 pub const ALLOC_STATS: &str = "PRISM_ALLOC_STATS";
+/// The env var that turns on the runtime's in-place reuse report.
+pub const REUSE_STATS: &str = "PRISM_REUSE_STATS";
 
 /// Every counter the C runtime reports writes one `prism: <n> <suffix>` line to
 /// stderr under its own env var. This is the one home for that family: an oracle
@@ -43,13 +46,13 @@ pub const ALLOC_STATS: &str = "PRISM_ALLOC_STATS";
 /// diverges the whole corpus against an interpreter that never printed it.
 /// [`counter_reports_are_registered`] holds the list against the runtime source.
 const COUNTER_PREFIX: &str = "prism: ";
-const LEAKED_SUFFIX: &str = " cells leaked";
-const ALLOCATED_SUFFIX: &str = " cells allocated";
+pub const LEAKED_SUFFIX: &str = " cells leaked";
+pub const ALLOCATED_SUFFIX: &str = " cells allocated";
 /// Companion byte total to [`ALLOCATED_SUFFIX`], reported under the same env var.
 /// Cells are not one size, so a pass that stops copying a payload and starts
 /// sharing it moves this and leaves the count alone.
 pub const ALLOCATED_BYTES_SUFFIX: &str = " cell bytes allocated";
-const REUSED_SUFFIX: &str = " cells reused";
+pub const REUSED_SUFFIX: &str = " cells reused";
 const EFF_OPS_SUFFIX: &str = " eff ops allocated";
 const DRIVE_STEPS_SUFFIX: &str = " drive steps";
 const PROMOTED_SUFFIX: &str = " cells promoted";
@@ -161,6 +164,43 @@ pub fn counter_report(stderr: &str, suffix: &str) -> Option<i64> {
         .nth(COUNTER_VALUE_FIELD)?
         .parse()
         .ok()
+}
+
+/// Build `full` to a native binary, run it once with each of `stat_envs` armed,
+/// and read one counter per `suffixes` entry back from the runtime's stderr
+/// report. The one build/run/read path behind every counter-pinning gate, so no
+/// harness re-implements the spawn, the cleanup, or the report parse. A missing
+/// report line is an error, never a zero: the counter was armed, so silence
+/// means the measurement did not happen.
+pub fn stat_build_counters(
+    full: &str,
+    tag: &str,
+    stat_envs: &[&str],
+    suffixes: &[&str],
+    build: impl Fn(&str, &Path) -> Result<(), Error>,
+) -> Result<Vec<i64>, String> {
+    // `tag` may be a path-like label; keep the temp binary's name a single
+    // component.
+    let bin = temp_bin(&tag.replace(['/', '.', ' '], "_"), "stat");
+    if let Err(e) = build(full, &bin) {
+        cleanup_bin(&bin);
+        return Err(format!("{tag}: build failed: {e}"));
+    }
+    let mut cmd = Command::new(&bin);
+    for stat_env in stat_envs {
+        cmd.env(stat_env, "1");
+    }
+    let out = cmd.output();
+    cleanup_bin(&bin);
+    let out = out.map_err(|e| format!("{tag}: spawn failed: {e}"))?;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    suffixes
+        .iter()
+        .map(|suffix| {
+            counter_report(&stderr, suffix)
+                .ok_or_else(|| format!("{tag}: no `{suffix}` report in stderr: {stderr:?}"))
+        })
+        .collect()
 }
 /// Opt-in memoization of verified native cases: set it to skip programs whose
 /// complete toolchain fingerprint is unchanged since a previous green run.
@@ -374,6 +414,11 @@ pub const CORPUS_SKIPS: &[(&str, &str)] = &[
         "tests/cases/run/fs_bytes.pr",
         "off-platform: byte-level file IO",
     ),
+    (
+        "tests/cases/run/teleport.pr",
+        "off-platform: prim_kont_encode/prim_kont_resume (continuation mobility; \
+         the dedicated teleport tests cover interpreter and native behavior)",
+    ),
 ];
 
 /// Every committed `.pr` under the corpus directories, as `(dir/name.pr, path)`,
@@ -435,10 +480,61 @@ pub fn corpus() -> Vec<PathBuf> {
 /// and coverage, while each shard now discovers only its own quarter instead of
 /// discovering the full corpus and throwing three quarters away afterward.
 pub fn sharded_corpus() -> Vec<PathBuf> {
-    shard(corpus_candidates())
+    sentinel_filter(shard(corpus_candidates()))
         .into_iter()
         .filter(|path| runnable_corpus_source(&source(path)))
         .collect()
+}
+
+/// Env var selecting the committed sentinel subset for fast local gates. The
+/// subset flows through [`sharded_corpus`] exactly like a CI shard, so every
+/// gate that tolerates a shard tolerates it unchanged; whole-corpus goldens
+/// enumerate through [`corpus`] and stay full either way.
+const SENTINEL_ENV: &str = "PRISM_SENTINEL_CORPUS";
+/// The committed coverage-selected subset, one corpus label per line.
+const SENTINEL_LIST: &str = "tests/sentinel_corpus.txt";
+
+fn sentinel_active() -> bool {
+    env::var_os(SENTINEL_ENV).is_some()
+}
+
+/// Restrict `cases` to the committed sentinel subset when it is requested.
+///
+/// A golden regenerated from a subset run would be silently truncated to the
+/// subset, so combining the sentinel with any accept knob is refused outright.
+/// An unreadable or empty list also fails closed rather than passing a
+/// zero-case gate.
+fn sentinel_filter(cases: Vec<PathBuf>) -> Vec<PathBuf> {
+    if !sentinel_active() {
+        return cases;
+    }
+    if let Some((name, _)) = env::vars().find(|(name, _)| name.starts_with("PRISM_ACCEPT_")) {
+        panic!(
+            "refusing {name} under {SENTINEL_ENV}: a golden regenerated from the sentinel \
+             subset would be truncated to it; rerun the accept without {SENTINEL_ENV}"
+        );
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let text = fs::read_to_string(root.join(SENTINEL_LIST)).unwrap_or_else(|e| {
+        panic!(
+            "{SENTINEL_ENV} is set but {SENTINEL_LIST} is unreadable ({e}); regenerate it \
+             with `just sentinel`"
+        )
+    });
+    let labels: BTreeSet<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect();
+    let kept: Vec<PathBuf> = cases
+        .into_iter()
+        .filter(|path| labels.contains(label_of(path).as_str()))
+        .collect();
+    assert!(
+        !kept.is_empty(),
+        "{SENTINEL_LIST} selected nothing from the corpus; regenerate it with `just sentinel`"
+    );
+    kept
 }
 
 /// Env var naming how many CI shards the corpus is split across; unset or `<= 1`
@@ -459,9 +555,11 @@ fn shard_total() -> usize {
         .unwrap_or(UNSHARDED_TOTAL)
 }
 
-/// Whether this process is running one proper partition of the corpus.
+/// Whether this process is running a proper subset of the corpus, either one
+/// CI shard partition or the local sentinel subset. Floor counts and other
+/// full-corpus-only assertions key off this.
 pub fn corpus_is_sharded() -> bool {
-    shard_total() > UNSHARDED_TOTAL
+    shard_total() > UNSHARDED_TOTAL || sentinel_active()
 }
 
 /// Whether the umbrella runner delegated heavyweight whole-corpus tests to the
@@ -1111,15 +1209,8 @@ pub fn label_of(case: &Path) -> String {
         .into_owned()
 }
 
-/// Worker stack size for corpus fan-out. The in-process interpreter's recursion
-/// depth is corpus-dependent (deep non-tail folds recurse per element), and its
-/// real budget has always been the CLI main thread's 8MB, not the 2MB default of
-/// a spawned test thread. Reserve generously: the reservation is virtual and
-/// pages commit only on use, so the cost of headroom is nothing and the cost of
-/// too little is a corpus-wide abort that names no culprit.
-const MEBIBYTE: usize = 1024 * 1024;
-const CORPUS_WORKER_STACK: usize = 256 * MEBIBYTE;
 const DEFAULT_PARALLELISM: usize = 4;
+const MAX_PARALLELISM: usize = 8;
 const MIN_WORKER_COUNT: usize = 1;
 
 /// Run `check` over `cases` across cores, collecting every failure so one run
@@ -1143,8 +1234,7 @@ pub fn parallel_collect<T: Send>(
 }
 
 /// The worker pool underneath [`parallel_check`], generic over the item type so
-/// generated-program sweeps reuse the same big-stack corpus workers as
-/// path-keyed sweeps.
+/// generated-program sweeps reuse the same corpus workers as path-keyed sweeps.
 pub fn parallel_each<I: Sync, T: Send>(
     items: &[I],
     check: impl Fn(&I) -> Result<T, String> + Sync,
@@ -1154,6 +1244,7 @@ pub fn parallel_each<I: Sync, T: Send>(
     let values: Mutex<Vec<T>> = Mutex::new(Vec::new());
     let threads = thread::available_parallelism()
         .map_or(DEFAULT_PARALLELISM, NonZeroUsize::get)
+        .min(MAX_PARALLELISM)
         .min(items.len().max(MIN_WORKER_COUNT));
     thread::scope(|s| {
         for _ in 0..threads {
@@ -1165,8 +1256,17 @@ pub fn parallel_each<I: Sync, T: Send>(
                     Err(e) => fails.lock().unwrap().push(e),
                 }
             };
-            thread::Builder::new()
-                .stack_size(CORPUS_WORKER_STACK)
+            // In release the deep corpus runs on the ordinary scoped-thread
+            // stack now that traversals are iterative, so a recursion
+            // regression deep enough to need more fails here first. Debug
+            // frames are several times release size and overflow that budget
+            // at legal depths, so debug workers get the public compiler's
+            // 8 MiB main-thread budget instead.
+            let mut builder = thread::Builder::new();
+            if cfg!(debug_assertions) {
+                builder = builder.stack_size(8 * 1024 * 1024);
+            }
+            builder
                 .spawn_scoped(s, worker)
                 .expect("spawning corpus worker");
         }

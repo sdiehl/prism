@@ -1,0 +1,12 @@
+-- Compiler fixture for the cardinality fallback. The same range flows through
+-- `filter` before freezing, so the element count depends on the predicate and
+-- must become unknown: the optimizer has to keep the growable fallback and may
+-- not change failure pruning or evaluation order to recover a size. The
+-- printed sum is identical on both paths.
+
+import Data.List (..)
+import Data.Frozen (..)
+
+fn main() : Unit ! {IO} =
+  let evens = fz_of_list(filter(\(n : Int) -> even(n), range(1, 20)))
+  println(fz_foldl(\(acc : Int, v : Int) -> acc + v, 0, evens))

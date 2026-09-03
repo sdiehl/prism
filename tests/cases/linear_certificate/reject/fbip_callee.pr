@@ -1,0 +1,7 @@
+-- `fbip` proves zero allocation, not linearity: an fbip callee may duplicate
+-- what it receives, so it is not a linearity certificate.
+type Box = Box(Int)
+
+fbip fn id(x) = x
+
+fn top(b : Box) : Box @ linear = id(b)

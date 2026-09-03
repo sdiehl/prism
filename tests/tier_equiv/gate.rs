@@ -78,9 +78,9 @@ struct Variant {
 impl Variant {
     fn tier(tier: EffectTier) -> Self {
         let mut config = Config::default();
-        config.flags.effect_tier = tier;
-        config.flags.compiler_cache = false;
-        config.flags.quiet = true;
+        config.update_flags(|flags| flags.effect_tier = tier);
+        config.update_flags(|flags| flags.compiler_cache = false);
+        config.update_flags(|flags| flags.quiet = true);
         Self {
             label: tier.label(),
             config,

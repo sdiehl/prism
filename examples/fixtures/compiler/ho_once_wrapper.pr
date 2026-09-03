@@ -1,0 +1,17 @@
+-- Compiler fixture for once-use preservation through a higher-order wrapper.
+-- `use_once` calls its callback exactly once, so a uniqueness or once-use fact
+-- about the argument survives the wrapper; `use_twice` duplicates the call, so
+-- the same fact must be lost there. Both wrappers have two call sites, keeping
+-- them out of the bounded inliner: whatever a summary claims about the
+-- callback's usage has to be proved at the wrapper's interface, not recovered
+-- by substitution. The printed sums are a pure function of the source.
+
+fn use_once(f : (Int) -> Int, x : Int) : Int = f(x)
+
+fn use_twice(f : (Int) -> Int, x : Int) : Int = f(x) + f(x)
+
+fn main() : Unit ! {IO} =
+  let bump = \(n : Int) -> n + 1
+  let once = use_once(bump, 10) + use_once(bump, 20)
+  let twice = use_twice(bump, 10) + use_twice(bump, 20)
+  println(once + twice)

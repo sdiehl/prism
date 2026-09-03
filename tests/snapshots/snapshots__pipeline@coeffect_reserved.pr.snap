@@ -59,21 +59,21 @@ Program {
                         node: Var(
                             "f",
                         ),
-                        span: 287..288,
+                        span: 325..326,
                     },
                     [
                         Spanned {
                             node: Var(
                                 "x",
                             ),
-                            span: 289..290,
+                            span: 327..328,
                         },
                     ],
                 ),
-                span: 287..291,
+                span: 325..329,
             },
             wheres: [],
-            span: 232..291,
+            span: 270..329,
         },
         Decl {
             name: "main",
@@ -89,7 +89,7 @@ Program {
                         node: Var(
                             "apply",
                         ),
-                        span: 311..316,
+                        span: 349..354,
                     },
                     [
                         Spanned {
@@ -109,7 +109,7 @@ Program {
                                             node: Var(
                                                 "y",
                                             ),
-                                            span: 325..326,
+                                            span: 363..364,
                                         },
                                         Spanned {
                                             node: Int(
@@ -118,13 +118,13 @@ Program {
                                                     suffix: None,
                                                 },
                                             ),
-                                            span: 329..330,
+                                            span: 367..368,
                                         },
                                     ),
-                                    span: 325..330,
+                                    span: 363..368,
                                 },
                             ),
-                            span: 317..330,
+                            span: 355..368,
                         },
                         Spanned {
                             node: Int(
@@ -133,23 +133,23 @@ Program {
                                     suffix: None,
                                 },
                             ),
-                            span: 332..334,
+                            span: 370..372,
                         },
                     ],
                 ),
-                span: 311..335,
+                span: 349..373,
             },
             wheres: [],
-            span: 293..335,
+            span: 331..373,
         },
     ],
 }
 
 == types ==
 [E6052] Type Error: usage fact `unique` is reserved but not implemented
-   ╭─[ <source>:4:1 ]
+   ╭─[ <source>:5:1 ]
    │
- 4 │ fn apply(f : ((Int) -> Int) @ unique, x : Int) : Int = f(x)
+ 5 │ fn apply(f : ((Int) -> Int) @ unique, x : Int) : Int = f(x)
    │ ─────────────────────────────┬─────────────────────────────  
    │                              ╰─────────────────────────────── usage fact `unique` is reserved but not implemented
 ───╯

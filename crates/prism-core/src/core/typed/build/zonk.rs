@@ -3,12 +3,12 @@
 use crate::types::ty::{EffRow, Label};
 use crate::types::Type;
 
+use super::super::on_core_stack;
 use super::super::{
     CompSig, CoreFnSig, CoreInstantiation, CoreType, LoweredType, TypedBinder, TypedComp,
     TypedCompKind, TypedForward, TypedHandleOp, TypedHandler, TypedPattern, TypedValue,
     TypedValueKind,
 };
-use super::super::{CORE_GROW_STACK, CORE_MIN_STACK};
 use super::env::{lower_value_type, source_type};
 use super::solve::Solver;
 
@@ -206,9 +206,7 @@ impl Solver {
     pub(super) fn zonk_comp(&self, comp: TypedComp) -> TypedComp {
         // Zonking recurses per typed node; grow segments inside the recursion,
         // same discipline as `Builder::comp`.
-        stacker::maybe_grow(CORE_MIN_STACK, CORE_GROW_STACK, || {
-            self.zonk_comp_inner(comp)
-        })
+        on_core_stack(|| self.zonk_comp_inner(comp))
     }
 
     fn zonk_comp_inner(&self, comp: TypedComp) -> TypedComp {

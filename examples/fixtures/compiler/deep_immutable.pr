@@ -1,0 +1,22 @@
+-- Compiler fixture for deep type-property propagation through a generic
+-- container. `Cell(a)` is immutable exactly when its payload is: the frozen
+-- integer array in `firm` makes the whole value deeply immutable, while the
+-- growable array in `churny` does not, and the two must never be conflated by
+-- a property that only inspects the outer constructor. Both sums are a pure
+-- function of the source.
+
+import Data.List (..)
+import Data.Frozen (..)
+
+type Cell(a) = Cell(a)
+
+fn peek(c : Cell(a)) : a =
+  match c of
+    Cell(x) => x
+
+fn main() : Unit ! {IO} =
+  let firm = Cell(fz_of_list(range(1, 5)))
+  let churny = Cell(array_of_list(range(1, 5)))
+  let a = fz_foldl(\(acc : Int, v : Int) -> acc + v, 0, peek(firm))
+  let b = array_get(peek(churny), 2)
+  println(a + b)

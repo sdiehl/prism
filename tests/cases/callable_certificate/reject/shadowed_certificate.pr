@@ -1,0 +1,7 @@
+type Holder = Hold((Int) -> Int)
+
+fn apply(f : ((Int) -> Int) @ noalloc, x : Int) : Int = f(x)
+
+fn wrap(g : ((Int) -> Int) @ noalloc, h : Holder, x : Int) : Int =
+  match h of
+    Hold(g) => apply(g, x)

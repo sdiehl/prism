@@ -7,6 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use super::builtins::{Builtin, FloatOp};
 use super::effect_shape::{classify_resume, ResumeUse};
 use super::traverse::Visit;
+use super::work::on_core_stack;
 use crate::types::Type;
 use prism_common::sym::Sym;
 use prism_syntax::ast::BinOp;
@@ -126,6 +127,7 @@ mod f64_bits {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub enum Value {
     Var(Sym),
     Int(i64),
@@ -387,6 +389,7 @@ impl IoOp {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub enum Comp {
     Return(Value),
     Bind(Box<Self>, Sym, Box<Self>),
@@ -463,6 +466,48 @@ pub enum Comp {
     RefNew(Value),
     RefGet(Value),
     RefSet(Value, Value),
+}
+
+// Serde recurses per node like every other Core descent, so the derived bodies
+// (kept as the one description of the wire shape via `remote = "Self"`) run
+// behind the shared stack-growth seam. A lowered ANF spine is a frame per link,
+// deep enough to overflow a 2 MiB thread in a debug build, and the artifact
+// cache keys on this serialization from whatever thread compiles; the seam
+// makes the encoding a function of the term alone, not of the caller's stack.
+impl Serialize for Value {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        on_core_stack(|| Self::serialize(self, serializer))
+    }
+}
+
+impl<'de> Deserialize<'de> for Value {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        on_core_stack(|| Self::deserialize(deserializer))
+    }
+}
+
+impl Serialize for Comp {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        on_core_stack(|| Self::serialize(self, serializer))
+    }
+}
+
+impl<'de> Deserialize<'de> for Comp {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        on_core_stack(|| Self::deserialize(deserializer))
+    }
 }
 
 impl Comp {
@@ -544,8 +589,30 @@ pub struct CoreFn {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(remote = "Self")]
 pub struct Core {
     pub fns: Vec<CoreFn>,
+}
+
+// The whole program steps onto the Core stack once, so the per-node seams below
+// each function body find room and grow only when a spine actually needs it,
+// instead of every body opening a fresh segment from a shallow caller.
+impl Serialize for Core {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        on_core_stack(|| Self::serialize(self, serializer))
+    }
+}
+
+impl<'de> Deserialize<'de> for Core {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        on_core_stack(|| Self::deserialize(deserializer))
+    }
 }
 
 // Whole-program Core, tagged by its position across the effect-lowering seam so
@@ -674,18 +741,14 @@ pub fn reachable_fns(core: &Core) -> BTreeSet<Sym> {
 pub fn calls_in(c: &Comp, out: &mut Vec<Sym>) {
     struct Calls<'a>(&'a mut Vec<Sym>);
     impl Visit for Calls<'_> {
-        fn visit_comp(&mut self, c: &Comp) {
-            if let Comp::Call(name, args) = c {
+        fn comp(&mut self, c: &Comp) -> bool {
+            if let Comp::Call(name, _) = c {
                 self.0.push(*name);
-                for a in args {
-                    self.visit_value(a);
-                }
-            } else {
-                self.descend_comp(c);
             }
+            true
         }
     }
-    Visit::visit_comp(&mut Calls(out), c);
+    Calls(out).walk_comp(c);
 }
 
 #[cfg(test)]
@@ -848,6 +911,64 @@ mod tag_tests {
             ],
             IoOp::kind,
         );
+    }
+}
+
+#[cfg(test)]
+mod serde_tests {
+    use super::{Comp, Value};
+    use prism_common::sym::Sym;
+    use std::{mem, panic, thread};
+
+    const DEEP_DEPTH: usize = 20_000;
+    const ORDINARY_TEST_STACK: usize = 2 * 1024 * 1024;
+
+    // A spine of binds ending in a value nested as deep again: the two recursive
+    // shapes the derives descend (computation through boxed fields, value through
+    // sequences), one term.
+    fn deep_term() -> Comp {
+        let local = Sym::new("x");
+        let mut returned = Value::Var(local);
+        for _ in 0..DEEP_DEPTH {
+            returned = Value::UnboxedTuple(vec![returned]);
+        }
+        let mut body = Comp::Return(returned);
+        for _ in 0..DEEP_DEPTH {
+            body = Comp::Bind(
+                Box::new(Comp::Return(Value::Var(local))),
+                local,
+                Box::new(body),
+            );
+        }
+        body
+    }
+
+    // Serde descends per node like every other Core walk, so a deep term must
+    // encode and decode on a 2 MiB thread in a debug build, and decoding what
+    // was encoded must reproduce the bytes. Equality is the derived recursive
+    // walk and destruction is recursive, so the terms are compared by their
+    // encodings and forgotten rather than dropped, as the hasher's deep test does.
+    #[test]
+    fn serde_round_trips_deep_terms_on_an_ordinary_stack() {
+        let result = thread::Builder::new()
+            .name("deep-serde".into())
+            .stack_size(ORDINARY_TEST_STACK)
+            .spawn(|| {
+                let term = deep_term();
+                let bytes = serde_json::to_vec(&term).expect("deep term serializes");
+                let mut de = serde_json::Deserializer::from_slice(&bytes);
+                de.disable_recursion_limit();
+                let back = Comp::deserialize(&mut de).expect("deep term deserializes");
+                let again = serde_json::to_vec(&back).expect("decoded term serializes");
+                assert!(bytes == again, "round trip moved the encoding");
+                mem::forget(term);
+                mem::forget(back);
+            })
+            .expect("spawning deep serde test")
+            .join();
+        if let Err(payload) = result {
+            panic::resume_unwind(payload);
+        }
     }
 }
 

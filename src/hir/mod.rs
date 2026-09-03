@@ -25,22 +25,21 @@ use serde::{Deserialize, Serialize};
 use crate::sym::Sym;
 use crate::syntax::ast::NodeId;
 use crate::tc::parse_checked_signature;
-use crate::types::{Checked, Dict, DictTable, PathRes, Type};
+use crate::types::{Checked, Dict, DictTable, FieldRef, PathRes, Type};
 
 /// A node's resolution fact: what checking decided this syntactic site means,
 /// resolved to constructor-and-offset form so elaboration makes no new
 /// type-system decisions.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NodeRes {
-    /// A record field access `e.f`: the constructor name, the field's index,
-    /// and the constructor arity.
-    Field(String, usize, usize),
+    /// A record field access `e.f`, resolved to constructor-and-offset form.
+    Field(FieldRef),
     /// An unboxed record projection `e.#f`: the field's index in the record's
     /// type field order, and the record arity.
     UnboxedField(usize, usize),
-    /// A record update path `e { p.q = v }`: one rebuild chain per path, each
-    /// step a (constructor, field index, arity) triple.
-    Paths(Vec<Vec<(String, usize, usize)>>),
+    /// A record update path `e { p.q = v }`: one rebuild chain per path, one
+    /// [`FieldRef`] step per path segment.
+    Paths(Vec<Vec<FieldRef>>),
 }
 
 /// Operation-local residual evidence for one checked handler expression.
@@ -199,6 +198,21 @@ struct NodeFactWire {
 }
 
 impl NodeFacts {
+    /// The dictionary evidence recorded at a dispatch site.
+    #[must_use]
+    pub fn evidence(&self, id: NodeId) -> Option<&[Dict]> {
+        self.evidence
+            .get(id.0 as usize)
+            .and_then(Option::as_ref)
+            .map(Vec::as_slice)
+    }
+
+    /// The type the checker assigned to a node.
+    #[must_use]
+    pub fn node_type(&self, id: NodeId) -> Option<&Type> {
+        self.ty.get(id.0 as usize).and_then(Option::as_ref)
+    }
+
     pub(crate) const fn empty() -> Self {
         Self {
             res: Vec::new(),
@@ -314,7 +328,7 @@ impl NodeFacts {
         reason = "the sole checked-HIR conversion keeps each inference fact family explicit"
     )]
     pub(crate) fn from_tables(
-        field_res: BTreeMap<NodeId, (String, usize, usize)>,
+        field_res: BTreeMap<NodeId, FieldRef>,
         unboxed_field: BTreeMap<NodeId, (usize, usize)>,
         path_res: PathRes,
         fixed: BTreeMap<NodeId, Type>,
@@ -333,8 +347,8 @@ impl NodeFacts {
             res[i] = Some(fact);
         };
         let mut res: Vec<Option<NodeRes>> = Vec::new();
-        for (id, (c, i, n)) in field_res {
-            place(&mut res, id, NodeRes::Field(c, i, n));
+        for (id, field) in field_res {
+            place(&mut res, id, NodeRes::Field(field));
         }
         for (id, (idx, arity)) in unboxed_field {
             place(&mut res, id, NodeRes::UnboxedField(idx, arity));
@@ -393,11 +407,17 @@ impl NodeFacts {
 /// fact family on the session program's numerically colliding node identities.
 #[derive(Debug)]
 pub struct CheckedHir<'a> {
-    pub checked: &'a Checked,
+    checked: &'a Checked,
     facts: &'a NodeFacts,
 }
 
 impl<'a> CheckedHir<'a> {
+    /// The checked-program owner whose node facts this private view exposes.
+    #[must_use]
+    pub(crate) const fn checked(&self) -> &'a Checked {
+        self.checked
+    }
+
     /// The resolution fact recorded for a node, if checking recorded one.
     #[must_use]
     pub fn res(&self, id: NodeId) -> Option<&NodeRes> {
@@ -407,11 +427,7 @@ impl<'a> CheckedHir<'a> {
     /// The dictionary evidence recorded at a dispatch site.
     #[must_use]
     pub fn evidence(&self, id: NodeId) -> Option<&[Dict]> {
-        self.facts
-            .evidence
-            .get(id.0 as usize)
-            .and_then(Option::as_ref)
-            .map(Vec::as_slice)
+        self.facts.evidence(id)
     }
 
     /// The concrete numeric lane a literal or operator site fixed to.
@@ -423,7 +439,7 @@ impl<'a> CheckedHir<'a> {
     /// The zonked type checking synthesized for a node.
     #[must_use]
     pub fn node_type(&self, id: NodeId) -> Option<&Type> {
-        self.facts.ty.get(id.0 as usize).and_then(Option::as_ref)
+        self.facts.node_type(id)
     }
 
     /// True when checking generalized this local `let` binding's value to a
@@ -504,7 +520,7 @@ mod tests {
     use crate::parse::{parse, ParseResult};
     use crate::sym::Sym;
     use crate::syntax::desugar::desugar;
-    use crate::types::{check, ClassInfo};
+    use crate::types::check;
 
     fn checked(src: &str) -> Checked {
         let ParseResult { program, .. } = parse(src).expect("parses");
@@ -522,35 +538,49 @@ mod tests {
         let hir = build(&c);
         assert!(lint::lint_hir(&hir).is_empty());
         // The field access recorded a resolution the HIR serves.
-        assert!(c
-            .facts
-            .res
-            .iter()
-            .flatten()
-            .any(|r| matches!(r, NodeRes::Field(ctor, 0, 2) if ctor == "Point")));
+        assert!(c.facts.res.iter().flatten().any(
+            |r| matches!(r, NodeRes::Field(f) if f.ctor == "Point" && f.index == 0 && f.arity == 2)
+        ));
     }
 
     #[test]
     fn expression_facts_do_not_fall_through_to_colliding_session_ids() {
         let mut c = checked(SRC);
         let id = NodeId(1);
-        place_dense(&mut c.facts.lane, id.0 as usize, Some(Type::Int));
+        let mut session_facts = c.facts.clone();
+        place_dense(&mut session_facts.lane, id.0 as usize, Some(Type::Int));
         place_dense(
-            &mut c.facts.res,
+            &mut session_facts.res,
             id.0 as usize,
-            Some(NodeRes::Field("Point".into(), 0, 2)),
+            Some(NodeRes::Field(FieldRef {
+                ctor: "Point".into(),
+                index: 0,
+                arity: 2,
+            })),
         );
+        c.replace_node_facts_for_test(session_facts);
         let mut expression = NodeFacts::empty();
         place_dense(&mut expression.lane, id.0 as usize, Some(Type::Bool));
         place_dense(
             &mut expression.res,
             id.0 as usize,
-            Some(NodeRes::Field("Point".into(), 1, 2)),
+            Some(NodeRes::Field(FieldRef {
+                ctor: "Point".into(),
+                index: 1,
+                arity: 2,
+            })),
         );
 
         let hir = build_for_expr(&c, &expression);
         assert_eq!(hir.lane(id), Some(&Type::Bool));
-        assert_eq!(hir.res(id), Some(&NodeRes::Field("Point".into(), 1, 2)));
+        assert_eq!(
+            hir.res(id),
+            Some(&NodeRes::Field(FieldRef {
+                ctor: "Point".into(),
+                index: 1,
+                arity: 2,
+            }))
+        );
     }
 
     // Negative tests for the validation transition: a fabricated fact that
@@ -559,7 +589,11 @@ mod tests {
     fn lint_rejects_unknown_ctor() {
         let c = checked(SRC);
         let facts = NodeFacts {
-            res: vec![Some(NodeRes::Field("NoSuchCtor".into(), 0, 2))],
+            res: vec![Some(NodeRes::Field(FieldRef {
+                ctor: "NoSuchCtor".into(),
+                index: 0,
+                arity: 2,
+            }))],
             ..NodeFacts::empty()
         };
         let hir = CheckedHir {
@@ -575,7 +609,11 @@ mod tests {
         let facts = NodeFacts {
             res: vec![
                 // Point's declared arity is 2, not 3.
-                Some(NodeRes::Field("Point".into(), 0, 3)),
+                Some(NodeRes::Field(FieldRef {
+                    ctor: "Point".into(),
+                    index: 0,
+                    arity: 3,
+                })),
                 // Index past the recorded arity.
                 Some(NodeRes::UnboxedField(2, 2)),
                 // An update path with an empty chain.
@@ -606,16 +644,12 @@ mod tests {
 
     #[test]
     fn lint_rejects_super_index_out_of_bounds() {
-        let mut c = checked(SRC);
-        // A class with a single declared superclass; index 5 projects past it.
-        c.classes.insert(
-            Sym::from("Ord"),
-            ClassInfo {
-                param: Sym::from("a"),
-                supers: vec![Sym::from("Eq")],
-                methods: vec![],
-            },
+        let c = checked(
+            "class Eq(a)\nclass Ord(a) given Eq(a)\n\
+             type Point = Point { x: Int, y: Int }\n\
+             fn get_x(p : Point) : Int = p.x\n",
         );
+        // A class with a single declared superclass; index 5 projects past it.
         let facts = NodeFacts {
             // Param(0) inner is deliberately unjudged, so exactly one violation.
             evidence: vec![Some(vec![Dict::Super(

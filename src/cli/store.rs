@@ -107,7 +107,7 @@ pub fn lock(accept: bool, file: &Path, cfg: &crate::Config) -> CmdResult {
 // content whose liveness the store cannot see, and for a write racing this
 // sweep). See `prism_store::disk::gc` for the reachability rules.
 pub fn gc(days: u64, dry_run: bool, cfg: &crate::Config) -> CmdResult {
-    let store_root = resolve_store_path(cfg.flags.store_path.as_deref());
+    let store_root = resolve_store_path(cfg.flags().store_path.as_deref());
     let store = Store::open_or_create(&store_root).map_err(|e| io_err(e, &store_root, "open"))?;
     let census = store
         .census()

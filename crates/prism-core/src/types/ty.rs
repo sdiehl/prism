@@ -224,27 +224,6 @@ impl EffRow {
         }
     }
 
-    // Free rigid row-variable (row skolem) names of the row, the `RowUni`-kind
-    // dual of `free_exist_row`. Rows carry no binders of their own; label
-    // arguments are types, walked for the row skolems nested inside them. Drives
-    // `Type::free_row_vars` through the type/row alternation.
-    fn walk_vars(&self, bound: &mut Vec<Sym>, acc: &mut BTreeSet<Sym>) {
-        match self {
-            Self::Var(n) => {
-                if !bound.contains(n) {
-                    acc.insert(*n);
-                }
-            }
-            Self::Extend(l, rest) => {
-                for a in &l.args {
-                    a.walk_row_vars(bound, acc);
-                }
-                rest.walk_vars(bound, acc);
-            }
-            _ => {}
-        }
-    }
-
     #[must_use]
     pub fn subst_row_exist(&self, v: u32, with: &Self) -> Self {
         match self {
@@ -571,13 +550,13 @@ impl Type {
     // free, so a well-formed generalized scheme collects the empty set; a name
     // left over here is a skolem that escaped its quantifier.
     pub fn free_ty_vars(&self, acc: &mut BTreeSet<Sym>) {
-        self.walk_ty_vars(&mut Vec::new(), acc);
+        collect_free_vars(self, RigidVarKind::Type, acc);
     }
 
     // Free rigid row-variable (row skolem) names, the `RowUni`-kind dual of
     // `free_exist_row`; a variable bound by an enclosing `RowForall` is excluded.
     pub fn free_row_vars(&self, acc: &mut BTreeSet<Sym>) {
-        self.walk_row_vars(&mut Vec::new(), acc);
+        collect_free_vars(self, RigidVarKind::Row, acc);
     }
 
     /// Visit each directly-nested type, effect-row and coeffect-row arguments
@@ -626,81 +605,6 @@ impl Type {
             | Self::Var(_)
             | Self::Exist(_)
             | Self::Nat(_) => {}
-        }
-    }
-
-    fn walk_ty_vars(&self, bound: &mut Vec<Sym>, acc: &mut BTreeSet<Sym>) {
-        match self {
-            Self::Var(n) => {
-                if !bound.contains(n) {
-                    acc.insert(*n);
-                }
-            }
-            Self::Forall(n, t) => {
-                bound.push(*n);
-                t.walk_ty_vars(bound, acc);
-                bound.pop();
-            }
-            Self::RowForall(_, t) => t.walk_ty_vars(bound, acc),
-            Self::Fun(ps, row, r) => {
-                for p in ps {
-                    p.walk_ty_vars(bound, acc);
-                }
-                row.for_each_arg(&mut |a| a.walk_ty_vars(bound, acc));
-                r.walk_ty_vars(bound, acc);
-            }
-            Self::Con(_, ps) | Self::Tuple(ps) | Self::UnboxedTuple(ps) => {
-                for p in ps {
-                    p.walk_ty_vars(bound, acc);
-                }
-            }
-            Self::UnboxedRecord(fs) => {
-                for (_, t) in fs {
-                    t.walk_ty_vars(bound, acc);
-                }
-            }
-            Self::App(h, a) => {
-                h.walk_ty_vars(bound, acc);
-                a.walk_ty_vars(bound, acc);
-            }
-            Self::OrNull(a) | Self::Coeffect(a, _) => a.walk_ty_vars(bound, acc),
-            Self::Row(r) => r.for_each_arg(&mut |a| a.walk_ty_vars(bound, acc)),
-            _ => {}
-        }
-    }
-
-    fn walk_row_vars(&self, bound: &mut Vec<Sym>, acc: &mut BTreeSet<Sym>) {
-        match self {
-            Self::Fun(ps, row, r) => {
-                for p in ps {
-                    p.walk_row_vars(bound, acc);
-                }
-                row.walk_vars(bound, acc);
-                r.walk_row_vars(bound, acc);
-            }
-            Self::RowForall(n, t) => {
-                bound.push(*n);
-                t.walk_row_vars(bound, acc);
-                bound.pop();
-            }
-            Self::Forall(_, t) => t.walk_row_vars(bound, acc),
-            Self::Con(_, ps) | Self::Tuple(ps) | Self::UnboxedTuple(ps) => {
-                for p in ps {
-                    p.walk_row_vars(bound, acc);
-                }
-            }
-            Self::UnboxedRecord(fs) => {
-                for (_, t) in fs {
-                    t.walk_row_vars(bound, acc);
-                }
-            }
-            Self::App(h, a) => {
-                h.walk_row_vars(bound, acc);
-                a.walk_row_vars(bound, acc);
-            }
-            Self::OrNull(a) | Self::Coeffect(a, _) => a.walk_row_vars(bound, acc),
-            Self::Row(r) => r.walk_vars(bound, acc),
-            _ => {}
         }
     }
 
@@ -892,122 +796,290 @@ impl Type {
     // `total`: every appearance of each row variable. `tail`: only appearances as
     // the trailing variable of an arrow's effect row. See `phantom_rows`.
     fn row_var_stats(&self, total: &mut BTreeMap<Sym, usize>, tail: &mut BTreeMap<Sym, usize>) {
-        match self {
-            Self::Forall(_, t) | Self::RowForall(_, t) => t.row_var_stats(total, tail),
-            Self::Fun(ps, row, r) => {
-                for p in ps {
-                    p.row_var_stats(total, tail);
-                }
-                count_row_vars(row, total);
-                if let EffRow::Var(v) = row.tail() {
-                    *tail.entry(*v).or_default() += 1;
-                }
-                r.row_var_stats(total, tail);
+        enum Task<'a> {
+            Type(&'a Type),
+            Row(&'a EffRow),
+        }
+
+        let mut work = vec![Task::Type(self)];
+        while let Some(task) = work.pop() {
+            match task {
+                Task::Type(ty) => match ty {
+                    Self::Forall(_, body) | Self::RowForall(_, body) => {
+                        work.push(Task::Type(body));
+                    }
+                    Self::Fun(params, row, result) => {
+                        if let EffRow::Var(name) = row.tail() {
+                            *tail.entry(*name).or_default() += 1;
+                        }
+                        work.push(Task::Type(result));
+                        work.push(Task::Row(row));
+                        work.extend(params.iter().rev().map(Task::Type));
+                    }
+                    Self::Con(_, arguments)
+                    | Self::Tuple(arguments)
+                    | Self::UnboxedTuple(arguments) => {
+                        work.extend(arguments.iter().rev().map(Task::Type));
+                    }
+                    Self::UnboxedRecord(fields) => {
+                        work.extend(fields.iter().rev().map(|(_, ty)| Task::Type(ty)));
+                    }
+                    Self::App(head, argument) => {
+                        work.push(Task::Type(argument));
+                        work.push(Task::Type(head));
+                    }
+                    Self::OrNull(inner) | Self::Coeffect(inner, _) => {
+                        work.push(Task::Type(inner));
+                    }
+                    Self::Row(row) => work.push(Task::Row(row)),
+                    Self::Unit
+                    | Self::Int
+                    | Self::I64
+                    | Self::U64
+                    | Self::Bool
+                    | Self::Float
+                    | Self::Char
+                    | Self::Str
+                    | Self::Var(_)
+                    | Self::Exist(_)
+                    | Self::Nat(_) => {}
+                },
+                Task::Row(row) => match row {
+                    EffRow::Var(name) => *total.entry(*name).or_default() += 1,
+                    EffRow::Extend(label, rest) => {
+                        work.push(Task::Row(rest));
+                        work.extend(label.args.iter().rev().map(Task::Type));
+                    }
+                    EffRow::Empty | EffRow::Exist(_) => {}
+                },
             }
-            Self::Con(_, ps) | Self::Tuple(ps) | Self::UnboxedTuple(ps) => {
-                for p in ps {
-                    p.row_var_stats(total, tail);
-                }
-            }
-            Self::UnboxedRecord(fs) => {
-                for (_, t) in fs {
-                    t.row_var_stats(total, tail);
-                }
-            }
-            Self::App(h, a) => {
-                h.row_var_stats(total, tail);
-                a.row_var_stats(total, tail);
-            }
-            Self::OrNull(a) | Self::Coeffect(a, _) => a.row_var_stats(total, tail),
-            Self::Row(r) => count_row_vars(r, total),
-            _ => {}
         }
     }
 
     fn show_p(&self, phantom: &BTreeSet<Sym>) -> String {
-        match self {
-            Self::Unit => kw::TY_UNIT.into(),
-            Self::Int => kw::TY_INT.into(),
-            Self::I64 => kw::TY_I64.into(),
-            Self::U64 => kw::TY_U64.into(),
-            Self::Bool => kw::TY_BOOL.into(),
-            Self::Float => kw::TY_FLOAT.into(),
-            Self::Char => kw::TY_CHAR.into(),
-            Self::Str => kw::TY_STRING.into(),
-            Self::Var(n) => n.to_string(),
-            Self::Exist(v) => format!("?{v}"),
-            Self::Forall(..) | Self::RowForall(..) => {
-                let mut vs = Vec::new();
-                let mut cur = self;
-                while let Self::Forall(n, t) | Self::RowForall(n, t) = cur {
-                    if !phantom.contains(n) {
-                        vs.push(n.as_str());
-                    }
-                    cur = t;
-                }
-                if vs.is_empty() {
-                    cur.show_p(phantom)
-                } else {
-                    format!("forall {}. {}", vs.join(" "), cur.show_p(phantom))
-                }
-            }
-            Self::Fun(ps, row, r) => {
-                let ps: Vec<_> = ps.iter().map(|p| p.show_p(phantom)).collect();
-                let row_s =
-                    show_row_p(row, phantom).map_or_else(String::new, |s| format!(" ! {s}"));
-                format!(
-                    "({}) {} {}{}",
-                    ps.join(", "),
-                    kw::ARROW,
-                    r.show_p(phantom),
-                    row_s
-                )
-            }
-            // A higher-kinded application spine prints in n-ary form `head(a, b)`.
-            Self::App(..) => {
-                let (head, args) = self.spine();
-                let args: Vec<_> = args.iter().map(|a| a.show_p(phantom)).collect();
-                format!("{}({})", head.show_p(phantom), args.join(", "))
-            }
-            Self::Con(n, ps) if ps.is_empty() => n.to_string(),
-            Self::Con(n, ps) => {
-                let ps: Vec<_> = ps.iter().map(|p| p.show_p(phantom)).collect();
-                format!("{n}({})", ps.join(", "))
-            }
-            Self::Tuple(ts) => {
-                let ts: Vec<_> = ts.iter().map(|t| t.show_p(phantom)).collect();
-                format!("({})", ts.join(", "))
-            }
-            Self::UnboxedTuple(ts) => {
-                let ts: Vec<_> = ts.iter().map(|t| t.show_p(phantom)).collect();
-                format!("#({})", ts.join(", "))
-            }
-            Self::UnboxedRecord(fs) => {
-                let fs: Vec<_> = fs
-                    .iter()
-                    .map(|(n, t)| format!("{n} : {}", t.show_p(phantom)))
-                    .collect();
-                format!("#{{ {} }}", fs.join(", "))
-            }
-            Self::OrNull(a) => format!("{}({})", kw::TY_OR_NULL, a.show_p(phantom)),
-            Self::Coeffect(a, r) => format!("{} {r}", a.show_p(phantom)),
-            Self::Row(r) => r.show(),
-            Self::Nat(n) => n.to_string(),
+        enum Task<'a> {
+            Type(&'a Type),
+            Text(&'static str),
+            Owned(String),
         }
+
+        fn push_fields<'a>(
+            work: &mut Vec<Task<'a>>,
+            fields: impl DoubleEndedIterator<Item = &'a Type>,
+        ) {
+            let fields: Vec<_> = fields.collect();
+            let count = fields.len();
+            for (index, field) in fields.into_iter().enumerate().rev() {
+                if index + 1 < count {
+                    work.push(Task::Text(", "));
+                }
+                work.push(Task::Type(field));
+            }
+        }
+
+        let mut rendered = String::new();
+        let mut work = vec![Task::Type(self)];
+        while let Some(task) = work.pop() {
+            match task {
+                Task::Text(text) => rendered.push_str(text),
+                Task::Owned(text) => rendered.push_str(&text),
+                Task::Type(ty) => match ty {
+                    Self::Unit => rendered.push_str(kw::TY_UNIT),
+                    Self::Int => rendered.push_str(kw::TY_INT),
+                    Self::I64 => rendered.push_str(kw::TY_I64),
+                    Self::U64 => rendered.push_str(kw::TY_U64),
+                    Self::Bool => rendered.push_str(kw::TY_BOOL),
+                    Self::Float => rendered.push_str(kw::TY_FLOAT),
+                    Self::Char => rendered.push_str(kw::TY_CHAR),
+                    Self::Str => rendered.push_str(kw::TY_STRING),
+                    Self::Var(name) => rendered.push_str(name.as_str()),
+                    Self::Exist(id) => {
+                        rendered.push('?');
+                        rendered.push_str(&id.to_string());
+                    }
+                    Self::Forall(..) | Self::RowForall(..) => {
+                        let mut names = Vec::new();
+                        let mut body = ty;
+                        while let Self::Forall(name, inner) | Self::RowForall(name, inner) = body {
+                            if !phantom.contains(name) {
+                                names.push(name.as_str());
+                            }
+                            body = inner;
+                        }
+                        if !names.is_empty() {
+                            rendered.push_str("forall ");
+                            rendered.push_str(&names.join(" "));
+                            rendered.push_str(". ");
+                        }
+                        work.push(Task::Type(body));
+                    }
+                    Self::Fun(params, row, result) => {
+                        rendered.push('(');
+                        let row = show_row_p(row, phantom)
+                            .map_or_else(String::new, |row| format!(" ! {row}"));
+                        work.push(Task::Owned(row));
+                        work.push(Task::Type(result));
+                        work.push(Task::Owned(format!(") {} ", kw::ARROW)));
+                        push_fields(&mut work, params.iter());
+                    }
+                    Self::App(..) => {
+                        let (head, arguments) = ty.spine();
+                        work.push(Task::Text(")"));
+                        push_fields(&mut work, arguments.into_iter());
+                        work.push(Task::Text("("));
+                        work.push(Task::Type(head));
+                    }
+                    Self::Con(name, arguments) if arguments.is_empty() => {
+                        rendered.push_str(name.as_str());
+                    }
+                    Self::Con(name, arguments) => {
+                        rendered.push_str(name.as_str());
+                        rendered.push('(');
+                        work.push(Task::Text(")"));
+                        push_fields(&mut work, arguments.iter());
+                    }
+                    Self::Tuple(fields) => {
+                        rendered.push('(');
+                        work.push(Task::Text(")"));
+                        push_fields(&mut work, fields.iter());
+                    }
+                    Self::UnboxedTuple(fields) => {
+                        rendered.push_str("#(");
+                        work.push(Task::Text(")"));
+                        push_fields(&mut work, fields.iter());
+                    }
+                    Self::UnboxedRecord(fields) => {
+                        rendered.push_str("#{ ");
+                        work.push(Task::Text(" }"));
+                        for (index, (name, field)) in fields.iter().enumerate().rev() {
+                            if index + 1 < fields.len() {
+                                work.push(Task::Text(", "));
+                            }
+                            work.push(Task::Type(field));
+                            work.push(Task::Text(" : "));
+                            work.push(Task::Owned(name.to_string()));
+                        }
+                    }
+                    Self::OrNull(inner) => {
+                        rendered.push_str(kw::TY_OR_NULL);
+                        rendered.push('(');
+                        work.push(Task::Text(")"));
+                        work.push(Task::Type(inner));
+                    }
+                    Self::Coeffect(inner, row) => {
+                        let parenthesized = matches!(
+                            **inner,
+                            Self::Fun(..) | Self::Forall(..) | Self::RowForall(..)
+                        );
+                        if parenthesized {
+                            rendered.push('(');
+                        }
+                        work.push(Task::Owned(format!(" {row}")));
+                        if parenthesized {
+                            work.push(Task::Text(")"));
+                        }
+                        work.push(Task::Type(inner));
+                    }
+                    Self::Row(row) => rendered.push_str(&row.show()),
+                    Self::Nat(value) => rendered.push_str(&value.to_string()),
+                },
+            }
+        }
+        rendered
     }
 }
 
-// Add every row variable of `row` (its trailing variable, and any inside a
-// label's type arguments) to `total`.
-fn count_row_vars(row: &EffRow, total: &mut BTreeMap<Sym, usize>) {
-    for l in row.labels() {
-        for a in &l.args {
-            let mut t = BTreeMap::new();
-            a.row_var_stats(total, &mut t);
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RigidVarKind {
+    Type,
+    Row,
+}
+
+enum FreeVarTask<'a> {
+    Type(&'a Type),
+    Row(&'a EffRow),
+    Leave(Sym),
+}
+
+fn collect_free_vars(ty: &Type, kind: RigidVarKind, acc: &mut BTreeSet<Sym>) {
+    let mut bound: BTreeMap<Sym, usize> = BTreeMap::new();
+    let mut work = vec![FreeVarTask::Type(ty)];
+    while let Some(task) = work.pop() {
+        match task {
+            FreeVarTask::Type(ty) => match ty {
+                Type::Var(name) if kind == RigidVarKind::Type => {
+                    if !bound.contains_key(name) {
+                        acc.insert(*name);
+                    }
+                }
+                Type::Forall(name, body) if kind == RigidVarKind::Type => {
+                    *bound.entry(*name).or_default() += 1;
+                    work.push(FreeVarTask::Leave(*name));
+                    work.push(FreeVarTask::Type(body));
+                }
+                Type::RowForall(name, body) if kind == RigidVarKind::Row => {
+                    *bound.entry(*name).or_default() += 1;
+                    work.push(FreeVarTask::Leave(*name));
+                    work.push(FreeVarTask::Type(body));
+                }
+                Type::Forall(_, body) | Type::RowForall(_, body) => {
+                    work.push(FreeVarTask::Type(body));
+                }
+                Type::Fun(params, row, result) => {
+                    work.push(FreeVarTask::Type(result));
+                    work.push(FreeVarTask::Row(row));
+                    work.extend(params.iter().rev().map(FreeVarTask::Type));
+                }
+                Type::Con(_, arguments)
+                | Type::Tuple(arguments)
+                | Type::UnboxedTuple(arguments) => {
+                    work.extend(arguments.iter().rev().map(FreeVarTask::Type));
+                }
+                Type::App(head, argument) => {
+                    work.push(FreeVarTask::Type(argument));
+                    work.push(FreeVarTask::Type(head));
+                }
+                Type::UnboxedRecord(fields) => {
+                    work.extend(fields.iter().rev().map(|(_, ty)| FreeVarTask::Type(ty)));
+                }
+                Type::OrNull(inner) | Type::Coeffect(inner, _) => {
+                    work.push(FreeVarTask::Type(inner));
+                }
+                Type::Row(row) => work.push(FreeVarTask::Row(row)),
+                Type::Unit
+                | Type::Int
+                | Type::I64
+                | Type::U64
+                | Type::Bool
+                | Type::Float
+                | Type::Char
+                | Type::Str
+                | Type::Var(_)
+                | Type::Exist(_)
+                | Type::Nat(_) => {}
+            },
+            FreeVarTask::Row(row) => match row {
+                EffRow::Var(name) if kind == RigidVarKind::Row => {
+                    if !bound.contains_key(name) {
+                        acc.insert(*name);
+                    }
+                }
+                EffRow::Extend(label, rest) => {
+                    work.push(FreeVarTask::Row(rest));
+                    work.extend(label.args.iter().rev().map(FreeVarTask::Type));
+                }
+                EffRow::Empty | EffRow::Var(_) | EffRow::Exist(_) => {}
+            },
+            FreeVarTask::Leave(name) => {
+                let count = bound
+                    .get_mut(&name)
+                    .expect("free-variable worklist restores an entered binder");
+                *count -= 1;
+                if *count == 0 {
+                    bound.remove(&name);
+                }
+            }
         }
-    }
-    if let EffRow::Var(v) = row.tail() {
-        *total.entry(*v).or_default() += 1;
     }
 }
 

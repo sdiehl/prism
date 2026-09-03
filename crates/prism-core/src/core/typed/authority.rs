@@ -4,7 +4,10 @@
 //! whole-program verifier can mint the authoritative phase marker consumed by
 //! the next compiler transition.
 
+use std::collections::BTreeSet;
 use std::marker::PhantomData;
+
+use prism_common::sym::Sym;
 
 use super::verify::{check_functions, CoreViolation, TypedCorePhase, VerifyEnv};
 use super::TypedCoreFn;
@@ -97,6 +100,26 @@ impl<P> TypedCore<P> {
     #[must_use]
     pub fn functions(&self) -> &[TypedCoreFn] {
         &self.fns
+    }
+
+    /// Restrict to a subset of the verified functions without re-verification.
+    ///
+    /// This is not a second minting path: every retained function already
+    /// carries the marker's judgment. It is sound only for a reference-closed
+    /// subset (each kept body names only kept functions): checking is
+    /// per-function against the table of function signatures, so dropping
+    /// functions no kept body references removes no judgment a kept function
+    /// depends on. The optimizer stage runner audits its input
+    /// unconditionally, so a caller passing a non-closed set fails there
+    /// rather than miscompiling downstream.
+    #[must_use]
+    pub fn retain_reachable(self, keep: &BTreeSet<Sym>) -> Self {
+        Self::from_verified(
+            self.fns
+                .into_iter()
+                .filter(|f| keep.contains(&f.name()))
+                .collect(),
+        )
     }
 
     /// Consume the proof-bearing wrapper before transforming or regrouping it.

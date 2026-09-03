@@ -358,6 +358,8 @@ fn mdecl(name: String, param: &str, param_ty: Ty, ret: Ty, body: S<Expr>, span: 
         fip: Fip::No,
         replayable: false,
         no_alloc: false,
+        bounded_stack: false,
+        linear: false,
         span,
     }
 }

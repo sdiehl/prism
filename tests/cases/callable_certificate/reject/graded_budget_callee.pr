@@ -1,0 +1,7 @@
+type Box = Box(Int)
+
+fip(1) fn boxit(x : Int) : Box = Box(x)
+
+fn apply(f : ((Int) -> Box) @ noalloc, x : Int) : Box = f(x)
+
+fn drive(x : Int) : Box = apply(boxit, x)

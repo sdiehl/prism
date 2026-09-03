@@ -76,9 +76,9 @@ const PROG_STDLIB: &str = "fn inc(xs) = map(\\(x) -> x + 1, xs)\n";
 
 fn store_cfg(root: PathBuf) -> Config {
     let mut cfg = Config::default();
-    cfg.flags.store = true;
-    cfg.flags.store_path = Some(root);
-    cfg.flags.quiet = true;
+    cfg.update_flags(|flags| flags.store = true);
+    cfg.update_flags(|flags| flags.store_path = Some(root));
+    cfg.update_flags(|flags| flags.quiet = true);
     cfg
 }
 
@@ -470,7 +470,7 @@ fn log_is_append_only_and_detects_repoints() {
 fn publish_unsigned(root: &Path, name: &str, tag: &str) -> IndexRow {
     let cfg = {
         let mut c = store_cfg(root.to_path_buf());
-        c.flags.sign_mode = SignMode::Unsigned;
+        c.update_flags(|flags| flags.sign_mode = SignMode::Unsigned);
         c
     };
     let full = with_prelude(PROG_STDLIB);

@@ -1,0 +1,15 @@
+-- Compiler fixture for an unboxed product surviving a non-inlined call
+-- boundary. `polar` builds the product in one function and `norm2` consumes it
+-- in another; each has two call sites, so neither is inlined and the product
+-- is boxed to cross the boundary today. A cross-function unboxed ABI would let
+-- the fields travel in registers; the printed value must be byte-identical
+-- either way.
+
+fn polar(re : Float, im : Float) : #{ re : Float, im : Float } =
+  #{ re = re, im = im }
+
+fn norm2(v : #{ re : Float, im : Float }) : Float =
+  v.#re * v.#re + v.#im * v.#im
+
+fn main() : Unit ! {IO} =
+  println(show_float(norm2(polar(3.0, 4.0)) + norm2(polar(1.0, 2.0))))

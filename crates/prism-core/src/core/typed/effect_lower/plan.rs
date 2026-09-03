@@ -32,7 +32,8 @@ use prism_common::sym::Sym;
 use crate::core::EffectStrategy;
 
 use super::super::inline::calls_in;
-use super::super::{TypedComp, TypedCompKind, TypedCoreFn, TypedValue};
+use super::super::traverse::Visit;
+use super::super::{on_core_stack, TypedComp, TypedCompKind, TypedCoreFn, TypedValue};
 use super::decline::Decline;
 use super::flow::{self, ThunkFlow};
 use super::latent::{self, Latent};
@@ -97,14 +98,25 @@ impl EffectPlan {
     /// Compute the plan for one program tree.
     #[must_use]
     pub fn analyze(functions: &[TypedCoreFn]) -> Self {
-        let latent = latent::latent_map(functions);
-        let flow = flow::analyze(functions, &latent);
-        Self::from_parts(functions, latent, flow)
+        on_core_stack(|| {
+            let latent = latent::latent_map(functions);
+            let flow = flow::analyze(functions, &latent);
+            Self::from_parts_on_core_stack(functions, latent, flow)
+        })
     }
 
     /// The plan for a tree whose latent map and thunk flow are already in hand,
     /// so the cascade pays for each fixpoint once.
+    #[must_use]
     pub fn from_parts(functions: &[TypedCoreFn], latent: Latent, flow: ThunkFlow) -> Self {
+        on_core_stack(|| Self::from_parts_on_core_stack(functions, latent, flow))
+    }
+
+    fn from_parts_on_core_stack(
+        functions: &[TypedCoreFn],
+        latent: Latent,
+        flow: ThunkFlow,
+    ) -> Self {
         // What arrived in each function's thunk-valued parameters, with the mask
         // depth dropped: reachability asks whether an op can run at all, not how
         // many handlers of it are still to be skipped.
@@ -488,15 +500,12 @@ pub fn genuine_effects(latent: &Latent) -> BTreeSet<Sym> {
 /// Representation wrappers are transparent to this shape query.
 #[must_use]
 pub fn raw_effects(comp: &TypedComp) -> bool {
-    if matches!(
-        comp.kind(),
-        TypedCompKind::Do { .. } | TypedCompKind::Handle { .. } | TypedCompKind::Mask(..)
-    ) {
-        return true;
-    }
-    let mut found = false;
-    each_subterm(comp, &mut |child| found |= raw_effects(child));
-    found
+    any_comp(comp, |node| {
+        matches!(
+            node.kind(),
+            TypedCompKind::Do { .. } | TypedCompKind::Handle { .. } | TypedCompKind::Mask(..)
+        )
+    })
 }
 
 /// Whether a handler under `comp` resumes from inside a thunk while its action
@@ -530,32 +539,53 @@ pub fn open_resume_escapes(comp: &TypedComp, latent: &Latent) -> bool {
 
 /// Every function `comp` calls by name, descending through thunks.
 pub fn collect_calls(comp: &TypedComp, out: &mut BTreeSet<Sym>) {
-    if let TypedCompKind::Call { callee, .. } = comp.kind() {
-        out.insert(*callee);
-    }
-    each_subterm(comp, &mut |child| collect_calls(child, out));
+    out.extend(calls_in(comp));
 }
 
 fn calls_any(comp: &TypedComp, names: &BTreeSet<Sym>) -> bool {
-    let mut found =
-        matches!(comp.kind(), TypedCompKind::Call { callee, .. } if names.contains(callee));
-    each_subterm(comp, &mut |child| found |= calls_any(child, names));
-    found
+    any_comp(
+        comp,
+        |node| matches!(node.kind(), TypedCompKind::Call { callee, .. } if names.contains(callee)),
+    )
 }
 
 // Whether `comp` applies a value rather than calling a name, so what runs is
 // decided by whatever thunk flowed to that position.
 fn applies_value(comp: &TypedComp) -> bool {
-    if matches!(comp.kind(), TypedCompKind::App { .. }) {
-        return true;
+    any_comp(comp, |node| {
+        matches!(node.kind(), TypedCompKind::App { .. })
+    })
+}
+
+fn any_comp(comp: &TypedComp, predicate: impl FnMut(&TypedComp) -> bool) -> bool {
+    struct AnyComp<F> {
+        predicate: F,
+        found: bool,
     }
-    let mut found = false;
-    each_subterm(comp, &mut |child| found |= applies_value(child));
-    found
+
+    impl<F: FnMut(&TypedComp) -> bool> Visit for AnyComp<F> {
+        fn comp(&mut self, comp: &TypedComp) -> bool {
+            self.found |= (self.predicate)(comp);
+            !self.found
+        }
+
+        fn value(&mut self, _value: &TypedValue) -> bool {
+            !self.found
+        }
+    }
+
+    let mut query = AnyComp {
+        predicate,
+        found: false,
+    };
+    query.walk_comp(comp);
+    query.found
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{mem, thread};
+
     use prism_syntax::names::ENTRY_POINT;
 
     use crate::core::typed::{
@@ -570,6 +600,8 @@ mod tests {
 
     const ASK: &str = "Ask.ask";
     const EFFECT: &str = "Ask";
+    const DEEP_QUERY_COMP_COUNT: usize = 50_000;
+    const ORDINARY_TEST_STACK: usize = 2 * 1024 * 1024;
 
     fn main_name() -> Sym {
         Sym::from(ENTRY_POINT)
@@ -578,6 +610,55 @@ mod tests {
     fn function(body: &TypedComp) -> TypedCoreFn {
         let signature = CoreFnSig::new(Vec::new(), Vec::new(), body.sig().clone());
         TypedCoreFn::new(main_name(), Vec::new(), body.clone(), signature, 0)
+    }
+
+    #[test]
+    fn whole_tree_queries_handle_deep_terms_on_an_ordinary_stack() {
+        thread::Builder::new()
+            .name("deep-effect-plan-queries".into())
+            .stack_size(ORDINARY_TEST_STACK)
+            .spawn(|| {
+                let target = Sym::new("deep.target");
+                let call = TypedComp::new(
+                    CompSig::new(CoreType::Source(Type::Unit), EffRow::Empty),
+                    TypedCompKind::Call {
+                        callee: target,
+                        instantiation: Vec::new(),
+                        args: Vec::new(),
+                    },
+                );
+                let applied = applied(lambda(performed()));
+                let mut body = TypedComp::new(
+                    applied.sig().clone(),
+                    TypedCompKind::Bind(Box::new(call), unit_binder("called"), Box::new(applied)),
+                );
+                for _ in 0..DEEP_QUERY_COMP_COUNT {
+                    let sig = body.sig().clone();
+                    let prefix = returning(TypedValue::new(
+                        CoreType::Source(Type::Unit),
+                        TypedValueKind::Unit,
+                    ));
+                    body = TypedComp::new(
+                        sig,
+                        TypedCompKind::Bind(
+                            Box::new(prefix),
+                            unit_binder("ignored"),
+                            Box::new(body),
+                        ),
+                    );
+                }
+
+                assert!(raw_effects(&body));
+                assert!(calls_any(&body, &BTreeSet::from([target])));
+                assert!(applies_value(&body));
+                let mut calls = BTreeSet::new();
+                collect_calls(&body, &mut calls);
+                assert_eq!(calls, BTreeSet::from([target]));
+                mem::forget(body);
+            })
+            .expect("spawn deep effect-plan query test")
+            .join()
+            .expect("deep effect-plan query test panicked");
     }
 
     // `do Ask.ask`, the operation whose presence makes a thunk effectful.

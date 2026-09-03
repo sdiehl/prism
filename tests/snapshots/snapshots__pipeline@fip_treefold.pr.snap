@@ -185,7 +185,9 @@ Program {
                 span: 590..674,
             },
             wheres: [],
-            fip: Fip,
+            fip: Fip(
+                0,
+            ),
             span: 568..674,
         },
     ],
@@ -211,7 +213,7 @@ fn relabel(t) =
       return Node(t@2, t@5, t@7)
 
 == fip ==
-[E1998] Type Error: usage check `fip` failed for function `relabel`: recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
+[E6080] Type Error: usage check `fip` failed for function `relabel`: recurses in non-tail position (one stack frame per element); make the recursive call a tail call or a tail under a single constructor / addition, or annotate it `fbip`
     ╭─[ <source>:10:1 ]
     │
  10 │ ╭─▶ fip fn relabel(t) =

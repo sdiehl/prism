@@ -15,10 +15,14 @@ use crate::core::cbpv::calls_in;
 use crate::core::fbip::borrow_sigs;
 use crate::core::fv::comp as fv_comp;
 use crate::core::hash::hex as hash_hex;
+use crate::core::traverse::Visit;
+#[cfg(feature = "native")]
+use crate::core::typed::summary::encode_summaries;
+use crate::core::typed::summary::{summarize_counted, FunctionSummary};
 use crate::core::{
     captures, core_identity_json, core_to_json, fip_annots, hash_program, insert_rc,
-    pp_core_pretty, reuse, scc_groups, shape_digests, Core, CoreFn, DepGraph, Digest, Hashes,
-    HASH_PREFIX_HEX, HASH_SCHEME,
+    pp_core_pretty, reuse, scc_groups, shape_digests, Comp, Core, CoreFn, DepGraph, Digest, Hashes,
+    Value, HASH_PREFIX_HEX, HASH_SCHEME,
 };
 use crate::docs::extract_typespans;
 use crate::error::{Error, SourceMap};
@@ -42,6 +46,9 @@ use prism_native::{emit_llvm_with_native_kont_table, native_kont_state_map};
 
 #[cfg(feature = "native")]
 use super::build::compiled;
+#[cfg(feature = "native")]
+use super::cache::SummaryCache;
+use super::front::{run_front, FrontRequest};
 use super::identity::{module_interface, namespace_root_of};
 #[cfg(feature = "native")]
 use super::identity::{native_kont_table_of, NativeKontIdentityRows};
@@ -400,6 +407,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
             );
             let graph = DepGraph::of(&core);
             let types: BTreeMap<&str, String> = checked
+                .defs
                 .decls
                 .iter()
                 .map(|d| (d.name.as_str(), d.ty.show()))
@@ -520,6 +528,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                 .filter(|n| !names::is_synthesized(n.as_str()))
                 .collect();
             let decl_ty: BTreeMap<Sym, Type> = checked
+                .defs
                 .decls
                 .iter()
                 .map(|d| (Sym::new(&d.name), d.ty.clone()))
@@ -529,6 +538,43 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                 &code_names,
                 &decl_ty,
             )))
+        }
+        // The optimizer's per-function fact sheet over optimized pre-lowering
+        // Core: for each of the program's own definitions, its size, how many of
+        // its calls resolve to a known head versus go through a computed
+        // function, which definitions it calls directly, and what shape of
+        // result its tail produces. Every `unknown:` result names the first
+        // construct that made the fact unrecoverable, so a reader sees why a
+        // rewrite could not fire, not just that it did not. Each row also
+        // carries the interprocedural summary computed over verified typed
+        // Core: result shape, checked effect row, allocation bound, closure
+        // capture state, invoked-callable parameter slots, and collection
+        // cardinality. Diagnostic only; changes no output.
+        "optimizer-facts" => {
+            let (_, _, core, typed, _) =
+                run_front(src, roots, cfg, FrontRequest::Full)?.into_typed_pre();
+            let (summaries, stats) = summarize_counted(typed.functions());
+            // Scalability counters on stderr only, so the pinned dump schema
+            // and the stored byte-identity check never see them.
+            if cfg.flags().opt_stats {
+                eprintln!(
+                    "summaries: {} functions, {} components ({} recursive), {} rounds, {} transfers",
+                    stats.functions,
+                    stats.components,
+                    stats.recursive,
+                    stats.rounds,
+                    stats.transfers
+                );
+            }
+            // The encoded table is durably stored and, on a warm key, checked
+            // byte-for-byte against the stored copy: recomputation must be
+            // invisible, and a divergence fails the dump loudly.
+            #[cfg(feature = "native")]
+            if let Some(cache) = SummaryCache::for_subject(src, roots, cfg)? {
+                cache.reconcile(&encode_summaries(&summaries))?;
+            }
+            let core = strip_prelude(core.into_core(), &prelude_fn_names()?);
+            optimizer_facts(&core, &summaries)
         }
         // One row per top-level definition of the usage facts the compiler already
         // holds: the allocation certificate, the fip/fbip discipline, the
@@ -558,7 +604,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
                 &core,
                 &ctors,
                 &native_kont_table,
-                cfg.flags.native_kont_frames,
+                cfg.flags().native_kont_frames,
             )
             .map_err(Error::CodegenDump)
         }
@@ -577,7 +623,7 @@ pub fn dump_on(phase: &str, src: &str, roots: &[Root], cfg: &Config) -> Result<S
 struct UsageRow {
     name: String,
     noalloc: &'static str,
-    discipline: &'static str,
+    discipline: String,
     borrow: String,
     row: String,
 }
@@ -655,7 +701,7 @@ fn usage_rows(
     let decls: BTreeMap<&str, &Decl<CorePhase>> =
         program.fns.iter().map(|d| (d.name.as_str(), d)).collect();
     let mut rows: Vec<UsageRow> = Vec::new();
-    for info in &checked.decls {
+    for info in &checked.defs.decls {
         let name = info.name.as_str();
         if !own.contains(&Sym::new(name)) {
             continue;
@@ -668,9 +714,13 @@ fn usage_rows(
         } else {
             USAGE_NOALLOC_NO
         };
-        // Keyword (`fip`/`fbip`) from the canonical home; the discipline column
-        // shows `-` when the definition carries no discipline.
-        let discipline = decl.fip.keyword().unwrap_or(USAGE_DISCIPLINE_NONE);
+        // The rendered discipline (`fip`, `fbip`, or a budgeted `fip(2)`) from
+        // the canonical home; the column shows `-` when the definition carries
+        // no discipline.
+        let discipline = decl
+            .fip
+            .render()
+            .unwrap_or_else(|| USAGE_DISCIPLINE_NONE.to_string());
         rows.push(UsageRow {
             name: name.to_string(),
             noalloc,
@@ -718,7 +768,7 @@ fn usage_summary_md(rows: &[UsageRow], tier: &str) -> String {
             [
                 md_cell(&r.name),
                 md_cell(r.noalloc),
-                md_cell(r.discipline),
+                md_cell(&r.discipline),
                 md_cell(&r.borrow),
                 md_cell(&r.row),
             ]
@@ -777,13 +827,190 @@ fn usage_summary_json(rows: &[UsageRow], tier: &str) -> Result<String, Error> {
             .map(|r| UsageDefJson {
                 name: &r.name,
                 noalloc: r.noalloc,
-                discipline: r.discipline,
+                discipline: &r.discipline,
                 borrow: &r.borrow,
                 row: &r.row,
             })
             .collect(),
     };
     pretty_json(&doc)
+}
+
+// The versioned schema tag heading the optimizer fact sheet, so a committed
+// export is self-describing and a reader can tell which layout it is parsing;
+// bump it on any incompatible shape change. The schema grows as the optimizer
+// learns new facts; existing fields never change meaning within a version.
+// v2 added the per-function `summary` block rendered from the interprocedural
+// summary table over verified typed Core.
+const OPTIMIZER_FACTS_SCHEMA: &str = "prism-optimizer-facts-v2";
+
+// The optimizer fact-sheet envelope behind `dump optimizer-facts`: one row per
+// own (non-prelude, non-synthesized) definition, name-sorted.
+#[derive(Serialize)]
+struct OptimizerFactsDoc {
+    schema: &'static str,
+    compiler: &'static str,
+    functions: Vec<OptimizerFnFacts>,
+}
+
+// One definition's facts as the optimizer sees them in optimized pre-lowering
+// Core. `size` counts computation nodes (nested closures included), so it is the
+// same quantity an inlining budget would meter. `direct_calls` are `Call` nodes
+// (the head is a known definition); `indirect_calls` are `App` nodes (the head
+// is a computed function, the shape a closure-identity fact would resolve).
+// `result` states the shape of the value the tail produces, or the first reason
+// that shape is unknown.
+#[derive(Serialize)]
+struct OptimizerFnFacts {
+    name: String,
+    params: Vec<String>,
+    size: usize,
+    direct_calls: usize,
+    indirect_calls: usize,
+    callees: Vec<String>,
+    result: String,
+    summary: OptimizerFnSummary,
+}
+
+// One function's interprocedural summary, rendered from the typed-Core
+// summary table. Where `result` above is the zero-analysis narrative whose
+// `unknown:` names the blocking construct, this block is the fixed-lattice
+// claim joined across paths and remapped through call sites; the two agreeing
+// is expected, the summary being strictly stronger is the point.
+#[derive(Serialize)]
+struct OptimizerFnSummary {
+    result: String,
+    effects: String,
+    allocation: &'static str,
+    capture: &'static str,
+    callbacks: Vec<usize>,
+    cardinality: String,
+}
+
+impl OptimizerFnSummary {
+    fn render(summary: &FunctionSummary) -> Self {
+        Self {
+            result: summary.result.render(),
+            effects: summary.effects.show(),
+            allocation: summary.allocation.render(),
+            capture: summary.capture.render(),
+            callbacks: summary.callbacks.iter().copied().collect(),
+            cardinality: summary.cardinality.render(),
+        }
+    }
+}
+
+// A single read-only walk collecting every per-body count the fact sheet
+// reports, so the counts can never disagree about which nodes were visited.
+#[derive(Default)]
+struct OptimizerCounts {
+    size: usize,
+    direct_calls: usize,
+    indirect_calls: usize,
+    callees: BTreeSet<String>,
+}
+
+impl Visit for OptimizerCounts {
+    fn comp(&mut self, c: &Comp) -> bool {
+        self.size += 1;
+        match c {
+            Comp::Call(f, _) => {
+                self.direct_calls += 1;
+                self.callees.insert(f.as_str().to_string());
+            }
+            Comp::App(..) => self.indirect_calls += 1,
+            _ => {}
+        }
+        true
+    }
+}
+
+// The shape of the value a body's tail produces, or the first construct that
+// makes it unknown. Follows binder chains and transparent wrappers to the
+// computation whose result is the body's result, then reads its shape without
+// any dataflow: this is deliberately the zero-analysis baseline a real result
+// fact would improve on, so every `unknown:` names the construct a smarter
+// domain would have to see through.
+fn tail_result(c: &Comp, params: &[Sym]) -> String {
+    match c {
+        Comp::Bind(_, _, k) => tail_result(k, params),
+        Comp::Mask(_, b) => tail_result(b, params),
+        Comp::WithReuse { body, .. } => tail_result(body, params),
+        Comp::Lam(..) => "closure: returns a function".to_string(),
+        Comp::Return(v) => match v {
+            Value::Var(x) if params.contains(x) => {
+                format!("alias: returns parameter `{}` unchanged", x.as_str())
+            }
+            Value::Var(_) => "unknown: returns a locally bound value".to_string(),
+            Value::Int(_)
+            | Value::I64(_)
+            | Value::U64(_)
+            | Value::Float(_)
+            | Value::Bool(_)
+            | Value::Unit
+            | Value::Str(_) => "constant: returns a literal".to_string(),
+            Value::Ctor(name, ..) => {
+                format!("constructor: returns `{}`", name.as_str())
+            }
+            Value::Tuple(_) | Value::UnboxedTuple(_) | Value::UnboxedRecord(_) => {
+                "product: returns a freshly built product".to_string()
+            }
+            Value::Thunk(_) => "closure: returns a thunk".to_string(),
+        },
+        Comp::Prim(..) | Comp::FloatBuiltin(..) | Comp::Neg(..) => {
+            "scalar: returns a primitive arithmetic result".to_string()
+        }
+        Comp::If(..) => "unknown: joins over 2 branches".to_string(),
+        // A single-arm case is a projection, not a join: descend into the arm
+        // the way a binder chain is descended (still zero dataflow).
+        Comp::Case(_, arms) if arms.len() == 1 => tail_result(&arms[0].1, params),
+        Comp::Case(_, arms) => format!("unknown: joins over {} branches", arms.len()),
+        Comp::Call(f, _) => format!("unknown: tail calls `{}`", f.as_str()),
+        Comp::App(..) => "unknown: tail applies a computed function".to_string(),
+        Comp::Do(..) | Comp::Handle { .. } => "unknown: effectful tail".to_string(),
+        other => format!("unknown: tail is {}", other.kind()),
+    }
+}
+
+// Render the fact sheet for a prelude-stripped optimized Core. Rows cover every
+// named definition the optimizer sees, the entry file's own and any explicitly
+// imported library module's; synthesized helpers (specializations, derived
+// instances) are excluded from rows but still appear in `callees`, naming where
+// a call actually lands.
+fn optimizer_facts(
+    core: &Core,
+    summaries: &BTreeMap<Sym, FunctionSummary>,
+) -> Result<String, Error> {
+    let mut functions: Vec<OptimizerFnFacts> = core
+        .fns
+        .iter()
+        .filter(|f| !names::is_synthesized(f.name.as_str()))
+        .map(|f| {
+            let mut counts = OptimizerCounts::default();
+            counts.walk_comp(&f.body);
+            // Erasure preserves names, so every kept erased definition has a
+            // summary computed from its typed twin.
+            let summary = summaries.get(&f.name).ok_or_else(|| {
+                Error::InternalInvariant(format!("no typed-core summary for `{}`", f.name.as_str()))
+            })?;
+            Ok(OptimizerFnFacts {
+                name: f.name.as_str().to_string(),
+                params: f.params.iter().map(|p| p.as_str().to_string()).collect(),
+                size: counts.size,
+                direct_calls: counts.direct_calls,
+                indirect_calls: counts.indirect_calls,
+                callees: counts.callees.into_iter().collect(),
+                result: tail_result(&f.body, &f.params),
+                summary: OptimizerFnSummary::render(summary),
+            })
+        })
+        .collect::<Result<_, Error>>()?;
+    functions.sort_by(|a, b| a.name.cmp(&b.name));
+    pretty_json(&OptimizerFactsDoc {
+        schema: OPTIMIZER_FACTS_SCHEMA,
+        compiler: COMPILER_VERSION,
+        functions,
+    })
 }
 
 // The schema tag heading every checked-HIR fixture. It versions the envelope so
@@ -946,6 +1173,7 @@ fn hir_fixture(checked: &Checked) -> Result<String, Error> {
 // the two renderings can never diverge.
 fn hir_decls(checked: &Checked) -> Vec<HirDecl> {
     checked
+        .defs
         .decls
         .iter()
         .map(|d| HirDecl {
@@ -1005,10 +1233,10 @@ fn render_handler_residual(residual: &HandlerResidual) -> HirHandlerResidual {
 // A resolution fact as its serializable projection.
 fn render_res(res: &NodeRes) -> HirRes {
     match res {
-        NodeRes::Field(ctor, index, arity) => HirRes::Field {
-            ctor: ctor.clone(),
-            index: *index,
-            arity: *arity,
+        NodeRes::Field(field) => HirRes::Field {
+            ctor: field.ctor.clone(),
+            index: field.index,
+            arity: field.arity,
         },
         NodeRes::UnboxedField(index, arity) => HirRes::Unboxed {
             index: *index,
@@ -1020,10 +1248,10 @@ fn render_res(res: &NodeRes) -> HirRes {
                 .map(|chain| {
                     chain
                         .iter()
-                        .map(|(ctor, index, arity)| HirStep {
-                            ctor: ctor.clone(),
-                            index: *index,
-                            arity: *arity,
+                        .map(|step| HirStep {
+                            ctor: step.ctor.clone(),
+                            index: step.index,
+                            arity: step.arity,
                         })
                         .collect()
                 })
@@ -1301,7 +1529,7 @@ fn tc_input_body(program: &Program<CorePhase>, checked: &Checked, src: &str) -> 
                 .ctors
                 .iter()
                 .map(|ctor| {
-                    let info = checked.ctors.get(&ctor.name);
+                    let info = checked.defs.ctors.get(&ctor.name);
                     TcCtor {
                         name: ctor.name.clone(),
                         tag: info.map_or(0, |i| i.tag),
@@ -1336,7 +1564,7 @@ fn tc_input_body(program: &Program<CorePhase>, checked: &Checked, src: &str) -> 
                 .ops
                 .iter()
                 .map(|op| {
-                    let info = checked.eff_ops.get(&op.name);
+                    let info = checked.defs.eff_ops.get(&op.name);
                     TcOp {
                         name: op.name.clone(),
                         grade: op.grade.word(),
@@ -1360,6 +1588,7 @@ fn tc_input_body(program: &Program<CorePhase>, checked: &Checked, src: &str) -> 
         .iter()
         .map(|class| {
             let mut methods: Vec<TcMethod> = checked
+                .dispatch
                 .classes
                 .get(&Sym::new(&class.name))
                 .map_or_else(Vec::new, |info| {
@@ -1388,7 +1617,7 @@ fn tc_input_body(program: &Program<CorePhase>, checked: &Checked, src: &str) -> 
         .instances
         .iter()
         .filter_map(|inst| {
-            let info = checked.instances.get(&Sym::new(&inst.name))?;
+            let info = checked.dispatch.instances.get(&Sym::new(&inst.name))?;
             let mut context: Vec<TcConstraint> = info
                 .context
                 .iter()

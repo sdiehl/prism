@@ -1,9 +1,0 @@
-[package]
-name = "parser_generator_type_leaf"
-version = "0.0.0"
-authors = ["Stephen Diehl <stephen.m.diehl@gmail.com>"]
-maintainers = ["stephen.m.diehl@gmail.com"]
-license = "MIT"
-
-[bin]
-entry = "src/main.pr"

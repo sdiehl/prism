@@ -1,6 +1,7 @@
 -- Usage facts without checkers parse as reserved names and are rejected, so no
--- program can give a reserved fact a meaning. (`noalloc`, `once`, `portable`,
--- and `noescape` are checked; `unique` stands in for the reserved set.)
+-- program can give a reserved fact a meaning. (`noalloc`, `once`, `many`,
+-- `portable`, `noescape`, `linear`, and `bounded_stack` are checked; `unique`
+-- stands in for the reserved set.)
 fn apply(f : ((Int) -> Int) @ unique, x : Int) : Int = f(x)
 
 fn main() : Int = apply(\(y) -> y + 1, 41)

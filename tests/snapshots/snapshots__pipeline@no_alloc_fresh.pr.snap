@@ -88,7 +88,7 @@ fn fresh(x) =
   return Box(t@0)
 
 == fip ==
-[E1998] Type Error: allocation certificate `@ noalloc` failed for function `fresh`: in `fresh`, constructor `Box` is built fresh outside `reuse`
+[E6076] Type Error: allocation certificate `@ noalloc` failed for function `fresh`: in `fresh`, constructor `Box` is built fresh outside `reuse`
    ╭─[ <source>:6:1 ]
    │
  6 │ fn fresh(x : Int) : Box @ noalloc = Box(x)

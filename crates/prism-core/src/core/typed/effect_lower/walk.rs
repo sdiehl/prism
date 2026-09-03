@@ -16,20 +16,15 @@ use std::collections::BTreeSet;
 
 use prism_common::sym::Sym;
 
-use super::super::{TypedComp, TypedCompKind, TypedValue, TypedValueKind};
+use crate::core::typed::traverse::Visit;
+use crate::core::typed::{TypedComp, TypedCompKind, TypedHandleOp, TypedValue, TypedValueKind};
 
 pub fn thunks_in_comp<'a>(c: &'a TypedComp, out: &mut Vec<&'a TypedComp>) {
-    each_value(c, &mut |v| thunks_in_value(v, out));
-    each_subcomp(c, &mut |sc| thunks_in_comp(sc, out));
+    collect_thunks(ThunkFrame::Comp(c), out, true);
 }
 
 pub fn thunks_in_value<'a>(v: &'a TypedValue, out: &mut Vec<&'a TypedComp>) {
-    let mut top = Vec::new();
-    top_thunks_in_value(v, &mut top);
-    for t in top {
-        out.push(t);
-        thunks_in_comp(t, out);
-    }
+    collect_thunks(ThunkFrame::Value(v), out, true);
 }
 
 /// The thunks a value holds directly.
@@ -40,39 +35,7 @@ pub fn thunks_in_value<'a>(v: &'a TypedValue, out: &mut Vec<&'a TypedComp>) {
 /// transitive answer would hand it the same thunk again at every enclosing
 /// level.
 pub fn top_thunks_in_value<'a>(v: &'a TypedValue, out: &mut Vec<&'a TypedComp>) {
-    match &v.kind {
-        TypedValueKind::Thunk(c) => {
-            out.push(c);
-        }
-        TypedValueKind::Reinterpret(inner)
-        | TypedValueKind::LoweredRepr { value: inner, .. }
-        | TypedValueKind::NewtypeRepr { value: inner, .. } => {
-            top_thunks_in_value(inner, out);
-        }
-        TypedValueKind::Ctor { fields, .. }
-        | TypedValueKind::Tuple(fields)
-        | TypedValueKind::UnboxedTuple(fields) => {
-            for f in fields {
-                top_thunks_in_value(f, out);
-            }
-        }
-        TypedValueKind::UnboxedRecord(fields) => {
-            for (_, f) in fields {
-                top_thunks_in_value(f, out);
-            }
-        }
-        // The remaining forms carry no nested values; enumerated so a new
-        // variant fails the match rather than silently hiding a thunk from
-        // every reachability and purity query built on this walk.
-        TypedValueKind::Var { .. }
-        | TypedValueKind::Unit
-        | TypedValueKind::Int(_)
-        | TypedValueKind::I64(_)
-        | TypedValueKind::U64(_)
-        | TypedValueKind::Bool(_)
-        | TypedValueKind::Float(_)
-        | TypedValueKind::Str(_) => {}
-    }
+    collect_thunks(ThunkFrame::Value(v), out, false);
 }
 
 /// Whether a value is a thunk in its own right, rather than an aggregate
@@ -84,12 +47,71 @@ pub fn top_thunks_in_value<'a>(v: &'a TypedValue, out: &mut Vec<&'a TypedComp>) 
 /// field of an aggregate is named by nothing until a later `case` extracts it.
 #[must_use]
 pub fn is_thunk(v: &TypedValue) -> bool {
-    match &v.kind {
-        TypedValueKind::Thunk(_) => true,
-        TypedValueKind::Reinterpret(inner)
-        | TypedValueKind::LoweredRepr { value: inner, .. }
-        | TypedValueKind::NewtypeRepr { value: inner, .. } => is_thunk(inner),
-        _ => false,
+    let mut value = v;
+    loop {
+        match value.kind() {
+            TypedValueKind::Thunk(_) => return true,
+            TypedValueKind::Reinterpret(inner)
+            | TypedValueKind::LoweredRepr { value: inner, .. }
+            | TypedValueKind::NewtypeRepr { value: inner, .. } => value = inner,
+            _ => return false,
+        }
+    }
+}
+
+enum ThunkFrame<'a> {
+    Comp(&'a TypedComp),
+    Value(&'a TypedValue),
+}
+
+fn collect_thunks<'a>(root: ThunkFrame<'a>, out: &mut Vec<&'a TypedComp>, descend_bodies: bool) {
+    let mut stack = vec![root];
+    while let Some(frame) = stack.pop() {
+        match frame {
+            ThunkFrame::Comp(comp) => {
+                let start = stack.len();
+                each_subcomp(comp, &mut |child| stack.push(ThunkFrame::Comp(child)));
+                stack[start..].reverse();
+
+                let start = stack.len();
+                each_value(comp, &mut |value| stack.push(ThunkFrame::Value(value)));
+                stack[start..].reverse();
+            }
+            ThunkFrame::Value(value) => match value.kind() {
+                TypedValueKind::Thunk(body) => {
+                    out.push(body);
+                    if descend_bodies {
+                        stack.push(ThunkFrame::Comp(body));
+                    }
+                }
+                TypedValueKind::Reinterpret(inner)
+                | TypedValueKind::LoweredRepr { value: inner, .. }
+                | TypedValueKind::NewtypeRepr { value: inner, .. } => {
+                    stack.push(ThunkFrame::Value(inner));
+                }
+                TypedValueKind::Ctor { fields, .. }
+                | TypedValueKind::Tuple(fields)
+                | TypedValueKind::UnboxedTuple(fields) => {
+                    stack.extend(fields.iter().rev().map(ThunkFrame::Value));
+                }
+                TypedValueKind::UnboxedRecord(fields) => {
+                    stack.extend(
+                        fields
+                            .iter()
+                            .rev()
+                            .map(|(_, field)| ThunkFrame::Value(field)),
+                    );
+                }
+                TypedValueKind::Var { .. }
+                | TypedValueKind::Unit
+                | TypedValueKind::Int(_)
+                | TypedValueKind::I64(_)
+                | TypedValueKind::U64(_)
+                | TypedValueKind::Bool(_)
+                | TypedValueKind::Float(_)
+                | TypedValueKind::Str(_) => {}
+            },
+        }
     }
 }
 
@@ -204,20 +226,140 @@ pub fn each_subterm<'a>(c: &'a TypedComp, f: &mut impl FnMut(&'a TypedComp)) {
     });
 }
 
+#[must_use]
+pub fn contains_mask(c: &TypedComp) -> bool {
+    struct MaskFinder(bool);
+
+    impl Visit for MaskFinder {
+        fn comp(&mut self, comp: &TypedComp) -> bool {
+            let masked = matches!(comp.kind(), TypedCompKind::Mask(..));
+            self.0 |= masked;
+            !masked
+        }
+    }
+
+    let mut finder = MaskFinder(false);
+    finder.walk_comp(c);
+    finder.0
+}
+
 // Every effect op a computation names: performed (`Do`), handled (`Handle`
 // arm), or masked, descending through thunks.
 pub fn collect_ops(c: &TypedComp, out: &mut BTreeSet<Sym>) {
-    match c.kind() {
-        TypedCompKind::Do { operation, .. } => {
-            out.insert(*operation);
-        }
-        TypedCompKind::Handle { ops, .. } => {
-            for op in ops.arms() {
-                out.insert(op.name());
+    OpCollector(out).walk_comp(c);
+}
+
+struct OpCollector<'a>(&'a mut BTreeSet<Sym>);
+
+impl Visit for OpCollector<'_> {
+    fn comp(&mut self, comp: &TypedComp) -> bool {
+        match comp.kind() {
+            TypedCompKind::Do { operation, .. } => {
+                self.0.insert(*operation);
             }
+            TypedCompKind::Handle { ops, .. } => {
+                self.0.extend(ops.arms().iter().map(TypedHandleOp::name));
+            }
+            TypedCompKind::Mask(ops, _) => self.0.extend(ops.iter().copied()),
+            _ => {}
         }
-        TypedCompKind::Mask(ops, _) => out.extend(ops.iter().copied()),
-        _ => {}
+        true
     }
-    each_subterm(c, &mut |sub| collect_ops(sub, out));
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{mem, thread};
+
+    use super::*;
+    use crate::core::typed::{CompSig, CoreType, TypedBinder};
+    use crate::types::ty::EffRow;
+    use crate::types::Type;
+
+    const DEEP_NODE_COUNT: usize = 50_000;
+    const ORDINARY_TEST_STACK: usize = 2 * 1024 * 1024;
+
+    fn unit_value() -> TypedValue {
+        TypedValue::new(CoreType::Source(Type::Unit), TypedValueKind::Unit)
+    }
+
+    fn unit_return() -> TypedComp {
+        TypedComp::new(
+            CompSig::new(CoreType::Source(Type::Unit), EffRow::Empty),
+            TypedCompKind::Return(unit_value()),
+        )
+    }
+
+    #[test]
+    fn walk_queries_handle_deep_terms_on_an_ordinary_stack() {
+        thread::Builder::new()
+            .name("deep-effect-query-walks".into())
+            .stack_size(ORDINARY_TEST_STACK)
+            .spawn(|| {
+                let pure_thunk_type = CoreType::Thunk(Box::new(unit_return().sig().clone()));
+                let mut wrapped = TypedValue::new(
+                    pure_thunk_type.clone(),
+                    TypedValueKind::Thunk(Box::new(unit_return())),
+                );
+                for _ in 0..DEEP_NODE_COUNT {
+                    wrapped = TypedValue::new(
+                        pure_thunk_type.clone(),
+                        TypedValueKind::Reinterpret(Box::new(wrapped)),
+                    );
+                }
+                assert!(is_thunk(&wrapped));
+                mem::forget(wrapped);
+
+                let operation = Sym::new("Deep.perform");
+                let effect = TypedComp::new(
+                    CompSig::new(CoreType::Source(Type::Unit), EffRow::singleton(operation)),
+                    TypedCompKind::Do {
+                        operation,
+                        instantiation: Vec::new(),
+                        args: Vec::new(),
+                    },
+                );
+                let thunk_type = CoreType::Thunk(Box::new(effect.sig().clone()));
+                let mut nested =
+                    TypedValue::new(thunk_type, TypedValueKind::Thunk(Box::new(effect)));
+                for _ in 0..DEEP_NODE_COUNT {
+                    nested = TypedValue::new(
+                        CoreType::Source(Type::Unit),
+                        TypedValueKind::Tuple(vec![nested]),
+                    );
+                }
+                let mut top = Vec::new();
+                top_thunks_in_value(&nested, &mut top);
+                assert_eq!(top.len(), 1);
+                drop(top);
+
+                let mut body = TypedComp::new(
+                    CompSig::new(CoreType::Source(Type::Unit), EffRow::Empty),
+                    TypedCompKind::Return(nested),
+                );
+                for _ in 0..DEEP_NODE_COUNT {
+                    let sig = body.sig().clone();
+                    body = TypedComp::new(
+                        sig,
+                        TypedCompKind::Bind(
+                            Box::new(unit_return()),
+                            TypedBinder::new(Sym::new("ignored"), CoreType::Source(Type::Unit)),
+                            Box::new(body),
+                        ),
+                    );
+                }
+
+                let mut thunks = Vec::new();
+                thunks_in_comp(&body, &mut thunks);
+                assert_eq!(thunks.len(), 1);
+                let mut operations = BTreeSet::new();
+                collect_ops(&body, &mut operations);
+                assert_eq!(operations, BTreeSet::from([operation]));
+                assert!(!contains_mask(&body));
+                mem::forget(body);
+            })
+            .expect("spawn deep effect-query test")
+            .join()
+            .expect("deep effect-query test panicked");
+    }
 }

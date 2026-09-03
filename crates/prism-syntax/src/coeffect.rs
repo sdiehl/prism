@@ -13,10 +13,11 @@
 //! what enters a definition's content hash, so `@ {once, portable}` and
 //! `@ {portable, once}` can never hash differently.
 //!
-//! Only `noalloc` is wired: at the root of a `fn` declaration's return annotation
-//! it is the allocation certificate (the heir of the retired `without alloc` /
-//! `\ alloc` spellings). Every other fact parses and is rejected as reserved, so
-//! no package can establish an incompatible meaning.
+//! Wired facts have checkers; everything else parses and is rejected as
+//! reserved, so no package can establish an incompatible meaning. At the root
+//! of a `fn` declaration's return annotation, `noalloc` (the heir of the
+//! retired `without alloc` / `\ alloc` spellings) and `bounded_stack` are
+//! declaration claims, lifted onto the declaration at parse.
 
 use std::fmt;
 
@@ -137,13 +138,31 @@ impl CoeffectFact {
     }
 
     /// Whether the checker behind this fact exists. Everything else parses and
-    /// rejects as reserved.
+    /// rejects as reserved. `many` is wired as the spelled form of the
+    /// unrestricted default: it admits repeated use, conflicts with `once` on
+    /// the multiplicity axis, and demands no checker beyond the existing
+    /// contravariant multiplicity relation.
     #[must_use]
     pub const fn is_wired(self) -> bool {
         matches!(
             self,
-            Self::Noalloc | Self::Once | Self::Portable | Self::Noescape
+            Self::Noalloc
+                | Self::Once
+                | Self::Many
+                | Self::Portable
+                | Self::Noescape
+                | Self::BoundedStack
+                | Self::Linear
         )
+    }
+
+    /// Whether this fact is a declaration claim: a wired past fact admitted at
+    /// the root of a `fn` return annotation and lifted onto the declaration at
+    /// parse, where it demands a whole-call-tree proof rather than typing a
+    /// value.
+    #[must_use]
+    pub const fn is_decl_claim(self) -> bool {
+        matches!(self, Self::Noalloc | Self::BoundedStack | Self::Linear)
     }
 }
 
@@ -229,6 +248,32 @@ impl CoeffectRow {
         self.facts == [CoeffectFact::Noalloc]
     }
 
+    /// Whether every fact is a declaration claim, the rows lifted off a `fn`
+    /// return root onto the declaration. A mixed row (a claim beside a
+    /// closure contract, say) stays in the type and is rejected at its span.
+    #[must_use]
+    pub fn is_decl_claims_only(&self) -> bool {
+        self.facts.iter().all(|f| f.is_decl_claim())
+    }
+
+    /// The canonical row for a declaration's lifted claim flags: the inverse
+    /// of the parse-time lift, used to print the claims back in one spelling.
+    /// `None` when the declaration claims nothing.
+    #[must_use]
+    pub fn decl_claims(no_alloc: bool, bounded_stack: bool, linear: bool) -> Option<Self> {
+        let facts: Vec<CoeffectFact> = [
+            bounded_stack.then_some(CoeffectFact::BoundedStack),
+            linear.then_some(CoeffectFact::Linear),
+            no_alloc.then_some(CoeffectFact::Noalloc),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        // Distinct facts on composing axes, so the set discipline holds by
+        // construction; the list above is already in canonical order.
+        (!facts.is_empty()).then_some(Self { facts })
+    }
+
     /// Whether every fact is a multiplicity (`once`/`many`), the usage contract a
     /// closure-typed value may carry: `(T -> U) @ once`. Other axes (mobility,
     /// escape) attach to a value through their own positions, not this one.
@@ -248,11 +293,32 @@ impl CoeffectRow {
             .all(|f| matches!(f.axis(), Axis::Multiplicity | Axis::Mobility))
     }
 
+    /// Whether every fact is a contract a function-typed value may carry: the
+    /// closure-boundary axes (multiplicity, mobility) plus the allocation
+    /// certificate. `((Int) -> Int) @ noalloc` demands an allocation-free
+    /// callable; the producer proves the whole-call-tree certificate and the
+    /// consumer may invoke it inside its own certified body.
+    #[must_use]
+    pub fn is_callable_contract(&self) -> bool {
+        self.facts.iter().all(|f| {
+            matches!(
+                f.axis(),
+                Axis::Multiplicity | Axis::Mobility | Axis::Allocation
+            )
+        })
+    }
+
     /// Whether this row claims `portable` (mobility): the closure may be moved to a
     /// fresh runtime because its captures are all portable.
     #[must_use]
     pub fn is_portable(&self) -> bool {
         self.facts.contains(&CoeffectFact::Portable)
+    }
+
+    /// Whether this row claims the allocation certificate (`noalloc`).
+    #[must_use]
+    pub fn has_noalloc(&self) -> bool {
+        self.facts.contains(&CoeffectFact::Noalloc)
     }
 
     /// Whether this row is exactly the scoped-token contract `@ noescape`: valid

@@ -1,0 +1,10 @@
+-- A recursive call under a single constructor lowers as a
+-- tail-modulo-constructor loop, so the claim holds even though the call is
+-- not literally in tail position.
+type List = Nil | Cons(Int, List)
+
+fn upto(n : Int) : List @ bounded_stack =
+  if n == 0 then
+    Nil
+  else
+    Cons(n, upto(n - 1))

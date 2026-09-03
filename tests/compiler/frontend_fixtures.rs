@@ -41,10 +41,11 @@ fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(FIXTURE_DIR)
 }
 
-// The committed golden: the dump's bytes plus exactly one terminating newline, so
-// the file satisfies the end-of-file hook while the comparison stays exact bytes.
+// The committed golden: the dump's bytes with the build stamp punched out, plus
+// one terminating newline for the end-of-file hook. The stamp is still checked
+// live below, against the dump rather than the golden.
 fn golden_document(dump: &str) -> String {
-    format!("{dump}\n")
+    format!("{}\n", super::seam::json(dump))
 }
 
 // Write a golden atomically (temp then rename) so an interrupted acceptance never

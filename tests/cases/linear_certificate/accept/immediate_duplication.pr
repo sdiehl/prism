@@ -1,0 +1,3 @@
+-- Scalars are unrestricted: a `dup` on an immediate is a runtime no-op under
+-- pointer tagging, so duplicating an `Int` never breaks the claim.
+fn sq(x : Int) : Int @ linear = x * x

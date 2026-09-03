@@ -35,7 +35,9 @@ Program {
                 span: 236..237,
             },
             wheres: [],
-            fip: Fip,
+            fip: Fip(
+                0,
+            ),
             span: 212..237,
         },
     ],
@@ -49,7 +51,7 @@ fn keep(x) =
   return x
 
 == fip ==
-[E1998] Type Error: usage check `fip` failed for function `keep`: is not linear (has a borrowed parameter)
+[E6077] Type Error: usage check `fip` failed for function `keep`: is not linear (has a borrowed parameter)
    ╭─[ <source>:4:1 ]
    │
  4 │ fip fn keep(borrow x) = x

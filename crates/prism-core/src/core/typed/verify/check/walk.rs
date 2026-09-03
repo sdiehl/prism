@@ -13,9 +13,9 @@ use crate::core::typed::violation::{
     RcOperandFault, RcSequenceFault, ReuseFault, RowRelation, Site, Violation,
 };
 use crate::core::typed::{
-    BinderErasure, CompSig, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType, TypedBinder,
-    TypedComp, TypedCompKind, TypedCoreFn, TypedHandleOp, TypedHandler, TypedPattern, TypedValue,
-    TypedValueKind, CORE_GROW_STACK, CORE_MIN_STACK,
+    on_core_stack, BinderErasure, CompSig, CoreFnSig, CoreInstantiation, CoreQuantifier, CoreType,
+    TypedBinder, TypedComp, TypedCompKind, TypedCoreFn, TypedHandleOp, TypedHandler, TypedPattern,
+    TypedValue, TypedValueKind,
 };
 use crate::core::CoreOp::{
     Add, Addf, Div, Divf, Eq, Eqf, Ge, Gef, Gt, Gtf, Le, Lef, Lt, Ltf, Mul, Mulf, Ne, Nef, Rem,
@@ -104,6 +104,12 @@ impl<P: TypedCorePhase> Checker<'_, P> {
     }
 
     fn value(&mut self, value: &TypedValue) {
+        // Values nest as deeply as computations (thunks, reinterpret chains);
+        // grow stack segments inside the recursion, same discipline as `comp`.
+        on_core_stack(|| self.value_inner(value));
+    }
+
+    fn value_inner(&mut self, value: &TypedValue) {
         self.check_core_type(value.ty());
         match value.kind() {
             TypedValueKind::Var {
@@ -398,11 +404,12 @@ impl<P: TypedCorePhase> Checker<'_, P> {
     fn comp(&mut self, comp: &TypedComp) {
         // The verifier recurses per typed node; grow stack segments inside the
         // recursion, same discipline as the builder it checks.
-        stacker::maybe_grow(CORE_MIN_STACK, CORE_GROW_STACK, || {
+        on_core_stack(|| {
             self.comp_inner(comp);
         });
     }
 
+    #[allow(clippy::too_many_lines)] // One arm per computation form; the exhaustive match is the point.
     fn comp_inner(&mut self, comp: &TypedComp) {
         self.check_sig(comp.sig());
         match comp.kind() {

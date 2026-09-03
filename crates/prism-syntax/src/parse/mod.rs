@@ -7,7 +7,7 @@ use marginalia::{Span, TriviaTable};
 
 use crate::ast::{Expr, Item, Program, Vis, S};
 use crate::error::{LexError, ParseError, SourceMap};
-use crate::lex::{lex, lex_raw, Token};
+use crate::lex::{lex, lex_raw, LexSpanned, Token};
 use crate::{ExprParser, ProgramParser};
 
 #[derive(Debug)]
@@ -18,6 +18,42 @@ pub struct ParseResult {
 
 // Cap on how many expected tokens a syntax error lists before eliding the rest.
 const MAX_EXPECTED_SHOWN: usize = 8;
+
+/// The structural nesting a compilation unit may reach before the parse refuses it.
+///
+/// Brackets, layout blocks, and string interpolations each open one level.
+/// Deliberately the stdlib parser's `depth_budget`, so both parsers refuse the
+/// same hostile shapes with the same code (`E7102`).
+pub const MAX_NESTING: usize = 2048;
+
+// Refuse hostile nesting before the parser builds any tree: one linear pass
+// over the token stream, refusing at the first token that crosses the budget.
+// Nothing deep exists at that point, so the refusal allocates nothing that then
+// needs deep destruction. The scan is a bound, not a validator: an unbalanced
+// stream passes here and fails in the parser with its ordinary diagnostic.
+fn check_nesting(tokens: &[LexSpanned]) -> Result<(), ParseError> {
+    let mut depth = 0_usize;
+    for (start, token, end) in tokens {
+        match token {
+            Token::LParen
+            | Token::LBrace
+            | Token::LBracket
+            | Token::VOpen
+            | Token::InterpStart(_) => {
+                depth += 1;
+                if depth > MAX_NESTING {
+                    return Err(ParseError::depth(Span::new(*start, *end)));
+                }
+            }
+            Token::RParen | Token::RBrace | Token::RBracket | Token::VClose => {
+                depth = depth.saturating_sub(1);
+            }
+            Token::InterpEnd(_) => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    Ok(())
+}
 
 fn from_lex(src: &str, e: &LexError) -> ParseError {
     ParseError::syntax(
@@ -31,6 +67,7 @@ fn from_lex(src: &str, e: &LexError) -> ParseError {
 /// Fails on lex or syntax errors.
 pub fn parse_expr(src: &str) -> Result<S<Expr>, ParseError> {
     let (tokens, _) = lex_raw(src).map_err(|e| from_lex(src, &e))?;
+    check_nesting(&tokens)?;
     ExprParser::new()
         .parse(tokens)
         .map_err(|e| from_lalrpop(src, &e))
@@ -56,6 +93,7 @@ pub fn incomplete(src: &str) -> bool {
 /// Fails on lex or syntax errors.
 pub fn parse(src: &str) -> Result<ParseResult, ParseError> {
     let (tokens, trivia) = lex(src).map_err(|e| from_lex(src, &e))?;
+    check_nesting(&tokens)?;
     let items = ProgramParser::new()
         .parse(tokens)
         .map_err(|e| from_lalrpop(src, &e))?;
@@ -281,5 +319,34 @@ fn from_lalrpop(
             Vec::new(),
         ),
         User { error: (span, msg) } => ParseError::syntax(*span, msg.clone(), Vec::new()),
+    }
+}
+
+#[cfg(test)]
+mod nesting_tests {
+    use super::{parse, parse_expr, MAX_NESTING};
+
+    fn parens(depth: usize) -> String {
+        format!("{}1{}", "(".repeat(depth), ")".repeat(depth))
+    }
+
+    // The budget is a refusal before any tree exists, so a hostile source one
+    // level past it answers the stable depth code instead of exhausting the
+    // stack. The refusal must not depend on the stream ever balancing: the
+    // closers below are never reached.
+    #[test]
+    fn hostile_nesting_is_refused_with_the_depth_code() {
+        let err = parse_expr(&parens(MAX_NESTING + 1)).unwrap_err();
+        assert_eq!(err.code(), "E7102");
+        let src = format!("fn f() : Int = {}", parens(MAX_NESTING + 1));
+        let err = parse(&src).unwrap_err();
+        assert_eq!(err.code(), "E7102");
+    }
+
+    // At the budget itself the scan stays silent and the parser builds the
+    // tree, so the bound is exactly `MAX_NESTING`, not one below it.
+    #[test]
+    fn nesting_at_the_budget_still_parses() {
+        parse_expr(&parens(MAX_NESTING)).expect("an expression at the budget parses");
     }
 }

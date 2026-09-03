@@ -1,29 +1,29 @@
 fn main() =
-  return 0 to t@731
-  return 0 to t@732
-  return Vec2(t@731, t@732) to t@733
-  return 1 to t@734
-  return 1 to t@735
-  return Vec2(t@734, t@735) to t@736
-  return Line(t@733, t@736) to l
-  return l to t@737
-  return 9 to t@738
-  case t@737 of
-    Line(t@739, t@740) =>
-      case t@739 of
-        Vec2(t@741, t@742) =>
-          return Vec2(t@738, t@742)
-      to t@743
-      return Line(t@743, t@740)
+  return 0 to t@41
+  return 0 to t@42
+  return Vec2(t@41, t@42) to t@43
+  return 1 to t@44
+  return 1 to t@45
+  return Vec2(t@44, t@45) to t@46
+  return Line(t@43, t@46) to l
+  return l to t@47
+  return 9 to t@48
+  case t@47 of
+    Line(t@49, t@50) =>
+      case t@49 of
+        Vec2(t@51, t@52) =>
+          return Vec2(t@48, t@52)
+      to t@53
+      return Line(t@53, t@50)
   to l2
-  return l2 to t@744
-  case t@744 of
-    Line(t@745, _) =>
-      return t@745
-  to t@746
-  case t@746 of
-    Vec2(t@747, _) =>
-      return t@747
-  to t@748
-  print t@748 to t@749
+  return l2 to t@54
+  case t@54 of
+    Line(t@55, _) =>
+      return t@55
+  to t@56
+  case t@56 of
+    Vec2(t@57, _) =>
+      return t@57
+  to t@58
+  print t@58 to t@59
   print_nl

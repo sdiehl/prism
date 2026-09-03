@@ -1,8 +1,7 @@
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::{atomic_write, DECISIONS_DIR};
+use super::DECISIONS_DIR;
 
 const DECISION_FORMAT: &str = "prism-query-decision-v1";
 
@@ -22,9 +21,14 @@ fn path(root: &Path, kind: &str, locator: &str) -> io::Result<PathBuf> {
     Ok(root.join(DECISIONS_DIR).join(kind).join(locator))
 }
 
-pub(super) fn get(root: &Path, kind: &str, locator: &str) -> io::Result<Option<Vec<u8>>> {
-    match fs::read(path(root, kind, locator)?) {
-        Ok(bytes) => {
+pub(super) fn get(
+    root: &Path,
+    pending: Option<&super::PendingWrites>,
+    kind: &str,
+    locator: &str,
+) -> io::Result<Option<Vec<u8>>> {
+    match super::read_visible(pending, &path(root, kind, locator)?)? {
+        Some(bytes) => {
             let prefix = format!("{DECISION_FORMAT}\n");
             if !bytes.starts_with(prefix.as_bytes()) {
                 return Err(io::Error::new(
@@ -34,13 +38,18 @@ pub(super) fn get(root: &Path, kind: &str, locator: &str) -> io::Result<Option<V
             }
             Ok(Some(bytes[prefix.len()..].to_vec()))
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error),
+        None => Ok(None),
     }
 }
 
-pub(super) fn put(root: &Path, kind: &str, locator: &str, bytes: &[u8]) -> io::Result<()> {
+pub(super) fn put(
+    root: &Path,
+    pending: Option<&super::PendingWrites>,
+    kind: &str,
+    locator: &str,
+    bytes: &[u8],
+) -> io::Result<()> {
     let mut encoded = format!("{DECISION_FORMAT}\n").into_bytes();
     encoded.extend_from_slice(bytes);
-    atomic_write(&path(root, kind, locator)?, &encoded)
+    super::atomic_write_in(pending, &path(root, kind, locator)?, &encoded)
 }

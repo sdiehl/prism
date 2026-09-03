@@ -16,9 +16,9 @@
 //! `lib/std/Wire.pr` discipline, self-contained here as in `store::codec`):
 //!
 //! ```text
-//!   +------------+------+------------------+--------------+
-//!   | scheme tag | kind |  bundle digest   |     body     |
-//!   +------------+------+------------------+--------------+
+//!   +------------+------+------------------+-------------+--------------+
+//!   | scheme tag | kind |  bundle digest   | certificate |     body     |
+//!   +------------+------+------------------+-------------+--------------+
 //!
 //!   scheme tag     length-prefixed "prism-core-hash-v2"; a foreign scheme is
 //!                  rejected before anything else
@@ -26,8 +26,45 @@
 //!   bundle digest  length-prefixed: the code-identity hash of the program this
 //!                  continuation runs in. A resumer checks it before the body, so a
 //!                  continuation cannot resume against code it was not captured in.
+//!   certificate    uvarint version, then what the sealing side proved: a
+//!                  `Portability` byte, and the digest of the bundle and the whole
+//!                  body under this protocol's own domain tag, never the Core hash
+//!                  scheme. The version is checked first, so a reader that does not
+//!                  know a later slot refuses the frame instead of parsing past a
+//!                  field it cannot see. The digest is then checked before a byte of
+//!                  the body is parsed, which is what makes an envelope edited or
+//!                  truncated in flight detectable rather than merely unlikely to
+//!                  reconstruct.
 //!   body           the machine snapshot below
 //! ```
+//!
+//! The bundle digest answers "is this my code"; the certificate answers "what was
+//! checked about this computation, and is this still the state that was checked".
+//! Placement needs both, because the two can fail independently, and the
+//! certificate covers the bundle so no part of the header a writer chooses sits
+//! outside it.
+//!
+//! # What the frame does not answer
+//!
+//! It does not answer "who sent this". Both digests are unkeyed, so a peer that
+//! can write a body can write its certificate too, and the bundle is derived from
+//! a program both sides already have rather than from a secret. What the frame
+//! rules out is an envelope that is not the one its own header describes, and one
+//! captured against different code; it rules out nothing about the peer.
+//!
+//! So landing an envelope is running code the sender chose. Every byte of a
+//! decoded body is a machine graph this process is about to execute: an inlined
+//! lambda body rides in the frame itself, and nothing here re-typechecks it or
+//! bounds its effects, because a well-typed continuation is exactly as capable as
+//! the program it was captured in. Anyone who can hand this process an envelope
+//! for a bundle it accepts can run a computation in it.
+//!
+//! That is a property of moving computations, not a gap to be closed by parsing
+//! more carefully, and this protocol has no key boundary yet. A host that lands
+//! envelopes must therefore choose its peers itself: bind the receiver to
+//! loopback or a trusted network, and treat the socket as the trust boundary. A
+//! recording or authenticating handler is the place that changes, and the frame
+//! shape above is fixed so it can be added without breaking this one.
 //!
 //! # The body: a machine snapshot over one hash-consed node table
 //!
@@ -103,6 +140,93 @@ use super::{Atom, Cmp, Env, Frame, HandleInfo, Node, Obs, Rv};
 // typed-envelope codec's job, not this dynamic one.
 const MAX_SUSPEND_DEPTH: usize = 256;
 
+/// What the sealing side proved about the computation in an envelope, carried
+/// so the landing side reads a claim rather than trusting the sender.
+///
+/// The distinction is not decorative. A suspended run is an arbitrary machine
+/// state, captured wherever the step budget ran out; a placed computation is a
+/// closure whose portability the compiler checked at the call. Only the second
+/// may be landed by `Teleport`, and only this byte tells them apart once they
+/// are both just bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Portability {
+    /// No portability claim: a suspension, resumable only by the same program's
+    /// own resume path.
+    Unchecked,
+    /// The compiler proved the sealed closure captures only what travels, at the
+    /// call that sealed it.
+    Checked,
+}
+
+impl Portability {
+    // Wire values. `2` is reserved for a recorded failed check, which no
+    // envelope can currently carry because a failed check produces no bytes.
+    const UNCHECKED: u8 = 0;
+    const CHECKED: u8 = 1;
+
+    const fn byte(self) -> u8 {
+        match self {
+            Self::Unchecked => Self::UNCHECKED,
+            Self::Checked => Self::CHECKED,
+        }
+    }
+
+    const fn of_byte(b: u8) -> Option<Self> {
+        match b {
+            Self::UNCHECKED => Some(Self::Unchecked),
+            Self::CHECKED => Some(Self::Checked),
+            _ => None,
+        }
+    }
+}
+
+/// The version of the certificate slot this build writes. A reader that does not
+/// know a version refuses the envelope rather than guessing at the fields behind
+/// it, which is what lets the slot grow without a second wire.
+const CERT_VERSION: u64 = 1;
+
+/// Domain tag for the certificate's body digest.
+///
+/// It is not the Core hash and must never collide with one: a Core digest names
+/// a program's meaning, while this names one envelope's bytes under one version
+/// of this protocol. Prefixing the tag keeps the two apart even where the same
+/// bytes could be read as either, so a Core digest can never be presented as a
+/// certificate or the reverse.
+const CERT_DOMAIN: &[u8] = b"prism-kont-certificate-v1\0";
+
+/// Hash what the certificate covers, under this protocol's own domain.
+///
+/// That is every byte of the frame the reader has a choice about: the bundle
+/// digest, the portability stamp, and the whole body (the machine registers, the
+/// recorded trace, and the capture graph the landing side will rebuild values
+/// from). The stamp and the bundle are inside the digest because they are the
+/// fields a rewriter most wants to edit, and hashing the whole body rather than
+/// the capture table alone costs nothing and leaves no reachable byte of the
+/// frame uncovered. Only the scheme tag, the kind, and the version sit outside,
+/// because a reader checks each of those against a constant before it reaches
+/// this digest at all.
+///
+/// This is a content commitment, not a signature. The hash is unkeyed, so it
+/// proves that a frame is the frame its own header describes, and nothing about
+/// who wrote it: whoever can rewrite the body can recompute the digest to match.
+/// It catches an envelope damaged or edited between the seal and the landing; a
+/// hostile peer is a key boundary this protocol does not yet have, and the
+/// module header above says what that means for a caller who lands one.
+fn certificate_digest(bundle: &str, portable: Portability, body: &[u8]) -> String {
+    let mut h = blake3::Hasher::new();
+    h.update(CERT_DOMAIN);
+    // Length-prefixed, so no bundle/body split can be re-cut into another one.
+    h.update(
+        &u64::try_from(bundle.len())
+            .unwrap_or(u64::MAX)
+            .to_le_bytes(),
+    );
+    h.update(bundle.as_bytes());
+    h.update(&[portable.byte()]);
+    h.update(body);
+    h.finalize().to_hex().to_string()
+}
+
 /// A live interpreter continuation made portable: the whole suspended machine as
 /// a value. Encoded by [`encode_kont`], reconstructed by [`decode_kont`], and
 /// resumed by the driver in `crate::eval`.
@@ -111,6 +235,17 @@ pub struct Kont {
     /// The code-identity digest of the program this continuation runs in. A
     /// resumer refuses a continuation whose bundle does not match its own code.
     pub bundle: String,
+    /// What the sealing side proved about this continuation. Set by whoever
+    /// builds the `Kont`, because only they know which boundary it crossed.
+    ///
+    /// The certificate's other half, the body digest, is deliberately not a
+    /// field. It is computed by [`encode_kont`] over the bytes it wrote and
+    /// recomputed by [`decode_kont`] over the bytes it read, so a mismatch is a
+    /// refusal and a decoded `Kont` in hand already means it matched. Carrying it
+    /// here would only let a caller state a digest nothing checks, and pair with
+    /// this field into states (`Unchecked` plus a digest, `Checked` plus none)
+    /// that mean nothing.
+    pub portable: Portability,
     /// The pending continuation: the frame stack, bottom to top.
     pub stack: Vec<Frame>,
     /// What the machine was about to do when it suspended.
@@ -895,42 +1030,49 @@ pub fn encode_kont(k: &Kont) -> Result<Vec<u8>, SuspendError> {
         }
     };
 
-    let mut out = Vec::new();
-    put_str(&mut out, HASH_SCHEME);
-    put_uvarint(&mut out, u64::from(WireKind::Kont.varint()));
-    put_str(&mut out, &k.bundle);
-
-    put_uvarint(&mut out, k.rng);
-    put_sym(&mut out, k.fn_name);
-    put_uvarint(&mut out, k.observed as u64);
+    // The body is built before the header so the certificate can commit to the
+    // exact bytes a reader will parse, rather than to a rendering of them.
+    let mut body = Vec::new();
+    put_uvarint(&mut body, k.rng);
+    put_sym(&mut body, k.fn_name);
+    put_uvarint(&mut body, k.observed as u64);
     match k.exit {
         Some(code) => {
-            out.push(1);
-            put_svarint(&mut out, i64::from(code));
+            body.push(1);
+            put_svarint(&mut body, i64::from(code));
         }
-        None => out.push(0),
+        None => body.push(0),
     }
-    put_uvarint(&mut out, k.trace.len() as u64);
+    put_uvarint(&mut body, k.trace.len() as u64);
     for o in &k.trace {
-        put_obs(&mut out, o);
+        put_obs(&mut body, o);
     }
-    put_uvarint(&mut out, k.observations.len() as u64);
+    put_uvarint(&mut body, k.observations.len() as u64);
     for observation in &k.observations {
         let json = serde_json::to_string(observation).map_err(|error| {
             SuspendError::NonSerializable(format!("observation trace: {error}"))
         })?;
-        put_str(&mut out, &json);
+        put_str(&mut body, &json);
     }
 
-    put_uvarint(&mut out, enc.table.len() as u64);
+    put_uvarint(&mut body, enc.table.len() as u64);
     for node in &enc.table {
-        out.extend_from_slice(node);
+        body.extend_from_slice(node);
     }
 
-    put_indices(&mut out, &stack_idxs);
-    out.push(state.0);
-    put_uvarint(&mut out, u64::from(state.1));
-    put_uvarint(&mut out, u64::from(state.2));
+    put_indices(&mut body, &stack_idxs);
+    body.push(state.0);
+    put_uvarint(&mut body, u64::from(state.1));
+    put_uvarint(&mut body, u64::from(state.2));
+
+    let mut out = Vec::new();
+    put_str(&mut out, HASH_SCHEME);
+    put_uvarint(&mut out, u64::from(WireKind::Kont.varint()));
+    put_str(&mut out, &k.bundle);
+    put_uvarint(&mut out, CERT_VERSION);
+    out.push(k.portable.byte());
+    put_str(&mut out, &certificate_digest(&k.bundle, k.portable, &body));
+    out.extend_from_slice(&body);
     Ok(out)
 }
 
@@ -1274,7 +1416,7 @@ impl Builder<'_> {
             map.insert(Sym::new(&k), self.value_at(vi)?);
         }
         self.depth -= 1;
-        Ok(Rc::new(map))
+        Ok(Rc::new(map.into()))
     }
 
     fn atom_at(&mut self, i: u32) -> Result<Atom, CodecError> {
@@ -1447,6 +1589,19 @@ pub fn decode_kont(bytes: &[u8]) -> Result<Kont, CodecError> {
         return Err(CodecError::Kind);
     }
     let bundle = r.string()?;
+    if r.uvarint()? != CERT_VERSION {
+        return Err(CodecError::Malformed);
+    }
+    let portable = Portability::of_byte(r.byte()?).ok_or(CodecError::Malformed)?;
+    // The certificate's digest is checked before a byte of the body is parsed, so
+    // an envelope edited or truncated in flight is refused outright rather than
+    // half-reconstructed into a machine. Everything below this line is bytes the
+    // certificate accounts for.
+    let claimed = r.string()?;
+    let body = bytes.get(r.position()..).ok_or(CodecError::Truncated)?;
+    if certificate_digest(&bundle, portable, body) != claimed {
+        return Err(CodecError::Malformed);
+    }
 
     let rng = r.uvarint()?;
     let fn_name = Sym::new(&r.string()?);
@@ -1480,7 +1635,6 @@ pub fn decode_kont(bytes: &[u8]) -> Result<Kont, CodecError> {
             u32::try_from(i).map_err(|_| CodecError::TooLarge)?,
         )?);
     }
-
     let stack_len = r.bounded_len()?;
     let stack_idxs = (0..stack_len)
         .map(|_| {
@@ -1521,6 +1675,7 @@ pub fn decode_kont(bytes: &[u8]) -> Result<Kont, CodecError> {
 
     Ok(Kont {
         bundle,
+        portable,
         stack,
         state,
         rng,
@@ -1540,7 +1695,7 @@ mod tests {
     use num_bigint::BigInt;
 
     use super::super::{Atom, Cmp, Env, Frame, HandleInfo, Node, Obs, Rv};
-    use super::{decode_kont, encode_kont, Kont, KontState, SuspendError};
+    use super::{decode_kont, encode_kont, Kont, KontState, Portability, SuspendError};
     use crate::core::builtins::{Builtin, FloatOp};
     use crate::core::{CoreOp, CorePat, NegLane};
     use crate::store::CodecError;
@@ -1551,12 +1706,18 @@ mod tests {
     }
 
     fn env(pairs: Vec<(&str, Rv)>) -> Env {
-        Rc::new(pairs.into_iter().map(|(k, v)| (Sym::new(k), v)).collect())
+        let map: BTreeMap<Sym, Rv> = pairs.into_iter().map(|(k, v)| (Sym::new(k), v)).collect();
+        Rc::new(map.into())
     }
 
     // A continuation exercising every value, node, atom, frame, pattern and
     // handler shape the codec must round-trip, so the idempotence and totality
     // checks below cover the whole table, including uncommon cases.
+    // The bundle a hand-built frame and the round-tripped `kitchen_sink` share, so
+    // a frame this module writes by hand certifies the same header the encoder
+    // would have, and `header_len` measures the one the tests actually use.
+    const TEST_BUNDLE: &str = "deadbeefcafef00d";
+
     fn kitchen_sink() -> Kont {
         let inner_body = cmp(Node::Prim(
             CoreOp::Add,
@@ -1672,7 +1833,8 @@ mod tests {
             Frame::Mask(Rc::from([Sym::new("tell")])),
         ];
         Kont {
-            bundle: "deadbeefcafef00d".into(),
+            bundle: TEST_BUNDLE.into(),
+            portable: Portability::Checked,
             stack,
             state: KontState::Eval(big_body, base_env),
             rng: 0x9E37_79B9_7F4A_7C15,
@@ -1754,11 +1916,125 @@ mod tests {
         }
     }
 
+    // Everything a frame writes before the portability stamp. Its length is the
+    // stamp's index, which is how a test that wants to restamp a frame in flight
+    // finds that byte: subtracting field widths from the header would land on the
+    // digest's own length prefix instead, and would still pass for the wrong
+    // reason.
+    fn preamble(version: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        super::put_str(&mut out, crate::core::HASH_SCHEME);
+        super::put_uvarint(&mut out, u64::from(crate::driver::WireKind::Kont.varint()));
+        super::put_str(&mut out, TEST_BUNDLE);
+        super::put_uvarint(&mut out, version);
+        out
+    }
+
+    // A hand-built frame: everything up to and including the certificate, then a
+    // body. `version` and `digest_of` are open so a test can write a frame this
+    // build would never produce.
+    fn frame(version: u64, stamp: Portability, digest_of: &[u8], body: &[u8]) -> Vec<u8> {
+        let mut out = preamble(version);
+        out.push(stamp.byte());
+        super::put_str(
+            &mut out,
+            &super::certificate_digest(TEST_BUNDLE, stamp, digest_of),
+        );
+        out.extend_from_slice(body);
+        out
+    }
+
+    // How long that header is. The digest is a fixed-width hex string, so this
+    // does not depend on which body a frame certifies.
+    fn header_len() -> usize {
+        frame(super::CERT_VERSION, Portability::Checked, &[], &[]).len()
+    }
+
+    // The body of a real frame, for tests that perturb one.
+    fn kitchen_sink_body() -> Vec<u8> {
+        encode_kont(&kitchen_sink()).unwrap()[header_len()..].to_vec()
+    }
+
     #[test]
     fn trailing_bytes_rejected() {
+        // A body with a spare byte, certified as written: the digest passes and the
+        // reader still refuses what it cannot account for.
+        let mut body = kitchen_sink_body();
+        body.push(0);
+        assert_eq!(
+            decode_kont(&frame(
+                super::CERT_VERSION,
+                Portability::Checked,
+                &body,
+                &body
+            ))
+            .unwrap_err(),
+            CodecError::TrailingBytes
+        );
+    }
+
+    #[test]
+    fn appending_to_a_sealed_frame_is_refused_by_the_certificate() {
+        // The same spare byte on a frame whose certificate was written before it:
+        // refused at the digest, before the reader parses anything it covers.
         let mut bytes = encode_kont(&kitchen_sink()).unwrap();
         bytes.push(0);
-        assert_eq!(decode_kont(&bytes).unwrap_err(), CodecError::TrailingBytes);
+        assert_eq!(decode_kont(&bytes).unwrap_err(), CodecError::Malformed);
+    }
+
+    #[test]
+    fn the_portability_stamp_survives_the_round_trip_and_cannot_be_forged() {
+        let body = kitchen_sink_body();
+        for stamp in [Portability::Unchecked, Portability::Checked] {
+            let k = Kont {
+                portable: stamp,
+                ..kitchen_sink()
+            };
+            assert_eq!(
+                decode_kont(&encode_kont(&k).unwrap()).unwrap().portable,
+                stamp
+            );
+        }
+        // The stamp is inside the digest, so re-stamping a frame in flight (the way
+        // a sender would promote its own suspension into a placeable computation)
+        // does not produce a frame that decodes.
+        let forged = frame(super::CERT_VERSION, Portability::Checked, &body, &body);
+        let stamp_at = preamble(super::CERT_VERSION).len();
+        assert_eq!(
+            forged[stamp_at],
+            Portability::Checked.byte(),
+            "the stamp is where the preamble ends"
+        );
+        let mut restamped = forged.clone();
+        restamped[stamp_at] = Portability::Unchecked.byte();
+        assert!(
+            decode_kont(&forged).is_ok(),
+            "the frame itself is well formed"
+        );
+        assert_eq!(decode_kont(&restamped).unwrap_err(), CodecError::Malformed);
+    }
+
+    #[test]
+    fn an_unknown_certificate_version_is_refused_whole() {
+        let body = kitchen_sink_body();
+        // A reader that does not know the version stops at it rather than parsing
+        // past a field it cannot see, even though everything after is well formed.
+        let ahead = frame(super::CERT_VERSION + 1, Portability::Checked, &body, &body);
+        assert_eq!(decode_kont(&ahead).unwrap_err(), CodecError::Malformed);
+    }
+
+    #[test]
+    fn every_body_byte_is_covered_by_the_certificate() {
+        let bytes = encode_kont(&kitchen_sink()).unwrap();
+        for i in header_len()..bytes.len() {
+            let mut b = bytes.clone();
+            b[i] ^= 0x01;
+            assert_eq!(
+                decode_kont(&b).unwrap_err(),
+                CodecError::Malformed,
+                "flipping body byte {i} is refused"
+            );
+        }
     }
 
     #[test]
@@ -1777,19 +2053,26 @@ mod tests {
 
     #[test]
     fn oversized_node_count_rejected() {
-        // Hand-build a header with a monstrous node count.
-        let mut buf = Vec::new();
-        super::put_str(&mut buf, crate::core::HASH_SCHEME);
-        super::put_uvarint(&mut buf, u64::from(crate::driver::WireKind::Kont.varint()));
-        super::put_str(&mut buf, "bundle");
-        super::put_uvarint(&mut buf, 0); // rng
-        super::put_str(&mut buf, "main"); // fn_name
-        super::put_uvarint(&mut buf, 0); // observed
-        buf.push(0); // exit: none
-        super::put_uvarint(&mut buf, 0); // trace len
-        super::put_uvarint(&mut buf, 0); // observation len
-        super::put_uvarint(&mut buf, u64::MAX); // node_count
-        assert_eq!(decode_kont(&buf).unwrap_err(), CodecError::TooLarge);
+        // A body with a monstrous node count, correctly certified so the bound is
+        // what refuses it rather than the digest.
+        let mut body = Vec::new();
+        super::put_uvarint(&mut body, 0); // rng
+        super::put_str(&mut body, "main"); // fn_name
+        super::put_uvarint(&mut body, 0); // observed
+        body.push(0); // exit: none
+        super::put_uvarint(&mut body, 0); // trace len
+        super::put_uvarint(&mut body, 0); // observation len
+        super::put_uvarint(&mut body, u64::MAX); // node_count
+        assert_eq!(
+            decode_kont(&frame(
+                super::CERT_VERSION,
+                Portability::Unchecked,
+                &body,
+                &body
+            ))
+            .unwrap_err(),
+            CodecError::TooLarge
+        );
     }
 
     #[test]

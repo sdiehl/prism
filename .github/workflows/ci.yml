@@ -232,9 +232,6 @@ jobs:
       PRISM_REAL_CC: /usr/lib/llvm-22/bin/clang
       PRISM_CC: ${{ github.workspace }}/scripts/clang-sccache
       RUSTC_WRAPPER: sccache
-      # Same debug-profile parity run as the shards: enlarge libtest's per-test
-      # thread stack past the 2 MB default for the deepest corpus recursion.
-      RUST_MIN_STACK: "33554432"
     steps:
       - uses: actions/checkout@v7
       - name: Setup Rust toolchain
@@ -435,11 +432,6 @@ jobs:
         env:
           PRISM_CORPUS_SHARDED: "1"
           PRISM_HEAVY_CORPUS_SHARDED: "1"
-          # Enlarge libtest's per-test thread stack so the deepest debug-profile
-          # compiler recursion (Core Lint over the corpus, the scheduler
-          # constant-stack perf gate) does not overflow the 2 MB default. Matches
-          # the `just test` recipe; these tests are release-green in `just gate`.
-          RUST_MIN_STACK: "33554432"
         run: cargo nextest run --profile ci --workspace --partition hash:${{ matrix.partition }}/4
 
   # Whole-corpus relational gates are individually too large for hash partitioning:
@@ -464,7 +456,6 @@ jobs:
       PRISM_GATE_FINGERPRINT: source
       PRISM_SHARD_TOTAL: "4"
       PRISM_SHARD_INDEX: ${{ matrix.shard }}
-      RUST_MIN_STACK: "33554432"
     steps:
       - uses: actions/checkout@v7
 
@@ -878,10 +869,6 @@ jobs:
       PRISM_SHARD_TOTAL: "4"
       PRISM_SHARD_INDEX: ${{ matrix.shard }}
       RUSTC_WRAPPER: sccache
-      # Enlarge libtest's per-test thread stack so the deepest debug-profile
-      # compiler recursion over the corpus does not overflow the 2 MB default.
-      # Matches the Test shards; the corpus is release-green in `just gate`.
-      RUST_MIN_STACK: "33554432"
     steps:
       - uses: actions/checkout@v7
 

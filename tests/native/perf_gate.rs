@@ -20,7 +20,7 @@ use std::path::Path;
 use std::process::Command;
 use std::{env, fs};
 
-use crate::support::{ALLOCATED_BYTES_SUFFIX, ALLOC_STATS};
+use crate::support::{stat_build_counters, ALLOCATED_BYTES_SUFFIX, ALLOC_STATS};
 
 // Corpus discovery and prelude-prepending source loader, shared with the parity
 // oracles. The tier manifest below records the same program set those gates diff, so
@@ -114,7 +114,7 @@ fn stat_src(full: &str, tag: &str, stat_env: &str, suffix: &str) -> Result<i64, 
 fn stat_src_o2(full: &str, tag: &str, stat_env: &str, suffix: &str) -> Result<i64, String> {
     stat_build(full, tag, stat_env, suffix, |src, bin| {
         let mut cfg = prism::Config::from_env();
-        cfg.flags.opt_level = prism::OptLevel::O2;
+        cfg.update_flags(|flags| flags.opt_level = prism::OptLevel::O2);
         prism::build_on(src, &prism::default_roots(Path::new(".")), bin, &cfg)
     })
 }
@@ -130,7 +130,8 @@ fn stat_build(
 }
 
 // Every counter a stats run reports is on the same stderr, so a family of them
-// costs one build and one run, not one per counter.
+// costs one build and one run, not one per counter. The build/run/read path
+// itself is the shared `stat_build_counters` in `support`.
 fn stat_build_many(
     full: &str,
     tag: &str,
@@ -138,38 +139,7 @@ fn stat_build_many(
     suffixes: &[&str],
     build: impl Fn(&str, &Path) -> Result<(), prism::error::Error>,
 ) -> Result<Vec<i64>, String> {
-    let bin = env::temp_dir().join(format!(
-        "prism_perf_{}_{}",
-        std::process::id(),
-        tag.replace(['/', '.', ' '], "_")
-    ));
-    let cleanup = || {
-        for ext in ["bc", "ll"] {
-            let _ = fs::remove_file(bin.with_extension(ext));
-        }
-        let _ = fs::remove_file(&bin);
-    };
-    if let Err(e) = build(full, &bin) {
-        cleanup();
-        return Err(format!("{tag}: build failed: {e}"));
-    }
-    let out = Command::new(&bin).env(stat_env, "1").output();
-    cleanup();
-    let out = out.map_err(|e| format!("{tag}: spawn failed: {e}"))?;
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    suffixes
-        .iter()
-        .map(|suffix| {
-            let line = stderr
-                .lines()
-                .find(|l| l.trim_end().ends_with(suffix))
-                .ok_or_else(|| format!("{tag}: no `{suffix}` line in stderr: {stderr:?}"))?;
-            line.split_whitespace()
-                .nth(1)
-                .and_then(|n| n.parse().ok())
-                .ok_or_else(|| format!("{tag}: cannot parse count from {line:?}"))
-        })
-        .collect()
+    stat_build_counters(full, tag, &[stat_env], suffixes, build)
 }
 
 // The fusion corpus: each program drives a different path to the zero-allocation
@@ -540,7 +510,7 @@ impl PromoteStats {
             &Self::SUFFIXES,
             |src, bin| {
                 let mut cfg = prism::Config::from_env();
-                cfg.flags.opt_level = prism::OptLevel::O2;
+                cfg.update_flags(|flags| flags.opt_level = prism::OptLevel::O2);
                 prism::build_on(src, &prism::default_roots(Path::new(".")), bin, &cfg)
             },
         )
@@ -964,7 +934,7 @@ fn borrowed_walk_threads_no_rc_pairs() {
     let build = |infer: bool| {
         move |src: &str, bin: &Path| {
             let mut cfg = prism::Config::from_env();
-            cfg.flags.borrow_infer = infer;
+            cfg.update_flags(|flags| flags.borrow_infer = infer);
             prism::build_on(src, &prism::default_roots(Path::new(".")), bin, &cfg)
         }
     };
@@ -1267,10 +1237,6 @@ fn guarded_match_fallthrough_is_shared_not_duplicated() {
 
 const TIER_MANIFEST: &str = "tests/tier_manifest.txt";
 const TIER_MANIFEST_ACCEPT: &str = "PRISM_ACCEPT_TIER_MANIFEST";
-// This gate compiles the entire corpus sequentially in one debug test worker.
-// Match the corpus-oracle headroom in `tests/support`: the reservation is
-// virtual, while a too-small stack aborts the process before naming the case.
-const TIER_MANIFEST_STACK: usize = 256 * 1024 * 1024;
 const TIER_MANIFEST_HEADER: &str = r"# Effect-lowering tier manifest. One `<program>\t<tier>` line per corpus
 # program, sorted. The golden pinned by tests/perf_gate.rs::tier_manifest_holds.
 # A tier moving to a costlier one (see prism::EFFECT_TIERS order) is a silent
@@ -1393,10 +1359,21 @@ fn newly_costliest(
 // when the tree is most likely to be mid-change, so the accept path is the one
 // that has to be suspicious.
 //
-// A program that left the corpus but whose file is still on disk stopped
-// compiling; one whose file is gone was deleted on purpose. That distinction is
-// exact, so the guard needs no override to stay out of a legitimate deletion's
-// way.
+// Corpus membership has two conditions, so leaving it has two innocent
+// explanations and one guilty one. A file that is gone was deleted on purpose. A
+// file still on disk that now reaches a host builtin left because it went
+// off-platform, which is a deliberate change to what the program is. Anything
+// else still on disk stopped interpreting, and dropping it would disarm the gate
+// for it. The classification below fails closed: a source the analysis cannot
+// even read counts as broken.
+fn went_off_platform(root: &Path, path: &Path) -> bool {
+    prism::off_platform_builtins(
+        &crate::support::source(path),
+        &prism::resolve::default_roots(root),
+    )
+    .is_ok_and(|ops| !ops.is_empty())
+}
+
 fn guard_accept(
     root: &Path,
     current: &[(String, String)],
@@ -1412,13 +1389,17 @@ fn guard_accept(
     let broken: Vec<&str> = prior
         .keys()
         .map(String::as_str)
-        .filter(|label| !live.contains(label) && root.join(label).exists())
+        .filter(|label| {
+            let path = root.join(label);
+            !live.contains(label) && path.exists() && !went_off_platform(root, &path)
+        })
         .collect();
     assert!(
         broken.is_empty(),
         "refusing to regenerate {TIER_MANIFEST}: {} program(s) left the corpus but are still on \
-         disk, so they stopped compiling rather than being deleted. Dropping them would disarm \
-         the gate for each. Fix or delete them, then rerun:\n  {}",
+         disk and still on this platform, so they stopped interpreting rather than being deleted \
+         or moved off-platform. Dropping them would disarm the gate for each. Fix or delete them, \
+         then rerun:\n  {}",
         broken.len(),
         broken.join("\n  ")
     );
@@ -1426,9 +1407,15 @@ fn guard_accept(
 
 #[test]
 fn tier_manifest_holds() {
-    let result = std::thread::Builder::new()
-        .name("tier-manifest".into())
-        .stack_size(TIER_MANIFEST_STACK)
+    // In release the deep corpus runs on the ordinary libtest worker stack
+    // now that traversals are iterative. Debug frames are several times
+    // release size and overflow that budget at legal depths, so the debug
+    // gate gets the public compiler's 8 MiB main-thread budget instead.
+    let mut builder = std::thread::Builder::new().name("tier-manifest".into());
+    if cfg!(debug_assertions) {
+        builder = builder.stack_size(8 * 1024 * 1024);
+    }
+    let result = builder
         .spawn(tier_manifest_holds_on_compiler_stack)
         .expect("spawning tier-manifest compiler stack")
         .join();

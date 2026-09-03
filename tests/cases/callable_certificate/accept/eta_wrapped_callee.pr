@@ -1,0 +1,5 @@
+fip fn inc(x) = x + 1
+
+fn apply(f : ((Int) -> Int) @ noalloc, x : Int) : Int = f(x)
+
+fn drive(x : Int) : Int = apply(\(y) -> inc(y), x)

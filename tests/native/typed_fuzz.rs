@@ -30,8 +30,8 @@ const ARENA_FAMILY: &str = "typed-fuzz-arena";
 
 fn forced(tier: EffectTier) -> Config {
     let mut config = Config::from_env();
-    config.flags.effect_tier = tier;
-    config.flags.compiler_cache = false;
+    config.update_flags(|flags| flags.effect_tier = tier);
+    config.update_flags(|flags| flags.compiler_cache = false);
     config
 }
 

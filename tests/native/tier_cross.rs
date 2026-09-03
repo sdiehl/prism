@@ -57,8 +57,8 @@ const MIN_MOVED_CORPUS_CASES: usize = 60;
 /// the erasure-free outer bound.
 fn grid() -> Vec<(String, Config)> {
     let mut auto_cfg = Config::from_env();
-    auto_cfg.flags.compiler_cache = false;
-    auto_cfg.flags.quiet = true;
+    auto_cfg.update_flags(|flags| flags.compiler_cache = false);
+    auto_cfg.update_flags(|flags| flags.quiet = true);
     let mut points = vec![("auto".to_string(), auto_cfg)];
     for tier in EffectTier::ALL
         .into_iter()
@@ -268,8 +268,8 @@ fn convention_split_controls_match_the_interpreter_and_do_not_leak() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let roots = default_roots(Path::new("."));
     let mut cfg = Config::from_env();
-    cfg.flags.compiler_cache = false;
-    cfg.flags.quiet = true;
+    cfg.update_flags(|flags| flags.compiler_cache = false);
+    cfg.update_flags(|flags| flags.quiet = true);
     let cases: Vec<PathBuf> = CONVENTION_CONTROL_CASES
         .iter()
         .map(|case| root.join(case))

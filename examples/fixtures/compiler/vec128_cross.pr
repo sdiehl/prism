@@ -1,0 +1,15 @@
+-- Compiler fixture for a 128-bit vector crossing a non-inlined call boundary.
+-- `dot2` takes and returns SIMD values and has two call sites, so it is never
+-- inlined and its arguments cross a real native call today. A vector calling
+-- convention would keep the lanes in one register across that boundary; the
+-- scalar interpreter defines the semantics, so the printed value is identical
+-- on every tier regardless.
+
+fn dot2(a : F64x2, b : F64x2) : Float =
+  let p = simd_fmul(a, b)
+  simd_fextract(p, 0) + simd_fextract(p, 1)
+
+fn main() : Unit ! {IO} =
+  let xs = simd_fadd(simd_fsplat(3.0), simd_fsplat(0.5))
+  let ys = simd_fsplat(2.0)
+  println(show_float(dot2(xs, ys) + dot2(ys, ys)))

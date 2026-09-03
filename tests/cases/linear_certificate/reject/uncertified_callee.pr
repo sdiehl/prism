@@ -1,0 +1,11 @@
+-- Linearity is closed through direct calls: handing an owned value to a
+-- function with no linearity certificate would let it duplicate the value
+-- outside the claim's proof.
+type List = Nil | Cons(Int, List)
+
+fn consume(xs : List) : Int =
+  match xs of
+    Nil => 0
+    Cons(_, _) => 1
+
+fn top(xs : List) : Int @ linear = consume(xs)

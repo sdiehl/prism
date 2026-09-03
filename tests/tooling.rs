@@ -8,6 +8,8 @@ mod support;
 mod bootstrap;
 #[path = "tooling/bootstrap_worker.rs"]
 mod bootstrap_worker;
+#[path = "tooling/classification_tables.rs"]
+mod classification_tables;
 #[path = "tooling/durable_driver.rs"]
 mod durable_driver;
 #[path = "tooling/index.rs"]

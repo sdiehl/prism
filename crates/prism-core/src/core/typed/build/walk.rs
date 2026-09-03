@@ -14,6 +14,7 @@ use crate::core::{CheckedHandler, Comp, CoreOp, CorePat, IoOp, NegLane, Value};
 use crate::types::ty::{EffRow, Label};
 use crate::types::Type;
 
+use super::super::on_core_stack;
 use super::super::violation::{
     BindPart, BuildContext, BuildError, BuildSubject, Form, NameKind, Site,
 };
@@ -22,7 +23,6 @@ use super::super::{
     CompSig, CoreFnSig, CoreType, TypedBinder, TypedComp, TypedCompKind, TypedForward,
     TypedHandleOp, TypedHandler, TypedPattern, TypedValue, TypedValueKind, VerifyEnv,
 };
-use super::super::{CORE_GROW_STACK, CORE_MIN_STACK};
 use super::env::{
     intrinsic_sig, lower_value_type, representation_preserving, source_type, subtract_labels,
     subtract_names,
@@ -348,9 +348,7 @@ impl<'a> Builder<'a> {
         // statement block) is deep recursion. The entry-point guard in
         // `build_typed` buys one segment; growing here, inside the recursion,
         // chains segments so depth is bounded by memory, not by one stack.
-        stacker::maybe_grow(CORE_MIN_STACK, CORE_GROW_STACK, || {
-            self.comp_inner(comp, expected)
-        })
+        on_core_stack(|| self.comp_inner(comp, expected))
     }
 
     fn return_comp(
@@ -366,6 +364,7 @@ impl<'a> Builder<'a> {
         )
     }
 
+    #[allow(clippy::too_many_lines)] // One arm per computation form; the exhaustive match is the point.
     fn comp_inner(
         &mut self,
         comp: Comp,

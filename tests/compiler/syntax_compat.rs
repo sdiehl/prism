@@ -30,6 +30,10 @@ use serde_json::Value;
 
 use prism::{default_roots, dump_on, interpret_io_on_with_args, with_prelude, Config, Error};
 
+// A cross-release comparison punches the same holes the live goldens are
+// committed under, so the two mechanisms share one spelling of them.
+use super::seam;
+
 const FIXTURE_DIR: &str = "tests/fixtures/syntax";
 const RELEASED_DIR: &str = "released";
 const HARNESS: &str = "roundtrip.pr";
@@ -47,12 +51,6 @@ const STEMS: &[&str] = &["decls", "interp", "stable", "types"];
 // type-syntax snippet naming types no module defines. It has a token, surface
 // and diagnostic form, but no resolved one.
 const RESOLVED_STEMS: &[&str] = &["decls", "interp", "stable"];
-
-// The holes a cross-release comparison leaves in a document, and the key whose
-// value the second of them replaces.
-const VERSION_HOLE: &str = "<version>";
-const NODE_ID_KEY: &str = "\"id\": ";
-const NODE_ID_HOLE: &str = "<node>";
 
 // How much of a retained document the current exporter reproduces from the
 // source that document carries.
@@ -165,35 +163,13 @@ fn json(path: &Path) -> Value {
     serde_json::from_str(&read(path)).unwrap_or_else(|e| panic!("{}: JSON: {e}", path.display()))
 }
 
-// Replace every node number with a hole. Only `id` carries one, and nothing
-// refers to a node by number, so erasing the values leaves every structural
-// field of the document still under comparison.
-fn erase_node_ids(doc: &str) -> String {
-    let mut out = String::with_capacity(doc.len());
-    let mut rest = doc;
-    while let Some(at) = rest.find(NODE_ID_KEY) {
-        let (head, tail) = rest.split_at(at + NODE_ID_KEY.len());
-        out.push_str(head);
-        let digits = tail.len() - tail.trim_start_matches(|c: char| c.is_ascii_digit()).len();
-        if digits > 0 {
-            out.push_str(NODE_ID_HOLE);
-        }
-        rest = &tail[digits..];
-    }
-    out.push_str(rest);
-    out
-}
-
 // Erase what a comparison across releases must not depend on: the compiler
 // stamp always, and the node numbering for a schema that does not promise it.
 fn comparable(doc: &str, version: &str, export: Export) -> String {
-    let doc = doc.replace(
-        &format!("\"compiler\": \"{version}\""),
-        &format!("\"compiler\": \"{VERSION_HOLE}\""),
-    );
+    let doc = seam::json_stamped(doc, version);
     match export {
         Export::Bytes => doc,
-        Export::Shape => erase_node_ids(&doc),
+        Export::Shape => seam::erase_node_ids(&doc),
     }
 }
 

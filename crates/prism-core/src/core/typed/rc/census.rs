@@ -11,8 +11,9 @@ use crate::core::fbip::Sigs;
 use prism_common::sym::Sym;
 
 use super::super::specialize_support::free_comp_var_witnesses;
+use super::super::traverse::clone_reference;
 use super::super::{TypedComp, TypedCompKind, TypedValue, TypedValueKind};
-use super::{borrowed_at, Set};
+use super::{borrowed_at, referenced_binding, Set};
 
 /// Every occurrence of a name in one leaf, in traversal order.
 ///
@@ -20,11 +21,6 @@ use super::{borrowed_at, Set};
 /// witnesses those rules emit against, so the decision to insert an operation
 /// and the term that justifies it come out of one walk and cannot disagree.
 pub(super) type Census = BTreeMap<Sym, Vec<TypedValue>>;
-
-/// The occurrences of `name` this leaf holds, empty when it holds none.
-pub(super) fn occurrences(census: &Census, name: Sym) -> &[TypedValue] {
-    census.get(&name).map_or(&[], Vec::as_slice)
-}
 
 pub(super) fn borrowed_call_vars(comp: &TypedComp, sigs: &Sigs) -> Set {
     let TypedCompKind::Call { callee, args, .. } = &comp.kind else {
@@ -40,46 +36,47 @@ pub(super) fn borrowed_call_vars(comp: &TypedComp, sigs: &Sigs) -> Set {
         // fresh binder, so the only non-variables left are scalars the backend
         // represents without a heap cell; those own nothing to retain and are
         // correctly absent from the set.
-        .filter_map(|(_, arg)| arg.referenced_binding())
+        .filter_map(|(_, arg)| referenced_binding(arg))
         .collect()
 }
 
 fn census_value(value: &TypedValue, census: &mut Census) {
-    match &value.kind {
-        TypedValueKind::Var { name, .. } => census.entry(*name).or_default().push(value.clone()),
-        TypedValueKind::Ctor { fields, .. }
-        | TypedValueKind::Tuple(fields)
-        | TypedValueKind::UnboxedTuple(fields) => {
-            for field in fields {
-                census_value(field, census);
+    let mut values = vec![value];
+    while let Some(value) = values.pop() {
+        match &value.kind {
+            TypedValueKind::Var { name, .. } => {
+                census
+                    .entry(*name)
+                    .or_default()
+                    .push(clone_reference(value));
             }
-        }
-        TypedValueKind::UnboxedRecord(fields) => {
-            for (_, field) in fields {
-                census_value(field, census);
+            TypedValueKind::Ctor { fields, .. }
+            | TypedValueKind::Tuple(fields)
+            | TypedValueKind::UnboxedTuple(fields) => values.extend(fields.iter().rev()),
+            TypedValueKind::UnboxedRecord(fields) => {
+                values.extend(fields.iter().rev().map(|(_, field)| field));
             }
-        }
-        // A thunk cell captures one reference per distinct free name however many
-        // times the suspended body reads it, so the census takes one witness per
-        // name here rather than one per occurrence.
-        TypedValueKind::Thunk(body) => {
-            for (name, witness) in free_comp_var_witnesses(body) {
-                census.entry(name).or_default().push(witness);
+            // A thunk cell captures one reference per distinct free name however
+            // many times its body reads it.
+            TypedValueKind::Thunk(body) => {
+                for (name, witness) in free_comp_var_witnesses(body) {
+                    census.entry(name).or_default().push(witness);
+                }
             }
+            TypedValueKind::Reinterpret(inner)
+            | TypedValueKind::LoweredRepr {
+                value: inner,
+                proof: _,
+            }
+            | TypedValueKind::NewtypeRepr { value: inner, .. } => values.push(inner),
+            TypedValueKind::Int(_)
+            | TypedValueKind::I64(_)
+            | TypedValueKind::U64(_)
+            | TypedValueKind::Float(_)
+            | TypedValueKind::Bool(_)
+            | TypedValueKind::Unit
+            | TypedValueKind::Str(_) => {}
         }
-        TypedValueKind::Reinterpret(inner)
-        | TypedValueKind::LoweredRepr {
-            value: inner,
-            proof: _,
-        }
-        | TypedValueKind::NewtypeRepr { value: inner, .. } => census_value(inner, census),
-        TypedValueKind::Int(_)
-        | TypedValueKind::I64(_)
-        | TypedValueKind::U64(_)
-        | TypedValueKind::Float(_)
-        | TypedValueKind::Bool(_)
-        | TypedValueKind::Unit
-        | TypedValueKind::Str(_) => {}
     }
 }
 
