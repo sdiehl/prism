@@ -521,11 +521,11 @@ pub fn is_lineage_sidecar(path: &Path) -> bool {
 // content hashes, so verification is the structural graph invariants, and
 // re-derivation (re-running the wasm) is not implemented. A `--certify` path mints a
 // `lineage-verified` certificate over the sidecar digest on a clean rehash.
-pub fn verify_rehash_cmd(file: &Path, certify: Option<&Path>) -> CmdResult {
+pub fn verify_rehash_cmd(file: &Path, cert_path: Option<&Path>) -> CmdResult {
     let graph = lineage_model::read_lineage(file)
         .map_err(|e| (e, String::new(), file.display().to_string()))?;
     if graph.variant == Variant::World {
-        if certify.is_some() {
+        if cert_path.is_some() {
             return Err((
                 Error::ResolveLineage(
                     "lineage verify --certify: a world timeline verifies structurally \
@@ -563,7 +563,7 @@ pub fn verify_rehash_cmd(file: &Path, certify: Option<&Path>) -> CmdResult {
             report.skipped
         );
     }
-    if let Some(out) = certify {
+    if let Some(out) = cert_path {
         let bytes = fs::read(&sidecar)
             .map_err(|e| (Error::Io(e), String::new(), sidecar.display().to_string()))?;
         let cert = lineage_model::mint_lineage_cert(&graph, &report, &bytes);
@@ -935,7 +935,7 @@ pub fn verify_run_sidecar(
         .map_err(|e| (e, String::new(), path.display().to_string()))
 }
 
-pub fn verify_lineage_cmd(sidecar: &Path, certify: Option<&Path>, cfg: &Config) -> CmdResult {
+pub fn verify_lineage_cmd(sidecar: &Path, cert_path: Option<&Path>, cfg: &Config) -> CmdResult {
     let verified = verify_run_sidecar(sidecar, cfg)?;
     println!(
         "lineage verify: replay matches the sidecar ({} trace event(s), {} stdout byte(s), \
@@ -950,7 +950,7 @@ pub fn verify_lineage_cmd(sidecar: &Path, certify: Option<&Path>, cfg: &Config) 
     }
     // Only a passed replay reaches here, so a `--certify` path mints a
     // `replay-verified` certificate over the sidecar's own digest.
-    if let Some(out) = certify {
+    if let Some(out) = cert_path {
         let path = lineage_model::sidecar_of(sidecar);
         let graph = lineage_model::read_lineage(&path)
             .map_err(|e| (e, String::new(), path.display().to_string()))?;

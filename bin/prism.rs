@@ -552,8 +552,8 @@ enum LineageCmd {
         replay: bool,
         /// On success, write a certificate over the sidecar digest to this path
         /// (`replay-verified` with `--replay`, else `lineage-verified`)
-        #[arg(long)]
-        certify: Option<PathBuf>,
+        #[arg(long = "certify")]
+        cert_path: Option<PathBuf>,
     },
     /// Check a lineage certificate against the sidecar it names
     CheckCert {
@@ -1257,12 +1257,12 @@ fn dispatch_lineage(lineage: LineageCmd, cfg: &prism::Config) -> CmdResult {
         LineageCmd::Verify {
             sidecar,
             replay,
-            certify,
+            cert_path,
         } => {
             if replay {
-                cli::lineage::verify_lineage_cmd(&sidecar, certify.as_deref(), cfg)
+                cli::lineage::verify_lineage_cmd(&sidecar, cert_path.as_deref(), cfg)
             } else {
-                cli::lineage::verify_rehash_cmd(&sidecar, certify.as_deref())
+                cli::lineage::verify_rehash_cmd(&sidecar, cert_path.as_deref())
             }
         }
         LineageCmd::CheckCert { cert, sidecar } => cli::lineage::check_cert_cmd(&cert, &sidecar),
