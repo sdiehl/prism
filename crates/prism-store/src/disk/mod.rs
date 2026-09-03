@@ -863,6 +863,7 @@ fn staged_flush(f: &fs::File) -> io::Result<()> {
 // On Linux the commit barrier is syncfs, which flushes the whole filesystem,
 // so a staged temp needs no per-file flush at all.
 #[cfg(any(target_os = "linux", target_os = "android"))]
+#[allow(clippy::unnecessary_wraps, clippy::missing_const_for_fn)] // one signature across the three targets
 fn staged_flush(_f: &fs::File) -> io::Result<()> {
     Ok(())
 }

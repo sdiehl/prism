@@ -736,6 +736,18 @@ category = "Compiler"
 role = "fixture"
 
 [[example]]
+path = "fixtures/compiler/ctor_cross_call.pr"
+title = "Constructor projection across a call"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
+path = "fixtures/compiler/deep_immutable.pr"
+title = "Deep immutability through a container"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
 path = "fixtures/compiler/diff_after_edit.pr"
 title = "Behavior diff edit"
 category = "Compiler"
@@ -754,8 +766,44 @@ category = "Compiler"
 role = "fixture"
 
 [[example]]
+path = "fixtures/compiler/exact_size_filter.pr"
+title = "Cardinality fallback under filter"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
+path = "fixtures/compiler/exact_size_map.pr"
+title = "Exact-size destination under map"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
 path = "fixtures/compiler/grade_isolation.pr"
 title = "Effect-grade isolation"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
+path = "fixtures/compiler/ho_once_wrapper.pr"
+title = "Once-use through a higher-order wrapper"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
+path = "fixtures/compiler/iter_callback.pr"
+title = "Callback allocation summaries"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
+path = "fixtures/compiler/known_closure.pr"
+title = "Known closure through a parameter"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
+path = "fixtures/compiler/opaque_kill.pr"
+title = "Fact invalidation at effects and writes"
 category = "Compiler"
 role = "fixture"
 
@@ -782,6 +830,50 @@ path = "fixtures/compiler/stream_ufcs.pr"
 title = "Stream UFCS lowering"
 category = "Compiler"
 role = "fixture"
+
+[[example]]
+path = "fixtures/compiler/unboxed_cross.pr"
+title = "Unboxed product across a call boundary"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
+path = "fixtures/compiler/vec128_cross.pr"
+title = "128-bit vector across a call boundary"
+category = "Compiler"
+role = "fixture"
+
+[[example]]
+path = "fixtures/net/classify.pr"
+title = "Socket refusal classification"
+category = "Net"
+role = "fixture"
+platforms = ["interpreter", "native"]
+expected_output = "host-dependent"
+
+[[example]]
+path = "fixtures/net/handles.pr"
+title = "Socket handle numbering"
+category = "Net"
+role = "fixture"
+platforms = ["interpreter", "native"]
+expected_output = "host-dependent"
+
+[[example]]
+path = "fixtures/net/loopback.pr"
+title = "Single-process TCP loopback"
+category = "Net"
+role = "fixture"
+platforms = ["interpreter", "native"]
+expected_output = "host-dependent"
+
+[[example]]
+path = "fixtures/net/teleport_tcp.pr"
+title = "Two-process TCP teleport"
+category = "Net"
+role = "fixture"
+platforms = ["interpreter", "native"]
+expected_output = "host-dependent"
 
 [[example]]
 path = "fixtures/runtime/incr_resident.pr"

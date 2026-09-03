@@ -41,6 +41,7 @@ use crate::syntax::reflect::parse_unit;
 use crate::tc::parse_checked_signature;
 use crate::types::{Checked, Env, Type, TypecheckSeed};
 
+use super::downstream::cache_enabled;
 use super::front::{run_front, Front, FrontRequest};
 use super::input::field;
 use super::{elaborated, hash_meta, stage_validation_error, with_prelude, Config};
@@ -1221,7 +1222,7 @@ pub(super) fn stdlib_layers(cfg: &Config) -> Result<StdlibHash, Error> {
     if let Some(cached) = CACHE.get() {
         return Ok(cached.clone());
     }
-    let durable = if cfg.flags().compiler_cache && !cfg.flags().store {
+    let durable = if cache_enabled(cfg) {
         let mut h = blake3::Hasher::new();
         field(&mut h, STDLIB_LAYERS_SCHEMA.as_bytes());
         field(&mut h, compiler_binary_fingerprint()?.as_bytes());
@@ -1259,7 +1260,13 @@ pub(super) fn stdlib_layers(cfg: &Config) -> Result<StdlibHash, Error> {
 }
 
 // One tab-separated line per entry: the three header fields, then every layer
-// entry as `<layer> <name> <digest>` in the tables' sorted order.
+// entry as `<layer> <name> <digest>` in name order.
+//
+// The encoding is content-addressed, so it must be a function of the layers
+// alone. The definition table is keyed by `Sym`, whose order is the interner's
+// allocation order and so differs between processes that interned different
+// names first; emitting it in that order gave one stdlib several encodings and
+// tripped the store's injectivity check. Sort by the spelled name instead.
 fn encode_layers(layers: &StdlibHash) -> Vec<u8> {
     let mut out = String::new();
     let mut line = |tag: &str, name: &str, digest: &str| {
@@ -1273,8 +1280,13 @@ fn encode_layers(layers: &StdlibHash) -> Vec<u8> {
     line(LAYER_SCHEME, layers.scheme, "");
     line(LAYER_VERSION, layers.version, "");
     line(LAYER_ROOT, layers.root.as_str(), "");
-    for (name, digest) in &layers.defs {
-        line(LAYER_DEF, name.as_str(), digest.as_str());
+    let defs: BTreeMap<&str, &Digest> = layers
+        .defs
+        .iter()
+        .map(|(name, digest)| (name.as_str(), digest))
+        .collect();
+    for (name, digest) in defs {
+        line(LAYER_DEF, name, digest.as_str());
     }
     for (name, digest) in &layers.shapes {
         line(LAYER_SHAPE, name, digest.as_str());
@@ -1367,6 +1379,26 @@ mod stdlib_layer_codec_tests {
         assert_eq!(decoded.shapes, layers.shapes);
         assert_eq!(decoded.classes, layers.classes);
         assert_eq!(decoded.instances, layers.instances);
+    }
+
+    #[test]
+    fn the_encoding_is_independent_of_interning_order() {
+        // `Sym` orders by interner id, so interning the later name first puts
+        // it first in the definition table. The bytes are a content address
+        // every process sharing a store must agree on, so they follow the
+        // spelled name, not the id.
+        let later = Sym::new("zz_layer_probe");
+        let earlier = Sym::new("aa_layer_probe");
+        assert!(later < earlier, "the probe relies on interning order");
+        let mut layers = sample();
+        layers.defs = Hashes::from([(later, Digest::from("d3")), (earlier, Digest::from("d4"))]);
+        let text = String::from_utf8(encode_layers(&layers)).expect("utf8");
+        let earlier_at = text.find("def\taa_layer_probe\t").expect("earlier line");
+        let later_at = text.find("def\tzz_layer_probe\t").expect("later line");
+        assert!(
+            earlier_at < later_at,
+            "definitions are emitted in name order:\n{text}"
+        );
     }
 
     #[test]

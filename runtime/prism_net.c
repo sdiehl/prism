@@ -355,6 +355,7 @@ long prism_prim_net_local_addr(long handle) {
     int fd = prism_net_fd(handle);
     if (fd < 0) return prism_net_err(PRISM_NET_CLOSED);
     struct sockaddr_storage ss;
+    memset(&ss, 0, sizeof ss);
     socklen_t len = (socklen_t)sizeof ss;
     if (getsockname(fd, (struct sockaddr *)&ss, &len) != 0) return prism_net_errno();
     return prism_net_addr_text((const struct sockaddr *)&ss, len);
@@ -364,6 +365,7 @@ long prism_prim_net_peer_addr(long handle) {
     int fd = prism_net_fd_of(handle, PRISM_NET_STREAM);
     if (fd < 0) return prism_net_err(PRISM_NET_CLOSED);
     struct sockaddr_storage ss;
+    memset(&ss, 0, sizeof ss);
     socklen_t len = (socklen_t)sizeof ss;
     if (getpeername(fd, (struct sockaddr *)&ss, &len) != 0) return prism_net_errno();
     return prism_net_addr_text((const struct sockaddr *)&ss, len);
